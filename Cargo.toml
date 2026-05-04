@@ -1,0 +1,22 @@
+[package]
+name = "fluxheim"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "EUPL-1.2"
+publish = false
+description = "A modular Pingora-based reverse proxy, static web server, and cache."
+
+[features]
+default = ["proxy", "cache", "web", "tls", "acme", "metrics", "security"]
+proxy = []
+cache = []
+web = []
+tls = []
+acme = ["tls"]
+metrics = []
+security = []
+
+[dependencies]
+
+[dev-dependencies]
