@@ -1,0 +1,69 @@
+name: Rust CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  checks:
+    name: Format, lint, test, and audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install security tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run default tests
+        run: cargo test
+
+      - name: Run feature build tests
+        run: |
+          cargo test --no-default-features --features proxy,load-balancer
+          cargo test --no-default-features --features proxy,cache
+          cargo test --no-default-features --features cache
+          cargo test --no-default-features --features web
+          cargo check --no-default-features --features proxy,tls-rustls
+
+      - name: Validate example configs
+        run: |
+          cargo run --quiet -- --check-config --config examples/fluxheim.toml
+          cargo run --quiet -- --check-config --config examples/admin.toml
+          cargo run --quiet -- --check-config --config examples/vhosts.toml
+          cargo run --quiet -- --check-config --config examples/conf.d
+
+      - name: Check dependency policy
+        run: cargo deny check
+
+      - name: Check RustSec advisories
+        run: cargo audit

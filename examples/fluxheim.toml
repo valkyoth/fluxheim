@@ -1,0 +1,92 @@
+[server]
+listen = ["127.0.0.1:8080"]
+# HTTPS listeners are explicit so HTTP and HTTPS are never guessed by port.
+# tls_listen = ["127.0.0.1:8443"]
+
+[server.limits]
+max_request_header_bytes = "64KiB"
+max_uri_bytes = "8KiB"
+max_request_headers = 100
+max_request_body_bytes = "16MiB"
+
+[admin]
+enabled = false
+listen = "127.0.0.1:9090"
+require_loopback = true
+# token_env = "FLUXHEIM_ADMIN_TOKEN"
+# token_file = "/run/secrets/fluxheim-admin-token"
+# snapshot_store = "/var/lib/fluxheim/snapshots"
+
+[admin.self_healing]
+enabled = false
+validation_window_secs = 30
+health_path = "/_fluxheim/health"
+min_successful_checks = 1
+max_error_rate_per_mille = 100
+
+[metrics]
+enabled = false
+listen = "127.0.0.1:9091"
+require_loopback = true
+
+[proxy]
+upstream = "127.0.0.1:3000"
+# Optional Pingora round-robin pool. When set, Fluxheim selects from this list.
+# upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
+upstream_tls = false
+# upstream_sni = "origin.example.test"
+
+[proxy.load_balance]
+max_iterations = 256
+
+[proxy.load_balance.health_check]
+enabled = true
+interval_secs = 1
+consecutive_success = 1
+consecutive_failure = 1
+parallel = false
+
+[tls]
+enabled = false
+backend = "rustls"
+
+# [[tls.certificates]]
+# cert_path = "tls/fullchain.pem"
+# key_path = "tls/key.pem"
+
+[tls.acme]
+enabled = false
+# storage = "/var/lib/fluxheim/acme"
+# contact_email = "admin@example.test"
+default_issuer = "letsencrypt"
+challenge = "tls-alpn-01"
+
+[tls.acme.renewal]
+enabled = true
+renew_before_secs = 2592000
+# renew_after = 2026-06-01T00:00:00Z
+check_interval_secs = 3600
+retry_initial_secs = 300
+retry_max_secs = 86400
+reload_after_renewal = true
+zero_downtime_reload = true
+
+[cache]
+enabled = false
+image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
+methods = ["GET", "HEAD"]
+max_object_bytes = "32MiB"
+
+[cache.memory]
+enabled = false
+max_size_bytes = "1GiB"
+
+[cache.disk]
+enabled = false
+# path = "/var/cache/fluxheim"
+max_size_bytes = "10GiB"
+
+[web]
+# root = "public"
+index_files = ["index.html"]
+deny_dotfiles = true

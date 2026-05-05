@@ -1,0 +1,44 @@
+[[vhosts]]
+name = "example.test"
+hosts = ["example.test", "www.example.test"]
+
+[vhosts.tls]
+enabled = false
+
+# [vhosts.tls.acme]
+# enabled = true
+
+[vhosts.web]
+root = "../public/example"
+index_files = ["index.html"]
+deny_dotfiles = true
+
+[vhosts.proxy]
+upstream = "127.0.0.1:3000"
+upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
+upstream_tls = false
+
+[vhosts.proxy.load_balance]
+max_iterations = 256
+
+[vhosts.proxy.load_balance.health_check]
+enabled = true
+interval_secs = 1
+consecutive_success = 1
+consecutive_failure = 1
+parallel = false
+
+[vhosts.cache]
+enabled = true
+image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
+methods = ["GET", "HEAD"]
+max_object_bytes = "32MiB"
+
+[vhosts.cache.memory]
+enabled = true
+max_size_bytes = "1GiB"
+
+[vhosts.cache.disk]
+enabled = false
+# path = "../cache/example.test"
+max_size_bytes = "10GiB"

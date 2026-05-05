@@ -1,0 +1,55 @@
+[server]
+listen = ["127.0.0.1:8080"]
+# tls_listen = ["127.0.0.1:8443"]
+default_vhost = "example.test"
+
+[server.limits]
+max_request_header_bytes = "64KiB"
+max_uri_bytes = "8KiB"
+max_request_headers = 100
+max_request_body_bytes = "16MiB"
+
+[metrics]
+enabled = false
+listen = "127.0.0.1:9091"
+require_loopback = true
+
+[tls]
+enabled = false
+backend = "rustls"
+
+# [[tls.certificates]]
+# cert_path = "../tls/fullchain.pem"
+# key_path = "../tls/key.pem"
+
+[tls.acme]
+enabled = false
+# storage = "../acme"
+# contact_email = "admin@example.test"
+default_issuer = "letsencrypt"
+challenge = "tls-alpn-01"
+
+[tls.acme.renewal]
+enabled = true
+renew_before_secs = 2592000
+# renew_after = 2026-06-01T00:00:00Z
+check_interval_secs = 3600
+retry_initial_secs = 300
+retry_max_secs = 86400
+reload_after_renewal = true
+zero_downtime_reload = true
+
+[cache]
+enabled = false
+image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
+methods = ["GET", "HEAD"]
+max_object_bytes = "32MiB"
+
+[cache.memory]
+enabled = false
+max_size_bytes = "1GiB"
+
+[cache.disk]
+enabled = false
+# path = "/var/cache/fluxheim"
+max_size_bytes = "10GiB"

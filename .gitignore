@@ -1,2 +1,51 @@
+# Rust build output
 /target/
+
+# Local tool/runtime state
+/.agents/
+/.codex/
+README.internal.md
+
+# Logs and diagnostics
 *.log
+logs/
+*.pid
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.token
+*.key
+*.pem
+*.p12
+*.pfx
+*.der
+
+# Fluxheim runtime data
+cache/
+acme/
+snapshots/
+runtime/
+data/
+tmp/
+temp/
+
+# Container/local generated artifacts
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.zst
+*.img
+*.qcow2
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.idea/
+.vscode/

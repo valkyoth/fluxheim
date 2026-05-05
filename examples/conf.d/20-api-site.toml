@@ -1,0 +1,11 @@
+[[vhosts]]
+name = "api.example.test"
+hosts = ["api.example.test", "*.api.example.test"]
+
+[vhosts.proxy]
+upstream = "127.0.0.1:4000"
+upstreams = ["127.0.0.1:4000", "127.0.0.1:4001"]
+upstream_tls = false
+
+[vhosts.proxy.load_balance.health_check]
+enabled = true

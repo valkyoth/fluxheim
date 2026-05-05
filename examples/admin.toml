@@ -1,0 +1,24 @@
+[server]
+listen = ["127.0.0.1:19080"]
+
+[admin]
+enabled = true
+listen = "127.0.0.1:19090"
+require_loopback = true
+token_env = "FLUXHEIM_ADMIN_TOKEN"
+snapshot_store = "/tmp/fluxheim-admin-example-snapshots"
+
+[admin.self_healing]
+enabled = true
+validation_window_secs = 30
+health_path = "/_fluxheim/health"
+min_successful_checks = 1
+max_error_rate_per_mille = 100
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:19091"
+require_loopback = true
+
+[proxy]
+upstream = "127.0.0.1:3000"
