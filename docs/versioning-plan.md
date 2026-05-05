@@ -345,8 +345,7 @@ These should not be promised in a stable minor until proven:
 
 ## What Changes In Cargo Defaults
 
-Before `1.0`, the default feature set can be broad while development is active.
-For `1.0`, default features should be narrowed to stable core only:
+The `1.0` default feature set is intentionally narrowed to stable core only:
 
 ```toml
 default = ["proxy", "web", "tls-rustls", "security"]

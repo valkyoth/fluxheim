@@ -67,6 +67,8 @@ cargo build --release --no-default-features --features proxy
 cargo build --release --no-default-features --features proxy,load-balancer
 cargo build --release --no-default-features --features web
 cargo build --release --no-default-features --features cache
+cargo build --release --no-default-features --features proxy,metrics
+cargo build --release --no-default-features --features proxy,tls-rustls,acme
 ```
 
 For hardware-specific local binaries, use `target-cpu=native` only for the
