@@ -56,7 +56,7 @@ Target build:
 cargo build --no-default-features --features proxy,web,tls-rustls,privacy-mode
 ```
 
-Planned feature:
+Implemented feature:
 
 ```toml
 privacy-mode = ["proxy", "web"]
@@ -64,9 +64,34 @@ privacy-mode = ["proxy", "web"]
 
 `privacy-mode` must not be part of `default`.
 
-Planned incompatible features:
+Initial implemented behavior: privacy builds strip inbound client-IP forwarding
+headers before proxying and do not synthesize `X-Forwarded-For` or RFC
+`Forwarded`, even when config requests those headers.
+
+Access logging is disabled by default in `privacy-mode`, the Pingora access-log
+emission hook is not compiled into privacy builds, and config validation rejects
+`logging.access.enabled = true`.
+Privacy builds also do not generate Fluxheim request IDs for access-log
+correlation.
+
+Implemented compile-time incompatible features:
 
 - `metrics`
+- `cache`
+
+Because `cache` is part of the normal default build, privacy builds must use
+`--no-default-features` or the `profile-privacy` alias:
+
+```bash
+cargo build --no-default-features --features profile-privacy
+```
+
+Use `examples/privacy.toml` as the baseline runtime config for this profile.
+It disables Fluxheim access logging, request ID generation, metrics, cache, and
+client-IP forwarding headers.
+
+Planned incompatible features:
+
 - `metrics-advanced`
 - `metrics-push`
 - `metrics-otlp`

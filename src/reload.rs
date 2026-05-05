@@ -33,6 +33,7 @@ impl ReloadImpact {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ReloadReason {
     ListenerChanged,
+    LoggingRuntimeChanged,
     TlsModeChanged,
     TlsBackendChanged,
     AdminServiceChanged,
@@ -66,6 +67,7 @@ impl std::fmt::Display for ReloadReason {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::ListenerChanged => "listener-changed",
+            Self::LoggingRuntimeChanged => "logging-runtime-changed",
             Self::TlsModeChanged => "tls-mode-changed",
             Self::TlsBackendChanged => "tls-backend-changed",
             Self::AdminServiceChanged => "admin-service-changed",
@@ -84,6 +86,10 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
 
     if old.server.listen != new.server.listen || old.server.tls_listen != new.server.tls_listen {
         reasons.push(ReloadReason::ListenerChanged);
+    }
+
+    if old.logging.level != new.logging.level || old.logging.format != new.logging.format {
+        reasons.push(ReloadReason::LoggingRuntimeChanged);
     }
 
     if old.tls.enabled != new.tls.enabled {
@@ -153,8 +159,8 @@ fn proxy_load_balancer_signature(
 #[cfg(test)]
 mod tests {
     use crate::config::{
-        AdminConfig, Config, MetricsConfig, ProxyConfig, ServerConfig, TlsBackend, TlsConfig,
-        VhostConfig, WebConfig,
+        AdminConfig, Config, LoggingConfig, LoggingFormat, LoggingLevel, MetricsConfig,
+        ProxyConfig, ServerConfig, TlsBackend, TlsConfig, VhostConfig, WebConfig,
     };
 
     use super::{ReloadImpact, ReloadReason, classify_reload};
@@ -178,6 +184,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -213,6 +220,48 @@ mod tests {
         assert_eq!(
             classify_reload(&old, &new).reasons(),
             &[ReloadReason::ListenerChanged]
+        );
+    }
+
+    #[test]
+    fn logging_runtime_change_requires_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            logging: LoggingConfig {
+                level: LoggingLevel::Debug,
+                ..LoggingConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoggingRuntimeChanged]
+            }
+        );
+        assert_eq!(
+            classify_reload(&old, &new).to_string(),
+            "process-upgrade: logging-runtime-changed"
+        );
+    }
+
+    #[test]
+    fn logging_format_change_requires_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            logging: LoggingConfig {
+                format: LoggingFormat::Text,
+                ..LoggingConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoggingRuntimeChanged]
+            }
         );
     }
 

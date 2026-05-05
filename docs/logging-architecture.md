@@ -137,6 +137,8 @@ overflow = "spool" # drop_new | block | spool
 
 [logging.access]
 enabled = true
+request_id = true
+request_id_header = "x-request-id"
 
 [logging.security]
 enabled = true
@@ -162,14 +164,31 @@ path = "/var/lib/fluxheim/log-spool"
 max_size_bytes = "1GiB"
 ```
 
+Implemented baseline: `logging.access.enabled` controls a compact JSON access
+event emitted from Pingora's `logging` hook. It records method, host, vhost,
+query-free path, status, error flag, request ID, request body bytes seen, and
+response body bytes seen, and latency. If request IDs are enabled, Fluxheim
+reuses a valid inbound request ID from `request_id_header` or generates one and
+passes it upstream before normal header policy mutations run. This baseline uses
+the existing `log` stack; the async dispatcher and remote/file sinks remain
+future work.
+
+`logging.level` and `logging.format` are applied at startup through
+`env_logger`; `RUST_LOG` can still override the level for local debugging.
+Changing either setting after startup currently requires a process upgrade
+because the logger is initialized once. JSON format emits structured internal
+runtime records, while access events remain direct JSON access records.
+
 ## Implementation Stages
 
-1. Add `tracing`, JSON stdout formatting, and bridge existing `log` records.
-2. Add access/security/audit event schema and request ids.
-3. Add bounded dispatcher queue with `drop_new` and `block` policies.
-4. Add file sink and protected local spool directory.
-5. Add remote TCP/TLS sink with circuit breaker and fallback.
-6. Expose log health through Prometheus/admin status:
+1. Add typed access-log config, request IDs, and baseline JSON access events
+   through `log`.
+2. Add `tracing`, JSON stdout formatting, and bridge existing `log` records.
+3. Add access/security/audit event schema and request ids.
+4. Add bounded dispatcher queue with `drop_new` and `block` policies.
+5. Add file sink and protected local spool directory.
+6. Add remote TCP/TLS sink with circuit breaker and fallback.
+7. Expose log health through Prometheus/admin status:
    dropped logs, spooled logs, remote failures, current circuit state, and
    reconnect attempts.
 

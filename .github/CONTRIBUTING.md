@@ -24,7 +24,14 @@ Useful reduced builds:
 ```bash
 cargo build --no-default-features --features proxy
 cargo build --no-default-features --features web
-cargo build --no-default-features --features proxy,load-balancer
+cargo build --no-default-features --features profile-load-balancer
+cargo build --no-default-features --features profile-privacy
+```
+
+When using a custom feature set, run the feature preflight first:
+
+```bash
+scripts/validate-features.sh proxy,web,tls-rustls
 ```
 
 ## Checks

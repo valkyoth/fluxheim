@@ -32,7 +32,22 @@ using write-temp-and-rename semantics.
 
 Snapshot config files contain the validated effective config, written back as
 TOML. Metadata files contain the snapshot id, creation time, and optional
-operator message.
+operator message. Operator messages are trimmed and limited to 4096 bytes of
+non-control text before they are written or loaded.
+
+The store is deliberately conservative about filesystem indirection. Snapshot
+ids may only contain ASCII letters, digits, `_`, and `-`, and are limited to
+128 bytes; the store root cannot contain `..` or sit below a symlinked parent
+directory; the store root and `configs` directory must be real directories; the
+`configs` directory must remain inside the snapshot store; and `current`,
+snapshot TOML files, and metadata TOML files are opened as regular files.
+Symlinked store roots, pointer, config, metadata, or `configs` paths are
+rejected so a rollback cannot be redirected to an operator-unapproved file.
+Atomic writes also require an already validated real parent directory and will
+not replace a symlinked destination. Snapshot reads are bounded: `current` is
+limited to 4 KiB and snapshot TOML/metadata reads are limited to 16 MiB.
+Snapshot stores are limited to 1024 snapshots; operators should export or prune
+old snapshots before that limit.
 
 ## Commands
 

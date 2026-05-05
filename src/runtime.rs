@@ -1,10 +1,14 @@
 use std::error::Error;
+#[cfg(feature = "proxy")]
+use std::io::Write;
 
 use crate::config::Config;
+#[cfg(feature = "proxy")]
+use crate::config::LoggingFormat;
 
 #[cfg(feature = "proxy")]
 pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    env_logger::init();
+    init_logging(&config);
 
     let mut server = pingora::server::Server::new(None)?;
     server.bootstrap();
@@ -58,10 +62,113 @@ pub fn run(_config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     Err("no runnable Fluxheim module is enabled; enable the `proxy` feature".into())
 }
 
+#[cfg(feature = "proxy")]
+fn init_logging(config: &Config) {
+    let env = env_logger::Env::default().default_filter_or(config.logging.level.as_filter());
+    let format = config.logging.format;
+    let _ = env_logger::Builder::from_env(env)
+        .format(move |buf, record| match format {
+            LoggingFormat::Json => write_json_log_record(buf, record),
+            LoggingFormat::Text => write_text_log_record(buf, record),
+        })
+        .try_init();
+}
+
+#[cfg(feature = "proxy")]
+fn write_text_log_record(
+    buf: &mut env_logger::fmt::Formatter,
+    record: &log::Record<'_>,
+) -> std::io::Result<()> {
+    writeln!(
+        buf,
+        "{} {} {}: {}",
+        buf.timestamp_millis(),
+        record.level(),
+        record.target(),
+        record.args()
+    )
+}
+
+#[cfg(feature = "proxy")]
+fn write_json_log_record(
+    buf: &mut env_logger::fmt::Formatter,
+    record: &log::Record<'_>,
+) -> std::io::Result<()> {
+    if record.target() == "fluxheim::access" {
+        return writeln!(buf, "{}", record.args());
+    }
+
+    writeln!(
+        buf,
+        "{}",
+        log_record_json(
+            &buf.timestamp_millis().to_string(),
+            record.level().as_str(),
+            record.target(),
+            &record.args().to_string(),
+        )
+    )
+}
+
+#[cfg(feature = "proxy")]
+fn log_record_json(timestamp: &str, level: &str, target: &str, message: &str) -> String {
+    format!(
+        "{{\"timestamp\":\"{}\",\"level\":\"{}\",\"target\":\"{}\",\"message\":\"{}\"}}",
+        json_escape(timestamp),
+        json_escape(level),
+        json_escape(target),
+        json_escape(message),
+    )
+}
+
+#[cfg(feature = "proxy")]
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(escaped, "\\u{:04x}", character as u32);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+#[cfg(all(test, feature = "proxy"))]
+mod tests {
+    use super::{json_escape, log_record_json};
+
+    #[test]
+    fn json_log_record_escapes_fields() {
+        let record = log_record_json(
+            "2026-05-05T12:00:00Z",
+            "INFO",
+            "fluxheim::test",
+            "line\n\"x\"",
+        );
+
+        assert_eq!(
+            record,
+            "{\"timestamp\":\"2026-05-05T12:00:00Z\",\"level\":\"INFO\",\"target\":\"fluxheim::test\",\"message\":\"line\\n\\\"x\\\"\"}"
+        );
+    }
+
+    #[test]
+    fn json_escape_escapes_control_characters() {
+        assert_eq!(json_escape("a\u{0001}b"), "a\\u0001b");
+    }
+}
+
 #[cfg(all(
     feature = "proxy",
     any(
-        feature = "tls",
         feature = "tls-rustls",
         feature = "tls-openssl",
         feature = "tls-boringssl",
@@ -105,7 +212,6 @@ where
 #[cfg(all(
     feature = "proxy",
     not(any(
-        feature = "tls",
         feature = "tls-rustls",
         feature = "tls-openssl",
         feature = "tls-boringssl",

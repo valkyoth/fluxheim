@@ -27,9 +27,47 @@ internal cache implementation.
   rename. It refuses objects above `cache.max_object_bytes`, evicts the oldest
   `.fhc` files when needed to enforce `cache.disk.max_size_bytes`, and refuses
   admission only when the incoming object still cannot fit after eviction.
+- Disk-cache reads canonicalize existing object paths, open cache objects
+  without following symlinks on Linux, verify the opened handle is a regular
+  file, and refuse encoded files larger than the configured object budget plus
+  bounded metadata overhead. Disk-cache writes verify that shard directories
+  still resolve under the canonical cache root before opening a no-follow
+  same-directory temp file and renaming it into place. Symlinked cache roots,
+  cache roots below symlinked parent directories, object files, write
+  destinations, and shard escapes are refused. Eviction scans also use
+  non-following metadata, ignore symlinked shards or objects, and fail closed
+  when a scan exceeds 100000 cache objects so cache stats or eviction cannot
+  allocate an unbounded entry list. Purge, invalid-object cleanup, and eviction
+  re-check the target immediately before deletion and only remove regular
+  `.fhc` cache objects. Shard directories and object files must be symlink-free,
+  even when a symlink points back inside the cache root; mount or configure the
+  real cache directory path.
 - Partial-write streaming is explicitly disabled for the production memory
   and disk adapters until in-progress response buffering can be bounded for
   unknown-size origin responses.
+- Cache-header semantics are partially implemented and remain a cache-pack
+  hardening requirement before cache is considered complete. Static responses
+  currently emit `Cache-Control`, `ETag`, `Last-Modified` when available,
+  `Accept-Ranges`, and range headers, and they honor `If-None-Match`,
+  `If-Modified-Since`, request `Cache-Control`, `Pragma`, single `Range`, and
+  `If-Range`. Header policy lets operators set, append, and unset
+  browser/CDN-facing headers such as `Cache-Control`, `Expires`, `Vary`, and
+  provider-specific cache controls. Proxied image cache admission currently
+  bypasses Fluxheim's cache when the request sends `Cache-Control: no-cache`,
+  `Cache-Control: no-store`, `Cache-Control: max-age=0`, or
+  `Pragma: no-cache`. Proxied cache variants use Pingora's variance hook for
+  `Vary`; repeated `Vary` headers are normalized, request variant headers are
+  hashed into the variant key, and unsafe or identity-sensitive `Vary` headers
+  are rejected from cache admission. Responses carrying `Set-Cookie` are not
+  admitted into the shared image cache. Origin responses must be successful
+  `200 OK` image responses to enter the shared image cache: missing or
+  non-image `Content-Type` values, redirects, and error statuses are rejected
+  from shared image-cache admission. Pingora's cache
+  pipeline injects `Age` on stored-response hits and applies downstream
+  conditional/range handling when cache is enabled. Planned work covers
+  end-to-end cached-hit verification for those Pingora behaviors, full
+  validator-based revalidation for proxied cache responses, and broader
+  cache-header tests for static and proxied responses.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and
@@ -39,9 +77,15 @@ internal cache implementation.
   cache activity counters for hits, misses, stores, refused stores, and purges.
   `POST /_fluxheim/cache/activity/reset` resets activity counters without
   clearing cached objects.
-  `POST /_fluxheim/cache/purge` invalidates one cache key from the selected
-  vhost. `POST /_fluxheim/cache/purge-bulk` invalidates multiple exact keys
-  that share the same host, method, vhost, and optional original URL query.
+  `POST /_fluxheim/cache/purge` invalidates one cache identity from the
+  selected vhost. If the object has negotiated `Vary` variants, memory and disk
+  purge remove every stored variant for that primary identity. `POST
+  /_fluxheim/cache/purge-bulk` invalidates multiple identities that share the
+  same host, method, vhost, and optional original URL query.
+  Purge identities are bounded before key derivation: hosts, methods, paths,
+  queries, and bulk path count have explicit limits; paths must start with `/`;
+  path traversal segments, encoded path separators, encoded dots, backslashes,
+  control bytes, and malformed host/method/query values are rejected.
   Prefix and tag purge need a cache index and remain planned.
 
 Example: `cache.memory.max_size_bytes = "1GiB"` with
@@ -89,6 +133,16 @@ A production adapter must:
 - Refuse objects larger than `cache.max_object_bytes`.
 - Preserve HTTP cache metadata, including status, headers, validators, and
   freshness metadata.
+- Implement full cache-header behavior for:
+  `Cache-Control`, `Expires`, `ETag`, `Last-Modified`, `Vary`, `Age`,
+  `Accept-Ranges`, `If-None-Match`, `If-Modified-Since`, request
+  `Cache-Control`, `Pragma`, `Range`, and `If-Range`.
+- Implemented now: static validators/ranges/client refresh controls, proxied
+  client refresh bypass, Pingora `Vary` variance keys with unsafe/sensitive
+  `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, and
+  `image/*` origin response admission for proxied image cache.
+- Keep CDN/browser cache headers configurable through header policy and
+  examples instead of hardcoded provider-specific defaults.
 - Avoid unbounded buffering for large responses. Implemented for memory by
   enforcing `cache.max_object_bytes` and keeping partial streaming disabled;
   bounded partial streaming is still pending.

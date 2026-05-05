@@ -11,21 +11,40 @@ description = "A modular Pingora-based reverse proxy and static web server."
 default = [
     "proxy",
     "web",
+    "cache",
     "tls-rustls",
     "security",
 ]
-proxy = ["dep:async-trait", "dep:http", "dep:pingora", "dep:tokio"]
+proxy = ["dep:async-trait", "dep:bytes", "dep:http", "dep:pingora", "dep:tokio"]
 load-balancer = ["proxy", "pingora/lb"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "pingora?/cache"]
 web = ["dep:bytes", "dep:httpdate", "dep:mime_guess", "dep:percent-encoding"]
-tls = ["tls-rustls"]
-tls-rustls = ["proxy", "pingora/rustls"]
-tls-openssl = ["proxy", "pingora/openssl"]
-tls-boringssl = ["proxy", "pingora/boringssl"]
-tls-s2n = ["proxy", "pingora/s2n"]
+tls = []
+tls-rustls = ["tls", "proxy", "pingora/rustls"]
+tls-openssl = ["tls", "proxy", "pingora/openssl"]
+tls-boringssl = ["tls", "proxy", "pingora/boringssl"]
+tls-s2n = ["tls", "proxy", "pingora/s2n"]
 acme = ["tls"]
 metrics = ["dep:prometheus"]
+privacy-mode = ["proxy", "web"]
 security = []
+
+# Cargo does not have a separate --group flag. These profile features are
+# named feature aliases that enable useful deployment sets.
+profile-core = ["proxy", "web", "cache", "tls-rustls", "security"]
+profile-static-site = ["proxy", "web", "tls-rustls", "security"]
+profile-reverse-proxy = ["proxy", "tls-rustls", "security"]
+profile-cache-server = ["proxy", "web", "cache", "tls-rustls", "security"]
+profile-load-balancer = [
+    "proxy",
+    "web",
+    "cache",
+    "load-balancer",
+    "tls-rustls",
+    "security",
+]
+profile-observability = ["profile-core", "metrics"]
+profile-privacy = ["proxy", "web", "tls-rustls", "privacy-mode", "security"]
 
 [dependencies]
 arc-swap = "1.9.1"

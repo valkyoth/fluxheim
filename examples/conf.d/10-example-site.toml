@@ -9,7 +9,7 @@ enabled = false
 # enabled = true
 
 [vhosts.web]
-root = "../public/example"
+root = "/srv/sites/example.test/public"
 index_files = ["index.html"]
 deny_dotfiles = true
 
@@ -40,5 +40,5 @@ max_size_bytes = "1GiB"
 
 [vhosts.cache.disk]
 enabled = false
-# path = "../cache/example.test"
+# path = "/var/cache/fluxheim/example.test"
 max_size_bytes = "10GiB"

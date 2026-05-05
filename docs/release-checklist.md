@@ -8,6 +8,12 @@ people to run.
 
 - Confirm the Rust version in `rust-toolchain.toml`, `Cargo.toml`, `README.md`,
   and the `Containerfile` all agree.
+- Run the release metadata preflight:
+
+```bash
+scripts/validate-release-metadata.sh
+```
+
 - Check that the pinned Rust version is still the current stable release before
   release work starts.
 - Re-check the latest `cargo-deny` and `cargo-audit` versions:
@@ -39,7 +45,12 @@ scripts/release_checks.sh
 ```
 
 The wrapper runs formatting, clippy, tests, selected feature builds, example
-config validation, `cargo deny check`, and `cargo audit`.
+config validation, `cargo deny check`, `cargo audit`, and localhost smoke tests
+for static serving and load balancing.
+
+Confirm GitHub CodeQL is still enabled for `main`. The repository carries an
+advanced Rust CodeQL workflow in `.github/workflows/codeql.yml`; it should run
+on pushes, pull requests, and a weekly schedule.
 
 ## TLS And Certificate Storage
 
@@ -62,6 +73,7 @@ should be owner-only (`0700`).
 Confirm the default binary and important reduced binaries compile:
 
 ```bash
+scripts/validate-features.sh profile-core
 cargo build --release
 cargo build --release --no-default-features --features proxy
 cargo build --release --no-default-features --features proxy,load-balancer
@@ -69,6 +81,8 @@ cargo build --release --no-default-features --features web
 cargo build --release --no-default-features --features cache
 cargo build --release --no-default-features --features proxy,metrics
 cargo build --release --no-default-features --features proxy,tls-rustls,acme
+cargo build --release --no-default-features --features profile-load-balancer
+cargo build --release --no-default-features --features profile-privacy
 ```
 
 For hardware-specific local binaries, use `target-cpu=native` only for the
@@ -100,7 +114,7 @@ runtime process does not run as root.
 ## Final Release Gate
 
 - Confirm `git status` contains only intentional release changes.
-- Update release notes or changelog material before tagging.
+- Update `CHANGELOG.md` before tagging.
 - Confirm the repository still carries the `EUPL-1.2` license.
 - Confirm reviewed advisory exceptions still match current `cargo audit`
   output.

@@ -23,6 +23,19 @@ use sha2::{Digest, Sha256};
 
 use crate::config::{ByteSize, CacheConfig, normalize_host};
 
+#[cfg(all(feature = "proxy", target_os = "linux"))]
+use std::os::unix::fs::OpenOptionsExt;
+
+#[cfg(all(feature = "proxy", target_os = "linux"))]
+const O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(feature = "proxy")]
+const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 128;
+#[cfg(feature = "proxy")]
+const DISK_CACHE_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-v1\n";
+#[cfg(feature = "proxy")]
+const DISK_CACHE_MAGIC_V2: &[u8] = b"FLUXHEIM-CACHE-v2\n";
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheStoragePlan {
     pub memory: Option<MemoryTierPlan>,
@@ -268,9 +281,6 @@ pub fn memory_image_cache_from_config(config: &CacheConfig) -> Option<MemoryImag
 }
 
 #[cfg(feature = "proxy")]
-const DISK_CACHE_MAGIC: &[u8] = b"FLUXHEIM-CACHE-v1\n";
-
-#[cfg(feature = "proxy")]
 static DISK_CACHE_TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[cfg(feature = "proxy")]
@@ -321,9 +331,22 @@ impl PingoraMemoryStorage {
     }
 
     pub fn purge_cache_key(&self, key: &pingora::cache::CacheKey) -> bool {
-        let key = key.combined();
-        let existed = self.inner.get(&key).is_some();
-        self.inner.invalidate(&key);
+        let primary = key.primary();
+        let combined = key.combined();
+        let keys: Vec<String> = self
+            .inner
+            .iter()
+            .filter_map(|(candidate_key, object)| {
+                (object.primary_key.as_deref() == Some(primary.as_str())
+                    || *candidate_key == combined)
+                    .then(|| candidate_key.as_ref().clone())
+            })
+            .collect();
+
+        let existed = !keys.is_empty();
+        for key in keys {
+            self.inner.invalidate(&key);
+        }
         self.inner.run_pending_tasks();
         if existed {
             self.activity.purge();
@@ -335,16 +358,23 @@ impl PingoraMemoryStorage {
         self.inner.get(&key.combined())
     }
 
-    fn put_object(&self, key: String, meta: CacheMeta, body: Arc<[u8]>) -> pingora::Result<usize> {
+    fn put_object(
+        &self,
+        key: String,
+        primary_key: String,
+        meta: CacheMeta,
+        body: Arc<[u8]>,
+    ) -> pingora::Result<usize> {
         let (internal_meta, response_header) = meta.serialize()?;
         Ok(self
-            .put_serialized_object(key, internal_meta, response_header, body)?
+            .put_serialized_object(key, primary_key, internal_meta, response_header, body)?
             .unwrap_or(0))
     }
 
     fn put_serialized_object(
         &self,
         key: String,
+        primary_key: String,
         internal_meta: Vec<u8>,
         response_header: Vec<u8>,
         body: Arc<[u8]>,
@@ -367,6 +397,7 @@ impl PingoraMemoryStorage {
         self.inner.insert(
             key,
             PingoraStoredObject {
+                primary_key: Some(primary_key),
                 internal_meta,
                 response_header,
                 body,
@@ -398,7 +429,7 @@ impl PingoraDiskStorage {
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
     ) -> std::io::Result<Self> {
-        std::fs::create_dir_all(&root)?;
+        let root = prepare_disk_cache_root(&root)?;
         Ok(Self {
             root,
             max_size_bytes,
@@ -430,12 +461,43 @@ impl PingoraDiskStorage {
     }
 
     pub fn purge_cache_key(&self, key: &pingora::cache::CacheKey) -> std::io::Result<bool> {
-        match std::fs::remove_file(self.path_for_key(key)) {
-            Ok(()) => {
+        self.purge_cache_primary(key)
+    }
+
+    fn purge_cache_primary(&self, key: &pingora::cache::CacheKey) -> std::io::Result<bool> {
+        let primary = key.primary();
+        let exact_path = self.path_for_key(key);
+        let mut purged = self.purge_object_path(exact_path.clone())?;
+
+        for entry in disk_cache_entries(&self.root)? {
+            if entry.path == exact_path {
+                continue;
+            }
+
+            let Some(read_path) = self.safe_existing_object_path(&entry.path)? else {
+                continue;
+            };
+            let object = match read_disk_cache_object(&read_path, self.max_object_bytes)
+                .and_then(|bytes| parse_disk_cache_object(&bytes, self.max_object_bytes))
+            {
+                Ok(object) => object,
+                Err(_) => continue,
+            };
+            if object.primary_key.as_deref() == Some(primary.as_str()) {
+                purged |= self.purge_object_path(entry.path)?;
+            }
+        }
+
+        Ok(purged)
+    }
+
+    fn purge_object_path(&self, path: PathBuf) -> std::io::Result<bool> {
+        match remove_disk_cache_object(&self.root, &path) {
+            Ok(true) => {
                 self.activity.purge();
                 Ok(true)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Ok(false) => Ok(false),
             Err(error) => Err(error),
         }
     }
@@ -445,7 +507,13 @@ impl PingoraDiskStorage {
         key: &pingora::cache::CacheKey,
     ) -> pingora::Result<Option<PingoraStoredObject>> {
         let path = self.path_for_key(key);
-        let bytes = match std::fs::read(&path) {
+        let Some(read_path) = self
+            .safe_existing_object_path(&path)
+            .map_err(|error| cache_io_error("validate disk cache object path", error))?
+        else {
+            return Ok(None);
+        };
+        let bytes = match read_disk_cache_object(&read_path, self.max_object_bytes) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(cache_io_error("read disk cache object", error)),
@@ -453,7 +521,7 @@ impl PingoraDiskStorage {
         match parse_disk_cache_object(&bytes, self.max_object_bytes) {
             Ok(object) => Ok(Some(object)),
             Err(error) => {
-                let _ = std::fs::remove_file(&path);
+                let _ = remove_disk_cache_object(&self.root, &path);
                 Err(cache_io_error("parse disk cache object", error))
             }
         }
@@ -462,16 +530,18 @@ impl PingoraDiskStorage {
     fn put_object(
         &self,
         key: String,
+        primary_key: String,
         meta: CacheMeta,
         body: Arc<[u8]>,
     ) -> pingora::Result<Option<usize>> {
         let (internal_meta, response_header) = meta.serialize()?;
-        self.put_serialized_object(key, internal_meta, response_header, body)
+        self.put_serialized_object(key, primary_key, internal_meta, response_header, body)
     }
 
     fn put_serialized_object(
         &self,
         key: String,
+        primary_key: String,
         internal_meta: Vec<u8>,
         response_header: Vec<u8>,
         body: Arc<[u8]>,
@@ -500,12 +570,19 @@ impl PingoraDiskStorage {
                 std::io::Error::other("disk cache path has no parent"),
             )
         })?;
-        std::fs::create_dir_all(parent)
+        self.ensure_safe_cache_parent(parent)
             .map_err(|error| cache_io_error("create disk cache shard", error))?;
+        require_disk_cache_write_destination(&path)
+            .map_err(|error| cache_io_error("validate disk cache object destination", error))?;
         let tmp_path = self.tmp_path_for(&path);
-        let write_result =
-            write_disk_cache_object(&tmp_path, &internal_meta, &response_header, &body)
-                .and_then(|()| std::fs::rename(&tmp_path, &path));
+        let write_result = write_disk_cache_object(
+            &tmp_path,
+            &primary_key,
+            &internal_meta,
+            &response_header,
+            &body,
+        )
+        .and_then(|()| std::fs::rename(&tmp_path, &path));
         if let Err(error) = write_result {
             let _ = std::fs::remove_file(&tmp_path);
             self.activity.store_refusal();
@@ -542,14 +619,14 @@ impl PingoraDiskStorage {
         });
 
         for entry in entries {
-            match std::fs::remove_file(&entry.path) {
-                Ok(()) => {
+            match remove_disk_cache_object(&self.root, &entry.path) {
+                Ok(true) => {
                     bytes_to_free = bytes_to_free.saturating_sub(entry.size);
                     if bytes_to_free == 0 {
                         return Ok(true);
                     }
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Ok(false) => {}
                 Err(error) => return Err(error),
             }
         }
@@ -575,6 +652,146 @@ impl PingoraDiskStorage {
         let nonce = DISK_CACHE_TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         path.with_extension(format!("tmp.{}.{}", std::process::id(), nonce))
     }
+
+    fn safe_existing_object_path(&self, path: &Path) -> std::io::Result<Option<PathBuf>> {
+        if cache_path_contains_symlink(&self.root, path)? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "disk cache object path contains symlink: {}",
+                    path.display()
+                ),
+            ));
+        }
+
+        let canonical = match path.canonicalize() {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+
+        if !canonical.starts_with(&self.root) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("disk cache object escaped root: {}", canonical.display()),
+            ));
+        }
+
+        let metadata = canonical.metadata()?;
+        if !metadata.is_file() {
+            return Ok(None);
+        }
+
+        Ok(Some(canonical))
+    }
+
+    fn ensure_safe_cache_parent(&self, parent: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(parent)?;
+        if cache_path_contains_symlink(&self.root, parent)? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("disk cache shard contains symlink: {}", parent.display()),
+            ));
+        }
+
+        let canonical = parent.canonicalize()?;
+        if canonical.starts_with(&self.root) && canonical.is_dir() {
+            return Ok(());
+        }
+
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("disk cache shard escaped root: {}", canonical.display()),
+        ))
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn prepare_disk_cache_root(root: &Path) -> std::io::Result<PathBuf> {
+    if configured_cache_path_contains_symlink(root)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "disk cache root must not be below a symlinked directory: {}",
+                root.display()
+            ),
+        ));
+    }
+
+    match std::fs::symlink_metadata(root) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "disk cache root must be a real directory: {}",
+                    root.display()
+                ),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(root)?;
+            let metadata = std::fs::symlink_metadata(root)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "disk cache root must be a real directory: {}",
+                        root.display()
+                    ),
+                ));
+            }
+        }
+        Err(error) => return Err(error),
+    }
+
+    if configured_cache_path_contains_symlink(root)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "disk cache root must not be below a symlinked directory: {}",
+                root.display()
+            ),
+        ));
+    }
+
+    root.canonicalize()
+}
+
+#[cfg(feature = "proxy")]
+fn configured_cache_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
+#[cfg(feature = "proxy")]
+fn cache_path_contains_symlink(root: &Path, path: &Path) -> std::io::Result<bool> {
+    let Ok(relative) = path.strip_prefix(root) else {
+        return Ok(true);
+    };
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
 }
 
 #[cfg(feature = "proxy")]
@@ -614,6 +831,7 @@ impl PingoraTieredStorage {
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone)]
 struct PingoraStoredObject {
+    primary_key: Option<String>,
     internal_meta: Vec<u8>,
     response_header: Vec<u8>,
     body: Arc<[u8]>,
@@ -629,29 +847,82 @@ struct DiskCacheEntry {
 }
 
 #[cfg(feature = "proxy")]
+#[cfg(not(test))]
+const MAX_DISK_CACHE_SCAN_ENTRIES: usize = 100_000;
+
+#[cfg(feature = "proxy")]
+#[cfg(test)]
+const MAX_DISK_CACHE_SCAN_ENTRIES: usize = 8;
+
+#[cfg(feature = "proxy")]
 fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
     let mut entries = Vec::new();
     for shard in std::fs::read_dir(root)? {
         let shard = shard?;
-        if !shard.file_type()?.is_dir() {
+        let shard_path = shard.path();
+        if cache_path_contains_symlink(root, &shard_path)? || !shard.file_type()?.is_dir() {
             continue;
         }
-        for entry in std::fs::read_dir(shard.path())? {
+        for entry in std::fs::read_dir(&shard_path)? {
             let entry = entry?;
-            if !entry.file_type()?.is_file()
-                || entry.path().extension() != Some(std::ffi::OsStr::new("fhc"))
+            let path = entry.path();
+            if cache_path_contains_symlink(root, &path)?
+                || path.extension() != Some(std::ffi::OsStr::new("fhc"))
             {
                 continue;
             }
-            let metadata = entry.metadata()?;
+            let metadata = std::fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                continue;
+            }
+            if entries.len() >= MAX_DISK_CACHE_SCAN_ENTRIES {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "disk cache scan exceeded {MAX_DISK_CACHE_SCAN_ENTRIES} objects below {}",
+                        root.display()
+                    ),
+                ));
+            }
             entries.push(DiskCacheEntry {
-                path: entry.path(),
+                path,
                 size: metadata.len(),
                 modified: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
             });
         }
     }
     Ok(entries)
+}
+
+#[cfg(feature = "proxy")]
+fn remove_disk_cache_object(root: &Path, path: &Path) -> std::io::Result<bool> {
+    if path.extension() != Some(std::ffi::OsStr::new("fhc")) {
+        return Ok(false);
+    }
+    if cache_path_contains_symlink(root, path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "disk cache object path contains symlink: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Ok(false);
+    }
+
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -771,6 +1042,7 @@ impl Storage for PingoraMemoryStorage {
         Ok(Box::new(PingoraMemoryMissHandler {
             storage: self,
             key: key.combined(),
+            primary_key: key.primary(),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -869,6 +1141,7 @@ impl Storage for PingoraDiskStorage {
         Ok(Box::new(PingoraDiskMissHandler {
             storage: self,
             key: key.combined(),
+            primary_key: key.primary(),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -883,14 +1156,8 @@ impl Storage for PingoraDiskStorage {
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
         let path = self.path_for_combined_key(&key.combined());
-        match std::fs::remove_file(path) {
-            Ok(()) => {
-                self.activity.purge();
-                Ok(true)
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(cache_io_error("purge disk cache object", error)),
-        }
+        self.purge_object_path(path)
+            .map_err(|error| cache_io_error("purge disk cache object", error))
     }
 
     async fn update_meta(
@@ -904,7 +1171,13 @@ impl Storage for PingoraDiskStorage {
         };
         let (internal_meta, response_header) = meta.serialize()?;
         Ok(self
-            .put_serialized_object(key.combined(), internal_meta, response_header, object.body)?
+            .put_serialized_object(
+                key.combined(),
+                key.primary(),
+                internal_meta,
+                response_header,
+                object.body,
+            )?
             .is_some())
     }
 
@@ -943,8 +1216,10 @@ impl Storage for PingoraTieredStorage {
         };
         self.disk.activity.hit();
         let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
+        let primary_key = object.primary_key.clone().unwrap_or_else(|| key.primary());
         let _promoted = self.memory.put_serialized_object(
             key.combined(),
+            primary_key,
             object.internal_meta.clone(),
             object.response_header.clone(),
             Arc::clone(&object.body),
@@ -966,6 +1241,7 @@ impl Storage for PingoraTieredStorage {
         Ok(Box::new(PingoraTieredMissHandler {
             storage: self,
             key: key.combined(),
+            primary_key: key.primary(),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self
@@ -1074,6 +1350,7 @@ impl pingora::cache::storage::HandleHit for PingoraMemoryHitHandler {
 struct PingoraMemoryMissHandler {
     storage: &'static PingoraMemoryStorage,
     key: String,
+    primary_key: String,
     serialized_meta: (Vec<u8>, Vec<u8>),
     body: Vec<u8>,
     max_object_bytes: u64,
@@ -1104,9 +1381,12 @@ impl pingora::cache::storage::HandleMiss for PingoraMemoryMissHandler {
         }
 
         let meta = CacheMeta::deserialize(&self.serialized_meta.0, &self.serialized_meta.1)?;
-        let created = self
-            .storage
-            .put_object(self.key, meta, Arc::<[u8]>::from(self.body))?;
+        let created = self.storage.put_object(
+            self.key,
+            self.primary_key,
+            meta,
+            Arc::<[u8]>::from(self.body),
+        )?;
         Ok(MissFinishType::Created(created))
     }
 }
@@ -1115,6 +1395,7 @@ impl pingora::cache::storage::HandleMiss for PingoraMemoryMissHandler {
 struct PingoraDiskMissHandler {
     storage: &'static PingoraDiskStorage,
     key: String,
+    primary_key: String,
     serialized_meta: (Vec<u8>, Vec<u8>),
     body: Vec<u8>,
     max_object_bytes: u64,
@@ -1145,9 +1426,12 @@ impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
         }
 
         let meta = CacheMeta::deserialize(&self.serialized_meta.0, &self.serialized_meta.1)?;
-        let Some(created) =
-            self.storage
-                .put_object(self.key, meta, Arc::<[u8]>::from(self.body))?
+        let Some(created) = self.storage.put_object(
+            self.key,
+            self.primary_key,
+            meta,
+            Arc::<[u8]>::from(self.body),
+        )?
         else {
             return Ok(MissFinishType::Created(0));
         };
@@ -1159,6 +1443,7 @@ impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
 struct PingoraTieredMissHandler {
     storage: &'static PingoraTieredStorage,
     key: String,
+    primary_key: String,
     serialized_meta: (Vec<u8>, Vec<u8>),
     body: Vec<u8>,
     max_object_bytes: u64,
@@ -1191,12 +1476,14 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
         let body = Arc::<[u8]>::from(self.body);
         let memory_created = self.storage.memory.put_serialized_object(
             self.key.clone(),
+            self.primary_key.clone(),
             self.serialized_meta.0.clone(),
             self.serialized_meta.1.clone(),
             Arc::clone(&body),
         )?;
         let disk_created = self.storage.disk.put_serialized_object(
             self.key,
+            self.primary_key,
             self.serialized_meta.0,
             self.serialized_meta.1,
             body,
@@ -1210,20 +1497,25 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
 #[cfg(feature = "proxy")]
 fn write_disk_cache_object(
     path: &Path,
+    primary_key: &str,
     internal_meta: &[u8],
     response_header: &[u8],
     body: &[u8],
 ) -> std::io::Result<()> {
     use std::io::Write as _;
 
-    let mut file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)?;
-    file.write_all(DISK_CACHE_MAGIC)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NOFOLLOW);
+
+    let mut file = options.open(path)?;
+    file.write_all(DISK_CACHE_MAGIC_V2)?;
+    writeln!(file, "{}", primary_key.len())?;
     writeln!(file, "{}", internal_meta.len())?;
     writeln!(file, "{}", response_header.len())?;
     writeln!(file, "{}", body.len())?;
+    file.write_all(primary_key.as_bytes())?;
     file.write_all(internal_meta)?;
     file.write_all(response_header)?;
     file.write_all(body)?;
@@ -1232,20 +1524,94 @@ fn write_disk_cache_object(
 }
 
 #[cfg(feature = "proxy")]
+fn read_disk_cache_object(path: &Path, max_object_bytes: ByteSize) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NOFOLLOW);
+
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "disk cache object is not a regular file: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    let max_encoded_bytes = max_object_bytes
+        .as_u64()
+        .saturating_add(DISK_CACHE_HEADER_OVERHEAD_LIMIT);
+    if metadata.len() > max_encoded_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "disk cache object is larger than configured object limit: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    let mut bytes = Vec::new();
+    let mut reader = file.take(max_encoded_bytes.saturating_add(1));
+    reader.read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max_encoded_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "disk cache object grew beyond configured object limit: {}",
+                path.display()
+            ),
+        ));
+    }
+    Ok(bytes)
+}
+
+#[cfg(feature = "proxy")]
+fn require_disk_cache_write_destination(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "disk cache object destination is unsafe: {}",
+                    path.display()
+                ),
+            ))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(feature = "proxy")]
 fn parse_disk_cache_object(
     bytes: &[u8],
     max_object_bytes: ByteSize,
 ) -> std::io::Result<PingoraStoredObject> {
-    let Some(mut offset) = bytes
-        .get(..DISK_CACHE_MAGIC.len())
-        .and_then(|prefix| (prefix == DISK_CACHE_MAGIC).then_some(DISK_CACHE_MAGIC.len()))
-    else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "invalid cache object magic",
-        ));
-    };
+    let (mut offset, has_primary_key) =
+        if bytes.get(..DISK_CACHE_MAGIC_V2.len()) == Some(DISK_CACHE_MAGIC_V2) {
+            (DISK_CACHE_MAGIC_V2.len(), true)
+        } else if bytes.get(..DISK_CACHE_MAGIC_V1.len()) == Some(DISK_CACHE_MAGIC_V1) {
+            (DISK_CACHE_MAGIC_V1.len(), false)
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid cache object magic",
+            ));
+        };
 
+    let primary_key_len = if has_primary_key {
+        parse_disk_cache_len(bytes, &mut offset)?
+    } else {
+        0
+    };
     let internal_meta_len = parse_disk_cache_len(bytes, &mut offset)?;
     let response_header_len = parse_disk_cache_len(bytes, &mut offset)?;
     let body_len = parse_disk_cache_len(bytes, &mut offset)?;
@@ -1260,7 +1626,8 @@ fn parse_disk_cache_object(
     }
 
     let total_len = offset
-        .checked_add(internal_meta_len)
+        .checked_add(primary_key_len)
+        .and_then(|value| value.checked_add(internal_meta_len))
         .and_then(|value| value.checked_add(response_header_len))
         .and_then(|value| value.checked_add(body_len))
         .ok_or_else(|| {
@@ -1276,16 +1643,29 @@ fn parse_disk_cache_object(
         ));
     }
 
-    let internal_meta_end = offset + internal_meta_len;
-    let response_header_end = internal_meta_end + response_header_len;
     let weight = u32::try_from(object_bytes).map_err(|_| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "cache object weight exceeds u32",
         )
     })?;
+    let primary_key_end = offset + primary_key_len;
+    let internal_meta_end = primary_key_end + internal_meta_len;
+    let response_header_end = internal_meta_end + response_header_len;
+    let primary_key = if has_primary_key {
+        Some(
+            std::str::from_utf8(&bytes[offset..primary_key_end])
+                .map_err(|error| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{error}"))
+                })?
+                .to_owned(),
+        )
+    } else {
+        None
+    };
     Ok(PingoraStoredObject {
-        internal_meta: bytes[offset..internal_meta_end].to_vec(),
+        primary_key,
+        internal_meta: bytes[primary_key_end..internal_meta_end].to_vec(),
         response_header: bytes[internal_meta_end..response_header_end].to_vec(),
         body: Arc::from(&bytes[response_header_end..][..]),
         weight,
@@ -1872,6 +2252,46 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_memory_storage_purges_variants_by_primary_key() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 4,
+        });
+        let base_key = pingora::cache::CacheKey::new("fluxheim-test", "vary-key", "vhost");
+        let mut br_key = base_key.clone();
+        br_key.set_variance_key([1; 16]);
+        let mut gzip_key = base_key.clone();
+        gzip_key.set_variance_key([2; 16]);
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        for (key, body) in [(&br_key, b"br".as_slice()), (&gzip_key, b"gzip".as_slice())] {
+            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::copy_from_slice(body), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup(&gzip_key, &span))
+                .unwrap()
+                .is_some()
+        );
+
+        assert!(storage.purge_cache_key(&base_key));
+        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup(&gzip_key, &span))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_disk_storage_round_trips_cached_body() {
         use pingora::cache::Storage;
 
@@ -1903,6 +2323,52 @@ mod tests {
         );
         assert_eq!(block_on(hit.read_body()).unwrap(), None);
         assert_eq!(storage.stats().unwrap().entries, 1);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_purges_variants_by_primary_key() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-vary-purge");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let base_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-vary-key", "vhost");
+        let mut br_key = base_key.clone();
+        br_key.set_variance_key([3; 16]);
+        let mut gzip_key = base_key.clone();
+        gzip_key.set_variance_key([4; 16]);
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        for (key, body) in [(&br_key, b"br".as_slice()), (&gzip_key, b"gzip".as_slice())] {
+            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::copy_from_slice(body), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        assert_eq!(storage.stats().unwrap().entries, 2);
+        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_some());
+        assert!(
+            block_on(storage.lookup(&gzip_key, &span))
+                .unwrap()
+                .is_some()
+        );
+
+        assert!(storage.purge_cache_key(&base_key).unwrap());
+        assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup(&gzip_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(storage.stats().unwrap().entries, 0);
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1976,6 +2442,232 @@ mod tests {
         );
         assert!(!object_path.exists());
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn pingora_disk_storage_refuses_symlinked_shard_writes() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("symlink-shard");
+        let outside = unique_test_cache_dir("symlink-shard-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write", "vhost");
+        let object_path = storage.path_for_key(&key);
+        std::os::unix::fs::symlink(&outside, object_path.parent().unwrap()).unwrap();
+
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+
+        let Err(_error) = block_on(miss.finish()) else {
+            panic!("symlinked disk cache shard write unexpectedly succeeded");
+        };
+        assert!(!object_path.exists());
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn pingora_disk_storage_refuses_symlinked_object_reads() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("symlink-object");
+        let outside = unique_test_cache_dir("symlink-object-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-read", "vhost");
+        let object_path = storage.path_for_key(&key);
+        std::fs::create_dir_all(object_path.parent().unwrap()).unwrap();
+        let outside_file = outside.join("outside.fhc");
+        std::fs::write(&outside_file, b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside_file, &object_path).unwrap();
+
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let Err(_error) = block_on(storage.lookup(&key, &span)) else {
+            panic!("symlinked disk cache object read unexpectedly succeeded");
+        };
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn pingora_disk_storage_refuses_symlinked_object_writes() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("symlink-object-write");
+        let outside = unique_test_cache_dir("symlink-object-write-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write-target", "vhost");
+        let object_path = storage.path_for_key(&key);
+        std::fs::create_dir_all(object_path.parent().unwrap()).unwrap();
+        let outside_file = outside.join("outside.fhc");
+        std::fs::write(&outside_file, b"outside").unwrap();
+        std::os::unix::fs::symlink(&outside_file, &object_path).unwrap();
+
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+
+        let Err(_error) = block_on(miss.finish()) else {
+            panic!("symlinked disk cache object write unexpectedly succeeded");
+        };
+        assert_eq!(std::fs::read(&outside_file).unwrap(), b"outside");
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn pingora_disk_storage_refuses_symlinks_inside_root() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("symlink-inside-root");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "inside-symlink", "vhost");
+        let object_path = storage.path_for_key(&key);
+        let real_shard = root.join("real-shard");
+        std::fs::create_dir_all(&real_shard).unwrap();
+        std::os::unix::fs::symlink(&real_shard, object_path.parent().unwrap()).unwrap();
+
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+
+        let Err(_error) = block_on(miss.finish()) else {
+            panic!("symlinked in-root disk cache shard write unexpectedly succeeded");
+        };
+        let error = storage.purge_cache_key(&key).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn pingora_disk_storage_refuses_symlinked_root() {
+        let root = unique_test_cache_dir("symlink-root");
+        let outside = unique_test_cache_dir("symlink-root-outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &root).unwrap();
+
+        let error = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        std::fs::remove_file(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn pingora_disk_storage_refuses_root_below_symlinked_parent() {
+        let real_parent = unique_test_cache_dir("symlink-parent-real");
+        let linked_parent = unique_test_cache_dir("symlink-parent-link");
+        std::fs::create_dir_all(&real_parent).unwrap();
+        std::os::unix::fs::symlink(&real_parent, &linked_parent).unwrap();
+        let root = linked_parent.join("cache");
+
+        let error = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!real_parent.join("cache").exists());
+
+        std::fs::remove_file(linked_parent).unwrap();
+        std::fs::remove_dir_all(real_parent).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn disk_cache_entries_skip_symlinked_shards_and_objects() {
+        let root = unique_test_cache_dir("scan-symlinks");
+        let shard = root.join("ab");
+        let outside = unique_test_cache_dir("scan-symlinks-outside");
+        let linked_shard = root.join("cd");
+        std::fs::create_dir_all(&shard).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(shard.join("real.fhc"), b"real").unwrap();
+        std::fs::write(outside.join("outside.fhc"), b"outside").unwrap();
+        std::os::unix::fs::symlink(outside.join("outside.fhc"), shard.join("linked.fhc")).unwrap();
+        std::os::unix::fs::symlink(&outside, &linked_shard).unwrap();
+
+        let entries = super::disk_cache_entries(&root).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, shard.join("real.fhc"));
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn disk_cache_entries_refuses_scan_over_entry_cap() {
+        let root = unique_test_cache_dir("scan-entry-cap");
+        let shard = root.join("ab");
+        std::fs::create_dir_all(&shard).unwrap();
+        for index in 0..=super::MAX_DISK_CACHE_SCAN_ENTRIES {
+            std::fs::write(shard.join(format!("{index}.fhc")), b"cached").unwrap();
+        }
+
+        let error = super::disk_cache_entries(&root).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn read_disk_cache_object_refuses_oversized_encoded_file() {
+        let root = unique_test_cache_dir("read-oversized");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("oversized.fhc");
+        std::fs::write(&path, vec![b'x'; 256]).unwrap();
+
+        let error = super::read_disk_cache_object(&path, ByteSize::from_bytes(8)).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2153,6 +2845,9 @@ mod tests {
             )
         }
 
+        // SAFETY: `raw_waker` uses a no-op vtable and a null data pointer that is
+        // never dereferenced. The waker is only used to poll immediately-ready
+        // test futures in this thread.
         let waker = unsafe { Waker::from_raw(raw_waker()) };
         let mut context = Context::from_waker(&waker);
         let mut future = pin!(future);

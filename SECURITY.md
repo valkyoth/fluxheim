@@ -15,6 +15,11 @@ cargo deny check licenses
 cargo audit
 ```
 
+GitHub Actions also run CI and CodeQL. CodeQL is configured as an advanced Rust
+setup with a manual Cargo build so path handling, request parsing, and other
+security-sensitive code keep getting scanned after each push, pull request, and
+weekly scheduled run.
+
 The full release gate is documented in
 [Release Checklist](docs/release-checklist.md). Use it before publishing
 artifacts, changing dependency versions, or changing TLS/cache/proxy behavior.

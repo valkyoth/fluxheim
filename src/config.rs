@@ -1,13 +1,26 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::fs;
-use std::net::SocketAddr;
+use std::fs::{self, OpenOptions};
+use std::io::Read;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use toml::value::{Datetime, Offset};
+
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
+
+#[cfg(target_os = "linux")]
+const O_NOFOLLOW: i32 = 0o400000;
+
+const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
+const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_ADMIN_HEALTH_PATH_BYTES: usize = 2048;
+const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +31,10 @@ pub struct Config {
     pub admin: AdminConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub logging: LoggingConfig,
+    #[serde(default)]
+    pub headers: HeaderPolicyConfig,
     #[serde(default)]
     pub tls: TlsConfig,
     #[serde(default)]
@@ -33,8 +50,14 @@ pub struct Config {
 impl Config {
     pub fn load(path: Option<&Path>) -> Result<Self, ConfigLoadError> {
         let config = match path {
-            Some(path) if path.is_dir() => Self::load_dir(path)?,
-            Some(path) => Self::load_file(path)?,
+            Some(path) => {
+                let path = canonical_config_source(path)?;
+                if path.is_dir() {
+                    Self::load_dir(&path)?
+                } else {
+                    Self::load_file(&path)?
+                }
+            }
             None => Self::default(),
         };
 
@@ -79,6 +102,12 @@ impl Config {
         if let Some(metrics) = fragment.metrics {
             self.metrics = metrics;
         }
+        if let Some(logging) = fragment.logging {
+            self.logging = logging;
+        }
+        if let Some(headers) = fragment.headers {
+            self.headers = headers;
+        }
         if let Some(tls) = fragment.tls {
             self.tls = tls;
         }
@@ -98,6 +127,8 @@ impl Config {
         self.server.validate()?;
         self.admin.validate()?;
         self.metrics.validate()?;
+        self.logging.validate()?;
+        self.headers.validate()?;
         self.tls.validate()?;
         self.validate_tls_listeners()?;
         self.proxy.validate()?;
@@ -171,6 +202,10 @@ struct ConfigFragment {
     #[serde(default)]
     metrics: Option<MetricsConfig>,
     #[serde(default)]
+    logging: Option<LoggingConfig>,
+    #[serde(default)]
+    headers: Option<HeaderPolicyConfig>,
+    #[serde(default)]
     tls: Option<TlsConfig>,
     #[serde(default)]
     proxy: Option<ProxyConfig>,
@@ -184,7 +219,12 @@ struct ConfigFragment {
 
 impl ConfigFragment {
     fn load(path: &Path) -> Result<Self, ConfigLoadError> {
-        let raw = fs::read_to_string(path).map_err(ConfigLoadError::Read)?;
+        if !regular_visible_toml_file(path)? {
+            return Err(ConfigLoadError::InvalidPath {
+                path: path.to_path_buf(),
+            });
+        }
+        let raw = read_regular_config_file_to_string(path)?;
         toml::from_str(&raw).map_err(ConfigLoadError::Parse)
     }
 
@@ -217,6 +257,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub default_vhost: Option<String>,
     #[serde(default)]
+    pub trusted_proxies: Vec<String>,
+    #[serde(default)]
     pub limits: ServerLimitsConfig,
 }
 
@@ -226,6 +268,7 @@ impl Default for ServerConfig {
             listen: default_listen(),
             tls_listen: Vec::new(),
             default_vhost: None,
+            trusted_proxies: Vec::new(),
             limits: ServerLimitsConfig::default(),
         }
     }
@@ -241,6 +284,9 @@ impl ServerConfig {
         }
         if let Some(default_vhost) = fragment.default_vhost {
             self.default_vhost = Some(default_vhost);
+        }
+        if let Some(trusted_proxies) = fragment.trusted_proxies {
+            self.trusted_proxies = trusted_proxies;
         }
         if let Some(limits) = fragment.limits {
             self.limits = limits;
@@ -272,6 +318,13 @@ impl ServerConfig {
         {
             return Err(ConfigError::EmptyDefaultVhost);
         }
+        for proxy in &self.trusted_proxies {
+            if !valid_trusted_proxy(proxy) {
+                return Err(ConfigError::InvalidTrustedProxy {
+                    value: proxy.clone(),
+                });
+            }
+        }
 
         self.limits.validate()?;
         Ok(())
@@ -287,6 +340,8 @@ struct ServerConfigFragment {
     tls_listen: Option<Vec<String>>,
     #[serde(default)]
     default_vhost: Option<String>,
+    #[serde(default)]
+    trusted_proxies: Option<Vec<String>>,
     #[serde(default)]
     limits: Option<ServerLimitsConfig>,
 }
@@ -348,6 +403,8 @@ impl AdminConfig {
         validate_optional_env("admin.token_env", self.token_env.as_deref())?;
         validate_optional_path("admin.token_file", self.token_file.as_deref())?;
         validate_optional_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        validate_path("admin.token_file", self.token_file.as_deref())?;
+        validate_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
         self.self_healing.validate()?;
 
         if !self.enabled {
@@ -420,7 +477,13 @@ impl AdminSelfHealingConfig {
         }
         if !self.health_path.starts_with('/')
             || self.health_path.trim() != self.health_path
-            || self.health_path.contains(' ')
+            || self.health_path.len() > MAX_ADMIN_HEALTH_PATH_BYTES
+            || self
+                .health_path
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || matches!(byte, b' ' | b'\\' | b'?' | b'#'))
+            || (self.health_path.starts_with("/_fluxheim/")
+                && self.health_path != DEFAULT_ADMIN_HEALTH_PATH)
         {
             return Err(ConfigError::InvalidAdminHealthPath {
                 path: self.health_path.clone(),
@@ -467,6 +530,430 @@ impl MetricsConfig {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoggingConfig {
+    #[serde(default)]
+    pub level: LoggingLevel,
+    #[serde(default)]
+    pub format: LoggingFormat,
+    #[serde(default)]
+    pub access: AccessLoggingConfig,
+}
+
+impl LoggingConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.access.validate()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LoggingLevel {
+    Trace,
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+    Off,
+}
+
+impl LoggingLevel {
+    pub fn as_filter(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LoggingFormat {
+    Text,
+    #[default]
+    Json,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccessLoggingConfig {
+    #[serde(default = "default_access_logging_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub request_id: bool,
+    #[serde(default = "default_request_id_header")]
+    pub request_id_header: String,
+}
+
+impl Default for AccessLoggingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_access_logging_enabled(),
+            request_id: true,
+            request_id_header: default_request_id_header(),
+        }
+    }
+}
+
+impl AccessLoggingConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        #[cfg(feature = "privacy-mode")]
+        if self.enabled {
+            return Err(ConfigError::PrivacyModeAccessLogging);
+        }
+
+        if self.request_id {
+            validate_header_name("logging.access.request_id_header", &self.request_id_header)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeaderPolicyConfig {
+    #[serde(default)]
+    pub request: RequestHeaderPolicyConfig,
+    #[serde(default)]
+    pub response: ResponseHeaderPolicyConfig,
+}
+
+impl HeaderPolicyConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.request.validate()?;
+        self.response.validate()
+    }
+
+    pub fn with_vhost_overlay(&self, overlay: &VhostHeaderPolicyConfig) -> Self {
+        let mut policy = self.clone();
+        policy.request.apply_overlay(&overlay.request);
+        policy.response.apply_overlay(&overlay.response);
+        policy
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VhostHeaderPolicyConfig {
+    #[serde(default)]
+    pub request: RequestHeaderPolicyOverlayConfig,
+    #[serde(default)]
+    pub response: ResponseHeaderPolicyOverlayConfig,
+}
+
+impl VhostHeaderPolicyConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.request.validate()?;
+        self.response.validate()
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestHeaderPolicyOverlayConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub strip_inbound_client_ip_headers: Option<bool>,
+    #[serde(default)]
+    pub x_forwarded_for: Option<ForwardedClientIpHeaderMode>,
+    #[serde(default)]
+    pub x_forwarded_host: Option<bool>,
+    #[serde(default)]
+    pub x_forwarded_proto: Option<bool>,
+    #[serde(default)]
+    pub forwarded: Option<bool>,
+    #[serde(default)]
+    pub unset: Vec<String>,
+    #[serde(default)]
+    pub set: BTreeMap<String, String>,
+    #[serde(default)]
+    pub append: BTreeMap<String, HeaderValues>,
+}
+
+impl RequestHeaderPolicyOverlayConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        validate_header_mutations(
+            "vhosts.headers.request",
+            &self.unset,
+            &self.set,
+            &self.append,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequestHeaderPolicyConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub strip_inbound_client_ip_headers: bool,
+    #[serde(default)]
+    pub x_forwarded_for: ForwardedClientIpHeaderMode,
+    #[serde(default = "default_true")]
+    pub x_forwarded_host: bool,
+    #[serde(default = "default_true")]
+    pub x_forwarded_proto: bool,
+    #[serde(default)]
+    pub forwarded: bool,
+    #[serde(default)]
+    pub unset: Vec<String>,
+    #[serde(default)]
+    pub set: BTreeMap<String, String>,
+    #[serde(default)]
+    pub append: BTreeMap<String, HeaderValues>,
+}
+
+impl Default for RequestHeaderPolicyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            strip_inbound_client_ip_headers: true,
+            #[cfg(not(feature = "privacy-mode"))]
+            x_forwarded_for: ForwardedClientIpHeaderMode::Replace,
+            #[cfg(feature = "privacy-mode")]
+            x_forwarded_for: ForwardedClientIpHeaderMode::Off,
+            x_forwarded_host: true,
+            x_forwarded_proto: true,
+            forwarded: false,
+            unset: Vec::new(),
+            set: BTreeMap::new(),
+            append: BTreeMap::new(),
+        }
+    }
+}
+
+impl RequestHeaderPolicyConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        validate_header_mutations("headers.request", &self.unset, &self.set, &self.append)?;
+        Ok(())
+    }
+
+    fn apply_overlay(&mut self, overlay: &RequestHeaderPolicyOverlayConfig) {
+        if let Some(enabled) = overlay.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(strip) = overlay.strip_inbound_client_ip_headers {
+            self.strip_inbound_client_ip_headers = strip;
+        }
+        if let Some(mode) = overlay.x_forwarded_for {
+            self.x_forwarded_for = mode;
+        }
+        if let Some(enabled) = overlay.x_forwarded_host {
+            self.x_forwarded_host = enabled;
+        }
+        if let Some(enabled) = overlay.x_forwarded_proto {
+            self.x_forwarded_proto = enabled;
+        }
+        if let Some(enabled) = overlay.forwarded {
+            self.forwarded = enabled;
+        }
+        merge_header_mutations(
+            &mut self.unset,
+            &mut self.set,
+            &mut self.append,
+            &overlay.unset,
+            &overlay.set,
+            &overlay.append,
+        );
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ForwardedClientIpHeaderMode {
+    Off,
+    #[default]
+    Replace,
+    Append,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseHeaderPolicyConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub strict_transport_security: Option<String>,
+    #[serde(default)]
+    pub content_security_policy: Option<String>,
+    #[serde(default = "default_x_content_type_options")]
+    pub x_content_type_options: Option<String>,
+    #[serde(default = "default_x_frame_options")]
+    pub x_frame_options: Option<String>,
+    #[serde(default = "default_referrer_policy")]
+    pub referrer_policy: Option<String>,
+    #[serde(default)]
+    pub unset: Vec<String>,
+    #[serde(default)]
+    pub set: BTreeMap<String, String>,
+    #[serde(default)]
+    pub append: BTreeMap<String, HeaderValues>,
+}
+
+impl Default for ResponseHeaderPolicyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            strict_transport_security: None,
+            content_security_policy: None,
+            x_content_type_options: default_x_content_type_options(),
+            x_frame_options: default_x_frame_options(),
+            referrer_policy: default_referrer_policy(),
+            unset: Vec::new(),
+            set: BTreeMap::new(),
+            append: BTreeMap::new(),
+        }
+    }
+}
+
+impl ResponseHeaderPolicyConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        validate_optional_header_value(
+            "headers.response.strict_transport_security",
+            self.strict_transport_security.as_deref(),
+        )?;
+        validate_optional_header_value(
+            "headers.response.content_security_policy",
+            self.content_security_policy.as_deref(),
+        )?;
+        validate_optional_header_value(
+            "headers.response.x_content_type_options",
+            self.x_content_type_options.as_deref(),
+        )?;
+        validate_optional_header_value(
+            "headers.response.x_frame_options",
+            self.x_frame_options.as_deref(),
+        )?;
+        validate_optional_header_value(
+            "headers.response.referrer_policy",
+            self.referrer_policy.as_deref(),
+        )?;
+        validate_header_mutations("headers.response", &self.unset, &self.set, &self.append)?;
+
+        Ok(())
+    }
+
+    fn apply_overlay(&mut self, overlay: &ResponseHeaderPolicyOverlayConfig) {
+        if let Some(enabled) = overlay.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(value) = &overlay.strict_transport_security {
+            self.strict_transport_security = value.clone();
+        }
+        if let Some(value) = &overlay.content_security_policy {
+            self.content_security_policy = value.clone();
+        }
+        if let Some(value) = &overlay.x_content_type_options {
+            self.x_content_type_options = value.clone();
+        }
+        if let Some(value) = &overlay.x_frame_options {
+            self.x_frame_options = value.clone();
+        }
+        if let Some(value) = &overlay.referrer_policy {
+            self.referrer_policy = value.clone();
+        }
+        merge_header_mutations(
+            &mut self.unset,
+            &mut self.set,
+            &mut self.append,
+            &overlay.unset,
+            &overlay.set,
+            &overlay.append,
+        );
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseHeaderPolicyOverlayConfig {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub strict_transport_security: Option<Option<String>>,
+    #[serde(default)]
+    pub content_security_policy: Option<Option<String>>,
+    #[serde(default)]
+    pub x_content_type_options: Option<Option<String>>,
+    #[serde(default)]
+    pub x_frame_options: Option<Option<String>>,
+    #[serde(default)]
+    pub referrer_policy: Option<Option<String>>,
+    #[serde(default)]
+    pub unset: Vec<String>,
+    #[serde(default)]
+    pub set: BTreeMap<String, String>,
+    #[serde(default)]
+    pub append: BTreeMap<String, HeaderValues>,
+}
+
+impl ResponseHeaderPolicyOverlayConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        validate_optional_header_value(
+            "vhosts.headers.response.strict_transport_security",
+            self.strict_transport_security
+                .as_ref()
+                .and_then(Option::as_deref),
+        )?;
+        validate_optional_header_value(
+            "vhosts.headers.response.content_security_policy",
+            self.content_security_policy
+                .as_ref()
+                .and_then(Option::as_deref),
+        )?;
+        validate_optional_header_value(
+            "vhosts.headers.response.x_content_type_options",
+            self.x_content_type_options
+                .as_ref()
+                .and_then(Option::as_deref),
+        )?;
+        validate_optional_header_value(
+            "vhosts.headers.response.x_frame_options",
+            self.x_frame_options.as_ref().and_then(Option::as_deref),
+        )?;
+        validate_optional_header_value(
+            "vhosts.headers.response.referrer_policy",
+            self.referrer_policy.as_ref().and_then(Option::as_deref),
+        )?;
+        validate_header_mutations(
+            "vhosts.headers.response",
+            &self.unset,
+            &self.set,
+            &self.append,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum HeaderValues {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl HeaderValues {
+    pub fn iter(&self) -> Box<dyn Iterator<Item = &str> + '_> {
+        match self {
+            Self::One(value) => Box::new(std::iter::once(value.as_str())),
+            Self::Many(values) => Box::new(values.iter().map(String::as_str)),
+        }
+    }
+
+    fn extend(&mut self, extra: &Self) {
+        let mut values = self.iter().map(str::to_owned).collect::<Vec<_>>();
+        values.extend(extra.iter().map(str::to_owned));
+        *self = Self::Many(values);
     }
 }
 
@@ -702,6 +1189,8 @@ impl StaticCertificateConfig {
         if self.key_path.as_os_str().is_empty() {
             return Err(ConfigError::EmptyTlsKeyPath { scope });
         }
+        validate_path(format!("{scope}.cert_path"), Some(&self.cert_path))?;
+        validate_path(format!("{scope}.key_path"), Some(&self.key_path))?;
 
         Ok(())
     }
@@ -760,6 +1249,7 @@ impl AcmeConfig {
             if storage.as_os_str().is_empty() {
                 return Err(ConfigError::EmptyAcmeStorage);
             }
+            validate_path("tls.acme.storage", Some(storage))?;
             if self.contact_email.as_deref().is_none_or(invalid_email) {
                 return Err(ConfigError::InvalidAcmeContactEmail);
             }
@@ -1113,6 +1603,8 @@ pub struct VhostConfig {
     #[serde(default)]
     pub cache: CacheConfig,
     #[serde(default)]
+    pub headers: VhostHeaderPolicyConfig,
+    #[serde(default)]
     pub web: WebConfig,
 }
 
@@ -1143,6 +1635,7 @@ impl VhostConfig {
 
         self.proxy.validate()?;
         self.cache.validate("vhosts.cache")?;
+        self.headers.validate()?;
         self.web.validate()?;
 
         for host in &self.hosts {
@@ -1428,6 +1921,7 @@ impl CacheDiskConfig {
         if path.as_os_str().is_empty() {
             return Err(ConfigError::EmptyCacheDiskPath { scope });
         }
+        validate_path(format!("{scope}.disk.path"), Some(path))?;
 
         if self.max_size_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidCacheTierMaxSize {
@@ -1485,6 +1979,7 @@ impl WebConfig {
         {
             return Err(ConfigError::EmptyWebRoot);
         }
+        validate_path("web.root", self.root.as_deref())?;
 
         if self.index_files.is_empty() {
             return Err(ConfigError::EmptyIndexFiles);
@@ -1509,6 +2004,7 @@ impl WebConfig {
 
 #[derive(Debug)]
 pub enum ConfigLoadError {
+    InvalidPath { path: PathBuf },
     Read(std::io::Error),
     Parse(toml::de::Error),
     Validate(ConfigError),
@@ -1517,6 +2013,13 @@ pub enum ConfigLoadError {
 impl Display for ConfigLoadError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidPath { path } => {
+                write!(
+                    formatter,
+                    "config path must be a readable .toml file or directory, got {}",
+                    path.display()
+                )
+            }
             Self::Read(error) => write!(formatter, "failed to read config: {error}"),
             Self::Parse(error) => write!(formatter, "failed to parse config: {error}"),
             Self::Validate(error) => write!(formatter, "invalid config: {error}"),
@@ -1527,6 +2030,7 @@ impl Display for ConfigLoadError {
 impl Error for ConfigLoadError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::InvalidPath { .. } => None,
             Self::Read(error) => Some(error),
             Self::Parse(error) => Some(error),
             Self::Validate(error) => Some(error),
@@ -1543,6 +2047,9 @@ pub enum ConfigError {
     EmptyDefaultVhost,
     UnknownDefaultVhost {
         name: String,
+    },
+    InvalidTrustedProxy {
+        value: String,
     },
     InvalidLimit {
         field: &'static str,
@@ -1562,6 +2069,10 @@ pub enum ConfigError {
     EmptyAdminPath {
         field: &'static str,
     },
+    UnsafePath {
+        field: String,
+        path: PathBuf,
+    },
     InvalidAdminSelfHealing {
         field: &'static str,
     },
@@ -1573,6 +2084,18 @@ pub enum ConfigError {
     },
     MetricsListenNotLoopback {
         address: String,
+    },
+    PrivacyModeAccessLogging,
+    InvalidHeaderName {
+        field: &'static str,
+        name: String,
+    },
+    InvalidHeaderValue {
+        field: &'static str,
+        name: String,
+    },
+    InvalidResponseHeaderValue {
+        field: &'static str,
     },
     EmptyTlsCertificatePath {
         scope: &'static str,
@@ -1702,6 +2225,10 @@ impl Display for ConfigError {
                     "server.default_vhost references unknown vhost {name:?}"
                 )
             }
+            Self::InvalidTrustedProxy { value } => write!(
+                formatter,
+                "server.trusted_proxies entries must be IP addresses or CIDR ranges, got {value:?}"
+            ),
             Self::InvalidLimit { field } => write!(formatter, "{field} must be greater than zero"),
             Self::InvalidAdminListenAddress { address } => write!(
                 formatter,
@@ -1727,12 +2254,17 @@ impl Display for ConfigError {
                 write!(formatter, "{field} cannot be empty")
             }
             Self::EmptyAdminPath { field } => write!(formatter, "{field} cannot be empty"),
+            Self::UnsafePath { field, path } => write!(
+                formatter,
+                "{field} must not contain parent-directory traversal, got {}",
+                path.display()
+            ),
             Self::InvalidAdminSelfHealing { field } => {
                 write!(formatter, "{field} must be within the allowed range")
             }
             Self::InvalidAdminHealthPath { path } => write!(
                 formatter,
-                "admin.self_healing.health_path must be an absolute path without spaces, got {path:?}"
+                "admin.self_healing.health_path must be an absolute path no longer than {MAX_ADMIN_HEALTH_PATH_BYTES} bytes, without whitespace, controls, backslashes, query, or fragment markers, and must not shadow protected /_fluxheim/ admin endpoints, got {path:?}"
             ),
             Self::InvalidMetricsListenAddress { address } => write!(
                 formatter,
@@ -1741,6 +2273,24 @@ impl Display for ConfigError {
             Self::MetricsListenNotLoopback { address } => write!(
                 formatter,
                 "metrics.listen must be loopback when metrics.require_loopback = true, got {address:?}"
+            ),
+            Self::PrivacyModeAccessLogging => write!(
+                formatter,
+                "privacy-mode builds do not allow logging.access.enabled = true"
+            ),
+            Self::InvalidHeaderName { field, name } => {
+                write!(
+                    formatter,
+                    "{field} contains invalid HTTP header name {name:?}"
+                )
+            }
+            Self::InvalidHeaderValue { field, name } => write!(
+                formatter,
+                "{field}.{name} must be a non-empty HTTP header value without control characters"
+            ),
+            Self::InvalidResponseHeaderValue { field } => write!(
+                formatter,
+                "{field} must be a non-empty HTTP response header value without control characters"
             ),
             Self::EmptyTlsCertificatePath { scope } => {
                 write!(formatter, "{scope}.cert_path cannot be empty")
@@ -1909,7 +2459,7 @@ fn default_admin_validation_window_secs() -> u64 {
 }
 
 fn default_admin_health_path() -> String {
-    "/_fluxheim/health".to_owned()
+    DEFAULT_ADMIN_HEALTH_PATH.to_owned()
 }
 
 fn default_admin_min_successful_checks() -> usize {
@@ -1926,6 +2476,14 @@ fn default_metrics_listen() -> String {
 
 fn default_metrics_require_loopback() -> bool {
     true
+}
+
+fn default_access_logging_enabled() -> bool {
+    !cfg!(feature = "privacy-mode")
+}
+
+fn default_request_id_header() -> String {
+    "x-request-id".to_owned()
 }
 
 fn default_max_request_header_bytes() -> ByteSize {
@@ -2040,6 +2598,39 @@ fn default_true() -> bool {
     true
 }
 
+fn default_x_content_type_options() -> Option<String> {
+    Some("nosniff".to_owned())
+}
+
+fn default_x_frame_options() -> Option<String> {
+    Some("DENY".to_owned())
+}
+
+fn default_referrer_policy() -> Option<String> {
+    Some("no-referrer".to_owned())
+}
+
+fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
+    let metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
+    if metadata.file_type().is_symlink() {
+        return Err(ConfigLoadError::InvalidPath {
+            path: path.to_path_buf(),
+        });
+    }
+    if existing_path_contains_symlink(path).map_err(ConfigLoadError::Read)? {
+        return Err(ConfigLoadError::InvalidPath {
+            path: path.to_path_buf(),
+        });
+    }
+
+    let path = path.canonicalize().map_err(ConfigLoadError::Read)?;
+    if path.is_dir() || regular_visible_toml_file(&path)? {
+        return Ok(path);
+    }
+
+    Err(ConfigLoadError::InvalidPath { path })
+}
+
 fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
     let entries = fs::read_dir(dir).map_err(ConfigLoadError::Read)?;
     let mut files = Vec::new();
@@ -2047,12 +2638,98 @@ fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
     for entry in entries {
         let entry = entry.map_err(ConfigLoadError::Read)?;
         let path = entry.path();
-        if path.is_file() && is_visible_toml_file(&path) {
+        let metadata = fs::symlink_metadata(&path).map_err(ConfigLoadError::Read)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            continue;
+        }
+        if is_visible_toml_file(&path) {
             files.push(path);
+            if files.len() > MAX_CONFIG_DIRECTORY_FILES {
+                return Err(ConfigLoadError::Read(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "config directory {} contains more than {} TOML files",
+                        dir.display(),
+                        MAX_CONFIG_DIRECTORY_FILES
+                    ),
+                )));
+            }
         }
     }
 
     Ok(files)
+}
+
+fn regular_visible_toml_file(path: &Path) -> Result<bool, ConfigLoadError> {
+    if !is_visible_toml_file(path) {
+        return Ok(false);
+    }
+    let metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
+    Ok(!metadata.file_type().is_symlink() && metadata.is_file())
+}
+
+fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigLoadError> {
+    let metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(ConfigLoadError::InvalidPath {
+            path: path.to_path_buf(),
+        });
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NOFOLLOW);
+
+    let file = options.open(path).map_err(ConfigLoadError::Read)?;
+    let metadata = file.metadata().map_err(ConfigLoadError::Read)?;
+    if !metadata.is_file() {
+        return Err(ConfigLoadError::InvalidPath {
+            path: path.to_path_buf(),
+        });
+    }
+    if metadata.len() > MAX_CONFIG_FILE_BYTES {
+        return Err(ConfigLoadError::Read(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "config file {} exceeds {} bytes",
+                path.display(),
+                MAX_CONFIG_FILE_BYTES
+            ),
+        )));
+    }
+
+    let mut contents = String::new();
+    let mut limited = file.take(MAX_CONFIG_FILE_BYTES.saturating_add(1));
+    limited
+        .read_to_string(&mut contents)
+        .map_err(ConfigLoadError::Read)?;
+    if contents.len() as u64 > MAX_CONFIG_FILE_BYTES {
+        return Err(ConfigLoadError::Read(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "config file {} changed while reading and exceeded {} bytes",
+                path.display(),
+                MAX_CONFIG_FILE_BYTES
+            ),
+        )));
+    }
+    Ok(contents)
+}
+
+fn existing_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
 }
 
 fn is_visible_toml_file(path: &Path) -> bool {
@@ -2069,6 +2746,27 @@ fn is_visible_toml_file(path: &Path) -> bool {
 
 fn valid_authority(authority: &str) -> bool {
     authority.parse::<SocketAddr>().is_ok() || split_host_port(authority).is_some()
+}
+
+fn valid_trusted_proxy(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+
+    let Some((address, prefix)) = value.split_once('/') else {
+        return value.parse::<IpAddr>().is_ok();
+    };
+    let Ok(address) = address.parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    match address {
+        IpAddr::V4(_) => prefix <= 32,
+        IpAddr::V6(_) => prefix <= 128,
+    }
 }
 
 fn valid_http_token(value: &str) -> bool {
@@ -2131,6 +2829,10 @@ fn validate_secret_source(
 ) -> Result<(), ConfigError> {
     let env = env.map(str::trim).filter(|value| !value.is_empty());
     let file = file.filter(|path| !path.as_os_str().is_empty());
+    validate_path(
+        format!("tls.acme.issuers.{issuer}.eab.{field}_file"),
+        file.map(PathBuf::as_path),
+    )?;
 
     match (env, file) {
         (Some(_), None) | (None, Some(_)) => Ok(()),
@@ -2157,6 +2859,171 @@ fn validate_optional_path(field: &'static str, path: Option<&Path>) -> Result<()
         return Err(ConfigError::EmptyAdminPath { field });
     }
     Ok(())
+}
+
+fn validate_path(field: impl Into<String>, path: Option<&Path>) -> Result<(), ConfigError> {
+    let field = field.into();
+    let Some(path) = path else {
+        return Ok(());
+    };
+
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ConfigError::UnsafePath {
+            field,
+            path: path.to_path_buf(),
+        });
+    }
+
+    if path_existing_prefix_contains_symlink(path).unwrap_or(true) {
+        return Err(ConfigError::UnsafePath {
+            field,
+            path: path.to_path_buf(),
+        });
+    }
+
+    Ok(())
+}
+
+fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
+    let mut current = PathBuf::new();
+
+    for component in path.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
+fn validate_optional_header_value(
+    field: &'static str,
+    value: Option<&str>,
+) -> Result<(), ConfigError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+
+    if value.trim().is_empty()
+        || value.as_bytes().iter().any(|byte| {
+            matches!(
+                byte,
+                0x00..=0x08 | 0x0a..=0x1f | 0x7f
+            )
+        })
+    {
+        return Err(ConfigError::InvalidResponseHeaderValue { field });
+    }
+
+    Ok(())
+}
+
+fn validate_header_mutations(
+    field: &'static str,
+    unset: &[String],
+    set: &BTreeMap<String, String>,
+    append: &BTreeMap<String, HeaderValues>,
+) -> Result<(), ConfigError> {
+    for name in unset {
+        validate_header_name(field, name)?;
+    }
+    for (name, value) in set {
+        validate_header_name(field, name)?;
+        validate_header_mutation_value(field, name, value)?;
+    }
+    for (name, values) in append {
+        validate_header_name(field, name)?;
+        for value in values.iter() {
+            validate_header_mutation_value(field, name, value)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn merge_header_mutations(
+    unset: &mut Vec<String>,
+    set: &mut BTreeMap<String, String>,
+    append: &mut BTreeMap<String, HeaderValues>,
+    overlay_unset: &[String],
+    overlay_set: &BTreeMap<String, String>,
+    overlay_append: &BTreeMap<String, HeaderValues>,
+) {
+    unset.extend(overlay_unset.iter().cloned());
+    for (name, value) in overlay_set {
+        set.insert(name.clone(), value.clone());
+    }
+    for (name, values) in overlay_append {
+        append
+            .entry(name.clone())
+            .and_modify(|existing| existing.extend(values))
+            .or_insert_with(|| values.clone());
+    }
+}
+
+fn validate_header_name(field: &'static str, name: &str) -> Result<(), ConfigError> {
+    let normalized = name.trim();
+    if normalized != name || !valid_http_header_name(name) {
+        return Err(ConfigError::InvalidHeaderName {
+            field,
+            name: name.to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_header_mutation_value(
+    field: &'static str,
+    name: &str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    if value.trim().is_empty()
+        || value
+            .as_bytes()
+            .iter()
+            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
+    {
+        return Err(ConfigError::InvalidHeaderValue {
+            field,
+            name: name.to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+fn valid_http_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+                    | b'0'..=b'9'
+                    | b'A'..=b'Z'
+                    | b'a'..=b'z'
+            )
+        })
 }
 
 pub fn normalize_host(host: &str) -> Option<String> {
@@ -2249,13 +3116,61 @@ mod tests {
 
     use super::{
         AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, Config, ConfigError,
-        MetricsConfig, ProxyConfig, ServerConfig, ServerLimitsConfig, VhostConfig, WebConfig,
+        ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig,
+        ServerConfig, ServerLimitsConfig, VhostConfig, VhostHeaderPolicyConfig, WebConfig,
         normalize_host, normalize_host_pattern,
     };
 
     #[test]
     fn default_config_is_valid() {
         Config::default().validate().unwrap();
+        assert_eq!(Config::default().logging.level, super::LoggingLevel::Info);
+        assert_eq!(Config::default().logging.format, super::LoggingFormat::Json);
+        assert!(Config::default().headers.request.enabled);
+        assert!(
+            Config::default()
+                .headers
+                .request
+                .strip_inbound_client_ip_headers
+        );
+        #[cfg(not(feature = "privacy-mode"))]
+        assert_eq!(
+            Config::default().headers.request.x_forwarded_for,
+            super::ForwardedClientIpHeaderMode::Replace
+        );
+        #[cfg(feature = "privacy-mode")]
+        assert_eq!(
+            Config::default().headers.request.x_forwarded_for,
+            super::ForwardedClientIpHeaderMode::Off
+        );
+        assert_eq!(
+            Config::default()
+                .headers
+                .response
+                .x_content_type_options
+                .as_deref(),
+            Some("nosniff")
+        );
+        assert_eq!(
+            Config::default()
+                .headers
+                .response
+                .x_frame_options
+                .as_deref(),
+            Some("DENY")
+        );
+        assert_eq!(
+            Config::default()
+                .headers
+                .response
+                .referrer_policy
+                .as_deref(),
+            Some("no-referrer")
+        );
+        #[cfg(not(feature = "privacy-mode"))]
+        assert!(Config::default().logging.access.enabled);
+        #[cfg(feature = "privacy-mode")]
+        assert!(!Config::default().logging.access.enabled);
     }
 
     #[test]
@@ -2322,6 +3237,234 @@ mod tests {
     }
 
     #[test]
+    fn parses_request_header_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.request]
+            enabled = true
+            strip_inbound_client_ip_headers = true
+            x_forwarded_for = "append"
+            x_forwarded_host = false
+            x_forwarded_proto = true
+            forwarded = true
+            unset = ["x-powered-by"]
+
+            [headers.request.set]
+            host = "backend.internal"
+            x-proxy-by = "Fluxheim"
+
+            [headers.request.append]
+            via = "fluxheim"
+            "#,
+        )
+        .unwrap();
+
+        let policy = &config.headers.request;
+        assert!(policy.enabled);
+        assert!(policy.strip_inbound_client_ip_headers);
+        assert_eq!(
+            policy.x_forwarded_for,
+            super::ForwardedClientIpHeaderMode::Append
+        );
+        assert!(!policy.x_forwarded_host);
+        assert!(policy.x_forwarded_proto);
+        assert!(policy.forwarded);
+        assert_eq!(policy.unset, ["x-powered-by"]);
+        assert_eq!(
+            policy.set.get("host").map(String::as_str),
+            Some("backend.internal")
+        );
+        assert_eq!(
+            policy.set.get("x-proxy-by").map(String::as_str),
+            Some("Fluxheim")
+        );
+        assert_eq!(
+            policy
+                .append
+                .get("via")
+                .and_then(|values| values.iter().next()),
+            Some("fluxheim")
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_response_header_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.response]
+            enabled = true
+            strict_transport_security = "max-age=31536000; includeSubDomains"
+            content_security_policy = "default-src 'self'"
+            x_content_type_options = "nosniff"
+            x_frame_options = "SAMEORIGIN"
+            referrer_policy = "strict-origin-when-cross-origin"
+            unset = ["server", "x-powered-by"]
+
+            [headers.response.set]
+            cache-control = "public, max-age=60"
+            access-control-allow-origin = "https://example.test"
+
+            [headers.response.append]
+            vary = ["Accept-Encoding", "Origin"]
+            set-cookie = "fluxheim=1; HttpOnly; Secure; SameSite=Lax"
+            "#,
+        )
+        .unwrap();
+
+        let policy = &config.headers.response;
+        assert!(policy.enabled);
+        assert_eq!(
+            policy.strict_transport_security.as_deref(),
+            Some("max-age=31536000; includeSubDomains")
+        );
+        assert_eq!(
+            policy.content_security_policy.as_deref(),
+            Some("default-src 'self'")
+        );
+        assert_eq!(policy.x_frame_options.as_deref(), Some("SAMEORIGIN"));
+        assert_eq!(
+            policy.referrer_policy.as_deref(),
+            Some("strict-origin-when-cross-origin")
+        );
+        assert_eq!(policy.unset, ["server", "x-powered-by"]);
+        assert_eq!(
+            policy.set.get("cache-control").map(String::as_str),
+            Some("public, max-age=60")
+        );
+        assert_eq!(
+            policy
+                .append
+                .get("vary")
+                .map(|values| values.iter().collect::<Vec<_>>()),
+            Some(vec!["Accept-Encoding", "Origin"])
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_vhost_header_policy_overlay() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "api"
+            hosts = ["api.example.test"]
+
+            [vhosts.headers.request]
+            x_forwarded_for = "off"
+            unset = ["x-powered-by"]
+
+            [vhosts.headers.request.set]
+            host = "api.internal"
+
+            [vhosts.headers.response]
+            x_frame_options = "SAMEORIGIN"
+            unset = ["server"]
+
+            [vhosts.headers.response.set]
+            access-control-allow-origin = "https://app.example.test"
+
+            [vhosts.headers.response.append]
+            vary = "Origin"
+            "#,
+        )
+        .unwrap();
+
+        let headers = &config.vhosts[0].headers;
+        assert_eq!(
+            headers.request.x_forwarded_for,
+            Some(super::ForwardedClientIpHeaderMode::Off)
+        );
+        assert_eq!(headers.request.unset, ["x-powered-by"]);
+        assert_eq!(
+            headers.request.set.get("host").map(String::as_str),
+            Some("api.internal")
+        );
+        assert_eq!(
+            headers
+                .response
+                .x_frame_options
+                .as_ref()
+                .and_then(Option::as_deref),
+            Some("SAMEORIGIN")
+        );
+        assert_eq!(headers.response.unset, ["server"]);
+        assert_eq!(
+            headers
+                .response
+                .set
+                .get("access-control-allow-origin")
+                .map(String::as_str),
+            Some("https://app.example.test")
+        );
+        assert_eq!(
+            headers
+                .response
+                .append
+                .get("vary")
+                .and_then(|values| values.iter().next()),
+            Some("Origin")
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_response_header_value() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.response]
+            x_frame_options = "DENY\nx-bad: injected"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidResponseHeaderValue {
+                field: "headers.response.x_frame_options"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_generic_header_name() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.response.set]
+            "bad header" = "value"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderName {
+                field: "headers.response",
+                name: "bad header".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_generic_header_value() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.request.set]
+            x-test = "ok\nx-bad: injected"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderValue {
+                field: "headers.request",
+                name: "x-test".to_owned()
+            })
+        );
+    }
+
+    #[test]
     fn rejects_invalid_load_balance_max_iterations() {
         let config: Config = toml::from_str(
             r#"
@@ -2359,6 +3502,9 @@ mod tests {
     fn parses_server_limits() {
         let config: Config = toml::from_str(
             r#"
+            [server]
+            trusted_proxies = ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
+
             [server.limits]
             max_request_header_bytes = "32KiB"
             max_uri_bytes = 4096
@@ -2381,7 +3527,29 @@ mod tests {
             config.server.limits.max_request_body_bytes,
             ByteSize::from_bytes(2 * 1024 * 1024)
         );
+        assert_eq!(
+            config.server.trusted_proxies,
+            ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
+        );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_trusted_proxy_range() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            trusted_proxies = ["10.0.0.0/99"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTrustedProxy {
+                value: "10.0.0.0/99".to_owned()
+            })
+        );
     }
 
     #[test]
@@ -2756,10 +3924,13 @@ mod tests {
                 listen: vec![],
                 tls_listen: Vec::new(),
                 default_vhost: None,
+                trusted_proxies: Vec::new(),
                 limits: ServerLimitsConfig::default(),
             },
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            logging: LoggingConfig::default(),
+            headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
@@ -2831,6 +4002,66 @@ mod tests {
         config.validate().unwrap();
         assert!(config.metrics.enabled);
         assert_eq!(config.metrics.listen, "127.0.0.1:9091");
+    }
+
+    #[test]
+    fn parses_access_logging_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging]
+            level = "debug"
+            format = "text"
+
+            [logging.access]
+            enabled = false
+            request_id = false
+            request_id_header = "x-correlation-id"
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(config.logging.level, super::LoggingLevel::Debug);
+        assert_eq!(config.logging.format, super::LoggingFormat::Text);
+        assert!(!config.logging.access.enabled);
+        assert!(!config.logging.access.request_id);
+        assert_eq!(config.logging.access.request_id_header, "x-correlation-id");
+    }
+
+    #[test]
+    fn rejects_invalid_access_log_request_id_header() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.access]
+            request_id_header = "bad header"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderName {
+                field: "logging.access.request_id_header",
+                name: "bad header".to_owned(),
+            })
+        );
+    }
+
+    #[cfg(feature = "privacy-mode")]
+    #[test]
+    fn privacy_mode_rejects_access_logging() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.access]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::PrivacyModeAccessLogging)
+        );
     }
 
     #[test]
@@ -2926,6 +4157,37 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unsafe_admin_health_paths() {
+        for health_path in [
+            "relative/path".to_owned(),
+            "/_fluxheim/health query".to_owned(),
+            "/_fluxheim/health\tbad".to_owned(),
+            "/_fluxheim\\health".to_owned(),
+            "/_fluxheim/health?ready=1".to_owned(),
+            "/_fluxheim/health#ready".to_owned(),
+            "/_fluxheim/status".to_owned(),
+            "/_fluxheim/reload".to_owned(),
+            "/".to_owned() + &"a".repeat(super::MAX_ADMIN_HEALTH_PATH_BYTES),
+        ] {
+            let config = Config {
+                admin: AdminConfig {
+                    self_healing: AdminSelfHealingConfig {
+                        health_path,
+                        ..AdminSelfHealingConfig::default()
+                    },
+                    ..AdminConfig::default()
+                },
+                ..Config::default()
+            };
+
+            assert!(matches!(
+                config.validate(),
+                Err(ConfigError::InvalidAdminHealthPath { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn rejects_tls_listener_without_tls_enabled() {
         let config = Config {
             server: ServerConfig {
@@ -2985,6 +4247,8 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            logging: LoggingConfig::default(),
+            headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig {
                 upstream: "https://origin.example.test".to_owned(),
@@ -3011,6 +4275,8 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            logging: LoggingConfig::default(),
+            headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
@@ -3031,6 +4297,8 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            logging: LoggingConfig::default(),
+            headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
@@ -3108,6 +4376,8 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            logging: LoggingConfig::default(),
+            headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
@@ -3119,6 +4389,7 @@ mod tests {
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
                 },
                 VhostConfig {
@@ -3127,6 +4398,7 @@ mod tests {
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
                 },
             ],
@@ -3147,6 +4419,7 @@ mod tests {
                 listen: vec!["127.0.0.1:8080".to_owned()],
                 tls_listen: Vec::new(),
                 default_vhost: Some("missing".to_owned()),
+                trusted_proxies: Vec::new(),
                 limits: ServerLimitsConfig::default(),
             },
             vhosts: vec![VhostConfig {
@@ -3155,6 +4428,7 @@ mod tests {
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                headers: VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -3177,6 +4451,7 @@ mod tests {
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                headers: VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -3223,6 +4498,20 @@ mod tests {
         assert_eq!(config.server.default_vhost, Some("example".to_owned()));
         assert_eq!(config.vhosts.len(), 1);
         assert_eq!(config.vhosts[0].web.root, Some(dir.path().join("site")));
+    }
+
+    #[test]
+    fn rejects_config_directory_with_too_many_toml_files() {
+        let dir = TestDir::new("config-dir-too-many-files");
+        for index in 0..=super::MAX_CONFIG_DIRECTORY_FILES {
+            fs::write(dir.path().join(format!("{index:03}.toml")), "[server]\n").unwrap();
+        }
+
+        let error = Config::load(Some(dir.path())).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigLoadError::Read(error) if error.kind() == std::io::ErrorKind::InvalidData)
+        );
     }
 
     #[test]
@@ -3279,6 +4568,181 @@ mod tests {
             config.vhosts[0].tls.certificate.as_ref().unwrap().key_path,
             dir.path().join("vhosts/example/key.pem")
         );
+    }
+
+    #[test]
+    fn rejects_config_relative_paths_with_parent_traversal() {
+        let dir = TestDir::new("unsafe-paths");
+        fs::write(
+            dir.path().join("fluxheim.toml"),
+            r#"
+            [web]
+            root = "../outside"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigLoadError::Validate(ConfigError::UnsafePath { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_runtime_path_below_symlinked_directory() {
+        let dir = TestDir::new("runtime-path-parent-symlink");
+        let real_dir = dir.path().join("real");
+        let symlink_dir = dir.path().join("linked");
+        fs::create_dir_all(real_dir.join("public")).unwrap();
+        std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
+        fs::write(
+            dir.path().join("fluxheim.toml"),
+            r#"
+            [web]
+            root = "linked/public"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigLoadError::Validate(ConfigError::UnsafePath { field, .. })
+                if field == "web.root"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_runtime_path() {
+        let dir = TestDir::new("runtime-path-symlink");
+        let real_root = dir.path().join("public-real");
+        let symlink_root = dir.path().join("public");
+        fs::create_dir(&real_root).unwrap();
+        std::os::unix::fs::symlink(&real_root, &symlink_root).unwrap();
+        fs::write(
+            dir.path().join("fluxheim.toml"),
+            r#"
+            [web]
+            root = "public"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigLoadError::Validate(ConfigError::UnsafePath { field, .. })
+                if field == "web.root"
+        ));
+    }
+
+    #[test]
+    fn rejects_non_toml_config_file() {
+        let dir = TestDir::new("non-toml-config");
+        let path = dir.path().join("fluxheim.txt");
+        fs::write(&path, "[server]\n").unwrap();
+
+        let error = Config::load(Some(&path)).unwrap_err();
+
+        assert!(matches!(error, ConfigLoadError::InvalidPath { .. }));
+    }
+
+    #[test]
+    fn rejects_oversized_config_file() {
+        let dir = TestDir::new("oversized-config");
+        let path = dir.path().join("fluxheim.toml");
+        fs::write(
+            &path,
+            vec![b'#'; (super::MAX_CONFIG_FILE_BYTES + 1) as usize],
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&path)).unwrap_err();
+
+        assert!(
+            matches!(error, ConfigLoadError::Read(error) if error.kind() == std::io::ErrorKind::InvalidData)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_config_file() {
+        let dir = TestDir::new("config-file-symlink");
+        let real_path = dir.path().join("real.toml");
+        let symlink_path = dir.path().join("fluxheim.toml");
+        fs::write(&real_path, "[server]\n").unwrap();
+        std::os::unix::fs::symlink(&real_path, &symlink_path).unwrap();
+
+        let error = Config::load(Some(&symlink_path)).unwrap_err();
+
+        assert!(matches!(error, ConfigLoadError::InvalidPath { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_config_directory_source() {
+        let dir = TestDir::new("config-dir-symlink");
+        let real_dir = dir.path().join("real");
+        let symlink_dir = dir.path().join("linked");
+        fs::create_dir(&real_dir).unwrap();
+        fs::write(real_dir.join("fluxheim.toml"), "[server]\n").unwrap();
+        std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
+
+        let error = Config::load(Some(&symlink_dir)).unwrap_err();
+
+        assert!(matches!(error, ConfigLoadError::InvalidPath { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_config_source_below_symlinked_directory() {
+        let dir = TestDir::new("config-dir-parent-symlink");
+        let real_dir = dir.path().join("real");
+        let symlink_dir = dir.path().join("linked");
+        fs::create_dir(&real_dir).unwrap();
+        fs::write(real_dir.join("fluxheim.toml"), "[server]\n").unwrap();
+        std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
+
+        let error = Config::load(Some(&symlink_dir.join("fluxheim.toml"))).unwrap_err();
+
+        assert!(matches!(error, ConfigLoadError::InvalidPath { .. }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignores_symlinked_config_directory_entries() {
+        let dir = TestDir::new("config-dir-entry-symlink");
+        let outside_dir = TestDir::new("config-dir-entry-symlink-outside");
+        let outside = outside_dir.path().join("outside.toml");
+        fs::write(
+            dir.path().join("00-server.toml"),
+            r#"
+            [server]
+            listen = ["127.0.0.1:19090"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &outside,
+            r#"
+            [[vhosts]]
+            name = "linked"
+            hosts = ["linked.example"]
+            "#,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside, dir.path().join("10-linked.toml")).unwrap();
+
+        let config = Config::load(Some(dir.path())).unwrap();
+
+        assert_eq!(config.server.listen, ["127.0.0.1:19090"]);
+        assert!(config.vhosts.is_empty());
     }
 
     struct TestDir {

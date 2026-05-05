@@ -2,6 +2,8 @@
 set -eu
 
 scripts/checks.sh
+sh scripts/smoke_static_local.sh
+sh scripts/smoke_load_balancer.sh
 
 if [ "${FLUXHEIM_RELEASE_PODMAN:-0}" = "1" ]; then
     scripts/podman_smoke.sh

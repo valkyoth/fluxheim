@@ -14,14 +14,15 @@ intentionally narrow:
 
 - static website hosting;
 - reverse proxying;
+- cache module baseline;
 - virtual hosts;
 - TLS with rustls as the default backend;
 - strict request limits and secure defaults;
 - local and rootless Podman operation.
 
-Features such as load balancing, cache, ACME automation, admin snapshots,
-metrics, WAF, Cloudflare origin support, PHP, CGI, and legacy protocols are
-planned as opt-in modules and are documented separately until they graduate.
+Features such as load balancing, ACME automation, admin snapshots, metrics,
+WAF, Cloudflare origin support, PHP, CGI, and legacy protocols are planned as
+opt-in modules and are documented separately until they graduate.
 
 ## Why Fluxheim
 
@@ -30,6 +31,8 @@ planned as opt-in modules and are documented separately until they graduate.
 - **Modular**: compile only the modules needed for a deployment.
 - **Secure by default**: strict config validation, request limits, license
   checks, and no hidden legacy protocol fallback.
+- **Static-site basics**: MIME detection, index files, `GET`/`HEAD`, `ETag`,
+  conditional `304`, and single-range static responses.
 - **Local friendly**: supports normal local binaries and rootless Podman.
 
 ## Quick Start
@@ -60,28 +63,96 @@ cargo run -- --config examples/fluxheim.toml
 
 ## Feature Builds
 
-Proxy-only:
+The default build is the recommended local/server baseline:
+
+```bash
+cargo build
+```
+
+It enables:
+
+- `proxy`
+- `web`
+- `cache`
+- `tls-rustls`
+- `security`
+
+Individual module features:
+
+| Feature | Default | Notes |
+| --- | --- | --- |
+| `proxy` | Yes | Pingora reverse proxy runtime and admin plumbing. |
+| `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
+| `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
+| `load-balancer` | No | Pingora load-balancing module and health checks. |
+| `metrics` | No | Prometheus metrics listener. |
+| `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
+| `privacy-mode` | No | Zero-retention static/proxy build profile. |
+| `security` | Yes | Security helpers and release hardening checks. |
+| `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
+
+Cargo does not provide a separate `--group` flag. Fluxheim uses normal Cargo
+feature aliases named `profile-*` for grouped builds.
+
+Recommended profile features:
+
+| Profile feature | Enables | Use case |
+| --- | --- | --- |
+| `profile-core` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Same intent as the default build. |
+| `profile-static-site` | `proxy`, `web`, `tls-rustls`, `security` | Static sites without Fluxheim cache. |
+| `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
+| `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
+| `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
+| `profile-observability` | `profile-core`, `metrics` | Core server with Prometheus metrics. |
+| `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
+
+Example grouped build:
+
+```bash
+cargo build --no-default-features --features profile-load-balancer
+```
+
+Manual feature selection also works:
+
+```bash
+cargo build --no-default-features --features proxy,web,tls-rustls,load-balancer
+```
+
+TLS backends are mutually exclusive. Select exactly one backend when TLS is
+needed:
+
+| TLS feature | Status |
+| --- | --- |
+| `tls-rustls` | Default and recommended. |
+| `tls-openssl` | Optional OpenSSL backend. |
+| `tls-boringssl` | Optional BoringSSL backend. |
+| `tls-s2n` | Optional s2n-tls backend. |
+
+Selecting more than one TLS backend is a compile error.
+Use `scripts/validate-features.sh` in packaging or custom CI jobs when accepting
+user-provided feature strings; Cargo features are additive, and Pingora itself
+does not support compiling multiple TLS backends together.
+
+Future optional modules such as `waf`, `cloudflare`, PHP, CGI, and legacy
+static HTTP are documented in the architecture docs but are not enabled in the
+default build.
+
+Because `cache` is part of the default build, privacy builds must use
+`--no-default-features` through `profile-privacy` or an explicit manual feature
+set. Combining `privacy-mode` with `cache` or `metrics` fails at compile time.
+
+Small manual builds:
 
 ```bash
 cargo build --no-default-features --features proxy
-```
-
-Static web server-only:
-
-```bash
-cargo build --no-default-features --features web
-```
-
-Proxy with load-balancer module:
-
-```bash
-cargo build --no-default-features --features proxy,load-balancer
-```
-
-Static web plus reverse proxy with rustls:
-
-```bash
 cargo build --no-default-features --features proxy,web,tls-rustls
+cargo build --no-default-features --features proxy,web,tls-rustls,privacy-mode
+```
+
+Validate a custom feature set before building:
+
+```bash
+scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 ```
 
 ## Example Config
@@ -90,6 +161,44 @@ cargo build --no-default-features --features proxy,web,tls-rustls
 [server]
 listen = ["127.0.0.1:8080"]
 default_vhost = "example"
+trusted_proxies = []
+
+[logging]
+level = "info"
+format = "json"
+
+[logging.access]
+enabled = true
+request_id = true
+request_id_header = "x-request-id"
+
+[headers.request]
+enabled = true
+strip_inbound_client_ip_headers = true
+x_forwarded_for = "replace"
+x_forwarded_host = true
+x_forwarded_proto = true
+forwarded = false
+unset = ["x-powered-by"]
+
+[headers.request.set]
+x-proxy-by = "Fluxheim"
+
+[headers.request.append]
+via = "fluxheim"
+
+[headers.response]
+enabled = true
+x_content_type_options = "nosniff"
+x_frame_options = "DENY"
+referrer_policy = "no-referrer"
+unset = ["server", "x-powered-by"]
+
+[headers.response.set]
+cache-control = "public, max-age=60"
+
+[headers.response.append]
+vary = ["Accept-Encoding"]
 
 [[vhosts]]
 name = "example"
@@ -103,22 +212,39 @@ deny_dotfiles = true
 [vhosts.proxy]
 upstream = "127.0.0.1:3000"
 upstream_tls = false
+
+[vhosts.headers.response.set]
+access-control-allow-origin = "https://example.test"
+
+[vhosts.headers.response.append]
+vary = ["Origin"]
 ```
 
 More examples live in [examples](examples).
+The `examples/privacy.toml` config is designed for
+`--no-default-features --features profile-privacy` and keeps Fluxheim access
+logging, request IDs, metrics, and cache disabled.
 
 ## Documentation
 
 - [Roadmap](ROADMAP.md)
+- [Changelog](CHANGELOG.md)
 - [Versioning Plan](docs/versioning-plan.md)
 - [Release Checklist](docs/release-checklist.md)
 - [Build And Rootless Podman](docs/build-and-podman.md)
+- [Feature Matrix](docs/features.md)
+- [Config Reference](docs/config-reference.md)
 - [GitHub Repository Setup](docs/github-setup.md)
 - [Cache Backends](docs/cache-backends.md)
+- [Image Filter](docs/image-filter.md)
+- [Programmable Media Edge](docs/programmable-media-edge.md)
 - [Certificate Renewal And Reload](docs/certificate-renewal.md)
 - [Config Snapshots And Rollback](docs/config-snapshots.md)
 - [Logging Architecture](docs/logging-architecture.md)
 - [Metrics Architecture](docs/metrics-architecture.md)
+- [OpenTelemetry Tracing](docs/opentelemetry-tracing.md)
+- [WASM Extensibility](docs/wasm-extensibility.md)
+- [External Authorization Request](docs/auth-request.md)
 - [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md)
 - [WAF Architecture](docs/waf-architecture.md)
 - [Cloudflare Origin Support](docs/cloudflare-origin-support.md)
@@ -135,11 +261,19 @@ Fluxheim will not treat every planned feature as part of `1.0`.
 - `1.1`: operational pack: logging, admin snapshots, rollback, metrics.
 - `1.2`: load balancer support.
 - `1.3`: cache pack.
-- `1.4`: certificate automation.
-- `1.5`: privacy and security profiles.
-- `1.6`: Cloudflare origin support.
-- `1.7`: advanced logging and metrics.
+- `1.4`: media transform pack.
+- `1.5`: certificate automation.
+- `1.6`: privacy and security profiles.
+- `1.7`: Cloudflare origin support.
+- `1.8`: advanced logging and metrics.
+- `1.9`: traffic mirroring for release-safety workflows.
+- `1.10`: external authorization and identity-aware routing.
+- `1.11`: cluster-native shared state.
+- `1.12`: AI gateway controls.
+- `1.13`: Sentinel Mesh graduation.
 - `2.0`: dynamic runtime boundary for PHP/CGI.
+- `2.1`: programmable media edge.
+- `2.2`: WASM extensibility.
 
 See [Versioning Plan](docs/versioning-plan.md) for the full release ladder.
 
@@ -149,6 +283,7 @@ Fluxheim uses:
 
 - pinned Rust stable toolchain;
 - checked-in `Cargo.lock`;
+- GitHub CI and CodeQL scanning;
 - `cargo deny` for license and dependency policy;
 - `cargo audit` for advisory checks;
 - rootless Podman smoke tests before container releases.

@@ -1,0 +1,102 @@
+# Feature Matrix
+
+Fluxheim uses Cargo features for compile-time module selection. The default
+binary is intentionally useful but conservative:
+
+```toml
+default = ["proxy", "web", "cache", "tls-rustls", "security"]
+```
+
+Use `scripts/validate-features.sh` before packaging custom feature strings:
+
+```bash
+scripts/validate-features.sh proxy,web,tls-rustls
+```
+
+The validator expands profile aliases and rejects unsupported combinations
+before Cargo starts compiling Pingora.
+
+## Stable Core Features
+
+| Feature | Default | Purpose |
+| --- | --- | --- |
+| `proxy` | Yes | Pingora proxy runtime and upstream forwarding. |
+| `web` | Yes | Static file resolver and static response planning. |
+| `cache` | Yes | Image cache module. Runtime caching still requires config. |
+| `tls-rustls` | Yes | rustls TLS backend. |
+| `security` | Yes | Security and release hardening helpers. |
+
+## Optional Implemented Features
+
+| Feature | Default | Purpose |
+| --- | --- | --- |
+| `load-balancer` | No | Pingora load-balancing support and health-check setup. |
+| `metrics` | No | Prometheus metrics listener. |
+| `acme` | No | ACME config and renewal planning. Runtime issuance remains future work. |
+| `privacy-mode` | No | Zero-retention static/proxy build profile. |
+| `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
+
+## TLS Backends
+
+Select at most one:
+
+| Feature | Status |
+| --- | --- |
+| `tls-rustls` | Default and recommended. |
+| `tls-openssl` | Optional OpenSSL backend. |
+| `tls-boringssl` | Optional BoringSSL backend. |
+| `tls-s2n` | Optional s2n-tls backend. |
+
+Cargo features are additive, and Pingora does not support compiling multiple
+TLS backends together. The feature validator catches this before build.
+
+## Profile Aliases
+
+Cargo does not have a separate `--group` flag. Fluxheim provides normal Cargo
+feature aliases for common deployment shapes.
+
+| Profile | Expands to | Use case |
+| --- | --- | --- |
+| `profile-core` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Same intent as default. |
+| `profile-static-site` | `proxy`, `web`, `tls-rustls`, `security` | Static sites without Fluxheim cache. |
+| `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
+| `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
+| `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
+| `profile-observability` | `profile-core`, `metrics` | Core server with Prometheus metrics. |
+| `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
+
+Examples:
+
+```bash
+cargo build --no-default-features --features profile-load-balancer
+cargo build --no-default-features --features profile-privacy
+```
+
+## Incompatible Combinations
+
+| Combination | Reason |
+| --- | --- |
+| Multiple `tls-*` backends | Pingora exposes one TLS backend at a time. |
+| `privacy-mode` + `cache` | Zero-retention builds must not compile request/response cache code. |
+| `privacy-mode` + `metrics` | Zero-retention builds must not compile request metrics. |
+
+Because `cache` is part of the default build, privacy builds must use
+`--no-default-features`.
+
+## Planned Future Features
+
+These are documented architecture tracks, not enabled Cargo features yet:
+
+| Future feature family | Document |
+| --- | --- |
+| Image filter | [Image Filter](image-filter.md) |
+| Programmable media edge | [Programmable Media Edge](programmable-media-edge.md) |
+| OpenTelemetry tracing | [OpenTelemetry Tracing](opentelemetry-tracing.md) |
+| WASM extensibility | [WASM Extensibility](wasm-extensibility.md) |
+| WAF | [WAF Architecture](waf-architecture.md) |
+| Cloudflare origin support | [Cloudflare Origin Support](cloudflare-origin-support.md) |
+| External authorization request | [External Authorization Request](auth-request.md) |
+| PHP runtimes | [PHP Runtime Support](php-runtime-support.md) |
+| Perl CGI | [Perl CGI Support](perl-cgi-support.md) |
+| Legacy static HTTP listeners | [Legacy Static HTTP Support](legacy-static-http.md) |
+| WireGuard smart load balancing | [Sentinel Mesh](sentinel-mesh.md) |

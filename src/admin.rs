@@ -1,7 +1,8 @@
 use std::env;
 use std::error::Error;
 use std::fs;
-use std::path::Path;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,7 +17,22 @@ use pingora::services::listening::Service;
 use crate::config::{AdminConfig, Config};
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
 use crate::reload::{ReloadReason, classify_reload};
-use crate::snapshot::{ConfigSnapshot, SnapshotStore};
+use crate::snapshot::{ConfigSnapshot, SnapshotError, SnapshotStore};
+
+const MAX_ADMIN_TOKEN_BYTES: usize = 8 * 1024;
+const MAX_ADMIN_TOKEN_FILE_BYTES: u64 = MAX_ADMIN_TOKEN_BYTES as u64;
+const MAX_ADMIN_PATH_BYTES: usize = 2048;
+const MAX_ADMIN_QUERY_BYTES: usize = 16 * 1024;
+#[cfg(feature = "cache")]
+const MAX_CACHE_PURGE_HOST_BYTES: usize = 255;
+#[cfg(feature = "cache")]
+const MAX_CACHE_PURGE_METHOD_BYTES: usize = 32;
+#[cfg(feature = "cache")]
+const MAX_CACHE_PURGE_PATH_BYTES: usize = 4096;
+#[cfg(feature = "cache")]
+const MAX_CACHE_PURGE_QUERY_BYTES: usize = 8192;
+#[cfg(feature = "cache")]
+const MAX_CACHE_PURGE_BULK_PATHS: usize = 256;
 
 #[derive(Clone)]
 pub struct AdminApp {
@@ -141,6 +157,10 @@ impl AdminApp {
             return response;
         }
 
+        if path.len() > MAX_ADMIN_PATH_BYTES {
+            return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"path_too_large"}"#);
+        }
+
         if path == self.health_path {
             if method != "GET" {
                 return json_response(
@@ -153,6 +173,9 @@ impl AdminApp {
 
         if !authorized(authorization_header(headers), &self.token) {
             return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
+        }
+        if query.is_some_and(|query| query.len() > MAX_ADMIN_QUERY_BYTES) {
+            return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"query_too_large"}"#);
         }
 
         match (method, path) {
@@ -337,6 +360,9 @@ impl AdminApp {
                 );
                 json_response(StatusCode::CREATED, body.as_bytes())
             }
+            Err(error @ SnapshotError::InvalidSnapshotMessage { .. }) => {
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
             Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
         }
     }
@@ -419,31 +445,31 @@ impl AdminApp {
         path: Option<&str>,
         query: Option<&str>,
     ) -> AdminResponse {
-        let Some(host) = host.filter(|host| !host.trim().is_empty()) else {
-            return error_response(StatusCode::BAD_REQUEST, "cache purge host is required");
+        let host = match validated_cache_purge_host(host) {
+            Ok(host) => host,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
         };
-        let method = method.unwrap_or("GET").trim();
-        if method.is_empty() {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "cache purge method cannot be empty",
-            );
-        }
-        let Some(path) = path.filter(|path| path.starts_with('/')) else {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "cache purge path is required and must start with /",
-            );
+        let method = match validated_cache_purge_method(method) {
+            Ok(method) => method,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+        let path = match validated_cache_purge_path(path) {
+            Ok(path) => path,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+        let query = match validated_cache_purge_query(query) {
+            Ok(query) => query,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
         };
 
         match self
             .proxy
             .purge_image_cache(crate::proxy::CachePurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
-                host: host.trim(),
+                host,
                 method,
                 path,
-                query: query.filter(|query| !query.is_empty()),
+                query,
             }) {
             Ok(result) => {
                 let body = format!(
@@ -475,16 +501,14 @@ impl AdminApp {
         paths: Vec<&str>,
         query: Option<&str>,
     ) -> AdminResponse {
-        let Some(host) = host.filter(|host| !host.trim().is_empty()) else {
-            return error_response(StatusCode::BAD_REQUEST, "cache purge host is required");
+        let host = match validated_cache_purge_host(host) {
+            Ok(host) => host,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
         };
-        let method = method.unwrap_or("GET").trim();
-        if method.is_empty() {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "cache purge method cannot be empty",
-            );
-        }
+        let method = match validated_cache_purge_method(method) {
+            Ok(method) => method,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
         let paths = paths
             .into_iter()
             .map(str::trim)
@@ -496,21 +520,30 @@ impl AdminApp {
                 "at least one cache purge path is required",
             );
         }
-        if paths.iter().any(|path| !path.starts_with('/')) {
+        if paths.len() > MAX_CACHE_PURGE_BULK_PATHS {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                "all cache purge paths must start with /",
+                "too many cache purge paths requested",
             );
         }
+        for path in &paths {
+            if let Err(message) = validate_cache_purge_path_value(path) {
+                return error_response(StatusCode::BAD_REQUEST, message);
+            }
+        }
+        let query = match validated_cache_purge_query(query) {
+            Ok(query) => query,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
 
         match self
             .proxy
             .purge_image_cache_bulk(crate::proxy::CacheBulkPurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
-                host: host.trim(),
+                host,
                 method,
                 paths,
-                query: query.filter(|query| !query.is_empty()),
+                query,
             }) {
             Ok(result) => {
                 let body = format!(
@@ -952,15 +985,127 @@ fn load_admin_token(config: &AdminConfig) -> Result<String, Box<dyn Error + Send
     let token = raw.trim().to_owned();
     if token.is_empty() {
         Err("admin token cannot be empty".into())
+    } else if token.len() > MAX_ADMIN_TOKEN_BYTES {
+        Err(format!("admin token cannot exceed {MAX_ADMIN_TOKEN_BYTES} bytes").into())
     } else {
         Ok(token)
     }
 }
 
 fn read_secret_file(path: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
-    fs::read_to_string(path).map_err(|error| {
+    if secret_parent_path_contains_symlink(path).map_err(|error| {
+        format!(
+            "failed to inspect admin token parent path {}: {error}",
+            path.display()
+        )
+    })? {
+        return Err(format!(
+            "admin token file {} must not be below a symlinked directory",
+            path.display()
+        )
+        .into());
+    }
+
+    let file = open_regular_secret_file(path)?;
+    let metadata = file.metadata().map_err(|error| {
+        format!(
+            "failed to inspect admin token file {}: {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(format!("admin token file {} must be a regular file", path.display()).into());
+    }
+    if metadata.len() > MAX_ADMIN_TOKEN_FILE_BYTES {
+        return Err(format!(
+            "admin token file {} is too large; limit is {MAX_ADMIN_TOKEN_FILE_BYTES} bytes",
+            path.display()
+        )
+        .into());
+    }
+
+    read_bounded_secret_file(file, path, MAX_ADMIN_TOKEN_FILE_BYTES)
+}
+
+fn read_bounded_secret_file(
+    file: fs::File,
+    path: &Path,
+    max_bytes: u64,
+) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let mut token = String::new();
+    let mut limited = file.take(max_bytes.saturating_add(1));
+    limited.read_to_string(&mut token).map_err(|error| {
         format!(
             "failed to read admin token file {}: {error}",
+            path.display()
+        )
+    })?;
+    if token.len() as u64 > max_bytes {
+        return Err(format!(
+            "admin token file {} changed while reading and exceeded {max_bytes} bytes",
+            path.display(),
+        )
+        .into());
+    }
+    Ok(token)
+}
+
+fn secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
+    let Some(parent) = path.parent() else {
+        return Ok(false);
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(false);
+    }
+
+    let mut current = PathBuf::new();
+    for component in parent.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
+#[cfg(target_os = "linux")]
+fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    const O_NOFOLLOW: i32 = 0o400000;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| {
+            format!(
+                "failed to open admin token file {} without following symlinks: {error}",
+                path.display()
+            )
+            .into()
+        })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "failed to inspect admin token file {}: {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(format!("admin token file {} must be a regular file", path.display()).into());
+    }
+
+    fs::File::open(path).map_err(|error| {
+        format!(
+            "failed to open admin token file {}: {error}",
             path.display()
         )
         .into()
@@ -974,12 +1119,15 @@ fn authorized(header: Option<&str>, token: &str) -> bool {
     let Some(candidate) = header.trim().strip_prefix("Bearer ") else {
         return false;
     };
-    constant_time_eq(candidate.trim().as_bytes(), token.as_bytes())
+    let candidate = candidate.trim();
+    candidate.len() <= MAX_ADMIN_TOKEN_BYTES
+        && token.len() <= MAX_ADMIN_TOKEN_BYTES
+        && constant_time_eq(candidate.as_bytes(), token.as_bytes())
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     let mut diff = left.len() ^ right.len();
-    for index in 0..left.len().max(right.len()) {
+    for index in 0..MAX_ADMIN_TOKEN_BYTES {
         let left = left.get(index).copied().unwrap_or(0);
         let right = right.get(index).copied().unwrap_or(0);
         diff |= usize::from(left ^ right);
@@ -1185,6 +1333,109 @@ fn cache_purge_paths<'a>(headers: &'a HeaderMap, query: Option<&'a str>) -> Vec<
         .unwrap_or_default()
 }
 
+#[cfg(feature = "cache")]
+fn validated_cache_purge_host(host: Option<&str>) -> Result<&str, &'static str> {
+    let Some(host) = host.map(str::trim).filter(|host| !host.is_empty()) else {
+        return Err("cache purge host is required");
+    };
+    if host.len() > MAX_CACHE_PURGE_HOST_BYTES
+        || host
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || matches!(byte, b'/' | b'\\'))
+        || host.chars().any(char::is_whitespace)
+    {
+        return Err("cache purge host is invalid");
+    }
+    Ok(host)
+}
+
+#[cfg(feature = "cache")]
+fn validated_cache_purge_method(method: Option<&str>) -> Result<&str, &'static str> {
+    let method = method.unwrap_or("GET").trim();
+    if method.is_empty() {
+        return Err("cache purge method cannot be empty");
+    }
+    if method.len() > MAX_CACHE_PURGE_METHOD_BYTES || !method.bytes().all(is_http_token_byte) {
+        return Err("cache purge method is invalid");
+    }
+    Ok(method)
+}
+
+#[cfg(feature = "cache")]
+fn is_http_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+#[cfg(feature = "cache")]
+fn validated_cache_purge_path(path: Option<&str>) -> Result<&str, &'static str> {
+    let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return Err("cache purge path is required and must start with /");
+    };
+    validate_cache_purge_path_value(path)?;
+    Ok(path)
+}
+
+#[cfg(feature = "cache")]
+fn validate_cache_purge_path_value(path: &str) -> Result<(), &'static str> {
+    if !path.starts_with('/') {
+        return Err("cache purge path is required and must start with /");
+    }
+    if path.len() > MAX_CACHE_PURGE_PATH_BYTES
+        || path
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b'\\')
+    {
+        return Err("cache purge path is invalid");
+    }
+    if path_contains_traversal_segment(path) || path_contains_encoded_path_control(path) {
+        return Err("cache purge path must not contain traversal segments");
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn path_contains_traversal_segment(path: &str) -> bool {
+    path.split('/').any(|segment| matches!(segment, "." | ".."))
+}
+
+#[cfg(feature = "cache")]
+fn path_contains_encoded_path_control(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c")
+}
+
+#[cfg(feature = "cache")]
+fn validated_cache_purge_query(query: Option<&str>) -> Result<Option<&str>, &'static str> {
+    let Some(query) = query.filter(|query| !query.is_empty()) else {
+        return Ok(None);
+    };
+    if query.len() > MAX_CACHE_PURGE_QUERY_BYTES
+        || query
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || matches!(byte, b'#'))
+    {
+        return Err("cache purge query is invalid");
+    }
+    Ok(Some(query))
+}
+
 fn truthy_header(headers: &HeaderMap, name: &str) -> bool {
     header_value(headers, name).is_some_and(truthy)
 }
@@ -1241,10 +1492,11 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use arc_swap::ArcSwap;
-    use http::{HeaderMap, StatusCode, header};
+    use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::{
-        AdminApp, AdminRuntimeState, admin_services_from_config, authorized, constant_time_eq,
+        AdminApp, AdminRuntimeState, MAX_ADMIN_TOKEN_FILE_BYTES, admin_services_from_config,
+        authorized, constant_time_eq, read_bounded_secret_file, read_secret_file,
     };
     use crate::config::{
         AdminConfig, AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig, VhostConfig,
@@ -1311,6 +1563,26 @@ mod tests {
     }
 
     #[test]
+    fn admin_endpoint_rejects_oversized_query_before_parsing() {
+        let query = "x=".to_owned() + &"a".repeat(super::MAX_ADMIN_QUERY_BYTES);
+
+        let response = app().handle("GET", "/_fluxheim/status", Some(&query), &auth_headers());
+
+        assert_eq!(response.status, StatusCode::URI_TOO_LONG);
+        assert_eq!(response.body, br#"{"error":"query_too_large"}"#);
+    }
+
+    #[test]
+    fn admin_endpoint_rejects_oversized_path_before_routing() {
+        let path = "/".to_owned() + &"a".repeat(super::MAX_ADMIN_PATH_BYTES);
+
+        let response = app().handle("GET", &path, None, &auth_headers());
+
+        assert_eq!(response.status, StatusCode::URI_TOO_LONG);
+        assert_eq!(response.body, br#"{"error":"path_too_large"}"#);
+    }
+
+    #[test]
     fn snapshots_endpoint_requires_auth() {
         let response = app().handle("GET", "/_fluxheim/snapshots", None, &HeaderMap::new());
         assert_eq!(response.status, StatusCode::UNAUTHORIZED);
@@ -1333,6 +1605,27 @@ mod tests {
         assert_eq!(app.store.list().unwrap().len(), 1);
     }
 
+    #[test]
+    fn snapshot_endpoint_rejects_oversized_message() {
+        let app = app();
+        let mut headers = auth_headers();
+        headers.insert(
+            "x-fluxheim-message",
+            HeaderValue::from_str(&"a".repeat(crate::snapshot::MAX_SNAPSHOT_MESSAGE_BYTES + 1))
+                .unwrap(),
+        );
+
+        let response = app.handle("POST", "/_fluxheim/snapshot", None, &headers);
+
+        assert_eq!(
+            response.status,
+            StatusCode::BAD_REQUEST,
+            "{}",
+            String::from_utf8_lossy(&response.body)
+        );
+        assert_eq!(app.store.list().unwrap().len(), 0);
+    }
+
     #[cfg(feature = "cache")]
     #[test]
     fn cache_purge_endpoint_requires_auth_and_purges_by_request_identity() {
@@ -1351,6 +1644,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1394,6 +1688,25 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_purge_endpoint_rejects_unsafe_identity_parts() {
+        let cases = [
+            Some("host=example.test&path=/../secret.png"),
+            Some("host=example.test&path=/img/%2e%2e/secret.png"),
+            Some("host=example.test&path=/img\\secret.png"),
+            Some("host=example.test&method=GET POST&path=/img/logo.png"),
+            Some("host=example.test/evil&path=/img/logo.png"),
+            Some("host=example.test&path=/img/logo.png&url_query=ok#fragment"),
+        ];
+
+        for query in cases {
+            let response = app().handle("POST", "/_fluxheim/cache/purge", query, &auth_headers());
+
+            assert_eq!(response.status, StatusCode::BAD_REQUEST, "{query:?}");
+        }
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_status_endpoint_reports_vhost_cache_tiers() {
         let cache_path = std::env::temp_dir().join(format!(
             "fluxheim-admin-cache-status-{}-{}",
@@ -1420,6 +1733,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1477,6 +1791,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1526,6 +1841,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1553,6 +1869,26 @@ mod tests {
             "POST",
             "/_fluxheim/cache/purge-bulk",
             Some("host=example.test"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_bulk_endpoint_rejects_too_many_paths() {
+        let mut query = "host=example.test".to_owned();
+        for index in 0..=super::MAX_CACHE_PURGE_BULK_PATHS {
+            query.push_str("&path=/img/");
+            query.push_str(&index.to_string());
+            query.push_str(".png");
+        }
+
+        let response = app().handle(
+            "POST",
+            "/_fluxheim/cache/purge-bulk",
+            Some(&query),
             &auth_headers(),
         );
 
@@ -1641,6 +1977,24 @@ mod tests {
     }
 
     #[test]
+    fn rollback_endpoint_rejects_oversized_target_without_reflecting_it() {
+        let app = app();
+        let target = "a".repeat(129);
+        let mut headers = auth_headers();
+        headers.insert(
+            "x-fluxheim-rollback-to",
+            HeaderValue::from_str(&target).unwrap(),
+        );
+
+        let response = app.handle("POST", "/_fluxheim/rollback", None, &headers);
+        let body = String::from_utf8(response.body).unwrap();
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("length 129 exceeds 128 bytes"));
+        assert!(!body.contains(&target));
+    }
+
+    #[test]
     fn rollback_endpoint_can_live_apply_snapshot_safe_target() {
         let live_config = Config {
             vhosts: vec![VhostConfig {
@@ -1649,6 +2003,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1661,6 +2016,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1746,6 +2102,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1782,6 +2139,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1890,6 +2248,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1906,6 +2265,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1976,6 +2336,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -1992,6 +2353,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -2030,6 +2392,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -2046,6 +2409,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -2085,6 +2449,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -2101,6 +2466,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -2140,6 +2506,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -2156,6 +2523,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
             }],
             ..Config::default()
@@ -2232,6 +2600,82 @@ mod tests {
         assert!(authorized(Some("Bearer secret-token"), "secret-token"));
         assert!(!authorized(Some("Bearer secret"), "secret-token"));
         assert!(!constant_time_eq(b"secret", b"secret-token"));
+        assert!(!authorized(
+            Some(&format!(
+                "Bearer {}",
+                "a".repeat(super::MAX_ADMIN_TOKEN_BYTES + 1)
+            )),
+            "secret-token"
+        ));
+    }
+
+    #[test]
+    fn admin_token_file_must_be_regular_file() {
+        let dir = TestDir::new("admin-token-directory");
+
+        let error = read_secret_file(&dir.path).unwrap_err();
+
+        assert!(error.to_string().contains("must be a regular file"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn admin_token_file_must_not_be_symlink() {
+        let dir = TestDir::new("admin-token-symlink");
+        let token_file = dir.path.join("admin-token");
+        let token_link = dir.path.join("admin-token-link");
+        std::fs::write(&token_file, "secret-token\n").unwrap();
+        std::os::unix::fs::symlink(&token_file, &token_link).unwrap();
+
+        let error = read_secret_file(&token_link).unwrap_err();
+
+        assert!(error.to_string().contains("without following symlinks"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn admin_token_file_must_not_be_below_symlinked_directory() {
+        let dir = TestDir::new("admin-token-parent-symlink");
+        let real_dir = dir.path.join("real");
+        let linked_dir = dir.path.join("linked");
+        std::fs::create_dir(&real_dir).unwrap();
+        std::fs::write(real_dir.join("admin-token"), "secret-token\n").unwrap();
+        std::os::unix::fs::symlink(&real_dir, &linked_dir).unwrap();
+
+        let error = read_secret_file(&linked_dir.join("admin-token")).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("must not be below a symlinked directory")
+        );
+    }
+
+    #[test]
+    fn admin_token_file_has_size_limit() {
+        let dir = TestDir::new("admin-token-large");
+        let token_file = dir.path.join("admin-token");
+        std::fs::write(
+            &token_file,
+            vec![b'a'; (MAX_ADMIN_TOKEN_FILE_BYTES + 1) as usize],
+        )
+        .unwrap();
+
+        let error = read_secret_file(&token_file).unwrap_err();
+
+        assert!(error.to_string().contains("is too large"));
+    }
+
+    #[test]
+    fn admin_token_read_is_bounded() {
+        let dir = TestDir::new("admin-token-bounded-read");
+        let token_file = dir.path.join("admin-token");
+        std::fs::write(&token_file, b"123456789").unwrap();
+        let file = std::fs::File::open(&token_file).unwrap();
+
+        let error = read_bounded_secret_file(file, &token_file, 8).unwrap_err();
+
+        assert!(error.to_string().contains("exceeded 8 bytes"));
     }
 
     fn auth_headers() -> HeaderMap {

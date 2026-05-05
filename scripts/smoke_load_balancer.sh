@@ -132,11 +132,12 @@ ORIGIN_TWO_PID=$!
 wait_http "http://127.0.0.1:$ORIGIN_ONE_PORT/"
 wait_http "http://127.0.0.1:$ORIGIN_TWO_PORT/"
 
+"$ROOT_DIR/scripts/validate-features.sh" proxy,load-balancer
 (
     cd "$ROOT_DIR"
-    cargo run --quiet --no-default-features --features proxy,load-balancer -- \
-        --config "$TMP_DIR/fluxheim.toml"
-) >"$TMP_DIR/fluxheim.log" 2>&1 &
+    cargo build --quiet --no-default-features --features proxy,load-balancer
+)
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
 FLUXHEIM_PID=$!
 
 wait_http "http://127.0.0.1:$FLUXHEIM_PORT/smoke"

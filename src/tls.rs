@@ -44,6 +44,23 @@ pub enum TlsStorageIssue {
         path: PathBuf,
         mode: u32,
     },
+    AcmeEabSecretReadFailed {
+        issuer: String,
+        field: &'static str,
+        path: PathBuf,
+        message: String,
+    },
+    AcmeEabSecretPathIsNotFile {
+        issuer: String,
+        field: &'static str,
+        path: PathBuf,
+    },
+    InsecureAcmeEabSecretPermissions {
+        issuer: String,
+        field: &'static str,
+        path: PathBuf,
+        mode: u32,
+    },
     AcmeStorageReadFailed {
         path: PathBuf,
         message: String,
@@ -94,6 +111,36 @@ impl Display for TlsStorageIssue {
                 path.display(),
                 PRIVATE_KEY_MODE
             ),
+            Self::AcmeEabSecretReadFailed {
+                issuer,
+                field,
+                path,
+                message,
+            } => write!(
+                formatter,
+                "tls.acme.issuers.{issuer}.eab.{field}_file {} cannot be read: {message}",
+                path.display()
+            ),
+            Self::AcmeEabSecretPathIsNotFile {
+                issuer,
+                field,
+                path,
+            } => write!(
+                formatter,
+                "tls.acme.issuers.{issuer}.eab.{field}_file {} is not a regular file",
+                path.display()
+            ),
+            Self::InsecureAcmeEabSecretPermissions {
+                issuer,
+                field,
+                path,
+                mode,
+            } => write!(
+                formatter,
+                "tls.acme.issuers.{issuer}.eab.{field}_file {} has insecure mode {mode:o}; use {:o}",
+                path.display(),
+                PRIVATE_KEY_MODE
+            ),
             Self::AcmeStorageReadFailed { path, message } => write!(
                 formatter,
                 "tls.acme.storage {} cannot be read: {message}",
@@ -136,6 +183,7 @@ pub fn validate_tls_storage(config: &Config) -> TlsStorageCheck {
     }
 
     validate_acme_storage(&config.tls.acme, &mut issues);
+    validate_acme_eab_secret_storage(&config.tls.acme, &mut issues);
 
     TlsStorageCheck { issues }
 }
@@ -165,33 +213,57 @@ fn validate_static_certificate_storage(
     certificate: &StaticCertificateConfig,
     issues: &mut Vec<TlsStorageIssue>,
 ) {
-    match fs::metadata(&certificate.cert_path) {
-        Ok(metadata) if !metadata.is_file() => {
-            issues.push(TlsStorageIssue::CertificatePathIsNotFile {
+    match path_contains_symlink(&certificate.cert_path) {
+        Ok(true) => issues.push(TlsStorageIssue::CertificatePathIsNotFile {
+            scope: scope.to_owned(),
+            path: certificate.cert_path.clone(),
+        }),
+        Ok(false) => match fs::symlink_metadata(&certificate.cert_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                issues.push(TlsStorageIssue::CertificatePathIsNotFile {
+                    scope: scope.to_owned(),
+                    path: certificate.cert_path.clone(),
+                });
+            }
+            Ok(_) => {}
+            Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
                 scope: scope.to_owned(),
                 path: certificate.cert_path.clone(),
-            })
-        }
-        Ok(_) => {}
+                message: error_message(error),
+            }),
+        },
         Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
             scope: scope.to_owned(),
             path: certificate.cert_path.clone(),
-            message: error_message(error),
+            message: symlink_inspection_error(error),
         }),
     }
 
-    match fs::metadata(&certificate.key_path) {
-        Ok(metadata) if !metadata.is_file() => {
-            issues.push(TlsStorageIssue::PrivateKeyPathIsNotFile {
+    match path_contains_symlink(&certificate.key_path) {
+        Ok(true) => issues.push(TlsStorageIssue::PrivateKeyPathIsNotFile {
+            scope: scope.to_owned(),
+            path: certificate.key_path.clone(),
+        }),
+        Ok(false) => match fs::symlink_metadata(&certificate.key_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                issues.push(TlsStorageIssue::PrivateKeyPathIsNotFile {
+                    scope: scope.to_owned(),
+                    path: certificate.key_path.clone(),
+                });
+            }
+            Ok(metadata) => {
+                validate_key_permissions(scope, &certificate.key_path, &metadata, issues)
+            }
+            Err(error) => issues.push(TlsStorageIssue::PrivateKeyReadFailed {
                 scope: scope.to_owned(),
                 path: certificate.key_path.clone(),
-            })
-        }
-        Ok(metadata) => validate_key_permissions(scope, &certificate.key_path, &metadata, issues),
+                message: error_message(error),
+            }),
+        },
         Err(error) => issues.push(TlsStorageIssue::PrivateKeyReadFailed {
             scope: scope.to_owned(),
             path: certificate.key_path.clone(),
-            message: error_message(error),
+            message: symlink_inspection_error(error),
         }),
     }
 }
@@ -205,16 +277,105 @@ fn validate_acme_storage(acme: &AcmeConfig, issues: &mut Vec<TlsStorageIssue>) {
         return;
     };
 
-    match fs::metadata(path) {
-        Ok(metadata) if !metadata.is_dir() => {
+    match path_contains_symlink(path) {
+        Ok(true) => {
             issues.push(TlsStorageIssue::AcmeStoragePathIsNotDirectory { path: path.clone() })
         }
-        Ok(metadata) => validate_acme_storage_permissions(path, &metadata, issues),
+        Ok(false) => match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                issues.push(TlsStorageIssue::AcmeStoragePathIsNotDirectory { path: path.clone() })
+            }
+            Ok(metadata) => validate_acme_storage_permissions(path, &metadata, issues),
+            Err(error) => issues.push(TlsStorageIssue::AcmeStorageReadFailed {
+                path: path.clone(),
+                message: error_message(error),
+            }),
+        },
         Err(error) => issues.push(TlsStorageIssue::AcmeStorageReadFailed {
             path: path.clone(),
-            message: error_message(error),
+            message: symlink_inspection_error(error),
         }),
     }
+}
+
+fn validate_acme_eab_secret_storage(acme: &AcmeConfig, issues: &mut Vec<TlsStorageIssue>) {
+    if !acme.enabled {
+        return;
+    }
+
+    for issuer in &acme.issuers {
+        let Some(eab) = &issuer.eab else {
+            continue;
+        };
+
+        if let Some(path) = &eab.key_id_file {
+            validate_acme_eab_secret_file(&issuer.name, "key_id", path, issues);
+        }
+        if let Some(path) = &eab.hmac_key_file {
+            validate_acme_eab_secret_file(&issuer.name, "hmac_key", path, issues);
+        }
+    }
+}
+
+fn validate_acme_eab_secret_file(
+    issuer: &str,
+    field: &'static str,
+    path: &Path,
+    issues: &mut Vec<TlsStorageIssue>,
+) {
+    match path_contains_symlink(path) {
+        Ok(true) => issues.push(TlsStorageIssue::AcmeEabSecretPathIsNotFile {
+            issuer: issuer.to_owned(),
+            field,
+            path: path.to_path_buf(),
+        }),
+        Ok(false) => match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                issues.push(TlsStorageIssue::AcmeEabSecretPathIsNotFile {
+                    issuer: issuer.to_owned(),
+                    field,
+                    path: path.to_path_buf(),
+                });
+            }
+            Ok(metadata) => {
+                validate_acme_eab_secret_permissions(issuer, field, path, &metadata, issues)
+            }
+            Err(error) => issues.push(TlsStorageIssue::AcmeEabSecretReadFailed {
+                issuer: issuer.to_owned(),
+                field,
+                path: path.to_path_buf(),
+                message: error_message(error),
+            }),
+        },
+        Err(error) => issues.push(TlsStorageIssue::AcmeEabSecretReadFailed {
+            issuer: issuer.to_owned(),
+            field,
+            path: path.to_path_buf(),
+            message: symlink_inspection_error(error),
+        }),
+    }
+}
+
+fn path_contains_symlink(path: &Path) -> io::Result<bool> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
+fn symlink_inspection_error(error: io::Error) -> String {
+    format!(
+        "failed to inspect path for symlinks: {}",
+        error_message(error)
+    )
 }
 
 #[cfg(unix)]
@@ -262,6 +423,37 @@ fn validate_acme_storage_permissions(
     }
 }
 
+#[cfg(unix)]
+fn validate_acme_eab_secret_permissions(
+    issuer: &str,
+    field: &'static str,
+    path: &Path,
+    metadata: &fs::Metadata,
+    issues: &mut Vec<TlsStorageIssue>,
+) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = metadata.permissions().mode() & 0o777;
+    if !secure_private_key_mode(mode) {
+        issues.push(TlsStorageIssue::InsecureAcmeEabSecretPermissions {
+            issuer: issuer.to_owned(),
+            field,
+            path: path.to_path_buf(),
+            mode,
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn validate_acme_eab_secret_permissions(
+    _issuer: &str,
+    _field: &'static str,
+    _path: &Path,
+    _metadata: &fs::Metadata,
+    _issues: &mut Vec<TlsStorageIssue>,
+) {
+}
+
 #[cfg(not(unix))]
 fn validate_acme_storage_permissions(
     _path: &Path,
@@ -280,7 +472,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use crate::config::{AcmeConfig, Config, StaticCertificateConfig, TlsConfig};
+    use crate::config::{
+        AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, Config,
+        StaticCertificateConfig, TlsConfig,
+    };
 
     use super::{
         TlsStorageIssue, recommended_acme_storage_mode, recommended_private_key_mode,
@@ -360,6 +555,117 @@ mod tests {
             &check.issues[1],
             TlsStorageIssue::PrivateKeyReadFailed { path, .. } if path == &key
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_certificate_files_and_acme_storage() {
+        let dir = TestDir::new("tls-storage-symlink");
+        let real_cert = dir.file("real-fullchain.pem", 0o644);
+        let real_key = dir.file("real-key.pem", recommended_private_key_mode());
+        let real_acme = dir.dir("real-acme", recommended_acme_storage_mode());
+        let cert = dir.path().join("fullchain.pem");
+        let key = dir.path().join("key.pem");
+        let acme = dir.path().join("acme");
+        std::os::unix::fs::symlink(&real_cert, &cert).unwrap();
+        std::os::unix::fs::symlink(&real_key, &key).unwrap();
+        std::os::unix::fs::symlink(&real_acme, &acme).unwrap();
+        let config = tls_config(cert.clone(), key.clone(), acme.clone());
+
+        let check = validate_tls_storage(&config);
+
+        assert_eq!(
+            check.issues,
+            vec![
+                TlsStorageIssue::CertificatePathIsNotFile {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: cert,
+                },
+                TlsStorageIssue::PrivateKeyPathIsNotFile {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: key,
+                },
+                TlsStorageIssue::AcmeStoragePathIsNotDirectory { path: acme },
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_tls_storage_below_symlinked_directory() {
+        let dir = TestDir::new("tls-storage-parent-symlink");
+        let real_dir = dir.dir("real", 0o700);
+        let linked_dir = dir.path().join("linked");
+        std::os::unix::fs::symlink(&real_dir, &linked_dir).unwrap();
+        let cert = linked_dir.join("fullchain.pem");
+        let key = linked_dir.join("key.pem");
+        let acme = linked_dir.join("acme");
+        fs::write(real_dir.join("fullchain.pem"), "test").unwrap();
+        fs::write(real_dir.join("key.pem"), "test").unwrap();
+        fs::create_dir(real_dir.join("acme")).unwrap();
+        set_mode(&real_dir.join("key.pem"), recommended_private_key_mode());
+        set_mode(&real_dir.join("acme"), recommended_acme_storage_mode());
+        let config = tls_config(cert.clone(), key.clone(), acme.clone());
+
+        let check = validate_tls_storage(&config);
+
+        assert_eq!(
+            check.issues,
+            vec![
+                TlsStorageIssue::CertificatePathIsNotFile {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: cert,
+                },
+                TlsStorageIssue::PrivateKeyPathIsNotFile {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: key,
+                },
+                TlsStorageIssue::AcmeStoragePathIsNotDirectory { path: acme },
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validates_acme_eab_secret_files() {
+        let dir = TestDir::new("tls-storage-eab");
+        let cert = dir.file("fullchain.pem", 0o644);
+        let key = dir.file("key.pem", recommended_private_key_mode());
+        let acme = dir.dir("acme", recommended_acme_storage_mode());
+        let key_id = dir.file("key-id", 0o640);
+        let real_hmac = dir.file("real-hmac", recommended_private_key_mode());
+        let hmac = dir.path().join("hmac");
+        std::os::unix::fs::symlink(&real_hmac, &hmac).unwrap();
+        let mut config = tls_config(cert, key, acme);
+        config.tls.acme.issuers = vec![AcmeIssuerConfig {
+            name: "actalis".to_owned(),
+            directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
+            eab: Some(AcmeExternalAccountBindingConfig {
+                key_id_env: None,
+                key_id_file: Some(key_id.clone()),
+                hmac_key_env: None,
+                hmac_key_file: Some(hmac.clone()),
+            }),
+        }];
+
+        let check = validate_tls_storage(&config);
+
+        assert_eq!(
+            check.issues,
+            vec![
+                TlsStorageIssue::InsecureAcmeEabSecretPermissions {
+                    issuer: "actalis".to_owned(),
+                    field: "key_id",
+                    path: key_id,
+                    mode: 0o640,
+                },
+                TlsStorageIssue::AcmeEabSecretPathIsNotFile {
+                    issuer: "actalis".to_owned(),
+                    field: "hmac_key",
+                    path: hmac,
+                },
+            ]
+        );
     }
 
     #[test]

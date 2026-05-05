@@ -155,6 +155,7 @@ Before the first GitHub push, the repository should include:
 - `rust-toolchain.toml`;
 - `deny.toml`;
 - `README.md`;
+- `CHANGELOG.md`;
 - `ROADMAP.md`;
 - `SECURITY.md`;
 - `LICENSE`;
@@ -162,12 +163,28 @@ Before the first GitHub push, the repository should include:
 - `examples/`;
 - `scripts/`;
 - `src/`;
+- `.github/workflows/ci.yml`;
+- `.github/workflows/codeql.yml`;
+- `.github/dependabot.yml`;
 - `Containerfile`;
 - `.containerignore`;
 - `.cargo/` config if it contains project-specific build settings.
 
 Do not commit local secrets, private TLS keys, ACME account keys, Cloudflare API
 tokens, cache directories, Podman volumes, or generated release artifacts.
+
+## GitHub Security Settings
+
+After pushing, confirm these repository settings are enabled:
+
+- Dependabot alerts;
+- Dependabot version updates from `.github/dependabot.yml`;
+- code scanning alerts from `.github/workflows/codeql.yml`;
+- private vulnerability reporting or GitHub security advisories.
+
+CodeQL should run on pushes, pull requests, and the weekly schedule. If the
+repository uses GitHub default setup for CodeQL, keep only one active CodeQL
+configuration to avoid duplicate alerts.
 
 ## First Tag After GitHub Import
 

@@ -17,8 +17,10 @@ Describe what changed and why.
 
 - [ ] I kept the change scoped to Fluxheim's existing architecture.
 - [ ] I updated docs, examples, or roadmap entries when behavior changed.
+- [ ] I updated `CHANGELOG.md` for release-relevant changes.
 - [ ] I added or updated tests for behavior changes.
 - [ ] I ran `cargo fmt --all --check`.
+- [ ] I ran `scripts/validate-release-metadata.sh` when version/toolchain/release docs changed.
 - [ ] I ran `cargo clippy --all-targets -- -D warnings`.
 - [ ] I ran `cargo test`.
 - [ ] I ran relevant feature builds or tests.

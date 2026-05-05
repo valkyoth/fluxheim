@@ -2,6 +2,9 @@
 listen = ["127.0.0.1:8080"]
 # HTTPS listeners are explicit so HTTP and HTTPS are never guessed by port.
 # tls_listen = ["127.0.0.1:8443"]
+# Only configure direct proxy peers whose forwarded client-IP headers may be
+# trusted. Inbound forwarding headers from all other peers are ignored.
+trusted_proxies = []
 
 [server.limits]
 max_request_header_bytes = "64KiB"
@@ -28,6 +31,47 @@ max_error_rate_per_mille = 100
 enabled = false
 listen = "127.0.0.1:9091"
 require_loopback = true
+
+[logging]
+level = "info"
+format = "json"
+
+[logging.access]
+enabled = true
+request_id = true
+request_id_header = "x-request-id"
+
+[headers.request]
+enabled = true
+strip_inbound_client_ip_headers = true
+x_forwarded_for = "replace"
+x_forwarded_host = true
+x_forwarded_proto = true
+forwarded = false
+unset = ["x-powered-by"]
+
+[headers.request.set]
+x-proxy-by = "Fluxheim"
+
+[headers.request.append]
+via = "fluxheim"
+
+[headers.response]
+enabled = true
+# HSTS and CSP are intentionally opt-in because they can break local HTTP
+# testing or site-specific asset policies when enabled blindly.
+# strict_transport_security = "max-age=31536000; includeSubDomains"
+# content_security_policy = "default-src 'self'"
+x_content_type_options = "nosniff"
+x_frame_options = "DENY"
+referrer_policy = "no-referrer"
+unset = ["server", "x-powered-by"]
+
+[headers.response.set]
+cache-control = "public, max-age=60"
+
+[headers.response.append]
+vary = ["Accept-Encoding"]
 
 [proxy]
 upstream = "127.0.0.1:3000"

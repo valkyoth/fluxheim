@@ -41,6 +41,31 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - name: Validate release metadata
+        run: scripts/validate-release-metadata.sh
+
+      - name: Check Markdown links
+        run: perl scripts/check-doc-links.pl
+
+      - name: Validate feature policy
+        run: |
+          scripts/validate-features.sh default
+          scripts/validate-features.sh profile-core
+          scripts/validate-features.sh profile-load-balancer
+          scripts/validate-features.sh profile-privacy
+          if scripts/validate-features.sh profile-privacy,metrics; then
+            echo "profile-privacy,metrics unexpectedly passed feature validation" >&2
+            exit 1
+          fi
+          if scripts/validate-features.sh profile-core,tls-openssl; then
+            echo "profile-core,tls-openssl unexpectedly passed feature validation" >&2
+            exit 1
+          fi
+          if scripts/validate-features.sh tls-rustls,tls-openssl; then
+            echo "tls-rustls,tls-openssl unexpectedly passed feature validation" >&2
+            exit 1
+          fi
+
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
 
@@ -49,12 +74,21 @@ jobs:
 
       - name: Run feature build tests
         run: |
+          scripts/validate-features.sh tls-rustls
           cargo test --no-default-features --features proxy,load-balancer
           cargo test --no-default-features --features proxy,cache
           cargo test --no-default-features --features cache
           cargo test --no-default-features --features web
+          cargo test --no-default-features --features profile-core
+          cargo check --no-default-features --features profile-static-site
+          cargo check --no-default-features --features profile-reverse-proxy
+          cargo check --no-default-features --features profile-cache-server
+          cargo check --no-default-features --features profile-load-balancer
+          cargo check --no-default-features --features profile-observability
+          cargo check --no-default-features --features profile-privacy
           cargo test --no-default-features --features proxy,metrics
           cargo test --no-default-features --features proxy,tls-rustls,acme
+          cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
           cargo check --no-default-features --features proxy,tls-rustls
 
       - name: Validate example configs
@@ -62,7 +96,14 @@ jobs:
           cargo run --quiet -- --check-config --config examples/fluxheim.toml
           cargo run --quiet -- --check-config --config examples/admin.toml
           cargo run --quiet -- --check-config --config examples/vhosts.toml
+          cargo run --quiet -- --check-config --config examples/privacy.toml
           cargo run --quiet -- --check-config --config examples/conf.d
+          cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml
+
+      - name: Run localhost smoke tests
+        run: |
+          sh scripts/smoke_static_local.sh
+          sh scripts/smoke_load_balancer.sh
 
       - name: Check dependency policy
         run: cargo deny check

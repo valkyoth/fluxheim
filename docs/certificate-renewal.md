@@ -23,10 +23,11 @@ Recommended Unix permissions:
   `0644`
 
 The checker reports missing certificate/key files, non-file certificate/key
-paths, non-directory ACME storage paths, group/world-readable private keys, and
-group/world-accessible ACME storage directories. Config parsing stays separate
-from filesystem checks so configuration can still be validated before files are
-provisioned.
+paths, non-directory ACME storage paths, symlinked certificate/key/EAB/storage
+paths including symlinked parent directories, group/world-readable private keys,
+and group/world-accessible ACME storage directories. Config parsing stays
+separate from filesystem checks so configuration can still be validated before
+files are provisioned.
 
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage

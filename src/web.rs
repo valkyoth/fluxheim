@@ -1,10 +1,23 @@
+#[cfg(feature = "proxy")]
+use std::fs::OpenOptions;
 use std::io;
+#[cfg(feature = "proxy")]
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use percent_encoding::percent_decode_str;
 
 use crate::config::WebConfig;
+
+#[cfg(all(feature = "proxy", target_os = "linux"))]
+use std::os::unix::fs::OpenOptionsExt;
+
+#[cfg(all(feature = "proxy", target_os = "linux"))]
+const O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(feature = "proxy")]
+pub const MAX_STATIC_BUFFERED_BODY_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct StaticFileServer {
@@ -18,6 +31,24 @@ impl StaticFileServer {
         let Some(root) = &config.root else {
             return Ok(None);
         };
+
+        if configured_web_path_contains_symlink(root)? {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "web root must not be below a symlinked directory: {}",
+                    root.display()
+                ),
+            ));
+        }
+
+        let root_metadata = std::fs::symlink_metadata(root)?;
+        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("web root is not a real directory: {}", root.display()),
+            ));
+        }
 
         let root = root.canonicalize()?;
         if !root.is_dir() {
@@ -76,7 +107,19 @@ impl StaticFileServer {
     }
 
     fn resolve_candidate(&self, candidate: &Path) -> io::Result<ResolveResult> {
-        if candidate.is_dir() {
+        if path_contains_symlink(&self.root, candidate)? {
+            return Ok(ResolveResult::NotFound);
+        }
+
+        let candidate_metadata = match candidate.metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(ResolveResult::NotFound);
+            }
+            Err(error) => return Err(error),
+        };
+
+        if candidate_metadata.is_dir() {
             for index in &self.index_files {
                 let index_candidate = candidate.join(index);
                 if let Some(file) = self.static_file(&index_candidate)? {
@@ -94,6 +137,10 @@ impl StaticFileServer {
     }
 
     fn static_file(&self, candidate: &Path) -> io::Result<Option<StaticFile>> {
+        if path_contains_symlink(&self.root, candidate)? {
+            return Ok(None);
+        }
+
         let canonical = match candidate.canonicalize() {
             Ok(path) => path,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -123,6 +170,40 @@ impl StaticFileServer {
     }
 }
 
+fn path_contains_symlink(root: &Path, candidate: &Path) -> io::Result<bool> {
+    let Ok(relative) = candidate.strip_prefix(root) else {
+        return Ok(true);
+    };
+
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
+fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        }
+    }
+
+    Ok(false)
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ResolveResult {
     Found(StaticFile),
@@ -138,50 +219,336 @@ pub struct StaticFile {
     pub modified: Option<SystemTime>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StaticResponsePlan {
+    pub status: u16,
+    pub body: StaticResponseBody,
+    pub content_length: Option<u64>,
+    pub content_range: Option<String>,
+    pub etag: String,
+    pub response_body_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum StaticResponseBody {
+    None,
+    Full,
+    Range { start: u64, len: u64 },
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct StaticRequestConditions<'a> {
+    pub if_none_match: Option<&'a str>,
+    pub if_modified_since: Option<&'a str>,
+    pub cache_control: Option<&'a str>,
+    pub pragma: Option<&'a str>,
+    pub range: Option<&'a str>,
+    pub if_range: Option<&'a str>,
+}
+
+pub fn plan_static_response(
+    file: &StaticFile,
+    method: &str,
+    conditions: StaticRequestConditions<'_>,
+) -> StaticResponsePlan {
+    let etag = static_etag(file);
+
+    if !crate::cache_headers::request_forces_cache_refresh(
+        conditions.cache_control,
+        conditions.pragma,
+    ) && (etag_not_modified(conditions.if_none_match, &etag)
+        || (conditions.if_none_match.is_none()
+            && modified_since_not_modified(file.modified, conditions.if_modified_since)))
+    {
+        return StaticResponsePlan {
+            status: 304,
+            body: StaticResponseBody::None,
+            content_length: None,
+            content_range: None,
+            etag,
+            response_body_bytes: 0,
+        };
+    }
+
+    let range = conditions
+        .range
+        .filter(|_| if_range_allows_range(file.modified, &etag, conditions.if_range));
+
+    if let Some(range) = range {
+        return match parse_single_byte_range(range, file.len) {
+            Some((start, len)) => StaticResponsePlan {
+                status: 206,
+                body: response_body(method, StaticResponseBody::Range { start, len }),
+                content_length: Some(len),
+                content_range: Some(format!(
+                    "bytes {start}-{}/{}",
+                    start.saturating_add(len).saturating_sub(1),
+                    file.len
+                )),
+                etag,
+                response_body_bytes: response_bytes(method, len),
+            },
+            None => StaticResponsePlan {
+                status: 416,
+                body: StaticResponseBody::None,
+                content_length: Some(0),
+                content_range: Some(format!("bytes */{}", file.len)),
+                etag,
+                response_body_bytes: 0,
+            },
+        };
+    }
+
+    StaticResponsePlan {
+        status: 200,
+        body: response_body(method, StaticResponseBody::Full),
+        content_length: Some(file.len),
+        content_range: None,
+        etag,
+        response_body_bytes: response_bytes(method, file.len),
+    }
+}
+
 #[cfg(all(feature = "web", feature = "proxy"))]
 pub async fn serve_static_file(
     session: &mut pingora::proxy::Session,
     file: &StaticFile,
-    send_body: bool,
+    plan: &StaticResponsePlan,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
 ) -> pingora::Result<()> {
     use pingora::prelude::{InternalError, OrErr};
 
-    let mut response = pingora::http::ResponseHeader::build(200, Some(6))?;
+    let mut response = pingora::http::ResponseHeader::build(plan.status, Some(9))?;
     response.insert_header("content-type", file.mime.as_str())?;
-    response.insert_header("content-length", file.len)?;
+    if let Some(content_length) = plan.content_length {
+        response.insert_header("content-length", content_length)?;
+    }
     response.insert_header("cache-control", "public, max-age=60")?;
-    response.insert_header("x-content-type-options", "nosniff")?;
+    response.insert_header("etag", plan.etag.as_str())?;
+    response.insert_header("accept-ranges", "bytes")?;
 
     if let Some(modified) = file.modified {
         response.insert_header("last-modified", httpdate::fmt_http_date(modified))?;
     }
+    if let Some(content_range) = plan.content_range.as_deref() {
+        response.insert_header("content-range", content_range)?;
+    }
+    crate::headers::apply_response_policy(&mut response, response_policy)?;
 
-    if send_body {
-        session
-            .write_response_header(Box::new(response), false)
-            .await?;
-        let body = std::fs::read(&file.path).or_err(InternalError, "failed to read static file")?;
-        session
-            .write_response_body(Some(bytes::Bytes::from(body)), true)
-            .await?;
-    } else {
+    if matches!(plan.body, StaticResponseBody::None) {
         session
             .write_response_header(Box::new(response), true)
             .await?;
+    } else {
+        session
+            .write_response_header(Box::new(response), false)
+            .await?;
+        let body = read_static_body(file, plan.body)
+            .or_err(InternalError, "failed to read static file")?;
+        session.write_response_body(Some(body), true).await?;
     }
 
     Ok(())
 }
 
+fn response_body(method: &str, body: StaticResponseBody) -> StaticResponseBody {
+    if method == "HEAD" {
+        StaticResponseBody::None
+    } else {
+        body
+    }
+}
+
+fn response_bytes(method: &str, bytes: u64) -> u64 {
+    if method == "HEAD" { 0 } else { bytes }
+}
+
+fn static_etag(file: &StaticFile) -> String {
+    let (seconds, nanos) = file
+        .modified
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| (duration.as_secs(), duration.subsec_nanos()))
+        .unwrap_or((0, 0));
+
+    format!("W/\"{:x}-{seconds:x}-{nanos:x}\"", file.len)
+}
+
+fn etag_not_modified(if_none_match: Option<&str>, etag: &str) -> bool {
+    let Some(value) = if_none_match else {
+        return false;
+    };
+
+    value
+        .split(',')
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || weak_etag_value(candidate) == weak_etag_value(etag))
+}
+
+fn weak_etag_value(value: &str) -> &str {
+    value.strip_prefix("W/").unwrap_or(value)
+}
+
+fn modified_since_not_modified(
+    modified: Option<SystemTime>,
+    if_modified_since: Option<&str>,
+) -> bool {
+    let (Some(modified), Some(if_modified_since)) = (modified, if_modified_since) else {
+        return false;
+    };
+    let Ok(if_modified_since) = httpdate::parse_http_date(if_modified_since) else {
+        return false;
+    };
+
+    let modified_seconds = modified
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let requested_seconds = if_modified_since
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+
+    modified_seconds <= requested_seconds
+}
+
+fn parse_single_byte_range(range: &str, file_len: u64) -> Option<(u64, u64)> {
+    let range = range.trim();
+    let range = range.strip_prefix("bytes=")?;
+    if range.contains(',') || file_len == 0 {
+        return None;
+    }
+
+    let (start, end) = range.split_once('-')?;
+    if start.is_empty() {
+        let suffix_len = end.parse::<u64>().ok()?;
+        if suffix_len == 0 {
+            return None;
+        }
+        let len = suffix_len.min(file_len);
+        return Some((file_len - len, len));
+    }
+
+    let start = start.parse::<u64>().ok()?;
+    if start >= file_len {
+        return None;
+    }
+
+    let end = if end.is_empty() {
+        file_len - 1
+    } else {
+        end.parse::<u64>().ok()?.min(file_len - 1)
+    };
+
+    if end < start {
+        return None;
+    }
+
+    Some((start, end - start + 1))
+}
+
+fn if_range_allows_range(modified: Option<SystemTime>, etag: &str, if_range: Option<&str>) -> bool {
+    let Some(if_range) = if_range.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+
+    if if_range.starts_with('"') {
+        return !etag.starts_with("W/") && if_range == etag;
+    }
+
+    modified_since_not_modified(modified, Some(if_range))
+}
+
+#[cfg(feature = "proxy")]
+fn read_static_body(file: &StaticFile, body: StaticResponseBody) -> io::Result<bytes::Bytes> {
+    match body {
+        StaticResponseBody::None => Ok(bytes::Bytes::new()),
+        StaticResponseBody::Full => {
+            if file.len > MAX_STATIC_BUFFERED_BODY_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "static file exceeds buffered response limit",
+                ));
+            }
+            let mut reader = open_static_body_file(file)?;
+            let capacity = usize::try_from(file.len).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "static file too large")
+            })?;
+            let mut body = Vec::with_capacity(capacity);
+            let mut bounded_reader = reader.by_ref().take(file.len.saturating_add(1));
+            bounded_reader.read_to_end(&mut body)?;
+            if body.len() as u64 != file.len {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "static file changed during body read",
+                ));
+            }
+            Ok(bytes::Bytes::from(body))
+        }
+        StaticResponseBody::Range { start, len } => {
+            if len > MAX_STATIC_BUFFERED_BODY_BYTES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "static range exceeds buffered response limit",
+                ));
+            }
+            let len = usize::try_from(len).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "static range too large")
+            })?;
+            let mut reader = open_static_body_file(file)?;
+            reader.seek(io::SeekFrom::Start(start))?;
+            let mut body = vec![0; len];
+            reader.read_exact(&mut body)?;
+            Ok(bytes::Bytes::from(body))
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
+    let metadata = std::fs::symlink_metadata(&file.path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "static body path is not a regular file",
+        ));
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NOFOLLOW);
+
+    let file_handle = options.open(&file.path)?;
+    let metadata = file_handle.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "static body handle is not a regular file",
+        ));
+    }
+    if metadata.len() != file.len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "static file changed before body read",
+        ));
+    }
+
+    Ok(file_handle)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::config::WebConfig;
 
-    use super::{ResolveResult, StaticFileServer};
+    use super::{
+        ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions, StaticResponseBody,
+        parse_single_byte_range, plan_static_response,
+    };
 
     #[test]
     fn resolves_index_file() {
@@ -221,6 +588,51 @@ mod tests {
         assert_eq!(server.resolve("/.env").unwrap(), ResolveResult::Forbidden);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_static_root() {
+        let target = TestDir::new("root-symlink-target");
+        let root = std::env::temp_dir().join(format!(
+            "fluxheim-web-test-root-symlink-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::os::unix::fs::symlink(target.path(), &root).unwrap();
+
+        let error = StaticFileServer::from_config(&WebConfig {
+            root: Some(root.clone()),
+            index_files: vec!["index.html".to_owned()],
+            deny_dotfiles: true,
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        let _ = fs::remove_file(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_static_root_below_symlinked_directory() {
+        let dir = TestDir::new("root-parent-symlink");
+        let real = dir.path().join("real");
+        let linked = dir.path().join("linked");
+        fs::create_dir_all(real.join("public")).unwrap();
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+
+        let error = StaticFileServer::from_config(&WebConfig {
+            root: Some(linked.join("public")),
+            index_files: vec!["index.html".to_owned()],
+            deny_dotfiles: true,
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("symlinked directory"));
+    }
+
     #[test]
     fn blocks_symlink_escape() {
         #[cfg(unix)]
@@ -235,6 +647,266 @@ mod tests {
 
             assert_eq!(server.resolve("/link").unwrap(), ResolveResult::NotFound);
         }
+    }
+
+    #[test]
+    fn rejects_static_symlinks_inside_root() {
+        #[cfg(unix)]
+        {
+            let root = TestDir::new("inside-symlink");
+            fs::create_dir_all(root.path().join("real")).unwrap();
+            fs::write(root.path().join("real").join("asset.txt"), "ok").unwrap();
+            std::os::unix::fs::symlink(
+                root.path().join("real").join("asset.txt"),
+                root.path().join("asset-link.txt"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(root.path().join("real"), root.path().join("dir-link"))
+                .unwrap();
+
+            let server = server(root.path());
+
+            assert_eq!(
+                server.resolve("/asset-link.txt").unwrap(),
+                ResolveResult::NotFound
+            );
+            assert_eq!(
+                server.resolve("/dir-link/asset.txt").unwrap(),
+                ResolveResult::NotFound
+            );
+        }
+    }
+
+    #[test]
+    fn plans_static_etag_revalidation() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = static_file(42, Some(modified));
+        let first = plan_static_response(&file, "GET", StaticRequestConditions::default());
+
+        assert_eq!(first.status, 200);
+        assert_eq!(first.content_length, Some(42));
+        assert_eq!(first.response_body_bytes, 42);
+
+        let revalidated = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_none_match: Some(&first.etag),
+                ..StaticRequestConditions::default()
+            },
+        );
+
+        assert_eq!(revalidated.status, 304);
+        assert_eq!(revalidated.content_length, None);
+        assert_eq!(revalidated.body, StaticResponseBody::None);
+        assert_eq!(revalidated.response_body_bytes, 0);
+    }
+
+    #[test]
+    fn plans_static_modified_since_revalidation() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = static_file(42, Some(modified));
+        let header = httpdate::fmt_http_date(modified);
+        let plan = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_modified_since: Some(&header),
+                ..StaticRequestConditions::default()
+            },
+        );
+
+        assert_eq!(plan.status, 304);
+        assert_eq!(plan.body, StaticResponseBody::None);
+    }
+
+    #[test]
+    fn plans_static_single_byte_ranges() {
+        let file = static_file(100, None);
+
+        let bounded = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                range: Some("bytes=10-19"),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(bounded.status, 206);
+        assert_eq!(
+            bounded.body,
+            StaticResponseBody::Range { start: 10, len: 10 }
+        );
+        assert_eq!(bounded.content_length, Some(10));
+        assert_eq!(bounded.content_range.as_deref(), Some("bytes 10-19/100"));
+        assert_eq!(bounded.response_body_bytes, 10);
+
+        let suffix = plan_static_response(
+            &file,
+            "HEAD",
+            StaticRequestConditions {
+                range: Some("bytes=-5"),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(suffix.status, 206);
+        assert_eq!(suffix.body, StaticResponseBody::None);
+        assert_eq!(suffix.content_length, Some(5));
+        assert_eq!(suffix.response_body_bytes, 0);
+    }
+
+    #[test]
+    fn rejects_invalid_static_ranges() {
+        assert_eq!(parse_single_byte_range("bytes=100-200", 100), None);
+        assert_eq!(parse_single_byte_range("bytes=20-10", 100), None);
+        assert_eq!(parse_single_byte_range("bytes=0-1,4-5", 100), None);
+        assert_eq!(parse_single_byte_range("items=0-1", 100), None);
+
+        let file = static_file(100, None);
+        let plan = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                range: Some("bytes=100-200"),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(plan.status, 416);
+        assert_eq!(plan.content_length, Some(0));
+        assert_eq!(plan.content_range.as_deref(), Some("bytes */100"));
+        assert_eq!(plan.response_body_bytes, 0);
+    }
+
+    #[test]
+    fn request_cache_control_can_force_static_refresh() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = static_file(42, Some(modified));
+        let first = plan_static_response(&file, "GET", StaticRequestConditions::default());
+
+        let cache_control = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_none_match: Some(&first.etag),
+                cache_control: Some("max-age = 0"),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(cache_control.status, 200);
+        assert_eq!(cache_control.body, StaticResponseBody::Full);
+
+        let pragma = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_none_match: Some(&first.etag),
+                pragma: Some("no-cache"),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(pragma.status, 200);
+        assert_eq!(pragma.body, StaticResponseBody::Full);
+    }
+
+    #[test]
+    fn if_range_controls_static_range_responses() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = static_file(100, Some(modified));
+        let fresh_date = httpdate::fmt_http_date(modified + std::time::Duration::from_secs(1));
+        let stale_date = httpdate::fmt_http_date(modified - std::time::Duration::from_secs(1));
+
+        let fresh = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                range: Some("bytes=10-19"),
+                if_range: Some(&fresh_date),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(fresh.status, 206);
+        assert_eq!(fresh.body, StaticResponseBody::Range { start: 10, len: 10 });
+
+        let stale = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                range: Some("bytes=10-19"),
+                if_range: Some(&stale_date),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(stale.status, 200);
+        assert_eq!(stale.body, StaticResponseBody::Full);
+        assert_eq!(stale.content_range, None);
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn rejects_symlink_swap_before_static_body_read() {
+        let root = TestDir::new("body-symlink-swap");
+        let outside = TestDir::new("body-symlink-outside");
+        fs::write(root.path().join("index.html"), "ok").unwrap();
+        fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+
+        let server = server(root.path());
+        let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
+            panic!("expected static file")
+        };
+        fs::remove_file(&file.path).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret.txt"), &file.path).unwrap();
+
+        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn reads_static_full_body_exactly() {
+        let root = TestDir::new("body-full-exact");
+        fs::write(root.path().join("index.html"), "ok").unwrap();
+
+        let server = server(root.path());
+        let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
+            panic!("expected static file")
+        };
+
+        let body = super::read_static_body(&file, StaticResponseBody::Full).unwrap();
+
+        assert_eq!(body, bytes::Bytes::from_static(b"ok"));
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn refuses_static_full_body_over_buffer_limit() {
+        let file = StaticFile {
+            path: std::path::PathBuf::from("/tmp/fluxheim-too-large-static"),
+            mime: "application/octet-stream".to_owned(),
+            len: super::MAX_STATIC_BUFFERED_BODY_BYTES + 1,
+            modified: None,
+        };
+
+        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn rejects_size_change_before_static_body_read() {
+        let root = TestDir::new("body-size-change");
+        fs::write(root.path().join("index.html"), "ok").unwrap();
+
+        let server = server(root.path());
+        let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
+            panic!("expected static file")
+        };
+        fs::write(&file.path, "changed").unwrap();
+
+        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     struct TestDir {
@@ -274,5 +946,14 @@ mod tests {
         })
         .unwrap()
         .unwrap()
+    }
+
+    fn static_file(len: u64, modified: Option<SystemTime>) -> StaticFile {
+        StaticFile {
+            path: PathBuf::from("/tmp/fluxheim-static-test"),
+            mime: "text/plain".to_owned(),
+            len,
+            modified,
+        }
     }
 }

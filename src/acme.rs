@@ -221,6 +221,7 @@ mod tests {
             },
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
+            headers: crate::config::VhostHeaderPolicyConfig::default(),
             web: WebConfig::default(),
         }]);
 
@@ -342,6 +343,7 @@ mod tests {
             },
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
+            headers: crate::config::VhostHeaderPolicyConfig::default(),
             web: WebConfig::default(),
         }
     }

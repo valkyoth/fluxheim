@@ -21,11 +21,27 @@ Feature-reduced builds keep the binary small and reduce dependency surface:
 ```bash
 cargo build --release --no-default-features --features proxy
 cargo build --release --no-default-features --features proxy,load-balancer
-cargo build --release --no-default-features --features web
+cargo build --release --no-default-features --features profile-load-balancer
 ```
 
-TLS backends are mutually exclusive. The default `tls` feature selects
-`tls-rustls`.
+The default build enables `proxy`, `web`, `cache`, `tls-rustls`, and
+`security`. Cargo does not have a separate `--group` flag, so Fluxheim exposes
+grouped build profiles as normal feature aliases such as `profile-core`,
+`profile-static-site`, `profile-reverse-proxy`, `profile-cache-server`,
+`profile-load-balancer`, `profile-observability`, and `profile-privacy`.
+
+TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
+`tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls` is the default and
+recommended backend.
+
+See [Feature Matrix](features.md) for the complete feature/profile list.
+
+For package scripts or custom CI that accept user-provided feature strings, run
+the feature preflight before invoking Cargo:
+
+```bash
+scripts/validate-features.sh proxy,web,tls-rustls
+```
 
 ## Rootless Podman Image
 
@@ -51,6 +67,18 @@ Build a smaller proxy-only binary:
 podman build \
   --build-arg FLUXHEIM_FEATURES=proxy \
   -t fluxheim:proxy \
+  -f Containerfile .
+```
+
+Build a zero-retention privacy image. The smoke script automatically uses
+`examples/privacy.toml` for `profile-privacy`, but explicit builds should pass
+the matching config:
+
+```bash
+podman build \
+  --build-arg FLUXHEIM_FEATURES=profile-privacy \
+  --build-arg FLUXHEIM_CONFIG=examples/privacy.toml \
+  -t fluxheim:privacy \
   -f Containerfile .
 ```
 

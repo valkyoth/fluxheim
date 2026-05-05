@@ -14,16 +14,24 @@ Pingora static web server and reverse proxy that can safely run small sites and
 origin frontends:
 
 - vhost routing with static web serving and single-upstream proxying;
+- cache module compiled by default but disabled unless configured;
 - static/bought-certificate TLS with rustls as the default backend;
 - strict header/body limits and basic secure header policy;
 - release checks, license checks, and rootless container packaging.
 
 The near-term focus is hardening the already-working baseline rather than
 expanding into large research features. ACME runtime, SNI certificate selection,
-load balancing, cache, admin snapshots, metrics, Sentinel Mesh/WireGuard,
+load balancing, admin snapshots, metrics, Sentinel Mesh/WireGuard,
 stale-while-revalidate, and persistent cache indexing remain important, but
 they should graduate after the `1.0` stable core according to the versioning
 plan.
+
+Future differentiating features should lean into infrastructure problems that
+are hard to solve safely with external glue: cluster-wide state, identity-aware
+routing, AI-aware request controls, traffic mirroring, and encrypted
+inter-node transport. These are not `1.0` items. Each one needs an explicit
+compile-time feature, a documented threat model, redaction/privacy rules, and
+failure-mode tests before it can move from research to beta.
 
 PHP execution is explicitly post-MVP application-server work. It must stay
 disabled by default and compile only through opt-in feature flags because PHP
@@ -55,9 +63,19 @@ These are realistic additions to implement across the stable core and early
      Pingora process upgrade.
 
 2. **Access And Error Logging**
-   - Add typed access-log config with secure defaults.
+   - Add typed access-log config with secure defaults. Initial
+     `logging.access.enabled` support is implemented.
+   - Apply `logging.level` and `logging.format` during startup through
+     `env_logger`, while still letting `RUST_LOG` override the configured
+     default filter. Runtime log level/format changes require a process
+     upgrade.
    - Emit structured request logs from the Pingora `logging` hook with method,
-     host/vhost, path, status, bytes when available, request id, and latency.
+     host/vhost, query-free path, status, request ID, request body bytes seen,
+     response body bytes seen, error flag, and latency. Initial
+     stdout/stderr-compatible JSON event emission is implemented through the
+     existing `log` stack and is compiled out in `privacy-mode`.
+   - Broaden response byte accounting if later response paths bypass Pingora's
+     response body filter or static file accounting.
    - Keep log sinks simple at first: stderr/stdout and optional file path.
    - Implement the staged structured logging plan in
      [Logging Architecture](docs/logging-architecture.md).
@@ -73,14 +91,56 @@ These are realistic additions to implement across the stable core and early
      fallback.
    - Redact secrets by default: authorization headers, cookies, admin tokens,
      ACME/EAB secrets, and configured sensitive fields.
+   - Add optional OpenTelemetry tracing as a separate observability module.
+     Architecture and security plan documented in
+     [OpenTelemetry Tracing](docs/opentelemetry-tracing.md).
+   - Tracing must be compile-time gated and disabled by default. Planned
+     features:
+     - `otel-tracing`: W3C Trace Context propagation, trace-log correlation,
+       and internal request spans.
+     - `otel-otlp`: optional OTLP exporter to a local collector.
+   - Start with propagation-only support: extract valid `traceparent`, generate
+     a trace ID when absent, inject context into upstream requests, and include
+     trace IDs in structured logs when logging is enabled.
+   - Add spans after propagation is stable: vhost routing, request filtering,
+     auth request, cache lookup/store, upstream selection/connect/response,
+     static file reads, and future body filters.
+   - Add sampling before export is marked beta: probabilistic sampling for
+     normal traffic, optional all-`5xx` sampling, and latency-aware sampling for
+     slow requests.
+   - OTLP export must run through bounded background queues, expose exporter
+     health, redact attributes, and never block request workers when the
+     collector is down.
+   - Tracing attributes must be low-cardinality and redacted: use vhost, route,
+     status class, cache tier, upstream pool, and policy names; avoid raw
+     queries, cookies, authorization values, bodies, and arbitrary path labels.
+   - `privacy-mode` should reject tracing/export features unless a future
+     strictly propagation-only privacy design is written and tested.
 
 3. **Header Policy**
    - Add configurable upstream forwarding headers:
      `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, and
-     standardized `Forwarded`.
+     standardized `Forwarded`. Implemented globally for proxied requests
+     through `[headers.request]`; spoofable inbound client-IP headers are
+     stripped by default, Fluxheim replaces `X-Forwarded-For` from the observed
+     peer address, and RFC `Forwarded` remains opt-in.
    - Add configurable response hardening headers for static/proxied responses:
      HSTS, CSP, `X-Content-Type-Options`, frame policy, and referrer policy.
+     Implemented globally for proxied and static responses through
+     `[headers.response]`; HSTS and CSP are opt-in, while `nosniff`, frame
+     denial, and `no-referrer` are defaulted.
+   - Add generic header mutation blocks for both request and response stages:
+     `unset`, `set`, and `append`. Implemented globally under
+     `[headers.request]` and `[headers.response]` so operators can hide version
+     headers such as `Server`/`X-Powered-By`, add CORS/cache headers, append
+     `Vary`/`Set-Cookie`, or set proxy marker headers.
+   - Add per-vhost header overlays. Implemented under
+     `[vhosts.headers.request]` and `[vhosts.headers.response]`; vhosts inherit
+     global headers and can override booleans/modes or add more
+     `unset`/`set`/`append` mutations.
    - Make trusted-proxy handling explicit before accepting client IP headers.
+     Implemented as `server.trusted_proxies`; append mode preserves inbound
+     `X-Forwarded-For` only when the direct peer matches a configured IP/CIDR.
 
 4. **Modern Protocol Focus**
    - Keep normal Fluxheim ingress focused on modern, strictly parsed HTTP:
@@ -94,9 +154,14 @@ These are realistic additions to implement across the stable core and early
 5. **Request Body Streaming Limits**
    - Keep current `Content-Length` enforcement.
    - Add streaming byte accounting for chunked/unknown-length bodies so request
-     body limits cannot be bypassed.
+     body limits cannot be bypassed. Implemented in Pingora's
+     `request_body_filter`; every proxied body chunk is counted against
+     `server.limits.max_request_body_bytes` and over-limit streams fail with
+     `413`.
    - Add focused tests for chunked uploads, oversized streaming bodies, and
-     normal uploads.
+     normal uploads. Initial pure limit-counter tests cover exact-limit,
+     over-limit, and saturating counter behavior; end-to-end upload tests
+     remain future work.
 
 6. **Load-Balancing Policy Options**
    - Keep round-robin as the stable default.
@@ -113,7 +178,9 @@ These are realistic additions to implement across the stable core and early
 
 8. **Zero-Retention Privacy Build Profile**
    - Add a compile-time optional privacy profile for static web serving and
-     reverse proxying with no application-level request retention.
+     reverse proxying with no application-level request retention. Initial
+     `privacy-mode` feature is implemented and covered by the release check
+     script.
    - Architecture and security plan documented in
      [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md).
    - Intended build shape:
@@ -125,12 +192,14 @@ These are realistic additions to implement across the stable core and early
      requires them. The guarantee is no Fluxheim application persistence of
      request logs, IP addresses, cookies, user agents, request IDs, or paths.
    - Privacy mode must not add `X-Forwarded-For`, `Forwarded`, or similar
-     client-IP forwarding headers to upstreams. Existing incoming forwarding
-     headers should be stripped unless explicitly allowed by a non-privacy
-     build.
+     client-IP forwarding headers to upstreams. Implemented for the proxy
+     request header policy: incoming forwarding headers are stripped even if
+     config asks to synthesize forwarding headers.
    - Add release checks proving privacy builds do not compile metrics/logging
      exporters and add tests that request handling does not emit or persist
-     client-identifying fields.
+     client-identifying fields. Initial compile/test coverage exists for
+     `proxy,web,tls-rustls,privacy-mode`; exporter absence checks remain future
+     work once logging exporters exist.
 
 ## Configuration Model
 
@@ -163,6 +232,36 @@ max_request_header_bytes = "64KiB"
 max_uri_bytes = "8KiB"
 max_request_headers = 100
 max_request_body_bytes = "16MiB"
+
+[headers.request]
+enabled = true
+strip_inbound_client_ip_headers = true
+x_forwarded_for = "replace"
+x_forwarded_host = true
+x_forwarded_proto = true
+forwarded = false
+unset = ["x-powered-by"]
+
+[headers.request.set]
+x-proxy-by = "Fluxheim"
+
+[headers.request.append]
+via = "fluxheim"
+
+[headers.response]
+enabled = true
+strict_transport_security = "max-age=31536000; includeSubDomains"
+content_security_policy = "default-src 'self'"
+x_content_type_options = "nosniff"
+x_frame_options = "DENY"
+referrer_policy = "no-referrer"
+unset = ["server", "x-powered-by"]
+
+[headers.response.set]
+cache-control = "public, max-age=60"
+
+[headers.response.append]
+vary = ["Accept-Encoding"]
 
 [tls]
 enabled = true
@@ -260,6 +359,8 @@ without parsing text fixtures for every module.
    - Index files.
    - MIME detection.
    - `GET` and `HEAD` support.
+   - Static `ETag`, `If-None-Match`, `If-Modified-Since`, and single
+     `Range`/`Content-Range` response planning. Implemented.
    - Traversal, dotfile, and symlink escape tests.
    - Pingora does not currently provide a ready-made static file server module.
      Continue using Fluxheim's checked file resolver on top of Pingora sessions.
@@ -372,6 +473,43 @@ without parsing text fixtures for every module.
      admission.
    - Pingora `HttpCache` storage admission. Implemented for eligible image
      requests with origin-provided freshness metadata.
+   - Full cache-header semantics. Planned as a required cache-pack hardening
+     track before cache is called complete:
+     - response headers: `Cache-Control`, `Expires`, `ETag`,
+       `Last-Modified`, `Vary`, `Age`, and `Accept-Ranges`;
+     - request headers: `If-None-Match`, `If-Modified-Since`,
+       `Cache-Control`, `Pragma`, `Range`, and `If-Range`;
+     - static responses should honor conditional requests, forced
+       revalidation, range validation, explicit no-store/no-cache policy, and
+       operator-configured browser/CDN headers. Implemented for static
+       `If-None-Match`, `If-Modified-Since`, request `Cache-Control`,
+       `Pragma`, single `Range`, and `If-Range`;
+     - proxied cache responses should preserve origin validators and freshness
+       metadata, emit correct `Age` behavior on hits, respect request
+       revalidation controls, and avoid caching when origin/client directives
+       forbid it. Implemented conservatively for request `Cache-Control:
+       no-cache`, `Cache-Control: no-store`, `Cache-Control: max-age=0`, and
+       `Pragma: no-cache` by bypassing Fluxheim cache admission until full
+       proxy revalidation is implemented. Pingora's cache pipeline already
+       injects `Age` for stored-response hits and applies downstream
+       conditional/range handling when cache is enabled; Fluxheim tests still
+       need an end-to-end cached-hit assertion around those Pingora behaviors;
+     - `Vary` must be part of the cache-key strategy before content
+       negotiation, compression, image filtering, or media variants are marked
+       stable. Implemented for Pingora cache variance: repeated `Vary` headers
+       are normalized, request variant headers are hashed into the variance
+       key, and `Vary: *`, malformed, oversized, or excessive `Vary` headers
+       are rejected from cache admission. Sensitive `Vary` fields such as
+       `Cookie`, `Authorization`, and `Proxy-Authorization` are also rejected
+       to avoid per-user cache variants;
+     - `Set-Cookie` responses must not be stored in the shared image cache.
+       Implemented: cache admission rejects responses carrying `Set-Cookie`;
+     - proxied image-cache admission should validate the origin response, not
+       only the request path. Implemented: shared image-cache admission is
+       limited to `200 OK` responses with an `image/*` `Content-Type`, and
+       rejects missing/non-image content types, redirects, and errors;
+     - CDN-facing headers should be user-configurable through header policy and
+       documented examples, not hardcoded globally.
    - Request collapsing. Implemented for the memory tier with Pingora
      `CacheLock`.
    - Oversized memory admission refusal. Implemented: objects above
@@ -391,16 +529,57 @@ without parsing text fixtures for every module.
    - HTTP cache semantics.
    - Stale-while-revalidate.
    - Purge/admin API. Implemented for protected single-key invalidation through
-     `POST /_fluxheim/cache/purge` and same-host bulk exact invalidation
-     through `POST /_fluxheim/cache/purge-bulk`; tag/prefix purge is planned
-     after a cache index lands.
+     `POST /_fluxheim/cache/purge` and same-host bulk invalidation through
+     `POST /_fluxheim/cache/purge-bulk`. Purge removes all stored `Vary`
+     variants for the selected primary cache identity in memory and disk tiers;
+     tag/prefix purge is planned after a cache index lands.
    - Cache admin status. Implemented through protected
      `GET /_fluxheim/cache/status` with aggregate and per-vhost memory/disk
      counters plus hit, miss, store, refused-store, and purge activity.
    - Cache activity reset. Implemented through protected
      `POST /_fluxheim/cache/activity/reset` without clearing cached objects.
 
-7. **Metrics**
+7. **Future Optional Image Filter**
+   - Architecture and security plan documented in
+     [Image Filter](docs/image-filter.md).
+   - Image filtering must be optional, compile-time gated, and disabled by
+     default. Planned features:
+     - `image-filter`: shared config, eligibility checks, metadata reporting,
+       transform pipeline, and cache-key integration.
+     - `image-filter-webp`: WebP output/input support after codec review.
+     - `image-filter-avif`: AVIF output/input support as beta after codec
+       performance and maintenance review.
+   - Initial transformations:
+     validate image type, report metadata, resize, crop, rotate by
+     `90`/`180`/`270`, strip metadata by default, and set bounded JPEG/WebP
+     quality.
+   - Supported input formats should start with JPEG, PNG, GIF, and WebP. GIF
+     animation handling must be explicit: reject, first frame only, or preserve
+     only when the selected codec safely supports animation.
+   - The module must enforce hard resource limits before and during decode:
+     input bytes, decoded pixels, output bytes, width/height, timeout, and
+     per-vhost/global transform concurrency.
+   - Transform policies must be explicit per vhost or route. Do not process
+     admin, metrics, ACME, PHP, CGI, legacy HTTP, or arbitrary binary
+     responses.
+   - Transformed variants need cache isolation by vhost, source identity,
+     policy version, dimensions, crop/rotate settings, output format, quality,
+     and normalized `Accept` bucket.
+   - Prefer WebP only when the client advertises support and the vhost policy
+     allows it. AVIF remains beta until resource use and codec maintenance are
+     proven.
+   - Security baseline:
+     strip EXIF/GPS/comment metadata by default, reject malformed/oversized
+     files safely, do not log image bytes or sensitive source URLs, keep FFI
+     codecs behind separate feature flags, and require license/advisory review
+     for codec dependencies.
+   - Exit criteria before beta:
+     unsupported-format tests, decode-bomb tests, output-dimension tests,
+     metadata stripping tests, WebP negotiation tests, cache-key isolation
+     tests, timeout/concurrency tests, and default/privacy build absence
+     checks.
+
+8. **Metrics**
    - Compile-time `metrics` module. Implemented.
    - Typed metrics listener config. Implemented with secure defaults:
      disabled by default, loopback listener, and loopback enforcement before
@@ -435,7 +614,7 @@ without parsing text fixtures for every module.
      request workers. Failed pushes keep metrics available locally and expose
      exporter health through Prometheus/admin status.
 
-8. **Future Optional WAF Support**
+9. **Future Optional WAF Support**
    - Architecture and security plan documented in
      [WAF Architecture](docs/waf-architecture.md).
    - WAF support must be optional, compile-time gated, and disabled by default.
@@ -472,7 +651,7 @@ without parsing text fixtures for every module.
      rules through snapshots, and default builds proving WAF is absent unless
      explicitly compiled.
 
-9. **Future Optional Cloudflare Origin Support**
+10. **Future Optional Cloudflare Origin Support**
    - Architecture and security plan documented in
      [Cloudflare Origin Support](docs/cloudflare-origin-support.md).
    - Cloudflare support must be optional, compile-time gated, and disabled by
@@ -510,7 +689,7 @@ without parsing text fixtures for every module.
      restoration, token redaction, Origin CA CSR validation, and default builds
      proving Cloudflare support is absent unless explicitly compiled.
 
-10. **Zero-Retention Privacy Mode Compatibility**
+11. **Zero-Retention Privacy Mode Compatibility**
    - Architecture and security plan documented in
      [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md).
    - Privacy mode is not a normal runtime toggle. It should be a compile-time
@@ -535,7 +714,7 @@ without parsing text fixtures for every module.
      the OS, container runtime, firewall, Cloudflare/CDN, and upstream
      applications can still log traffic unless configured separately.
 
-11. **Future PHP Runtime Support**
+12. **Future PHP Runtime Support**
    - Architecture and security plan documented in
      [PHP Runtime Support](docs/php-runtime-support.md).
    - PHP must be optional and compile-time gated. Planned mutually exclusive
@@ -576,7 +755,7 @@ without parsing text fixtures for every module.
    - PHP runtime changes should be process-upgrade changes, not snapshot-only
      reloads, until each runtime proves safe reload semantics.
 
-12. **Future Perl CGI Support**
+13. **Future Perl CGI Support**
    - Architecture and security plan documented in
      [Perl CGI Support](docs/perl-cgi-support.md).
    - Perl CGI must be optional and compile-time gated. Planned features:
@@ -607,7 +786,7 @@ without parsing text fixtures for every module.
    - CGI runtime changes should be process-upgrade changes until process pool,
      sandbox, and per-vhost policy reload semantics are proven safe.
 
-13. **Future Legacy Static HTTP Support**
+14. **Future Legacy Static HTTP Support**
    - Architecture and security plan documented in
      [Legacy Static HTTP Support](docs/legacy-static-http.md).
    - Legacy protocol support must be compile-time gated, disabled by default,
@@ -635,7 +814,7 @@ without parsing text fixtures for every module.
      malformed HTTP/0.9 lines, traversal, and attempts to reach non-static
      routes.
 
-14. **Future HTTP/3 And QUIC**
+15. **Future HTTP/3 And QUIC**
    - HTTP/3 is the modern protocol direction, not a legacy-compatibility
      feature.
    - Plan as a separate future milestone after MVP hardening: evaluate Pingora
@@ -646,7 +825,256 @@ without parsing text fixtures for every module.
      strict parsing, no downgrade shortcuts, no legacy protocol fallback on
      modern listeners, and the same vhost/cache/admin isolation rules.
 
-15. **Operational Packaging**
+16. **Future Cluster-Native State**
+   - Plan as an optional compile-time module after the load-balancer,
+     metrics, admin, and security profiles are stable.
+   - Goal: let multiple Fluxheim nodes coordinate selected security and routing
+     state without requiring an external database for the first useful cases.
+   - Planned features:
+     - `cluster-state`: shared config, node identity, peer discovery, local
+       persistence, admin/metrics visibility, and compatibility checks.
+     - `cluster-gossip`: lightweight eventually consistent distribution for
+       blocklists, allowlists, health summaries, and coarse counters.
+     - `cluster-consensus`: stronger Raft-style coordination for state that
+       must not diverge, such as global rate-limit leases or active leader
+       ownership.
+   - Start with safe eventually consistent data: blocklists, drain state,
+     backend health hints, and low-risk counters. Do not start with billing,
+     authentication decisions, or hard quotas that require exact consistency.
+   - Global rate limiting should be designed as a separate capability on top of
+     cluster state. It needs explicit consistency semantics:
+     `local_only`, `eventual`, or `strict`.
+   - Security baseline:
+     every node must have a stable identity, authenticated peer transport,
+     replay protection, bounded message sizes, version negotiation, and
+     fail-closed behavior for strict policies.
+   - Privacy baseline:
+     replicated state must never contain raw paths, queries, authorization
+     headers, cookies, user agents, or client IPs unless an operator explicitly
+     enables a non-privacy profile and the field is documented.
+   - Exit criteria before beta:
+     split-brain tests, clock-skew tests, peer restart tests, message fuzzing,
+     downgrade/version mismatch tests, and release checks proving cluster code
+     is absent from default and privacy builds.
+
+17. **Future External Authorization And Identity-Aware Routing**
+   - Architecture and security plan for external authorization requests is
+     documented in [External Authorization Request](docs/auth-request.md).
+   - Plan as optional `auth-request` and `identity` module families after
+     stable admin, logging redaction, TLS, and header policy are mature.
+   - Goal: let Fluxheim ask a trusted authorization service for an access
+     decision, and later verify user or service identity at the edge and route
+     or annotate requests based on explicit policy rather than blindly trusting
+     inbound headers.
+   - Planned features:
+     - `auth-request`: per-vhost/per-route external authorization probe before
+       static serving or proxying.
+     - `identity-oidc`: OIDC discovery, JWKS fetch/cache, JWT verification,
+       issuer/audience validation, and key rotation.
+     - `identity-oauth2`: OAuth2 token introspection for providers that require
+       online validation.
+     - `identity-policy`: per-vhost route decisions based on verified claims,
+       groups, roles, tenant IDs, or subscription tier.
+   - Authorization decision contract:
+     `2xx` from the auth service allows the original request, `401` and `403`
+     deny with controlled response handling, and every other status is an auth
+     service error.
+   - External auth must be fail-closed by default. `fail_open` should require
+     explicit per-vhost config and emit a security event.
+   - Auth probes should be header-only by default. Body forwarding requires
+     explicit opt-in, small body caps, content-type allow-lists, redaction, and
+     independent timeout budgets.
+   - Headers copied to the auth service, copied from the auth service to the
+     upstream, or copied to the client must be allow-listed. Fluxheim must strip
+     spoofable identity and forwarding headers before making decisions.
+   - Optional auth-decision caching must be isolated by vhost, route, method,
+     identity/session fingerprint, and policy version. Positive and negative
+     TTLs must be separate and bounded.
+   - Header injection must be deny-by-default and namespaced. Fluxheim should
+     strip inbound identity headers before adding verified replacement headers.
+   - Security baseline:
+     auth backend TLS verification by default, optional mTLS, strict auth
+     backend response-size limits, loop prevention, strict
+     issuer/audience/expiry checks, algorithm allow-lists, bounded token sizes,
+     JWKS cache pinning rules, stale-key behavior, clock-skew limits, no raw
+     token logging, and explicit failure modes.
+   - Routing examples:
+     route verified admin users to an admin upstream pool, route paid tiers to
+     stronger backend pools, or deny requests before proxying when claims do
+     not match per-vhost policy.
+   - Exit criteria before beta:
+     auth allow/deny/error tests, timeout tests, response-size tests,
+     challenge-header allow-list tests, JWT confusion tests,
+     expired/revoked token tests, key rotation tests, spoofed identity-header
+     tests, recursive-auth rejection, and privacy-mode incompatibility guards.
+
+18. **Future AI Gateway**
+   - Plan as an optional compile-time module family after metrics, WAF, cache,
+     and identity foundations exist.
+   - Goal: make Fluxheim understand AI API traffic enough to control cost,
+     protect backends, and safely reuse responses where operators opt in.
+   - Planned features:
+     - `ai-gateway`: shared request classification, provider/upstream config,
+       model routing, and safety hooks.
+     - `ai-rate-limit`: token-aware rate limits such as tokens per minute,
+       output-token budget, and per-tenant quotas.
+     - `ai-semantic-cache`: opt-in semantic cache for deterministic or
+       cache-approved prompts using vector similarity with strict privacy
+       boundaries.
+     - `ai-prompt-guard`: prompt-injection and data-exfiltration scoring,
+       preferably integrated with the future WAF decision model.
+   - Start realistic:
+     implement provider-agnostic request size limits, model allow-lists, API
+     key redaction, per-vhost model routing, and token accounting for responses
+     where providers return usage metadata. Token estimation is useful as a
+     fallback but must be labeled approximate.
+   - Semantic caching is high risk and must be opt-in per vhost and per route.
+     It must never cache prompts or responses containing secrets, personal
+     data, authorization material, cookies, file uploads, tool outputs, or
+     tenant-private context unless an operator provides an explicit safe policy.
+   - Security baseline:
+     redact prompts by default in logs, cap body sizes before inspection,
+     isolate cache entries by vhost/tenant/model/policy version, and expose
+     clear cache-hit explanations for audit without storing sensitive payloads
+     in normal logs.
+   - Exit criteria before beta:
+     token-budget tests, provider metadata parsing tests, redaction tests,
+     semantic-cache isolation tests, jailbreak/prompt-guard dry-run tests, and
+     default/privacy build absence checks.
+
+19. **Future Traffic Mirroring**
+   - Plan as an optional compile-time `traffic-mirror` module after reverse
+     proxy, load balancing, metrics, privacy profiles, and request body
+     streaming limits are stable.
+   - Goal: safely shadow a bounded portion of production traffic to a test or
+     analysis upstream while the live client receives only the primary
+     response.
+   - Planned features:
+     - per-vhost and per-route mirror rules;
+     - percentage, header, identity-claim, and method based sampling;
+     - request body size caps and body redaction/transformation policies;
+     - mirror timeout budgets that cannot affect the primary request;
+     - mirror result metrics without storing sensitive request data.
+   - Never mirror by default. The operator must explicitly opt in and choose
+     what fields may be copied. Unsafe methods such as `POST`, `PUT`, `PATCH`,
+     and `DELETE` require a stronger explicit config than idempotent requests.
+   - Security baseline:
+     strip credentials by default, remove cookies unless allow-listed, cap body
+     copies, block mirrored admin paths, and forbid mirroring in
+     `privacy-mode`.
+   - Exit criteria before beta:
+     primary-response isolation tests, cancellation tests, timeout tests,
+     redaction tests, sampling distribution tests, and proof that mirror
+     failures never change the client response.
+
+20. **Future Sentinel Mesh Graduation**
+   - Keep the current Sentinel Mesh design as a research track until the
+     load-balancer, TLS reload, admin, metrics, and cluster-state foundations
+     are mature.
+   - Goal: encrypted node-to-node and edge-to-backend transport with smart
+     routing based on verified telemetry.
+   - Planned features:
+     - `sentinel-mesh`: high-level mesh config, node identity, route policy,
+       admin/metrics visibility, and health state.
+     - `sentinel-wireguard-userspace`: optional userspace WireGuard transport
+       evaluation for rootless deployments.
+     - `sentinel-telemetry`: signed backend load/health reports over the
+       encrypted channel.
+   - The first implementation should not try to be a full service mesh. Start
+     with gateway-to-backend tunnels and smart load balancing for small
+     clusters.
+   - Security baseline:
+     authenticated peers, key rotation, replay protection, route allow-lists,
+     no plaintext fallback unless explicitly configured, and clear behavior
+     when tunnel health diverges from backend HTTP health.
+   - Exit criteria before beta:
+     tunnel restart tests, wrong-peer tests, stale telemetry tests, failover
+     tests, rootless Podman smoke coverage, and default/privacy build absence
+     checks.
+
+21. **Future Programmable Media Edge**
+   - Architecture and security plan documented in
+     [Programmable Media Edge](docs/programmable-media-edge.md).
+   - Video-aware delivery must be optional, compile-time gated, and disabled by
+     default. Planned features:
+     - `media-edge`: shared media config, policy model, parser limits, route
+       integration, and metrics hooks.
+     - `media-hls`: HLS manifest parser/rewrite support.
+     - `media-dash`: DASH manifest parser/rewrite support after XML parser
+       review.
+     - `media-ssai`: dynamic manifest stitching with a trusted decision
+       service.
+     - `media-watermark`: forensic watermarking research track.
+     - `media-transmux`: edge transmuxing/packaging research track.
+   - Start with manifest intelligence, not video decoding:
+     parse HLS/DASH manifests, validate segment URLs, rewrite safe segment
+     routes, enforce manifest limits, and expose media metrics.
+   - Add segment-aware cache/routing only after cache indexing and range
+     behavior are strong enough. Cache keys must isolate vhost, asset ID,
+     representation, byte range, sequence, encryption key ID, tenant/entitlement
+     policy, and media policy version.
+   - Dynamic stitching should operate at manifest level first. Any ad or
+     personalization decision service needs strict timeouts, fail behavior,
+     redaction, and no raw user-profile logging.
+   - WASM media policy plugins are future-only and require a sandbox with CPU,
+     memory, wall-time, outbound-network, and host-call limits.
+   - Forensic watermarking should begin with safer manifest or timed-metadata
+     markers. Segment-level or bitstream-level watermarking requires reviewed
+     TS/fMP4 parsers, codec/container compatibility tests, fuzzing, and a
+     legal/privacy policy for user-identifying marks.
+   - Edge transmuxing is research. The first scope should be container
+     packaging/remuxing only, not arbitrary video transcoding, GPU scheduling,
+     or frame processing.
+   - Security baseline:
+     reject oversized/recursive/escaping manifests, never cache media keys or
+     authorization tokens, never mix personalized segments across users or
+     tenants, redact personalized URLs, keep DRM license flows out of scope
+     until separately modeled, and forbid media-edge in `privacy-mode` by
+     default.
+   - Exit criteria before beta:
+     manifest parser tests, manifest fuzzing, segment URL normalization tests,
+     media cache-key isolation tests, ad-stitch timeout/fallback tests,
+     redaction tests, metrics cardinality tests, and default/privacy build
+     absence checks.
+
+22. **Future WASM Extensibility**
+   - Architecture and security plan documented in
+     [WASM Extensibility](docs/wasm-extensibility.md).
+   - WASM support must be optional, compile-time gated, and disabled by
+     default. Planned features:
+     - `wasm`: shared runtime config, plugin loading, limits, host-call policy,
+       and lifecycle integration.
+     - `wasm-proxy-abi`: proxy-oriented ABI compatibility path.
+     - `wasm-wasi`: explicit WASI capability support for narrowly scoped
+       policy plugins.
+   - Current crate candidates checked on 2026-05-05:
+     `wasmtime 44.0.1`, `wasmtime-wasi 44.0.1`, and `proxy-wasm 0.2.4`.
+   - Start with request/response header hooks and access-control decisions.
+     Do not expose body mutation, filesystem, outbound network, process
+     spawning, cache internals, or admin APIs in the first stage.
+   - Use a reviewed proxy-oriented ABI where practical, but expose only the
+     subset Fluxheim can implement safely. Unsupported host calls must fail
+     deterministically.
+   - Every plugin needs strict resource limits:
+     module size, compiled artifact size, linear memory, fuel/instruction
+     budget, wall-time, log bytes, header mutations, synthetic response size,
+     and per-vhost concurrency.
+   - WASI capabilities must be disabled by default. Filesystem, network,
+     clocks, randomness, environment variables, and process state require
+     explicit grants and should remain unavailable for normal header/access
+     plugins.
+   - Security baseline:
+     reject symlinked plugin files/parents, hash loaded modules, version the
+     host ABI, redact secrets from host calls, prevent plugins from directly
+     controlling cache keys/routing/TLS verification, isolate traps/timeouts,
+     and reject WASM in `privacy-mode` by default.
+   - Exit criteria before beta:
+     ABI compatibility tests, header mutation tests, deny/synthetic response
+     tests, unsupported host-call tests, fuel/timeout/trap tests, capability
+     denial tests, redaction tests, plugin path hardening tests, and
+     default/privacy build absence checks.
+
+23. **Operational Packaging**
    - Rootless Podman image. Implemented with a pinned Rust 1.95.0 builder and
      non-root runtime user.
    - Rootless Podman smoke script. Implemented for image build, packaged config
