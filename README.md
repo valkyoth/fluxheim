@@ -23,17 +23,23 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 ## Status
 
-Fluxheim is under active early development. The public `1.0` target is
-intentionally narrow:
+Fluxheim is under active early development. The current `0.5.x` release line is
+the basic-sites preview:
 
 - static website hosting;
-- reverse proxying;
+- simple whole-vhost reverse proxying;
 - cache module baseline;
 - virtual hosts;
 - TLS with rustls as the default backend;
 - optional cleartext-to-HTTPS redirect;
 - strict request limits and secure defaults;
 - local and rootless Podman operation.
+
+The public `1.0` target is the first release intended to migrate Fluxheim's own
+real multi-site gateway configs. That means route-level proxy/static/redirect
+behavior, SNI certificate selection, websocket-safe proxying, per-route limits
+and timeouts, custom upstream error pages, and secure static alias/directory
+handling must be implemented and tested before `1.0.0`.
 
 Features such as load balancing, ACME automation, admin snapshots, metrics,
 WAF, Cloudflare origin support, PHP, CGI, and legacy protocols are planned as
@@ -299,7 +305,9 @@ layout for configs, TLS certificates, cache, state, logs, and static site roots.
 
 Fluxheim will not treat every planned feature as part of `1.0`.
 
-- `1.0`: stable static hosting and reverse proxy core.
+- `0.5`: basic vhosts, static HTML sites, static TLS, containers, and simple
+  whole-vhost proxying.
+- `1.0`: route-aware gateway core sufficient for the posted real site configs.
 - `1.1`: TLS policy hardening.
 - `1.2`: operational pack: logging, admin snapshots, rollback, metrics.
 - `1.3`: load balancer support.

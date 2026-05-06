@@ -5,9 +5,12 @@ not considered stable just because it compiles. A feature becomes stable only
 after it has docs, config validation, tests, release checks, and a clear
 security boundary.
 
-The main lesson from the roadmap is to avoid shipping one giant 1.0. Version
-1.0 should be a small, boring, secure web server and reverse proxy. Larger
-modules then graduate in later minor releases.
+The main lesson from the roadmap is to avoid shipping one giant 1.0. The
+`0.5.x` line is the basic-sites preview: static HTML, vhosts, static TLS,
+containers, and simple whole-vhost proxying. Version `1.0.0` should be the
+first stable gateway release that can migrate Fluxheim's own representative
+multi-site configs without losing core behavior. Larger modules then graduate
+in later minor releases.
 
 ## Versioning Rules
 
@@ -20,9 +23,11 @@ modules then graduate in later minor releases.
 
 Security fixes should be backported to the latest stable minor when practical.
 
-Every stable release must pass the stable release security and stability gate in
-`docs/release-checklist.md`. The gate grows with the release: `1.0.x` runs it
-against static hosting, reverse proxying, TLS, cache policy, headers, and
+Every public release must pass the matching release security and stability gate
+in `docs/release-checklist.md`. Preview releases may document known gaps, but
+must still pass dependency, license, static/proxy smoke, and container checks
+for the behavior they claim. Stable `1.0.x` runs the full gate against route
+routing, static hosting, reverse proxying, TLS, cache policy, headers, and
 container delivery; later minors must add the same dependency, fuzzing, DAST,
 load, TLS, and malicious-input coverage for every newly stable module.
 
@@ -117,9 +122,58 @@ Exit criteria:
 - Release checklist is complete.
 - Config validation errors are clear enough for GitHub users.
 
-### 1.0 - Stable Core
+### 0.5 - Basic Sites Preview
 
-Goal: a small stable Fluxheim release for static web hosting and reverse proxy.
+Goal: publish a truthful preview release for simple real websites.
+
+Scope:
+
+- Basic vhost routing by Host header.
+- Static HTML/CSS/JS/image/font serving from one safe web root per vhost.
+- Static TLS certificates with rustls as the default backend.
+- Global cleartext-to-HTTPS redirect.
+- Simple whole-vhost reverse proxying to one upstream.
+- Header policy, request limits, static cache headers, ETag/conditional
+  request handling, and byte ranges.
+- Rootless Podman/container examples and shutdown behavior.
+- GitHub CI, dependency/license checks, CodeQL, release notes, and docs.
+
+Known gaps:
+
+- Multiple downstream certificates selected by SNI.
+- Path/location routing.
+- Per-route redirects, proxy/static actions, body limits, and timeouts.
+- Websocket-specific upgrade handling.
+- Custom upstream error pages.
+- Static aliases and directory listing.
+- Dynamic DNS re-resolution and upstream failure policy.
+
+Exit criteria:
+
+- `scripts/stable_release_gate.sh check` or an equivalent documented preview
+  gate passes.
+- `scripts/smoke_1_0_core.sh` passes for the basic static/proxy/TLS behavior
+  it currently covers.
+- Release notes clearly say this is not the `1.0.0` gateway release.
+- The version is tagged as `v0.5.0`.
+
+### 1.0 - Gateway Core
+
+Goal: a stable Fluxheim release that can migrate the representative real
+multi-site gateway configs without requiring another front server.
+
+The target configs include:
+
+- apex plus `www` redirect hosts;
+- cleartext ACME challenge exception paths plus HTTPS redirect for everything
+  else;
+- multiple TLS certificates on the same listener;
+- whole-host proxy apps;
+- `/chat/` websocket-capable proxy routes with prefix stripping;
+- per-host and per-route body-size limits;
+- per-route upstream connect/read/send timeouts;
+- custom `502` fallback pages;
+- static alias-style repository paths, index files, and directory listing.
 
 Stable scope:
 
@@ -130,6 +184,7 @@ Stable scope:
 - Vhost routing.
 - Caddy-inspired TOML config and `conf.d` loading.
 - Static/bought certificate support.
+- SNI certificate selection for multiple configured downstream certificates.
 - Rustls as the default TLS backend.
 - Optional OpenSSL and s2n TLS builds when they pass the release matrix.
 - Optional BoringSSL TLS builds on builders with `libclang` available for
@@ -139,7 +194,18 @@ Stable scope:
   release.
 - Secure header policy.
 - Optional global cleartext-to-HTTPS redirect.
+- Declarative route layer with exact, prefix, and fallback matching.
+- Route actions for proxy, static serving, and redirects.
+- Safe route URL rewriting, including prefix stripping for proxy backends.
+- Per-route request body limits.
+- Per-route upstream connect/read/send timeout policy.
+- Websocket-safe upgrade proxying with tests.
+- Custom upstream error pages with internal-only static serving.
+- Static aliases and directory listing with traversal, symlink, dotfile, and
+  generated-output tests.
 - Request header/body limits.
+- Container DNS names that work reliably for Podman deployments, with either
+  safe startup resolution or documented/implemented re-resolution behavior.
 - Rootless Podman runtime.
 - Release/security checks.
 
@@ -150,6 +216,7 @@ Not in 1.0 stable scope:
 - Admin snapshots/rollback.
 - Prometheus metrics.
 - Advanced logging pipelines.
+- Full rewrite scripting or WASM extension hooks.
 - WAF.
 - Cloudflare automation.
 - PHP/CGI.
@@ -161,8 +228,14 @@ Exit criteria:
 - Default 1.0 binary contains only stable core modules.
 - `--no-default-features --features web` works.
 - `--no-default-features --features proxy` works.
-- Static+proxy+TLS mixed config has integration coverage through
-  `scripts/smoke_1_0_core.sh`.
+- Static+proxy+TLS mixed config has integration coverage through the stable
+  gateway smoke suite.
+- A fixture set equivalent to the six representative gateway configs validates
+  and passes local smoke tests.
+- SNI tests prove each configured host receives the intended certificate.
+- Route tests prove ACME challenge exceptions, `www` redirects, `/chat/`
+  prefix stripping, websocket upgrade proxying, error-page fallback, and static
+  alias/directory-listing behavior.
 - No known `cargo audit` advisory without documented exception.
 - `cargo deny check` passes.
 - The 1.0 security and stability launch gate in `docs/release-checklist.md`
@@ -703,7 +776,8 @@ These should not be promised in a stable minor until proven:
 
 ## What Changes In Cargo Defaults
 
-The `1.0` default feature set is intentionally narrowed to stable core only:
+The `0.5` and `1.0` default feature set is intentionally narrowed to core
+modules only:
 
 ```toml
 default = ["proxy", "web", "cache", "tls-rustls", "security"]
@@ -729,12 +803,16 @@ reaches Pingora.
 Use annotated tags:
 
 ```bash
+git tag -a v0.5.0 -m "Fluxheim 0.5.0"
+git push origin v0.5.0
+
 git tag -a v1.0.0 -m "Fluxheim 1.0.0"
 git push origin v1.0.0
 ```
 
 Patch releases should contain fixes only:
 
+- `v0.5.1`: security or bug fixes for the basic-sites preview.
 - `v1.0.1`: security or bug fixes for stable core.
 - `v1.1.1`: fixes for TLS policy hardening.
 - `v1.2.1`: fixes for operations pack.

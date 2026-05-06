@@ -46,8 +46,10 @@ scripts/release_checks.sh
 
 The wrapper runs formatting, clippy, tests, selected feature builds, example
 config validation, `cargo deny check`, `cargo audit`, and localhost smoke tests.
-It may include incubator-module smoke checks during development; the `1.0` core
-build matrix below defines what is stable release scope.
+It may include incubator-module smoke checks during development. The `0.5.x`
+preview scope is basic static/proxy/TLS behavior; the `1.0` gateway scope is
+defined in the versioning plan and must cover representative multi-site gateway
+configs before a stable tag.
 
 For the stable-release gate without incubator module checks, use:
 
@@ -55,7 +57,7 @@ For the stable-release gate without incubator module checks, use:
 scripts/stable_release_gate.sh release
 ```
 
-Run the 1.0 core localhost smoke directly when changing stable static/proxy
+Run the core localhost smoke directly when changing stable static/proxy
 behavior:
 
 ```bash
@@ -70,14 +72,14 @@ Confirm GitHub CodeQL default setup is enabled for `main`. Do not also enable an
 advanced CodeQL workflow for the same repository; GitHub rejects advanced SARIF
 uploads when default setup is active.
 
-Confirm the Rust CI workflow still runs the `1.0` core feature matrix in both
-check and release modes, plus the `scripts/smoke_1_0_core.sh` localhost smoke.
+Confirm the Rust CI workflow still runs the core feature matrix in both check
+and release modes, plus the `scripts/smoke_1_0_core.sh` localhost smoke.
 
 ## TLS And Certificate Storage
 
 - Static certificate chains and private keys are supported. Bought certificates
   remain a first-class deployment mode.
-- The 1.0 core smoke generates a temporary static certificate and proves both
+- The core smoke generates a temporary static certificate and proves both
   static and proxied vhosts over a TLS listener.
 - ACME config and renewal queue planning are implemented, but account/order and
   challenge runtime work is not release-ready yet. Do not document automated
@@ -91,11 +93,12 @@ fluxheim --config path/to/fluxheim.toml --check-tls-storage
 On Unix, private keys should be owner-only (`0600`) and ACME storage directories
 should be owner-only (`0700`).
 
-## 1.0 Core Build Matrix
+## Core Build Matrix
 
-For a `1.0.x` release, confirm the stable core binaries compile. This matrix
-intentionally excludes post-1.0 modules such as load balancing, metrics, admin,
-ACME runtime, WAF, PHP/CGI, Cloudflare automation, legacy HTTP, and WASM.
+For a `0.5.x` preview or `1.0.x` release, confirm the stable core binaries
+compile. This matrix intentionally excludes post-1.0 modules such as load
+balancing, metrics, admin, ACME runtime, WAF, PHP/CGI, Cloudflare automation,
+legacy HTTP, and WASM.
 
 ```bash
 scripts/validate-1-0-core.sh release
@@ -112,9 +115,10 @@ scripts/validate-1-0-core.sh check
 
 Passing memory-safe Rust builds is not enough for a proxy. Before every stable
 release, run this gate against the stable modules included in that release and
-record the results in the release notes. For `1.0.x`, the target is the
-static/proxy/TLS core. For later minors, include every module promoted to
-`stable` in that release.
+record the results in the release notes. For `0.5.x`, the target is the
+documented basic-sites preview. For `1.0.x`, the target is the gateway core
+needed for representative multi-site configs. For later minors, include every
+module promoted to `stable` in that release.
 
 Local checks that can be run from this repository:
 

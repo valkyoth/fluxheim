@@ -11,6 +11,14 @@ behavior when the change improves security or project direction.
 
 ### Added
 
+- Nothing yet.
+
+## 0.5.0 - Basic Sites Preview
+
+Released: 2026-05-06
+
+### Added
+
 - GitHub CI, Dependabot, CodeQL, dependency policy, and release-check scripts.
 - Feature preflight validation for mutually exclusive TLS backends and
   zero-retention privacy-mode incompatibilities.
@@ -44,6 +52,8 @@ behavior when the change improves security or project direction.
   restricted redirect statuses.
 - Wolfi, Alpine, SUSE Micro, and Debian runtime Containerfiles.
 - Container image publish workflow for GitHub Container Registry and Docker Hub.
+- RPM packaging spec for RHEL/openSUSE-style builds from vendored Cargo
+  dependencies.
 - Runtime UID/GID build args for container images, defaulting to non-root
   `65532:65532` while allowing deliberate root-runtime images.
 - Zero-retention privacy example config for `profile-privacy` builds.
@@ -91,6 +101,16 @@ behavior when the change improves security or project direction.
 - `privacy-mode` rejects access logging and cannot be combined with `cache` or
   `metrics`.
 - CodeQL uses the supported Rust `build-mode: none` setup.
+
+### Notes
+
+- This is a preview release for normal static HTML websites and simple
+  whole-vhost proxying with static TLS certificates. It is not the `1.0.0`
+  gateway release.
+- Known `1.0.0` gaps include SNI certificate selection across multiple
+  certificates, route-level proxy/static/redirect behavior, websocket-safe
+  proxying, per-route limits and timeouts, custom upstream error pages, and
+  secure static alias/directory listing behavior.
 
 ## 0.1.0 - Repository Baseline
 

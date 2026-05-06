@@ -1,15 +1,15 @@
 # Production Readiness
 
-Fluxheim is still pre-`1.0`. This page states what the first stable release is
-intended to support, what is deliberately outside the stable promise, and what
-operators should verify before using a build beyond local testing.
+Fluxheim is still pre-`1.0`. This page states what the current preview release
+is intended to support, what the first stable gateway release must support, and
+what operators should verify before using a build beyond local testing.
 
-## Stable 1.0 Target
+## 0.5 Basic-Sites Preview
 
-The `1.0` line is intentionally small:
+The `0.5.x` line is intentionally limited:
 
 - static file hosting from configured vhost roots;
-- reverse proxying to one configured upstream target;
+- simple whole-vhost reverse proxying to one configured upstream target;
 - vhost routing by exact and wildcard host names;
 - cache code compiled by default, with runtime caching disabled until a storage
   tier is configured;
@@ -22,6 +22,23 @@ The `1.0` line is intentionally small:
 - rootless Podman deployment paths and container examples;
 - local release gates for formatting, linting, tests, license policy,
   dependency advisories, core feature profiles, and localhost smoke checks.
+
+## Stable 1.0 Target
+
+The `1.0` line should be the first gateway-ready release for representative
+real multi-site configs. In addition to the `0.5.x` behavior, it must support:
+
+- SNI certificate selection across multiple configured certificates;
+- route-level exact, prefix, and fallback matching;
+- route actions for proxy, static serving, and redirects;
+- cleartext ACME challenge exception routes plus HTTPS redirect for everything
+  else;
+- apex/`www` redirect vhosts that preserve the request URI safely;
+- websocket-safe proxying and prefix stripping for routes such as `/chat/`;
+- per-route body limits and upstream connect/read/send timeouts;
+- custom upstream error pages;
+- static aliases and secure directory listing;
+- container DNS behavior suitable for local Podman deployments.
 
 ## Not Stable In 1.0
 

@@ -4,13 +4,14 @@ This roadmap is the working implementation plan. Keep it current as features
 move from design to code.
 
 Release sequencing is defined in [Versioning Plan](docs/versioning-plan.md).
-That plan keeps `1.0` intentionally small and promotes larger modules through
-later minor releases.
+That plan treats `0.5.x` as the basic-sites preview and `1.0.0` as the first
+gateway-ready release for Fluxheim's representative real multi-site configs.
+Larger modules still graduate through later minor releases.
 
 ## Current MVP Goal
 
-Fluxheim's first stable release should be a local/rootless-Podman friendly
-Pingora static web server and reverse proxy that can safely run small sites and
+Fluxheim's `0.5.x` preview should be a local/rootless-Podman friendly Pingora
+static web server and reverse proxy that can safely run small sites and simple
 origin frontends:
 
 - vhost routing with static web serving and single-upstream proxying;
@@ -19,11 +20,13 @@ origin frontends:
 - strict header/body limits and basic secure header policy;
 - release checks, license checks, and rootless container packaging.
 
-The near-term focus is hardening the already-working baseline rather than
-expanding into large research features. ACME runtime, SNI certificate selection,
-load balancing, admin snapshots, metrics, Sentinel Mesh/WireGuard,
-stale-while-revalidate, and persistent cache indexing remain important, but
-they should graduate after the `1.0` stable core according to the versioning
+The near-term focus is hardening the already-working baseline, then closing the
+`1.0.0` gateway gaps exposed by real configs: SNI certificate selection,
+path/location routing, route redirects, websocket-safe proxying, per-route body
+limits and timeouts, custom upstream error pages, static aliases, and directory
+listing. ACME runtime, load balancing, admin snapshots, metrics, Sentinel
+Mesh/WireGuard, stale-while-revalidate, and persistent cache indexing remain
+important, but they should graduate after `1.0.0` according to the versioning
 plan.
 
 After `1.0`, the first dedicated minor release should focus on TLS policy:

@@ -1,0 +1,5 @@
+d /run/fluxheim 0750 fluxheim fluxheim -
+d /var/lib/fluxheim 0750 fluxheim fluxheim -
+d /var/cache/fluxheim 0750 fluxheim fluxheim -
+d /var/log/fluxheim 0750 fluxheim fluxheim -
+d /srv/fluxheim 0755 fluxheim fluxheim -
