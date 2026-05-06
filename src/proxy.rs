@@ -1919,6 +1919,8 @@ mod tests {
         ByteSize, CacheConfig, Config, HttpsRedirectConfig, ProxyConfig, ServerConfig,
         ServerLimitsConfig, VhostConfig, WebConfig,
     };
+    #[cfg(feature = "cache")]
+    use crate::test_support::unique_temp_path;
 
     #[cfg(feature = "cache")]
     use super::request_cache_bypass;
@@ -3285,13 +3287,7 @@ mod tests {
 
     #[cfg(feature = "cache")]
     fn unique_test_cache_dir(label: &str) -> std::path::PathBuf {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-        std::env::temp_dir().join(format!(
-            "fluxheim-proxy-cache-{label}-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ))
+        unique_temp_path(label)
     }
 
     #[cfg(feature = "cache")]

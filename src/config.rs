@@ -3726,7 +3726,6 @@ mod tests {
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, Config, ConfigError,
@@ -3734,6 +3733,7 @@ mod tests {
         ServerConfig, ServerLimitsConfig, VhostConfig, VhostHeaderPolicyConfig, WebConfig,
         normalize_host, normalize_host_pattern,
     };
+    use crate::test_support::unique_temp_path;
 
     #[test]
     fn default_config_is_valid() {
@@ -6093,14 +6093,7 @@ mod tests {
 
     impl TestDir {
         fn new(label: &str) -> Self {
-            let unique = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "fluxheim-config-test-{label}-{}-{unique}",
-                std::process::id()
-            ));
+            let path = unique_temp_path(label);
             fs::create_dir_all(&path).unwrap();
             Self { path }
         }

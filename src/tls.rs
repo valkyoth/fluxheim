@@ -651,12 +651,12 @@ fn error_message(error: io::Error) -> String {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::config::{
         AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, Config,
         StaticCertificateConfig, TlsConfig,
     };
+    use crate::test_support::{safe_child_path, unique_temp_path};
 
     use super::{
         TlsStorageIssue, recommended_acme_storage_mode, recommended_private_key_mode,
@@ -809,10 +809,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_tls_storage_below_world_writable_parent() {
-        let nonce = std::process::id();
-        let cert = PathBuf::from(format!("/tmp/fluxheim-{nonce}-fullchain.pem"));
-        let key = PathBuf::from(format!("/tmp/fluxheim-{nonce}-key.pem"));
-        let acme = PathBuf::from(format!("/tmp/fluxheim-{nonce}-acme"));
+        let base = unique_temp_path("tls-world-writable-parent");
+        let cert = base.with_extension("fullchain.pem");
+        let key = base.with_extension("key.pem");
+        let acme = base.with_extension("acme");
         let config = tls_config(cert.clone(), key.clone(), acme.clone());
 
         let check = validate_tls_storage(&config);
@@ -883,7 +883,7 @@ mod tests {
         let cert = dir.file("fullchain.pem", 0o644);
         let key = dir.file("key.pem", recommended_private_key_mode());
         let acme = dir.dir("acme", recommended_acme_storage_mode());
-        let key_id = PathBuf::from(format!("/tmp/fluxheim-{}-eab-kid", std::process::id()));
+        let key_id = unique_temp_path("tls-eab-kid");
         let mut config = tls_config(cert, key, acme);
         config.tls.acme.issuers = vec![AcmeIssuerConfig {
             name: "actalis".to_owned(),
@@ -957,11 +957,7 @@ mod tests {
 
     impl TestDir {
         fn new(name: &str) -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock after Unix epoch")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!("fluxheim-{name}-{nonce}"));
+            let path = unique_temp_path(name);
             fs::create_dir(&path).expect("create test directory");
             Self { path }
         }
@@ -971,14 +967,14 @@ mod tests {
         }
 
         fn file(&self, name: &str, mode: u32) -> PathBuf {
-            let path = self.path.join(name);
+            let path = safe_child_path(&self.path, name);
             fs::write(&path, "test").expect("write test file");
             set_mode(&path, mode);
             path
         }
 
         fn dir(&self, name: &str, mode: u32) -> PathBuf {
-            let path = self.path.join(name);
+            let path = safe_child_path(&self.path, name);
             fs::create_dir(&path).expect("create child directory");
             set_mode(&path, mode);
             path

@@ -703,11 +703,9 @@ fn snapshot_root_or_parent_is_world_writable(_path: &Path) -> io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::{SnapshotError, SnapshotStore, write_atomically};
     use crate::config::{Config, ProxyConfig};
+    use crate::test_support::unique_temp_path;
 
     #[test]
     fn snapshots_validated_config_and_sets_current() {
@@ -873,11 +871,7 @@ mod tests {
     #[test]
     fn rejects_symlinked_snapshot_store_root() {
         let target = TestDir::new("snapshot-root-target");
-        let root = std::env::temp_dir().join(format!(
-            "fluxheim-snapshot-root-symlink-{}-{}",
-            std::process::id(),
-            unique_test_sequence()
-        ));
+        let root = unique_temp_path("snapshot-root-symlink");
         std::os::unix::fs::symlink(target.path(), &root).unwrap();
         let store = SnapshotStore::new(&root);
 
@@ -908,11 +902,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_snapshot_store_root_below_world_writable_directory() {
-        let root = std::env::temp_dir().join(format!(
-            "fluxheim-snapshot-root-world-writable-{}-{}",
-            std::process::id(),
-            unique_test_sequence()
-        ));
+        let root = unique_temp_path("snapshot-root-world-writable");
         let store = SnapshotStore::new(&root);
 
         let error = store
@@ -1058,14 +1048,7 @@ mod tests {
 
     impl TestDir {
         fn new(name: &str) -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock after Unix epoch")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "fluxheim-{name}-{nonce}-{}",
-                unique_test_sequence()
-            ));
+            let path = unique_temp_path(name);
             std::fs::create_dir(&path).expect("create test directory");
             Self { path }
         }
@@ -1079,10 +1062,5 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.path);
         }
-    }
-
-    fn unique_test_sequence() -> u64 {
-        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-        SEQUENCE.fetch_add(1, Ordering::Relaxed)
     }
 }

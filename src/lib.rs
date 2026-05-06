@@ -32,6 +32,9 @@ pub mod web;
 
 pub mod runtime;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 #[cfg(any(
     all(feature = "tls-rustls", feature = "tls-openssl"),
     all(feature = "tls-rustls", feature = "tls-boringssl"),

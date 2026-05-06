@@ -1528,8 +1528,6 @@ fn json_escape(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use arc_swap::ArcSwap;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -1546,6 +1544,7 @@ mod tests {
     use crate::config::{ByteSize, CacheConfig};
     use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
     use crate::snapshot::SnapshotStore;
+    use crate::test_support::unique_temp_path;
 
     fn app() -> AdminApp {
         app_with_config(Config::default())
@@ -1556,15 +1555,7 @@ mod tests {
     }
 
     fn app_with_config_and_self_healing(config: Config, self_healing_enabled: bool) -> AdminApp {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock after Unix epoch")
-            .as_nanos();
-        let store = std::env::temp_dir().join(format!(
-            "fluxheim-admin-test-{}-{nonce}-{}",
-            std::process::id(),
-            unique_test_sequence()
-        ));
+        let store = unique_temp_path("admin-snapshot-store");
         std::fs::create_dir(&store).expect("create private admin snapshot test store");
         #[cfg(unix)]
         {
@@ -1755,11 +1746,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn cache_status_endpoint_reports_vhost_cache_tiers() {
-        let cache_path = std::env::temp_dir().join(format!(
-            "fluxheim-admin-cache-status-{}-{}",
-            std::process::id(),
-            unique_test_sequence()
-        ));
+        let cache_path = unique_temp_path("admin-cache-status");
         let config = Config {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
@@ -1813,11 +1800,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn cache_activity_reset_endpoint_requires_auth_and_reports_tiers() {
-        let cache_path = std::env::temp_dir().join(format!(
-            "fluxheim-admin-cache-reset-{}-{}",
-            std::process::id(),
-            unique_test_sequence()
-        ));
+        let cache_path = unique_temp_path("admin-cache-reset");
         let config = Config {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
@@ -2703,11 +2686,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn admin_token_file_must_not_be_below_world_writable_directory() {
-        let token_file = std::env::temp_dir().join(format!(
-            "fluxheim-admin-token-{}-{}",
-            std::process::id(),
-            unique_test_sequence()
-        ));
+        let token_file = unique_temp_path("admin-token-world-writable-parent");
         std::fs::write(&token_file, "secret-token\n").unwrap();
 
         let error = read_secret_file(&token_file).unwrap_err();
@@ -2756,25 +2735,13 @@ mod tests {
         headers
     }
 
-    fn unique_test_sequence() -> u64 {
-        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-        SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    }
-
     struct TestDir {
         path: std::path::PathBuf,
     }
 
     impl TestDir {
         fn new(name: &str) -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock after Unix epoch")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "fluxheim-{name}-{nonce}-{}",
-                unique_test_sequence()
-            ));
+            let path = unique_temp_path(name);
             std::fs::create_dir(&path).expect("create test directory");
             Self { path }
         }

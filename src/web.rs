@@ -630,6 +630,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::config::WebConfig;
+    use crate::test_support::unique_temp_path;
 
     use super::{
         ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions, StaticResponseBody,
@@ -757,14 +758,7 @@ mod tests {
     #[test]
     fn rejects_symlinked_static_root() {
         let target = TestDir::new("root-symlink-target");
-        let root = std::env::temp_dir().join(format!(
-            "fluxheim-web-test-root-symlink-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = unique_temp_path("web-root-symlink");
         std::os::unix::fs::symlink(target.path(), &root).unwrap();
 
         let error = StaticFileServer::from_config(&WebConfig {
@@ -1170,14 +1164,7 @@ mod tests {
 
     impl TestDir {
         fn new(label: &str) -> Self {
-            let unique = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "fluxheim-web-test-{label}-{}-{unique}",
-                std::process::id()
-            ));
+            let path = unique_temp_path(label);
             fs::create_dir_all(&path).unwrap();
             Self { path }
         }

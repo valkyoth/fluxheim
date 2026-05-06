@@ -219,6 +219,7 @@ fn json_escape(value: &str) -> String {
 #[cfg(all(test, feature = "proxy"))]
 mod tests {
     use super::{json_escape, log_record_json, open_log_file, pingora_server_conf};
+    use crate::test_support::unique_temp_path;
 
     #[test]
     fn json_log_record_escapes_fields() {
@@ -282,10 +283,7 @@ mod tests {
 
     #[test]
     fn opens_regular_log_file_for_append() {
-        let path = std::env::temp_dir().join(format!(
-            "fluxheim-runtime-log-{}-append.log",
-            std::process::id()
-        ));
+        let path = unique_temp_path("runtime-log-append").with_extension("log");
         let _ = std::fs::remove_file(&path);
 
         let file = open_log_file(&path, true).unwrap();
@@ -297,15 +295,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn rejects_symlink_log_file() {
-        let base = std::env::temp_dir();
-        let target = base.join(format!(
-            "fluxheim-runtime-log-{}-target.log",
-            std::process::id()
-        ));
-        let link = base.join(format!(
-            "fluxheim-runtime-log-{}-link.log",
-            std::process::id()
-        ));
+        let target = unique_temp_path("runtime-log-target").with_extension("log");
+        let link = unique_temp_path("runtime-log-link").with_extension("log");
         let _ = std::fs::remove_file(&target);
         let _ = std::fs::remove_file(&link);
         std::fs::write(&target, b"").unwrap();

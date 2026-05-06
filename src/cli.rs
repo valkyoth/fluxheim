@@ -201,9 +201,9 @@ fn check_tls_storage(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::run_from_args;
+    use crate::test_support::{safe_child_path, unique_temp_path};
 
     #[test]
     fn check_tls_storage_accepts_secure_files() {
@@ -333,24 +333,20 @@ mod tests {
 
     impl TestDir {
         fn new(name: &str) -> Self {
-            let nonce = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock after Unix epoch")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!("fluxheim-{name}-{nonce}"));
+            let path = unique_temp_path(name);
             fs::create_dir(&path).expect("create test directory");
             Self { path }
         }
 
         fn file(&self, name: &str, mode: u32) -> PathBuf {
-            let path = self.path.join(name);
+            let path = safe_child_path(&self.path, name);
             fs::write(&path, "test").expect("write test file");
             set_mode(&path, mode);
             path
         }
 
         fn dir(&self, name: &str, mode: u32) -> PathBuf {
-            let path = self.path.join(name);
+            let path = safe_child_path(&self.path, name);
             fs::create_dir(&path).expect("create child directory");
             set_mode(&path, mode);
             path
@@ -384,7 +380,7 @@ mod tests {
         }
 
         fn simple_config(&self, name: &str, vhost_name: &str, host: &str) -> PathBuf {
-            let path = self.path.join(name);
+            let path = safe_child_path(&self.path, name);
             fs::write(
                 &path,
                 format!(
@@ -400,7 +396,7 @@ mod tests {
         }
 
         fn minimal_config(&self, name: &str, listen: &str) -> PathBuf {
-            let path = self.path.join(name);
+            let path = safe_child_path(&self.path, name);
             fs::write(
                 &path,
                 format!(

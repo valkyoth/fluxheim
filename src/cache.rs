@@ -1777,6 +1777,7 @@ mod tests {
         eligible_image_request, image_cache_key, memory_image_cache_from_config, storage_plan,
     };
     use crate::config::{ByteSize, CacheConfig, CacheDiskConfig, CacheMemoryConfig};
+    use crate::test_support::unique_temp_path;
 
     fn enabled_cache() -> CacheConfig {
         CacheConfig {
@@ -2861,13 +2862,7 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     fn unique_test_cache_dir(label: &str) -> PathBuf {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-        std::env::temp_dir().join(format!(
-            "fluxheim-cache-{label}-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ))
+        unique_temp_path(label)
     }
 
     fn cached_image(body: &[u8]) -> CachedImageObject {
