@@ -753,7 +753,13 @@ mod tests {
         )
         .unwrap();
 
-        assert!(response.headers.get("server").is_none());
+        assert_eq!(
+            response
+                .headers
+                .get("server")
+                .and_then(|value| value.to_str().ok()),
+            Some("fluxheim")
+        );
         assert_eq!(
             response
                 .headers

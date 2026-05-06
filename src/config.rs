@@ -3071,7 +3071,7 @@ fn default_referrer_policy() -> Option<String> {
 }
 
 fn default_response_unset_headers() -> Vec<String> {
-    vec!["server".to_owned(), "x-powered-by".to_owned()]
+    vec!["x-powered-by".to_owned()]
 }
 
 fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
@@ -3781,10 +3781,7 @@ mod tests {
                 .as_deref(),
             Some("no-referrer")
         );
-        assert_eq!(
-            Config::default().headers.response.unset,
-            ["server", "x-powered-by"]
-        );
+        assert_eq!(Config::default().headers.response.unset, ["x-powered-by"]);
         assert_eq!(Config::default().web.cache_control, "public, max-age=60");
         assert_eq!(Config::default().server.process.threads, 1);
         assert_eq!(Config::default().server.process.listener_tasks_per_fd, 1);

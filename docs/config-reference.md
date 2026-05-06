@@ -222,7 +222,7 @@ enabled = true
 x_content_type_options = "nosniff"
 x_frame_options = "DENY"
 referrer_policy = "no-referrer"
-remove = ["server", "x-powered-by"]
+remove = ["x-powered-by"]
 
 [headers.response.add]
 cache-control = "public, max-age=60"
@@ -258,9 +258,10 @@ referrer_policy = "no-referrer"
 HSTS and CSP are intentionally not enabled blindly in examples because they are
 site-specific and can break local HTTP testing or asset policies.
 
-Fluxheim strips `Server` and `X-Powered-By` response headers by default to avoid
-leaking origin or framework version banners. Operators who intentionally want a
-banner can set one through `[headers.response.add]`.
+Fluxheim sets `Server: fluxheim` and strips `X-Powered-By` by default. Operators
+who do not want a server banner can remove it with `remove = ["server"]`, and
+operators who want a different banner can set one through
+`[headers.response.add]`.
 
 ## Proxy
 

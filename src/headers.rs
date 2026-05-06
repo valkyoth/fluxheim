@@ -20,6 +20,7 @@ const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
     "x-cluster-client-ip",
     "fastly-client-ip",
 ];
+const DEFAULT_SERVER_HEADER: &str = "fluxheim";
 
 pub fn apply_upstream_request_policy(
     request: &mut pingora::http::RequestHeader,
@@ -169,6 +170,7 @@ pub fn apply_response_policy(
         "referrer-policy",
         policy.referrer_policy.as_deref(),
     )?;
+    response.insert_header("server", DEFAULT_SERVER_HEADER)?;
 
     let unset = policy.effective_unset();
     let set = policy.effective_set();
@@ -312,7 +314,13 @@ mod tests {
 
         apply_response_policy(&mut response, &policy).unwrap();
 
-        assert!(response.headers.get("server").is_none());
+        assert_eq!(
+            response
+                .headers
+                .get("server")
+                .and_then(|value| value.to_str().ok()),
+            Some("fluxheim")
+        );
         assert!(response.headers.get("x-powered-by").is_none());
         assert_eq!(
             response

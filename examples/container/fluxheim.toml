@@ -57,7 +57,7 @@ enabled = true
 x_content_type_options = "nosniff"
 x_frame_options = "DENY"
 referrer_policy = "no-referrer"
-remove = ["server", "x-powered-by"]
+remove = ["x-powered-by"]
 
 [headers.response.add]
 cache-control = "public, max-age=60"
