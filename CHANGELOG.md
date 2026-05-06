@@ -52,6 +52,8 @@ Released: 2026-05-06
   restricted redirect statuses.
 - Wolfi, Alpine, SUSE Micro, and Debian runtime Containerfiles.
 - Container image publish workflow for GitHub Container Registry and Docker Hub.
+- Self-contained packaged default site and config so fresh containers/RPMs
+  serve `/srv/fluxheim/index.html` on port `8080` without external assets.
 - RPM packaging spec for RHEL/openSUSE-style builds from vendored Cargo
   dependencies.
 - Runtime UID/GID build args for container images, defaulting to non-root

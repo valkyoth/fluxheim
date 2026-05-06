@@ -14,7 +14,7 @@ on:
       config:
         description: Config file copied into /etc/fluxheim/fluxheim.toml.
         required: true
-        default: examples/fluxheim.toml
+        default: packaging/default/fluxheim.toml
       runtime_uid:
         description: Runtime UID inside the image. Keep 65532 unless intentionally publishing a root image.
         required: true
@@ -128,7 +128,7 @@ jobs:
           push: true
           build-args: |
             FLUXHEIM_FEATURES=${{ inputs.features || 'default' }}
-            FLUXHEIM_CONFIG=${{ inputs.config || 'examples/fluxheim.toml' }}
+            FLUXHEIM_CONFIG=${{ inputs.config || 'packaging/default/fluxheim.toml' }}
             FLUXHEIM_RUNTIME_UID=${{ inputs.runtime_uid || '65532' }}
             FLUXHEIM_RUNTIME_GID=${{ inputs.runtime_gid || '65532' }}
           labels: |

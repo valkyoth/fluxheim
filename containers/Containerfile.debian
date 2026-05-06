@@ -1,6 +1,6 @@
 ARG RUST_IMAGE=docker.io/library/rust:1.95.0-bookworm
 ARG RUNTIME_IMAGE=docker.io/library/debian:trixie-slim
-ARG FLUXHEIM_CONFIG=examples/fluxheim.toml
+ARG FLUXHEIM_CONFIG=packaging/default/fluxheim.toml
 
 FROM ${RUST_IMAGE} AS builder
 WORKDIR /usr/src/fluxheim
@@ -26,7 +26,7 @@ RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
     fi
 
 FROM ${RUNTIME_IMAGE}
-ARG FLUXHEIM_CONFIG=examples/fluxheim.toml
+ARG FLUXHEIM_CONFIG=packaging/default/fluxheim.toml
 ARG FLUXHEIM_RUNTIME_UID=65532
 ARG FLUXHEIM_RUNTIME_GID=65532
 
@@ -40,11 +40,12 @@ LABEL org.opencontainers.image.source="https://github.com/valkyoth/fluxheim"
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /etc/fluxheim /run/fluxheim /var/lib/fluxheim/acme /var/cache/fluxheim /srv/fluxheim \
-    && chown -R ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID} /etc/fluxheim /run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /srv/fluxheim
+    && mkdir -p /etc/fluxheim /run/fluxheim /var/lib/fluxheim/acme /var/cache/fluxheim /var/log/fluxheim /srv/fluxheim \
+    && chown -R ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID} /etc/fluxheim /run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /var/log/fluxheim /srv/fluxheim
 
 COPY --from=builder /usr/src/fluxheim/target/release/fluxheim /usr/local/bin/fluxheim
 COPY ${FLUXHEIM_CONFIG} /etc/fluxheim/fluxheim.toml
+COPY packaging/default/index.html /srv/fluxheim/index.html
 
 USER ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID}
 EXPOSE 8080 8443

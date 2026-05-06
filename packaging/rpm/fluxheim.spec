@@ -68,7 +68,8 @@ cargo build --release --locked --offline --no-default-features --features "%{flu
 
 %install
 install -Dm0755 target/release/fluxheim %{buildroot}%{_bindir}/fluxheim
-install -Dm0644 examples/fluxheim.toml %{buildroot}%{_sysconfdir}/fluxheim/fluxheim.toml
+install -Dm0644 packaging/default/fluxheim.toml %{buildroot}%{_sysconfdir}/fluxheim/fluxheim.toml
+install -Dm0644 packaging/default/index.html %{buildroot}/srv/fluxheim/index.html
 install -Dm0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/fluxheim.conf
 
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/conf.d
@@ -76,7 +77,6 @@ install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/tls
 install -d -m0750 %{buildroot}%{_localstatedir}/lib/fluxheim
 install -d -m0750 %{buildroot}%{_localstatedir}/cache/fluxheim
 install -d -m0750 %{buildroot}%{_localstatedir}/log/fluxheim
-install -d -m0755 %{buildroot}/srv/fluxheim
 
 %check
 %if %{with tests}
@@ -110,6 +110,7 @@ fi
 %dir %attr(0750,fluxheim,fluxheim) %{_localstatedir}/cache/fluxheim
 %dir %attr(0750,fluxheim,fluxheim) %{_localstatedir}/log/fluxheim
 %dir %attr(0755,fluxheim,fluxheim) /srv/fluxheim
+%config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
 * Wed May 06 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 0.5.0-1

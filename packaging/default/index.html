@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Fluxheim is running</title>
+  <style>
+    :root {
+      --bg: #081425;
+      --panel: #111c2d;
+      --panel-2: #17243a;
+      --text: #d8e3fb;
+      --muted: #aebed5;
+      --line: #324258;
+      --accent: #8aebff;
+      --accent-2: #ffb77d;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(138, 235, 255, 0.16), transparent 32rem),
+        linear-gradient(135deg, #081425 0%, #0b1728 55%, #101827 100%);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      display: grid;
+      min-height: 100vh;
+      place-items: center;
+      padding: 2rem;
+    }
+
+    .card {
+      width: min(48rem, 100%);
+      padding: clamp(1.5rem, 5vw, 3rem);
+      background: linear-gradient(180deg, rgba(23, 36, 58, 0.92), rgba(17, 28, 45, 0.96));
+      border: 1px solid var(--line);
+      border-radius: 0.5rem;
+      box-shadow: 0 1.5rem 4rem var(--shadow);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.4rem 0.7rem;
+      color: var(--accent);
+      background: rgba(138, 235, 255, 0.08);
+      border: 1px solid rgba(138, 235, 255, 0.25);
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      width: 0.6rem;
+      height: 0.6rem;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 1rem rgba(138, 235, 255, 0.8);
+    }
+
+    h1 {
+      margin: 1.5rem 0 0.75rem;
+      color: var(--accent);
+      font-size: clamp(2.4rem, 8vw, 4.5rem);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    p {
+      max-width: 42rem;
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 2.5vw, 1.15rem);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .tile {
+      min-height: 7rem;
+      padding: 1rem;
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 0.375rem;
+    }
+
+    .tile strong {
+      display: block;
+      margin-bottom: 0.35rem;
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+
+    .tile span {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+      margin-top: 2rem;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.75rem;
+      padding: 0 1rem;
+      border-radius: 0.375rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .button.primary {
+      color: #002c34;
+      background: var(--accent);
+    }
+
+    .button.secondary {
+      color: var(--text);
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+
+    footer {
+      margin-top: 2rem;
+      padding-top: 1rem;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 0.9rem;
+    }
+
+    code {
+      color: var(--accent-2);
+      font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.95em;
+    }
+
+    @media (max-width: 42rem) {
+      main {
+        padding: 1rem;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card" aria-labelledby="title">
+      <div class="badge"><span class="status-dot" aria-hidden="true"></span>Active</div>
+      <h1 id="title">Fluxheim is running</h1>
+      <p>
+        This default page is served by Fluxheim. Replace
+        <code>/srv/fluxheim/index.html</code> with your own site content or
+        point a vhost at another web root.
+      </p>
+
+      <div class="grid" aria-label="Default install checks">
+        <div class="tile">
+          <strong>Static web</strong>
+          <span>HTML, CSS, JavaScript, images, fonts, cache headers, and byte ranges.</span>
+        </div>
+        <div class="tile">
+          <strong>Reverse proxy</strong>
+          <span>Simple whole-vhost proxying is available in the 0.5 release line.</span>
+        </div>
+        <div class="tile">
+          <strong>TLS ready</strong>
+          <span>Add your certificate paths in <code>/etc/fluxheim/fluxheim.toml</code>.</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <a class="button primary" href="https://github.com/valkyoth/fluxheim/tree/main/docs">Read documentation</a>
+        <a class="button secondary" href="https://github.com/valkyoth/fluxheim">View project</a>
+      </div>
+
+      <footer>
+        Fluxheim 0.5.0 basic-sites preview. Licensed under EUPL-1.2.
+      </footer>
+    </section>
+  </main>
+</body>
+</html>

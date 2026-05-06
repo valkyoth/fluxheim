@@ -4,8 +4,8 @@
 
 - Version: `0.5.0`
 - Release date: 2026-05-06
-- Git tag: `v0.5.0` after release validation
-- Git commit: fill in from `git rev-parse HEAD` before tagging
+- Git tag: `v0.5.0`
+- Git commit: to be recorded from `git rev-parse HEAD` before publishing
 - License: EUPL-1.2
 
 ## Scope
@@ -28,6 +28,8 @@ Stable preview scope:
 - static cache headers, ETag, conditional requests, and byte ranges;
 - rootless Podman/container examples for Wolfi, Alpine, SUSE Micro, and Debian
   runtime variants;
+- self-contained packaged default site and config serving
+  `/srv/fluxheim/index.html` on port `8080`;
 - RPM packaging spec for RHEL/openSUSE-style builds from vendored Cargo
   dependencies;
 - release checks for formatting, linting, tests, dependency policy, advisory
@@ -45,6 +47,8 @@ Default Cargo features:
 
 - Basic vhost static hosting and simple reverse proxying are now documented as
   the preview release promise.
+- Fresh packaged containers and RPMs serve the bundled Fluxheim default page
+  without needing external JavaScript, fonts, or images.
 - Container deployment examples include explicit graceful shutdown settings so
   normal `podman compose down` does not fall back to `SIGKILL`.
 - The public `1.0.0` target is now defined as the gateway-ready release needed
@@ -52,26 +56,28 @@ Default Cargo features:
 
 ## Security And Stability Gate
 
-Fill this in immediately before tagging:
+Release evidence to record immediately before publishing:
 
 - Gate command: `scripts/stable_release_gate.sh check` or stronger
-- Gate report directory:
-- Result:
-- `cargo audit` result:
-- `cargo deny check` result:
-- TLS scan result:
-- Load smoke result:
-- Request-framing smoke result:
-- Fuzz target compile result:
-- Podman smoke result:
+- Gate report directory: to be filled
+- Result: to be filled
+- `cargo audit` result: to be filled
+- `cargo deny check` result: to be filled
+- TLS scan result: to be filled, or explicitly marked not run for this preview
+- Load smoke result: to be filled, or explicitly marked not run for this preview
+- Request-framing smoke result: to be filled, or explicitly marked not run for
+  this preview
+- Fuzz target compile result: to be filled, or explicitly marked not run for
+  this preview
+- Podman smoke result: to be filled
 
 ## Reviewed Advisory Exceptions
 
 - `protobuf < 3.7.2` may appear transitively through Pingora dependencies until
-  upstream updates. Do not accept this exception silently: record the exact
-  dependency path from `cargo audit`, confirm whether Fluxheim parses
-  attacker-supplied protobuf through that dependency in this release, and remove
-  the exception as soon as the upstream fix is available.
+  upstream updates. Before publishing, record the exact dependency path from
+  `cargo audit`, confirm whether Fluxheim parses attacker-supplied protobuf
+  through that dependency in this release, and remove the exception as soon as
+  the upstream fix is available.
 
 ## Breaking Changes
 
@@ -111,7 +117,8 @@ Planned image tags after release validation:
 - Docker Hub: matching variant tags when Docker Hub credentials are configured
 - Runtime user: `65532:65532` by default
 - Default config path: `/etc/fluxheim/fluxheim.toml`
-- Static site path: operator-mounted, commonly `/srv/sites/...`
+- Default static site path: `/srv/fluxheim/index.html`
+- Operator static site path: commonly mounted under `/srv/sites/...`
 - Cache path: `/var/cache/fluxheim`
 - State path: `/var/lib/fluxheim`
 
@@ -136,9 +143,9 @@ rpmbuild -ba packaging/rpm/fluxheim.spec --define 'fluxheim_features profile-sta
 
 ## Checksums And Signatures
 
-Fill this in during the release:
+Record during the release:
 
-- Source archive checksum:
-- Binary checksums:
-- Container digests:
-- Tag signature:
+- Source archive checksum: to be filled
+- Binary checksums: to be filled
+- Container digests: to be filled
+- Tag signature: to be filled

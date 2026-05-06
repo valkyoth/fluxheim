@@ -345,6 +345,13 @@ The container config sets `grace_period_seconds = 2` and
 `graceful_shutdown_timeout_seconds = 5`; keep the Podman stop timeout higher
 than the sum of those values so normal shutdown does not fall back to `SIGKILL`.
 
+Published images default to
+[packaging/default/fluxheim.toml](../packaging/default/fluxheim.toml) and a
+self-contained default page at
+[packaging/default/index.html](../packaging/default/index.html), installed in
+the image as `/srv/fluxheim/index.html`. Mount your own config or static root
+over those paths when deploying a real site.
+
 If using a root-runtime image, `:U` is usually not needed for ownership, but
 keeping separate writable directories for state/cache/logs is still recommended
 so the container does not need write access to static site content or TLS keys.
