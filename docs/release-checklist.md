@@ -66,9 +66,9 @@ This smoke requires `openssl` for a temporary self-signed certificate. It covers
 HTTP static hosting, HTTP proxying, static certificate storage validation, HTTPS
 static hosting, and HTTPS proxying.
 
-Confirm GitHub CodeQL is still enabled for `main`. The repository carries an
-advanced Rust CodeQL workflow in `.github/workflows/codeql.yml`; it should run
-on pushes, pull requests, and a weekly schedule.
+Confirm GitHub CodeQL default setup is enabled for `main`. Do not also enable an
+advanced CodeQL workflow for the same repository; GitHub rejects advanced SARIF
+uploads when default setup is active.
 
 Confirm the Rust CI workflow still runs the `1.0` core feature matrix in both
 check and release modes, plus the `scripts/smoke_1_0_core.sh` localhost smoke.

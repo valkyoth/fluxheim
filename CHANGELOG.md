@@ -50,6 +50,10 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Removed the advanced CodeQL workflow so GitHub CodeQL default setup can own
+  code scanning without duplicate SARIF upload failures.
+- Updated the optional OpenSSL TLS backend lockfile path to `openssl 0.10.79`
+  and `openssl-sys 0.9.115`.
 - The default build is `proxy`, `web`, `cache`, `tls-rustls`, and `security`.
 - Container builds can select both feature set and packaged config.
 - CI now separates the stable `1.0` core matrix from incubator-module feature

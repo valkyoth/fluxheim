@@ -164,7 +164,6 @@ Before the first GitHub push, the repository should include:
 - `scripts/`;
 - `src/`;
 - `.github/workflows/ci.yml`;
-- `.github/workflows/codeql.yml`;
 - `.github/dependabot.yml`;
 - `Containerfile`;
 - `.containerignore`;
@@ -179,12 +178,12 @@ After pushing, confirm these repository settings are enabled:
 
 - Dependabot alerts;
 - Dependabot version updates from `.github/dependabot.yml`;
-- code scanning alerts from `.github/workflows/codeql.yml`;
+- CodeQL default setup for code scanning alerts;
 - private vulnerability reporting or GitHub security advisories.
 
-CodeQL should run on pushes, pull requests, and the weekly schedule. If the
-repository uses GitHub default setup for CodeQL, keep only one active CodeQL
-configuration to avoid duplicate alerts.
+Keep only one active CodeQL configuration. If GitHub default setup is enabled,
+do not also add an advanced CodeQL workflow; GitHub rejects the duplicate SARIF
+upload.
 
 ## First Tag After GitHub Import
 

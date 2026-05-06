@@ -15,10 +15,10 @@ cargo deny check licenses
 cargo audit
 ```
 
-GitHub Actions also run CI and CodeQL. CodeQL is configured as an advanced Rust
-setup with `build-mode: none`, which is the supported mode for Rust analysis,
-so path handling, request parsing, and other security-sensitive code keep
-getting scanned after each push, pull request, and weekly scheduled run.
+GitHub Actions run CI, and GitHub CodeQL default setup should be enabled in the
+repository security settings. Keep only one active CodeQL configuration:
+GitHub rejects SARIF uploads when default setup and an advanced workflow both
+try to analyze the same repository.
 
 The full release gate is documented in
 [Release Checklist](docs/release-checklist.md). Use it before publishing
