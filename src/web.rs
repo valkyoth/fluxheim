@@ -202,7 +202,10 @@ fn path_contains_symlink(root: &Path, candidate: &Path) -> io::Result<bool> {
 
     let mut current = root.to_path_buf();
     for component in relative.components() {
-        current.push(component);
+        match component {
+            std::path::Component::Normal(_) => current.push(component),
+            _ => return Ok(true),
+        }
         match std::fs::read_link(&current) {
             Ok(_) => return Ok(true),
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
