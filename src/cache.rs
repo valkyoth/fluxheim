@@ -282,9 +282,6 @@ pub fn memory_image_cache_from_config(config: &CacheConfig) -> Option<MemoryImag
 }
 
 #[cfg(feature = "proxy")]
-static DISK_CACHE_TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-#[cfg(feature = "proxy")]
 #[derive(Debug)]
 pub struct PingoraMemoryStorage {
     inner: moka::sync::Cache<String, PingoraStoredObject>,
@@ -575,20 +572,11 @@ impl PingoraDiskStorage {
             .map_err(|error| cache_io_error("create disk cache shard", error))?;
         require_disk_cache_write_destination(&path)
             .map_err(|error| cache_io_error("validate disk cache object destination", error))?;
-        let tmp_path = self.tmp_path_for(&path);
-        let write_result = write_disk_cache_object(
-            &tmp_path,
-            &primary_key,
-            &internal_meta,
-            &response_header,
-            &body,
-        )
-        .and_then(|()| std::fs::rename(&tmp_path, &path));
-        if let Err(error) = write_result {
-            let _ = std::fs::remove_file(&tmp_path);
-            self.activity.store_refusal();
-            return Err(cache_io_error("write disk cache object", error));
-        }
+        self.write_object_atomically(&path, &primary_key, &internal_meta, &response_header, &body)
+            .map_err(|error| {
+                self.activity.store_refusal();
+                cache_io_error("write disk cache object", error)
+            })?;
         self.activity.store();
         Ok(Some(body.len()))
     }
@@ -649,9 +637,56 @@ impl PingoraDiskStorage {
         self.root.join(shard).join(format!("{encoded}.fhc"))
     }
 
-    fn tmp_path_for(&self, path: &Path) -> PathBuf {
-        let nonce = DISK_CACHE_TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        path.with_extension(format!("tmp.{}.{}", std::process::id(), nonce))
+    fn write_object_atomically(
+        &self,
+        path: &Path,
+        primary_key: &str,
+        internal_meta: &[u8],
+        response_header: &[u8],
+        body: &[u8],
+    ) -> std::io::Result<()> {
+        let mut last_error = None;
+        for _ in 0..4 {
+            let tmp_path = self.tmp_path_for(path)?;
+            let write_result = write_disk_cache_object(
+                &tmp_path,
+                primary_key,
+                internal_meta,
+                response_header,
+                body,
+            )
+            .and_then(|()| std::fs::rename(&tmp_path, path));
+            match write_result {
+                Ok(()) => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    last_error = Some(error);
+                }
+                Err(error) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(error);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "disk cache temporary path collision",
+            )
+        }))
+    }
+
+    fn tmp_path_for(&self, path: &Path) -> std::io::Result<PathBuf> {
+        let mut nonce = [0_u8; 16];
+        getrandom::fill(&mut nonce).map_err(|error| {
+            std::io::Error::other(format!("generate cache temp nonce: {error}"))
+        })?;
+        let mut encoded = String::with_capacity(nonce.len() * 2);
+        for byte in nonce {
+            let _ = write!(&mut encoded, "{byte:02x}");
+        }
+        Ok(path.with_extension(format!("tmp.{}.{}", std::process::id(), encoded)))
     }
 
     fn safe_existing_object_path(&self, path: &Path) -> std::io::Result<Option<PathBuf>> {

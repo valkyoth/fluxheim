@@ -848,6 +848,7 @@ dependencies = [
  "bytes",
  "clap",
  "env_logger",
+ "getrandom 0.4.2",
  "http",
  "httpdate",
  "log",
