@@ -15,7 +15,15 @@ default = [
     "tls-rustls",
     "security",
 ]
-proxy = ["dep:async-trait", "dep:bytes", "dep:getrandom", "dep:http", "dep:pingora", "dep:tokio"]
+proxy = [
+    "dep:async-trait",
+    "dep:bytes",
+    "dep:getrandom",
+    "dep:http",
+    "dep:pingora",
+    "dep:sha2",
+    "dep:tokio",
+]
 load-balancer = ["proxy", "pingora/lb"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "pingora?/cache"]
 web = ["dep:bytes", "dep:httpdate", "dep:mime_guess", "dep:percent-encoding"]

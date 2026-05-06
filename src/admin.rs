@@ -15,6 +15,7 @@ use pingora::apps::http_app::{HttpServer, ServeHttp};
 use pingora::protocols::http::ServerSession;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::services::listening::Service;
+use sha2::{Digest, Sha256};
 
 use crate::config::{AdminConfig, Config};
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
@@ -38,7 +39,7 @@ const MAX_CACHE_PURGE_BULK_PATHS: usize = 256;
 
 #[derive(Clone)]
 pub struct AdminApp {
-    token: String,
+    token: AdminToken,
     store: SnapshotStore,
     current_config: Arc<ArcSwap<Config>>,
     proxy: FluxProxy,
@@ -48,6 +49,21 @@ pub struct AdminApp {
     min_successful_checks: usize,
     max_error_rate_per_mille: u16,
     state: Arc<Mutex<AdminRuntimeState>>,
+}
+
+#[derive(Clone)]
+struct AdminToken {
+    len: usize,
+    digest: [u8; 32],
+}
+
+impl AdminToken {
+    fn new(token: &str) -> Self {
+        Self {
+            len: token.len(),
+            digest: digest_admin_token(token.as_bytes()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -112,7 +128,7 @@ impl AdminApp {
         config: &Config,
         proxy: FluxProxy,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let token = load_admin_token(&config.admin)?;
+        let token = AdminToken::new(&load_admin_token(&config.admin)?);
         let snapshot_store = config
             .admin
             .snapshot_store
@@ -1152,7 +1168,7 @@ fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Sen
     })
 }
 
-fn authorized(header: Option<&str>, token: &str) -> bool {
+fn authorized(header: Option<&str>, token: &AdminToken) -> bool {
     let Some(header) = header else {
         return false;
     };
@@ -1160,19 +1176,20 @@ fn authorized(header: Option<&str>, token: &str) -> bool {
         return false;
     };
     let candidate = candidate.trim();
-    candidate.len() <= MAX_ADMIN_TOKEN_BYTES
-        && token.len() <= MAX_ADMIN_TOKEN_BYTES
-        && constant_time_eq(candidate.as_bytes(), token.as_bytes())
+    candidate.len() <= MAX_ADMIN_TOKEN_BYTES && constant_time_eq(candidate.as_bytes(), token)
 }
 
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    let mut diff = left.len() ^ right.len();
-    for index in 0..MAX_ADMIN_TOKEN_BYTES {
-        let left = left.get(index).copied().unwrap_or(0);
-        let right = right.get(index).copied().unwrap_or(0);
-        diff |= usize::from(left ^ right);
+fn constant_time_eq(candidate: &[u8], token: &AdminToken) -> bool {
+    let candidate_digest = digest_admin_token(candidate);
+    let mut diff = candidate.len() ^ token.len;
+    for (&candidate_byte, &token_byte) in candidate_digest.iter().zip(token.digest.iter()) {
+        diff |= usize::from(candidate_byte ^ token_byte);
     }
     diff == 0
+}
+
+fn digest_admin_token(token: &[u8]) -> [u8; 32] {
+    Sha256::digest(token).into()
 }
 
 fn json_response(status: StatusCode, body: &[u8]) -> AdminResponse {
@@ -1533,8 +1550,9 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::{
-        AdminApp, AdminRuntimeState, MAX_ADMIN_TOKEN_FILE_BYTES, admin_services_from_config,
-        authorized, constant_time_eq, read_bounded_secret_file, read_secret_file,
+        AdminApp, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
+        admin_services_from_config, authorized, constant_time_eq, read_bounded_secret_file,
+        read_secret_file,
     };
     use crate::config::{
         AdminConfig, AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig, VhostConfig,
@@ -1567,7 +1585,7 @@ mod tests {
         }
         let proxy = FluxProxy::from_config(&config).unwrap();
         AdminApp {
-            token: "secret-token".to_owned(),
+            token: AdminToken::new("secret-token"),
             store: SnapshotStore::new(store),
             current_config: Arc::new(ArcSwap::from_pointee(config)),
             proxy,
@@ -2629,15 +2647,16 @@ mod tests {
 
     #[test]
     fn bearer_token_comparison_checks_full_string() {
-        assert!(authorized(Some("Bearer secret-token"), "secret-token"));
-        assert!(!authorized(Some("Bearer secret"), "secret-token"));
-        assert!(!constant_time_eq(b"secret", b"secret-token"));
+        let token = AdminToken::new("secret-token");
+        assert!(authorized(Some("Bearer secret-token"), &token));
+        assert!(!authorized(Some("Bearer secret"), &token));
+        assert!(!constant_time_eq(b"secret", &token));
         assert!(!authorized(
             Some(&format!(
                 "Bearer {}",
                 "a".repeat(super::MAX_ADMIN_TOKEN_BYTES + 1)
             )),
-            "secret-token"
+            &token
         ));
     }
 
