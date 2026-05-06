@@ -2,11 +2,9 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-#[cfg(not(feature = "privacy-mode"))]
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 #[cfg(not(feature = "privacy-mode"))]
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -1489,7 +1487,7 @@ fn access_log_request_id(config: &AccessLoggingConfig, request: &RequestHeader) 
         .map(str::trim)
         .filter(|value| valid_request_id(value))
         .map(str::to_owned)
-        .or_else(|| Some(generate_request_id()))
+        .or_else(generate_request_id)
 }
 
 fn count_response_body_chunk(bytes_seen: &mut u64, body: Option<&Bytes>) {
@@ -1508,15 +1506,16 @@ fn valid_request_id(value: &str) -> bool {
 }
 
 #[cfg(not(feature = "privacy-mode"))]
-fn generate_request_id() -> String {
-    static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+fn generate_request_id() -> Option<String> {
+    let mut random = [0_u8; 16];
+    getrandom::fill(&mut random).ok()?;
 
-    let sequence = NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("fh-{now:x}-{:x}-{sequence:x}", std::process::id())
+    let mut id = String::with_capacity(35);
+    id.push_str("fh-");
+    for byte in random {
+        let _ = std::fmt::Write::write_fmt(&mut id, format_args!("{byte:02x}"));
+    }
+    Some(id)
 }
 
 #[cfg(not(feature = "privacy-mode"))]
