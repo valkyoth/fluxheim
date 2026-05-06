@@ -8,6 +8,8 @@ trusted_proxies = []
 daemon = false
 pid_file = "/run/fluxheim/fluxheim.pid"
 upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+grace_period_seconds = 2
+graceful_shutdown_timeout_seconds = 5
 
 [server.https_redirect]
 enabled = false

@@ -291,6 +291,8 @@ Podman run example:
 podman run --rm \
   --name fluxheim \
   --network gateway_net \
+  --stop-signal SIGTERM \
+  --stop-timeout 15 \
   -p 80:8080 \
   -p 443:8443 \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
@@ -317,6 +319,8 @@ services:
     image: ghcr.io/valkyoth/fluxheim:latest-wolfi
     container_name: fluxheim_gateway
     restart: always
+    stop_signal: SIGTERM
+    stop_grace_period: 15s
     ports:
       - "80:8080"
       - "443:8443"
@@ -337,6 +341,9 @@ The same deployment shape is available as
 [examples/podman-compose.yml](../examples/podman-compose.yml), with a matching
 container-oriented config at
 [examples/container/fluxheim.toml](../examples/container/fluxheim.toml).
+The container config sets `grace_period_seconds = 2` and
+`graceful_shutdown_timeout_seconds = 5`; keep the Podman stop timeout higher
+than the sum of those values so normal shutdown does not fall back to `SIGKILL`.
 
 If using a root-runtime image, `:U` is usually not needed for ownership, but
 keeping separate writable directories for state/cache/logs is still recommended
