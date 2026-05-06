@@ -656,6 +656,8 @@ mod tests {
         AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, Config,
         StaticCertificateConfig, TlsConfig,
     };
+    #[cfg(unix)]
+    use crate::test_support::unique_world_writable_child;
     use crate::test_support::{safe_child_path, unique_temp_path};
 
     use super::{
@@ -809,10 +811,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_tls_storage_below_world_writable_parent() {
-        let base = unique_temp_path("tls-world-writable-parent");
-        let cert = base.with_extension("fullchain.pem");
-        let key = base.with_extension("key.pem");
-        let acme = base.with_extension("acme");
+        let cert = unique_world_writable_child("tls-world-writable-parent", "fullchain.pem");
+        let key = unique_world_writable_child("tls-world-writable-parent-key", "key.pem");
+        let acme = unique_world_writable_child("tls-world-writable-parent-acme", "acme");
         let config = tls_config(cert.clone(), key.clone(), acme.clone());
 
         let check = validate_tls_storage(&config);
@@ -883,7 +884,7 @@ mod tests {
         let cert = dir.file("fullchain.pem", 0o644);
         let key = dir.file("key.pem", recommended_private_key_mode());
         let acme = dir.dir("acme", recommended_acme_storage_mode());
-        let key_id = unique_temp_path("tls-eab-kid");
+        let key_id = unique_world_writable_child("tls-eab-kid", "key-id");
         let mut config = tls_config(cert, key, acme);
         config.tls.acme.issuers = vec![AcmeIssuerConfig {
             name: "actalis".to_owned(),
@@ -920,15 +921,19 @@ mod tests {
 
     #[test]
     fn formats_storage_issues_for_cli_output() {
+        let path = PathBuf::from("target/fluxheim-test-tmp/key.pem");
         let issue = TlsStorageIssue::InsecurePrivateKeyPermissions {
             scope: "tls.certificates[0]".to_owned(),
-            path: PathBuf::from("/tmp/key.pem"),
+            path: path.clone(),
             mode: 0o640,
         };
 
         assert_eq!(
             issue.to_string(),
-            "tls.certificates[0].key_path /tmp/key.pem has insecure mode 640; use 600"
+            format!(
+                "tls.certificates[0].key_path {} has insecure mode 640; use 600",
+                path.display()
+            )
         );
     }
 

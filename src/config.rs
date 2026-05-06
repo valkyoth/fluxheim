@@ -3733,6 +3733,8 @@ mod tests {
         ServerConfig, ServerLimitsConfig, VhostConfig, VhostHeaderPolicyConfig, WebConfig,
         normalize_host, normalize_host_pattern,
     };
+    #[cfg(unix)]
+    use crate::test_support::unique_world_writable_child;
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
     #[test]
@@ -4383,12 +4385,15 @@ mod tests {
 
         #[cfg(unix)]
         {
-            let config: Config = toml::from_str(
+            let pid_file =
+                unique_world_writable_child("config-process-world-writable", "fluxheim.pid");
+            let config: Config = toml::from_str(&format!(
                 r#"
                 [server.process]
-                pid_file = "/tmp/fluxheim.pid"
+                pid_file = "{}"
                 "#,
-            )
+                pid_file.display()
+            ))
             .unwrap();
 
             assert!(matches!(
@@ -4576,16 +4581,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_tls_certificate_paths_under_world_writable_parent() {
-        let config: Config = toml::from_str(
+        let cert_path = unique_world_writable_child("config-tls-world-writable", "fullchain.pem");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls]
             enabled = true
 
             [[tls.certificates]]
-            cert_path = "/tmp/fullchain.pem"
+            cert_path = "{}"
             key_path = "/var/lib/fluxheim/key.pem"
             "#,
-        )
+            cert_path.display()
+        ))
         .unwrap();
 
         assert!(matches!(
@@ -4597,11 +4604,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_acme_paths_under_world_writable_parent() {
-        let config: Config = toml::from_str(
+        let storage = unique_world_writable_child("config-acme-world-writable", "acme");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
-            storage = "/tmp/fluxheim-acme"
+            storage = "{}"
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -4613,7 +4621,8 @@ mod tests {
             key_id_env = "FLUXHEIM_ACTALIS_EAB_KID"
             hmac_key_env = "FLUXHEIM_ACTALIS_EAB_HMAC_KEY"
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         assert!(matches!(
@@ -4625,7 +4634,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_acme_eab_secret_paths_under_world_writable_parent() {
-        let config: Config = toml::from_str(
+        let key_id_file = unique_world_writable_child("config-acme-eab-world-writable", "key-id");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
@@ -4638,10 +4648,11 @@ mod tests {
             directory_url = "https://acme-api.actalis.com/acme/directory"
 
             [tls.acme.issuers.eab]
-            key_id_file = "/tmp/actalis-kid"
+            key_id_file = "{}"
             hmac_key_env = "FLUXHEIM_ACTALIS_EAB_HMAC_KEY"
             "#,
-        )
+            key_id_file.display()
+        ))
         .unwrap();
 
         assert!(matches!(
@@ -4929,13 +4940,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_disk_cache_under_world_writable_parent() {
-        let config: Config = toml::from_str(
+        let path = unique_world_writable_child("config-cache-world-writable", "cache");
+        let config: Config = toml::from_str(&format!(
             r#"
             [cache.disk]
             enabled = true
-            path = "/tmp/fluxheim-cache"
+            path = "{}"
             "#,
-        )
+            path.display()
+        ))
         .unwrap();
 
         assert!(matches!(
@@ -5256,12 +5269,14 @@ mod tests {
     #[cfg(all(not(feature = "privacy-mode"), unix))]
     #[test]
     fn rejects_file_logging_under_world_writable_parent() {
-        let config: Config = toml::from_str(
+        let path = unique_world_writable_child("config-log-world-writable", "fluxheim.log");
+        let config: Config = toml::from_str(&format!(
             r#"
             [logging.file]
-            path = "/tmp/fluxheim.log"
+            path = "{}"
             "#,
-        )
+            path.display()
+        ))
         .unwrap();
 
         assert!(matches!(
@@ -5313,7 +5328,7 @@ mod tests {
             r#"
             [logging.file]
             enabled = true
-            path = "/tmp/fluxheim.log"
+            path = "/var/log/fluxheim.log"
             "#,
         )
         .unwrap();
@@ -5395,9 +5410,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_admin_paths_under_world_writable_parent() {
+        let token_file = unique_world_writable_child("config-admin-token-world-writable", "token");
         let token_config = Config {
             admin: AdminConfig {
-                token_file: Some(PathBuf::from("/tmp/fluxheim-admin-token")),
+                token_file: Some(token_file),
                 ..AdminConfig::default()
             },
             ..Config::default()
@@ -5407,9 +5423,11 @@ mod tests {
             Err(ConfigError::UnsafePath { field, .. }) if field == "admin.token_file"
         ));
 
+        let snapshot_store =
+            unique_world_writable_child("config-admin-snapshot-world-writable", "snapshots");
         let snapshot_config = Config {
             admin: AdminConfig {
-                snapshot_store: Some(PathBuf::from("/tmp/fluxheim-admin-snapshots")),
+                snapshot_store: Some(snapshot_store),
                 ..AdminConfig::default()
             },
             ..Config::default()

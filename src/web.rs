@@ -1108,7 +1108,7 @@ mod tests {
     #[test]
     fn refuses_static_full_body_over_buffer_limit() {
         let file = StaticFile {
-            path: std::path::PathBuf::from("/tmp/fluxheim-too-large-static"),
+            path: std::path::PathBuf::from("target/fluxheim-too-large-static"),
             mime: "application/octet-stream".to_owned(),
             len: super::MAX_STATIC_BUFFERED_BODY_BYTES + 1,
             modified: None,
@@ -1197,7 +1197,7 @@ mod tests {
 
     fn static_file(len: u64, modified: Option<SystemTime>) -> StaticFile {
         StaticFile {
-            path: PathBuf::from("/tmp/fluxheim-static-test"),
+            path: PathBuf::from("target/fluxheim-static-test"),
             mime: "text/plain".to_owned(),
             len,
             modified,

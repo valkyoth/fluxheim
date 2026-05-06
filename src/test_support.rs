@@ -5,11 +5,22 @@ static NEXT_TEST_PATH: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn unique_temp_path(label: &str) -> PathBuf {
     assert_safe_label(label);
-    std::env::temp_dir().join(format!(
-        "fluxheim-test-{}-{}",
-        std::process::id(),
-        NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed)
-    ))
+    let root = test_root();
+    safe_relative_path(
+        &root,
+        &format!(
+            "fluxheim-test-{}-{}",
+            std::process::id(),
+            NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed)
+        ),
+    )
+}
+
+pub(crate) fn test_root() -> PathBuf {
+    let root = PathBuf::from("target/fluxheim-test-tmp");
+    std::fs::create_dir_all(&root).expect("create repository-local test root");
+    root.canonicalize()
+        .expect("canonicalize repository-local test root")
 }
 
 pub(crate) fn safe_child_path(base: &Path, name: &str) -> PathBuf {
@@ -29,6 +40,16 @@ pub(crate) fn safe_relative_path(base: &Path, relative: &str) -> PathBuf {
         path.push(component);
     }
     path
+}
+
+#[cfg(unix)]
+pub(crate) fn unique_world_writable_child(label: &str, child: &str) -> PathBuf {
+    let parent = unique_temp_path(label);
+    std::fs::create_dir_all(&parent).expect("create world-writable test parent");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o777))
+        .expect("mark test parent world-writable");
+    safe_relative_path(&parent, child)
 }
 
 fn assert_safe_label(label: &str) {
@@ -62,13 +83,22 @@ mod tests {
 
     #[test]
     fn safe_relative_path_allows_nested_safe_components() {
-        let path = safe_relative_path(std::path::Path::new("/tmp/base"), "logs/fluxheim.log");
-        assert_eq!(path, std::path::Path::new("/tmp/base/logs/fluxheim.log"));
+        let path = safe_relative_path(
+            std::path::Path::new("target/fluxheim-test-tmp"),
+            "logs/fluxheim.log",
+        );
+        assert_eq!(
+            path,
+            std::path::Path::new("target/fluxheim-test-tmp/logs/fluxheim.log")
+        );
     }
 
     #[test]
     #[should_panic(expected = "single ASCII-safe path component")]
     fn rejects_unsafe_labels() {
-        let _ = safe_child_path(std::path::Path::new("/tmp"), "../escape");
+        let _ = safe_child_path(
+            std::path::Path::new("target/fluxheim-test-tmp"),
+            "../escape",
+        );
     }
 }

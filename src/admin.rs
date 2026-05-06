@@ -1545,6 +1545,8 @@ mod tests {
     use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
     use crate::snapshot::SnapshotStore;
     use crate::test_support::unique_temp_path;
+    #[cfg(unix)]
+    use crate::test_support::unique_world_writable_child;
 
     fn app() -> AdminApp {
         app_with_config(Config::default())
@@ -2686,7 +2688,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn admin_token_file_must_not_be_below_world_writable_directory() {
-        let token_file = unique_temp_path("admin-token-world-writable-parent");
+        let token_file =
+            unique_world_writable_child("admin-token-world-writable-parent", "admin-token");
         std::fs::write(&token_file, "secret-token\n").unwrap();
 
         let error = read_secret_file(&token_file).unwrap_err();

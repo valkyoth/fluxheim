@@ -705,6 +705,8 @@ fn snapshot_root_or_parent_is_world_writable(_path: &Path) -> io::Result<bool> {
 mod tests {
     use super::{SnapshotError, SnapshotStore, write_atomically};
     use crate::config::{Config, ProxyConfig};
+    #[cfg(unix)]
+    use crate::test_support::unique_world_writable_child;
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
     #[test]
@@ -899,7 +901,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_snapshot_store_root_below_world_writable_directory() {
-        let root = unique_temp_path("snapshot-root-world-writable");
+        let root = unique_world_writable_child("snapshot-root-world-writable", "snapshots");
         let store = SnapshotStore::new(&root);
 
         let error = store
