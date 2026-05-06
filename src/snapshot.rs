@@ -965,8 +965,7 @@ mod tests {
             toml::to_string_pretty(&Config::default()).unwrap(),
         )
         .unwrap();
-        let config_path = snapshot.config_path.canonicalize().unwrap();
-        std::fs::remove_file(config_path).unwrap();
+        dir.remove_child_file(&snapshot.config_path);
         std::os::unix::fs::symlink(&outside, &snapshot.config_path).unwrap();
 
         let error = store.rollback_candidate(Some(&snapshot.id)).unwrap_err();
@@ -991,8 +990,7 @@ mod tests {
             ),
         )
         .unwrap();
-        let metadata_path = snapshot.metadata_path.canonicalize().unwrap();
-        std::fs::remove_file(metadata_path).unwrap();
+        dir.remove_child_file(&snapshot.metadata_path);
         std::os::unix::fs::symlink(&outside, &snapshot.metadata_path).unwrap();
 
         let error = store.list().unwrap_err();
@@ -1060,6 +1058,13 @@ mod tests {
 
         fn child(&self, name: &str) -> std::path::PathBuf {
             safe_relative_path(&self.path, name)
+        }
+
+        #[cfg(unix)]
+        fn remove_child_file(&self, path: &std::path::Path) {
+            let canonical = path.canonicalize().expect("canonicalize test child file");
+            assert!(canonical.starts_with(&self.path));
+            std::fs::remove_file(canonical).expect("remove test child file");
         }
     }
 

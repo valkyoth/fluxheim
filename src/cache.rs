@@ -204,7 +204,8 @@ impl std::fmt::Debug for MemoryImageCache {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("MemoryImageCache")
-            .field("stats", &self.stats())
+            .field("max_size_bytes", &self.max_size_bytes)
+            .field("max_object_bytes", &self.max_object_bytes)
             .finish()
     }
 }
@@ -859,23 +860,14 @@ fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
     let mut entries = Vec::new();
     for shard in std::fs::read_dir(root)? {
         let shard = shard?;
-        let shard_path = shard.path();
-        if cache_path_contains_symlink(root, &shard_path)? || !shard.file_type()?.is_dir() {
+        let Some(shard_path) = safe_cache_shard_entry_path(root, &shard)? else {
             continue;
-        }
+        };
         for entry in std::fs::read_dir(&shard_path)? {
             let entry = entry?;
-            let path = entry.path();
-            let file_type = entry.file_type()?;
-            if cache_path_contains_symlink(root, &path)?
-                || path.extension() != Some(std::ffi::OsStr::new("fhc"))
-            {
+            let Some((path, metadata)) = safe_cache_object_entry(root, &shard_path, &entry)? else {
                 continue;
-            }
-            if file_type.is_symlink() || !file_type.is_file() {
-                continue;
-            }
-            let metadata = entry.metadata()?;
+            };
             if entries.len() >= MAX_DISK_CACHE_SCAN_ENTRIES {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -893,6 +885,77 @@ fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
         }
     }
     Ok(entries)
+}
+
+#[cfg(feature = "proxy")]
+fn safe_cache_shard_entry_path(
+    root: &Path,
+    entry: &std::fs::DirEntry,
+) -> std::io::Result<Option<PathBuf>> {
+    let file_type = entry.file_type()?;
+    if file_type.is_symlink() || !file_type.is_dir() {
+        return Ok(None);
+    }
+
+    let file_name = entry.file_name();
+    let Some(name) = file_name.to_str() else {
+        return Ok(None);
+    };
+    if name.len() != 2 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(None);
+    }
+
+    let path = root.join(name);
+    if cache_path_contains_symlink(root, &path)? {
+        return Ok(None);
+    }
+
+    let canonical = path.canonicalize()?;
+    if canonical.starts_with(root) && canonical.is_dir() {
+        Ok(Some(canonical))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn safe_cache_object_entry(
+    root: &Path,
+    shard_path: &Path,
+    entry: &std::fs::DirEntry,
+) -> std::io::Result<Option<(PathBuf, std::fs::Metadata)>> {
+    let file_type = entry.file_type()?;
+    if file_type.is_symlink() || !file_type.is_file() {
+        return Ok(None);
+    }
+
+    let file_name = entry.file_name();
+    let Some(name) = file_name.to_str() else {
+        return Ok(None);
+    };
+    let Some(encoded) = name.strip_suffix(".fhc") else {
+        return Ok(None);
+    };
+    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Ok(None);
+    }
+
+    let path = shard_path.join(name);
+    if cache_path_contains_symlink(root, &path)? {
+        return Ok(None);
+    }
+
+    let canonical = path.canonicalize()?;
+    if !canonical.starts_with(root) {
+        return Ok(None);
+    }
+
+    let metadata = entry.metadata()?;
+    if metadata.is_file() {
+        Ok(Some((canonical, metadata)))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2651,15 +2714,21 @@ mod tests {
         let linked_shard = root.join("cd");
         std::fs::create_dir_all(&shard).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
-        std::fs::write(shard.join("real.fhc"), b"real").unwrap();
-        std::fs::write(outside.join("outside.fhc"), b"outside").unwrap();
-        std::os::unix::fs::symlink(outside.join("outside.fhc"), shard.join("linked.fhc")).unwrap();
+        let real_name = format!("{}.fhc", "0".repeat(64));
+        let linked_name = format!("{}.fhc", "1".repeat(64));
+        let outside_name = format!("{}.fhc", "2".repeat(64));
+        std::fs::write(shard.join(&real_name), b"real").unwrap();
+        std::fs::write(outside.join(&outside_name), b"outside").unwrap();
+        std::os::unix::fs::symlink(outside.join(&outside_name), shard.join(&linked_name)).unwrap();
         std::os::unix::fs::symlink(&outside, &linked_shard).unwrap();
 
         let entries = super::disk_cache_entries(&root).unwrap();
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].path, shard.join("real.fhc"));
+        assert_eq!(
+            entries[0].path,
+            shard.canonicalize().unwrap().join(real_name)
+        );
 
         std::fs::remove_dir_all(root).unwrap();
         std::fs::remove_dir_all(outside).unwrap();
@@ -2672,7 +2741,7 @@ mod tests {
         let shard = root.join("ab");
         std::fs::create_dir_all(&shard).unwrap();
         for index in 0..=super::MAX_DISK_CACHE_SCAN_ENTRIES {
-            std::fs::write(shard.join(format!("{index}.fhc")), b"cached").unwrap();
+            std::fs::write(shard.join(format!("{index:064x}.fhc")), b"cached").unwrap();
         }
 
         let error = super::disk_cache_entries(&root).unwrap_err();
