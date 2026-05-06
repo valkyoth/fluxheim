@@ -5,6 +5,8 @@ ARG FLUXHEIM_CONFIG=examples/fluxheim.toml
 FROM ${RUST_IMAGE} AS builder
 WORKDIR /usr/src/fluxheim
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake \
     && rm -rf /var/lib/apt/lists/* \
@@ -25,17 +27,21 @@ RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
 
 FROM ${RUNTIME_IMAGE}
 ARG FLUXHEIM_CONFIG=examples/fluxheim.toml
+ARG FLUXHEIM_RUNTIME_UID=65532
+ARG FLUXHEIM_RUNTIME_GID=65532
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /etc/fluxheim /var/lib/fluxheim/acme /var/cache/fluxheim /srv/fluxheim \
-    && chown -R 65532:65532 /etc/fluxheim /var/lib/fluxheim /var/cache/fluxheim /srv/fluxheim
+    && mkdir -p /etc/fluxheim /run/fluxheim /var/lib/fluxheim/acme /var/cache/fluxheim /srv/fluxheim \
+    && chown -R ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID} /etc/fluxheim /run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /srv/fluxheim
 
 COPY --from=builder /usr/src/fluxheim/target/release/fluxheim /usr/local/bin/fluxheim
 COPY ${FLUXHEIM_CONFIG} /etc/fluxheim/fluxheim.toml
 
-USER 65532:65532
+USER ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID}
 EXPOSE 8080 8443
 
 ENTRYPOINT ["/usr/local/bin/fluxheim"]

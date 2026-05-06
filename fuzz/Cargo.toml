@@ -1,0 +1,26 @@
+[package]
+name = "fluxheim-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+fluxheim = { path = ".." }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "host_normalization"
+path = "fuzz_targets/host_normalization.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cache_headers"
+path = "fuzz_targets/cache_headers.rs"
+test = false
+doc = false
+bench = false

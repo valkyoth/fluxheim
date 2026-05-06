@@ -29,7 +29,7 @@ use pingora::{
 
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
-use crate::config::{Config, ProxyConfig, ServerLimitsConfig, normalize_host};
+use crate::config::{Config, HttpsRedirectConfig, ProxyConfig, ServerLimitsConfig, normalize_host};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
 #[cfg(feature = "web")]
@@ -84,6 +84,7 @@ struct ProxyRuntimeState {
     default_vhost: usize,
     trusted_proxies: Vec<TrustedProxy>,
     limits: ServerLimitsConfig,
+    https_redirect: HttpsRedirectConfig,
     #[cfg(not(feature = "privacy-mode"))]
     access_log: AccessLoggingConfig,
 }
@@ -199,10 +200,18 @@ impl FluxProxy {
             "{}",
             access_log_json(AccessLogEvent {
                 method: session.req_header().method.as_str(),
-                host: request_host(session),
+                host: state
+                    .access_log
+                    .include_host
+                    .then(|| request_host(session))
+                    .flatten(),
                 vhost,
-                path: session.req_header().uri.path(),
+                path: state
+                    .access_log
+                    .include_path
+                    .then(|| session.req_header().uri.path()),
                 status,
+                status_class: status.map(status_class),
                 error: error.is_some(),
                 request_id: ctx.request_id.as_deref(),
                 request_body_bytes: ctx.request_body_bytes_seen,
@@ -682,6 +691,7 @@ impl ProxyRuntimeState {
             default_vhost,
             trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
             limits: config.server.limits,
+            https_redirect: config.server.https_redirect,
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -734,6 +744,7 @@ impl ProxyRuntimeState {
             default_vhost,
             trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
             limits: config.server.limits,
+            https_redirect: config.server.https_redirect,
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -995,6 +1006,11 @@ impl ProxyHttp for FluxProxy {
         {
             ctx.request_id = access_log_request_id(&state.access_log, session.req_header());
         }
+        if state.https_redirect.enabled && !downstream_tls(session) {
+            let vhost = state.vhost(vhost_index);
+            respond_https_redirect(session, &state.https_redirect, &vhost.response_headers).await?;
+            return Ok(true);
+        }
 
         #[cfg(feature = "web")]
         {
@@ -1010,6 +1026,9 @@ impl ProxyHttp for FluxProxy {
 
             match web.resolve(session.req_header().uri.path()) {
                 Ok(ResolveResult::Found(file)) => {
+                    let if_match = request_header_values_joined(session.req_header(), "if-match");
+                    let if_unmodified_since =
+                        request_header_values_joined(session.req_header(), "if-unmodified-since");
                     let if_none_match =
                         request_header_values_joined(session.req_header(), "if-none-match");
                     let if_modified_since =
@@ -1023,6 +1042,8 @@ impl ProxyHttp for FluxProxy {
                         &file,
                         method,
                         crate::web::StaticRequestConditions {
+                            if_match: if_match.as_deref(),
+                            if_unmodified_since: if_unmodified_since.as_deref(),
                             if_none_match: if_none_match.as_deref(),
                             if_modified_since: if_modified_since.as_deref(),
                             cache_control: cache_control.as_deref(),
@@ -1041,8 +1062,14 @@ impl ProxyHttp for FluxProxy {
                         return Ok(true);
                     }
                     ctx.response_body_bytes_seen = plan.response_body_bytes;
-                    crate::web::serve_static_file(session, &file, &plan, &vhost.response_headers)
-                        .await?;
+                    crate::web::serve_static_file(
+                        session,
+                        web,
+                        &file,
+                        &plan,
+                        &vhost.response_headers,
+                    )
+                    .await?;
                     Ok(true)
                 }
                 Ok(ResolveResult::Forbidden) => {
@@ -1089,7 +1116,7 @@ impl ProxyHttp for FluxProxy {
         }
 
         let peer = HttpPeer::new(
-            proxy.upstream.as_str(),
+            proxy.primary_upstream(),
             proxy.upstream_tls,
             proxy.upstream_sni(),
         );
@@ -1112,9 +1139,7 @@ impl ProxyHttp for FluxProxy {
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
-        let downstream_tls = session
-            .digest()
-            .is_some_and(|digest| digest.ssl_digest.is_some());
+        let downstream_tls = downstream_tls(session);
         let client_addr = session.client_addr().and_then(|addr| addr.as_inet());
         let trusted_proxy = client_addr
             .map(|addr| state.trusted_proxy(addr.ip()))
@@ -1200,6 +1225,7 @@ impl ProxyHttp for FluxProxy {
         #[cfg(feature = "metrics")]
         crate::metrics::record_proxy_outcome(
             proxy_metrics_vhost(ctx),
+            session.req_header().method.as_str(),
             session
                 .response_written()
                 .map(|response| response.status.as_u16()),
@@ -1334,13 +1360,77 @@ fn request_host(session: &Session) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
 }
 
+fn downstream_tls(session: &Session) -> bool {
+    session
+        .digest()
+        .is_some_and(|digest| digest.ssl_digest.is_some())
+}
+
+async fn respond_https_redirect(
+    session: &mut Session,
+    config: &HttpsRedirectConfig,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+) -> Result<()> {
+    let Some(location) = https_redirect_location(session.req_header(), config) else {
+        session
+            .respond_error_with_body(400, Bytes::from_static(b"missing or invalid host"))
+            .await?;
+        return Ok(());
+    };
+
+    let mut response = ResponseHeader::build(config.status, Some(4))?;
+    response.insert_header("location", location)?;
+    response.insert_header("content-length", 0)?;
+    crate::headers::apply_response_policy(&mut response, response_policy)?;
+    session
+        .write_response_header(Box::new(response), true)
+        .await
+}
+
+fn https_redirect_location(
+    request: &RequestHeader,
+    config: &HttpsRedirectConfig,
+) -> Option<String> {
+    let host = request
+        .headers
+        .get("host")
+        .and_then(|value| value.to_str().ok())?;
+    let normalized_host = normalize_host(host)?;
+    let authority = redirect_authority(&normalized_host, config.target_port)?;
+    let path_and_query = request
+        .uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
+    if !path_and_query.starts_with('/') || path_and_query.chars().any(char::is_control) {
+        return None;
+    }
+
+    Some(format!("https://{authority}{path_and_query}"))
+}
+
+fn redirect_authority(host: &str, target_port: Option<u16>) -> Option<String> {
+    let host = if host.parse::<Ipv6Addr>().is_ok() {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+
+    match target_port {
+        Some(443) | None => Some(host),
+        Some(0) => None,
+        Some(port) => Some(format!("{host}:{port}")),
+    }
+}
+
 #[cfg(not(feature = "privacy-mode"))]
 struct AccessLogEvent<'a> {
     method: &'a str,
     host: Option<&'a str>,
     vhost: &'a str,
-    path: &'a str,
+    path: Option<&'a str>,
     status: Option<u16>,
+    status_class: Option<&'static str>,
     error: bool,
     request_id: Option<&'a str>,
     request_body_bytes: u64,
@@ -1354,21 +1444,36 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
         .status
         .map(|status| status.to_string())
         .unwrap_or_else(|| "null".to_owned());
+    let status_class = event.status_class.unwrap_or("unknown");
     let host = event.host.unwrap_or("");
+    let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"path\":\"{}\",\"status\":{},\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
         json_escape(event.vhost),
-        json_escape(event.path),
+        json_escape(path),
         status,
+        status_class,
         event.error,
         json_escape(request_id),
         event.request_body_bytes,
         event.response_body_bytes,
         event.latency_ms,
     )
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+fn status_class(status: u16) -> &'static str {
+    match status {
+        100..=199 => "1xx",
+        200..=299 => "2xx",
+        300..=399 => "3xx",
+        400..=499 => "4xx",
+        500..=599 => "5xx",
+        _ => "other",
+    }
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -1551,6 +1656,11 @@ fn response_cache_admission_rejection(response: &ResponseHeader) -> Option<&'sta
     if headers.contains_key("set-cookie") {
         return Some("set-cookie");
     }
+    if let Some(reason) = crate::cache_headers::response_values_forbid_shared_cache(
+        response_header_values(response, "cache-control"),
+    ) {
+        return Some(reason);
+    }
     match vary_cache_policy(headers) {
         VaryCachePolicy::Uncacheable(reason) => Some(reason),
         VaryCachePolicy::None | VaryCachePolicy::Fields(_) => None,
@@ -1664,6 +1774,18 @@ fn request_header_values<'a>(
     name: &'a str,
 ) -> impl Iterator<Item = &'a str> + 'a {
     request
+        .headers
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+}
+
+#[cfg(feature = "cache")]
+fn response_header_values<'a>(
+    response: &'a ResponseHeader,
+    name: &'a str,
+) -> impl Iterator<Item = &'a str> + 'a {
+    response
         .headers
         .get_all(name)
         .iter()
@@ -1794,8 +1916,8 @@ mod tests {
     use bytes::Bytes;
 
     use crate::config::{
-        ByteSize, CacheConfig, Config, ProxyConfig, ServerConfig, ServerLimitsConfig, VhostConfig,
-        WebConfig,
+        ByteSize, CacheConfig, Config, HttpsRedirectConfig, ProxyConfig, ServerConfig,
+        ServerLimitsConfig, VhostConfig, WebConfig,
     };
 
     #[cfg(feature = "cache")]
@@ -1803,7 +1925,8 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, count_response_body_chunk, request_body_chunk_limit_status, request_limit_status,
+        FluxProxy, count_response_body_chunk, https_redirect_location, redirect_authority,
+        request_body_chunk_limit_status, request_limit_status,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -1820,6 +1943,7 @@ mod tests {
                 default_vhost: Some("exact".to_owned()),
                 trusted_proxies: Vec::new(),
                 limits: ServerLimitsConfig::default(),
+                ..ServerConfig::default()
             },
             vhosts: vec![
                 VhostConfig {
@@ -1827,7 +1951,7 @@ mod tests {
                     hosts: vec!["one.example".to_owned()],
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
-                        upstream: "127.0.0.1:3001".to_owned(),
+                        upstream: Some("127.0.0.1:3001".to_owned()),
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
@@ -1839,7 +1963,7 @@ mod tests {
                     hosts: vec!["two.example".to_owned()],
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
-                        upstream: "127.0.0.1:3002".to_owned(),
+                        upstream: Some("127.0.0.1:3002".to_owned()),
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
@@ -1920,6 +2044,7 @@ mod tests {
                 default_vhost: Some("two".to_owned()),
                 trusted_proxies: Vec::new(),
                 limits: ServerLimitsConfig::default(),
+                ..ServerConfig::default()
             },
             vhosts: vec![
                 VhostConfig {
@@ -1957,6 +2082,7 @@ mod tests {
                 default_vhost: Some("exact".to_owned()),
                 trusted_proxies: Vec::new(),
                 limits: ServerLimitsConfig::default(),
+                ..ServerConfig::default()
             },
             vhosts: vec![
                 VhostConfig {
@@ -1985,6 +2111,61 @@ mod tests {
         assert_eq!(proxy.route_host(Some("www.example.com")), "wild");
         assert_eq!(proxy.route_host(Some("api.example.com")), "exact");
         assert_eq!(proxy.route_host(Some("deep.www.example.com")), "exact");
+    }
+
+    #[test]
+    fn builds_safe_https_redirect_location() {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/shop/item?id=42", None).unwrap();
+        request.insert_header("host", "Example.Test:8080").unwrap();
+        let config = HttpsRedirectConfig {
+            enabled: true,
+            status: 308,
+            target_port: Some(8443),
+        };
+
+        assert_eq!(
+            https_redirect_location(&request, &config).as_deref(),
+            Some("https://example.test:8443/shop/item?id=42")
+        );
+    }
+
+    #[test]
+    fn default_https_redirect_drops_source_http_port() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/docs", None).unwrap();
+        request.insert_header("host", "example.test:8080").unwrap();
+
+        assert_eq!(
+            https_redirect_location(&request, &HttpsRedirectConfig::default()).as_deref(),
+            Some("https://example.test/docs")
+        );
+    }
+
+    #[test]
+    fn redirect_target_port_443_uses_default_authority() {
+        assert_eq!(
+            redirect_authority("example.test", Some(443)).as_deref(),
+            Some("example.test")
+        );
+    }
+
+    #[test]
+    fn rejects_redirect_location_without_safe_host() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        request.insert_header("host", "example.test/bad").unwrap();
+
+        assert_eq!(
+            https_redirect_location(&request, &HttpsRedirectConfig::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn wraps_ipv6_redirect_authority() {
+        assert_eq!(
+            redirect_authority("2001:db8::1", Some(8443)).as_deref(),
+            Some("[2001:db8::1]:8443")
+        );
     }
 
     #[test]
@@ -2769,6 +2950,28 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn response_cache_admission_rejects_uncacheable_response_cache_control() {
+        for (value, reason) in [
+            ("no-store", "cache-control-no-store"),
+            ("private", "cache-control-private"),
+            ("public, no-cache", "cache-control-no-cache"),
+            ("max-age=0", "cache-control-zero-freshness"),
+            ("s-maxage=0", "cache-control-zero-freshness"),
+        ] {
+            let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+            response.insert_header("content-type", "image/png").unwrap();
+            response.insert_header("cache-control", value).unwrap();
+
+            assert_eq!(
+                response_cache_admission_rejection(&response),
+                Some(reason),
+                "cache-control: {value}"
+            );
+        }
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn response_cache_admission_requires_image_content_type() {
         let mut redirect = pingora::http::ResponseHeader::build(302, Some(2)).unwrap();
         redirect
@@ -2954,8 +3157,9 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             vhost: "main\"site",
-            path: "/asset path/one.js",
+            path: Some("/asset path/one.js"),
             status: Some(200),
+            status_class: Some(super::status_class(200)),
             error: false,
             request_id: Some("req-123"),
             request_body_bytes: 42,
@@ -2967,9 +3171,63 @@ mod tests {
         assert!(log.contains("\"host\":\"example.test\""));
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
         assert!(log.contains("\"path\":\"/asset path/one.js\""));
+        assert!(log.contains("\"status_class\":\"2xx\""));
         assert!(log.contains("\"request_id\":\"req-123\""));
         assert!(log.contains("\"response_body_bytes\":2048"));
         assert!(!log.contains("secret="));
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn access_log_json_can_omit_path() {
+        let log = super::access_log_json(super::AccessLogEvent {
+            method: "GET",
+            host: Some("example.test"),
+            vhost: "main",
+            path: None,
+            status: Some(204),
+            status_class: Some(super::status_class(204)),
+            error: false,
+            request_id: None,
+            request_body_bytes: 0,
+            response_body_bytes: 0,
+            latency_ms: 1,
+        });
+
+        assert!(log.contains("\"path\":\"\""));
+        assert!(!log.contains("/private"));
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn access_log_json_can_omit_host() {
+        let log = super::access_log_json(super::AccessLogEvent {
+            method: "GET",
+            host: None,
+            vhost: "main",
+            path: Some("/"),
+            status: Some(204),
+            status_class: Some(super::status_class(204)),
+            error: false,
+            request_id: None,
+            request_body_bytes: 0,
+            response_body_bytes: 0,
+            latency_ms: 1,
+        });
+
+        assert!(log.contains("\"host\":\"\""));
+        assert!(!log.contains("tenant.example"));
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn access_log_status_class_is_low_cardinality() {
+        assert_eq!(super::status_class(101), "1xx");
+        assert_eq!(super::status_class(204), "2xx");
+        assert_eq!(super::status_class(304), "3xx");
+        assert_eq!(super::status_class(404), "4xx");
+        assert_eq!(super::status_class(503), "5xx");
+        assert_eq!(super::status_class(700), "other");
     }
 
     #[test]

@@ -1,16 +1,23 @@
 use std::error::Error;
 #[cfg(feature = "proxy")]
+use std::fs::{File, OpenOptions};
+#[cfg(feature = "proxy")]
 use std::io::Write;
+#[cfg(all(feature = "proxy", target_os = "linux"))]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(feature = "proxy")]
+use std::path::Path;
 
 use crate::config::Config;
 #[cfg(feature = "proxy")]
-use crate::config::LoggingFormat;
+use crate::config::{LoggingFormat, LoggingTarget};
 
 #[cfg(feature = "proxy")]
 pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    init_logging(&config);
+    init_logging(&config)?;
 
-    let mut server = pingora::server::Server::new(None)?;
+    let pingora_conf = pingora_server_conf(&config);
+    let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);
     server.bootstrap();
 
     #[cfg(feature = "load-balancer")]
@@ -57,22 +64,90 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     server.run_forever();
 }
 
+#[cfg(feature = "proxy")]
+fn pingora_server_conf(config: &Config) -> pingora::server::configuration::ServerConf {
+    let process = &config.server.process;
+    pingora::server::configuration::ServerConf {
+        daemon: process.daemon,
+        error_log: process
+            .error_log
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
+        pid_file: process.pid_file.to_string_lossy().into_owned(),
+        upgrade_sock: process.upgrade_sock.to_string_lossy().into_owned(),
+        threads: process.threads,
+        listener_tasks_per_fd: process.listener_tasks_per_fd,
+        work_stealing: process.work_stealing,
+        upstream_keepalive_pool_size: process.upstream_keepalive_pool_size,
+        max_retries: process.max_retries,
+        grace_period_seconds: process.grace_period_seconds,
+        graceful_shutdown_timeout_seconds: process.graceful_shutdown_timeout_seconds,
+        ..pingora::server::configuration::ServerConf::default()
+    }
+}
+
 #[cfg(not(feature = "proxy"))]
 pub fn run(_config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     Err("no runnable Fluxheim module is enabled; enable the `proxy` feature".into())
 }
 
 #[cfg(feature = "proxy")]
-fn init_logging(config: &Config) {
+fn init_logging(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let env = env_logger::Env::default().default_filter_or(config.logging.level.as_filter());
     let format = config.logging.format;
-    let _ = env_logger::Builder::from_env(env)
-        .format(move |buf, record| match format {
-            LoggingFormat::Json => write_json_log_record(buf, record),
-            LoggingFormat::Text => write_text_log_record(buf, record),
-        })
-        .try_init();
+    let mut builder = env_logger::Builder::from_env(env);
+    builder.format(move |buf, record| match format {
+        LoggingFormat::Json => write_json_log_record(buf, record),
+        LoggingFormat::Text => write_text_log_record(buf, record),
+    });
+
+    if config.logging.file.enabled {
+        let path = config.logging.file.path.as_deref().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "logging.file.enabled requires logging.file.path",
+            )
+        })?;
+        let file = open_log_file(path, config.logging.file.append)?;
+        builder.target(env_logger::Target::Pipe(Box::new(file)));
+    } else {
+        builder.target(match config.logging.target {
+            LoggingTarget::Stdout => env_logger::Target::Stdout,
+            LoggingTarget::Stderr => env_logger::Target::Stderr,
+        });
+    }
+
+    let _ = builder.try_init();
+    Ok(())
 }
+
+#[cfg(feature = "proxy")]
+fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create(true).write(true);
+    if append {
+        options.append(true);
+    } else {
+        options.truncate(true);
+    }
+
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NOFOLLOW);
+
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("log path is not a regular file: {}", path.display()),
+        ));
+    }
+
+    Ok(file)
+}
+
+#[cfg(all(feature = "proxy", target_os = "linux"))]
+const O_NOFOLLOW: i32 = 0o400000;
 
 #[cfg(feature = "proxy")]
 fn write_text_log_record(
@@ -143,7 +218,7 @@ fn json_escape(value: &str) -> String {
 
 #[cfg(all(test, feature = "proxy"))]
 mod tests {
-    use super::{json_escape, log_record_json};
+    use super::{json_escape, log_record_json, open_log_file, pingora_server_conf};
 
     #[test]
     fn json_log_record_escapes_fields() {
@@ -163,6 +238,83 @@ mod tests {
     #[test]
     fn json_escape_escapes_control_characters() {
         assert_eq!(json_escape("a\u{0001}b"), "a\\u0001b");
+    }
+
+    #[test]
+    fn maps_server_process_config_to_pingora_conf() {
+        let config = crate::config::Config {
+            server: crate::config::ServerConfig {
+                process: crate::config::ServerProcessConfig {
+                    daemon: true,
+                    error_log: Some(std::path::PathBuf::from("/run/fluxheim/error.log")),
+                    pid_file: std::path::PathBuf::from("/run/fluxheim/fluxheim.pid"),
+                    upgrade_sock: std::path::PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock"),
+                    threads: 4,
+                    listener_tasks_per_fd: 2,
+                    work_stealing: false,
+                    upstream_keepalive_pool_size: 512,
+                    max_retries: 8,
+                    grace_period_seconds: Some(10),
+                    graceful_shutdown_timeout_seconds: Some(30),
+                },
+                ..crate::config::ServerConfig::default()
+            },
+            ..crate::config::Config::default()
+        };
+
+        let pingora = pingora_server_conf(&config);
+
+        assert!(pingora.daemon);
+        assert_eq!(
+            pingora.error_log.as_deref(),
+            Some("/run/fluxheim/error.log")
+        );
+        assert_eq!(pingora.pid_file, "/run/fluxheim/fluxheim.pid");
+        assert_eq!(pingora.upgrade_sock, "/run/fluxheim/fluxheim-upgrade.sock");
+        assert_eq!(pingora.threads, 4);
+        assert_eq!(pingora.listener_tasks_per_fd, 2);
+        assert!(!pingora.work_stealing);
+        assert_eq!(pingora.upstream_keepalive_pool_size, 512);
+        assert_eq!(pingora.max_retries, 8);
+        assert_eq!(pingora.grace_period_seconds, Some(10));
+        assert_eq!(pingora.graceful_shutdown_timeout_seconds, Some(30));
+    }
+
+    #[test]
+    fn opens_regular_log_file_for_append() {
+        let path = std::env::temp_dir().join(format!(
+            "fluxheim-runtime-log-{}-append.log",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let file = open_log_file(&path, true).unwrap();
+
+        assert!(file.metadata().unwrap().is_file());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rejects_symlink_log_file() {
+        let base = std::env::temp_dir();
+        let target = base.join(format!(
+            "fluxheim-runtime-log-{}-target.log",
+            std::process::id()
+        ));
+        let link = base.join(format!(
+            "fluxheim-runtime-log-{}-link.log",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&target);
+        let _ = std::fs::remove_file(&link);
+        std::fs::write(&target, b"").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert!(open_log_file(&link, true).is_err());
+
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&target);
     }
 }
 

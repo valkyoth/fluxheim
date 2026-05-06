@@ -49,6 +49,9 @@ Select at most one:
 
 Cargo features are additive, and Pingora does not support compiling multiple
 TLS backends together. The feature validator catches this before build.
+`tls-boringssl` requires a build host with `libclang` available for bindgen.
+Use `scripts/validate-tls-backends.sh` to validate the supported TLS backends on
+the current machine.
 
 ## Profile Aliases
 

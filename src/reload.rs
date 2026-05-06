@@ -33,6 +33,7 @@ impl ReloadImpact {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ReloadReason {
     ListenerChanged,
+    ProcessSettingsChanged,
     LoggingRuntimeChanged,
     TlsModeChanged,
     TlsBackendChanged,
@@ -67,6 +68,7 @@ impl std::fmt::Display for ReloadReason {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::ListenerChanged => "listener-changed",
+            Self::ProcessSettingsChanged => "process-settings-changed",
             Self::LoggingRuntimeChanged => "logging-runtime-changed",
             Self::TlsModeChanged => "tls-mode-changed",
             Self::TlsBackendChanged => "tls-backend-changed",
@@ -88,7 +90,15 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
         reasons.push(ReloadReason::ListenerChanged);
     }
 
-    if old.logging.level != new.logging.level || old.logging.format != new.logging.format {
+    if old.server.process != new.server.process {
+        reasons.push(ReloadReason::ProcessSettingsChanged);
+    }
+
+    if old.logging.level != new.logging.level
+        || old.logging.format != new.logging.format
+        || old.logging.target != new.logging.target
+        || old.logging.file != new.logging.file
+    {
         reasons.push(ReloadReason::LoggingRuntimeChanged);
     }
 
@@ -159,8 +169,9 @@ fn proxy_load_balancer_signature(
 #[cfg(test)]
 mod tests {
     use crate::config::{
-        AdminConfig, Config, LoggingConfig, LoggingFormat, LoggingLevel, MetricsConfig,
-        ProxyConfig, ServerConfig, TlsBackend, TlsConfig, VhostConfig, WebConfig,
+        AdminConfig, Config, HttpsRedirectConfig, LoggingConfig, LoggingFileConfig, LoggingFormat,
+        LoggingLevel, LoggingTarget, MetricsConfig, ProxyConfig, ServerConfig, ServerProcessConfig,
+        TlsBackend, TlsConfig, VhostConfig, WebConfig,
     };
 
     use super::{ReloadImpact, ReloadReason, classify_reload};
@@ -196,6 +207,39 @@ mod tests {
     }
 
     #[test]
+    fn https_redirect_policy_change_is_snapshot_reload() {
+        let old = Config {
+            server: ServerConfig {
+                tls_listen: vec!["127.0.0.1:18443".to_owned()],
+                ..ServerConfig::default()
+            },
+            tls: TlsConfig {
+                enabled: true,
+                certificates: vec![crate::config::StaticCertificateConfig {
+                    cert_path: "fullchain.pem".into(),
+                    key_path: "key.pem".into(),
+                }],
+                ..TlsConfig::default()
+            },
+            ..Config::default()
+        };
+        let new = Config {
+            server: ServerConfig {
+                https_redirect: HttpsRedirectConfig {
+                    enabled: true,
+                    status: 308,
+                    target_port: Some(8443),
+                },
+                ..old.server.clone()
+            },
+            ..old.clone()
+        };
+
+        assert_eq!(classify_reload(&old, &new), ReloadImpact::Snapshot);
+        assert!(classify_reload(&old, &new).is_snapshot_safe());
+    }
+
+    #[test]
     fn listener_change_requires_process_upgrade() {
         let old = Config::default();
         let new = Config {
@@ -220,6 +264,32 @@ mod tests {
         assert_eq!(
             classify_reload(&old, &new).reasons(),
             &[ReloadReason::ListenerChanged]
+        );
+    }
+
+    #[test]
+    fn process_settings_change_requires_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            server: ServerConfig {
+                process: ServerProcessConfig {
+                    threads: 4,
+                    ..ServerProcessConfig::default()
+                },
+                ..ServerConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::ProcessSettingsChanged]
+            }
+        );
+        assert_eq!(
+            classify_reload(&old, &new).to_string(),
+            "process-upgrade: process-settings-changed"
         );
     }
 
@@ -252,6 +322,48 @@ mod tests {
         let new = Config {
             logging: LoggingConfig {
                 format: LoggingFormat::Text,
+                ..LoggingConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoggingRuntimeChanged]
+            }
+        );
+    }
+
+    #[test]
+    fn logging_target_change_requires_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            logging: LoggingConfig {
+                target: LoggingTarget::Stdout,
+                ..LoggingConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::LoggingRuntimeChanged]
+            }
+        );
+    }
+
+    #[test]
+    fn logging_file_change_requires_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            logging: LoggingConfig {
+                file: LoggingFileConfig {
+                    enabled: true,
+                    path: Some("/var/log/fluxheim/fluxheim.log".into()),
+                    append: true,
+                },
                 ..LoggingConfig::default()
             },
             ..Config::default()

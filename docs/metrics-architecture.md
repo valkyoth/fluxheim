@@ -41,6 +41,7 @@ Metrics must never create labels directly from arbitrary remote input.
 Allowed labels:
 
 - configured vhost name
+- fixed request method bucket
 - static status class
 - known module name, for example `proxy`, `static`, `cache`, `admin`
 - configured upstream name/address only when it came from config
@@ -197,7 +198,10 @@ retry_max_secs = 300
 ## Implementation Stages
 
 1. Harden current labels: ensure request outcome labels are derived from
-   configured vhost names or fixed buckets only.
+   configured vhost names or fixed buckets only. Implemented for
+   `fluxheim_proxy_requests_total`: it uses configured vhost names, fixed
+   request method buckets, fixed outcome classes, and fixed status classes
+   instead of raw status codes.
 2. Add vhost-indexed atomic counters.
 3. Add fixed atomic latency histograms.
 4. Add cache/load-balancer/admin/security counters.

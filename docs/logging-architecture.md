@@ -132,11 +132,14 @@ Initial target:
 [logging]
 level = "info"
 format = "json"
+target = "stderr"
 queue_size = 65536
 overflow = "spool" # drop_new | block | spool
 
 [logging.access]
 enabled = true
+include_host = true
+include_path = true
 request_id = true
 request_id_header = "x-request-id"
 
@@ -165,13 +168,16 @@ max_size_bytes = "1GiB"
 ```
 
 Implemented baseline: `logging.access.enabled` controls a compact JSON access
-event emitted from Pingora's `logging` hook. It records method, host, vhost,
-query-free path, status, error flag, request ID, request body bytes seen, and
-response body bytes seen, and latency. If request IDs are enabled, Fluxheim
-reuses a valid inbound request ID from `request_id_header` or generates one and
-passes it upstream before normal header policy mutations run. This baseline uses
-the existing `log` stack; the async dispatcher and remote/file sinks remain
-future work.
+event emitted from Pingora's `logging` hook. It records method, optional raw
+host, vhost,
+optional query-free path, status, low-cardinality status class, error flag,
+request ID, request body bytes seen, response body bytes seen, and latency. If
+request IDs are enabled, Fluxheim reuses a valid inbound request ID from
+`request_id_header` or generates one and passes it upstream before normal header
+policy mutations run. This baseline uses the existing `log` stack. stderr/stdout
+and a disabled-by-default
+`[logging.file]` sink are implemented; the async dispatcher and remote sinks
+remain future work.
 
 `logging.level` and `logging.format` are applied at startup through
 `env_logger`; `RUST_LOG` can still override the level for local debugging.

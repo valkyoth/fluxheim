@@ -2,6 +2,8 @@ use std::env;
 use std::error::Error;
 use std::fs;
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1006,6 +1008,20 @@ fn read_secret_file(path: &Path) -> Result<String, Box<dyn Error + Send + Sync>>
         .into());
     }
 
+    #[cfg(unix)]
+    if secret_existing_parent_is_world_writable(path).map_err(|error| {
+        format!(
+            "failed to inspect admin token parent path {}: {error}",
+            path.display()
+        )
+    })? {
+        return Err(format!(
+            "admin token file {} must not be below a world-writable directory",
+            path.display()
+        )
+        .into());
+    }
+
     let file = open_regular_secret_file(path)?;
     let metadata = file.metadata().map_err(|error| {
         format!(
@@ -1070,6 +1086,30 @@ fn secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
     }
 
     Ok(false)
+}
+
+#[cfg(unix)]
+fn secret_existing_parent_is_world_writable(path: &Path) -> std::io::Result<bool> {
+    let mut current = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    loop {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o002 != 0),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(parent) = current.parent() else {
+                    return Ok(false);
+                };
+                if parent == current {
+                    return Ok(false);
+                }
+                current = parent;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1525,6 +1565,13 @@ mod tests {
             std::process::id(),
             unique_test_sequence()
         ));
+        std::fs::create_dir(&store).expect("create private admin snapshot test store");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700))
+                .expect("secure private admin snapshot test store");
+        }
         let proxy = FluxProxy::from_config(&config).unwrap();
         AdminApp {
             token: "secret-token".to_owned(),
@@ -2612,8 +2659,10 @@ mod tests {
     #[test]
     fn admin_token_file_must_be_regular_file() {
         let dir = TestDir::new("admin-token-directory");
+        let token_dir = dir.path.join("admin-token-dir");
+        std::fs::create_dir(&token_dir).unwrap();
 
-        let error = read_secret_file(&dir.path).unwrap_err();
+        let error = read_secret_file(&token_dir).unwrap_err();
 
         assert!(error.to_string().contains("must be a regular file"));
     }
@@ -2649,6 +2698,26 @@ mod tests {
                 .to_string()
                 .contains("must not be below a symlinked directory")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn admin_token_file_must_not_be_below_world_writable_directory() {
+        let token_file = std::env::temp_dir().join(format!(
+            "fluxheim-admin-token-{}-{}",
+            std::process::id(),
+            unique_test_sequence()
+        ));
+        std::fs::write(&token_file, "secret-token\n").unwrap();
+
+        let error = read_secret_file(&token_file).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("must not be below a world-writable directory")
+        );
+        let _ = std::fs::remove_file(token_file);
     }
 
     #[test]

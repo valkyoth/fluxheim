@@ -72,7 +72,13 @@ jobs:
       - name: Run default tests
         run: cargo test
 
-      - name: Run feature build tests
+      - name: Validate 1.0 core feature matrix
+        run: scripts/validate-1-0-core.sh check
+
+      - name: Build 1.0 core release matrix
+        run: scripts/validate-1-0-core.sh release
+
+      - name: Run incubator feature build tests
         run: |
           scripts/validate-features.sh tls-rustls
           cargo test --no-default-features --features proxy,load-balancer
@@ -97,11 +103,13 @@ jobs:
           cargo run --quiet -- --check-config --config examples/admin.toml
           cargo run --quiet -- --check-config --config examples/vhosts.toml
           cargo run --quiet -- --check-config --config examples/privacy.toml
+          cargo run --quiet -- --check-config --config examples/container/fluxheim.toml
           cargo run --quiet -- --check-config --config examples/conf.d
           cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml
 
       - name: Run localhost smoke tests
         run: |
+          sh scripts/smoke_1_0_core.sh
           sh scripts/smoke_static_local.sh
           sh scripts/smoke_load_balancer.sh
 

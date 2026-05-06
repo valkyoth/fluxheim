@@ -94,7 +94,6 @@ cat > "$TMP_DIR/fluxheim.toml" <<EOF
 listen = ["127.0.0.1:$FLUXHEIM_PORT"]
 
 [proxy]
-upstream = "127.0.0.1:$ORIGIN_ONE_PORT"
 upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
 upstream_tls = false
 

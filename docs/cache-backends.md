@@ -47,16 +47,21 @@ internal cache implementation.
   unknown-size origin responses.
 - Cache-header semantics are partially implemented and remain a cache-pack
   hardening requirement before cache is considered complete. Static responses
-  currently emit `Cache-Control`, `ETag`, `Last-Modified` when available,
-  `Accept-Ranges`, and range headers, and they honor `If-None-Match`,
-  `If-Modified-Since`, request `Cache-Control`, `Pragma`, single `Range`, and
-  `If-Range`. Header policy lets operators set, append, and unset
+  emit configurable `Cache-Control`, optional `Expires`, `ETag`,
+  `Last-Modified` when available,
+  `Accept-Ranges`, and range headers, and they honor `If-Match`,
+  `If-Unmodified-Since`, `If-None-Match`, `If-Modified-Since`, request
+  `Cache-Control`, `Pragma`, single `Range`, and `If-Range`. Header policy lets
+  operators set, append, and unset
   browser/CDN-facing headers such as `Cache-Control`, `Expires`, `Vary`, and
   provider-specific cache controls. Proxied image cache admission currently
   bypasses Fluxheim's cache when the request sends `Cache-Control: no-cache`,
   `Cache-Control: no-store`, `Cache-Control: max-age=0`, or
-  `Pragma: no-cache`. Proxied cache variants use Pingora's variance hook for
-  `Vary`; repeated `Vary` headers are normalized, request variant headers are
+  `Pragma: no-cache`. Proxied image cache admission also refuses shared-cache
+  storage when origin responses send `Cache-Control: no-store`, `private`,
+  `no-cache`, `max-age=0`, or `s-maxage=0`, because validator-based
+  revalidation is not complete yet. Proxied cache variants use Pingora's
+  variance hook for `Vary`; repeated `Vary` headers are normalized, request variant headers are
   hashed into the variant key, and unsafe or identity-sensitive `Vary` headers
   are rejected from cache admission. Responses carrying `Set-Cookie` are not
   admitted into the shared image cache. Origin responses must be successful

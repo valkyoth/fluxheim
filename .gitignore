@@ -1,5 +1,8 @@
 # Rust build output
 /target/
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/corpus/
 
 # Local tool/runtime state
 /.agents/
@@ -9,6 +12,7 @@ README.internal.md
 # Logs and diagnostics
 *.log
 logs/
+release-reports/
 *.pid
 
 # Local environment and secrets

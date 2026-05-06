@@ -16,9 +16,9 @@ cargo audit
 ```
 
 GitHub Actions also run CI and CodeQL. CodeQL is configured as an advanced Rust
-setup with a manual Cargo build so path handling, request parsing, and other
-security-sensitive code keep getting scanned after each push, pull request, and
-weekly scheduled run.
+setup with `build-mode: none`, which is the supported mode for Rust analysis,
+so path handling, request parsing, and other security-sensitive code keep
+getting scanned after each push, pull request, and weekly scheduled run.
 
 The full release gate is documented in
 [Release Checklist](docs/release-checklist.md). Use it before publishing
@@ -33,6 +33,19 @@ documented with the reason for acceptance.
 Reviewed advisory exceptions are allowed only when there is no compatible
 upgrade and the affected API is not reachable in Fluxheim. Each exception must
 be listed in both `deny.toml` and `.cargo/audit.toml`, with a removal condition.
+
+Current reviewed dependency warnings:
+
+- `RUSTSEC-2024-0437` for `protobuf 2.28.0`: transitive through Pingora's
+  dependency stack. Fluxheim does not parse protobuf input. Remove the exception
+  when Pingora no longer pulls vulnerable protobuf 2.x.
+- `RUSTSEC-2025-0069` for `daemonize 0.5.0`: warning-only unmaintained
+  transitive through Pingora. Recheck on every Pingora upgrade.
+- `RUSTSEC-2024-0388` for `derivative 2.2.0`: warning-only unmaintained
+  transitive through Pingora. Recheck on every Pingora upgrade.
+- `RUSTSEC-2025-0134` for `rustls-pemfile 2.2.0`: warning-only unmaintained
+  transitive through Pingora's Rustls stack. Recheck on every Pingora or Rustls
+  dependency upgrade.
 
 ## TLS File Policy
 

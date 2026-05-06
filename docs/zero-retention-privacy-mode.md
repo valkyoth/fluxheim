@@ -70,7 +70,7 @@ headers before proxying and do not synthesize `X-Forwarded-For` or RFC
 
 Access logging is disabled by default in `privacy-mode`, the Pingora access-log
 emission hook is not compiled into privacy builds, and config validation rejects
-`logging.access.enabled = true`.
+`logging.access.enabled = true` and `logging.file.enabled = true`.
 Privacy builds also do not generate Fluxheim request IDs for access-log
 correlation.
 
@@ -96,7 +96,6 @@ Planned incompatible features:
 - `metrics-push`
 - `metrics-otlp`
 - `logging-remote`
-- `logging-file`
 - `logging-spool`
 - `waf`
 - `waf-native`
@@ -169,7 +168,13 @@ Static serving is compatible with privacy mode if it:
 - uses canonical path resolution;
 - does not create per-client records;
 - does not write request activity to disk;
+- allows operators to set conservative static response cache headers;
 - avoids directory listings unless explicitly enabled outside privacy mode.
+
+The privacy example uses `cache_control = "no-store"` to avoid encouraging
+client-side or intermediary retention. That is a deployment policy choice:
+Fluxheim's zero-retention guarantee covers Fluxheim itself, not browsers,
+intermediate networks, or upstream applications.
 
 OS-level filesystem access times may still change depending on mount options.
 Operators who care about that should use `noatime`/`relatime` choices
@@ -214,7 +219,7 @@ hosts = ["private.example.test"]
 root = "/srv/sites/private"
 
 [vhosts.proxy]
-upstream = "127.0.0.1:3000"
+upstreams = ["127.0.0.1:3000"]
 ```
 
 The config validator should reject privacy mode if request logging, metrics,

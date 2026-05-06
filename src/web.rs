@@ -10,6 +10,8 @@ use percent_encoding::percent_decode_str;
 
 use crate::config::WebConfig;
 
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 #[cfg(all(feature = "proxy", target_os = "linux"))]
 use std::os::unix::fs::OpenOptionsExt;
 
@@ -24,6 +26,10 @@ pub struct StaticFileServer {
     root: PathBuf,
     index_files: Vec<String>,
     deny_dotfiles: bool,
+    #[cfg_attr(not(feature = "proxy"), allow(dead_code))]
+    cache_control: String,
+    #[cfg_attr(not(feature = "proxy"), allow(dead_code))]
+    expires: Option<String>,
 }
 
 impl StaticFileServer {
@@ -62,6 +68,8 @@ impl StaticFileServer {
             root,
             index_files: config.index_files.clone(),
             deny_dotfiles: config.deny_dotfiles,
+            cache_control: config.cache_control.clone(),
+            expires: config.expires.clone(),
         }))
     }
 
@@ -166,6 +174,10 @@ impl StaticFileServer {
             mime,
             len: metadata.len(),
             modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
         }))
     }
 }
@@ -217,6 +229,10 @@ pub struct StaticFile {
     pub mime: String,
     pub len: u64,
     pub modified: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -238,6 +254,8 @@ pub enum StaticResponseBody {
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct StaticRequestConditions<'a> {
+    pub if_match: Option<&'a str>,
+    pub if_unmodified_since: Option<&'a str>,
     pub if_none_match: Option<&'a str>,
     pub if_modified_since: Option<&'a str>,
     pub cache_control: Option<&'a str>,
@@ -252,6 +270,20 @@ pub fn plan_static_response(
     conditions: StaticRequestConditions<'_>,
 ) -> StaticResponsePlan {
     let etag = static_etag(file);
+
+    if if_match_fails(conditions.if_match, &etag)
+        || (conditions.if_match.is_none()
+            && unmodified_since_fails(file.modified, conditions.if_unmodified_since))
+    {
+        return StaticResponsePlan {
+            status: 412,
+            body: StaticResponseBody::None,
+            content_length: Some(0),
+            content_range: None,
+            etag,
+            response_body_bytes: 0,
+        };
+    }
 
     if !crate::cache_headers::request_forces_cache_refresh(
         conditions.cache_control,
@@ -312,28 +344,14 @@ pub fn plan_static_response(
 #[cfg(all(feature = "web", feature = "proxy"))]
 pub async fn serve_static_file(
     session: &mut pingora::proxy::Session,
+    server: &StaticFileServer,
     file: &StaticFile,
     plan: &StaticResponsePlan,
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
 ) -> pingora::Result<()> {
     use pingora::prelude::{InternalError, OrErr};
 
-    let mut response = pingora::http::ResponseHeader::build(plan.status, Some(9))?;
-    response.insert_header("content-type", file.mime.as_str())?;
-    if let Some(content_length) = plan.content_length {
-        response.insert_header("content-length", content_length)?;
-    }
-    response.insert_header("cache-control", "public, max-age=60")?;
-    response.insert_header("etag", plan.etag.as_str())?;
-    response.insert_header("accept-ranges", "bytes")?;
-
-    if let Some(modified) = file.modified {
-        response.insert_header("last-modified", httpdate::fmt_http_date(modified))?;
-    }
-    if let Some(content_range) = plan.content_range.as_deref() {
-        response.insert_header("content-range", content_range)?;
-    }
-    crate::headers::apply_response_policy(&mut response, response_policy)?;
+    let response = build_static_response_header(server, file, plan, response_policy)?;
 
     if matches!(plan.body, StaticResponseBody::None) {
         session
@@ -349,6 +367,36 @@ pub async fn serve_static_file(
     }
 
     Ok(())
+}
+
+#[cfg(all(feature = "web", feature = "proxy"))]
+fn build_static_response_header(
+    server: &StaticFileServer,
+    file: &StaticFile,
+    plan: &StaticResponsePlan,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+) -> pingora::Result<pingora::http::ResponseHeader> {
+    let mut response = pingora::http::ResponseHeader::build(plan.status, Some(9))?;
+    response.insert_header("content-type", file.mime.as_str())?;
+    if let Some(content_length) = plan.content_length {
+        response.insert_header("content-length", content_length)?;
+    }
+    response.insert_header("cache-control", server.cache_control.as_str())?;
+    response.insert_header("etag", plan.etag.as_str())?;
+    response.insert_header("accept-ranges", "bytes")?;
+    if let Some(expires) = server.expires.as_deref() {
+        response.insert_header("expires", expires)?;
+    }
+
+    if let Some(modified) = file.modified {
+        response.insert_header("last-modified", httpdate::fmt_http_date(modified))?;
+    }
+    if let Some(content_range) = plan.content_range.as_deref() {
+        response.insert_header("content-range", content_range)?;
+    }
+    crate::headers::apply_response_policy(&mut response, response_policy)?;
+
+    Ok(response)
 }
 
 fn response_body(method: &str, body: StaticResponseBody) -> StaticResponseBody {
@@ -388,6 +436,17 @@ fn weak_etag_value(value: &str) -> &str {
     value.strip_prefix("W/").unwrap_or(value)
 }
 
+fn if_match_fails(if_match: Option<&str>, etag: &str) -> bool {
+    let Some(value) = if_match else {
+        return false;
+    };
+
+    !value.split(',').map(str::trim).any(|candidate| {
+        candidate == "*"
+            || (!candidate.starts_with("W/") && !etag.starts_with("W/") && candidate == etag)
+    })
+}
+
 fn modified_since_not_modified(
     modified: Option<SystemTime>,
     if_modified_since: Option<&str>,
@@ -409,6 +468,26 @@ fn modified_since_not_modified(
         .unwrap_or(0);
 
     modified_seconds <= requested_seconds
+}
+
+fn unmodified_since_fails(modified: Option<SystemTime>, if_unmodified_since: Option<&str>) -> bool {
+    let (Some(modified), Some(if_unmodified_since)) = (modified, if_unmodified_since) else {
+        return false;
+    };
+    let Ok(if_unmodified_since) = httpdate::parse_http_date(if_unmodified_since) else {
+        return false;
+    };
+
+    let modified_seconds = modified
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let requested_seconds = if_unmodified_since
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+
+    modified_seconds > requested_seconds
 }
 
 fn parse_single_byte_range(range: &str, file_len: u64) -> Option<(u64, u64)> {
@@ -526,6 +605,13 @@ fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
             "static body handle is not a regular file",
         ));
     }
+    #[cfg(unix)]
+    if metadata.dev() != file.device || metadata.ino() != file.inode {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "static file identity changed before body read",
+        ));
+    }
     if metadata.len() != file.len {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -588,6 +674,85 @@ mod tests {
         assert_eq!(server.resolve("/.env").unwrap(), ResolveResult::Forbidden);
     }
 
+    #[test]
+    fn stores_configured_static_cache_headers() {
+        let root = TestDir::new("static-cache-headers");
+        fs::write(root.path().join("index.html"), "ok").unwrap();
+
+        let server = StaticFileServer::from_config(&WebConfig {
+            root: Some(root.path().to_owned()),
+            cache_control: "public, max-age=31536000, immutable".to_owned(),
+            expires: Some("Wed, 21 Oct 2030 07:28:00 GMT".to_owned()),
+            ..WebConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(server.cache_control, "public, max-age=31536000, immutable");
+        assert_eq!(
+            server.expires.as_deref(),
+            Some("Wed, 21 Oct 2030 07:28:00 GMT")
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn builds_static_response_headers_from_config() {
+        let root = TestDir::new("static-response-headers");
+        fs::write(root.path().join("index.html"), "ok").unwrap();
+        let server = StaticFileServer::from_config(&WebConfig {
+            root: Some(root.path().to_owned()),
+            cache_control: "public, max-age=31536000, immutable".to_owned(),
+            expires: Some("Wed, 21 Oct 2030 07:28:00 GMT".to_owned()),
+            ..WebConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = static_file(2, Some(modified));
+        let plan = plan_static_response(&file, "GET", StaticRequestConditions::default());
+
+        let response = super::build_static_response_header(
+            &server,
+            &file,
+            &plan,
+            &crate::config::ResponseHeaderPolicyConfig::default(),
+        )
+        .unwrap();
+
+        assert!(response.headers.get("server").is_none());
+        assert_eq!(
+            response
+                .headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("public, max-age=31536000, immutable")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("expires")
+                .and_then(|value| value.to_str().ok()),
+            Some("Wed, 21 Oct 2030 07:28:00 GMT")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("content-length")
+                .and_then(|value| value.to_str().ok()),
+            Some("2")
+        );
+        assert!(response.headers.get("etag").is_some());
+        assert!(response.headers.get("last-modified").is_some());
+        assert_eq!(
+            response
+                .headers
+                .get("accept-ranges")
+                .and_then(|value| value.to_str().ok()),
+            Some("bytes")
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlinked_static_root() {
@@ -606,6 +771,7 @@ mod tests {
             root: Some(root.clone()),
             index_files: vec!["index.html".to_owned()],
             deny_dotfiles: true,
+            ..WebConfig::default()
         })
         .unwrap_err();
 
@@ -626,6 +792,7 @@ mod tests {
             root: Some(linked.join("public")),
             index_files: vec!["index.html".to_owned()],
             deny_dotfiles: true,
+            ..WebConfig::default()
         })
         .unwrap_err();
 
@@ -718,6 +885,72 @@ mod tests {
 
         assert_eq!(plan.status, 304);
         assert_eq!(plan.body, StaticResponseBody::None);
+    }
+
+    #[test]
+    fn plans_static_precondition_failures() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = static_file(42, Some(modified));
+        let stale_date = httpdate::fmt_http_date(modified - std::time::Duration::from_secs(1));
+
+        let if_match = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_match: Some("\"different\""),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(if_match.status, 412);
+        assert_eq!(if_match.body, StaticResponseBody::None);
+        assert_eq!(if_match.content_length, Some(0));
+
+        let unmodified_since = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_unmodified_since: Some(&stale_date),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(unmodified_since.status, 412);
+        assert_eq!(unmodified_since.body, StaticResponseBody::None);
+        assert_eq!(unmodified_since.content_length, Some(0));
+    }
+
+    #[test]
+    fn wildcard_if_match_allows_existing_static_file() {
+        let file = static_file(42, None);
+        let plan = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_match: Some("*"),
+                ..StaticRequestConditions::default()
+            },
+        );
+
+        assert_eq!(plan.status, 200);
+        assert_eq!(plan.body, StaticResponseBody::Full);
+    }
+
+    #[test]
+    fn if_match_takes_precedence_over_unmodified_since() {
+        let modified = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = static_file(42, Some(modified));
+        let stale_date = httpdate::fmt_http_date(modified - std::time::Duration::from_secs(1));
+        let plan = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                if_match: Some("*"),
+                if_unmodified_since: Some(&stale_date),
+                ..StaticRequestConditions::default()
+            },
+        );
+
+        assert_eq!(plan.status, 200);
+        assert_eq!(plan.body, StaticResponseBody::Full);
     }
 
     #[test]
@@ -885,11 +1118,33 @@ mod tests {
             mime: "application/octet-stream".to_owned(),
             len: super::MAX_STATIC_BUFFERED_BODY_BYTES + 1,
             modified: None,
+            #[cfg(unix)]
+            device: 0,
+            #[cfg(unix)]
+            inode: 0,
         };
 
         let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn rejects_same_size_replacement_before_static_body_read() {
+        let root = TestDir::new("body-identity-change");
+        fs::write(root.path().join("index.html"), "ok").unwrap();
+
+        let server = server(root.path());
+        let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
+            panic!("expected static file")
+        };
+        fs::rename(&file.path, root.path().join("old-index.html")).unwrap();
+        fs::write(&file.path, "no").unwrap();
+
+        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[cfg(feature = "proxy")]
@@ -943,6 +1198,7 @@ mod tests {
             root: Some(root.to_owned()),
             index_files: vec!["index.html".to_owned()],
             deny_dotfiles: true,
+            ..WebConfig::default()
         })
         .unwrap()
         .unwrap()
@@ -954,6 +1210,10 @@ mod tests {
             mime: "text/plain".to_owned(),
             len,
             modified,
+            #[cfg(unix)]
+            device: 0,
+            #[cfg(unix)]
+            inode: 0,
         }
     }
 }

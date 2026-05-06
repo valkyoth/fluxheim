@@ -309,7 +309,7 @@ mod tests {
             .unwrap();
         let config = crate::config::Config {
             proxy: crate::config::ProxyConfig {
-                upstream: "127.0.0.1:4000".to_owned(),
+                upstream: Some("127.0.0.1:4000".to_owned()),
                 ..crate::config::ProxyConfig::default()
             },
             ..crate::config::Config::default()

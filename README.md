@@ -17,12 +17,16 @@ intentionally narrow:
 - cache module baseline;
 - virtual hosts;
 - TLS with rustls as the default backend;
+- optional cleartext-to-HTTPS redirect;
 - strict request limits and secure defaults;
 - local and rootless Podman operation.
 
 Features such as load balancing, ACME automation, admin snapshots, metrics,
 WAF, Cloudflare origin support, PHP, CGI, and legacy protocols are planned as
 opt-in modules and are documented separately until they graduate.
+
+See [Production Readiness](docs/production-readiness.md) for the current
+stable-core promise and the checks expected before a real deployment.
 
 ## Why Fluxheim
 
@@ -33,7 +37,12 @@ opt-in modules and are documented separately until they graduate.
   checks, and no hidden legacy protocol fallback.
 - **Static-site basics**: MIME detection, index files, `GET`/`HEAD`, `ETag`,
   conditional `304`, and single-range static responses.
+- **HTTPS redirect**: optional global cleartext-to-HTTPS redirect with safe
+  Host validation and explicit redirect status.
 - **Local friendly**: supports normal local binaries and rootless Podman.
+- **Container choices**: explicit Wolfi, Alpine, SUSE Micro, and Debian
+  Containerfiles for different deployment policies, with documented volume
+  mappings for configs, TLS, state, cache, logs, and static roots.
 
 ## Quick Start
 
@@ -163,12 +172,25 @@ listen = ["127.0.0.1:8080"]
 default_vhost = "example"
 trusted_proxies = []
 
+# [server.https_redirect]
+# enabled = true
+# status = 308
+# target_port = 8443
+
 [logging]
 level = "info"
 format = "json"
+target = "stderr"
+
+[logging.file]
+enabled = false
+# path = "/var/log/fluxheim/fluxheim.log"
+append = true
 
 [logging.access]
 enabled = true
+include_host = true
+include_path = true
 request_id = true
 request_id_header = "x-request-id"
 
@@ -179,9 +201,9 @@ x_forwarded_for = "replace"
 x_forwarded_host = true
 x_forwarded_proto = true
 forwarded = false
-unset = ["x-powered-by"]
+remove = ["x-powered-by"]
 
-[headers.request.set]
+[headers.request.add]
 x-proxy-by = "Fluxheim"
 
 [headers.request.append]
@@ -192,14 +214,16 @@ enabled = true
 x_content_type_options = "nosniff"
 x_frame_options = "DENY"
 referrer_policy = "no-referrer"
-unset = ["server", "x-powered-by"]
+remove = ["server", "x-powered-by"]
 
-[headers.response.set]
+[headers.response.add]
 cache-control = "public, max-age=60"
 
 [headers.response.append]
 vary = ["Accept-Encoding"]
 
+# [[vhosts]] starts one virtual host. Every [vhosts.*] table below belongs to
+# this vhost until the next [[vhosts]] line.
 [[vhosts]]
 name = "example"
 hosts = ["example.test"]
@@ -210,10 +234,10 @@ index_files = ["index.html"]
 deny_dotfiles = true
 
 [vhosts.proxy]
-upstream = "127.0.0.1:3000"
+upstreams = ["127.0.0.1:3000"]
 upstream_tls = false
 
-[vhosts.headers.response.set]
+[vhosts.headers.response.add]
 access-control-allow-origin = "https://example.test"
 
 [vhosts.headers.response.append]
@@ -221,9 +245,13 @@ vary = ["Origin"]
 ```
 
 More examples live in [examples](examples).
+For the `[[vhosts]]` syntax and the recommended one-vhost-per-file layout, see
+[Vhost Config Guide](docs/vhost-config.md).
 The `examples/privacy.toml` config is designed for
 `--no-default-features --features profile-privacy` and keeps Fluxheim access
-logging, request IDs, metrics, and cache disabled.
+logging, file logging, request IDs, metrics, and cache disabled.
+The `examples/podman-compose.yml` file shows the recommended container volume
+layout for configs, TLS certificates, cache, state, logs, and static site roots.
 
 ## Documentation
 
@@ -231,7 +259,7 @@ logging, request IDs, metrics, and cache disabled.
 - [Changelog](CHANGELOG.md)
 - [Versioning Plan](docs/versioning-plan.md)
 - [Release Checklist](docs/release-checklist.md)
-- [Build And Rootless Podman](docs/build-and-podman.md)
+- [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
 - [Feature Matrix](docs/features.md)
 - [Config Reference](docs/config-reference.md)
 - [GitHub Repository Setup](docs/github-setup.md)
@@ -258,19 +286,21 @@ logging, request IDs, metrics, and cache disabled.
 Fluxheim will not treat every planned feature as part of `1.0`.
 
 - `1.0`: stable static hosting and reverse proxy core.
-- `1.1`: operational pack: logging, admin snapshots, rollback, metrics.
-- `1.2`: load balancer support.
-- `1.3`: cache pack.
-- `1.4`: media transform pack.
-- `1.5`: certificate automation.
-- `1.6`: privacy and security profiles.
-- `1.7`: Cloudflare origin support.
-- `1.8`: advanced logging and metrics.
-- `1.9`: traffic mirroring for release-safety workflows.
-- `1.10`: external authorization and identity-aware routing.
-- `1.11`: cluster-native shared state.
-- `1.12`: AI gateway controls.
-- `1.13`: Sentinel Mesh graduation.
+- `1.1`: TLS policy hardening.
+- `1.2`: operational pack: logging, admin snapshots, rollback, metrics.
+- `1.3`: load balancer support.
+- `1.4`: cache pack.
+- `1.5`: media transform pack.
+- `1.6`: certificate automation.
+- `1.7`: privacy and security profiles.
+- `1.8`: Cloudflare origin support.
+- `1.9`: advanced logging and metrics.
+- `1.10`: declarative redirect/rewrite policy and traffic mirroring for
+  release-safety workflows.
+- `1.11`: external authorization and identity-aware routing.
+- `1.12`: cluster-native shared state.
+- `1.13`: AI gateway controls.
+- `1.14`: Sentinel Mesh graduation.
 - `2.0`: dynamic runtime boundary for PHP/CGI.
 - `2.1`: programmable media edge.
 - `2.2`: WASM extensibility.

@@ -53,7 +53,7 @@ unset = ["server", "x-powered-by"]
 cache-control = "public, max-age=60"
 
 [proxy]
-upstream = "127.0.0.1:9"
+upstreams = ["127.0.0.1:9"]
 upstream_tls = false
 
 [tls]

@@ -8,6 +8,16 @@ max_uri_bytes = "8KiB"
 max_request_headers = 100
 max_request_body_bytes = "16MiB"
 
+[server.process]
+daemon = false
+pid_file = "/run/fluxheim/fluxheim-privacy.pid"
+upgrade_sock = "/run/fluxheim/fluxheim-privacy-upgrade.sock"
+threads = 1
+listener_tasks_per_fd = 1
+work_stealing = true
+upstream_keepalive_pool_size = 128
+max_retries = 16
+
 [admin]
 enabled = false
 listen = "127.0.0.1:9090"
@@ -21,9 +31,16 @@ require_loopback = true
 [logging]
 level = "info"
 format = "json"
+target = "stderr"
+
+[logging.file]
+enabled = false
+append = true
 
 [logging.access]
 enabled = false
+include_host = false
+include_path = false
 request_id = false
 request_id_header = "x-request-id"
 
@@ -34,7 +51,7 @@ x_forwarded_for = "off"
 x_forwarded_host = false
 x_forwarded_proto = false
 forwarded = false
-unset = [
+remove = [
   "cf-connecting-ip",
   "fastly-client-ip",
   "true-client-ip",
@@ -47,10 +64,10 @@ enabled = true
 x_content_type_options = "nosniff"
 x_frame_options = "DENY"
 referrer_policy = "no-referrer"
-unset = ["server", "x-powered-by"]
+remove = ["server", "x-powered-by"]
 
 [proxy]
-upstream = "127.0.0.1:3000"
+upstreams = ["127.0.0.1:3000"]
 upstream_tls = false
 
 [proxy.load_balance]
@@ -99,3 +116,4 @@ max_size_bytes = "10GiB"
 root = "/srv/fluxheim"
 index_files = ["index.html"]
 deny_dotfiles = true
+cache_control = "no-store"

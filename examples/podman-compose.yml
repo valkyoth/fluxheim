@@ -1,0 +1,25 @@
+name: fluxheim-gateway
+
+networks:
+  gateway_net:
+    external: true
+
+services:
+  fluxheim:
+    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    container_name: fluxheim_gateway
+    restart: always
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
+      - /srv/infra/fluxheim/tls:/etc/fluxheim/tls:ro,Z
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
+      - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U
+      - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U
+      - /srv/sites/example/public:/srv/sites/example/public:ro,Z
+      - /srv/sites/app/public:/srv/sites/app/public:ro,Z
+    networks:
+      - gateway_net

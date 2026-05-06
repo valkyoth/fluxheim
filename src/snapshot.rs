@@ -267,6 +267,7 @@ impl SnapshotStore {
                 .components()
                 .any(|component| matches!(component, std::path::Component::ParentDir))
             || snapshot_parent_path_contains_symlink(&self.root).unwrap_or(true)
+            || snapshot_root_or_parent_is_world_writable(&self.root).unwrap_or(true)
         {
             return Err(SnapshotError::UnsafeStoreRoot {
                 path: self.root.clone(),
@@ -366,7 +367,7 @@ impl Display for SnapshotError {
             ),
             Self::UnsafeStoreRoot { path } => write!(
                 formatter,
-                "snapshot store root must not be empty, contain parent-directory traversal, or sit below a symlinked directory: {}",
+                "snapshot store root must not be empty, contain parent-directory traversal, sit below a symlinked directory, or use a world-writable directory: {}",
                 path.display()
             ),
             Self::UnsafeSnapshotPath { path } => write!(
@@ -675,6 +676,31 @@ fn snapshot_parent_path_contains_symlink(path: &Path) -> io::Result<bool> {
     Ok(false)
 }
 
+#[cfg(unix)]
+fn snapshot_root_or_parent_is_world_writable(path: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut current = path.to_path_buf();
+
+    loop {
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(false),
+            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o002 != 0),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if !current.pop() {
+                    return Ok(false);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn snapshot_root_or_parent_is_world_writable(_path: &Path) -> io::Result<bool> {
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -777,7 +803,7 @@ mod tests {
             .unwrap();
         let second_config = Config {
             proxy: ProxyConfig {
-                upstream: "127.0.0.1:4000".to_owned(),
+                upstream: Some("127.0.0.1:4000".to_owned()),
                 ..ProxyConfig::default()
             },
             ..Config::default()
@@ -877,6 +903,24 @@ mod tests {
 
         assert!(matches!(error, SnapshotError::UnsafeStoreRoot { .. }));
         assert!(!real_parent.join("snapshots").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_snapshot_store_root_below_world_writable_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "fluxheim-snapshot-root-world-writable-{}-{}",
+            std::process::id(),
+            unique_test_sequence()
+        ));
+        let store = SnapshotStore::new(&root);
+
+        let error = store
+            .snapshot_config(&Config::default(), Some("initial"))
+            .unwrap_err();
+
+        assert!(matches!(error, SnapshotError::UnsafeStoreRoot { .. }));
+        assert!(!root.exists());
     }
 
     #[cfg(unix)]

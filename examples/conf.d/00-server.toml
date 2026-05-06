@@ -10,6 +10,22 @@ max_uri_bytes = "8KiB"
 max_request_headers = 100
 max_request_body_bytes = "16MiB"
 
+[server.process]
+daemon = false
+# error_log = "/run/fluxheim/error.log"
+pid_file = "/run/fluxheim/fluxheim.pid"
+upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+threads = 1
+listener_tasks_per_fd = 1
+work_stealing = true
+upstream_keepalive_pool_size = 128
+max_retries = 16
+
+# [server.https_redirect]
+# enabled = true
+# status = 308
+# target_port = 8443
+
 [metrics]
 enabled = false
 listen = "127.0.0.1:9091"
@@ -18,9 +34,17 @@ require_loopback = true
 [logging]
 level = "info"
 format = "json"
+target = "stderr"
+
+[logging.file]
+enabled = false
+# path = "/var/log/fluxheim/fluxheim.log"
+append = true
 
 [logging.access]
 enabled = true
+include_host = true
+include_path = true
 request_id = true
 request_id_header = "x-request-id"
 

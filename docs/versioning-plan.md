@@ -20,6 +20,12 @@ modules then graduate in later minor releases.
 
 Security fixes should be backported to the latest stable minor when practical.
 
+Every stable release must pass the stable release security and stability gate in
+`docs/release-checklist.md`. The gate grows with the release: `1.0.x` runs it
+against static hosting, reverse proxying, TLS, cache policy, headers, and
+container delivery; later minors must add the same dependency, fuzzing, DAST,
+load, TLS, and malicious-input coverage for every newly stable module.
+
 ## Stability Levels
 
 Every module should carry one of these labels in docs and examples:
@@ -125,8 +131,14 @@ Stable scope:
 - Caddy-inspired TOML config and `conf.d` loading.
 - Static/bought certificate support.
 - Rustls as the default TLS backend.
-- Optional OpenSSL/BoringSSL/s2n TLS builds if they pass the release matrix.
+- Optional OpenSSL and s2n TLS builds when they pass the release matrix.
+- Optional BoringSSL TLS builds on builders with `libclang` available for
+  bindgen.
+- TLS listener cipher/protocol policy follows the selected Pingora TLS backend
+  defaults in `1.0`; user-configurable TLS policy is not stable until a later
+  release.
 - Secure header policy.
+- Optional global cleartext-to-HTTPS redirect.
 - Request header/body limits.
 - Rootless Podman runtime.
 - Release/security checks.
@@ -149,11 +161,47 @@ Exit criteria:
 - Default 1.0 binary contains only stable core modules.
 - `--no-default-features --features web` works.
 - `--no-default-features --features proxy` works.
-- Static+proxy+TLS mixed config has integration coverage.
+- Static+proxy+TLS mixed config has integration coverage through
+  `scripts/smoke_1_0_core.sh`.
 - No known `cargo audit` advisory without documented exception.
 - `cargo deny check` passes.
+- The 1.0 security and stability launch gate in `docs/release-checklist.md`
+  has been run and recorded. This includes dependency checks, CodeQL/CI,
+  malformed request framing tests, header scrubbing checks, local load testing,
+  TLS scanning, and a deployment-side DAST pass.
+- Fuzz targets exist or have been run for Fluxheim-owned parser and policy
+  logic that can affect request routing, filesystem access, redirects, cache
+  keys, or cache-header decisions.
 
-### 1.1 - Operations Pack
+### 1.1 - TLS Policy Hardening
+
+Goal: expose explicit TLS policy without making insecure combinations easy.
+
+Stable scope:
+
+- Named TLS policy profiles such as `modern` and `compat`, with `modern` as the
+  default.
+- Minimum protocol version config, bounded to safe values.
+- ALPN policy for HTTP/1.1 and future HTTP/2/HTTP/3 work.
+- Per-backend validation that rejects cipher or protocol settings unsupported
+  by the selected TLS backend.
+
+Beta scope:
+
+- Explicit cipher-suite allow-lists for operators with compliance requirements.
+- Separate upstream TLS policy if upstream transport needs different
+  compatibility than public downstream listeners.
+
+Exit criteria:
+
+- Config validation rejects weak protocol versions and empty/unknown cipher
+  lists.
+- `testssl.sh` scans are recorded for every stable TLS backend in the release
+  matrix.
+- TLS policy changes are classified correctly as reload-safe or requiring a
+  process restart.
+
+### 1.2 - Operations Pack
 
 Goal: add safe operational visibility and controlled reload tooling.
 
@@ -175,7 +223,7 @@ Exit criteria:
 - Logs redact secrets by default.
 - Metrics labels are cardinality-safe.
 
-### 1.2 - Load Balancer
+### 1.3 - Load Balancer
 
 Goal: graduate Pingora load balancing to stable.
 
@@ -199,7 +247,7 @@ Exit criteria:
 - Failover behavior is documented.
 - Load-balancer metrics are available when `metrics` is enabled.
 
-### 1.3 - Cache Pack
+### 1.4 - Cache Pack
 
 Goal: add controlled image/static caching.
 
@@ -242,7 +290,7 @@ Exit criteria:
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 
-### 1.4 - Media Transform Pack
+### 1.5 - Media Transform Pack
 
 Goal: add safe, opt-in image transformation for static and proxied image
 responses.
@@ -275,7 +323,7 @@ Exit criteria:
   format, dimensions, quality, and `Accept` bucket.
 - `privacy-mode` rejects incompatible transform/cache combinations.
 
-### 1.5 - Certificate Automation
+### 1.6 - Certificate Automation
 
 Goal: make certificate lifecycle operational without downtime.
 
@@ -297,7 +345,7 @@ Exit criteria:
 - Private key storage permissions are validated.
 - Tests cover renewal scheduling and reload classification.
 
-### 1.6 - Privacy And Security Profiles
+### 1.7 - Privacy And Security Profiles
 
 Goal: provide explicit security/privacy build profiles.
 
@@ -318,7 +366,7 @@ Exit criteria:
 - Forwarded IP headers are stripped in privacy mode.
 - WAF is dry-run capable and redacts secrets before beta promotion.
 
-### 1.7 - Cloudflare Origin Pack
+### 1.8 - Cloudflare Origin Pack
 
 Goal: support Cloudflare as a verified trusted peer.
 
@@ -340,7 +388,7 @@ Exit criteria:
 - API tokens are never logged.
 - AOP mode clearly distinguishes global, zone-level, and per-hostname trust.
 
-### 1.8 - Advanced Metrics And Logging
+### 1.9 - Advanced Metrics And Logging
 
 Goal: add richer observability without hurting the request path.
 
@@ -375,13 +423,18 @@ Exit criteria:
 - Sensitive span attributes are redacted.
 - OpenTelemetry features are absent from default and privacy builds.
 
-### 1.9 - Traffic Safety Pack
+### 1.10 - Traffic Policy And Safety Pack
 
-Goal: add controlled release-safety tools for operators who need to test new
-backends without changing client-visible responses.
+Goal: add declarative redirect/rewrite policy plus controlled release-safety
+tools for operators who need to test new backends without changing
+client-visible responses.
 
 Stable scope:
 
+- Declarative redirect rules for common permanent and temporary redirects.
+- Declarative request rewrite rules with named matchers.
+- Path-template rewrites without raw string concatenation.
+- Config-load loop detection for internal rewrites.
 - Per-vhost traffic mirroring for idempotent requests.
 - Percentage-based sampling.
 - Mirror timeout budgets isolated from the primary request.
@@ -389,18 +442,24 @@ Stable scope:
 
 Beta scope:
 
+- Multi-pattern matcher compilation for large rule sets.
+- Query-parameter merge, strip, and allow-list policies.
+- WASM hook for complex rewrite decisions after the WASM sandbox is stable.
 - Body redaction/transformation policies.
 - Identity-claim based sampling if `identity` is enabled.
 - Mirroring of non-idempotent methods with explicit operator opt-in.
 
 Exit criteria:
 
+- Rewrite cycles are rejected at config load.
+- Redirect destinations are validated to prevent open redirects.
+- Matcher tests cover host, path, method, header, and query conditions.
 - Mirror failures never alter the live client response.
 - Credentials and cookies are stripped unless explicitly allow-listed.
 - Mirroring is incompatible with `privacy-mode`.
 - Tests cover cancellation, timeout, sampling, and redaction behavior.
 
-### 1.10 - External Authorization And Identity-Aware Routing
+### 1.11 - External Authorization And Identity-Aware Routing
 
 Goal: enforce access decisions through a trusted authorization service first,
 then add native identity verification and claim-aware routing.
@@ -441,7 +500,7 @@ Exit criteria:
 - Key rotation and stale-key behavior are tested.
 - Spoofed identity headers are stripped before verified replacements are added.
 
-### 1.11 - Cluster State
+### 1.12 - Cluster State
 
 Goal: let Fluxheim nodes share selected operational and security state without
 requiring external infrastructure for the first useful cases.
@@ -469,7 +528,7 @@ Exit criteria:
 - Global rate limits document whether they are `local_only`, `eventual`, or
   `strict`.
 
-### 1.12 - AI Gateway
+### 1.13 - AI Gateway
 
 Goal: add AI-aware proxy controls for cost, safety, and cacheability where
 operators explicitly opt in.
@@ -501,7 +560,7 @@ Exit criteria:
 - Tests cover token budgets, provider metadata parsing, redaction, cache
   isolation, and default/privacy build absence.
 
-### 1.13 - Sentinel Mesh
+### 1.14 - Sentinel Mesh
 
 Goal: graduate the encrypted gateway-to-backend tunnel design into a supported
 small-cluster routing module.
@@ -677,8 +736,9 @@ git push origin v1.0.0
 Patch releases should contain fixes only:
 
 - `v1.0.1`: security or bug fixes for stable core.
-- `v1.1.1`: fixes for operations pack.
-- `v1.2.1`: fixes for load balancer.
+- `v1.1.1`: fixes for TLS policy hardening.
+- `v1.2.1`: fixes for operations pack.
+- `v1.3.1`: fixes for load balancer.
 
 ## Changelog Shape
 

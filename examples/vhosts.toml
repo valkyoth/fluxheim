@@ -4,18 +4,42 @@ listen = ["127.0.0.1:8080"]
 default_vhost = "example.test"
 # trusted_proxies = ["127.0.0.1", "10.0.0.0/8"]
 
+# [server.https_redirect]
+# enabled = true
+# status = 308
+# target_port = 8443
+
 [server.limits]
 max_request_header_bytes = "64KiB"
 max_uri_bytes = "8KiB"
 max_request_headers = 100
 max_request_body_bytes = "16MiB"
 
+[server.process]
+daemon = false
+# error_log = "/run/fluxheim/error.log"
+pid_file = "/run/fluxheim/fluxheim.pid"
+upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+threads = 1
+listener_tasks_per_fd = 1
+work_stealing = true
+upstream_keepalive_pool_size = 128
+max_retries = 16
+
 [logging]
 level = "info"
 format = "json"
+target = "stderr"
+
+[logging.file]
+enabled = false
+# path = "/var/log/fluxheim/fluxheim.log"
+append = true
 
 [logging.access]
 enabled = true
+include_host = true
+include_path = true
 request_id = true
 request_id_header = "x-request-id"
 
@@ -51,9 +75,9 @@ x_forwarded_for = "replace"
 x_forwarded_host = true
 x_forwarded_proto = true
 forwarded = false
-unset = ["x-powered-by"]
+remove = ["x-powered-by"]
 
-[headers.request.set]
+[headers.request.add]
 x-proxy-by = "Fluxheim"
 
 [headers.request.append]
@@ -66,14 +90,16 @@ enabled = true
 x_content_type_options = "nosniff"
 x_frame_options = "DENY"
 referrer_policy = "no-referrer"
-unset = ["server", "x-powered-by"]
+remove = ["server", "x-powered-by"]
 
-[headers.response.set]
+[headers.response.add]
 cache-control = "public, max-age=60"
 
 [headers.response.append]
 vary = ["Accept-Encoding"]
 
+# TOML note: [[vhosts]] starts one virtual host. Every [vhosts.*] table below
+# belongs to this vhost until the next [[vhosts]] line.
 [[vhosts]]
 name = "example.test"
 hosts = ["example.test", "www.example.test"]
@@ -88,13 +114,13 @@ enabled = false
 root = "/srv/sites/example"
 index_files = ["index.html"]
 deny_dotfiles = true
+cache_control = "public, max-age=300"
 
 [vhosts.proxy]
-upstream = "127.0.0.1:3000"
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_tls = false
 
-[vhosts.headers.response.set]
+[vhosts.headers.response.add]
 access-control-allow-origin = "https://example.test"
 
 [vhosts.headers.response.append]
@@ -125,12 +151,13 @@ enabled = false
 # path = "/var/cache/fluxheim/example.test"
 max_size_bytes = "10GiB"
 
+# Start a second virtual host. The [vhosts.*] tables below now belong to
+# api.example.test, not example.test.
 [[vhosts]]
 name = "api.example.test"
 hosts = ["api.example.test", "*.api.example.test"]
 
 [vhosts.proxy]
-upstream = "127.0.0.1:4000"
 upstreams = ["127.0.0.1:4000", "127.0.0.1:4001"]
 upstream_tls = false
 

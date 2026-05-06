@@ -1,0 +1,141 @@
+name: Container Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: OCI platforms to build.
+        required: true
+        default: linux/amd64
+      features:
+        description: Fluxheim Cargo feature set.
+        required: true
+        default: default
+      config:
+        description: Config file copied into /etc/fluxheim/fluxheim.toml.
+        required: true
+        default: examples/fluxheim.toml
+      runtime_uid:
+        description: Runtime UID inside the image. Keep 65532 unless intentionally publishing a root image.
+        required: true
+        default: "65532"
+      runtime_gid:
+        description: Runtime GID inside the image. Keep 65532 unless intentionally publishing a root image.
+        required: true
+        default: "65532"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  images:
+    name: Build and publish ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: debian
+            containerfile: containers/Containerfile.debian
+          - variant: alpine
+            containerfile: containers/Containerfile.alpine
+          - variant: wolfi
+            containerfile: containers/Containerfile.wolfi
+          - variant: suse-micro
+            containerfile: containers/Containerfile.suse-micro
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Prepare tags
+        id: tags
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME}"
+          else
+            version="dev"
+          fi
+
+          tags=(
+            "ghcr.io/${GITHUB_REPOSITORY}:${version}-${VARIANT}"
+            "ghcr.io/${GITHUB_REPOSITORY}:sha-${GITHUB_SHA::12}-${VARIANT}"
+          )
+
+          if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+            tags+=("ghcr.io/${GITHUB_REPOSITORY}:latest-${VARIANT}")
+          fi
+
+          if [[ -n "${DOCKERHUB_USERNAME}" ]]; then
+            tags+=(
+              "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:${version}-${VARIANT}"
+              "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:sha-${GITHUB_SHA::12}-${VARIANT}"
+            )
+            if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+              tags+=("docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest-${VARIANT}")
+            fi
+          fi
+
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.containerfile }}
+          platforms: ${{ inputs.platforms || 'linux/amd64' }}
+          push: true
+          build-args: |
+            FLUXHEIM_FEATURES=${{ inputs.features || 'default' }}
+            FLUXHEIM_CONFIG=${{ inputs.config || 'examples/fluxheim.toml' }}
+            FLUXHEIM_RUNTIME_UID=${{ inputs.runtime_uid || '65532' }}
+            FLUXHEIM_RUNTIME_GID=${{ inputs.runtime_gid || '65532' }}
+          labels: |
+            org.opencontainers.image.title=Fluxheim
+            org.opencontainers.image.description=Fluxheim static web server and reverse proxy
+            org.opencontainers.image.licenses=EUPL-1.2
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.tags }}

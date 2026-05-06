@@ -77,6 +77,7 @@ cargo test --no-default-features --features proxy,cache
 cargo test --no-default-features --features cache
 cargo test --no-default-features --features web
 cargo test --no-default-features --features profile-core
+scripts/validate-1-0-core.sh check
 cargo check --no-default-features --features profile-static-site
 cargo check --no-default-features --features profile-reverse-proxy
 cargo check --no-default-features --features profile-cache-server
@@ -93,10 +94,12 @@ cargo test --no-default-features --features proxy,tls-rustls,acme
 cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
 cargo check --no-default-features --features proxy,tls
 cargo check --no-default-features --features proxy,tls-rustls
+scripts/validate-tls-backends.sh check
 cargo run --quiet -- --check-config --config examples/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/admin.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/vhosts.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
+cargo run --quiet -- --check-config --config examples/container/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/conf.d >/dev/null
 cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml >/dev/null
 cargo deny check

@@ -30,12 +30,20 @@ pub enum TlsStorageIssue {
         scope: String,
         path: PathBuf,
     },
+    CertificatePathHasWorldWritableParent {
+        scope: String,
+        path: PathBuf,
+    },
     PrivateKeyReadFailed {
         scope: String,
         path: PathBuf,
         message: String,
     },
     PrivateKeyPathIsNotFile {
+        scope: String,
+        path: PathBuf,
+    },
+    PrivateKeyPathHasWorldWritableParent {
         scope: String,
         path: PathBuf,
     },
@@ -55,6 +63,11 @@ pub enum TlsStorageIssue {
         field: &'static str,
         path: PathBuf,
     },
+    AcmeEabSecretPathHasWorldWritableParent {
+        issuer: String,
+        field: &'static str,
+        path: PathBuf,
+    },
     InsecureAcmeEabSecretPermissions {
         issuer: String,
         field: &'static str,
@@ -66,6 +79,9 @@ pub enum TlsStorageIssue {
         message: String,
     },
     AcmeStoragePathIsNotDirectory {
+        path: PathBuf,
+    },
+    AcmeStoragePathHasWorldWritableParent {
         path: PathBuf,
     },
     InsecureAcmeStoragePermissions {
@@ -91,6 +107,11 @@ impl Display for TlsStorageIssue {
                 "{scope}.cert_path {} is not a regular file",
                 path.display()
             ),
+            Self::CertificatePathHasWorldWritableParent { scope, path } => write!(
+                formatter,
+                "{scope}.cert_path {} uses a world-writable parent directory",
+                path.display()
+            ),
             Self::PrivateKeyReadFailed {
                 scope,
                 path,
@@ -103,6 +124,11 @@ impl Display for TlsStorageIssue {
             Self::PrivateKeyPathIsNotFile { scope, path } => write!(
                 formatter,
                 "{scope}.key_path {} is not a regular file",
+                path.display()
+            ),
+            Self::PrivateKeyPathHasWorldWritableParent { scope, path } => write!(
+                formatter,
+                "{scope}.key_path {} uses a world-writable parent directory",
                 path.display()
             ),
             Self::InsecurePrivateKeyPermissions { scope, path, mode } => write!(
@@ -130,6 +156,15 @@ impl Display for TlsStorageIssue {
                 "tls.acme.issuers.{issuer}.eab.{field}_file {} is not a regular file",
                 path.display()
             ),
+            Self::AcmeEabSecretPathHasWorldWritableParent {
+                issuer,
+                field,
+                path,
+            } => write!(
+                formatter,
+                "tls.acme.issuers.{issuer}.eab.{field}_file {} uses a world-writable parent directory",
+                path.display()
+            ),
             Self::InsecureAcmeEabSecretPermissions {
                 issuer,
                 field,
@@ -149,6 +184,11 @@ impl Display for TlsStorageIssue {
             Self::AcmeStoragePathIsNotDirectory { path } => write!(
                 formatter,
                 "tls.acme.storage {} is not a directory",
+                path.display()
+            ),
+            Self::AcmeStoragePathHasWorldWritableParent { path } => write!(
+                formatter,
+                "tls.acme.storage {} uses a world-writable parent directory",
                 path.display()
             ),
             Self::InsecureAcmeStoragePermissions { path, mode } => write!(
@@ -213,58 +253,62 @@ fn validate_static_certificate_storage(
     certificate: &StaticCertificateConfig,
     issues: &mut Vec<TlsStorageIssue>,
 ) {
-    match path_contains_symlink(&certificate.cert_path) {
-        Ok(true) => issues.push(TlsStorageIssue::CertificatePathIsNotFile {
-            scope: scope.to_owned(),
-            path: certificate.cert_path.clone(),
-        }),
-        Ok(false) => match fs::symlink_metadata(&certificate.cert_path) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-                issues.push(TlsStorageIssue::CertificatePathIsNotFile {
+    if !push_certificate_world_writable_parent_issue(scope, &certificate.cert_path, issues) {
+        match path_contains_symlink(&certificate.cert_path) {
+            Ok(true) => issues.push(TlsStorageIssue::CertificatePathIsNotFile {
+                scope: scope.to_owned(),
+                path: certificate.cert_path.clone(),
+            }),
+            Ok(false) => match fs::symlink_metadata(&certificate.cert_path) {
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                    issues.push(TlsStorageIssue::CertificatePathIsNotFile {
+                        scope: scope.to_owned(),
+                        path: certificate.cert_path.clone(),
+                    });
+                }
+                Ok(_) => {}
+                Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
                     scope: scope.to_owned(),
                     path: certificate.cert_path.clone(),
-                });
-            }
-            Ok(_) => {}
+                    message: error_message(error),
+                }),
+            },
             Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
                 scope: scope.to_owned(),
                 path: certificate.cert_path.clone(),
-                message: error_message(error),
+                message: symlink_inspection_error(error),
             }),
-        },
-        Err(error) => issues.push(TlsStorageIssue::CertificateReadFailed {
-            scope: scope.to_owned(),
-            path: certificate.cert_path.clone(),
-            message: symlink_inspection_error(error),
-        }),
+        }
     }
 
-    match path_contains_symlink(&certificate.key_path) {
-        Ok(true) => issues.push(TlsStorageIssue::PrivateKeyPathIsNotFile {
-            scope: scope.to_owned(),
-            path: certificate.key_path.clone(),
-        }),
-        Ok(false) => match fs::symlink_metadata(&certificate.key_path) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-                issues.push(TlsStorageIssue::PrivateKeyPathIsNotFile {
+    if !push_private_key_world_writable_parent_issue(scope, &certificate.key_path, issues) {
+        match path_contains_symlink(&certificate.key_path) {
+            Ok(true) => issues.push(TlsStorageIssue::PrivateKeyPathIsNotFile {
+                scope: scope.to_owned(),
+                path: certificate.key_path.clone(),
+            }),
+            Ok(false) => match fs::symlink_metadata(&certificate.key_path) {
+                Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                    issues.push(TlsStorageIssue::PrivateKeyPathIsNotFile {
+                        scope: scope.to_owned(),
+                        path: certificate.key_path.clone(),
+                    });
+                }
+                Ok(metadata) => {
+                    validate_key_permissions(scope, &certificate.key_path, &metadata, issues)
+                }
+                Err(error) => issues.push(TlsStorageIssue::PrivateKeyReadFailed {
                     scope: scope.to_owned(),
                     path: certificate.key_path.clone(),
-                });
-            }
-            Ok(metadata) => {
-                validate_key_permissions(scope, &certificate.key_path, &metadata, issues)
-            }
+                    message: error_message(error),
+                }),
+            },
             Err(error) => issues.push(TlsStorageIssue::PrivateKeyReadFailed {
                 scope: scope.to_owned(),
                 path: certificate.key_path.clone(),
-                message: error_message(error),
+                message: symlink_inspection_error(error),
             }),
-        },
-        Err(error) => issues.push(TlsStorageIssue::PrivateKeyReadFailed {
-            scope: scope.to_owned(),
-            path: certificate.key_path.clone(),
-            message: symlink_inspection_error(error),
-        }),
+        }
     }
 }
 
@@ -276,6 +320,10 @@ fn validate_acme_storage(acme: &AcmeConfig, issues: &mut Vec<TlsStorageIssue>) {
     let Some(path) = &acme.storage else {
         return;
     };
+
+    if push_acme_storage_world_writable_parent_issue(path, issues) {
+        return;
+    }
 
     match path_contains_symlink(path) {
         Ok(true) => {
@@ -323,6 +371,10 @@ fn validate_acme_eab_secret_file(
     path: &Path,
     issues: &mut Vec<TlsStorageIssue>,
 ) {
+    if push_acme_eab_world_writable_parent_issue(issuer, field, path, issues) {
+        return;
+    }
+
     match path_contains_symlink(path) {
         Ok(true) => issues.push(TlsStorageIssue::AcmeEabSecretPathIsNotFile {
             issuer: issuer.to_owned(),
@@ -368,6 +420,135 @@ fn path_contains_symlink(path: &Path) -> io::Result<bool> {
         }
     }
 
+    Ok(false)
+}
+
+fn push_certificate_world_writable_parent_issue(
+    scope: &str,
+    path: &Path,
+    issues: &mut Vec<TlsStorageIssue>,
+) -> bool {
+    match path_has_world_writable_parent(path) {
+        Ok(true) => {
+            issues.push(TlsStorageIssue::CertificatePathHasWorldWritableParent {
+                scope: scope.to_owned(),
+                path: path.to_path_buf(),
+            });
+            true
+        }
+        Ok(false) => false,
+        Err(error) => {
+            issues.push(TlsStorageIssue::CertificateReadFailed {
+                scope: scope.to_owned(),
+                path: path.to_path_buf(),
+                message: error_message(error),
+            });
+            true
+        }
+    }
+}
+
+fn push_private_key_world_writable_parent_issue(
+    scope: &str,
+    path: &Path,
+    issues: &mut Vec<TlsStorageIssue>,
+) -> bool {
+    match path_has_world_writable_parent(path) {
+        Ok(true) => {
+            issues.push(TlsStorageIssue::PrivateKeyPathHasWorldWritableParent {
+                scope: scope.to_owned(),
+                path: path.to_path_buf(),
+            });
+            true
+        }
+        Ok(false) => false,
+        Err(error) => {
+            issues.push(TlsStorageIssue::PrivateKeyReadFailed {
+                scope: scope.to_owned(),
+                path: path.to_path_buf(),
+                message: error_message(error),
+            });
+            true
+        }
+    }
+}
+
+fn push_acme_storage_world_writable_parent_issue(
+    path: &Path,
+    issues: &mut Vec<TlsStorageIssue>,
+) -> bool {
+    match path_has_world_writable_parent(path) {
+        Ok(true) => {
+            issues.push(TlsStorageIssue::AcmeStoragePathHasWorldWritableParent {
+                path: path.to_path_buf(),
+            });
+            true
+        }
+        Ok(false) => false,
+        Err(error) => {
+            issues.push(TlsStorageIssue::AcmeStorageReadFailed {
+                path: path.to_path_buf(),
+                message: error_message(error),
+            });
+            true
+        }
+    }
+}
+
+fn push_acme_eab_world_writable_parent_issue(
+    issuer: &str,
+    field: &'static str,
+    path: &Path,
+    issues: &mut Vec<TlsStorageIssue>,
+) -> bool {
+    match path_has_world_writable_parent(path) {
+        Ok(true) => {
+            issues.push(TlsStorageIssue::AcmeEabSecretPathHasWorldWritableParent {
+                issuer: issuer.to_owned(),
+                field,
+                path: path.to_path_buf(),
+            });
+            true
+        }
+        Ok(false) => false,
+        Err(error) => {
+            issues.push(TlsStorageIssue::AcmeEabSecretReadFailed {
+                issuer: issuer.to_owned(),
+                field,
+                path: path.to_path_buf(),
+                message: error_message(error),
+            });
+            true
+        }
+    }
+}
+
+#[cfg(unix)]
+fn path_has_world_writable_parent(path: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut current = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+
+    loop {
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(false),
+            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o002 != 0),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if !current.pop() {
+                    return Ok(false);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn path_has_world_writable_parent(_path: &Path) -> io::Result<bool> {
     Ok(false)
 }
 
@@ -627,6 +808,33 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn rejects_tls_storage_below_world_writable_parent() {
+        let nonce = std::process::id();
+        let cert = PathBuf::from(format!("/tmp/fluxheim-{nonce}-fullchain.pem"));
+        let key = PathBuf::from(format!("/tmp/fluxheim-{nonce}-key.pem"));
+        let acme = PathBuf::from(format!("/tmp/fluxheim-{nonce}-acme"));
+        let config = tls_config(cert.clone(), key.clone(), acme.clone());
+
+        let check = validate_tls_storage(&config);
+
+        assert_eq!(
+            check.issues,
+            vec![
+                TlsStorageIssue::CertificatePathHasWorldWritableParent {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: cert,
+                },
+                TlsStorageIssue::PrivateKeyPathHasWorldWritableParent {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: key,
+                },
+                TlsStorageIssue::AcmeStoragePathHasWorldWritableParent { path: acme },
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn validates_acme_eab_secret_files() {
         let dir = TestDir::new("tls-storage-eab");
         let cert = dir.file("fullchain.pem", 0o644);
@@ -665,6 +873,38 @@ mod tests {
                     path: hmac,
                 },
             ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_acme_eab_secret_below_world_writable_parent() {
+        let dir = TestDir::new("tls-storage-eab-world-writable");
+        let cert = dir.file("fullchain.pem", 0o644);
+        let key = dir.file("key.pem", recommended_private_key_mode());
+        let acme = dir.dir("acme", recommended_acme_storage_mode());
+        let key_id = PathBuf::from(format!("/tmp/fluxheim-{}-eab-kid", std::process::id()));
+        let mut config = tls_config(cert, key, acme);
+        config.tls.acme.issuers = vec![AcmeIssuerConfig {
+            name: "actalis".to_owned(),
+            directory_url: "https://acme-api.actalis.com/acme/directory".to_owned(),
+            eab: Some(AcmeExternalAccountBindingConfig {
+                key_id_env: None,
+                key_id_file: Some(key_id.clone()),
+                hmac_key_env: Some("FLUXHEIM_ACTALIS_EAB_HMAC_KEY".to_owned()),
+                hmac_key_file: None,
+            }),
+        }];
+
+        let check = validate_tls_storage(&config);
+
+        assert_eq!(
+            check.issues,
+            vec![TlsStorageIssue::AcmeEabSecretPathHasWorldWritableParent {
+                issuer: "actalis".to_owned(),
+                field: "key_id",
+                path: key_id,
+            }]
         );
     }
 

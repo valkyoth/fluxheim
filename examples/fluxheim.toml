@@ -6,11 +6,27 @@ listen = ["127.0.0.1:8080"]
 # trusted. Inbound forwarding headers from all other peers are ignored.
 trusted_proxies = []
 
+# [server.https_redirect]
+# enabled = true
+# status = 308
+# target_port = 8443
+
 [server.limits]
 max_request_header_bytes = "64KiB"
 max_uri_bytes = "8KiB"
 max_request_headers = 100
 max_request_body_bytes = "16MiB"
+
+[server.process]
+daemon = false
+# error_log = "/run/fluxheim/error.log"
+pid_file = "/run/fluxheim/fluxheim.pid"
+upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+threads = 1
+listener_tasks_per_fd = 1
+work_stealing = true
+upstream_keepalive_pool_size = 128
+max_retries = 16
 
 [admin]
 enabled = false
@@ -35,9 +51,17 @@ require_loopback = true
 [logging]
 level = "info"
 format = "json"
+target = "stderr"
+
+[logging.file]
+enabled = false
+# path = "/var/log/fluxheim/fluxheim.log"
+append = true
 
 [logging.access]
 enabled = true
+include_host = true
+include_path = true
 request_id = true
 request_id_header = "x-request-id"
 
@@ -48,9 +72,9 @@ x_forwarded_for = "replace"
 x_forwarded_host = true
 x_forwarded_proto = true
 forwarded = false
-unset = ["x-powered-by"]
+remove = ["x-powered-by"]
 
-[headers.request.set]
+[headers.request.add]
 x-proxy-by = "Fluxheim"
 
 [headers.request.append]
@@ -65,17 +89,17 @@ enabled = true
 x_content_type_options = "nosniff"
 x_frame_options = "DENY"
 referrer_policy = "no-referrer"
-unset = ["server", "x-powered-by"]
+remove = ["server", "x-powered-by"]
 
-[headers.response.set]
+[headers.response.add]
 cache-control = "public, max-age=60"
 
 [headers.response.append]
 vary = ["Accept-Encoding"]
 
 [proxy]
-upstream = "127.0.0.1:3000"
-# Optional Pingora round-robin pool. When set, Fluxheim selects from this list.
+upstreams = ["127.0.0.1:3000"]
+# Optional Pingora round-robin pool with the load-balancer feature:
 # upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_tls = false
 # upstream_sni = "origin.example.test"
@@ -134,3 +158,4 @@ max_size_bytes = "10GiB"
 # root = "public"
 index_files = ["index.html"]
 deny_dotfiles = true
+cache_control = "public, max-age=60"

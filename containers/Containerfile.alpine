@@ -1,0 +1,45 @@
+ARG RUST_IMAGE=docker.io/library/rust:1.95.0-alpine3.23
+ARG RUNTIME_IMAGE=docker.io/library/alpine:3.23
+ARG FLUXHEIM_CONFIG=examples/fluxheim.toml
+
+FROM ${RUST_IMAGE} AS builder
+WORKDIR /usr/src/fluxheim
+
+RUN apk add --no-cache build-base cmake perl pkgconf \
+    && mkdir -p scripts
+
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY build.rs ./
+COPY src ./src
+COPY scripts/validate-features.sh ./scripts/validate-features.sh
+
+ARG FLUXHEIM_FEATURES=default
+RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
+        cargo build --locked --release; \
+    else \
+        scripts/validate-features.sh "${FLUXHEIM_FEATURES}" && \
+        cargo build --locked --release --no-default-features --features "${FLUXHEIM_FEATURES}"; \
+    fi
+
+FROM ${RUNTIME_IMAGE}
+ARG FLUXHEIM_CONFIG=examples/fluxheim.toml
+ARG FLUXHEIM_RUNTIME_UID=65532
+ARG FLUXHEIM_RUNTIME_GID=65532
+
+LABEL org.opencontainers.image.title="Fluxheim"
+LABEL org.opencontainers.image.description="Fluxheim static web server and reverse proxy on Alpine Linux"
+LABEL org.opencontainers.image.licenses="EUPL-1.2"
+LABEL org.opencontainers.image.source="https://github.com/valkyoth/fluxheim"
+
+RUN apk add --no-cache ca-certificates \
+    && mkdir -p /etc/fluxheim /run/fluxheim /var/lib/fluxheim/acme /var/cache/fluxheim /srv/fluxheim \
+    && chown -R ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID} /etc/fluxheim /run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /srv/fluxheim
+
+COPY --from=builder /usr/src/fluxheim/target/release/fluxheim /usr/local/bin/fluxheim
+COPY ${FLUXHEIM_CONFIG} /etc/fluxheim/fluxheim.toml
+
+USER ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID}
+EXPOSE 8080 8443
+
+ENTRYPOINT ["/usr/local/bin/fluxheim"]
+CMD ["--config", "/etc/fluxheim/fluxheim.toml"]

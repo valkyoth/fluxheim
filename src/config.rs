@@ -13,6 +13,8 @@ use toml::value::{Datetime, Offset};
 
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[cfg(target_os = "linux")]
 const O_NOFOLLOW: i32 = 0o400000;
@@ -21,6 +23,7 @@ const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_ADMIN_HEALTH_PATH_BYTES: usize = 2048;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
+const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -229,11 +232,17 @@ impl ConfigFragment {
     }
 
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(server) = &mut self.server {
+            server.resolve_relative_paths(base_dir);
+        }
         if let Some(tls) = &mut self.tls {
             tls.resolve_relative_paths(base_dir);
         }
         if let Some(admin) = &mut self.admin {
             admin.resolve_relative_paths(base_dir);
+        }
+        if let Some(logging) = &mut self.logging {
+            logging.resolve_relative_paths(base_dir);
         }
         if let Some(cache) = &mut self.cache {
             cache.resolve_relative_paths(base_dir);
@@ -243,6 +252,14 @@ impl ConfigFragment {
         }
         for vhost in &mut self.vhosts {
             vhost.resolve_relative_paths(base_dir);
+        }
+    }
+}
+
+impl ServerConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(process) = &mut self.process {
+            process.resolve_relative_paths(base_dir);
         }
     }
 }
@@ -260,6 +277,10 @@ pub struct ServerConfig {
     pub trusted_proxies: Vec<String>,
     #[serde(default)]
     pub limits: ServerLimitsConfig,
+    #[serde(default)]
+    pub process: ServerProcessConfig,
+    #[serde(default)]
+    pub https_redirect: HttpsRedirectConfig,
 }
 
 impl Default for ServerConfig {
@@ -270,6 +291,8 @@ impl Default for ServerConfig {
             default_vhost: None,
             trusted_proxies: Vec::new(),
             limits: ServerLimitsConfig::default(),
+            process: ServerProcessConfig::default(),
+            https_redirect: HttpsRedirectConfig::default(),
         }
     }
 }
@@ -290,6 +313,12 @@ impl ServerConfig {
         }
         if let Some(limits) = fragment.limits {
             self.limits = limits;
+        }
+        if let Some(process) = fragment.process {
+            self.process = process;
+        }
+        if let Some(https_redirect) = fragment.https_redirect {
+            self.https_redirect = https_redirect;
         }
     }
 
@@ -312,6 +341,9 @@ impl ServerConfig {
                 });
             }
         }
+        if self.https_redirect.enabled && self.tls_listen.is_empty() {
+            return Err(ConfigError::HttpsRedirectWithoutTlsListener);
+        }
 
         if let Some(default_vhost) = &self.default_vhost
             && default_vhost.trim().is_empty()
@@ -327,6 +359,8 @@ impl ServerConfig {
         }
 
         self.limits.validate()?;
+        self.process.validate()?;
+        self.https_redirect.validate()?;
         Ok(())
     }
 }
@@ -344,6 +378,140 @@ struct ServerConfigFragment {
     trusted_proxies: Option<Vec<String>>,
     #[serde(default)]
     limits: Option<ServerLimitsConfig>,
+    #[serde(default)]
+    process: Option<ServerProcessConfig>,
+    #[serde(default)]
+    https_redirect: Option<HttpsRedirectConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpsRedirectConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_https_redirect_status")]
+    pub status: u16,
+    #[serde(default)]
+    pub target_port: Option<u16>,
+}
+
+impl Default for HttpsRedirectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            status: default_https_redirect_status(),
+            target_port: None,
+        }
+    }
+}
+
+impl HttpsRedirectConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !matches!(self.status, 301 | 302 | 307 | 308) {
+            return Err(ConfigError::InvalidHttpsRedirectStatus {
+                status: self.status,
+            });
+        }
+        if self.target_port == Some(0) {
+            return Err(ConfigError::InvalidHttpsRedirectTargetPort);
+        }
+
+        Ok(())
+    }
+}
+
+fn default_https_redirect_status() -> u16 {
+    308
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServerProcessConfig {
+    #[serde(default)]
+    pub daemon: bool,
+    #[serde(default)]
+    pub error_log: Option<PathBuf>,
+    #[serde(default = "default_process_pid_file")]
+    pub pid_file: PathBuf,
+    #[serde(default = "default_process_upgrade_sock")]
+    pub upgrade_sock: PathBuf,
+    #[serde(default = "default_process_threads")]
+    pub threads: usize,
+    #[serde(default = "default_process_listener_tasks_per_fd")]
+    pub listener_tasks_per_fd: usize,
+    #[serde(default = "default_true")]
+    pub work_stealing: bool,
+    #[serde(default = "default_process_upstream_keepalive_pool_size")]
+    pub upstream_keepalive_pool_size: usize,
+    #[serde(default = "default_process_max_retries")]
+    pub max_retries: usize,
+    #[serde(default)]
+    pub grace_period_seconds: Option<u64>,
+    #[serde(default)]
+    pub graceful_shutdown_timeout_seconds: Option<u64>,
+}
+
+impl Default for ServerProcessConfig {
+    fn default() -> Self {
+        Self {
+            daemon: false,
+            error_log: None,
+            pid_file: default_process_pid_file(),
+            upgrade_sock: default_process_upgrade_sock(),
+            threads: default_process_threads(),
+            listener_tasks_per_fd: default_process_listener_tasks_per_fd(),
+            work_stealing: true,
+            upstream_keepalive_pool_size: default_process_upstream_keepalive_pool_size(),
+            max_retries: default_process_max_retries(),
+            grace_period_seconds: None,
+            graceful_shutdown_timeout_seconds: None,
+        }
+    }
+}
+
+impl ServerProcessConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(error_log) = &mut self.error_log
+            && error_log.is_relative()
+        {
+            *error_log = base_dir.join(&error_log);
+        }
+        if self.pid_file.is_relative() {
+            self.pid_file = base_dir.join(&self.pid_file);
+        }
+        if self.upgrade_sock.is_relative() {
+            self.upgrade_sock = base_dir.join(&self.upgrade_sock);
+        }
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        validate_optional_process_path("server.process.error_log", self.error_log.as_deref())?;
+        validate_required_process_path("server.process.pid_file", &self.pid_file)?;
+        validate_required_process_path("server.process.upgrade_sock", &self.upgrade_sock)?;
+        validate_process_usize("server.process.threads", self.threads, 1, 1024)?;
+        validate_process_usize(
+            "server.process.listener_tasks_per_fd",
+            self.listener_tasks_per_fd,
+            1,
+            1024,
+        )?;
+        validate_process_usize(
+            "server.process.upstream_keepalive_pool_size",
+            self.upstream_keepalive_pool_size,
+            1,
+            1_000_000,
+        )?;
+        validate_process_usize("server.process.max_retries", self.max_retries, 0, 1024)?;
+        validate_process_optional_duration(
+            "server.process.grace_period_seconds",
+            self.grace_period_seconds,
+        )?;
+        validate_process_optional_duration(
+            "server.process.graceful_shutdown_timeout_seconds",
+            self.graceful_shutdown_timeout_seconds,
+        )?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -405,6 +573,8 @@ impl AdminConfig {
         validate_optional_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
         validate_path("admin.token_file", self.token_file.as_deref())?;
         validate_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        validate_non_world_writable_parent("admin.token_file", self.token_file.as_deref())?;
+        validate_non_world_writable_parent("admin.snapshot_store", self.snapshot_store.as_deref())?;
         self.self_healing.validate()?;
 
         if !self.enabled {
@@ -541,12 +711,79 @@ pub struct LoggingConfig {
     #[serde(default)]
     pub format: LoggingFormat,
     #[serde(default)]
+    pub target: LoggingTarget,
+    #[serde(default)]
+    pub file: LoggingFileConfig,
+    #[serde(default)]
     pub access: AccessLoggingConfig,
 }
 
 impl LoggingConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.file.path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
+        self.file.validate()?;
         self.access.validate()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoggingFileConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    pub append: bool,
+}
+
+impl Default for LoggingFileConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: None,
+            append: true,
+        }
+    }
+}
+
+impl LoggingFileConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        #[cfg(feature = "privacy-mode")]
+        if self.enabled {
+            return Err(ConfigError::PrivacyModeFileLogging);
+        }
+
+        if self.enabled && self.path.is_none() {
+            return Err(ConfigError::MissingLoggingFilePath);
+        }
+
+        if self
+            .path
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err(ConfigError::EmptyLoggingFilePath);
+        }
+
+        validate_path("logging.file.path", self.path.as_deref())?;
+        #[cfg(unix)]
+        if let Some(path) = self.path.as_deref()
+            && path_existing_parent_is_world_writable(path).unwrap_or(true)
+        {
+            return Err(ConfigError::UnsafePath {
+                field: "logging.file.path".to_owned(),
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -583,11 +820,23 @@ pub enum LoggingFormat {
     Json,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LoggingTarget {
+    Stdout,
+    #[default]
+    Stderr,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccessLoggingConfig {
     #[serde(default = "default_access_logging_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub include_host: bool,
+    #[serde(default = "default_true")]
+    pub include_path: bool,
     #[serde(default = "default_true")]
     pub request_id: bool,
     #[serde(default = "default_request_id_header")]
@@ -598,6 +847,8 @@ impl Default for AccessLoggingConfig {
     fn default() -> Self {
         Self {
             enabled: default_access_logging_enabled(),
+            include_host: true,
+            include_path: true,
             request_id: true,
             request_id_header: default_request_id_header(),
         }
@@ -676,19 +927,36 @@ pub struct RequestHeaderPolicyOverlayConfig {
     #[serde(default)]
     pub unset: Vec<String>,
     #[serde(default)]
+    pub remove: Vec<String>,
+    #[serde(default)]
     pub set: BTreeMap<String, String>,
     #[serde(default)]
+    pub add: BTreeMap<String, String>,
+    #[serde(default)]
     pub append: BTreeMap<String, HeaderValues>,
+    #[serde(default)]
+    pub operations: HeaderOperationsConfig,
 }
 
 impl RequestHeaderPolicyOverlayConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        validate_header_mutations(
+        validate_header_add_aliases(
             "vhosts.headers.request",
-            &self.unset,
             &self.set,
-            &self.append,
-        )
+            &self.add,
+            &self.operations.add,
+        )?;
+        let unset = combined_header_unset(&self.unset, &self.remove, &self.operations.remove);
+        let set = combined_header_set(&self.set, &self.add, &self.operations.add);
+        validate_header_mutations("vhosts.headers.request", &unset, &set, &self.append)
+    }
+
+    fn effective_unset(&self) -> Vec<String> {
+        combined_header_unset(&self.unset, &self.remove, &self.operations.remove)
+    }
+
+    fn effective_set(&self) -> BTreeMap<String, String> {
+        combined_header_set(&self.set, &self.add, &self.operations.add)
     }
 }
 
@@ -710,9 +978,15 @@ pub struct RequestHeaderPolicyConfig {
     #[serde(default)]
     pub unset: Vec<String>,
     #[serde(default)]
+    pub remove: Vec<String>,
+    #[serde(default)]
     pub set: BTreeMap<String, String>,
     #[serde(default)]
+    pub add: BTreeMap<String, String>,
+    #[serde(default)]
     pub append: BTreeMap<String, HeaderValues>,
+    #[serde(default)]
+    pub operations: HeaderOperationsConfig,
 }
 
 impl Default for RequestHeaderPolicyConfig {
@@ -728,16 +1002,35 @@ impl Default for RequestHeaderPolicyConfig {
             x_forwarded_proto: true,
             forwarded: false,
             unset: Vec::new(),
+            remove: Vec::new(),
             set: BTreeMap::new(),
+            add: BTreeMap::new(),
             append: BTreeMap::new(),
+            operations: HeaderOperationsConfig::default(),
         }
     }
 }
 
 impl RequestHeaderPolicyConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        validate_header_mutations("headers.request", &self.unset, &self.set, &self.append)?;
+        validate_header_add_aliases(
+            "headers.request",
+            &self.set,
+            &self.add,
+            &self.operations.add,
+        )?;
+        let unset = self.effective_unset();
+        let set = self.effective_set();
+        validate_header_mutations("headers.request", &unset, &set, &self.append)?;
         Ok(())
+    }
+
+    pub fn effective_unset(&self) -> Vec<String> {
+        combined_header_unset(&self.unset, &self.remove, &self.operations.remove)
+    }
+
+    pub fn effective_set(&self) -> BTreeMap<String, String> {
+        combined_header_set(&self.set, &self.add, &self.operations.add)
     }
 
     fn apply_overlay(&mut self, overlay: &RequestHeaderPolicyOverlayConfig) {
@@ -763,8 +1056,8 @@ impl RequestHeaderPolicyConfig {
             &mut self.unset,
             &mut self.set,
             &mut self.append,
-            &overlay.unset,
-            &overlay.set,
+            &overlay.effective_unset(),
+            &overlay.effective_set(),
             &overlay.append,
         );
     }
@@ -794,12 +1087,18 @@ pub struct ResponseHeaderPolicyConfig {
     pub x_frame_options: Option<String>,
     #[serde(default = "default_referrer_policy")]
     pub referrer_policy: Option<String>,
-    #[serde(default)]
+    #[serde(default = "default_response_unset_headers")]
     pub unset: Vec<String>,
+    #[serde(default)]
+    pub remove: Vec<String>,
     #[serde(default)]
     pub set: BTreeMap<String, String>,
     #[serde(default)]
+    pub add: BTreeMap<String, String>,
+    #[serde(default)]
     pub append: BTreeMap<String, HeaderValues>,
+    #[serde(default)]
+    pub operations: HeaderOperationsConfig,
 }
 
 impl Default for ResponseHeaderPolicyConfig {
@@ -811,9 +1110,12 @@ impl Default for ResponseHeaderPolicyConfig {
             x_content_type_options: default_x_content_type_options(),
             x_frame_options: default_x_frame_options(),
             referrer_policy: default_referrer_policy(),
-            unset: Vec::new(),
+            unset: default_response_unset_headers(),
+            remove: Vec::new(),
             set: BTreeMap::new(),
+            add: BTreeMap::new(),
             append: BTreeMap::new(),
+            operations: HeaderOperationsConfig::default(),
         }
     }
 }
@@ -840,9 +1142,25 @@ impl ResponseHeaderPolicyConfig {
             "headers.response.referrer_policy",
             self.referrer_policy.as_deref(),
         )?;
-        validate_header_mutations("headers.response", &self.unset, &self.set, &self.append)?;
+        validate_header_add_aliases(
+            "headers.response",
+            &self.set,
+            &self.add,
+            &self.operations.add,
+        )?;
+        let unset = self.effective_unset();
+        let set = self.effective_set();
+        validate_header_mutations("headers.response", &unset, &set, &self.append)?;
 
         Ok(())
+    }
+
+    pub fn effective_unset(&self) -> Vec<String> {
+        combined_header_unset(&self.unset, &self.remove, &self.operations.remove)
+    }
+
+    pub fn effective_set(&self) -> BTreeMap<String, String> {
+        combined_header_set(&self.set, &self.add, &self.operations.add)
     }
 
     fn apply_overlay(&mut self, overlay: &ResponseHeaderPolicyOverlayConfig) {
@@ -868,8 +1186,8 @@ impl ResponseHeaderPolicyConfig {
             &mut self.unset,
             &mut self.set,
             &mut self.append,
-            &overlay.unset,
-            &overlay.set,
+            &overlay.effective_unset(),
+            &overlay.effective_set(),
             &overlay.append,
         );
     }
@@ -893,9 +1211,15 @@ pub struct ResponseHeaderPolicyOverlayConfig {
     #[serde(default)]
     pub unset: Vec<String>,
     #[serde(default)]
+    pub remove: Vec<String>,
+    #[serde(default)]
     pub set: BTreeMap<String, String>,
     #[serde(default)]
+    pub add: BTreeMap<String, String>,
+    #[serde(default)]
     pub append: BTreeMap<String, HeaderValues>,
+    #[serde(default)]
+    pub operations: HeaderOperationsConfig,
 }
 
 impl ResponseHeaderPolicyOverlayConfig {
@@ -926,13 +1250,33 @@ impl ResponseHeaderPolicyOverlayConfig {
             "vhosts.headers.response.referrer_policy",
             self.referrer_policy.as_ref().and_then(Option::as_deref),
         )?;
-        validate_header_mutations(
+        validate_header_add_aliases(
             "vhosts.headers.response",
-            &self.unset,
             &self.set,
-            &self.append,
-        )
+            &self.add,
+            &self.operations.add,
+        )?;
+        let unset = self.effective_unset();
+        let set = self.effective_set();
+        validate_header_mutations("vhosts.headers.response", &unset, &set, &self.append)
     }
+
+    fn effective_unset(&self) -> Vec<String> {
+        combined_header_unset(&self.unset, &self.remove, &self.operations.remove)
+    }
+
+    fn effective_set(&self) -> BTreeMap<String, String> {
+        combined_header_set(&self.set, &self.add, &self.operations.add)
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeaderOperationsConfig {
+    #[serde(default)]
+    pub remove: Vec<String>,
+    #[serde(default)]
+    pub add: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -1189,8 +1533,12 @@ impl StaticCertificateConfig {
         if self.key_path.as_os_str().is_empty() {
             return Err(ConfigError::EmptyTlsKeyPath { scope });
         }
-        validate_path(format!("{scope}.cert_path"), Some(&self.cert_path))?;
-        validate_path(format!("{scope}.key_path"), Some(&self.key_path))?;
+        let cert_field = format!("{scope}.cert_path");
+        let key_field = format!("{scope}.key_path");
+        validate_path(cert_field.clone(), Some(&self.cert_path))?;
+        validate_path(key_field.clone(), Some(&self.key_path))?;
+        validate_non_world_writable_parent(cert_field, Some(&self.cert_path))?;
+        validate_non_world_writable_parent(key_field, Some(&self.key_path))?;
 
         Ok(())
     }
@@ -1250,6 +1598,7 @@ impl AcmeConfig {
                 return Err(ConfigError::EmptyAcmeStorage);
             }
             validate_path("tls.acme.storage", Some(storage))?;
+            validate_non_world_writable_parent("tls.acme.storage", Some(storage))?;
             if self.contact_email.as_deref().is_none_or(invalid_email) {
                 return Err(ConfigError::InvalidAcmeContactEmail);
             }
@@ -1455,8 +1804,8 @@ impl AcmeExternalAccountBindingConfig {
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProxyConfig {
-    #[serde(default = "default_upstream")]
-    pub upstream: String,
+    #[serde(default)]
+    pub upstream: Option<String>,
     #[serde(default)]
     pub upstreams: Vec<String>,
     #[serde(default)]
@@ -1470,7 +1819,7 @@ pub struct ProxyConfig {
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
-            upstream: default_upstream(),
+            upstream: Some(default_upstream()),
             upstreams: Vec::new(),
             upstream_tls: false,
             upstream_sni: None,
@@ -1480,16 +1829,30 @@ impl Default for ProxyConfig {
 }
 
 impl ProxyConfig {
+    pub fn primary_upstream(&self) -> &str {
+        self.upstreams
+            .first()
+            .map(String::as_str)
+            .or(self.upstream.as_deref())
+            .unwrap_or(DEFAULT_UPSTREAM)
+    }
+
     pub fn upstream_sni(&self) -> String {
         self.upstream_sni
             .clone()
-            .unwrap_or_else(|| upstream_host(&self.upstream).unwrap_or_default())
+            .unwrap_or_else(|| upstream_host(self.primary_upstream()).unwrap_or_default())
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        if !valid_authority(&self.upstream) {
+        if self.upstream.is_some() && !self.upstreams.is_empty() {
+            return Err(ConfigError::ConflictingProxyUpstreams);
+        }
+
+        if let Some(upstream) = &self.upstream
+            && !valid_authority(upstream)
+        {
             return Err(ConfigError::InvalidUpstream {
-                address: self.upstream.clone(),
+                address: upstream.clone(),
             });
         }
 
@@ -1921,7 +2284,15 @@ impl CacheDiskConfig {
         if path.as_os_str().is_empty() {
             return Err(ConfigError::EmptyCacheDiskPath { scope });
         }
-        validate_path(format!("{scope}.disk.path"), Some(path))?;
+        let path_field = format!("{scope}.disk.path");
+        validate_path(path_field.clone(), Some(path))?;
+        #[cfg(unix)]
+        if path_existing_parent_is_world_writable(path).unwrap_or(true) {
+            return Err(ConfigError::UnsafePath {
+                field: path_field,
+                path: path.to_path_buf(),
+            });
+        }
 
         if self.max_size_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidCacheTierMaxSize {
@@ -1948,6 +2319,10 @@ pub struct WebConfig {
     pub index_files: Vec<String>,
     #[serde(default = "default_true")]
     pub deny_dotfiles: bool,
+    #[serde(default = "default_static_cache_control")]
+    pub cache_control: String,
+    #[serde(default)]
+    pub expires: Option<String>,
 }
 
 impl Default for WebConfig {
@@ -1956,6 +2331,8 @@ impl Default for WebConfig {
             root: None,
             index_files: default_index_files(),
             deny_dotfiles: true,
+            cache_control: default_static_cache_control(),
+            expires: None,
         }
     }
 }
@@ -1997,6 +2374,8 @@ impl WebConfig {
                 });
             }
         }
+        validate_optional_header_value("web.cache_control", Some(&self.cache_control))?;
+        validate_optional_header_value("web.expires", self.expires.as_deref())?;
 
         Ok(())
     }
@@ -2051,6 +2430,17 @@ pub enum ConfigError {
     InvalidTrustedProxy {
         value: String,
     },
+    InvalidProcessSetting {
+        field: &'static str,
+    },
+    HttpsRedirectWithoutTlsListener,
+    InvalidHttpsRedirectStatus {
+        status: u16,
+    },
+    InvalidHttpsRedirectTargetPort,
+    EmptyProcessPath {
+        field: &'static str,
+    },
     InvalidLimit {
         field: &'static str,
     },
@@ -2086,11 +2476,18 @@ pub enum ConfigError {
         address: String,
     },
     PrivacyModeAccessLogging,
+    PrivacyModeFileLogging,
+    MissingLoggingFilePath,
+    EmptyLoggingFilePath,
     InvalidHeaderName {
         field: &'static str,
         name: String,
     },
     InvalidHeaderValue {
+        field: &'static str,
+        name: String,
+    },
+    ConflictingHeaderAdd {
         field: &'static str,
         name: String,
     },
@@ -2150,6 +2547,7 @@ pub enum ConfigError {
     InvalidUpstream {
         address: String,
     },
+    ConflictingProxyUpstreams,
     EmptyUpstreamSni,
     InvalidLoadBalanceMaxIterations,
     InvalidLoadBalanceHealthCheck {
@@ -2229,6 +2627,24 @@ impl Display for ConfigError {
                 formatter,
                 "server.trusted_proxies entries must be IP addresses or CIDR ranges, got {value:?}"
             ),
+            Self::InvalidProcessSetting { field } => {
+                write!(formatter, "{field} is outside the supported process range")
+            }
+            Self::HttpsRedirectWithoutTlsListener => write!(
+                formatter,
+                "server.https_redirect.enabled requires at least one server.tls_listen address"
+            ),
+            Self::InvalidHttpsRedirectStatus { status } => write!(
+                formatter,
+                "server.https_redirect.status must be one of 301, 302, 307, or 308, got {status}"
+            ),
+            Self::InvalidHttpsRedirectTargetPort => {
+                write!(
+                    formatter,
+                    "server.https_redirect.target_port must be greater than zero"
+                )
+            }
+            Self::EmptyProcessPath { field } => write!(formatter, "{field} cannot be empty"),
             Self::InvalidLimit { field } => write!(formatter, "{field} must be greater than zero"),
             Self::InvalidAdminListenAddress { address } => write!(
                 formatter,
@@ -2278,6 +2694,14 @@ impl Display for ConfigError {
                 formatter,
                 "privacy-mode builds do not allow logging.access.enabled = true"
             ),
+            Self::PrivacyModeFileLogging => write!(
+                formatter,
+                "privacy-mode builds do not allow logging.file.enabled = true"
+            ),
+            Self::MissingLoggingFilePath => {
+                write!(formatter, "logging.file.enabled requires logging.file.path")
+            }
+            Self::EmptyLoggingFilePath => write!(formatter, "logging.file.path cannot be empty"),
             Self::InvalidHeaderName { field, name } => {
                 write!(
                     formatter,
@@ -2287,6 +2711,10 @@ impl Display for ConfigError {
             Self::InvalidHeaderValue { field, name } => write!(
                 formatter,
                 "{field}.{name} must be a non-empty HTTP header value without control characters"
+            ),
+            Self::ConflictingHeaderAdd { field, name } => write!(
+                formatter,
+                "{field} defines header {name:?} in more than one add/set table"
             ),
             Self::InvalidResponseHeaderValue { field } => write!(
                 formatter,
@@ -2369,6 +2797,10 @@ impl Display for ConfigError {
                     "upstream must be host:port or ip:port, got {address:?}"
                 )
             }
+            Self::ConflictingProxyUpstreams => write!(
+                formatter,
+                "proxy.upstream and proxy.upstreams cannot both be configured; use proxy.upstreams for one or many targets"
+            ),
             Self::EmptyUpstreamSni => write!(formatter, "upstream_sni cannot be empty"),
             Self::InvalidLoadBalanceMaxIterations => {
                 write!(
@@ -2502,6 +2934,30 @@ fn default_max_request_body_bytes() -> ByteSize {
     ByteSize::from_bytes(16 * 1024 * 1024)
 }
 
+fn default_process_pid_file() -> PathBuf {
+    PathBuf::from("/run/fluxheim/fluxheim.pid")
+}
+
+fn default_process_upgrade_sock() -> PathBuf {
+    PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock")
+}
+
+fn default_process_threads() -> usize {
+    1
+}
+
+fn default_process_listener_tasks_per_fd() -> usize {
+    1
+}
+
+fn default_process_upstream_keepalive_pool_size() -> usize {
+    128
+}
+
+fn default_process_max_retries() -> usize {
+    16
+}
+
 fn default_acme_contact_email() -> Option<String> {
     None
 }
@@ -2594,6 +3050,10 @@ fn default_index_files() -> Vec<String> {
     vec!["index.html".to_owned()]
 }
 
+fn default_static_cache_control() -> String {
+    "public, max-age=60".to_owned()
+}
+
 fn default_true() -> bool {
     true
 }
@@ -2608,6 +3068,10 @@ fn default_x_frame_options() -> Option<String> {
 
 fn default_referrer_policy() -> Option<String> {
     Some("no-referrer".to_owned())
+}
+
+fn default_response_unset_headers() -> Vec<String> {
+    vec!["server".to_owned(), "x-powered-by".to_owned()]
 }
 
 fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
@@ -2829,10 +3293,9 @@ fn validate_secret_source(
 ) -> Result<(), ConfigError> {
     let env = env.map(str::trim).filter(|value| !value.is_empty());
     let file = file.filter(|path| !path.as_os_str().is_empty());
-    validate_path(
-        format!("tls.acme.issuers.{issuer}.eab.{field}_file"),
-        file.map(PathBuf::as_path),
-    )?;
+    let file_field = format!("tls.acme.issuers.{issuer}.eab.{field}_file");
+    validate_path(file_field.clone(), file.map(PathBuf::as_path))?;
+    validate_non_world_writable_parent(file_field, file.map(PathBuf::as_path))?;
 
     match (env, file) {
         (Some(_), None) | (None, Some(_)) => Ok(()),
@@ -2887,6 +3350,77 @@ fn validate_path(field: impl Into<String>, path: Option<&Path>) -> Result<(), Co
     Ok(())
 }
 
+fn validate_non_world_writable_parent(
+    field: impl Into<String>,
+    path: Option<&Path>,
+) -> Result<(), ConfigError> {
+    let field = field.into();
+    let Some(path) = path else {
+        return Ok(());
+    };
+
+    #[cfg(unix)]
+    if path_existing_parent_is_world_writable(path).unwrap_or(true) {
+        return Err(ConfigError::UnsafePath {
+            field,
+            path: path.to_path_buf(),
+        });
+    }
+
+    #[cfg(not(unix))]
+    let _ = (field, path);
+
+    Ok(())
+}
+
+fn validate_process_usize(
+    field: &'static str,
+    value: usize,
+    min: usize,
+    max: usize,
+) -> Result<(), ConfigError> {
+    if (min..=max).contains(&value) {
+        Ok(())
+    } else {
+        Err(ConfigError::InvalidProcessSetting { field })
+    }
+}
+
+fn validate_optional_process_path(
+    field: &'static str,
+    path: Option<&Path>,
+) -> Result<(), ConfigError> {
+    if let Some(path) = path {
+        validate_required_process_path(field, path)?;
+    }
+    Ok(())
+}
+
+fn validate_required_process_path(field: &'static str, path: &Path) -> Result<(), ConfigError> {
+    if path.as_os_str().is_empty() {
+        return Err(ConfigError::EmptyProcessPath { field });
+    }
+    validate_path(field, Some(path))?;
+    #[cfg(unix)]
+    if path_existing_parent_is_world_writable(path).unwrap_or(true) {
+        return Err(ConfigError::UnsafePath {
+            field: field.to_owned(),
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_process_optional_duration(
+    field: &'static str,
+    value: Option<u64>,
+) -> Result<(), ConfigError> {
+    match value {
+        Some(0) => Err(ConfigError::InvalidProcessSetting { field }),
+        Some(_) | None => Ok(()),
+    }
+}
+
 fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
     let mut current = PathBuf::new();
 
@@ -2901,6 +3435,30 @@ fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
     }
 
     Ok(false)
+}
+
+#[cfg(unix)]
+fn path_existing_parent_is_world_writable(path: &Path) -> std::io::Result<bool> {
+    let mut current = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    loop {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o002 != 0),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(parent) = current.parent() else {
+                    return Ok(false);
+                };
+                if parent == current {
+                    return Ok(false);
+                }
+                current = parent;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 fn validate_optional_header_value(
@@ -2946,6 +3504,59 @@ fn validate_header_mutations(
     }
 
     Ok(())
+}
+
+fn validate_header_add_aliases(
+    field: &'static str,
+    set: &BTreeMap<String, String>,
+    add: &BTreeMap<String, String>,
+    operations_add: &BTreeMap<String, String>,
+) -> Result<(), ConfigError> {
+    let mut seen = std::collections::BTreeSet::new();
+    for name in set.keys() {
+        seen.insert(name.to_ascii_lowercase());
+    }
+    for name in add.keys().chain(operations_add.keys()) {
+        let normalized = name.to_ascii_lowercase();
+        if !seen.insert(normalized) {
+            return Err(ConfigError::ConflictingHeaderAdd {
+                field,
+                name: name.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn combined_header_unset(
+    unset: &[String],
+    remove: &[String],
+    operations_remove: &[String],
+) -> Vec<String> {
+    let mut combined = Vec::with_capacity(unset.len() + remove.len() + operations_remove.len());
+    combined.extend(unset.iter().cloned());
+    combined.extend(remove.iter().cloned());
+    combined.extend(operations_remove.iter().cloned());
+    combined
+}
+
+fn combined_header_set(
+    set: &BTreeMap<String, String>,
+    add: &BTreeMap<String, String>,
+    operations_add: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut combined = set.clone();
+    combined.extend(
+        add.iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    combined.extend(
+        operations_add
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    combined
 }
 
 fn merge_header_mutations(
@@ -3032,7 +3643,10 @@ pub fn normalize_host(host: &str) -> Option<String> {
         || host.contains('*')
         || host.contains('/')
         || host.contains('\\')
-        || host.chars().any(char::is_whitespace)
+        || host.contains('?')
+        || host.contains('#')
+        || host.contains('@')
+        || host.chars().any(|ch| ch.is_whitespace() || ch.is_control())
     {
         return None;
     }
@@ -3167,6 +3781,14 @@ mod tests {
                 .as_deref(),
             Some("no-referrer")
         );
+        assert_eq!(
+            Config::default().headers.response.unset,
+            ["server", "x-powered-by"]
+        );
+        assert_eq!(Config::default().web.cache_control, "public, max-age=60");
+        assert_eq!(Config::default().server.process.threads, 1);
+        assert_eq!(Config::default().server.process.listener_tasks_per_fd, 1);
+        assert_eq!(Config::default().server.process.max_retries, 16);
         #[cfg(not(feature = "privacy-mode"))]
         assert!(Config::default().logging.access.enabled);
         #[cfg(feature = "privacy-mode")]
@@ -3191,9 +3813,80 @@ mod tests {
 
         assert_eq!(config.server.listen, ["127.0.0.1:18080"]);
         assert_eq!(config.server.tls_listen, ["127.0.0.1:18443"]);
-        assert_eq!(config.proxy.upstream, "origin.example.test:443");
+        assert_eq!(
+            config.proxy.upstream.as_deref(),
+            Some("origin.example.test:443")
+        );
         assert!(config.proxy.upstream_tls);
         assert_eq!(config.proxy.upstream_sni(), "origin.example.test");
+    }
+
+    #[test]
+    fn parses_server_process_settings() {
+        let config: Config = toml::from_str(
+            r#"
+            [server.process]
+            daemon = false
+            error_log = "/run/fluxheim/error.log"
+            pid_file = "/run/fluxheim/fluxheim.pid"
+            upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+            threads = 4
+            listener_tasks_per_fd = 2
+            work_stealing = false
+            upstream_keepalive_pool_size = 512
+            max_retries = 8
+            grace_period_seconds = 10
+            graceful_shutdown_timeout_seconds = 30
+            "#,
+        )
+        .unwrap();
+
+        assert!(!config.server.process.daemon);
+        assert_eq!(
+            config.server.process.error_log.as_deref(),
+            Some(Path::new("/run/fluxheim/error.log"))
+        );
+        assert_eq!(
+            config.server.process.pid_file,
+            PathBuf::from("/run/fluxheim/fluxheim.pid")
+        );
+        assert_eq!(
+            config.server.process.upgrade_sock,
+            PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock")
+        );
+        assert_eq!(config.server.process.threads, 4);
+        assert_eq!(config.server.process.listener_tasks_per_fd, 2);
+        assert!(!config.server.process.work_stealing);
+        assert_eq!(config.server.process.upstream_keepalive_pool_size, 512);
+        assert_eq!(config.server.process.max_retries, 8);
+        assert_eq!(config.server.process.grace_period_seconds, Some(10));
+        assert_eq!(
+            config.server.process.graceful_shutdown_timeout_seconds,
+            Some(30)
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_static_cache_headers() {
+        let config: Config = toml::from_str(
+            r#"
+            [web]
+            root = "public"
+            cache_control = "public, max-age=31536000, immutable"
+            expires = "Wed, 21 Oct 2030 07:28:00 GMT"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.web.cache_control,
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            config.web.expires.as_deref(),
+            Some("Wed, 21 Oct 2030 07:28:00 GMT")
+        );
     }
 
     #[test]
@@ -3201,7 +3894,6 @@ mod tests {
         let config: Config = toml::from_str(
             r#"
             [proxy]
-            upstream = "127.0.0.1:3000"
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
 
             [proxy.load_balance]
@@ -3234,6 +3926,39 @@ mod tests {
         );
         assert!(config.proxy.load_balance.health_check.parallel);
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_ambiguous_proxy_upstream_aliases() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            upstreams = ["127.0.0.1:3001"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::ConflictingProxyUpstreams)
+        );
+    }
+
+    #[test]
+    fn upstreams_can_be_used_as_primary_proxy_targets() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["origin-a.example.test:443", "origin-b.example.test:443"]
+            upstream_tls = true
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(config.proxy.primary_upstream(), "origin-a.example.test:443");
+        assert_eq!(config.proxy.upstream_sni(), "origin-a.example.test");
     }
 
     #[test]
@@ -3286,6 +4011,123 @@ mod tests {
             Some("fluxheim")
         );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_user_friendly_header_operations() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.request]
+            remove = ["x-powered-by"]
+
+            [headers.request.add]
+            x-internal-route = "true"
+
+            [headers.request.operations]
+            remove = ["server"]
+            add = { x-extra-route = "edge" }
+
+            [headers.response]
+            remove = ["x-origin-banner"]
+
+            [headers.response.operations]
+            remove = ["x-debug"]
+            add = { cache-control = "public, max-age=60" }
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(
+            config.headers.request.effective_unset(),
+            ["x-powered-by", "server"]
+        );
+        assert_eq!(
+            config
+                .headers
+                .request
+                .effective_set()
+                .get("x-internal-route")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            config
+                .headers
+                .request
+                .effective_set()
+                .get("x-extra-route")
+                .map(String::as_str),
+            Some("edge")
+        );
+        assert!(
+            config
+                .headers
+                .response
+                .effective_unset()
+                .contains(&"x-origin-banner".to_owned())
+        );
+        assert!(
+            config
+                .headers
+                .response
+                .effective_unset()
+                .contains(&"x-debug".to_owned())
+        );
+        assert_eq!(
+            config
+                .headers
+                .response
+                .effective_set()
+                .get("cache-control")
+                .map(String::as_str),
+            Some("public, max-age=60")
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_header_add_aliases() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.response.set]
+            cache-control = "public, max-age=60"
+
+            [headers.response.add]
+            Cache-Control = "private, no-store"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::ConflictingHeaderAdd {
+                field: "headers.response",
+                name: "Cache-Control".to_owned()
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "api"
+            hosts = ["api.example.test"]
+
+            [vhosts.headers.request.add]
+            x-route = "api"
+
+            [vhosts.headers.request.operations]
+            add = { x-route = "legacy" }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::ConflictingHeaderAdd {
+                field: "vhosts.headers.request",
+                name: "x-route".to_owned()
+            })
+        );
     }
 
     #[test]
@@ -3353,19 +4195,29 @@ mod tests {
             [vhosts.headers.request]
             x_forwarded_for = "off"
             unset = ["x-powered-by"]
+            remove = ["x-legacy-route"]
 
             [vhosts.headers.request.set]
             host = "api.internal"
 
+            [vhosts.headers.request.operations]
+            remove = ["x-old-api"]
+            add = { x-api-route = "true" }
+
             [vhosts.headers.response]
             x_frame_options = "SAMEORIGIN"
             unset = ["server"]
+            remove = ["x-origin-banner"]
 
             [vhosts.headers.response.set]
             access-control-allow-origin = "https://app.example.test"
 
             [vhosts.headers.response.append]
             vary = "Origin"
+
+            [vhosts.headers.response.operations]
+            remove = ["x-debug"]
+            add = { x-response-route = "api" }
             "#,
         )
         .unwrap();
@@ -3377,8 +4229,20 @@ mod tests {
         );
         assert_eq!(headers.request.unset, ["x-powered-by"]);
         assert_eq!(
+            headers.request.effective_unset(),
+            ["x-powered-by", "x-legacy-route", "x-old-api"]
+        );
+        assert_eq!(
             headers.request.set.get("host").map(String::as_str),
             Some("api.internal")
+        );
+        assert_eq!(
+            headers
+                .request
+                .effective_set()
+                .get("x-api-route")
+                .map(String::as_str),
+            Some("true")
         );
         assert_eq!(
             headers
@@ -3389,6 +4253,10 @@ mod tests {
             Some("SAMEORIGIN")
         );
         assert_eq!(headers.response.unset, ["server"]);
+        assert_eq!(
+            headers.response.effective_unset(),
+            ["server", "x-origin-banner", "x-debug"]
+        );
         assert_eq!(
             headers
                 .response
@@ -3404,6 +4272,14 @@ mod tests {
                 .get("vary")
                 .and_then(|values| values.iter().next()),
             Some("Origin")
+        );
+        assert_eq!(
+            headers
+                .response
+                .effective_set()
+                .get("x-response-route")
+                .map(String::as_str),
+            Some("api")
         );
         config.validate().unwrap();
     }
@@ -3424,6 +4300,102 @@ mod tests {
                 field: "headers.response.x_frame_options"
             })
         );
+    }
+
+    #[test]
+    fn rejects_invalid_static_cache_header_value() {
+        let config: Config = toml::from_str(
+            r#"
+            [web]
+            root = "public"
+            cache_control = "public\nx-bad: injected"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidResponseHeaderValue {
+                field: "web.cache_control"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_server_process_settings() {
+        let config: Config = toml::from_str(
+            r#"
+            [server.process]
+            threads = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProcessSetting {
+                field: "server.process.threads"
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [server.process]
+            grace_period_seconds = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProcessSetting {
+                field: "server.process.grace_period_seconds"
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [server.process]
+            pid_file = ""
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::EmptyProcessPath {
+                field: "server.process.pid_file"
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [server.process]
+            upgrade_sock = "../fluxheim.sock"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "server.process.upgrade_sock"
+        ));
+
+        #[cfg(unix)]
+        {
+            let config: Config = toml::from_str(
+                r#"
+                [server.process]
+                pid_file = "/tmp/fluxheim.pid"
+                "#,
+            )
+            .unwrap();
+
+            assert!(matches!(
+                config.validate(),
+                Err(ConfigError::UnsafePath { field, .. }) if field == "server.process.pid_file"
+            ));
+        }
     }
 
     #[test]
@@ -3599,6 +4571,84 @@ mod tests {
         assert_eq!(config.tls.acme.renewal.renew_before_secs, 2_592_000);
         assert!(config.tls.acme.renewal.renew_after.is_some());
         config.validate().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_tls_certificate_paths_under_world_writable_parent() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            enabled = true
+
+            [[tls.certificates]]
+            cert_path = "/tmp/fullchain.pem"
+            key_path = "/var/lib/fluxheim/key.pem"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "tls.certificates.cert_path"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_acme_paths_under_world_writable_parent() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.acme]
+            enabled = true
+            storage = "/tmp/fluxheim-acme"
+            contact_email = "admin@example.test"
+            default_issuer = "actalis"
+
+            [[tls.acme.issuers]]
+            name = "actalis"
+            directory_url = "https://acme-api.actalis.com/acme/directory"
+
+            [tls.acme.issuers.eab]
+            key_id_env = "FLUXHEIM_ACTALIS_EAB_KID"
+            hmac_key_env = "FLUXHEIM_ACTALIS_EAB_HMAC_KEY"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "tls.acme.storage"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_acme_eab_secret_paths_under_world_writable_parent() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.acme]
+            enabled = true
+            storage = "/var/lib/fluxheim/acme"
+            contact_email = "admin@example.test"
+            default_issuer = "actalis"
+
+            [[tls.acme.issuers]]
+            name = "actalis"
+            directory_url = "https://acme-api.actalis.com/acme/directory"
+
+            [tls.acme.issuers.eab]
+            key_id_file = "/tmp/actalis-kid"
+            hmac_key_env = "FLUXHEIM_ACTALIS_EAB_HMAC_KEY"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. })
+                if field == "tls.acme.issuers.actalis.eab.key_id_file"
+        ));
     }
 
     #[test]
@@ -3876,6 +4926,24 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rejects_disk_cache_under_world_writable_parent() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache.disk]
+            enabled = true
+            path = "/tmp/fluxheim-cache"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "cache.disk.path"
+        ));
+    }
+
     #[test]
     fn rejects_zero_memory_cache_size_when_enabled() {
         let config: Config = toml::from_str(
@@ -3926,6 +4994,7 @@ mod tests {
                 default_vhost: None,
                 trusted_proxies: Vec::new(),
                 limits: ServerLimitsConfig::default(),
+                ..ServerConfig::default()
             },
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
@@ -3956,6 +5025,91 @@ mod tests {
             Err(ConfigError::InvalidListenAddress {
                 address: "localhost:8443".to_owned()
             })
+        );
+    }
+
+    #[test]
+    fn parses_https_redirect_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            listen = ["127.0.0.1:8080"]
+            tls_listen = ["127.0.0.1:8443"]
+
+            [server.https_redirect]
+            enabled = true
+            status = 301
+            target_port = 8443
+
+            [tls]
+            enabled = true
+
+            [[tls.certificates]]
+            cert_path = "fullchain.pem"
+            key_path = "key.pem"
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert!(config.server.https_redirect.enabled);
+        assert_eq!(config.server.https_redirect.status, 301);
+        assert_eq!(config.server.https_redirect.target_port, Some(8443));
+    }
+
+    #[test]
+    fn rejects_https_redirect_without_tls_listener() {
+        let config: Config = toml::from_str(
+            r#"
+            [server.https_redirect]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::HttpsRedirectWithoutTlsListener)
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_https_redirect_status() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            tls_listen = ["127.0.0.1:8443"]
+
+            [server.https_redirect]
+            enabled = true
+            status = 200
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHttpsRedirectStatus { status: 200 })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_https_redirect_target_port() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            tls_listen = ["127.0.0.1:8443"]
+
+            [server.https_redirect]
+            enabled = true
+            target_port = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHttpsRedirectTargetPort)
         );
     }
 
@@ -4011,9 +5165,12 @@ mod tests {
             [logging]
             level = "debug"
             format = "text"
+            target = "stdout"
 
             [logging.access]
             enabled = false
+            include_host = false
+            include_path = false
             request_id = false
             request_id_header = "x-correlation-id"
             "#,
@@ -4023,9 +5180,94 @@ mod tests {
         config.validate().unwrap();
         assert_eq!(config.logging.level, super::LoggingLevel::Debug);
         assert_eq!(config.logging.format, super::LoggingFormat::Text);
+        assert_eq!(config.logging.target, super::LoggingTarget::Stdout);
         assert!(!config.logging.access.enabled);
+        assert!(!config.logging.access.include_host);
+        assert!(!config.logging.access.include_path);
         assert!(!config.logging.access.request_id);
         assert_eq!(config.logging.access.request_id_header, "x-correlation-id");
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn parses_file_logging_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.file]
+            enabled = true
+            path = "/var/log/fluxheim/fluxheim.log"
+            append = false
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert!(config.logging.file.enabled);
+        assert_eq!(
+            config.logging.file.path.as_deref(),
+            Some(std::path::Path::new("/var/log/fluxheim/fluxheim.log"))
+        );
+        assert!(!config.logging.file.append);
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn rejects_file_logging_without_path() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.file]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.validate(), Err(ConfigError::MissingLoggingFilePath));
+    }
+
+    #[test]
+    fn rejects_empty_file_logging_path() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.file]
+            path = ""
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.validate(), Err(ConfigError::EmptyLoggingFilePath));
+    }
+
+    #[test]
+    fn rejects_file_logging_path_traversal() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.file]
+            path = "../fluxheim.log"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "logging.file.path"
+        ));
+    }
+
+    #[cfg(all(not(feature = "privacy-mode"), unix))]
+    #[test]
+    fn rejects_file_logging_under_world_writable_parent() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.file]
+            path = "/tmp/fluxheim.log"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "logging.file.path"
+        ));
     }
 
     #[test]
@@ -4062,6 +5304,21 @@ mod tests {
             config.validate(),
             Err(ConfigError::PrivacyModeAccessLogging)
         );
+    }
+
+    #[cfg(feature = "privacy-mode")]
+    #[test]
+    fn privacy_mode_rejects_file_logging() {
+        let config: Config = toml::from_str(
+            r#"
+            [logging.file]
+            enabled = true
+            path = "/tmp/fluxheim.log"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.validate(), Err(ConfigError::PrivacyModeFileLogging));
     }
 
     #[test]
@@ -4133,6 +5390,34 @@ mod tests {
                 address: "0.0.0.0:9090".to_owned()
             })
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_admin_paths_under_world_writable_parent() {
+        let token_config = Config {
+            admin: AdminConfig {
+                token_file: Some(PathBuf::from("/tmp/fluxheim-admin-token")),
+                ..AdminConfig::default()
+            },
+            ..Config::default()
+        };
+        assert!(matches!(
+            token_config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "admin.token_file"
+        ));
+
+        let snapshot_config = Config {
+            admin: AdminConfig {
+                snapshot_store: Some(PathBuf::from("/tmp/fluxheim-admin-snapshots")),
+                ..AdminConfig::default()
+            },
+            ..Config::default()
+        };
+        assert!(matches!(
+            snapshot_config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "admin.snapshot_store"
+        ));
     }
 
     #[test]
@@ -4251,7 +5536,7 @@ mod tests {
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig {
-                upstream: "https://origin.example.test".to_owned(),
+                upstream: Some("https://origin.example.test".to_owned()),
                 upstream_tls: true,
                 upstream_sni: None,
                 ..ProxyConfig::default()
@@ -4284,6 +5569,7 @@ mod tests {
                 root: Some(PathBuf::from("public")),
                 index_files: vec![],
                 deny_dotfiles: true,
+                ..WebConfig::default()
             },
             vhosts: vec![],
         };
@@ -4306,6 +5592,7 @@ mod tests {
                 root: Some(PathBuf::from("public")),
                 index_files: vec!["pages/index.html".to_owned()],
                 deny_dotfiles: true,
+                ..WebConfig::default()
             },
             vhosts: vec![],
         };
@@ -4330,6 +5617,10 @@ mod tests {
         );
         assert_eq!(normalize_host("[::1]:443"), Some("::1".to_owned()));
         assert_eq!(normalize_host("bad host"), None);
+        assert_eq!(normalize_host("example.com?next=https://evil.test"), None);
+        assert_eq!(normalize_host("example.com#fragment"), None);
+        assert_eq!(normalize_host("user@example.com"), None);
+        assert_eq!(normalize_host("example.com\u{0001}"), None);
         assert_eq!(normalize_host("*.example.com"), None);
         assert_eq!(
             normalize_host_pattern("*.Example.COM"),
@@ -4421,6 +5712,7 @@ mod tests {
                 default_vhost: Some("missing".to_owned()),
                 trusted_proxies: Vec::new(),
                 limits: ServerLimitsConfig::default(),
+                ..ServerConfig::default()
             },
             vhosts: vec![VhostConfig {
                 name: "known".to_owned(),
@@ -4531,6 +5823,56 @@ mod tests {
         let config = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap();
 
         assert_eq!(config.cache.disk.path, Some(dir.path().join("cache")));
+    }
+
+    #[test]
+    fn resolves_relative_server_process_paths_from_config_file() {
+        let dir = TestDir::new("server-process-paths");
+        fs::write(
+            dir.path().join("fluxheim.toml"),
+            r#"
+            [server.process]
+            error_log = "logs/error.log"
+            pid_file = "run/fluxheim.pid"
+            upgrade_sock = "run/fluxheim-upgrade.sock"
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap();
+
+        assert_eq!(
+            config.server.process.error_log,
+            Some(dir.path().join("logs/error.log"))
+        );
+        assert_eq!(
+            config.server.process.pid_file,
+            dir.path().join("run/fluxheim.pid")
+        );
+        assert_eq!(
+            config.server.process.upgrade_sock,
+            dir.path().join("run/fluxheim-upgrade.sock")
+        );
+    }
+
+    #[test]
+    fn resolves_relative_logging_file_path_from_config_file() {
+        let dir = TestDir::new("logging-file-path");
+        fs::write(
+            dir.path().join("fluxheim.toml"),
+            r#"
+            [logging.file]
+            path = "logs/fluxheim.log"
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap();
+
+        assert_eq!(
+            config.logging.file.path,
+            Some(dir.path().join("logs/fluxheim.log"))
+        );
     }
 
     #[test]

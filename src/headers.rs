@@ -52,7 +52,9 @@ fn apply_privacy_upstream_request_policy(
     policy: &RequestHeaderPolicyConfig,
 ) -> pingora::Result<()> {
     if policy.enabled {
-        apply_request_mutations(request, &policy.unset, &policy.set, &policy.append)?;
+        let unset = policy.effective_unset();
+        let set = policy.effective_set();
+        apply_request_mutations(request, &unset, &set, &policy.append)?;
     }
     for header in SPOOFABLE_CLIENT_IP_HEADERS {
         request.remove_header(*header);
@@ -128,7 +130,9 @@ fn apply_standard_upstream_request_policy(
         )?;
     }
 
-    apply_request_mutations(request, &policy.unset, &policy.set, &policy.append)?;
+    let unset = policy.effective_unset();
+    let set = policy.effective_set();
+    apply_request_mutations(request, &unset, &set, &policy.append)?;
     Ok(())
 }
 
@@ -166,7 +170,9 @@ pub fn apply_response_policy(
         policy.referrer_policy.as_deref(),
     )?;
 
-    apply_response_mutations(response, &policy.unset, &policy.set, &policy.append)?;
+    let unset = policy.effective_unset();
+    let set = policy.effective_set();
+    apply_response_mutations(response, &unset, &set, &policy.append)?;
     Ok(())
 }
 
@@ -301,9 +307,13 @@ mod tests {
     fn applies_default_response_headers() {
         let policy = crate::config::ResponseHeaderPolicyConfig::default();
         let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        response.insert_header("server", "origin/1.2.3").unwrap();
+        response.insert_header("x-powered-by", "framework").unwrap();
 
         apply_response_policy(&mut response, &policy).unwrap();
 
+        assert!(response.headers.get("server").is_none());
+        assert!(response.headers.get("x-powered-by").is_none());
         assert_eq!(
             response
                 .headers
@@ -399,6 +409,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn applies_user_friendly_response_header_operations() {
+        let policy = crate::config::ResponseHeaderPolicyConfig {
+            remove: vec!["x-origin-banner".to_owned()],
+            add: std::collections::BTreeMap::from([(
+                "cache-control".to_owned(),
+                "public, max-age=300".to_owned(),
+            )]),
+            operations: crate::config::HeaderOperationsConfig {
+                remove: vec!["x-debug".to_owned()],
+                add: std::collections::BTreeMap::from([(
+                    "x-content-source".to_owned(),
+                    "fluxheim".to_owned(),
+                )]),
+            },
+            ..crate::config::ResponseHeaderPolicyConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        response.insert_header("x-origin-banner", "origin").unwrap();
+        response.insert_header("x-debug", "1").unwrap();
+
+        apply_response_policy(&mut response, &policy).unwrap();
+
+        assert!(response.headers.get("x-origin-banner").is_none());
+        assert!(response.headers.get("x-debug").is_none());
+        assert_eq!(
+            response
+                .headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("public, max-age=300")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("x-content-source")
+                .and_then(|value| value.to_str().ok()),
+            Some("fluxheim")
+        );
+    }
+
+    #[test]
+    fn explicit_response_server_header_can_override_default_unset() {
+        let policy = crate::config::ResponseHeaderPolicyConfig {
+            set: std::collections::BTreeMap::from([("server".to_owned(), "Fluxheim".to_owned())]),
+            ..crate::config::ResponseHeaderPolicyConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        response.insert_header("server", "origin-version").unwrap();
+
+        apply_response_policy(&mut response, &policy).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get("server")
+                .and_then(|value| value.to_str().ok()),
+            Some("Fluxheim")
+        );
+    }
+
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn applies_default_upstream_request_headers() {
@@ -486,6 +557,53 @@ mod tests {
                 .get("via")
                 .and_then(|value| value.to_str().ok()),
             Some("fluxheim")
+        );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn applies_user_friendly_request_header_operations() {
+        let policy = crate::config::RequestHeaderPolicyConfig {
+            remove: vec!["x-powered-by".to_owned()],
+            add: std::collections::BTreeMap::from([(
+                "x-internal-route".to_owned(),
+                "true".to_owned(),
+            )]),
+            operations: crate::config::HeaderOperationsConfig {
+                remove: vec!["x-debug".to_owned()],
+                add: std::collections::BTreeMap::from([(
+                    "x-extra-route".to_owned(),
+                    "edge".to_owned(),
+                )]),
+            },
+            ..crate::config::RequestHeaderPolicyConfig::default()
+        };
+        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(8)).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        request
+            .insert_header("x-powered-by", "origin-version")
+            .unwrap();
+        request.insert_header("x-debug", "1").unwrap();
+        let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
+
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true)
+            .unwrap();
+
+        assert!(request.headers.get("x-powered-by").is_none());
+        assert!(request.headers.get("x-debug").is_none());
+        assert_eq!(
+            request
+                .headers
+                .get("x-internal-route")
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-extra-route")
+                .and_then(|value| value.to_str().ok()),
+            Some("edge")
         );
     }
 

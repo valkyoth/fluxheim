@@ -26,6 +26,11 @@ stale-while-revalidate, and persistent cache indexing remain important, but
 they should graduate after the `1.0` stable core according to the versioning
 plan.
 
+After `1.0`, the first dedicated minor release should focus on TLS policy:
+explicit safe profiles, minimum protocol version, ALPN controls, backend
+validation, and scanner-backed release gates. Operational/admin tooling then
+follows once the public TLS surface is configurable and tested.
+
 Future differentiating features should lean into infrastructure problems that
 are hard to solve safely with external glue: cluster-wide state, identity-aware
 routing, AI-aware request controls, traffic mirroring, and encrypted
@@ -58,9 +63,16 @@ These are realistic additions to implement across the stable core and early
    - Map Fluxheim config into Pingora process settings: worker threads,
      daemon mode, PID file, error log, upgrade socket, graceful shutdown
      timeout, upstream keepalive pool size, and max retries.
-   - Validate rootless/container-friendly paths and defaults.
+     Initial safe numeric mapping is implemented through `[server.process]`
+     for `daemon`, `error_log`, `pid_file`, `upgrade_sock`, `threads`,
+     `listener_tasks_per_fd`, `work_stealing`, `upstream_keepalive_pool_size`,
+     `max_retries`, `grace_period_seconds`, and
+     `graceful_shutdown_timeout_seconds`.
+   - Validate rootless/container-friendly paths and defaults. Implemented for
+     PID file, upgrade socket, and optional error log by reusing Fluxheim's
+     symlink/traversal runtime-path validation.
    - Extend reload impact classification so process-owned settings require a
-     Pingora process upgrade.
+     Pingora process upgrade. Implemented for `[server.process]`.
 
 2. **Access And Error Logging**
    - Add typed access-log config with secure defaults. Initial
@@ -69,14 +81,25 @@ These are realistic additions to implement across the stable core and early
      `env_logger`, while still letting `RUST_LOG` override the configured
      default filter. Runtime log level/format changes require a process
      upgrade.
+   - Add typed stream sink selection for OS/container logs. Implemented as
+     `logging.target = "stderr" | "stdout"`; changes require a process
+     upgrade.
+   - Add an optional local file sink with explicit append/truncate behavior,
+     safe path validation, no final symlink following on Linux, and
+     `privacy-mode` rejection. Implemented as `[logging.file]`.
    - Emit structured request logs from the Pingora `logging` hook with method,
-     host/vhost, query-free path, status, request ID, request body bytes seen,
-     response body bytes seen, error flag, and latency. Initial
+     optional host, vhost, optional query-free path, status, request ID, request body
+     bytes seen, response body bytes seen, low-cardinality status class, error flag, and latency. Initial
      stdout/stderr-compatible JSON event emission is implemented through the
      existing `log` stack and is compiled out in `privacy-mode`.
+   - Allow operators to suppress raw request hosts and paths while keeping
+     access logs enabled. Implemented as `logging.access.include_host` and
+     `logging.access.include_path`.
    - Broaden response byte accounting if later response paths bypass Pingora's
      response body filter or static file accounting.
    - Keep log sinks simple at first: stderr/stdout and optional file path.
+     Implemented for stderr/stdout plus `[logging.file]`; async/remote sinks
+     remain future work.
    - Implement the staged structured logging plan in
      [Logging Architecture](docs/logging-architecture.md).
    - Use `tracing` as the core event system, with JSON output for production
@@ -173,7 +196,8 @@ These are realistic additions to implement across the stable core and early
 7. **Operator Documentation**
    - Add a concise GitHub-facing project goals document.
    - Add one “production checklist” that states what is MVP-ready and what is
-     still experimental.
+     still experimental. Implemented in
+     [Production Readiness](docs/production-readiness.md).
    - Keep example configs in sync with every new global section.
 
 8. **Zero-Retention Privacy Build Profile**
@@ -290,7 +314,6 @@ index_files = ["index.html"]
 deny_dotfiles = true
 
 [vhosts.proxy]
-upstream = "127.0.0.1:3000"
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 
 [vhosts.proxy.load_balance]
@@ -477,20 +500,25 @@ without parsing text fixtures for every module.
      track before cache is called complete:
      - response headers: `Cache-Control`, `Expires`, `ETag`,
        `Last-Modified`, `Vary`, `Age`, and `Accept-Ranges`;
-     - request headers: `If-None-Match`, `If-Modified-Since`,
-       `Cache-Control`, `Pragma`, `Range`, and `If-Range`;
+     - request headers: `If-Match`, `If-Unmodified-Since`, `If-None-Match`,
+       `If-Modified-Since`, `Cache-Control`, `Pragma`, `Range`, and
+       `If-Range`;
      - static responses should honor conditional requests, forced
        revalidation, range validation, explicit no-store/no-cache policy, and
        operator-configured browser/CDN headers. Implemented for static
-       `If-None-Match`, `If-Modified-Since`, request `Cache-Control`,
-       `Pragma`, single `Range`, and `If-Range`;
+       `If-Match`, `If-Unmodified-Since`, `If-None-Match`,
+       `If-Modified-Since`, request `Cache-Control`, `Pragma`, single
+       `Range`, and `If-Range`;
      - proxied cache responses should preserve origin validators and freshness
        metadata, emit correct `Age` behavior on hits, respect request
        revalidation controls, and avoid caching when origin/client directives
        forbid it. Implemented conservatively for request `Cache-Control:
        no-cache`, `Cache-Control: no-store`, `Cache-Control: max-age=0`, and
        `Pragma: no-cache` by bypassing Fluxheim cache admission until full
-       proxy revalidation is implemented. Pingora's cache pipeline already
+       proxy revalidation is implemented. Implemented for origin response
+       `Cache-Control: no-store`, `private`, `no-cache`, `max-age=0`, and
+       `s-maxage=0` by refusing shared image-cache admission until full proxy
+       revalidation is implemented. Pingora's cache pipeline already
        injects `Age` for stored-response hits and applies downstream
        conditional/range handling when cache is enabled; Fluxheim tests still
        need an end-to-end cached-hit assertion around those Pingora behaviors;
@@ -586,8 +614,8 @@ without parsing text fixtures for every module.
      remote exposure.
    - Pingora Prometheus HTTP service wiring. Implemented.
    - Proxy request outcome counter. Implemented as
-     `fluxheim_proxy_requests_total` labeled by vhost, outcome class, and
-     status.
+     `fluxheim_proxy_requests_total` labeled by vhost, fixed method bucket,
+     outcome class, and fixed status class.
    - Reload impact classification. Implemented: metrics listener changes
      require a process upgrade because the service is startup-owned.
    - Additional counters planned: cache operation totals, upstream selection
@@ -700,7 +728,7 @@ without parsing text fixtures for every module.
        no application-level request retention.
    - Planned incompatible features:
      `metrics`, `metrics-advanced`, `metrics-push`, `metrics-otlp`,
-     `logging-remote`, `logging-file`, `logging-spool`, `waf`,
+     `logging-remote`, `logging-spool`, `waf`,
      `waf-native`, `waf-hyperscan`, `waf-proxy-wasm`, `cloudflare`,
      `cloudflare-api`, `cloudflare-origin-ca`, `cloudflare-aop`, `php-*`,
      `perl-cgi-*`, `legacy-http-*`, and disk cache features.
@@ -908,7 +936,32 @@ without parsing text fixtures for every module.
      expired/revoked token tests, key rotation tests, spoofed identity-header
      tests, recursive-auth rejection, and privacy-mode incompatibility guards.
 
-18. **Future AI Gateway**
+18. **Future Declarative Redirect And Rewrite Engine**
+   - Goal: provide a safe match-action pipeline for redirects and internal
+     request rewrites without procedural phase ordering.
+   - Global HTTPS redirect is part of the stable core. The future engine should
+     expand this into per-vhost and per-route policies.
+   - Planned matcher model:
+     named matchers for host, path, method, header, query, source network,
+     protocol, and verified identity claims when identity modules are enabled.
+   - Planned actions:
+     external redirect, internal path rewrite, query merge/strip, route stop,
+     route continue, and controlled synthetic responses.
+   - Safety baseline:
+     redirect destinations must be parsed and validated, host-derived redirects
+     must reject unsafe Host headers, rewrite targets must stay origin-form
+     unless explicitly configured as redirects, and internal rewrite cycles
+     must be rejected during config validation.
+   - Performance baseline:
+     compile path matchers into tries where practical, compile multiple regex
+     rules into grouped matchers, bound pattern count and pattern size, and
+     reject catastrophic or unsupported patterns at config load.
+   - WASM integration:
+     complex rewrite decisions may later call a sandboxed WASM policy hook, but
+     only after the WASM host has fuel, wall-time, memory, host-call, and
+     failure-mode limits.
+
+19. **Future AI Gateway**
    - Plan as an optional compile-time module family after metrics, WAF, cache,
      and identity foundations exist.
    - Goal: make Fluxheim understand AI API traffic enough to control cost,
@@ -942,7 +995,7 @@ without parsing text fixtures for every module.
      semantic-cache isolation tests, jailbreak/prompt-guard dry-run tests, and
      default/privacy build absence checks.
 
-19. **Future Traffic Mirroring**
+20. **Future Traffic Mirroring**
    - Plan as an optional compile-time `traffic-mirror` module after reverse
      proxy, load balancing, metrics, privacy profiles, and request body
      streaming limits are stable.
@@ -967,7 +1020,7 @@ without parsing text fixtures for every module.
      redaction tests, sampling distribution tests, and proof that mirror
      failures never change the client response.
 
-20. **Future Sentinel Mesh Graduation**
+21. **Future Sentinel Mesh Graduation**
    - Keep the current Sentinel Mesh design as a research track until the
      load-balancer, TLS reload, admin, metrics, and cluster-state foundations
      are mature.
@@ -992,7 +1045,7 @@ without parsing text fixtures for every module.
      tests, rootless Podman smoke coverage, and default/privacy build absence
      checks.
 
-21. **Future Programmable Media Edge**
+22. **Future Programmable Media Edge**
    - Architecture and security plan documented in
      [Programmable Media Edge](docs/programmable-media-edge.md).
    - Video-aware delivery must be optional, compile-time gated, and disabled by
@@ -1037,7 +1090,7 @@ without parsing text fixtures for every module.
      redaction tests, metrics cardinality tests, and default/privacy build
      absence checks.
 
-22. **Future WASM Extensibility**
+23. **Future WASM Extensibility**
    - Architecture and security plan documented in
      [WASM Extensibility](docs/wasm-extensibility.md).
    - WASM support must be optional, compile-time gated, and disabled by
@@ -1074,7 +1127,7 @@ without parsing text fixtures for every module.
      denial tests, redaction tests, plugin path hardening tests, and
      default/privacy build absence checks.
 
-23. **Operational Packaging**
+24. **Operational Packaging**
    - Rootless Podman image. Implemented with a pinned Rust 1.95.0 builder and
      non-root runtime user.
    - Rootless Podman smoke script. Implemented for image build, packaged config

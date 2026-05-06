@@ -1,3 +1,5 @@
+# This file contains one vhost. In TOML, [[vhosts]] starts the vhost and every
+# [vhosts.*] table below belongs to it until another [[vhosts]] appears.
 [[vhosts]]
 name = "example.test"
 hosts = ["example.test", "www.example.test"]
@@ -12,9 +14,9 @@ enabled = false
 root = "/srv/sites/example.test/public"
 index_files = ["index.html"]
 deny_dotfiles = true
+cache_control = "public, max-age=300"
 
 [vhosts.proxy]
-upstream = "127.0.0.1:3000"
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_tls = false
 
