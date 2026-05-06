@@ -3075,12 +3075,6 @@ fn default_response_unset_headers() -> Vec<String> {
 }
 
 fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
-    let metadata = fs::symlink_metadata(path).map_err(ConfigLoadError::Read)?;
-    if metadata.file_type().is_symlink() {
-        return Err(ConfigLoadError::InvalidPath {
-            path: path.to_path_buf(),
-        });
-    }
     if existing_path_contains_symlink(path).map_err(ConfigLoadError::Read)? {
         return Err(ConfigLoadError::InvalidPath {
             path: path.to_path_buf(),
@@ -3088,6 +3082,10 @@ fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
     }
 
     let path = path.canonicalize().map_err(ConfigLoadError::Read)?;
+    let metadata = fs::symlink_metadata(&path).map_err(ConfigLoadError::Read)?;
+    if metadata.file_type().is_symlink() {
+        return Err(ConfigLoadError::InvalidPath { path });
+    }
     if path.is_dir() || regular_visible_toml_file(&path)? {
         return Ok(path);
     }
@@ -3102,8 +3100,8 @@ fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
     for entry in entries {
         let entry = entry.map_err(ConfigLoadError::Read)?;
         let path = entry.path();
-        let metadata = fs::symlink_metadata(&path).map_err(ConfigLoadError::Read)?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
+        let file_type = entry.file_type().map_err(ConfigLoadError::Read)?;
+        if file_type.is_symlink() || !file_type.is_file() {
             continue;
         }
         if is_visible_toml_file(&path) {

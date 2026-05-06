@@ -477,7 +477,7 @@ impl PingoraDiskStorage {
             let Some(read_path) = self.safe_existing_object_path(&entry.path)? else {
                 continue;
             };
-            let object = match read_disk_cache_object(&read_path, self.max_object_bytes)
+            let object = match read_disk_cache_object(&self.root, &read_path, self.max_object_bytes)
                 .and_then(|bytes| parse_disk_cache_object(&bytes, self.max_object_bytes))
             {
                 Ok(object) => object,
@@ -513,7 +513,7 @@ impl PingoraDiskStorage {
         else {
             return Ok(None);
         };
-        let bytes = match read_disk_cache_object(&read_path, self.max_object_bytes) {
+        let bytes = match read_disk_cache_object(&self.root, &read_path, self.max_object_bytes) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(cache_io_error("read disk cache object", error)),
@@ -866,15 +866,16 @@ fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
         for entry in std::fs::read_dir(&shard_path)? {
             let entry = entry?;
             let path = entry.path();
+            let file_type = entry.file_type()?;
             if cache_path_contains_symlink(root, &path)?
                 || path.extension() != Some(std::ffi::OsStr::new("fhc"))
             {
                 continue;
             }
-            let metadata = std::fs::symlink_metadata(&path)?;
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
+            if file_type.is_symlink() || !file_type.is_file() {
                 continue;
             }
+            let metadata = entry.metadata()?;
             if entries.len() >= MAX_DISK_CACHE_SCAN_ENTRIES {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -1524,15 +1525,37 @@ fn write_disk_cache_object(
 }
 
 #[cfg(feature = "proxy")]
-fn read_disk_cache_object(path: &Path, max_object_bytes: ByteSize) -> std::io::Result<Vec<u8>> {
+fn read_disk_cache_object(
+    root: &Path,
+    path: &Path,
+    max_object_bytes: ByteSize,
+) -> std::io::Result<Vec<u8>> {
     use std::io::Read as _;
+
+    if cache_path_contains_symlink(root, path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "disk cache object path contains symlink: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    let canonical = path.canonicalize()?;
+    if !canonical.starts_with(root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("disk cache object escaped root: {}", canonical.display()),
+        ));
+    }
 
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(target_os = "linux")]
     options.custom_flags(O_NOFOLLOW);
 
-    let file = options.open(path)?;
+    let file = options.open(&canonical)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(std::io::Error::new(
@@ -2666,7 +2689,8 @@ mod tests {
         let path = root.join("oversized.fhc");
         std::fs::write(&path, vec![b'x'; 256]).unwrap();
 
-        let error = super::read_disk_cache_object(&path, ByteSize::from_bytes(8)).unwrap_err();
+        let error =
+            super::read_disk_cache_object(&root, &path, ByteSize::from_bytes(8)).unwrap_err();
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         std::fs::remove_dir_all(root).unwrap();

@@ -119,6 +119,18 @@ impl StaticFileServer {
             return Ok(ResolveResult::NotFound);
         }
 
+        let candidate = match candidate.canonicalize() {
+            Ok(path) => path,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(ResolveResult::NotFound);
+            }
+            Err(error) => return Err(error),
+        };
+
+        if !candidate.starts_with(&self.root) {
+            return Ok(ResolveResult::NotFound);
+        }
+
         let candidate_metadata = match candidate.metadata() {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -138,7 +150,7 @@ impl StaticFileServer {
             return Ok(ResolveResult::NotFound);
         }
 
-        match self.static_file(candidate)? {
+        match self.static_file(&candidate)? {
             Some(file) => Ok(ResolveResult::Found(file)),
             None => Ok(ResolveResult::NotFound),
         }
@@ -170,6 +182,7 @@ impl StaticFileServer {
             .to_owned();
 
         Ok(Some(StaticFile {
+            root: self.root.clone(),
             path: canonical,
             mime,
             len: metadata.len(),
@@ -225,6 +238,7 @@ pub enum ResolveResult {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticFile {
+    root: PathBuf,
     pub path: PathBuf,
     pub mime: String,
     pub len: u64,
@@ -584,7 +598,22 @@ fn read_static_body(file: &StaticFile, body: StaticResponseBody) -> io::Result<b
 
 #[cfg(feature = "proxy")]
 fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
-    let metadata = std::fs::symlink_metadata(&file.path)?;
+    if path_contains_symlink(&file.root, &file.path)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "static body path contains a symlink",
+        ));
+    }
+
+    let canonical = file.path.canonicalize()?;
+    if !canonical.starts_with(&file.root) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "static body path escaped web root",
+        ));
+    }
+
+    let metadata = std::fs::symlink_metadata(&canonical)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -597,7 +626,7 @@ fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
     #[cfg(target_os = "linux")]
     options.custom_flags(O_NOFOLLOW);
 
-    let file_handle = options.open(&file.path)?;
+    let file_handle = options.open(&canonical)?;
     let metadata = file_handle.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::new(
@@ -1108,6 +1137,7 @@ mod tests {
     #[test]
     fn refuses_static_full_body_over_buffer_limit() {
         let file = StaticFile {
+            root: std::path::PathBuf::from("target"),
             path: std::path::PathBuf::from("target/fluxheim-too-large-static"),
             mime: "application/octet-stream".to_owned(),
             len: super::MAX_STATIC_BUFFERED_BODY_BYTES + 1,
@@ -1197,6 +1227,7 @@ mod tests {
 
     fn static_file(len: u64, modified: Option<SystemTime>) -> StaticFile {
         StaticFile {
+            root: PathBuf::from("target"),
             path: PathBuf::from("target/fluxheim-static-test"),
             mime: "text/plain".to_owned(),
             len,

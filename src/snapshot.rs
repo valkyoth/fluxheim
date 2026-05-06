@@ -965,7 +965,8 @@ mod tests {
             toml::to_string_pretty(&Config::default()).unwrap(),
         )
         .unwrap();
-        std::fs::remove_file(&snapshot.config_path).unwrap();
+        let config_path = snapshot.config_path.canonicalize().unwrap();
+        std::fs::remove_file(config_path).unwrap();
         std::os::unix::fs::symlink(&outside, &snapshot.config_path).unwrap();
 
         let error = store.rollback_candidate(Some(&snapshot.id)).unwrap_err();
@@ -990,7 +991,8 @@ mod tests {
             ),
         )
         .unwrap();
-        std::fs::remove_file(&snapshot.metadata_path).unwrap();
+        let metadata_path = snapshot.metadata_path.canonicalize().unwrap();
+        std::fs::remove_file(metadata_path).unwrap();
         std::os::unix::fs::symlink(&outside, &snapshot.metadata_path).unwrap();
 
         let error = store.list().unwrap_err();
