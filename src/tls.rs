@@ -52,6 +52,12 @@ pub enum TlsStorageIssue {
         path: PathBuf,
         mode: u32,
     },
+    PrivateKeyOwnerMismatch {
+        scope: String,
+        path: PathBuf,
+        owner_uid: u32,
+        process_uid: u32,
+    },
     AcmeEabSecretReadFailed {
         issuer: String,
         field: &'static str,
@@ -74,6 +80,13 @@ pub enum TlsStorageIssue {
         path: PathBuf,
         mode: u32,
     },
+    AcmeEabSecretOwnerMismatch {
+        issuer: String,
+        field: &'static str,
+        path: PathBuf,
+        owner_uid: u32,
+        process_uid: u32,
+    },
     AcmeStorageReadFailed {
         path: PathBuf,
         message: String,
@@ -87,6 +100,11 @@ pub enum TlsStorageIssue {
     InsecureAcmeStoragePermissions {
         path: PathBuf,
         mode: u32,
+    },
+    AcmeStorageOwnerMismatch {
+        path: PathBuf,
+        owner_uid: u32,
+        process_uid: u32,
     },
 }
 
@@ -137,6 +155,16 @@ impl Display for TlsStorageIssue {
                 path.display(),
                 PRIVATE_KEY_MODE
             ),
+            Self::PrivateKeyOwnerMismatch {
+                scope,
+                path,
+                owner_uid,
+                process_uid,
+            } => write!(
+                formatter,
+                "{scope}.key_path {} is owned by uid {owner_uid}; expected process uid {process_uid}",
+                path.display()
+            ),
             Self::AcmeEabSecretReadFailed {
                 issuer,
                 field,
@@ -176,6 +204,17 @@ impl Display for TlsStorageIssue {
                 path.display(),
                 PRIVATE_KEY_MODE
             ),
+            Self::AcmeEabSecretOwnerMismatch {
+                issuer,
+                field,
+                path,
+                owner_uid,
+                process_uid,
+            } => write!(
+                formatter,
+                "tls.acme.issuers.{issuer}.eab.{field}_file {} is owned by uid {owner_uid}; expected process uid {process_uid}",
+                path.display()
+            ),
             Self::AcmeStorageReadFailed { path, message } => write!(
                 formatter,
                 "tls.acme.storage {} cannot be read: {message}",
@@ -196,6 +235,15 @@ impl Display for TlsStorageIssue {
                 "tls.acme.storage {} has insecure mode {mode:o}; use {:o}",
                 path.display(),
                 ACME_STORAGE_MODE
+            ),
+            Self::AcmeStorageOwnerMismatch {
+                path,
+                owner_uid,
+                process_uid,
+            } => write!(
+                formatter,
+                "tls.acme.storage {} is owned by uid {owner_uid}; expected process uid {process_uid}",
+                path.display()
             ),
         }
     }
@@ -566,7 +614,7 @@ fn validate_key_permissions(
     metadata: &fs::Metadata,
     issues: &mut Vec<TlsStorageIssue>,
 ) {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let mode = metadata.permissions().mode() & 0o777;
     if !secure_private_key_mode(mode) {
@@ -574,6 +622,17 @@ fn validate_key_permissions(
             scope: scope.to_owned(),
             path: path.to_path_buf(),
             mode,
+        });
+    }
+
+    let owner_uid = metadata.uid();
+    let process_uid = current_effective_uid();
+    if owner_uid != process_uid {
+        issues.push(TlsStorageIssue::PrivateKeyOwnerMismatch {
+            scope: scope.to_owned(),
+            path: path.to_path_buf(),
+            owner_uid,
+            process_uid,
         });
     }
 }
@@ -593,13 +652,23 @@ fn validate_acme_storage_permissions(
     metadata: &fs::Metadata,
     issues: &mut Vec<TlsStorageIssue>,
 ) {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let mode = metadata.permissions().mode() & 0o777;
     if !secure_acme_storage_mode(mode) {
         issues.push(TlsStorageIssue::InsecureAcmeStoragePermissions {
             path: path.to_path_buf(),
             mode,
+        });
+    }
+
+    let owner_uid = metadata.uid();
+    let process_uid = current_effective_uid();
+    if owner_uid != process_uid {
+        issues.push(TlsStorageIssue::AcmeStorageOwnerMismatch {
+            path: path.to_path_buf(),
+            owner_uid,
+            process_uid,
         });
     }
 }
@@ -612,7 +681,7 @@ fn validate_acme_eab_secret_permissions(
     metadata: &fs::Metadata,
     issues: &mut Vec<TlsStorageIssue>,
 ) {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let mode = metadata.permissions().mode() & 0o777;
     if !secure_private_key_mode(mode) {
@@ -621,6 +690,18 @@ fn validate_acme_eab_secret_permissions(
             field,
             path: path.to_path_buf(),
             mode,
+        });
+    }
+
+    let owner_uid = metadata.uid();
+    let process_uid = current_effective_uid();
+    if owner_uid != process_uid {
+        issues.push(TlsStorageIssue::AcmeEabSecretOwnerMismatch {
+            issuer: issuer.to_owned(),
+            field,
+            path: path.to_path_buf(),
+            owner_uid,
+            process_uid,
         });
     }
 }
@@ -633,6 +714,16 @@ fn validate_acme_eab_secret_permissions(
     _metadata: &fs::Metadata,
     _issues: &mut Vec<TlsStorageIssue>,
 ) {
+}
+
+#[cfg(unix)]
+fn current_effective_uid() -> u32 {
+    unsafe extern "C" {
+        fn geteuid() -> u32;
+    }
+
+    // SAFETY: geteuid has no preconditions and does not dereference pointers.
+    unsafe { geteuid() }
 }
 
 #[cfg(not(unix))]
