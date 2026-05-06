@@ -206,10 +206,10 @@ fn path_contains_symlink(root: &Path, candidate: &Path) -> io::Result<bool> {
             std::path::Component::Normal(_) => current.push(component),
             _ => return Ok(true),
         }
-        match std::fs::read_link(&current) {
-            Ok(_) => return Ok(true),
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
             Err(error) => return Err(error),
         }
     }
