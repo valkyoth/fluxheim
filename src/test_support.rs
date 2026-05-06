@@ -17,6 +17,20 @@ pub(crate) fn safe_child_path(base: &Path, name: &str) -> PathBuf {
     base.join(name)
 }
 
+pub(crate) fn safe_relative_path(base: &Path, relative: &str) -> PathBuf {
+    assert!(!relative.is_empty(), "test relative path cannot be empty");
+    assert!(
+        !relative.starts_with('/') && !relative.starts_with('\\'),
+        "test relative path must stay relative: {relative:?}"
+    );
+    let mut path = base.to_path_buf();
+    for component in relative.split('/') {
+        assert_safe_label(component);
+        path.push(component);
+    }
+    path
+}
+
 fn assert_safe_label(label: &str) {
     assert!(!label.is_empty(), "test path label cannot be empty");
     assert!(
@@ -38,12 +52,18 @@ fn assert_safe_label(label: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_child_path, unique_temp_path};
+    use super::{safe_child_path, safe_relative_path, unique_temp_path};
 
     #[test]
     fn unique_temp_path_does_not_embed_label() {
         let path = unique_temp_path("example-label");
         assert!(!path.display().to_string().contains("example-label"));
+    }
+
+    #[test]
+    fn safe_relative_path_allows_nested_safe_components() {
+        let path = safe_relative_path(std::path::Path::new("/tmp/base"), "logs/fluxheim.log");
+        assert_eq!(path, std::path::Path::new("/tmp/base/logs/fluxheim.log"));
     }
 
     #[test]

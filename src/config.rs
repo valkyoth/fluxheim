@@ -3733,7 +3733,7 @@ mod tests {
         ServerConfig, ServerLimitsConfig, VhostConfig, VhostHeaderPolicyConfig, WebConfig,
         normalize_host, normalize_host_pattern,
     };
-    use crate::test_support::unique_temp_path;
+    use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
     #[test]
     fn default_config_is_valid() {
@@ -5759,9 +5759,9 @@ mod tests {
     #[test]
     fn loads_config_directory_in_sorted_order() {
         let dir = TestDir::new("config-dir");
-        fs::create_dir_all(dir.path().join("site")).unwrap();
+        fs::create_dir_all(dir.child("site")).unwrap();
         fs::write(
-            dir.path().join("00-server.toml"),
+            dir.child("00-server.toml"),
             r#"
             [server]
             listen = ["127.0.0.1:19090"]
@@ -5770,7 +5770,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            dir.path().join("10-vhost.toml"),
+            dir.child("10-vhost.toml"),
             r#"
             [[vhosts]]
             name = "example"
@@ -5781,22 +5781,22 @@ mod tests {
             "#,
         )
         .unwrap();
-        fs::write(dir.path().join(".ignored.toml"), "this is not toml").unwrap();
-        fs::write(dir.path().join("ignored.txt"), "ignored").unwrap();
+        fs::write(dir.child(".ignored.toml"), "this is not toml").unwrap();
+        fs::write(dir.child("ignored.txt"), "ignored").unwrap();
 
         let config = Config::load(Some(dir.path())).unwrap();
 
         assert_eq!(config.server.listen, ["127.0.0.1:19090"]);
         assert_eq!(config.server.default_vhost, Some("example".to_owned()));
         assert_eq!(config.vhosts.len(), 1);
-        assert_eq!(config.vhosts[0].web.root, Some(dir.path().join("site")));
+        assert_eq!(config.vhosts[0].web.root, Some(dir.child("site")));
     }
 
     #[test]
     fn rejects_config_directory_with_too_many_toml_files() {
         let dir = TestDir::new("config-dir-too-many-files");
         for index in 0..=super::MAX_CONFIG_DIRECTORY_FILES {
-            fs::write(dir.path().join(format!("{index:03}.toml")), "[server]\n").unwrap();
+            fs::write(dir.child(&format!("{index:03}.toml")), "[server]\n").unwrap();
         }
 
         let error = Config::load(Some(dir.path())).unwrap_err();
@@ -5810,7 +5810,7 @@ mod tests {
     fn resolves_relative_cache_disk_paths_from_config_file() {
         let dir = TestDir::new("cache-path");
         fs::write(
-            dir.path().join("fluxheim.toml"),
+            dir.child("fluxheim.toml"),
             r#"
             [cache.disk]
             enabled = true
@@ -5820,16 +5820,16 @@ mod tests {
         )
         .unwrap();
 
-        let config = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap();
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
 
-        assert_eq!(config.cache.disk.path, Some(dir.path().join("cache")));
+        assert_eq!(config.cache.disk.path, Some(dir.child("cache")));
     }
 
     #[test]
     fn resolves_relative_server_process_paths_from_config_file() {
         let dir = TestDir::new("server-process-paths");
         fs::write(
-            dir.path().join("fluxheim.toml"),
+            dir.child("fluxheim.toml"),
             r#"
             [server.process]
             error_log = "logs/error.log"
@@ -5839,19 +5839,19 @@ mod tests {
         )
         .unwrap();
 
-        let config = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap();
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
 
         assert_eq!(
             config.server.process.error_log,
-            Some(dir.path().join("logs/error.log"))
+            Some(dir.child("logs/error.log"))
         );
         assert_eq!(
             config.server.process.pid_file,
-            dir.path().join("run/fluxheim.pid")
+            dir.child("run/fluxheim.pid")
         );
         assert_eq!(
             config.server.process.upgrade_sock,
-            dir.path().join("run/fluxheim-upgrade.sock")
+            dir.child("run/fluxheim-upgrade.sock")
         );
     }
 
@@ -5859,7 +5859,7 @@ mod tests {
     fn resolves_relative_logging_file_path_from_config_file() {
         let dir = TestDir::new("logging-file-path");
         fs::write(
-            dir.path().join("fluxheim.toml"),
+            dir.child("fluxheim.toml"),
             r#"
             [logging.file]
             path = "logs/fluxheim.log"
@@ -5867,11 +5867,11 @@ mod tests {
         )
         .unwrap();
 
-        let config = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap();
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
 
         assert_eq!(
             config.logging.file.path,
-            Some(dir.path().join("logs/fluxheim.log"))
+            Some(dir.child("logs/fluxheim.log"))
         );
     }
 
@@ -5879,7 +5879,7 @@ mod tests {
     fn resolves_relative_tls_paths_from_config_file() {
         let dir = TestDir::new("tls-paths");
         fs::write(
-            dir.path().join("fluxheim.toml"),
+            dir.child("fluxheim.toml"),
             r#"
             [[tls.certificates]]
             cert_path = "tls/fullchain.pem"
@@ -5899,16 +5899,16 @@ mod tests {
         )
         .unwrap();
 
-        let config = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap();
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
 
         assert_eq!(
             config.tls.certificates[0].cert_path,
-            dir.path().join("tls/fullchain.pem")
+            dir.child("tls/fullchain.pem")
         );
-        assert_eq!(config.tls.acme.storage, Some(dir.path().join("acme")));
+        assert_eq!(config.tls.acme.storage, Some(dir.child("acme")));
         assert_eq!(
             config.vhosts[0].tls.certificate.as_ref().unwrap().key_path,
-            dir.path().join("vhosts/example/key.pem")
+            dir.child("vhosts/example/key.pem")
         );
     }
 
@@ -5916,7 +5916,7 @@ mod tests {
     fn rejects_config_relative_paths_with_parent_traversal() {
         let dir = TestDir::new("unsafe-paths");
         fs::write(
-            dir.path().join("fluxheim.toml"),
+            dir.child("fluxheim.toml"),
             r#"
             [web]
             root = "../outside"
@@ -5924,7 +5924,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap_err();
+        let error = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap_err();
 
         assert!(matches!(
             error,
@@ -5936,12 +5936,12 @@ mod tests {
     #[test]
     fn rejects_runtime_path_below_symlinked_directory() {
         let dir = TestDir::new("runtime-path-parent-symlink");
-        let real_dir = dir.path().join("real");
-        let symlink_dir = dir.path().join("linked");
-        fs::create_dir_all(real_dir.join("public")).unwrap();
+        let real_dir = dir.child("real");
+        let symlink_dir = dir.child("linked");
+        fs::create_dir_all(safe_child_path(&real_dir, "public")).unwrap();
         std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
         fs::write(
-            dir.path().join("fluxheim.toml"),
+            dir.child("fluxheim.toml"),
             r#"
             [web]
             root = "linked/public"
@@ -5949,7 +5949,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap_err();
+        let error = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap_err();
 
         assert!(matches!(
             error,
@@ -5962,12 +5962,12 @@ mod tests {
     #[test]
     fn rejects_symlinked_runtime_path() {
         let dir = TestDir::new("runtime-path-symlink");
-        let real_root = dir.path().join("public-real");
-        let symlink_root = dir.path().join("public");
+        let real_root = dir.child("public-real");
+        let symlink_root = dir.child("public");
         fs::create_dir(&real_root).unwrap();
         std::os::unix::fs::symlink(&real_root, &symlink_root).unwrap();
         fs::write(
-            dir.path().join("fluxheim.toml"),
+            dir.child("fluxheim.toml"),
             r#"
             [web]
             root = "public"
@@ -5975,7 +5975,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = Config::load(Some(&dir.path().join("fluxheim.toml"))).unwrap_err();
+        let error = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap_err();
 
         assert!(matches!(
             error,
@@ -5987,7 +5987,7 @@ mod tests {
     #[test]
     fn rejects_non_toml_config_file() {
         let dir = TestDir::new("non-toml-config");
-        let path = dir.path().join("fluxheim.txt");
+        let path = dir.child("fluxheim.txt");
         fs::write(&path, "[server]\n").unwrap();
 
         let error = Config::load(Some(&path)).unwrap_err();
@@ -5998,7 +5998,7 @@ mod tests {
     #[test]
     fn rejects_oversized_config_file() {
         let dir = TestDir::new("oversized-config");
-        let path = dir.path().join("fluxheim.toml");
+        let path = dir.child("fluxheim.toml");
         fs::write(
             &path,
             vec![b'#'; (super::MAX_CONFIG_FILE_BYTES + 1) as usize],
@@ -6016,8 +6016,8 @@ mod tests {
     #[test]
     fn rejects_symlinked_config_file() {
         let dir = TestDir::new("config-file-symlink");
-        let real_path = dir.path().join("real.toml");
-        let symlink_path = dir.path().join("fluxheim.toml");
+        let real_path = dir.child("real.toml");
+        let symlink_path = dir.child("fluxheim.toml");
         fs::write(&real_path, "[server]\n").unwrap();
         std::os::unix::fs::symlink(&real_path, &symlink_path).unwrap();
 
@@ -6030,10 +6030,10 @@ mod tests {
     #[test]
     fn rejects_symlinked_config_directory_source() {
         let dir = TestDir::new("config-dir-symlink");
-        let real_dir = dir.path().join("real");
-        let symlink_dir = dir.path().join("linked");
+        let real_dir = dir.child("real");
+        let symlink_dir = dir.child("linked");
         fs::create_dir(&real_dir).unwrap();
-        fs::write(real_dir.join("fluxheim.toml"), "[server]\n").unwrap();
+        fs::write(safe_child_path(&real_dir, "fluxheim.toml"), "[server]\n").unwrap();
         std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
 
         let error = Config::load(Some(&symlink_dir)).unwrap_err();
@@ -6045,13 +6045,14 @@ mod tests {
     #[test]
     fn rejects_config_source_below_symlinked_directory() {
         let dir = TestDir::new("config-dir-parent-symlink");
-        let real_dir = dir.path().join("real");
-        let symlink_dir = dir.path().join("linked");
+        let real_dir = dir.child("real");
+        let symlink_dir = dir.child("linked");
         fs::create_dir(&real_dir).unwrap();
-        fs::write(real_dir.join("fluxheim.toml"), "[server]\n").unwrap();
+        fs::write(safe_child_path(&real_dir, "fluxheim.toml"), "[server]\n").unwrap();
         std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
 
-        let error = Config::load(Some(&symlink_dir.join("fluxheim.toml"))).unwrap_err();
+        let error =
+            Config::load(Some(&safe_child_path(&symlink_dir, "fluxheim.toml"))).unwrap_err();
 
         assert!(matches!(error, ConfigLoadError::InvalidPath { .. }));
     }
@@ -6061,9 +6062,9 @@ mod tests {
     fn ignores_symlinked_config_directory_entries() {
         let dir = TestDir::new("config-dir-entry-symlink");
         let outside_dir = TestDir::new("config-dir-entry-symlink-outside");
-        let outside = outside_dir.path().join("outside.toml");
+        let outside = outside_dir.child("outside.toml");
         fs::write(
-            dir.path().join("00-server.toml"),
+            dir.child("00-server.toml"),
             r#"
             [server]
             listen = ["127.0.0.1:19090"]
@@ -6079,7 +6080,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        std::os::unix::fs::symlink(&outside, dir.path().join("10-linked.toml")).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.child("10-linked.toml")).unwrap();
 
         let config = Config::load(Some(dir.path())).unwrap();
 
@@ -6100,6 +6101,10 @@ mod tests {
 
         fn path(&self) -> &Path {
             &self.path
+        }
+
+        fn child(&self, name: &str) -> PathBuf {
+            safe_relative_path(&self.path, name)
         }
     }
 

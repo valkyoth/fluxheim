@@ -705,7 +705,7 @@ fn snapshot_root_or_parent_is_world_writable(_path: &Path) -> io::Result<bool> {
 mod tests {
     use super::{SnapshotError, SnapshotStore, write_atomically};
     use crate::config::{Config, ProxyConfig};
-    use crate::test_support::unique_temp_path;
+    use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
     #[test]
     fn snapshots_validated_config_and_sets_current() {
@@ -763,13 +763,10 @@ mod tests {
     fn rejects_snapshot_store_with_too_many_entries() {
         let dir = TestDir::new("snapshot-too-many-entries");
         let store = SnapshotStore::new(dir.path());
-        std::fs::create_dir(dir.path().join("configs")).unwrap();
+        let configs = dir.child("configs");
+        std::fs::create_dir(&configs).unwrap();
         for index in 0..=super::MAX_SNAPSHOT_STORE_ENTRIES {
-            std::fs::write(
-                dir.path().join("configs").join(format!("s{index:04}.toml")),
-                b"",
-            )
-            .unwrap();
+            std::fs::write(safe_child_path(&configs, &format!("s{index:04}.toml")), b"").unwrap();
         }
 
         let error = store.list().unwrap_err();
@@ -885,8 +882,8 @@ mod tests {
     #[test]
     fn rejects_snapshot_store_root_below_symlinked_directory() {
         let dir = TestDir::new("snapshot-root-parent-symlink");
-        let real_parent = dir.path().join("real-parent");
-        let linked_parent = dir.path().join("linked-parent");
+        let real_parent = dir.child("real-parent");
+        let linked_parent = dir.child("linked-parent");
         std::fs::create_dir(&real_parent).unwrap();
         std::os::unix::fs::symlink(&real_parent, &linked_parent).unwrap();
         let store = SnapshotStore::new(linked_parent.join("snapshots"));
@@ -922,7 +919,7 @@ mod tests {
             .snapshot_config(&Config::default(), Some("initial"))
             .unwrap();
 
-        let outside = dir.path().join("outside-current");
+        let outside = dir.child("outside-current");
         std::fs::write(&outside, format!("{}\n", snapshot.id)).unwrap();
         std::fs::remove_file(store.current_path()).unwrap();
         std::os::unix::fs::symlink(&outside, store.current_path()).unwrap();
@@ -960,7 +957,7 @@ mod tests {
         let snapshot = store
             .snapshot_config(&Config::default(), Some("initial"))
             .unwrap();
-        let outside = dir.path().join("outside.toml");
+        let outside = dir.child("outside.toml");
         std::fs::write(
             &outside,
             toml::to_string_pretty(&Config::default()).unwrap(),
@@ -982,7 +979,7 @@ mod tests {
         let snapshot = store
             .snapshot_config(&Config::default(), Some("initial"))
             .unwrap();
-        let outside = dir.path().join("outside.meta.toml");
+        let outside = dir.child("outside.meta.toml");
         std::fs::write(
             &outside,
             format!(
@@ -1004,7 +1001,7 @@ mod tests {
     fn rejects_symlinked_configs_directory() {
         let dir = TestDir::new("snapshot-configs-dir-symlink");
         let outside = TestDir::new("snapshot-configs-outside");
-        let configs_dir = dir.path().join("configs");
+        let configs_dir = dir.child("configs");
         std::os::unix::fs::symlink(outside.path(), &configs_dir).unwrap();
         let store = SnapshotStore::new(dir.path());
 
@@ -1018,7 +1015,7 @@ mod tests {
     fn rejects_atomic_write_below_symlinked_parent() {
         let dir = TestDir::new("snapshot-write-parent-symlink");
         let outside = TestDir::new("snapshot-write-parent-outside");
-        let symlinked_parent = dir.path().join("linked-parent");
+        let symlinked_parent = dir.child("linked-parent");
         std::os::unix::fs::symlink(outside.path(), &symlinked_parent).unwrap();
 
         let error = write_atomically(&symlinked_parent.join("current"), b"snapshot\n").unwrap_err();
@@ -1031,8 +1028,8 @@ mod tests {
     #[test]
     fn rejects_atomic_write_to_symlinked_destination() {
         let dir = TestDir::new("snapshot-write-destination-symlink");
-        let outside = dir.path().join("outside-current");
-        let destination = dir.path().join("current");
+        let outside = dir.child("outside-current");
+        let destination = dir.child("current");
         std::fs::write(&outside, "old\n").unwrap();
         std::os::unix::fs::symlink(&outside, &destination).unwrap();
 
@@ -1055,6 +1052,10 @@ mod tests {
 
         fn path(&self) -> &std::path::Path {
             &self.path
+        }
+
+        fn child(&self, name: &str) -> std::path::PathBuf {
+            safe_relative_path(&self.path, name)
         }
     }
 

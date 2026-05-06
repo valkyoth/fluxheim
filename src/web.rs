@@ -630,7 +630,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::config::WebConfig;
-    use crate::test_support::unique_temp_path;
+    use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
     use super::{
         ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions, StaticResponseBody,
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn resolves_index_file() {
         let root = TestDir::new("index");
-        fs::write(root.path().join("index.html"), "<h1>ok</h1>").unwrap();
+        fs::write(root.child("index.html"), "<h1>ok</h1>").unwrap();
 
         let server = server(root.path());
         let resolved = server.resolve("/").unwrap();
@@ -651,7 +651,7 @@ mod tests {
     #[test]
     fn rejects_traversal() {
         let root = TestDir::new("traversal");
-        fs::write(root.path().join("index.html"), "ok").unwrap();
+        fs::write(root.child("index.html"), "ok").unwrap();
 
         let server = server(root.path());
 
@@ -668,7 +668,7 @@ mod tests {
     #[test]
     fn rejects_dotfiles_by_default() {
         let root = TestDir::new("dotfiles");
-        fs::write(root.path().join(".env"), "secret").unwrap();
+        fs::write(root.child(".env"), "secret").unwrap();
 
         let server = server(root.path());
 
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn stores_configured_static_cache_headers() {
         let root = TestDir::new("static-cache-headers");
-        fs::write(root.path().join("index.html"), "ok").unwrap();
+        fs::write(root.child("index.html"), "ok").unwrap();
 
         let server = StaticFileServer::from_config(&WebConfig {
             root: Some(root.path().to_owned()),
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn builds_static_response_headers_from_config() {
         let root = TestDir::new("static-response-headers");
-        fs::write(root.path().join("index.html"), "ok").unwrap();
+        fs::write(root.child("index.html"), "ok").unwrap();
         let server = StaticFileServer::from_config(&WebConfig {
             root: Some(root.path().to_owned()),
             cache_control: "public, max-age=31536000, immutable".to_owned(),
@@ -777,13 +777,13 @@ mod tests {
     #[test]
     fn rejects_static_root_below_symlinked_directory() {
         let dir = TestDir::new("root-parent-symlink");
-        let real = dir.path().join("real");
-        let linked = dir.path().join("linked");
-        fs::create_dir_all(real.join("public")).unwrap();
+        let real = dir.child("real");
+        let linked = dir.child("linked");
+        fs::create_dir_all(safe_child_path(&real, "public")).unwrap();
         std::os::unix::fs::symlink(&real, &linked).unwrap();
 
         let error = StaticFileServer::from_config(&WebConfig {
-            root: Some(linked.join("public")),
+            root: Some(safe_child_path(&linked, "public")),
             index_files: vec!["index.html".to_owned()],
             deny_dotfiles: true,
             ..WebConfig::default()
@@ -800,9 +800,8 @@ mod tests {
         {
             let root = TestDir::new("symlink");
             let outside = TestDir::new("outside");
-            fs::write(outside.path().join("secret.txt"), "secret").unwrap();
-            std::os::unix::fs::symlink(outside.path().join("secret.txt"), root.path().join("link"))
-                .unwrap();
+            fs::write(outside.child("secret.txt"), "secret").unwrap();
+            std::os::unix::fs::symlink(outside.child("secret.txt"), root.child("link")).unwrap();
 
             let server = server(root.path());
 
@@ -815,15 +814,15 @@ mod tests {
         #[cfg(unix)]
         {
             let root = TestDir::new("inside-symlink");
-            fs::create_dir_all(root.path().join("real")).unwrap();
-            fs::write(root.path().join("real").join("asset.txt"), "ok").unwrap();
+            let real = root.child("real");
+            fs::create_dir_all(&real).unwrap();
+            fs::write(safe_child_path(&real, "asset.txt"), "ok").unwrap();
             std::os::unix::fs::symlink(
-                root.path().join("real").join("asset.txt"),
-                root.path().join("asset-link.txt"),
+                safe_child_path(&real, "asset.txt"),
+                root.child("asset-link.txt"),
             )
             .unwrap();
-            std::os::unix::fs::symlink(root.path().join("real"), root.path().join("dir-link"))
-                .unwrap();
+            std::os::unix::fs::symlink(&real, root.child("dir-link")).unwrap();
 
             let server = server(root.path());
 
@@ -1073,15 +1072,16 @@ mod tests {
     fn rejects_symlink_swap_before_static_body_read() {
         let root = TestDir::new("body-symlink-swap");
         let outside = TestDir::new("body-symlink-outside");
-        fs::write(root.path().join("index.html"), "ok").unwrap();
-        fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+        fs::write(root.child("index.html"), "ok").unwrap();
+        fs::write(outside.child("secret.txt"), "secret").unwrap();
 
         let server = server(root.path());
         let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
             panic!("expected static file")
         };
-        fs::remove_file(&file.path).unwrap();
-        std::os::unix::fs::symlink(outside.path().join("secret.txt"), &file.path).unwrap();
+        let index = root.child("index.html");
+        fs::remove_file(&index).unwrap();
+        std::os::unix::fs::symlink(outside.child("secret.txt"), &index).unwrap();
 
         let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
 
@@ -1092,7 +1092,7 @@ mod tests {
     #[test]
     fn reads_static_full_body_exactly() {
         let root = TestDir::new("body-full-exact");
-        fs::write(root.path().join("index.html"), "ok").unwrap();
+        fs::write(root.child("index.html"), "ok").unwrap();
 
         let server = server(root.path());
         let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
@@ -1127,14 +1127,14 @@ mod tests {
     #[test]
     fn rejects_same_size_replacement_before_static_body_read() {
         let root = TestDir::new("body-identity-change");
-        fs::write(root.path().join("index.html"), "ok").unwrap();
+        fs::write(root.child("index.html"), "ok").unwrap();
 
         let server = server(root.path());
         let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
             panic!("expected static file")
         };
-        fs::rename(&file.path, root.path().join("old-index.html")).unwrap();
-        fs::write(&file.path, "no").unwrap();
+        fs::rename(root.child("index.html"), root.child("old-index.html")).unwrap();
+        fs::write(root.child("index.html"), "no").unwrap();
 
         let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
 
@@ -1145,13 +1145,13 @@ mod tests {
     #[test]
     fn rejects_size_change_before_static_body_read() {
         let root = TestDir::new("body-size-change");
-        fs::write(root.path().join("index.html"), "ok").unwrap();
+        fs::write(root.child("index.html"), "ok").unwrap();
 
         let server = server(root.path());
         let ResolveResult::Found(file) = server.resolve("/index.html").unwrap() else {
             panic!("expected static file")
         };
-        fs::write(&file.path, "changed").unwrap();
+        fs::write(root.child("index.html"), "changed").unwrap();
 
         let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
 
@@ -1171,6 +1171,10 @@ mod tests {
 
         fn path(&self) -> &Path {
             &self.path
+        }
+
+        fn child(&self, name: &str) -> PathBuf {
+            safe_relative_path(&self.path, name)
         }
     }
 
