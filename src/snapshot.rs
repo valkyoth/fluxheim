@@ -956,19 +956,22 @@ mod tests {
     fn rejects_symlinked_snapshot_config() {
         let dir = TestDir::new("snapshot-config-symlink");
         let store = SnapshotStore::new(dir.path());
-        let snapshot = store
-            .snapshot_config(&Config::default(), Some("initial"))
-            .unwrap();
+        let snapshot_id = "symlinked_config";
+        let configs_dir = dir.child("configs");
+        std::fs::create_dir(&configs_dir).unwrap();
         let outside = dir.child("outside.toml");
         std::fs::write(
             &outside,
             toml::to_string_pretty(&Config::default()).unwrap(),
         )
         .unwrap();
-        dir.remove_child_file(&snapshot.config_path);
-        std::os::unix::fs::symlink(&outside, &snapshot.config_path).unwrap();
+        std::os::unix::fs::symlink(
+            &outside,
+            safe_child_path(&configs_dir, "symlinked_config.toml"),
+        )
+        .unwrap();
 
-        let error = store.rollback_candidate(Some(&snapshot.id)).unwrap_err();
+        let error = store.rollback_candidate(Some(snapshot_id)).unwrap_err();
 
         assert!(matches!(error, SnapshotError::UnsafeSnapshotPath { .. }));
     }
@@ -978,20 +981,28 @@ mod tests {
     fn rejects_symlinked_snapshot_metadata() {
         let dir = TestDir::new("snapshot-metadata-symlink");
         let store = SnapshotStore::new(dir.path());
-        let snapshot = store
-            .snapshot_config(&Config::default(), Some("initial"))
-            .unwrap();
+        let snapshot_id = "symlinked_metadata";
+        let configs_dir = dir.child("configs");
+        std::fs::create_dir(&configs_dir).unwrap();
+        std::fs::write(
+            safe_child_path(&configs_dir, "symlinked_metadata.toml"),
+            toml::to_string_pretty(&Config::default()).unwrap(),
+        )
+        .unwrap();
         let outside = dir.child("outside.meta.toml");
         std::fs::write(
             &outside,
             format!(
                 "id = \"{}\"\ncreated_unix_secs = 1\nmessage = \"outside\"\n",
-                snapshot.id
+                snapshot_id
             ),
         )
         .unwrap();
-        dir.remove_child_file(&snapshot.metadata_path);
-        std::os::unix::fs::symlink(&outside, &snapshot.metadata_path).unwrap();
+        std::os::unix::fs::symlink(
+            &outside,
+            safe_child_path(&configs_dir, "symlinked_metadata.meta.toml"),
+        )
+        .unwrap();
 
         let error = store.list().unwrap_err();
 
@@ -1058,13 +1069,6 @@ mod tests {
 
         fn child(&self, name: &str) -> std::path::PathBuf {
             safe_relative_path(&self.path, name)
-        }
-
-        #[cfg(unix)]
-        fn remove_child_file(&self, path: &std::path::Path) {
-            let canonical = path.canonicalize().expect("canonicalize test child file");
-            assert!(canonical.starts_with(&self.path));
-            std::fs::remove_file(canonical).expect("remove test child file");
         }
     }
 

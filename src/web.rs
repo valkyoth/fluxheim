@@ -203,7 +203,7 @@ fn path_contains_symlink(root: &Path, candidate: &Path) -> io::Result<bool> {
     let mut current = root.to_path_buf();
     for component in relative.components() {
         current.push(component);
-        match std::fs::symlink_metadata(&current) {
+        match current.symlink_metadata() {
             Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
