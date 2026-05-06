@@ -203,10 +203,10 @@ fn path_contains_symlink(root: &Path, candidate: &Path) -> io::Result<bool> {
     let mut current = root.to_path_buf();
     for component in relative.components() {
         current.push(component);
-        match current.symlink_metadata() {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
+        match std::fs::read_link(&current) {
+            Ok(_) => return Ok(true),
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
             Err(error) => return Err(error),
         }
     }
