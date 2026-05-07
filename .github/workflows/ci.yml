@@ -75,6 +75,9 @@ jobs:
       - name: Validate 1.0 core feature matrix
         run: scripts/validate-1-0-core.sh check
 
+      - name: Validate 1.0 gateway fixtures
+        run: scripts/validate-1-0-fixtures.sh
+
       - name: Build 1.0 core release matrix
         run: scripts/validate-1-0-core.sh release
 
@@ -105,6 +108,7 @@ jobs:
           cargo run --quiet -- --check-config --config examples/privacy.toml
           cargo run --quiet -- --check-config --config examples/container/fluxheim.toml
           cargo run --quiet -- --check-config --config examples/conf.d
+          cargo run --quiet -- --check-config --config examples/gateway-1-0
           cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml
 
       - name: Run localhost smoke tests
