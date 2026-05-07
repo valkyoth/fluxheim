@@ -37,10 +37,12 @@ real multi-site configs. In addition to the `0.5.x` behavior, it must support:
 - websocket-safe proxy smoke coverage for routes such as `/chat/`;
 - per-route body limits, prefix stripping, and upstream connect/read/send
   timeouts;
+- typed forwarding headers plus a small validated dynamic request-header
+  template set for common proxy migrations;
 - custom upstream error pages;
 - static aliases and secure directory listing;
 - container DNS behavior suitable for local Podman deployments, including
-  graceful direct-proxy DNS failures.
+  graceful direct-proxy DNS failures;
 - native systemd support for manually compiled binaries, including a hardened
   service unit, documented install paths, runtime directory handling, config
   validation before start, and graceful shutdown/reload behavior.
