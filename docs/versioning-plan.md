@@ -851,7 +851,9 @@ Exit criteria:
 
 These should not be promised in a stable minor until proven:
 
-- HTTP/3/QUIC.
+- HTTP/3/QUIC, including UDP listener ownership, `Alt-Svc` advertisement,
+  replay-safe 0-RTT policy, and parity with the normal vhost/proxy/cache
+  pipeline.
 - Legacy HTTP/1.0 and HTTP/0.9 static listeners.
 - Coraza/Proxy-Wasm WAF compatibility.
 - Pure Rust PHP interpreter experiments.

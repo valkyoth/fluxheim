@@ -908,10 +908,40 @@ without parsing text fixtures for every module.
 15. **Future HTTP/3 And QUIC**
    - HTTP/3 is the modern protocol direction, not a legacy-compatibility
      feature.
-   - Plan as a separate future milestone after MVP hardening: evaluate Pingora
-     or ecosystem QUIC support, TLS/ALPN handling, UDP listener ownership,
-     rootless Podman networking constraints, certificate reload interaction,
-     metrics, and zero-downtime process upgrades.
+   - Keep it outside `1.0.0`. HTTP/3 changes Fluxheim's listener model from
+     TCP/TLS-only ingress to a dual TCP plus UDP service. It should land first
+     as an opt-in `http3` or `http3-experimental` compile feature after the
+     gateway core and TLS policy surface are stable.
+   - Plan as a separate future milestone after MVP hardening: evaluate whether
+     a supported Pingora HTTP/3 server API can be reused before falling back to
+     direct ecosystem QUIC integration. The milestone must cover TLS/ALPN
+     handling, UDP listener ownership, rootless Podman networking constraints,
+     certificate reload interaction, metrics, graceful shutdown, and
+     zero-downtime process upgrades.
+   - Do not treat `Alt-Svc` as the implementation. Advertising HTTP/3 is easy;
+     Fluxheim must only emit `Alt-Svc` from listeners/vhosts where the UDP
+     QUIC service is actually configured and healthy, with the advertised port
+     matching the deployed UDP mapping.
+   - Start with a conservative config surface:
+     `enabled`, `listen`, `advertise_alt_svc`, `max_concurrent_streams`,
+     `idle_timeout`, and `enable_0rtt = false`. 0-RTT must remain disabled
+     until Fluxheim has explicit replay-safe route policy for idempotent
+     traffic.
+   - First implementation target should be minimal GET/HEAD traffic through the
+     existing vhost and route policy model. Full parity needs request body
+     streaming, upload limits, static serving, proxying, cache behavior,
+     access/error logs, dynamic headers, and certificate selection to behave
+     consistently with HTTP/1.1 and HTTP/2.
+   - The core engineering risk is not memory pinning or one buffer choice; it
+     is correctly integrating QUIC connection state, UDP socket batching,
+     connection IDs, anti-amplification limits, congestion behavior, stream
+     timeouts, and request/response mapping into Fluxheim's existing policy
+     pipeline without creating a second independent server path.
+   - Release validation must include HTTP/3 interop and resilience checks:
+     client tests with HTTP/3-capable tooling, browser discovery through
+     `Alt-Svc`, UDP firewall/container mapping tests, packet loss/reordering
+     tests, malformed frame handling, load tests, and request-smuggling-style
+     boundary tests for mixed HTTP/1.1, HTTP/2, and HTTP/3 deployments.
    - HTTP/3 must preserve the same security posture as HTTP/1.1/HTTP/2:
      strict parsing, no downgrade shortcuts, no legacy protocol fallback on
      modern listeners, and the same vhost/cache/admin isolation rules.
