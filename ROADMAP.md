@@ -10,9 +10,9 @@ Larger modules still graduate through later minor releases.
 
 ## Current MVP Goal
 
-Fluxheim's `0.5.x` preview should be a local/rootless-Podman friendly Pingora
-static web server and reverse proxy that can safely run small sites and simple
-origin frontends:
+Fluxheim's `0.5.x` preview is a local/rootless-Podman friendly Pingora static
+web server and reverse proxy that can safely run small sites and simple origin
+frontends:
 
 - vhost routing with static web serving and single-upstream proxying;
 - cache module compiled by default but disabled unless configured;
@@ -20,16 +20,15 @@ origin frontends:
 - strict header/body limits and basic secure header policy;
 - release checks, license checks, and rootless container packaging.
 
-The near-term focus is hardening the already-working baseline, then closing the
-`1.0.0` gateway gaps exposed by real configs: SNI certificate selection,
-path/location routing, route redirects, websocket-safe proxying, per-route body
-limits and timeouts, custom upstream error pages, static aliases, and directory
-listing. Native systemd service support is also part of the `1.0.0` operational
-target so manually compiled binaries can run cleanly outside containers. ACME
-runtime, load balancing, admin snapshots, metrics, Sentinel
-Mesh/WireGuard, stale-while-revalidate, and persistent cache indexing remain
-important, but they should graduate after `1.0.0` according to the versioning
-plan.
+The near-term focus is validating and hardening the `1.0.0` gateway migration
+surface now present in the codebase: SNI certificate selection, path/location
+routing, route redirects, websocket-safe proxying, per-route body limits and
+timeouts, custom upstream error pages, static aliases, directory listing,
+cleartext ACME challenge exceptions, safe dynamic request headers, and native
+systemd service support for manually compiled binaries. ACME runtime, advanced
+load balancing, admin snapshots, metrics, Sentinel Mesh/WireGuard,
+stale-while-revalidate, and persistent cache indexing remain important, but
+they should graduate after `1.0.0` according to the versioning plan.
 
 After `1.0`, the first dedicated minor release should focus on TLS policy:
 explicit safe profiles, minimum protocol version, ALPN controls, backend

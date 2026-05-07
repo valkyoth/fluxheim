@@ -115,6 +115,29 @@ read_timeout_secs = 60
 send_timeout_secs = 60
 ```
 
+For common upstream identity headers, prefer the typed request-header fields in
+the shared baseline:
+
+```toml
+[headers.request]
+enabled = true
+strip_inbound_client_ip_headers = true
+x_forwarded_for = "append"
+x_real_ip = true
+x_forwarded_host = true
+x_forwarded_proto = true
+
+[headers.request.add]
+host = "{host}"
+```
+
+Use dynamic header templates only when a backend needs an exact value that is
+not covered by a typed field. The supported variables are intentionally small:
+`{host}`, `{remote_addr}`, `{scheme}`, `{uri}`, `{path}`, `{query}`,
+`{request_id}`, and `{http.<header-name>}`. Unknown variables fail config
+validation, and rendered values still pass HTTP header validation before they
+are sent upstream.
+
 ## Websocket Or Long-Lived Route
 
 Fluxheim preserves `Connection: Upgrade` and `Upgrade` request headers by
@@ -133,6 +156,15 @@ upstreams = ["host.containers.internal:6012"]
 connect_timeout_secs = 5
 read_timeout_secs = 600
 send_timeout_secs = 600
+```
+
+If the backend requires explicit legacy-style upgrade forwarding on that route,
+set it route-locally:
+
+```toml
+[vhosts.routes.headers.request.add]
+upgrade = "{http.upgrade}"
+connection = "upgrade"
 ```
 
 ## Static Alias With Directory Listing
