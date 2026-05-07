@@ -159,7 +159,8 @@ local_time = true
 
 Directory listings are off by default. When enabled, index files still win,
 dotfiles remain hidden when `deny_dotfiles = true`, and symlink entries are
-skipped.
+skipped. Set `local_time = true` when you want listing modification times shown
+with the server's local UTC offset instead of GMT HTTP-date timestamps.
 
 ## Custom Upstream Error Page
 

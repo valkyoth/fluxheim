@@ -393,8 +393,8 @@ detection, `GET`/`HEAD`, `ETag`, `If-Match`, `If-Unmodified-Since`,
 generates a listing after no index file matches. Listings inherit dotfile
 protection, skip symlink entries, cap entry count, and use `private, no-store`
 so repository indexes are not accidentally cached by shared intermediaries.
-`local_time` is accepted for migration-friendly config shape; the current
-renderer emits HTTP-date timestamps.
+`local_time = true` renders listing modification times with the server's local
+UTC offset; otherwise listings use GMT HTTP-date timestamps.
 
 `cache_control` is emitted on static responses and defaults to
 `public, max-age=60`. Use response header policy when you need to append or
@@ -641,8 +641,8 @@ Listings are disabled by default, index files still win when present, dotfiles
 remain denied when `deny_dotfiles = true`, symlink entries are skipped, and the
 generated HTML is sent with `cache-control: private, no-store`. Keep
 `exact_size = false` for large directories when approximate display is enough.
-`local_time` is accepted for migration-friendly config shape; the current
-renderer emits HTTP-date timestamps.
+`local_time = true` renders listing modification times with the server's local
+UTC offset; otherwise listings use GMT HTTP-date timestamps.
 
 For production readability, prefer one vhost per file in a split config
 directory. See [Vhost Config Guide](vhost-config.md) and

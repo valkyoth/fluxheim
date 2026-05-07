@@ -1,9 +1,13 @@
+#[cfg(unix)]
+use std::ffi::CStr;
 use std::ffi::OsString;
 #[cfg(feature = "proxy")]
 use std::fs::OpenOptions;
 use std::io;
 #[cfg(feature = "proxy")]
 use std::io::{Read, Seek};
+#[cfg(unix)]
+use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -256,6 +260,7 @@ impl StaticFileServer {
         Ok(ResolveResult::DirectoryListing(DirectoryListing {
             path,
             entries,
+            local_time: self.directory_listing.local_time,
         }))
     }
 }
@@ -356,6 +361,7 @@ pub enum ResolveResult {
 pub struct DirectoryListing {
     pub path: String,
     pub entries: Vec<DirectoryEntry>,
+    pub local_time: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -597,7 +603,10 @@ fn render_directory_listing(listing: &DirectoryListing) -> String {
         );
         html.push_str("</td><td>");
         if let Some(modified) = entry.modified {
-            html.push_str(&html_escape(&httpdate::fmt_http_date(modified)));
+            html.push_str(&html_escape(&format_directory_listing_time(
+                modified,
+                listing.local_time,
+            )));
         } else {
             html.push('-');
         }
@@ -605,6 +614,54 @@ fn render_directory_listing(listing: &DirectoryListing) -> String {
     }
     html.push_str("</tbody></table></body></html>");
     html
+}
+
+#[cfg_attr(not(feature = "proxy"), allow(dead_code))]
+fn format_directory_listing_time(modified: SystemTime, local_time: bool) -> String {
+    if local_time && let Some(formatted) = format_local_directory_listing_time(modified) {
+        return formatted;
+    }
+
+    httpdate::fmt_http_date(modified)
+}
+
+#[cfg(unix)]
+fn format_local_directory_listing_time(modified: SystemTime) -> Option<String> {
+    let seconds: libc::time_t = modified
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_secs()
+        .try_into()
+        .ok()?;
+
+    let mut local = MaybeUninit::<libc::tm>::uninit();
+    let mut output = [0 as libc::c_char; 64];
+    let format = b"%Y-%m-%d %H:%M:%S %z\0";
+
+    unsafe {
+        if libc::localtime_r(&seconds, local.as_mut_ptr()).is_null() {
+            return None;
+        }
+        let local = local.assume_init();
+        let written = libc::strftime(
+            output.as_mut_ptr(),
+            output.len(),
+            format.as_ptr().cast(),
+            &local,
+        );
+        if written == 0 {
+            return None;
+        }
+        CStr::from_ptr(output.as_ptr())
+            .to_str()
+            .ok()
+            .map(str::to_owned)
+    }
+}
+
+#[cfg(not(unix))]
+fn format_local_directory_listing_time(_modified: SystemTime) -> Option<String> {
+    None
 }
 
 #[cfg_attr(not(feature = "proxy"), allow(dead_code))]
@@ -984,6 +1041,7 @@ mod tests {
         };
 
         assert_eq!(listing.path, "/");
+        assert!(!listing.local_time);
         assert_eq!(
             listing
                 .entries
@@ -1004,12 +1062,35 @@ mod tests {
                 size: Some(1),
                 modified: None,
             }],
+            local_time: false,
         };
 
         let html = super::render_directory_listing(&listing);
 
         assert!(html.contains("Index of /repo/&lt;root&gt;/"));
         assert!(html.contains("a&amp;b.txt"));
+    }
+
+    #[test]
+    fn directory_listing_local_time_uses_local_timestamp_shape() {
+        let listing = super::DirectoryListing {
+            path: "/".to_owned(),
+            entries: vec![super::DirectoryEntry {
+                name: "asset.txt".to_owned(),
+                is_dir: false,
+                size: Some(1),
+                modified: Some(UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000)),
+            }],
+            local_time: true,
+        };
+
+        let html = super::render_directory_listing(&listing);
+
+        assert!(
+            html.contains("2023-11-14") || html.contains("2023-11-15"),
+            "{html}"
+        );
+        assert!(!html.contains("GMT"));
     }
 
     #[test]
