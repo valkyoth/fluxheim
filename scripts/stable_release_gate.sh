@@ -28,6 +28,9 @@ cargo test
 echo "stable release gate: 1.0 core matrix ($mode)"
 scripts/validate-1-0-core.sh "$mode"
 
+echo "stable release gate: 1.0 representative fixtures"
+scripts/validate-1-0-fixtures.sh
+
 echo "stable release gate: 1.0 core smoke"
 scripts/smoke_1_0_core.sh
 

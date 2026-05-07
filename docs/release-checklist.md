@@ -111,6 +111,12 @@ instead of release builds:
 scripts/validate-1-0-core.sh check
 ```
 
+Validate the representative split-config fixture set before a `1.0.x` release:
+
+```bash
+scripts/validate-1-0-fixtures.sh
+```
+
 ## Stable Release Security And Stability Gate
 
 Passing memory-safe Rust builds is not enough for a proxy. Before every stable
