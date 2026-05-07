@@ -783,15 +783,17 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "arc-swap",
  "async-trait",
  "bytes",
  "clap",
  "env_logger",
+ "getrandom 0.4.2",
  "http",
  "httpdate",
+ "libc",
  "log",
  "mime_guess",
  "moka",
