@@ -814,6 +814,7 @@ impl WildcardHost {
 struct RuntimeVhost {
     name: String,
     hosts: Vec<String>,
+    max_request_body_bytes: Option<crate::config::ByteSize>,
     proxy: RuntimeProxy,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
@@ -842,6 +843,7 @@ impl std::fmt::Debug for RuntimeVhost {
         debug
             .field("name", &self.name)
             .field("hosts", &self.hosts)
+            .field("max_request_body_bytes", &self.max_request_body_bytes)
             .field("proxy", &self.proxy)
             .field("request_headers", &self.request_headers)
             .field("response_headers", &self.response_headers);
@@ -1072,6 +1074,7 @@ impl RuntimeVhost {
         Ok(Self {
             name: "default".to_owned(),
             hosts: vec![],
+            max_request_body_bytes: None,
             #[cfg(feature = "load-balancer")]
             load_balancer,
             proxy: RuntimeProxy::from_config(&proxy)?,
@@ -1126,6 +1129,7 @@ impl RuntimeVhost {
         Ok(Self {
             name: vhost.name.clone(),
             hosts: vhost.normalized_hosts(),
+            max_request_body_bytes: vhost.max_request_body_bytes,
             #[cfg(feature = "load-balancer")]
             load_balancer,
             proxy: RuntimeProxy::from_config(&vhost.proxy)?,
@@ -1193,6 +1197,7 @@ impl ProxyHttp for FluxProxy {
         ctx.request_body_limit_bytes = ctx
             .route_index
             .and_then(|route_index| vhost.route(route_index).max_request_body_bytes)
+            .or(vhost.max_request_body_bytes)
             .map(|bytes| bytes.as_u64())
             .or(Some(state.limits.max_request_body_bytes.as_u64()));
         if let Some(status) = request_limit_status(
@@ -2341,7 +2346,10 @@ fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<S
     }))
 }
 
-fn http_peer_for_proxy(address: &str, proxy: &ProxyConfig) -> Result<HttpPeer> {
+fn http_peer_for_proxy<A>(address: A, proxy: &ProxyConfig) -> Result<HttpPeer>
+where
+    A: ToSocketAddrs + std::fmt::Debug,
+{
     let mut addrs = address.to_socket_addrs().map_err(|error| {
         Error::because(
             ErrorType::ConnectError,
@@ -2526,6 +2534,7 @@ mod tests {
                 VhostConfig {
                     name: "one".to_owned(),
                     hosts: vec!["one.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
                         upstream: Some("127.0.0.1:3001".to_owned()),
@@ -2539,6 +2548,7 @@ mod tests {
                 VhostConfig {
                     name: "two".to_owned(),
                     hosts: vec!["two.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
                         upstream: Some("127.0.0.1:3002".to_owned()),
@@ -2564,6 +2574,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "default.example".to_owned(),
                 hosts: vec!["default.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
@@ -2585,6 +2596,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "old".to_owned(),
                 hosts: vec!["old.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
@@ -2601,6 +2613,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "new".to_owned(),
                 hosts: vec!["new.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
@@ -2632,6 +2645,7 @@ mod tests {
                 VhostConfig {
                     name: "one".to_owned(),
                     hosts: vec!["one.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -2642,6 +2656,7 @@ mod tests {
                 VhostConfig {
                     name: "two".to_owned(),
                     hosts: vec!["two.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -2672,6 +2687,7 @@ mod tests {
                 VhostConfig {
                     name: "wild".to_owned(),
                     hosts: vec!["*.example.com".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -2682,6 +2698,7 @@ mod tests {
                 VhostConfig {
                     name: "exact".to_owned(),
                     hosts: vec!["api.example.com".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -2760,6 +2777,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "gateway".to_owned(),
                 hosts: vec!["gateway.example".to_owned()],
+                max_request_body_bytes: Some(ByteSize::from_bytes(64 * 1024 * 1024)),
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
@@ -2839,6 +2857,10 @@ mod tests {
             .state
             .vhost(snapshot.state.vhost_index(Some("gateway.example")));
 
+        assert_eq!(
+            vhost.max_request_body_bytes,
+            Some(ByteSize::from_bytes(64 * 1024 * 1024))
+        );
         assert_eq!(vhost.route_index("/api/v2/status"), Some(3));
         assert_eq!(vhost.route_index("/api/v2/users"), Some(2));
         assert_eq!(vhost.route_index("/api/users"), Some(1));
@@ -2956,6 +2978,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "api".to_owned(),
                 hosts: vec!["api.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
@@ -3063,6 +3086,7 @@ mod tests {
                 VhostConfig {
                     name: "cached".to_owned(),
                     hosts: vec!["cached.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig {
@@ -3080,6 +3104,7 @@ mod tests {
                 VhostConfig {
                     name: "uncached".to_owned(),
                     hosts: vec!["uncached.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -3125,6 +3150,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -3183,6 +3209,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -3230,6 +3257,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -3269,6 +3297,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -3318,6 +3347,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -3386,6 +3416,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -3461,6 +3492,7 @@ mod tests {
                 VhostConfig {
                     name: "one".to_owned(),
                     hosts: vec!["one.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
                         upstreams: vec!["127.0.0.1:3001".to_owned()],
@@ -3474,6 +3506,7 @@ mod tests {
                 VhostConfig {
                     name: "two".to_owned(),
                     hosts: vec!["two.example".to_owned()],
+                    max_request_body_bytes: None,
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
                         upstreams: vec!["127.0.0.1:3002".to_owned()],

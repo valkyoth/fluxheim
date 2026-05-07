@@ -109,6 +109,7 @@ Each route must define one action: `redirect`, `proxy`, or `web`.
 [[vhosts]]
 name = "dev.example.test"
 hosts = ["dev.example.test"]
+max_request_body_bytes = "64MiB"
 
 [[vhosts.routes]]
 name = "chat"
@@ -154,7 +155,8 @@ status = 308
 
 `strip_prefix` rewrites the path for the selected route only. For example,
 `/chat/room?id=7` becomes `/room?id=7` before it is sent to the route backend.
-`max_request_body_bytes` overrides the global request body limit for the
+`max_request_body_bytes` can be set on a vhost for a host-wide upload limit, or
+on a route to override both the vhost and global request body limit for the
 selected route. Route proxy actions can also set `connect_timeout_secs`,
 `read_timeout_secs`, and `send_timeout_secs` for long-lived uploads or websocket
 paths without changing every backend on the vhost.

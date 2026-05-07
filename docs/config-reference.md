@@ -530,6 +530,7 @@ follows belongs to that current vhost until the next `[[vhosts]]`.
 [[vhosts]]
 name = "example.test"
 hosts = ["example.test", "www.example.test"]
+max_request_body_bytes = "64MiB"
 
 [vhosts.web]
 root = "/srv/sites/example"
@@ -555,6 +556,9 @@ upstream_tls = false
 
 Hostnames are normalized to lower case. Duplicate hosts are rejected. A single
 left-most wildcard label is supported, for example `*.api.example.test`.
+`max_request_body_bytes` is optional on a vhost and overrides the global
+`server.limits.max_request_body_bytes` for that host. Route-level
+`max_request_body_bytes` still wins when a matching route sets its own limit.
 
 Vhosts can also contain ordered route tables. Exact matches win first, then the
 longest prefix match, then one optional fallback route. A route must define one
@@ -605,11 +609,11 @@ status = 308
 `strip_prefix` is useful when a backend or alias root should receive `/room`
 instead of `/chat/room`. Redirect targets must be absolute `http://` or
 `https://` templates and may use `{uri}`, `{path}`, and `{query}`. Use
-`max_request_body_bytes` on a route to narrow or expand the global body limit
-for uploads handled by that route. Proxy actions accept `connect_timeout_secs`,
-`read_timeout_secs`, and `send_timeout_secs`; route proxy timeout values override
-the vhost/global proxy timeout values because the route owns its own proxy
-action.
+`max_request_body_bytes` on a route to narrow or expand the vhost or global
+body limit for uploads handled by that route. Proxy actions accept
+`connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs`; route
+proxy timeout values override the vhost/global proxy timeout values because the
+route owns its own proxy action.
 
 Static route actions support directory listing for repository-style file roots.
 Listings are disabled by default, index files still win when present, dotfiles
@@ -618,7 +622,8 @@ generated HTML is sent with `cache-control: private, no-store`. Keep
 `exact_size = false` for large directories when approximate display is enough.
 
 For production readability, prefer one vhost per file in a split config
-directory. See [Vhost Config Guide](vhost-config.md).
+directory. See [Vhost Config Guide](vhost-config.md) and
+[Gateway Recipes](gateway-recipes.md).
 
 ## Privacy Profile
 

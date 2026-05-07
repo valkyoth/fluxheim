@@ -119,7 +119,8 @@ More examples live in [examples](examples), and packaged containers/RPMs use
 [packaging/default/fluxheim.toml](packaging/default/fluxheim.toml) unless a
 deployment supplies its own config. For the `[[vhosts]]` syntax and the
 recommended one-vhost-per-file layout, see
-[Vhost Config Guide](docs/vhost-config.md).
+[Vhost Config Guide](docs/vhost-config.md). For common multi-site proxy
+patterns, see [Gateway Recipes](docs/gateway-recipes.md).
 
 Native/manual binary deployments can use the provided hardened systemd unit;
 see [systemd Deployment](docs/systemd.md).
@@ -256,6 +257,7 @@ the full release ladder.
 - [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
 - [Feature Matrix](docs/features.md)
 - [Config Reference](docs/config-reference.md)
+- [Gateway Recipes](docs/gateway-recipes.md)
 - [GitHub Repository Setup](docs/github-setup.md)
 - [Cache Backends](docs/cache-backends.md)
 - [Image Filter](docs/image-filter.md)

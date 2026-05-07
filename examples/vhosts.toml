@@ -105,6 +105,7 @@ vary = ["Accept-Encoding"]
 [[vhosts]]
 name = "example.test"
 hosts = ["example.test", "www.example.test"]
+max_request_body_bytes = "64MiB"
 
 [vhosts.tls]
 enabled = false

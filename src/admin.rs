@@ -1691,6 +1691,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -1772,6 +1773,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -1827,6 +1829,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -1883,6 +1886,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "cached".to_owned(),
                 hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig {
@@ -2054,6 +2058,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "live".to_owned(),
                 hosts: vec!["live.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2068,6 +2073,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "rollback".to_owned(),
                 hosts: vec!["rollback.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2155,6 +2161,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "example".to_owned(),
                 hosts: vec!["example.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2193,6 +2200,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "candidate".to_owned(),
                 hosts: vec!["candidate.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2303,6 +2311,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "baseline".to_owned(),
                 hosts: vec!["baseline.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2321,6 +2330,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "candidate".to_owned(),
                 hosts: vec!["candidate.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2393,6 +2403,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "baseline".to_owned(),
                 hosts: vec!["baseline.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2411,6 +2422,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "candidate".to_owned(),
                 hosts: vec!["candidate.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2451,6 +2463,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "baseline".to_owned(),
                 hosts: vec!["baseline.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2469,6 +2482,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "candidate".to_owned(),
                 hosts: vec!["candidate.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2510,6 +2524,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "baseline".to_owned(),
                 hosts: vec!["baseline.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2528,6 +2543,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "candidate".to_owned(),
                 hosts: vec!["candidate.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2569,6 +2585,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "baseline".to_owned(),
                 hosts: vec!["baseline.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
@@ -2587,6 +2604,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "candidate".to_owned(),
                 hosts: vec!["candidate.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),

@@ -227,6 +227,7 @@ cache_control = "public, max-age=60"
 [[vhosts]]
 name = "app.test"
 hosts = ["app.test"]
+max_request_body_bytes = "32B"
 
 [vhosts.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_PORT"]
@@ -371,6 +372,12 @@ for expected in "proxy-ok" "path=/api/check" "xfh=app.test" "xfp=http" "xri=127.
         exit 1
     fi
 done
+
+VHOST_BODY_STATUS="$(printf '%064d' 0 | curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Host: app.test" --data-binary @- "http://127.0.0.1:$FLUXHEIM_PORT/api/upload" 2>/dev/null || true)"
+if [ "$VHOST_BODY_STATUS" != "413" ]; then
+    echo "1.0 core smoke failed: vhost body limit returned $VHOST_BODY_STATUS instead of 413" >&2
+    exit 1
+fi
 
 python3 - "$FLUXHEIM_PORT" <<'PY'
 import socket

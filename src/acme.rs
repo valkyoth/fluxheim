@@ -210,6 +210,7 @@ mod tests {
         let config = acme_config_with_vhosts(vec![VhostConfig {
             name: "example".to_owned(),
             hosts: vec!["Example.TEST".to_owned(), "*.example.test".to_owned()],
+            max_request_body_bytes: None,
             tls: VhostTlsConfig {
                 enabled: true,
                 acme: VhostAcmeConfig {
@@ -223,6 +224,7 @@ mod tests {
             cache: CacheConfig::default(),
             headers: crate::config::VhostHeaderPolicyConfig::default(),
             web: WebConfig::default(),
+            routes: Vec::new(),
         }]);
 
         let targets = renewal_targets(&config);
@@ -332,6 +334,7 @@ mod tests {
         VhostConfig {
             name: name.to_owned(),
             hosts: vec![format!("{name}.test")],
+            max_request_body_bytes: None,
             tls: VhostTlsConfig {
                 enabled: true,
                 acme: VhostAcmeConfig {
@@ -345,6 +348,7 @@ mod tests {
             cache: CacheConfig::default(),
             headers: crate::config::VhostHeaderPolicyConfig::default(),
             web: WebConfig::default(),
+            routes: Vec::new(),
         }
     }
 }

@@ -2038,6 +2038,8 @@ pub struct VhostConfig {
     #[serde(default)]
     pub hosts: Vec<String>,
     #[serde(default)]
+    pub max_request_body_bytes: Option<ByteSize>,
+    #[serde(default)]
     pub tls: VhostTlsConfig,
     #[serde(default)]
     pub proxy: ProxyConfig,
@@ -2085,6 +2087,12 @@ impl VhostConfig {
         self.headers.validate()?;
         self.web.validate()?;
         self.validate_routes()?;
+        if matches!(self.max_request_body_bytes, Some(bytes) if bytes.as_u64() == 0) {
+            return Err(ConfigError::InvalidVhostLimit {
+                vhost: self.name.clone(),
+                field: "max_request_body_bytes",
+            });
+        }
 
         for host in &self.hosts {
             if normalize_host_pattern(host).is_none() {
@@ -2897,6 +2905,10 @@ pub enum ConfigError {
         vhost: String,
         host: String,
     },
+    InvalidVhostLimit {
+        vhost: String,
+        field: &'static str,
+    },
     EmptyRouteName {
         vhost: String,
     },
@@ -3248,6 +3260,12 @@ impl Display for ConfigError {
                 formatter,
                 "vhost {vhost:?} route {route:?} must define exactly one action: redirect, proxy, or web"
             ),
+            Self::InvalidVhostLimit { vhost, field } => {
+                write!(
+                    formatter,
+                    "vhost {vhost:?} {field} must be greater than zero"
+                )
+            }
             Self::InvalidRouteLimit {
                 vhost,
                 route,
@@ -6315,6 +6333,7 @@ mod tests {
             [[vhosts]]
             name = "gateway"
             hosts = ["gateway.example"]
+            max_request_body_bytes = "128MiB"
 
             [[vhosts.routes]]
             name = "chat"
@@ -6348,6 +6367,10 @@ mod tests {
 
         config.validate().unwrap();
         assert_eq!(config.vhosts[0].routes.len(), 3);
+        assert_eq!(
+            config.vhosts[0].max_request_body_bytes,
+            Some(ByteSize::from_bytes(128 * 1024 * 1024))
+        );
         assert_eq!(config.vhosts[0].routes[0].name, "chat");
         assert_eq!(
             config.vhosts[0].routes[0]
@@ -6369,6 +6392,30 @@ mod tests {
             config.vhosts[0].routes[2].redirect.as_ref().unwrap().status,
             308
         );
+    }
+
+    #[test]
+    fn rejects_invalid_vhost_body_limit() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+            max_request_body_bytes = "0B"
+
+            [vhosts.proxy]
+            upstreams = ["127.0.0.1:6010"]
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidVhostLimit {
+                vhost,
+                field: "max_request_body_bytes"
+            }) if vhost == "gateway"
+        ));
     }
 
     #[test]
@@ -6442,6 +6489,7 @@ mod tests {
                 VhostConfig {
                     name: "first.example".to_owned(),
                     hosts: vec!["Example.com".to_owned()],
+                    max_request_body_bytes: None,
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -6452,6 +6500,7 @@ mod tests {
                 VhostConfig {
                     name: "second.example".to_owned(),
                     hosts: vec!["example.com:443".to_owned()],
+                    max_request_body_bytes: None,
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -6484,6 +6533,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "known".to_owned(),
                 hosts: vec!["known.example".to_owned()],
+                max_request_body_bytes: None,
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
@@ -6508,6 +6558,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "wild".to_owned(),
                 hosts: vec!["*.example.com".to_owned()],
+                max_request_body_bytes: None,
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),

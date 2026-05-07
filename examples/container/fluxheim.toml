@@ -111,6 +111,7 @@ cache_control = "public, max-age=300"
 [[vhosts]]
 name = "app"
 hosts = ["app.example.test"]
+max_request_body_bytes = "64MiB"
 
 [vhosts.web]
 root = "/srv/sites/app/public"

@@ -192,6 +192,7 @@ mod tests {
             vhosts: vec![VhostConfig {
                 name: "example".to_owned(),
                 hosts: vec!["example.test".to_owned()],
+                max_request_body_bytes: None,
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),

@@ -1898,6 +1898,7 @@ mod tests {
         eligible_image_request, image_cache_key, memory_image_cache_from_config, storage_plan,
     };
     use crate::config::{ByteSize, CacheConfig, CacheDiskConfig, CacheMemoryConfig};
+    #[cfg(feature = "proxy")]
     use crate::test_support::unique_temp_path;
 
     fn enabled_cache() -> CacheConfig {
