@@ -3,8 +3,16 @@
 This is the maintainer procedure for publishing a Fluxheim release. It is the
 step-by-step operational companion to the broader release checklist.
 
-Use this from a clean `main` checkout. Replace `0.5.0` with the release version
-you are publishing.
+Use this from a clean `main` checkout. Set the release variables once, then
+reuse them through the commands below:
+
+```bash
+RELEASE_VERSION=0.5.0
+TAG="v${RELEASE_VERSION}"
+TITLE="Fluxheim ${RELEASE_VERSION}"
+RELEASE_NOTES="RELEASE_NOTES_${RELEASE_VERSION}.md"
+DIST_NAME="fluxheim-${RELEASE_VERSION}-linux-x86_64"
+```
 
 ## 1. Preflight
 
@@ -43,7 +51,7 @@ Commit any release-note, README, packaging, or metadata changes:
 
 ```bash
 git add .
-git commit -S -m "Prepare Fluxheim 0.5.0 release"
+git commit -S -m "Prepare Fluxheim ${RELEASE_VERSION} release"
 git push origin main
 ```
 
@@ -60,9 +68,9 @@ git rev-parse HEAD
 Create a signed tag:
 
 ```bash
-git tag -s v0.5.0 -m "Fluxheim 0.5.0"
-git tag -v v0.5.0
-git push origin v0.5.0
+git tag -s "${TAG}" -m "${TITLE}"
+git tag -v "${TAG}"
+git push origin "${TAG}"
 ```
 
 Record the `Good "git" signature ...` line from `git tag -v`.
@@ -80,12 +88,12 @@ cargo build --release --locked
 Create the release bundle:
 
 ```bash
-mkdir -p dist/fluxheim-0.5.0-linux-x86_64
-cp target/release/fluxheim dist/fluxheim-0.5.0-linux-x86_64/
-cp README.md LICENSE CHANGELOG.md RELEASE_NOTES_0.5.0.md dist/fluxheim-0.5.0-linux-x86_64/
-cp -r docs examples packaging dist/fluxheim-0.5.0-linux-x86_64/
-tar -C dist -czf dist/fluxheim-0.5.0-linux-x86_64.tar.gz fluxheim-0.5.0-linux-x86_64
-sha256sum dist/fluxheim-0.5.0-linux-x86_64.tar.gz
+mkdir -p "dist/${DIST_NAME}"
+cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp README.md LICENSE CHANGELOG.md "${RELEASE_NOTES}" "dist/${DIST_NAME}/"
+cp -r docs examples packaging "dist/${DIST_NAME}/"
+tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
+sha256sum "dist/${DIST_NAME}.tar.gz"
 ```
 
 Record the binary checksum.
@@ -98,10 +106,10 @@ On GitHub:
 
 1. Open Releases.
 2. Draft a new release.
-3. Select tag `v0.5.0`.
-4. Title it `Fluxheim 0.5.0`.
-5. Paste the contents of `RELEASE_NOTES_0.5.0.md`.
-6. Upload `dist/fluxheim-0.5.0-linux-x86_64.tar.gz`.
+3. Select the tag from `$TAG`.
+4. Use `$TITLE` as the release title.
+5. Paste the contents of `$RELEASE_NOTES`.
+6. Upload `dist/${DIST_NAME}.tar.gz`.
 7. Publish the release.
 
 It is normal to publish before every evidence field is filled. Source archives
@@ -115,10 +123,10 @@ and hash them:
 
 ```bash
 mkdir -p dist/checksums
-curl -L -o dist/checksums/fluxheim-0.5.0.tar.gz https://github.com/valkyoth/fluxheim/archive/refs/tags/v0.5.0.tar.gz
-curl -L -o dist/checksums/fluxheim-0.5.0.zip https://github.com/valkyoth/fluxheim/archive/refs/tags/v0.5.0.zip
-sha256sum dist/checksums/fluxheim-0.5.0.tar.gz
-sha256sum dist/checksums/fluxheim-0.5.0.zip
+curl -L -o "dist/checksums/fluxheim-${RELEASE_VERSION}.tar.gz" "https://github.com/valkyoth/fluxheim/archive/refs/tags/${TAG}.tar.gz"
+curl -L -o "dist/checksums/fluxheim-${RELEASE_VERSION}.zip" "https://github.com/valkyoth/fluxheim/archive/refs/tags/${TAG}.zip"
+sha256sum "dist/checksums/fluxheim-${RELEASE_VERSION}.tar.gz"
+sha256sum "dist/checksums/fluxheim-${RELEASE_VERSION}.zip"
 ```
 
 Edit the GitHub release notes and add these checksums.
@@ -137,17 +145,17 @@ For GHCR, the package must be public if anonymous users should pull it:
 Then collect immutable digests:
 
 ```bash
-podman pull ghcr.io/valkyoth/fluxheim:v0.5.0-wolfi
-podman inspect ghcr.io/valkyoth/fluxheim:v0.5.0-wolfi --format '{{index .RepoDigests 0}}'
+podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-wolfi"
+podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-wolfi" --format '{{index .RepoDigests 0}}'
 
-podman pull ghcr.io/valkyoth/fluxheim:v0.5.0-alpine
-podman inspect ghcr.io/valkyoth/fluxheim:v0.5.0-alpine --format '{{index .RepoDigests 0}}'
+podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-alpine"
+podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-alpine" --format '{{index .RepoDigests 0}}'
 
-podman pull ghcr.io/valkyoth/fluxheim:v0.5.0-suse-micro
-podman inspect ghcr.io/valkyoth/fluxheim:v0.5.0-suse-micro --format '{{index .RepoDigests 0}}'
+podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-suse-micro"
+podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-suse-micro" --format '{{index .RepoDigests 0}}'
 
-podman pull ghcr.io/valkyoth/fluxheim:v0.5.0-debian
-podman inspect ghcr.io/valkyoth/fluxheim:v0.5.0-debian --format '{{index .RepoDigests 0}}'
+podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-debian"
+podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-debian" --format '{{index .RepoDigests 0}}'
 ```
 
 If Docker Hub publishing is enabled, repeat the same pull/inspect process for
@@ -163,10 +171,10 @@ The release notes should end with concrete evidence, not placeholders:
 ## Checksums And Signatures
 
 - Source archive checksums:
-  - `...  fluxheim-0.5.0.tar.gz`
-  - `...  fluxheim-0.5.0.zip`
+  - `...  fluxheim-${RELEASE_VERSION}.tar.gz`
+  - `...  fluxheim-${RELEASE_VERSION}.zip`
 - Binary checksums:
-  - `...  fluxheim-0.5.0-linux-x86_64.tar.gz`
+  - `...  fluxheim-${RELEASE_VERSION}-linux-x86_64.tar.gz`
 - Container digests:
   - Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
   - Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
@@ -181,7 +189,7 @@ The release notes should end with concrete evidence, not placeholders:
 Pull one published image and confirm the packaged default site starts:
 
 ```bash
-podman run --rm -d --name fluxheim-release-smoke -p 127.0.0.1:18080:8080 ghcr.io/valkyoth/fluxheim:v0.5.0-wolfi
+podman run --rm -d --name fluxheim-release-smoke -p 127.0.0.1:18080:8080 "ghcr.io/valkyoth/fluxheim:${TAG}-wolfi"
 curl -I http://127.0.0.1:18080/
 podman logs fluxheim-release-smoke
 podman stop fluxheim-release-smoke

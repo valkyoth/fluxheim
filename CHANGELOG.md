@@ -11,7 +11,24 @@ behavior when the change improves security or project direction.
 
 ### Added
 
-- Nothing yet.
+- `1.0` gateway migration fixtures and smoke coverage for representative
+  multi-site configs.
+- Route-level exact, prefix, and fallback matching with proxy, static, and
+  redirect actions.
+- Route prefix stripping, per-route request body limits, and route-local
+  upstream connect/read/send timeout policy.
+- Websocket-safe upgrade proxying coverage for `/chat/`-style routes.
+- Vhost ACME challenge helper for standard cleartext challenge paths while
+  preserving HTTPS redirects for normal traffic.
+- Vhost canonical redirect helper for apex/secondary-host redirects that preserve
+  the request URI safely.
+- Custom upstream error pages with internal static serving.
+- Static alias routes with secure optional directory listing and local-time
+  timestamp rendering.
+- Safe dynamic request-header templates for common proxy migrations.
+- SNI certificate selection for callback-capable downstream TLS backends.
+- Native systemd deployment files, sysusers/tmpfiles packaging, and manual
+  server preparation helper for compiled binaries.
 
 ## 0.5.0 - Basic Sites Preview
 
