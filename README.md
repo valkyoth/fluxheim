@@ -121,6 +121,9 @@ deployment supplies its own config. For the `[[vhosts]]` syntax and the
 recommended one-vhost-per-file layout, see
 [Vhost Config Guide](docs/vhost-config.md).
 
+Native/manual binary deployments can use the provided hardened systemd unit;
+see [systemd Deployment](docs/systemd.md).
+
 <details>
 <summary><b>Feature Builds</b></summary>
 
@@ -224,16 +227,15 @@ Fluxheim will not treat every planned feature as part of `1.0`. The `1.0`
 target is the first release intended to migrate representative real multi-site
 gateway configs.
 
-The `1.0` blockers are:
-
-- SNI certificate selection across multiple configured certificates.
-- Route-level exact, prefix, and fallback matching.
-- Route actions for proxy, static serving, and redirects.
-- Websocket-safe proxying and prefix stripping for routes such as `/chat/`.
-- Per-route body limits and upstream connect/read/send timeouts.
-- Custom upstream error pages.
-- Static aliases and secure directory listing.
-- Container DNS behavior suitable for local Podman deployments.
+Already landed after `0.5.0`: route-level exact/prefix/fallback matching,
+route actions for proxy/static/redirects, route prefix stripping, per-route
+body limits, upstream connect/read/send timeout knobs, websocket-safe upgrade
+smoke coverage for `/chat/`-style routes, and custom upstream error pages,
+secure static aliases with optional directory listing, and SNI certificate
+selection for callback-capable TLS backends. Direct proxy upstream DNS names are
+resolved per request and resolution failures return upstream errors instead of
+panicking the worker, which covers local Podman service names for the non-LB
+gateway path.
 
 After `1.0`, the planned release ladder continues with TLS policy hardening,
 operations tooling, load balancing, cache improvements, certificate automation,
@@ -249,6 +251,7 @@ the full release ladder.
 - [Roadmap](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
 - [Versioning Plan](docs/versioning-plan.md)
+- [Release Runbook](docs/release-runbook.md)
 - [Release Checklist](docs/release-checklist.md)
 - [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
 - [Feature Matrix](docs/features.md)

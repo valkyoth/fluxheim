@@ -1,0 +1,42 @@
+[Unit]
+Description=Fluxheim reverse proxy and static web server
+Documentation=https://github.com/valkyoth/fluxheim
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fluxheim
+Group=fluxheim
+Environment=FLUXHEIM_CONFIG=/etc/fluxheim/fluxheim.toml
+EnvironmentFile=-/etc/sysconfig/fluxheim
+ExecStartPre=/usr/bin/fluxheim --config ${FLUXHEIM_CONFIG} --validate-config
+ExecStart=/usr/bin/fluxheim --config ${FLUXHEIM_CONFIG}
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+RuntimeDirectory=fluxheim
+RuntimeDirectoryMode=0750
+StateDirectory=fluxheim
+StateDirectoryMode=0750
+CacheDirectory=fluxheim
+CacheDirectoryMode=0750
+LogsDirectory=fluxheim
+LogsDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /var/log/fluxheim
+ReadOnlyPaths=/etc/fluxheim /srv/fluxheim
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

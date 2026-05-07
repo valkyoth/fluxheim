@@ -88,6 +88,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def _write_response(self, include_body):
         body = "\n".join(
             [
@@ -96,6 +98,8 @@ class Handler(BaseHTTPRequestHandler):
                 f"host={self.headers.get('host', '')}",
                 f"xfh={self.headers.get('x-forwarded-host', '')}",
                 f"xfp={self.headers.get('x-forwarded-proto', '')}",
+                f"xri={self.headers.get('x-real-ip', '')}",
+                f"xou={self.headers.get('x-original-uri', '')}",
                 f"xpb={self.headers.get('x-proxy-by', '')}",
             ]
         ).encode("ascii")
@@ -109,6 +113,18 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def do_GET(self):
+        if self.path.startswith("/room") and self.headers.get("upgrade", "").lower() == "websocket":
+            self.send_response(101, "Switching Protocols")
+            self.send_header("upgrade", "websocket")
+            self.send_header("connection", "Upgrade")
+            self.send_header("sec-websocket-accept", "HSmrc0sMlYUkAGmm5OPpG2HaGWk=")
+            self.send_header("x-upstream-path", self.path)
+            self.end_headers()
+            data = self.connection.recv(64)
+            if data:
+                self.connection.sendall(b"echo:" + data)
+            self.close_connection = True
+            return
         self._write_response(True)
 
     def do_HEAD(self):
@@ -157,12 +173,15 @@ request_id = false
 enabled = true
 strip_inbound_client_ip_headers = true
 x_forwarded_for = "replace"
+x_real_ip = true
 x_forwarded_host = true
 x_forwarded_proto = true
 forwarded = false
 unset = ["x-powered-by"]
 
 [headers.request.set]
+x-forwarded-host = "{host}"
+x-original-uri = "{uri}"
 x-proxy-by = "Fluxheim"
 
 [headers.response]
@@ -210,6 +229,26 @@ name = "app.test"
 hosts = ["app.test"]
 
 [vhosts.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_PORT"]
+upstream_tls = false
+
+[[vhosts.routes]]
+name = "chat"
+path_prefix = "/chat/"
+strip_prefix = "/chat/"
+max_request_body_bytes = "64MiB"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_PORT"]
+upstream_tls = false
+read_timeout_secs = 600
+send_timeout_secs = 600
+
+[[vhosts.routes]]
+name = "fallback"
+fallback = true
+
+[vhosts.routes.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
 EOF
@@ -325,13 +364,50 @@ fi
 
 PROXY_BODY="$TMP_DIR/proxy-body.txt"
 curl -fsS -H "Host: app.test" "http://127.0.0.1:$FLUXHEIM_PORT/api/check" > "$PROXY_BODY"
-for expected in "proxy-ok" "path=/api/check" "xfh=app.test" "xfp=http" "xpb=Fluxheim"; do
+for expected in "proxy-ok" "path=/api/check" "xfh=app.test" "xfp=http" "xri=127.0.0.1" "xou=/api/check" "xpb=Fluxheim"; do
     if ! grep -q "^$expected$" "$PROXY_BODY"; then
         echo "1.0 core smoke failed: proxied response missing $expected" >&2
         cat "$PROXY_BODY" >&2
         exit 1
     fi
 done
+
+python3 - "$FLUXHEIM_PORT" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+request = (
+    "GET /chat/room?id=7 HTTP/1.1\r\n"
+    "Host: app.test\r\n"
+    "Connection: Upgrade\r\n"
+    "Upgrade: websocket\r\n"
+    "Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\r\n"
+    "Sec-WebSocket-Version: 13\r\n"
+    "\r\n"
+).encode("ascii")
+
+with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+    sock.settimeout(5)
+    sock.sendall(request)
+    response = b""
+    while b"\r\n\r\n" not in response:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        response += chunk
+
+    header_block = response.decode("iso-8859-1", errors="replace")
+    if " 101 " not in header_block.split("\r\n", 1)[0]:
+        raise SystemExit(f"upgrade did not return 101:\n{header_block}")
+    if "x-upstream-path: /room?id=7" not in header_block.lower():
+        raise SystemExit(f"upgrade route did not strip /chat/ prefix:\n{header_block}")
+
+    sock.sendall(b"ping\n")
+    echo = sock.recv(64)
+    if echo != b"echo:ping\n":
+        raise SystemExit(f"upgrade tunnel did not echo bytes: {echo!r}")
+PY
 
 PROXY_HEADERS="$TMP_DIR/proxy-headers.txt"
 curl -fsSI -H "Host: app.test" "http://127.0.0.1:$FLUXHEIM_PORT/api/check" > "$PROXY_HEADERS"
@@ -348,7 +424,7 @@ fi
 
 TLS_PROXY_BODY="$TMP_DIR/tls-proxy-body.txt"
 curl -kfsS -H "Host: app.test" "https://127.0.0.1:$FLUXHEIM_TLS_PORT/tls/check" > "$TLS_PROXY_BODY"
-for expected in "proxy-ok" "path=/tls/check" "xfh=app.test" "xfp=https" "xpb=Fluxheim"; do
+for expected in "proxy-ok" "path=/tls/check" "xfh=app.test" "xfp=https" "xri=127.0.0.1" "xou=/tls/check" "xpb=Fluxheim"; do
     if ! grep -q "^$expected$" "$TLS_PROXY_BODY"; then
         echo "1.0 core smoke failed: TLS proxied response missing $expected" >&2
         cat "$TLS_PROXY_BODY" >&2

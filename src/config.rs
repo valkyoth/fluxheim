@@ -244,6 +244,9 @@ impl ConfigFragment {
         if let Some(logging) = &mut self.logging {
             logging.resolve_relative_paths(base_dir);
         }
+        if let Some(proxy) = &mut self.proxy {
+            proxy.resolve_relative_paths(base_dir);
+        }
         if let Some(cache) = &mut self.cache {
             cache.resolve_relative_paths(base_dir);
         }
@@ -919,6 +922,8 @@ pub struct RequestHeaderPolicyOverlayConfig {
     #[serde(default)]
     pub x_forwarded_for: Option<ForwardedClientIpHeaderMode>,
     #[serde(default)]
+    pub x_real_ip: Option<bool>,
+    #[serde(default)]
     pub x_forwarded_host: Option<bool>,
     #[serde(default)]
     pub x_forwarded_proto: Option<bool>,
@@ -970,6 +975,8 @@ pub struct RequestHeaderPolicyConfig {
     #[serde(default)]
     pub x_forwarded_for: ForwardedClientIpHeaderMode,
     #[serde(default = "default_true")]
+    pub x_real_ip: bool,
+    #[serde(default = "default_true")]
     pub x_forwarded_host: bool,
     #[serde(default = "default_true")]
     pub x_forwarded_proto: bool,
@@ -998,6 +1005,7 @@ impl Default for RequestHeaderPolicyConfig {
             x_forwarded_for: ForwardedClientIpHeaderMode::Replace,
             #[cfg(feature = "privacy-mode")]
             x_forwarded_for: ForwardedClientIpHeaderMode::Off,
+            x_real_ip: false,
             x_forwarded_host: true,
             x_forwarded_proto: true,
             forwarded: false,
@@ -1042,6 +1050,9 @@ impl RequestHeaderPolicyConfig {
         }
         if let Some(mode) = overlay.x_forwarded_for {
             self.x_forwarded_for = mode;
+        }
+        if let Some(enabled) = overlay.x_real_ip {
+            self.x_real_ip = enabled;
         }
         if let Some(enabled) = overlay.x_forwarded_host {
             self.x_forwarded_host = enabled;
@@ -1813,6 +1824,14 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_sni: Option<String>,
     #[serde(default)]
+    pub connect_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub read_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub send_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub error_pages: Vec<ProxyErrorPageConfig>,
+    #[serde(default)]
     pub load_balance: LoadBalanceConfig,
 }
 
@@ -1823,6 +1842,10 @@ impl Default for ProxyConfig {
             upstreams: Vec::new(),
             upstream_tls: false,
             upstream_sni: None,
+            connect_timeout_secs: None,
+            read_timeout_secs: None,
+            send_timeout_secs: None,
+            error_pages: Vec::new(),
             load_balance: LoadBalanceConfig::default(),
         }
     }
@@ -1841,6 +1864,12 @@ impl ProxyConfig {
         self.upstream_sni
             .clone()
             .unwrap_or_else(|| upstream_host(self.primary_upstream()).unwrap_or_default())
+    }
+
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        for error_page in &mut self.error_pages {
+            error_page.resolve_relative_paths(base_dir);
+        }
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -1870,7 +1899,56 @@ impl ProxyConfig {
             return Err(ConfigError::EmptyUpstreamSni);
         }
 
+        validate_optional_timeout_secs("proxy.connect_timeout_secs", self.connect_timeout_secs)?;
+        validate_optional_timeout_secs("proxy.read_timeout_secs", self.read_timeout_secs)?;
+        validate_optional_timeout_secs("proxy.send_timeout_secs", self.send_timeout_secs)?;
+
+        let mut statuses = std::collections::HashSet::new();
+        for error_page in &self.error_pages {
+            error_page.validate()?;
+            if !statuses.insert(error_page.status) {
+                return Err(ConfigError::DuplicateProxyErrorPageStatus {
+                    status: error_page.status,
+                });
+            }
+        }
+
         self.load_balance.validate()?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyErrorPageConfig {
+    pub status: u16,
+    pub path: String,
+    #[serde(default)]
+    pub web: WebConfig,
+}
+
+impl ProxyErrorPageConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        self.web.resolve_relative_paths(base_dir);
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !(400..=599).contains(&self.status) {
+            return Err(ConfigError::InvalidProxyErrorPageStatus {
+                status: self.status,
+            });
+        }
+        validate_route_path("proxy.error_pages.path", &self.path, false).map_err(|_| {
+            ConfigError::InvalidProxyErrorPagePath {
+                path: self.path.clone(),
+            }
+        })?;
+        self.web.validate()?;
+        if !self.web.enabled() {
+            return Err(ConfigError::MissingProxyErrorPageRoot {
+                status: self.status,
+            });
+        }
         Ok(())
     }
 }
@@ -1969,6 +2047,8 @@ pub struct VhostConfig {
     pub headers: VhostHeaderPolicyConfig,
     #[serde(default)]
     pub web: WebConfig,
+    #[serde(default)]
+    pub routes: Vec<RouteConfig>,
 }
 
 impl VhostConfig {
@@ -1981,8 +2061,12 @@ impl VhostConfig {
 
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
         self.tls.resolve_relative_paths(base_dir);
+        self.proxy.resolve_relative_paths(base_dir);
         self.cache.resolve_relative_paths(base_dir);
         self.web.resolve_relative_paths(base_dir);
+        for route in &mut self.routes {
+            route.resolve_relative_paths(base_dir);
+        }
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -2000,6 +2084,7 @@ impl VhostConfig {
         self.cache.validate("vhosts.cache")?;
         self.headers.validate()?;
         self.web.validate()?;
+        self.validate_routes()?;
 
         for host in &self.hosts {
             if normalize_host_pattern(host).is_none() {
@@ -2013,9 +2098,184 @@ impl VhostConfig {
         Ok(())
     }
 
+    fn validate_routes(&self) -> Result<(), ConfigError> {
+        let mut fallback_seen = false;
+        for route in &self.routes {
+            route.validate(&self.name)?;
+            if route.fallback {
+                if fallback_seen {
+                    return Err(ConfigError::DuplicateFallbackRoute {
+                        vhost: self.name.clone(),
+                    });
+                }
+                fallback_seen = true;
+            }
+        }
+        Ok(())
+    }
+
     fn validate_tls(&self, global_tls: &TlsConfig) -> Result<(), ConfigError> {
         self.tls.validate("vhosts.tls", &self.hosts, global_tls)
     }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteConfig {
+    pub name: String,
+    #[serde(default)]
+    pub path_exact: Option<String>,
+    #[serde(default)]
+    pub path_prefix: Option<String>,
+    #[serde(default)]
+    pub fallback: bool,
+    #[serde(default)]
+    pub strip_prefix: Option<String>,
+    #[serde(default)]
+    pub max_request_body_bytes: Option<ByteSize>,
+    #[serde(default)]
+    pub redirect: Option<RouteRedirectConfig>,
+    #[serde(default)]
+    pub proxy: Option<ProxyConfig>,
+    #[serde(default)]
+    pub web: Option<WebConfig>,
+    #[serde(default)]
+    pub headers: VhostHeaderPolicyConfig,
+}
+
+impl RouteConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(proxy) = &mut self.proxy {
+            proxy.resolve_relative_paths(base_dir);
+        }
+        if let Some(web) = &mut self.web {
+            web.resolve_relative_paths(base_dir);
+        }
+    }
+
+    fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
+        if self.name.trim().is_empty() {
+            return Err(ConfigError::EmptyRouteName {
+                vhost: vhost.to_owned(),
+            });
+        }
+
+        let matcher_count = usize::from(self.path_exact.is_some())
+            + usize::from(self.path_prefix.is_some())
+            + usize::from(self.fallback);
+        if matcher_count != 1 {
+            return Err(ConfigError::InvalidRouteMatcher {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+            });
+        }
+
+        if let Some(path) = &self.path_exact {
+            validate_route_path("vhosts.routes.path_exact", path, false).map_err(|_| {
+                ConfigError::InvalidRouteMatcher {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                }
+            })?;
+        }
+        if let Some(path) = &self.path_prefix {
+            validate_route_path("vhosts.routes.path_prefix", path, true).map_err(|_| {
+                ConfigError::InvalidRouteMatcher {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                }
+            })?;
+        }
+        if let Some(path) = &self.strip_prefix {
+            validate_route_path("vhosts.routes.strip_prefix", path, true).map_err(|_| {
+                ConfigError::InvalidRouteStripPrefix {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                }
+            })?;
+            let Some(prefix) = &self.path_prefix else {
+                return Err(ConfigError::InvalidRouteStripPrefix {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                });
+            };
+            if !prefix.starts_with(path) && !path.starts_with(prefix) {
+                return Err(ConfigError::InvalidRouteStripPrefix {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                });
+            }
+        }
+        if self
+            .max_request_body_bytes
+            .is_some_and(|bytes| bytes.as_u64() == 0)
+        {
+            return Err(ConfigError::InvalidRouteLimit {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                field: "max_request_body_bytes",
+            });
+        }
+
+        let action_count = usize::from(self.redirect.is_some())
+            + usize::from(self.proxy.is_some())
+            + usize::from(self.web.is_some());
+        if action_count != 1 {
+            return Err(ConfigError::InvalidRouteAction {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+            });
+        }
+
+        if let Some(redirect) = &self.redirect {
+            redirect.validate(vhost, &self.name)?;
+        }
+        if let Some(proxy) = &self.proxy {
+            proxy.validate()?;
+        }
+        if let Some(web) = &self.web {
+            web.validate()?;
+            if !web.enabled() {
+                return Err(ConfigError::InvalidRouteAction {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                });
+            }
+        }
+        self.headers.validate()?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RouteRedirectConfig {
+    pub to: String,
+    #[serde(default = "default_route_redirect_status")]
+    pub status: u16,
+}
+
+impl RouteRedirectConfig {
+    fn validate(&self, vhost: &str, route: &str) -> Result<(), ConfigError> {
+        if !matches!(self.status, 301 | 302 | 307 | 308) {
+            return Err(ConfigError::InvalidRouteRedirectStatus {
+                vhost: vhost.to_owned(),
+                route: route.to_owned(),
+                status: self.status,
+            });
+        }
+        if !valid_redirect_target_template(&self.to) {
+            return Err(ConfigError::InvalidRouteRedirectTarget {
+                vhost: vhost.to_owned(),
+                route: route.to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_route_redirect_status() -> u16 {
+    308
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -2319,6 +2579,8 @@ pub struct WebConfig {
     pub index_files: Vec<String>,
     #[serde(default = "default_true")]
     pub deny_dotfiles: bool,
+    #[serde(default)]
+    pub directory_listing: DirectoryListingConfig,
     #[serde(default = "default_static_cache_control")]
     pub cache_control: String,
     #[serde(default)]
@@ -2331,6 +2593,7 @@ impl Default for WebConfig {
             root: None,
             index_files: default_index_files(),
             deny_dotfiles: true,
+            directory_listing: DirectoryListingConfig::default(),
             cache_control: default_static_cache_control(),
             expires: None,
         }
@@ -2357,6 +2620,7 @@ impl WebConfig {
             return Err(ConfigError::EmptyWebRoot);
         }
         validate_path("web.root", self.root.as_deref())?;
+        self.directory_listing.validate()?;
 
         if self.index_files.is_empty() {
             return Err(ConfigError::EmptyIndexFiles);
@@ -2377,6 +2641,21 @@ impl WebConfig {
         validate_optional_header_value("web.cache_control", Some(&self.cache_control))?;
         validate_optional_header_value("web.expires", self.expires.as_deref())?;
 
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryListingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub exact_size: bool,
+}
+
+impl DirectoryListingConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
         Ok(())
     }
 }
@@ -2487,6 +2766,11 @@ pub enum ConfigError {
         field: &'static str,
         name: String,
     },
+    InvalidHeaderTemplate {
+        field: &'static str,
+        name: String,
+        variable: String,
+    },
     ConflictingHeaderAdd {
         field: &'static str,
         name: String,
@@ -2549,6 +2833,21 @@ pub enum ConfigError {
     },
     ConflictingProxyUpstreams,
     EmptyUpstreamSni,
+    InvalidProxyTimeout {
+        field: &'static str,
+    },
+    InvalidProxyErrorPageStatus {
+        status: u16,
+    },
+    DuplicateProxyErrorPageStatus {
+        status: u16,
+    },
+    InvalidProxyErrorPagePath {
+        path: String,
+    },
+    MissingProxyErrorPageRoot {
+        status: u16,
+    },
     InvalidLoadBalanceMaxIterations,
     InvalidLoadBalanceHealthCheck {
         field: &'static str,
@@ -2597,6 +2896,38 @@ pub enum ConfigError {
     InvalidVhostHost {
         vhost: String,
         host: String,
+    },
+    EmptyRouteName {
+        vhost: String,
+    },
+    InvalidRouteMatcher {
+        vhost: String,
+        route: String,
+    },
+    DuplicateFallbackRoute {
+        vhost: String,
+    },
+    InvalidRouteStripPrefix {
+        vhost: String,
+        route: String,
+    },
+    InvalidRouteAction {
+        vhost: String,
+        route: String,
+    },
+    InvalidRouteLimit {
+        vhost: String,
+        route: String,
+        field: &'static str,
+    },
+    InvalidRouteRedirectStatus {
+        vhost: String,
+        route: String,
+        status: u16,
+    },
+    InvalidRouteRedirectTarget {
+        vhost: String,
+        route: String,
     },
     DuplicateVhostName {
         name: String,
@@ -2712,6 +3043,14 @@ impl Display for ConfigError {
                 formatter,
                 "{field}.{name} must be a non-empty HTTP header value without control characters"
             ),
+            Self::InvalidHeaderTemplate {
+                field,
+                name,
+                variable,
+            } => write!(
+                formatter,
+                "{field}.{name} contains unsupported dynamic header variable {{{variable}}}"
+            ),
             Self::ConflictingHeaderAdd { field, name } => write!(
                 formatter,
                 "{field} defines header {name:?} in more than one add/set table"
@@ -2802,6 +3141,25 @@ impl Display for ConfigError {
                 "proxy.upstream and proxy.upstreams cannot both be configured; use proxy.upstreams for one or many targets"
             ),
             Self::EmptyUpstreamSni => write!(formatter, "upstream_sni cannot be empty"),
+            Self::InvalidProxyTimeout { field } => {
+                write!(formatter, "{field} must be greater than zero")
+            }
+            Self::InvalidProxyErrorPageStatus { status } => write!(
+                formatter,
+                "proxy.error_pages.status must be an HTTP error status from 400 through 599, got {status}"
+            ),
+            Self::DuplicateProxyErrorPageStatus { status } => write!(
+                formatter,
+                "proxy.error_pages contains more than one page for status {status}"
+            ),
+            Self::InvalidProxyErrorPagePath { path } => write!(
+                formatter,
+                "proxy.error_pages.path must be an absolute internal request path, got {path:?}"
+            ),
+            Self::MissingProxyErrorPageRoot { status } => write!(
+                formatter,
+                "proxy.error_pages entry for status {status} requires web.root"
+            ),
             Self::InvalidLoadBalanceMaxIterations => {
                 write!(
                     formatter,
@@ -2866,6 +3224,50 @@ impl Display for ConfigError {
             Self::InvalidVhostHost { vhost, host } => {
                 write!(formatter, "vhost {vhost:?} has invalid host {host:?}")
             }
+            Self::EmptyRouteName { vhost } => {
+                write!(
+                    formatter,
+                    "vhost {vhost:?} contains a route with an empty name"
+                )
+            }
+            Self::InvalidRouteMatcher { vhost, route } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} must define exactly one of path_exact, path_prefix, or fallback = true"
+            ),
+            Self::DuplicateFallbackRoute { vhost } => {
+                write!(
+                    formatter,
+                    "vhost {vhost:?} defines more than one fallback route"
+                )
+            }
+            Self::InvalidRouteStripPrefix { vhost, route } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} strip_prefix must be an absolute path prefix attached to path_prefix"
+            ),
+            Self::InvalidRouteAction { vhost, route } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} must define exactly one action: redirect, proxy, or web"
+            ),
+            Self::InvalidRouteLimit {
+                vhost,
+                route,
+                field,
+            } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} {field} must be greater than zero"
+            ),
+            Self::InvalidRouteRedirectStatus {
+                vhost,
+                route,
+                status,
+            } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} redirect.status must be one of 301, 302, 307, or 308, got {status}"
+            ),
+            Self::InvalidRouteRedirectTarget { vhost, route } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} redirect.to must be a safe absolute http(s) URL template"
+            ),
             Self::DuplicateVhostName { name } => write!(formatter, "duplicate vhost name {name:?}"),
             Self::DuplicateVhostHost { host } => write!(formatter, "duplicate vhost host {host:?}"),
         }
@@ -3263,6 +3665,77 @@ fn valid_https_url(value: &str) -> bool {
         && !value.chars().any(char::is_whitespace)
 }
 
+fn validate_optional_timeout_secs(
+    field: &'static str,
+    value: Option<u64>,
+) -> Result<(), ConfigError> {
+    if value.is_some_and(|seconds| seconds == 0) {
+        return Err(ConfigError::InvalidProxyTimeout { field });
+    }
+    Ok(())
+}
+
+fn validate_route_path(
+    _field: &'static str,
+    value: &str,
+    _prefix: bool,
+) -> Result<(), ConfigError> {
+    if !value.starts_with('/')
+        || value.contains('\0')
+        || value.contains('\\')
+        || value.contains('?')
+        || value.contains('#')
+        || value.chars().any(char::is_control)
+        || value.split('/').any(|segment| segment == "..")
+    {
+        return Err(ConfigError::InvalidRouteMatcher {
+            vhost: String::new(),
+            route: String::new(),
+        });
+    }
+    Ok(())
+}
+
+fn valid_redirect_target_template(value: &str) -> bool {
+    let value = value.trim();
+    if !(value.starts_with("https://") || value.starts_with("http://"))
+        || value
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return false;
+    }
+
+    let expanded = value
+        .replace("{uri}", "/")
+        .replace("{path}", "/")
+        .replace("{query}", "");
+    if expanded.contains('{') || expanded.contains('}') {
+        return false;
+    }
+    if expanded.contains("\\") {
+        return false;
+    }
+
+    let Some(rest) = expanded
+        .strip_prefix("https://")
+        .or_else(|| expanded.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim_matches(['[', ']']);
+    !authority.is_empty()
+        && !authority.contains('@')
+        && !authority.contains('\\')
+        && !authority.chars().any(|character| {
+            character.is_control() || character.is_whitespace() || matches!(character, '/' | '#')
+        })
+}
+
 fn invalid_email(value: &str) -> bool {
     let value = value.trim();
     value.is_empty()
@@ -3606,7 +4079,54 @@ fn validate_header_mutation_value(
         });
     }
 
+    validate_dynamic_header_template(field, name, value)?;
     Ok(())
+}
+
+fn validate_dynamic_header_template(
+    field: &'static str,
+    name: &str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    let mut rest = value;
+    while let Some(open) = rest.find('{') {
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('}') else {
+            return Err(ConfigError::InvalidHeaderTemplate {
+                field,
+                name: name.to_owned(),
+                variable: after_open.to_owned(),
+            });
+        };
+        let variable = &after_open[..close];
+        if !valid_dynamic_header_variable(variable) {
+            return Err(ConfigError::InvalidHeaderTemplate {
+                field,
+                name: name.to_owned(),
+                variable: variable.to_owned(),
+            });
+        }
+        rest = &after_open[close + 1..];
+    }
+
+    if let Some(variable) = rest.split_once('}').map(|(before, _)| before) {
+        return Err(ConfigError::InvalidHeaderTemplate {
+            field,
+            name: name.to_owned(),
+            variable: variable.to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+fn valid_dynamic_header_variable(variable: &str) -> bool {
+    matches!(
+        variable,
+        "host" | "remote_addr" | "scheme" | "uri" | "path" | "query" | "request_id"
+    ) || variable
+        .strip_prefix("http.")
+        .is_some_and(valid_http_header_name)
 }
 
 fn valid_http_header_name(name: &str) -> bool {
@@ -3872,6 +4392,10 @@ mod tests {
             root = "public"
             cache_control = "public, max-age=31536000, immutable"
             expires = "Wed, 21 Oct 2030 07:28:00 GMT"
+
+            [web.directory_listing]
+            enabled = true
+            exact_size = true
             "#,
         )
         .unwrap();
@@ -3884,6 +4408,8 @@ mod tests {
             config.web.expires.as_deref(),
             Some("Wed, 21 Oct 2030 07:28:00 GMT")
         );
+        assert!(config.web.directory_listing.enabled);
+        assert!(config.web.directory_listing.exact_size);
     }
 
     #[test]
@@ -3892,6 +4418,9 @@ mod tests {
             r#"
             [proxy]
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            connect_timeout_secs = 5
+            read_timeout_secs = 60
+            send_timeout_secs = 30
 
             [proxy.load_balance]
             max_iterations = 16
@@ -3902,6 +4431,13 @@ mod tests {
             consecutive_success = 2
             consecutive_failure = 3
             parallel = true
+
+            [[proxy.error_pages]]
+            status = 502
+            path = "/502.html"
+
+            [proxy.error_pages.web]
+            root = "/srv/fluxheim/errors"
             "#,
         )
         .unwrap();
@@ -3910,6 +4446,12 @@ mod tests {
             config.proxy.upstreams,
             ["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()]
         );
+        assert_eq!(config.proxy.connect_timeout_secs, Some(5));
+        assert_eq!(config.proxy.read_timeout_secs, Some(60));
+        assert_eq!(config.proxy.send_timeout_secs, Some(30));
+        assert_eq!(config.proxy.error_pages.len(), 1);
+        assert_eq!(config.proxy.error_pages[0].status, 502);
+        assert_eq!(config.proxy.error_pages[0].path, "/502.html");
         assert_eq!(config.proxy.load_balance.max_iterations, 16);
         assert!(config.proxy.load_balance.health_check.enabled);
         assert_eq!(config.proxy.load_balance.health_check.interval_secs, 2);
@@ -3943,6 +4485,59 @@ mod tests {
     }
 
     #[test]
+    fn rejects_zero_proxy_timeouts() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            read_timeout_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProxyTimeout {
+                field: "proxy.read_timeout_secs"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_error_pages() {
+        let config: Config = toml::from_str(
+            r#"
+            [[proxy.error_pages]]
+            status = 302
+            path = "/302.html"
+
+            [proxy.error_pages.web]
+            root = "/srv/fluxheim/errors"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProxyErrorPageStatus { status: 302 })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[proxy.error_pages]]
+            status = 502
+            path = "/502.html"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::MissingProxyErrorPageRoot { status: 502 })
+        );
+    }
+
+    #[test]
     fn upstreams_can_be_used_as_primary_proxy_targets() {
         let config: Config = toml::from_str(
             r#"
@@ -3966,6 +4561,7 @@ mod tests {
             enabled = true
             strip_inbound_client_ip_headers = true
             x_forwarded_for = "append"
+            x_real_ip = true
             x_forwarded_host = false
             x_forwarded_proto = true
             forwarded = true
@@ -3988,6 +4584,7 @@ mod tests {
             policy.x_forwarded_for,
             super::ForwardedClientIpHeaderMode::Append
         );
+        assert!(policy.x_real_ip);
         assert!(!policy.x_forwarded_host);
         assert!(policy.x_forwarded_proto);
         assert!(policy.forwarded);
@@ -4008,6 +4605,43 @@ mod tests {
             Some("fluxheim")
         );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn validates_dynamic_request_header_values() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.request.add]
+            host = "{host}"
+            x-real-ip = "{remote_addr}"
+            x-forwarded-proto = "{scheme}"
+            x-original-uri = "{uri}"
+            x-original-path = "{path}"
+            x-original-query = "{query}"
+            x-request-id = "{request_id}"
+            upgrade = "{http.upgrade}"
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+
+        let config: Config = toml::from_str(
+            r#"
+            [headers.request.add]
+            x-bad = "{client_ip}"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderTemplate {
+                field: "headers.request",
+                name: "x-bad".to_owned(),
+                variable: "client_ip".to_owned(),
+            })
+        );
     }
 
     #[test]
@@ -5675,6 +6309,124 @@ mod tests {
     }
 
     #[test]
+    fn parses_vhost_routes() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "chat"
+            path_prefix = "/chat/"
+            strip_prefix = "/chat/"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            connect_timeout_secs = 5
+            read_timeout_secs = 600
+            send_timeout_secs = 600
+
+            [[vhosts.routes]]
+            name = "repo"
+            path_prefix = "/repo"
+            strip_prefix = "/repo"
+
+            [vhosts.routes.web]
+            root = "/srv/repo"
+
+            [[vhosts.routes]]
+            name = "fallback"
+            fallback = true
+
+            [vhosts.routes.redirect]
+            to = "https://gateway.example{uri}"
+            status = 308
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(config.vhosts[0].routes.len(), 3);
+        assert_eq!(config.vhosts[0].routes[0].name, "chat");
+        assert_eq!(
+            config.vhosts[0].routes[0]
+                .proxy
+                .as_ref()
+                .unwrap()
+                .primary_upstream(),
+            "127.0.0.1:6012"
+        );
+        assert_eq!(
+            config.vhosts[0].routes[0]
+                .proxy
+                .as_ref()
+                .unwrap()
+                .read_timeout_secs,
+            Some(600)
+        );
+        assert_eq!(
+            config.vhosts[0].routes[2].redirect.as_ref().unwrap().status,
+            308
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_vhost_routes() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_exact = "/one"
+            path_prefix = "/one/"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidRouteMatcher {
+                vhost: "gateway".to_owned(),
+                route: "bad".to_owned(),
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_prefix = "/one/"
+
+            [vhosts.routes.redirect]
+            to = "https://gateway.example{uri}"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidRouteAction {
+                vhost: "gateway".to_owned(),
+                route: "bad".to_owned(),
+            })
+        );
+    }
+
+    #[test]
     fn rejects_duplicate_vhost_hosts() {
         let config = Config {
             server: ServerConfig::default(),
@@ -5695,6 +6447,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
                 VhostConfig {
                     name: "second.example".to_owned(),
@@ -5704,6 +6457,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
             ],
         };
@@ -5735,6 +6489,7 @@ mod tests {
                 cache: CacheConfig::default(),
                 headers: VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -5758,6 +6513,7 @@ mod tests {
                 cache: CacheConfig::default(),
                 headers: VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };

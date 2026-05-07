@@ -24,7 +24,9 @@ The near-term focus is hardening the already-working baseline, then closing the
 `1.0.0` gateway gaps exposed by real configs: SNI certificate selection,
 path/location routing, route redirects, websocket-safe proxying, per-route body
 limits and timeouts, custom upstream error pages, static aliases, and directory
-listing. ACME runtime, load balancing, admin snapshots, metrics, Sentinel
+listing. Native systemd service support is also part of the `1.0.0` operational
+target so manually compiled binaries can run cleanly outside containers. ACME
+runtime, load balancing, admin snapshots, metrics, Sentinel
 Mesh/WireGuard, stale-while-revalidate, and persistent cache indexing remain
 important, but they should graduate after `1.0.0` according to the versioning
 plan.
@@ -167,6 +169,16 @@ These are realistic additions to implement across the stable core and early
    - Make trusted-proxy handling explicit before accepting client IP headers.
      Implemented as `server.trusted_proxies`; append mode preserves inbound
      `X-Forwarded-For` only when the direct peer matches a configured IP/CIDR.
+   - Grow trusted-proxy handling into a typed client identity layer after the
+     `1.0` route core is stable. Fluxheim should keep separate values for the
+     direct socket peer, verified proxy hop, restored client IP, and original
+     forwarding chain instead of destructively overwriting one address field.
+   - Future real-client identity features should include recursive
+     `X-Forwarded-For` traversal with `max_hops`, provider-managed trusted
+     range sets, Proxy Protocol v2 support, and optional IP context enrichment
+     such as Geo/ASN/threat metadata loaded from local databases. All of this
+     must be fail-closed around trust boundaries and incompatible with
+     `privacy-mode` unless a non-retaining design is written and tested.
 
 4. **Modern Protocol Focus**
    - Keep normal Fluxheim ingress focused on modern, strictly parsed HTTP:
@@ -202,6 +214,10 @@ These are realistic additions to implement across the stable core and early
      still experimental. Implemented in
      [Production Readiness](docs/production-readiness.md).
    - Keep example configs in sync with every new global section.
+   - Add native systemd deployment support before `1.0.0`: a hardened
+     `fluxheim.service`, optional environment file, tmpfiles/sysusers
+     guidance, documented install paths, config validation before start, and
+     graceful `SIGTERM`/reload behavior for manually compiled binaries.
 
 8. **Zero-Retention Privacy Build Profile**
    - Add a compile-time optional privacy profile for static web serving and
@@ -570,6 +586,32 @@ without parsing text fixtures for every module.
    - Cache activity reset. Implemented through protected
      `POST /_fluxheim/cache/activity/reset` without clearing cached objects.
 
+6a. **Future Optional Compression**
+   - Architecture and security plan documented in
+     [Compression](docs/compression.md).
+   - Compression must be optional, compile-time gated, and disabled by default
+     until body-filter resource limits and cache-variant behavior are proven.
+   - Planned features:
+     - `compression`: shared config, negotiation, eligibility checks, and
+       response body filter integration.
+     - `compression-zstd`: Zstandard response encoding for modern dynamic or
+       streaming responses.
+     - `compression-brotli`: Brotli response encoding for eligible static web
+       assets.
+     - `compression-gzip`: gzip compatibility fallback for older clients.
+   - Prefer Zstandard and Brotli where clients support them. Gzip should be a
+     fallback, not the default preferred encoding.
+   - Do not compress already-compressed formats, `no-transform` responses,
+     unsafe personalized responses, or range responses until a range-aware
+     design exists.
+   - Compression variants must integrate with cache keys and
+     `Vary: Accept-Encoding`, including policy-version isolation.
+   - Expensive compression must use bounded worker pools or blocking-task
+     offload so request workers do not stall.
+   - Add tests for negotiation, excluded MIME types, cache isolation,
+     disconnect cancellation, resource limits, side-channel-sensitive response
+     exclusions, and default/privacy builds proving compression is absent.
+
 7. **Future Optional Image Filter**
    - Architecture and security plan documented in
      [Image Filter](docs/image-filter.md).
@@ -719,6 +761,25 @@ without parsing text fixtures for every module.
      range refresh failure, stale range fallback, Ray ID logging, real-IP
      restoration, token redaction, Origin CA CSR validation, and default builds
      proving Cloudflare support is absent unless explicitly compiled.
+
+10a. **Future Trusted Client Identity Layer**
+   - Generalize provider-specific real-IP restoration into a reusable trust
+     layer that can support local load balancers, private platform gateways,
+     Cloudflare, and future provider packs without duplicating header parsing.
+   - Planned config shape:
+     `trusted_client_ip` profiles with explicit `from` CIDRs, selected header
+     names, `recursive`, `max_hops`, and optional provider references.
+   - Keep identity non-destructive: request context should expose direct peer
+     IP, trusted proxy chain, restored client IP, and provider metadata
+     separately.
+   - Provider-managed ranges may refresh in background with last-known-good
+     fallback, bounded file/API sizes, signature/checksum support where
+     available, and clear health reporting.
+   - Proxy Protocol v2 support should be an explicit listener option because it
+     changes connection framing. TLV metadata must be allow-listed and bounded.
+   - Optional Geo/ASN/threat enrichment should load local databases at startup
+     or snapshot reload, use bounded lookups, and never add raw client IP labels
+     to high-cardinality metrics.
 
 11. **Zero-Retention Privacy Mode Compatibility**
    - Architecture and security plan documented in
@@ -891,6 +952,8 @@ without parsing text fixtures for every module.
 17. **Future External Authorization And Identity-Aware Routing**
    - Architecture and security plan for external authorization requests is
      documented in [External Authorization Request](docs/auth-request.md).
+   - Architecture and security plan for signed URL grants is documented in
+     [Secure Links](docs/secure-links.md).
    - Plan as optional `auth-request` and `identity` module families after
      stable admin, logging redaction, TLS, and header policy are mature.
    - Goal: let Fluxheim ask a trusted authorization service for an access
@@ -900,12 +963,23 @@ without parsing text fixtures for every module.
    - Planned features:
      - `auth-request`: per-vhost/per-route external authorization probe before
        static serving or proxying.
+     - `auth-zone`: global deny-by-default authorization coverage with
+       explicit route/path exclusions, so protected deployments do not depend
+       on every route remembering to opt in.
+     - `auth-hook-uds` and `auth-hook-grpc`: low-latency persistent
+       authorization hooks over Unix domain sockets or gRPC for deployments
+       that do not want per-request HTTP overhead.
      - `identity-oidc`: OIDC discovery, JWKS fetch/cache, JWT verification,
        issuer/audience validation, and key rotation.
      - `identity-oauth2`: OAuth2 token introspection for providers that require
        online validation.
      - `identity-policy`: per-vhost route decisions based on verified claims,
        groups, roles, tenant IDs, or subscription tier.
+     - `secure-links`: signed URL grants for static, proxy, download, and media
+       routes, using modern HMAC or Ed25519 verification instead of weak
+       digest-only schemes.
+     - `secure-links-replay`: optional token replay/usage accounting when an
+       explicit state backend is available.
    - Authorization decision contract:
      `2xx` from the auth service allows the original request, `401` and `403`
      deny with controlled response handling, and every other status is an auth
@@ -923,6 +997,19 @@ without parsing text fixtures for every module.
      TTLs must be separate and bounded.
    - Header injection must be deny-by-default and namespaced. Fluxheim should
      strip inbound identity headers before adding verified replacement headers.
+   - Local JWT verification should be preferred when possible. External
+     authorization is for session/policy decisions that cannot be verified
+     locally or need live revocation.
+   - Secure links should validate signed claims such as expiry, path, method,
+     audience, entitlement tier, and optional token ID before cache lookup,
+     static serving, proxying, or media transformation.
+   - Identity state should be stored in the request context after verification
+     so later phases can map verified claims to upstream headers, route
+     decisions, logs, and metrics without reparsing tokens.
+   - Denial handling should support browser and API clients separately:
+     configured login redirects with a safe return destination for browser
+     requests, and JSON `401`/`403` responses for AJAX/API clients when
+     configured.
    - Security baseline:
      auth backend TLS verification by default, optional mTLS, strict auth
      backend response-size limits, loop prevention, strict
@@ -937,6 +1024,7 @@ without parsing text fixtures for every module.
      auth allow/deny/error tests, timeout tests, response-size tests,
      challenge-header allow-list tests, JWT confusion tests,
      expired/revoked token tests, key rotation tests, spoofed identity-header
+     tests, signed-link expiry/path/method/audience tests, token redaction
      tests, recursive-auth rejection, and privacy-mode incompatibility guards.
 
 18. **Future Declarative Redirect And Rewrite Engine**

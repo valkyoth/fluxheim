@@ -34,11 +34,16 @@ real multi-site configs. In addition to the `0.5.x` behavior, it must support:
 - cleartext ACME challenge exception routes plus HTTPS redirect for everything
   else;
 - apex/`www` redirect vhosts that preserve the request URI safely;
-- websocket-safe proxying and prefix stripping for routes such as `/chat/`;
-- per-route body limits and upstream connect/read/send timeouts;
+- websocket-safe proxy smoke coverage for routes such as `/chat/`;
+- per-route body limits, prefix stripping, and upstream connect/read/send
+  timeouts;
 - custom upstream error pages;
 - static aliases and secure directory listing;
-- container DNS behavior suitable for local Podman deployments.
+- container DNS behavior suitable for local Podman deployments, including
+  graceful direct-proxy DNS failures.
+- native systemd support for manually compiled binaries, including a hardened
+  service unit, documented install paths, runtime directory handling, config
+  validation before start, and graceful shutdown/reload behavior.
 
 ## Not Stable In 1.0
 

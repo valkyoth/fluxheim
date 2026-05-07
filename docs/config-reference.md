@@ -72,6 +72,10 @@ Notes:
 - `default_vhost`, when set, must match a configured `[[vhosts]].name`.
 - `trusted_proxies` should contain only direct peers whose forwarded client-IP
   headers are allowed to influence routing/log context.
+- In `1.0`, trusted proxy support is intentionally explicit and CIDR-based.
+  Later trusted-client identity work should keep the direct socket peer,
+  restored client IP, and forwarding chain as separate request-context values
+  rather than replacing one with the other.
 - `[server.process]` maps safe process settings into Pingora's `ServerConf`.
   Changes to these values require a process upgrade, not a live snapshot
   reload. Keep `threads` conservative in containers because Pingora allocates
@@ -206,6 +210,7 @@ policy.
 enabled = true
 strip_inbound_client_ip_headers = true
 x_forwarded_for = "replace"
+x_real_ip = true
 x_forwarded_host = true
 x_forwarded_proto = true
 forwarded = false
@@ -213,6 +218,9 @@ remove = ["x-powered-by"]
 
 [headers.request.add]
 x-proxy-by = "Fluxheim"
+x-real-ip = "{remote_addr}"
+x-forwarded-host = "{host}"
+x-forwarded-proto = "{scheme}"
 
 [headers.request.append]
 via = "fluxheim"
@@ -235,7 +243,42 @@ remove = ["x-origin-banner"]
 add = { x-content-source = "fluxheim" }
 ```
 
-`x_forwarded_for` values: `off`, `replace`, `append`.
+`x_forwarded_for` values: `off`, `replace`, `append`. `x_real_ip = true`
+emits `X-Real-IP` from the observed client address. In privacy builds it
+defaults off and client-IP forwarding remains stripped.
+
+Request header values can use a small safe dynamic template set:
+
+- `{host}`: original request `Host` header.
+- `{remote_addr}`: observed client IP address.
+- `{scheme}`: `http` or `https` from the downstream listener.
+- `{uri}`: current request path and query.
+- `{path}`: current request path.
+- `{query}`: current request query without `?`, or empty.
+- `{request_id}`: Fluxheim request ID when access request IDs are enabled.
+- `{http.<header-name>}`: safe request-header forwarding, for example
+  `{http.upgrade}`.
+
+Unknown variables fail config validation. Rendered values are still passed
+through HTTP header validation before Fluxheim sends them upstream.
+
+Common proxy migration headers:
+
+```toml
+[headers.request.add]
+host = "{host}"
+x-real-ip = "{remote_addr}"
+x-forwarded-for = "{remote_addr}"
+x-forwarded-proto = "{scheme}"
+x-forwarded-host = "{host}"
+upgrade = "{http.upgrade}"
+connection = "upgrade"
+```
+
+Prefer the typed `x_forwarded_for`, `x_real_ip`, `x_forwarded_host`, and
+`x_forwarded_proto` fields where they fit. Use dynamic values when a backend
+expects an exact legacy-style header.
+
 For header mutations, `remove`/`add` are the preferred readable names.
 `unset`/`set` remain supported for compatibility. The nested
 `[headers.request.operations]`, `[headers.response.operations]`, and
@@ -273,6 +316,9 @@ operators who want a different banner can set one through
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_tls = false
 upstream_sni = "origin.example.test"
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 30
 
 [proxy.load_balance]
 max_iterations = 256
@@ -283,6 +329,14 @@ interval_secs = 1
 consecutive_success = 1
 consecutive_failure = 1
 parallel = false
+
+[[proxy.error_pages]]
+status = 502
+path = "/502.html"
+
+[proxy.error_pages.web]
+root = "/srv/fluxheim/errors"
+cache_control = "private, no-store"
 ```
 
 Every `upstreams` entry must be an authority such as
@@ -294,6 +348,19 @@ configs, but do not set both fields in the same proxy block. Fluxheim rejects
 that as ambiguous. When `upstreams` is present, Fluxheim uses the first entry
 as the primary upstream in builds without `load-balancer`, and uses the full
 list for the Pingora load-balancer path when compiled with `load-balancer`.
+`connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
+optional. They map to the upstream connection timeout, upstream response/read
+timeout, and upstream request-body/write timeout.
+
+For websocket-style upgrades, Fluxheim keeps the downstream `Connection:
+Upgrade` and `Upgrade` headers unless your header policy removes or replaces
+them. Route-level proxy blocks can use longer read/send timeouts for these
+long-lived paths without changing the whole vhost.
+
+`[[proxy.error_pages]]` entries are internal static fallback pages for proxy
+failures. The `path` is an internal request path resolved below the entry's
+`web.root`; it is not exposed as a public route unless you also configure a
+route for that root.
 
 ## Web
 
@@ -304,6 +371,10 @@ index_files = ["index.html"]
 deny_dotfiles = true
 cache_control = "public, max-age=60"
 expires = "Wed, 21 Oct 2030 07:28:00 GMT"
+
+[web.directory_listing]
+enabled = false
+exact_size = false
 ```
 
 Static serving requires `web.root` to be a real directory, not a symlink and
@@ -316,6 +387,11 @@ buffered and refuses response bodies larger than 64 MiB; larger-file streaming
 is planned before this limit is relaxed. Static responses support MIME
 detection, `GET`/`HEAD`, `ETag`, `If-Match`, `If-Unmodified-Since`,
 `If-None-Match`, `If-Modified-Since`, and single byte ranges.
+
+`web.directory_listing` is disabled by default. When enabled, Fluxheim only
+generates a listing after no index file matches. Listings inherit dotfile
+protection, skip symlink entries, cap entry count, and use `private, no-store`
+so repository indexes are not accidentally cached by shared intermediaries.
 
 `cache_control` is emitted on static responses and defaults to
 `public, max-age=60`. Use response header policy when you need to append or
@@ -375,11 +451,29 @@ Exactly one matching TLS compile-time feature should be selected:
 `tls-rustls`, `tls-openssl`, `tls-boringssl`, or `tls-s2n`. The default build
 uses `tls-rustls`.
 
+The first global `[[tls.certificates]]` entry is the default downstream
+certificate. Vhosts may provide their own static certificate:
+
+```toml
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "tls/example-fullchain.pem"
+key_path = "tls/example-key.pem"
+```
+
+When a TLS backend with certificate callbacks is compiled (`tls-openssl` or
+`tls-boringssl`), Fluxheim selects vhost certificates by SNI using the vhost
+`hosts` list, including one-label wildcards such as `*.api.example.test`.
+Backends without callback support reject vhost-specific certificates at startup
+instead of silently serving the default certificate.
+
 Fluxheim does not expose user-configurable TLS cipher-suite or protocol-version
 settings yet. Downstream TLS listeners currently use the selected Pingora TLS
-backend defaults through `add_tls`. Release validation must scan those defaults
-with a TLS scanner before publishing a stable release. Explicit named TLS policy
-profiles and optional cipher allow-lists are planned for a later stable release.
+backend defaults. Release validation must scan those defaults with a TLS scanner
+before publishing a stable release. Explicit named TLS policy profiles and
+optional cipher allow-lists are planned for a later stable release.
 
 Check certificate storage permissions separately:
 
@@ -461,6 +555,67 @@ upstream_tls = false
 
 Hostnames are normalized to lower case. Duplicate hosts are rejected. A single
 left-most wildcard label is supported, for example `*.api.example.test`.
+
+Vhosts can also contain ordered route tables. Exact matches win first, then the
+longest prefix match, then one optional fallback route. A route must define one
+action: `redirect`, `proxy`, or `web`.
+
+```toml
+[[vhosts.routes]]
+name = "chat"
+path_prefix = "/chat/"
+strip_prefix = "/chat/"
+max_request_body_bytes = "64MiB"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:6012"]
+connect_timeout_secs = 5
+read_timeout_secs = 600
+send_timeout_secs = 600
+
+[[vhosts.routes.proxy.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.routes.proxy.error_pages.web]
+root = "/srv/fluxheim/errors"
+
+[[vhosts.routes]]
+name = "repo"
+path_prefix = "/repo"
+strip_prefix = "/repo"
+
+[vhosts.routes.web]
+root = "/srv/infra/repository/public"
+index_files = ["repo.html", "index.html"]
+
+[vhosts.routes.web.directory_listing]
+enabled = true
+exact_size = false
+
+[[vhosts.routes]]
+name = "fallback-https"
+fallback = true
+
+[vhosts.routes.redirect]
+to = "https://example.test{uri}"
+status = 308
+```
+
+`strip_prefix` is useful when a backend or alias root should receive `/room`
+instead of `/chat/room`. Redirect targets must be absolute `http://` or
+`https://` templates and may use `{uri}`, `{path}`, and `{query}`. Use
+`max_request_body_bytes` on a route to narrow or expand the global body limit
+for uploads handled by that route. Proxy actions accept `connect_timeout_secs`,
+`read_timeout_secs`, and `send_timeout_secs`; route proxy timeout values override
+the vhost/global proxy timeout values because the route owns its own proxy
+action.
+
+Static route actions support directory listing for repository-style file roots.
+Listings are disabled by default, index files still win when present, dotfiles
+remain denied when `deny_dotfiles = true`, symlink entries are skipped, and the
+generated HTML is sent with `cache-control: private, no-store`. Keep
+`exact_size = false` for large directories when approximate display is enough.
 
 For production readability, prefer one vhost per file in a split config
 directory. See [Vhost Config Guide](vhost-config.md).

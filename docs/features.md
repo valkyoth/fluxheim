@@ -92,6 +92,7 @@ These are documented architecture tracks, not enabled Cargo features yet:
 
 | Future feature family | Document |
 | --- | --- |
+| Compression | [Compression](compression.md) |
 | Image filter | [Image Filter](image-filter.md) |
 | Programmable media edge | [Programmable Media Edge](programmable-media-edge.md) |
 | OpenTelemetry tracing | [OpenTelemetry Tracing](opentelemetry-tracing.md) |
@@ -99,6 +100,7 @@ These are documented architecture tracks, not enabled Cargo features yet:
 | WAF | [WAF Architecture](waf-architecture.md) |
 | Cloudflare origin support | [Cloudflare Origin Support](cloudflare-origin-support.md) |
 | External authorization request | [External Authorization Request](auth-request.md) |
+| Secure links | [Secure Links](secure-links.md) |
 | PHP runtimes | [PHP Runtime Support](php-runtime-support.md) |
 | Perl CGI | [Perl CGI Support](perl-cgi-support.md) |
 | Legacy static HTTP listeners | [Legacy Static HTTP Support](legacy-static-http.md) |

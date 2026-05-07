@@ -14,9 +14,15 @@ serving static content.
 
 - Keep the default binary free of external-authorization code.
 - Make authorization per-vhost and per-route.
+- Support global authorization zones that protect all routes by default unless
+  a route is explicitly excluded.
 - Keep request workers protected with strict timeouts and response-size limits.
 - Never trust headers supplied by the client as authorization facts.
 - Make every fail-open/fail-closed choice explicit in config.
+- Prefer local JWT/OIDC verification when a request can be decided without a
+  network call.
+- Support low-latency authorization hooks over HTTPS, Unix domain sockets, and
+  later gRPC.
 - Support static web, reverse proxy, and load-balancer routes without turning
   Fluxheim into an application runtime.
 
@@ -24,6 +30,13 @@ serving static content.
 
 Fluxheim sends a small authorization request to a configured internal endpoint.
 The authorization endpoint decides whether the original request may continue.
+
+Transport options should be explicit:
+
+- `https`: simplest integration with existing policy services.
+- `unix`: local sidecar/service integration without exposing a TCP port.
+- `grpc`: future persistent typed authorization API for high-throughput
+  deployments.
 
 Decision handling:
 
@@ -87,6 +100,74 @@ also be allow-listed. Recommended defaults:
 For `401`, challenge headers such as `WWW-Authenticate` may be passed to the
 client only from an allow-list.
 
+## Identity Context And Claim Mapping
+
+Fluxheim should store the verified identity decision in request context after
+authorization. Later phases can then use the same typed identity object for
+upstream header injection, routing, logging, and metrics without reparsing
+tokens or trusting inbound headers.
+
+Claim/header mapping must be explicit:
+
+- strip inbound identity headers before verification;
+- map only verified claims from the auth response or local JWT verifier;
+- prefer namespaced headers such as `X-Fluxheim-User`,
+  `X-Fluxheim-Groups`, and `X-Fluxheim-Tier`;
+- never forward raw tokens unless the operator explicitly allow-lists them.
+
+Example:
+
+```toml
+[auth_request.profiles.internal.claim_headers]
+x-fluxheim-user = "user.id"
+x-fluxheim-groups = "groups"
+x-fluxheim-tier = "subscription.tier"
+```
+
+## Global Auth Zones
+
+For protected deployments, authorization should be opt-out at the route level
+rather than opt-in everywhere. A global auth zone can cover a vhost, with
+explicit exclusions for public assets and health checks.
+
+```toml
+[vhosts.auth_request]
+enabled = true
+profile = "internal"
+mode = "protect_all"
+except = ["/public/*", "/favicon.ico", "/_health"]
+```
+
+Config validation must reject ambiguous policies where a route both requires
+and excludes auth through conflicting inherited settings.
+
+## Local JWT Verification
+
+When the identity provider issues signed JWTs, Fluxheim should be able to verify
+the token locally through the future `identity-oidc` module:
+
+- OIDC discovery and JWKS cache;
+- issuer and audience validation;
+- expiry, not-before, and clock-skew validation;
+- algorithm allow-listing;
+- bounded token and key sizes;
+- key rotation and stale-key behavior.
+
+Local verification avoids an auth-service round trip for normal requests. Live
+external authorization remains useful for session revocation, policy checks,
+device posture, and other decisions that cannot be encoded safely in a token.
+
+## Denial Responses
+
+Denial behavior should be explicit and client-aware:
+
+- browser requests may redirect to a configured login URL;
+- redirects may include a safe return destination generated from the normalized
+  original URL;
+- API/AJAX requests can receive a JSON `401`/`403` response instead of a
+  redirect;
+- redirect destinations must be validated to avoid open redirects.
+
 ## Caching
 
 Authorization decisions may be cached only when the operator enables it.
@@ -134,7 +215,7 @@ unbounded query strings.
 
 ```toml
 [auth_request.profiles.internal]
-endpoint = "https://auth.internal.example/check"
+endpoint = "unix:///run/auth/check.sock"
 timeout = "250ms"
 fail_mode = "fail_closed"
 forward_body = false
@@ -148,6 +229,11 @@ allow = ["authorization", "cookie"]
 copy_to_upstream = ["x-fluxheim-user", "x-fluxheim-groups"]
 copy_to_client_on_401 = ["www-authenticate"]
 
+[auth_request.profiles.internal.denial]
+browser_redirect = "https://auth.example.com/login"
+return_parameter = "rd"
+api_response = "json"
+
 [[vhosts]]
 name = "example"
 hosts = ["example.com"]
@@ -155,7 +241,8 @@ hosts = ["example.com"]
 [vhosts.auth_request]
 enabled = true
 profile = "internal"
-paths = ["/private/*", "/api/*"]
+mode = "protect_all"
+except = ["/public/*", "/favicon.ico"]
 ```
 
 ## Test Plan
@@ -170,5 +257,14 @@ paths = ["/private/*", "/api/*"]
 - Verify `fail_closed` and explicit `fail_open` behavior.
 - Verify positive/negative cache TTL boundaries when decision caching is
   enabled.
+- Verify global auth zones protect routes by default and honor explicit
+  exclusions.
+- Verify UDS auth endpoints and later gRPC hooks enforce the same timeout and
+  size limits as HTTPS endpoints.
+- Verify local JWT issuer, audience, expiry, algorithm, and key rotation
+  behavior.
+- Verify claim mapping only injects values from verified identity context.
+- Verify browser redirects preserve a safe return destination and API/AJAX
+  requests can receive non-redirect denials.
 - Verify `auth-request` is absent from default builds and rejected with
   `privacy-mode`.

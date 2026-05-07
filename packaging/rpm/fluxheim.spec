@@ -3,6 +3,8 @@
 %bcond_without tests
 
 %{!?_tmpfilesdir:%global _tmpfilesdir %{_prefix}/lib/tmpfiles.d}
+%{!?_sysusersdir:%global _sysusersdir %{_prefix}/lib/sysusers.d}
+%{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
 Version:        0.5.0
@@ -16,6 +18,9 @@ Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{versio
 #   tar -czf fluxheim-0.5.0-vendor.tar.gz vendor
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        fluxheim.tmpfiles
+Source3:        fluxheim.service
+Source4:        fluxheim.env
+Source5:        fluxheim.sysusers
 
 ExclusiveArch:  x86_64 aarch64
 
@@ -71,6 +76,9 @@ install -Dm0755 target/release/fluxheim %{buildroot}%{_bindir}/fluxheim
 install -Dm0644 packaging/default/fluxheim.toml %{buildroot}%{_sysconfdir}/fluxheim/fluxheim.toml
 install -Dm0644 packaging/default/index.html %{buildroot}/srv/fluxheim/index.html
 install -Dm0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/fluxheim.conf
+install -Dm0644 %{SOURCE3} %{buildroot}%{_unitdir}/fluxheim.service
+install -Dm0644 %{SOURCE4} %{buildroot}%{_sysconfdir}/sysconfig/fluxheim
+install -Dm0644 %{SOURCE5} %{buildroot}%{_sysusersdir}/fluxheim.conf
 
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/conf.d
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/tls
@@ -93,8 +101,19 @@ getent passwd fluxheim >/dev/null || \
 exit 0
 
 %post
+if command -v systemd-sysusers >/dev/null 2>&1; then
+    systemd-sysusers fluxheim.conf || :
+fi
 if command -v systemd-tmpfiles >/dev/null 2>&1; then
     systemd-tmpfiles --create fluxheim.conf || :
+fi
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || :
+fi
+
+%postun
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload || :
 fi
 
 %files
@@ -102,10 +121,13 @@ fi
 %doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_0.5.0.md docs examples
 %{_bindir}/fluxheim
 %{_tmpfilesdir}/fluxheim.conf
+%{_sysusersdir}/fluxheim.conf
+%{_unitdir}/fluxheim.service
 %dir %{_sysconfdir}/fluxheim
 %dir %{_sysconfdir}/fluxheim/conf.d
 %dir %{_sysconfdir}/fluxheim/tls
 %config(noreplace) %{_sysconfdir}/fluxheim/fluxheim.toml
+%config(noreplace) %{_sysconfdir}/sysconfig/fluxheim
 %dir %attr(0750,fluxheim,fluxheim) %{_localstatedir}/lib/fluxheim
 %dir %attr(0750,fluxheim,fluxheim) %{_localstatedir}/cache/fluxheim
 %dir %attr(0750,fluxheim,fluxheim) %{_localstatedir}/log/fluxheim

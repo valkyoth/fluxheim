@@ -6,7 +6,7 @@ use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use percent_encoding::percent_decode_str;
+use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
 use crate::config::WebConfig;
 
@@ -26,6 +26,7 @@ pub struct StaticFileServer {
     root: PathBuf,
     index_files: Vec<String>,
     deny_dotfiles: bool,
+    directory_listing: crate::config::DirectoryListingConfig,
     #[cfg_attr(not(feature = "proxy"), allow(dead_code))]
     cache_control: String,
     #[cfg_attr(not(feature = "proxy"), allow(dead_code))]
@@ -68,6 +69,7 @@ impl StaticFileServer {
             root,
             index_files: config.index_files.clone(),
             deny_dotfiles: config.deny_dotfiles,
+            directory_listing: config.directory_listing.clone(),
             cache_control: config.cache_control.clone(),
             expires: config.expires.clone(),
         }))
@@ -147,6 +149,10 @@ impl StaticFileServer {
                 }
             }
 
+            if self.directory_listing.enabled {
+                return self.directory_listing(&candidate);
+            }
+
             return Ok(ResolveResult::NotFound);
         }
 
@@ -193,7 +199,61 @@ impl StaticFileServer {
             inode: metadata.ino(),
         }))
     }
+
+    fn directory_listing(&self, directory: &Path) -> io::Result<ResolveResult> {
+        if path_contains_symlink(&self.root, directory)? {
+            return Ok(ResolveResult::NotFound);
+        }
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(directory)?.take(MAX_DIRECTORY_LISTING_ENTRIES + 1) {
+            let entry = entry?;
+            if entries.len() >= MAX_DIRECTORY_LISTING_ENTRIES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "directory listing entry limit exceeded",
+                ));
+            }
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
+            if self.deny_dotfiles && name.starts_with('.') {
+                continue;
+            }
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() || (!file_type.is_file() && !file_type.is_dir()) {
+                continue;
+            }
+            let metadata = entry.metadata()?;
+            entries.push(DirectoryEntry {
+                name: name.to_owned(),
+                is_dir: file_type.is_dir(),
+                size: file_type
+                    .is_file()
+                    .then_some(metadata.len())
+                    .filter(|_| self.directory_listing.exact_size),
+                modified: metadata.modified().ok(),
+            });
+        }
+        entries.sort_by(|left, right| {
+            right
+                .is_dir
+                .cmp(&left.is_dir)
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        let path = directory
+            .strip_prefix(&self.root)
+            .ok()
+            .map(directory_listing_path)
+            .unwrap_or_else(|| "/".to_owned());
+        Ok(ResolveResult::DirectoryListing(DirectoryListing {
+            path,
+            entries,
+        }))
+    }
 }
+
+const MAX_DIRECTORY_LISTING_ENTRIES: usize = 4096;
 
 fn path_contains_symlink(root: &Path, candidate: &Path) -> io::Result<bool> {
     let Ok(relative) = candidate.strip_prefix(root) else {
@@ -232,11 +292,43 @@ fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
     Ok(false)
 }
 
+fn directory_listing_path(relative: &Path) -> String {
+    let mut path = String::from("/");
+    for component in relative.components() {
+        let std::path::Component::Normal(segment) = component else {
+            continue;
+        };
+        if path.len() > 1 {
+            path.push('/');
+        }
+        path.push_str(&segment.to_string_lossy());
+    }
+    if !path.ends_with('/') {
+        path.push('/');
+    }
+    path
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ResolveResult {
     Found(StaticFile),
+    DirectoryListing(DirectoryListing),
     NotFound,
     Forbidden,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DirectoryListing {
+    pub path: String,
+    pub entries: Vec<DirectoryEntry>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+    pub modified: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -366,9 +458,23 @@ pub async fn serve_static_file(
     plan: &StaticResponsePlan,
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
 ) -> pingora::Result<()> {
+    serve_static_file_with_status(session, server, file, plan, response_policy, plan.status).await
+}
+
+#[cfg(all(feature = "web", feature = "proxy"))]
+pub async fn serve_static_file_with_status(
+    session: &mut pingora::proxy::Session,
+    server: &StaticFileServer,
+    file: &StaticFile,
+    plan: &StaticResponsePlan,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+    status: u16,
+) -> pingora::Result<()> {
     use pingora::prelude::{InternalError, OrErr};
 
-    let response = build_static_response_header(server, file, plan, response_policy)?;
+    let mut plan = plan.clone();
+    plan.status = status;
+    let response = build_static_response_header(server, file, &plan, response_policy)?;
 
     if matches!(plan.body, StaticResponseBody::None) {
         session
@@ -384,6 +490,102 @@ pub async fn serve_static_file(
     }
 
     Ok(())
+}
+
+#[cfg(all(feature = "web", feature = "proxy"))]
+pub async fn serve_directory_listing(
+    session: &mut pingora::proxy::Session,
+    listing: &DirectoryListing,
+    method: &str,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+) -> pingora::Result<u64> {
+    let body = render_directory_listing(listing);
+    let response_body_bytes = if method == "HEAD" {
+        0
+    } else {
+        body.len() as u64
+    };
+    let mut response = pingora::http::ResponseHeader::build(200, Some(4))?;
+    response.insert_header("content-type", "text/html; charset=utf-8")?;
+    response.insert_header("content-length", body.len())?;
+    response.insert_header("cache-control", "private, no-store")?;
+    crate::headers::apply_response_policy(&mut response, response_policy)?;
+
+    if method == "HEAD" {
+        session
+            .write_response_header(Box::new(response), true)
+            .await?;
+    } else {
+        session
+            .write_response_header(Box::new(response), false)
+            .await?;
+        session
+            .write_response_body(Some(bytes::Bytes::from(body)), true)
+            .await?;
+    }
+
+    Ok(response_body_bytes)
+}
+
+#[cfg_attr(not(feature = "proxy"), allow(dead_code))]
+fn render_directory_listing(listing: &DirectoryListing) -> String {
+    let mut html = String::new();
+    html.push_str("<!doctype html><html><head><meta charset=\"utf-8\"><title>Index of ");
+    html.push_str(&html_escape(&listing.path));
+    html.push_str("</title></head><body><h1>Index of ");
+    html.push_str(&html_escape(&listing.path));
+    html.push_str(
+        "</h1><table><thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead><tbody>",
+    );
+    for entry in &listing.entries {
+        let display_name = if entry.is_dir {
+            format!("{}/", entry.name)
+        } else {
+            entry.name.clone()
+        };
+        let href = format!(
+            "{}{}{}",
+            listing.path,
+            utf8_percent_encode(&entry.name, NON_ALPHANUMERIC),
+            if entry.is_dir { "/" } else { "" }
+        );
+        html.push_str("<tr><td><a href=\"");
+        html.push_str(&html_escape(&href));
+        html.push_str("\">");
+        html.push_str(&html_escape(&display_name));
+        html.push_str("</a></td><td>");
+        html.push_str(
+            &entry
+                .size
+                .map(|size| size.to_string())
+                .unwrap_or_else(|| "-".to_owned()),
+        );
+        html.push_str("</td><td>");
+        if let Some(modified) = entry.modified {
+            html.push_str(&html_escape(&httpdate::fmt_http_date(modified)));
+        } else {
+            html.push('-');
+        }
+        html.push_str("</td></tr>");
+    }
+    html.push_str("</tbody></table></body></html>");
+    html
+}
+
+#[cfg_attr(not(feature = "proxy"), allow(dead_code))]
+fn html_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 #[cfg(all(feature = "web", feature = "proxy"))]
@@ -705,6 +907,67 @@ mod tests {
         let server = server(root.path());
 
         assert_eq!(server.resolve("/.env").unwrap(), ResolveResult::Forbidden);
+    }
+
+    #[test]
+    fn directory_listing_is_disabled_by_default() {
+        let root = TestDir::new("directory-listing-disabled");
+        fs::write(root.child("asset.txt"), "ok").unwrap();
+
+        let server = server(root.path());
+
+        assert_eq!(server.resolve("/").unwrap(), ResolveResult::NotFound);
+    }
+
+    #[test]
+    fn resolves_directory_listing_when_enabled() {
+        let root = TestDir::new("directory-listing");
+        fs::write(root.child("alpha.txt"), "hello").unwrap();
+        fs::write(root.child(".secret"), "hidden").unwrap();
+        fs::create_dir_all(root.child("nested")).unwrap();
+
+        let server = StaticFileServer::from_config(&WebConfig {
+            root: Some(root.path().to_owned()),
+            directory_listing: crate::config::DirectoryListingConfig {
+                enabled: true,
+                exact_size: true,
+            },
+            ..WebConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let ResolveResult::DirectoryListing(listing) = server.resolve("/").unwrap() else {
+            panic!("expected directory listing")
+        };
+
+        assert_eq!(listing.path, "/");
+        assert_eq!(
+            listing
+                .entries
+                .iter()
+                .map(|entry| (entry.name.as_str(), entry.is_dir, entry.size))
+                .collect::<Vec<_>>(),
+            vec![("nested", true, None), ("alpha.txt", false, Some(5))]
+        );
+    }
+
+    #[test]
+    fn renders_escaped_directory_listing() {
+        let listing = super::DirectoryListing {
+            path: "/repo/<root>/".to_owned(),
+            entries: vec![super::DirectoryEntry {
+                name: "a&b.txt".to_owned(),
+                is_dir: false,
+                size: Some(1),
+                modified: None,
+            }],
+        };
+
+        let html = super::render_directory_listing(&listing);
+
+        assert!(html.contains("Index of /repo/&lt;root&gt;/"));
+        assert!(html.contains("a&amp;b.txt"));
     }
 
     #[test]

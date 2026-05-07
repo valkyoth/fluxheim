@@ -43,6 +43,51 @@ the feature preflight before invoking Cargo:
 scripts/validate-features.sh proxy,web,tls-rustls
 ```
 
+## System Build Dependencies
+
+Fluxheim builds with Rust 1.95.0. The default feature set uses Pingora,
+Rustls, cache support, and static file serving. Native builds need a normal C/C++
+toolchain plus a few build helpers for transitive native code.
+
+Required for the default build:
+
+- Rust 1.95.0, usually through `rustup` or the distro Rust packages when they
+  are new enough;
+- C and C++ compiler toolchain;
+- `make`;
+- `cmake`;
+- `perl`;
+- `pkg-config`/`pkgconf`;
+- `ca-certificates`.
+
+Package examples:
+
+```bash
+# Debian / Ubuntu
+sudo apt install build-essential cmake perl pkg-config ca-certificates
+
+# Alpine / Wolfi
+apk add build-base cmake perl pkgconf ca-certificates
+
+# openSUSE / SUSE
+sudo zypper install gcc gcc-c++ make cmake perl pkgconf-pkg-config ca-certificates
+
+# RHEL / Fedora-style systems
+sudo dnf install gcc gcc-c++ make cmake perl pkgconf-pkg-config ca-certificates
+```
+
+Optional backend-specific packages:
+
+- `tls-openssl`: install OpenSSL development headers, such as `libssl-dev`,
+  `openssl-devel`, or the distro equivalent.
+- `tls-boringssl`: install `clang` and a `libclang` development/runtime package
+  for bindgen.
+- `tls-s2n`: usually works with the default toolchain packages above, but keep
+  `cmake` and `perl` installed.
+
+Container builds install the same requirements in the builder stage. The
+runtime images only need CA certificates plus the Fluxheim binary and config.
+
 ## Container Variants
 
 Fluxheim ships multiple runtime Containerfiles so operators can choose the base
@@ -341,6 +386,31 @@ The same deployment shape is available as
 [examples/podman-compose.yml](../examples/podman-compose.yml), with a matching
 container-oriented config at
 [examples/container/fluxheim.toml](../examples/container/fluxheim.toml).
+For upstream containers on the same Podman network, use the service/container
+DNS name and port, for example:
+
+```toml
+[vhosts.proxy]
+upstreams = ["app-backend:3000"]
+upstream_tls = false
+```
+
+For services running on the host, use Podman's host gateway name when available:
+
+```toml
+[vhosts.proxy]
+upstreams = ["host.containers.internal:6010"]
+upstream_tls = false
+```
+
+Fluxheim resolves direct proxy upstream names when selecting an upstream peer
+for a request. If a Podman DNS name is temporarily missing, Fluxheim returns an
+upstream failure for that request instead of panicking the worker. Keep Fluxheim
+and its upstream containers on the same user-defined network, and avoid using
+load-balancer pools for container names that are expected to appear only after
+Fluxheim has already started until dynamic pool re-resolution is promoted to a
+stable feature.
+
 The container config sets `grace_period_seconds = 2` and
 `graceful_shutdown_timeout_seconds = 5`; keep the Podman stop timeout higher
 than the sum of those values so normal shutdown does not fall back to `SIGKILL`.
@@ -355,6 +425,13 @@ over those paths when deploying a real site.
 If using a root-runtime image, `:U` is usually not needed for ownership, but
 keeping separate writable directories for state/cache/logs is still recommended
 so the container does not need write access to static site content or TLS keys.
+
+## Native systemd
+
+For manually compiled binaries or RPM-style native installs, Fluxheim ships a
+systemd unit, sysusers file, tmpfiles file, and optional environment file under
+`packaging/systemd` and `packaging/rpm`. See
+[systemd Deployment](systemd.md) for the install steps and default paths.
 
 ## Codex And Rootless Podman
 

@@ -207,6 +207,12 @@ Stable scope:
 - Container DNS names that work reliably for Podman deployments, with either
   safe startup resolution or documented/implemented re-resolution behavior.
 - Rootless Podman runtime.
+- Native systemd deployment support for manually compiled binaries:
+  `fluxheim.service`, optional environment file, tmpfiles/sysusers guidance,
+  config validation before start, hardened service defaults, and documented
+  graceful stop/reload behavior.
+- Explicit trusted proxy CIDR handling for forwarded client-IP headers. The
+  richer trusted-client identity layer remains a later milestone.
 - Release/security checks.
 
 Not in 1.0 stable scope:
@@ -363,6 +369,36 @@ Exit criteria:
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 
+### 1.4a - Compression Pack
+
+Goal: add safe, opt-in response compression without blocking request workers or
+breaking cache correctness.
+
+Stable scope:
+
+- Compile-time `compression` module.
+- `zstd` and `br` negotiation where client support and route policy allow it.
+- `gzip` compatibility fallback.
+- Conservative MIME/content eligibility rules.
+- `Vary: Accept-Encoding` handling and cache-key isolation.
+- Resource limits for input size, buffered size, level, and concurrency.
+- Bounded offload for expensive compression work.
+
+Beta scope:
+
+- Precompressed static asset discovery.
+- Hardware or CPU-specific acceleration.
+- Shared dictionary compression if standards and client support are mature.
+
+Exit criteria:
+
+- Compressed and identity variants are cache-isolated.
+- Already-compressed formats and `Cache-Control: no-transform` responses are
+  not compressed.
+- Personalized/sensitive responses are excluded by default.
+- Downstream disconnects cancel or stop compression work.
+- Default and `privacy-mode` builds prove compression is absent.
+
 ### 1.5 - Media Transform Pack
 
 Goal: add safe, opt-in image transformation for static and proxied image
@@ -449,6 +485,8 @@ Stable scope:
 - Safe real-IP restoration only after trust validation.
 - Ray ID log correlation.
 - Optional IP range refresh with last-known-good fallback.
+- Integration with the future trusted-client identity layer when that layer
+  exists, while still keeping Cloudflare support compile-time optional.
 
 Beta scope:
 
@@ -460,6 +498,39 @@ Exit criteria:
 - Spoofed `CF-*` headers from non-Cloudflare peers are ignored.
 - API tokens are never logged.
 - AOP mode clearly distinguishes global, zone-level, and per-hostname trust.
+
+### 1.8a - Trusted Client Identity Layer
+
+Goal: make restored client identity safe, auditable, and reusable across load
+balancers, private gateways, and provider packs.
+
+Stable scope:
+
+- Typed request identity context with separate direct peer IP, trusted proxy
+  chain, restored client IP, and provider metadata.
+- Explicit trusted-client profiles with CIDRs, selected headers, recursive
+  chain traversal, and `max_hops`.
+- Last-untrusted-hop selection for multi-proxy `X-Forwarded-For` chains.
+- Config validation for ambiguous or unsafe trust policies.
+
+Beta scope:
+
+- Provider-managed trusted ranges with background refresh and last-known-good
+  fallback.
+- Proxy Protocol v2 listener support with bounded TLV metadata allow-lists.
+- Optional local Geo/ASN/threat metadata enrichment.
+
+Exit criteria:
+
+- Spoofed forwarded headers from untrusted peers are ignored.
+- Malformed or oversized forwarding chains are rejected or ignored safely.
+- Direct peer, restored client IP, and chain metadata remain separately
+  inspectable in tests.
+- Provider range refresh failure keeps the last valid set and reports health.
+- Proxy Protocol v2 framing is tested independently from normal HTTP
+  listeners.
+- Privacy builds reject real-client restoration and IP enrichment unless a
+  no-retention design is implemented.
 
 ### 1.9 - Advanced Metrics And Logging
 
@@ -541,24 +612,35 @@ Stable scope:
 
 - Compile-time `auth-request` module.
 - Per-vhost/per-route authorization probes.
+- Global auth zones that protect a vhost by default with explicit route/path
+  exclusions.
 - Decision handling: allow on `2xx`, deny on `401`/`403`, and treat every other
   auth service status as an error.
 - Fail-closed default with explicit `fail_open` opt-in.
 - Header allow-lists for auth request metadata, auth response headers copied to
   upstreams, and challenge headers copied to clients.
 - Auth backend timeouts and response-size limits.
+- HTTPS and Unix-domain-socket auth hooks.
 - Compile-time `identity-oidc` module.
 - OIDC discovery and JWKS caching.
 - JWT issuer, audience, expiry, and algorithm validation.
 - Per-vhost claim-based allow/deny/routing policy.
 - Verified header injection after stripping spoofable inbound identity headers.
+- Configured browser login redirects and API/AJAX denial responses.
+- Compile-time `secure-links` module for signed URL grants.
+- HMAC and Ed25519 verification for signed route access.
+- Expiry, path, method, audience, and route-claim validation.
+- Redaction for secure-link tokens in logs and errors.
 
 Beta scope:
 
 - Optional auth-decision caching with bounded positive/negative TTLs.
 - Auth backend mTLS.
+- gRPC authorization hooks.
 - OAuth2 token introspection.
 - Tenant/subscription-tier based upstream pool selection.
+- Replay/usage controls for signed links when an explicit state backend is
+  available.
 
 Exit criteria:
 
@@ -572,6 +654,12 @@ Exit criteria:
 - Token and JWKS sizes are bounded.
 - Key rotation and stale-key behavior are tested.
 - Spoofed identity headers are stripped before verified replacements are added.
+- Global auth zones are tested so protected vhosts cannot accidentally expose a
+  route through missing per-route auth config.
+- Browser redirect return destinations are normalized and validated.
+- Signed links reject expired, malformed, wrong-path, wrong-method, and
+  wrong-audience tokens.
+- Signed-link tokens and decoded claims are redacted from logs and errors.
 
 ### 1.12 - Cluster State
 

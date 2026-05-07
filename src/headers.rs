@@ -1,6 +1,4 @@
-#[cfg(not(feature = "privacy-mode"))]
-use std::net::IpAddr;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::{
@@ -28,11 +26,12 @@ pub fn apply_upstream_request_policy(
     client_addr: Option<&SocketAddr>,
     trusted_proxy: bool,
     downstream_tls: bool,
+    request_id: Option<&str>,
 ) -> pingora::Result<()> {
     #[cfg(feature = "privacy-mode")]
     {
-        let _ = (client_addr, trusted_proxy, downstream_tls);
-        return apply_privacy_upstream_request_policy(request, policy);
+        let _ = (client_addr, trusted_proxy, downstream_tls, request_id);
+        return apply_privacy_upstream_request_policy(request, policy, request_id);
     }
 
     #[cfg(not(feature = "privacy-mode"))]
@@ -43,6 +42,7 @@ pub fn apply_upstream_request_policy(
             client_addr,
             trusted_proxy,
             downstream_tls,
+            request_id,
         )
     }
 }
@@ -51,11 +51,13 @@ pub fn apply_upstream_request_policy(
 fn apply_privacy_upstream_request_policy(
     request: &mut pingora::http::RequestHeader,
     policy: &RequestHeaderPolicyConfig,
+    request_id: Option<&str>,
 ) -> pingora::Result<()> {
     if policy.enabled {
         let unset = policy.effective_unset();
         let set = policy.effective_set();
-        apply_request_mutations(request, &unset, &set, &policy.append)?;
+        let context = RequestHeaderTemplateContext::new(request, None, false, request_id);
+        apply_request_mutations(request, &unset, &set, &policy.append, &context)?;
     }
     for header in SPOOFABLE_CLIENT_IP_HEADERS {
         request.remove_header(*header);
@@ -70,6 +72,7 @@ fn apply_standard_upstream_request_policy(
     client_addr: Option<&SocketAddr>,
     trusted_proxy: bool,
     downstream_tls: bool,
+    request_id: Option<&str>,
 ) -> pingora::Result<()> {
     if !policy.enabled {
         return Ok(());
@@ -94,6 +97,14 @@ fn apply_standard_upstream_request_policy(
     if policy.strip_inbound_client_ip_headers {
         for header in SPOOFABLE_CLIENT_IP_HEADERS {
             request.remove_header(*header);
+        }
+    }
+
+    if policy.x_real_ip {
+        if let Some(client_addr) = client_addr {
+            request.insert_header("x-real-ip", client_addr.ip().to_string())?;
+        } else {
+            request.remove_header("x-real-ip");
         }
     }
 
@@ -133,8 +144,76 @@ fn apply_standard_upstream_request_policy(
 
     let unset = policy.effective_unset();
     let set = policy.effective_set();
-    apply_request_mutations(request, &unset, &set, &policy.append)?;
+    let context = RequestHeaderTemplateContext::new(
+        request,
+        client_addr.map(SocketAddr::ip),
+        downstream_tls,
+        request_id,
+    );
+    apply_request_mutations(request, &unset, &set, &policy.append, &context)?;
     Ok(())
+}
+
+struct RequestHeaderTemplateContext {
+    headers: http::HeaderMap,
+    host: Option<String>,
+    remote_addr: Option<String>,
+    scheme: &'static str,
+    uri: String,
+    path: String,
+    query: String,
+    request_id: Option<String>,
+}
+
+impl RequestHeaderTemplateContext {
+    fn new(
+        request: &pingora::http::RequestHeader,
+        client_ip: Option<IpAddr>,
+        downstream_tls: bool,
+        request_id: Option<&str>,
+    ) -> Self {
+        let host = request
+            .headers
+            .get("host")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let uri = request
+            .uri
+            .path_and_query()
+            .map(|value| value.as_str().to_owned())
+            .unwrap_or_else(|| request.uri.path().to_owned());
+        let path = request.uri.path().to_owned();
+        let query = request.uri.query().unwrap_or("").to_owned();
+
+        Self {
+            headers: request.headers.clone(),
+            host,
+            remote_addr: client_ip.map(|ip| ip.to_string()),
+            scheme: if downstream_tls { "https" } else { "http" },
+            uri,
+            path,
+            query,
+            request_id: request_id.map(str::to_owned),
+        }
+    }
+
+    fn variable(&self, variable: &str) -> Option<&str> {
+        match variable {
+            "host" => self.host.as_deref(),
+            "remote_addr" => self.remote_addr.as_deref(),
+            "scheme" => Some(self.scheme),
+            "uri" => Some(self.uri.as_str()),
+            "path" => Some(self.path.as_str()),
+            "query" => Some(self.query.as_str()),
+            "request_id" => self.request_id.as_deref(),
+            variable => variable
+                .strip_prefix("http.")
+                .and_then(|name| self.headers.get(name))
+                .and_then(|value| value.to_str().ok()),
+        }
+    }
 }
 
 pub fn apply_response_policy(
@@ -183,21 +262,50 @@ fn apply_request_mutations(
     unset: &[String],
     set: &std::collections::BTreeMap<String, String>,
     append: &std::collections::BTreeMap<String, HeaderValues>,
+    context: &RequestHeaderTemplateContext,
 ) -> pingora::Result<()> {
     for name in unset {
         request.remove_header(name.as_str());
     }
     for (name, value) in set {
         request.remove_header(name.as_str());
-        request.insert_header(name.clone(), value.as_str())?;
+        let value = render_header_template(value, context);
+        if !value.is_empty() {
+            request.insert_header(name.clone(), value)?;
+        }
     }
     for (name, values) in append {
         for value in values.iter() {
-            request.append_header(name.clone(), value)?;
+            let value = render_header_template(value, context);
+            if !value.is_empty() {
+                request.append_header(name.clone(), value)?;
+            }
         }
     }
 
     Ok(())
+}
+
+fn render_header_template(value: &str, context: &RequestHeaderTemplateContext) -> String {
+    let mut rendered = String::with_capacity(value.len());
+    let mut rest = value;
+
+    while let Some(open) = rest.find('{') {
+        rendered.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('}') else {
+            rendered.push_str(&rest[open..]);
+            return rendered;
+        };
+        let variable = &after_open[..close];
+        if let Some(value) = context.variable(variable) {
+            rendered.push_str(value);
+        }
+        rest = &after_open[close + 1..];
+    }
+
+    rendered.push_str(rest);
+    rendered
 }
 
 fn apply_response_mutations(
@@ -490,7 +598,7 @@ mod tests {
         request.insert_header("x-real-ip", "198.51.100.9").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true)
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
             .unwrap();
 
         assert_eq!(
@@ -520,6 +628,29 @@ mod tests {
 
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
+    fn can_emit_x_real_ip_when_enabled() {
+        let policy = crate::config::RequestHeaderPolicyConfig {
+            x_real_ip: true,
+            ..crate::config::RequestHeaderPolicyConfig::default()
+        };
+        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(8)).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
+
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
+            .unwrap();
+
+        assert_eq!(
+            request
+                .headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok()),
+            Some("203.0.113.10")
+        );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
     fn applies_request_header_mutations_after_forwarding_defaults() {
         let policy = crate::config::RequestHeaderPolicyConfig {
             unset: vec!["x-forwarded-proto".to_owned(), "x-powered-by".to_owned()],
@@ -540,7 +671,7 @@ mod tests {
             .unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true)
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
             .unwrap();
 
         assert_eq!(
@@ -570,6 +701,96 @@ mod tests {
 
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
+    fn renders_safe_dynamic_request_header_values() {
+        let policy = crate::config::RequestHeaderPolicyConfig {
+            set: std::collections::BTreeMap::from([
+                ("host".to_owned(), "{host}".to_owned()),
+                ("x-real-ip".to_owned(), "{remote_addr}".to_owned()),
+                ("x-forwarded-proto".to_owned(), "{scheme}".to_owned()),
+                ("x-original-uri".to_owned(), "{uri}".to_owned()),
+                ("x-original-path".to_owned(), "{path}".to_owned()),
+                ("x-original-query".to_owned(), "{query}".to_owned()),
+                ("x-request-id".to_owned(), "{request_id}".to_owned()),
+                ("upgrade".to_owned(), "{http.upgrade}".to_owned()),
+            ]),
+            ..crate::config::RequestHeaderPolicyConfig::default()
+        };
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/chat/?room=main", Some(8)).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        request.insert_header("upgrade", "websocket").unwrap();
+        let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
+
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            true,
+            Some("req-123"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            request
+                .headers
+                .get("host")
+                .and_then(|value| value.to_str().ok()),
+            Some("example.test")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok()),
+            Some("203.0.113.10")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-forwarded-proto")
+                .and_then(|value| value.to_str().ok()),
+            Some("https")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-original-uri")
+                .and_then(|value| value.to_str().ok()),
+            Some("/chat/?room=main")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-original-path")
+                .and_then(|value| value.to_str().ok()),
+            Some("/chat/")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-original-query")
+                .and_then(|value| value.to_str().ok()),
+            Some("room=main")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-request-id")
+                .and_then(|value| value.to_str().ok()),
+            Some("req-123")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("upgrade")
+                .and_then(|value| value.to_str().ok()),
+            Some("websocket")
+        );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
     fn applies_user_friendly_request_header_operations() {
         let policy = crate::config::RequestHeaderPolicyConfig {
             remove: vec!["x-powered-by".to_owned()],
@@ -594,7 +815,7 @@ mod tests {
         request.insert_header("x-debug", "1").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true)
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
             .unwrap();
 
         assert!(request.headers.get("x-powered-by").is_none());
@@ -617,6 +838,45 @@ mod tests {
 
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
+    fn preserves_upgrade_headers_by_default() {
+        let policy = crate::config::RequestHeaderPolicyConfig::default();
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/chat/room", Some(8)).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        request
+            .insert_header("connection", "keep-alive, Upgrade")
+            .unwrap();
+        request.insert_header("upgrade", "websocket").unwrap();
+        let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
+
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
+            .unwrap();
+
+        assert_eq!(
+            request
+                .headers
+                .get("connection")
+                .and_then(|value| value.to_str().ok()),
+            Some("keep-alive, Upgrade")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("upgrade")
+                .and_then(|value| value.to_str().ok()),
+            Some("websocket")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-forwarded-proto")
+                .and_then(|value| value.to_str().ok()),
+            Some("https")
+        );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
     fn appends_forwarded_for_when_configured() {
         let policy = crate::config::RequestHeaderPolicyConfig {
             strip_inbound_client_ip_headers: false,
@@ -629,7 +889,7 @@ mod tests {
             .unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), true, false)
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), true, false, None)
             .unwrap();
 
         assert_eq!(
@@ -655,8 +915,15 @@ mod tests {
             .unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, false)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            false,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             request
@@ -678,7 +945,7 @@ mod tests {
         request.insert_header("host", "example.test").unwrap();
         let client_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 53210);
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true)
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
             .unwrap();
 
         assert_eq!(
@@ -713,7 +980,7 @@ mod tests {
             .unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true)
+        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
             .unwrap();
 
         assert!(request.headers.get("x-forwarded-for").is_none());

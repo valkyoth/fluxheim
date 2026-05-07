@@ -16,12 +16,16 @@ pub struct Cli {
     #[arg(long)]
     pub check_config: bool,
 
+    /// Validate configuration without printing the resolved config.
+    #[arg(long, conflicts_with = "check_config")]
+    pub validate_config: bool,
+
     /// Validate TLS certificate/key files and ACME storage permissions.
     #[arg(long)]
     pub check_tls_storage: bool,
 
     /// Classify whether OLD_CONFIG can be hot-reloaded into --config.
-    #[arg(long, value_name = "OLD_CONFIG", conflicts_with_all = ["check_config", "check_tls_storage"])]
+    #[arg(long, value_name = "OLD_CONFIG", conflicts_with_all = ["check_config", "validate_config", "check_tls_storage"])]
     pub reload_from: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -101,6 +105,10 @@ where
 
     if cli.check_config {
         println!("{config:#?}");
+        return Ok(());
+    }
+
+    if cli.validate_config {
         return Ok(());
     }
 
@@ -273,6 +281,20 @@ mod tests {
             old_config.to_str().unwrap(),
             "--config",
             new_config.to_str().unwrap(),
+        ])
+        .unwrap();
+    }
+
+    #[test]
+    fn validate_config_accepts_valid_config() {
+        let dir = TestDir::new("cli-validate-config");
+        let config = dir.simple_config("fluxheim.toml", "example", "example.test");
+
+        run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "--validate-config",
         ])
         .unwrap();
     }

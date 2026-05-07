@@ -12,9 +12,12 @@ my @files;
 
 find(
     sub {
+        if (-d $_ && ($_ eq '.git' || $_ eq 'dist' || $_ eq 'target')) {
+            $File::Find::prune = 1;
+            return;
+        }
         return if -d $_;
         return unless /\.md\z/;
-        return if $File::Find::name =~ m{(?:^|/)\.git/};
         push @files, $File::Find::name;
     },
     $root

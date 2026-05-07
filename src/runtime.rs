@@ -332,9 +332,151 @@ where
         return Err("server.tls_listen requires tls.enabled = true".into());
     }
 
-    let Some(certificate) = crate::tls::default_downstream_certificate(config) else {
+    let Some(selector) = crate::tls::DownstreamCertificateSelector::from_config(config) else {
         return Err("server.tls_listen requires at least one [[tls.certificates]] entry".into());
     };
+
+    for listen in &config.server.tls_listen {
+        log::info!("proxy TLS listener enabled on {listen}");
+        add_downstream_tls_listener(service, listen, &selector)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+fn add_downstream_tls_listener<S>(
+    service: &mut pingora::services::listening::Service<S>,
+    listen: &str,
+    selector: &crate::tls::DownstreamCertificateSelector,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: Send + Sync + 'static,
+{
+    if selector.has_sni_certificates() {
+        let mut settings = pingora::listeners::tls::TlsSettings::with_callbacks(Box::new(
+            SniCertificateCallback::new(selector)?,
+        ))?;
+        settings.enable_h2();
+        service.add_tls_with_settings(listen, None, settings);
+        return Ok(());
+    }
+
+    let certificate = selector.certificate_for_sni(None);
+    let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
+    let mut settings = pingora::listeners::tls::TlsSettings::intermediate(cert_path, key_path)?;
+    settings.enable_h2();
+    service.add_tls_with_settings(listen, None, settings);
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-rustls", feature = "tls-s2n"),
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+fn add_downstream_tls_listener<S>(
+    service: &mut pingora::services::listening::Service<S>,
+    listen: &str,
+    selector: &crate::tls::DownstreamCertificateSelector,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: Send + Sync + 'static,
+{
+    if selector.has_sni_certificates() {
+        return Err(
+            "vhost TLS certificates require a TLS backend with SNI certificate callbacks; build with tls-openssl or tls-boringssl"
+                .into(),
+        );
+    }
+
+    let certificate = selector.certificate_for_sni(None);
+    let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
+    let mut settings = pingora::listeners::tls::TlsSettings::intermediate(cert_path, key_path)?;
+    settings.enable_h2();
+    service.add_tls_with_settings(listen, None, settings);
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+struct SniCertificateCallback {
+    selector: crate::tls::DownstreamCertificateSelector,
+    certificates: Vec<CallbackCertificate>,
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+impl SniCertificateCallback {
+    fn new(
+        selector: &crate::tls::DownstreamCertificateSelector,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let mut certificates = Vec::with_capacity(selector.certificates().len());
+        for certificate in selector.certificates() {
+            let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
+            certificates.push(CallbackCertificate {
+                cert_path: cert_path.to_owned(),
+                key_path: key_path.to_owned(),
+            });
+        }
+
+        Ok(Self {
+            selector: selector.clone(),
+            certificates,
+        })
+    }
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+#[async_trait::async_trait]
+impl pingora::listeners::TlsAccept for SniCertificateCallback {
+    async fn certificate_callback(&self, ssl: &mut pingora::tls::ssl::SslRef) {
+        let sni = ssl.servername(pingora::tls::ssl::NameType::HOST_NAME);
+        let index = self.selector.certificate_index_for_sni(sni);
+        let certificate = &self.certificates[index];
+        if let Err(error) = ssl.set_certificate_chain_file(&certificate.cert_path) {
+            log::error!("failed to set downstream SNI certificate chain: {error}");
+            return;
+        }
+        if let Err(error) =
+            ssl.set_private_key_file(&certificate.key_path, pingora::tls::ssl::SslFiletype::PEM)
+        {
+            log::error!("failed to set downstream SNI private key: {error}");
+        }
+    }
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+struct CallbackCertificate {
+    cert_path: String,
+    key_path: String,
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(
+        feature = "tls-rustls",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    )
+))]
+fn downstream_certificate_paths(
+    certificate: &crate::config::StaticCertificateConfig,
+) -> Result<(&str, &str), Box<dyn Error + Send + Sync>> {
     let cert_path = certificate
         .cert_path
         .to_str()
@@ -344,12 +486,7 @@ where
         .to_str()
         .ok_or("TLS private key path must be valid UTF-8 for Pingora")?;
 
-    for listen in &config.server.tls_listen {
-        log::info!("proxy TLS listener enabled on {listen}");
-        service.add_tls(listen, cert_path, key_path)?;
-    }
-
-    Ok(())
+    Ok((cert_path, key_path))
 }
 
 #[cfg(all(

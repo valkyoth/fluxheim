@@ -40,6 +40,7 @@ request_id_header = "x-request-id"
 enabled = true
 strip_inbound_client_ip_headers = true
 x_forwarded_for = "replace"
+x_real_ip = true
 x_forwarded_host = true
 x_forwarded_proto = true
 forwarded = false
@@ -47,6 +48,7 @@ remove = ["x-powered-by"]
 
 [headers.request.add]
 x-proxy-by = "Fluxheim"
+x-forwarded-host = "{host}"
 
 [headers.request.append]
 via = "fluxheim"

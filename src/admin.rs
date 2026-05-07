@@ -1704,6 +1704,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -1789,6 +1790,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -1843,6 +1845,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -1893,6 +1896,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2055,6 +2059,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2068,6 +2073,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2154,6 +2160,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2191,6 +2198,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2300,6 +2308,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2317,6 +2326,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2388,6 +2398,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2405,6 +2416,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2444,6 +2456,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2461,6 +2474,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2501,6 +2515,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2518,6 +2533,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2558,6 +2574,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2575,6 +2592,7 @@ mod tests {
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };

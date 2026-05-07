@@ -72,6 +72,7 @@ zero_downtime_reload = true
 enabled = true
 strip_inbound_client_ip_headers = true
 x_forwarded_for = "replace"
+x_real_ip = true
 x_forwarded_host = true
 x_forwarded_proto = true
 forwarded = false
@@ -79,6 +80,7 @@ remove = ["x-powered-by"]
 
 [headers.request.add]
 x-proxy-by = "Fluxheim"
+x-forwarded-host = "{host}"
 
 [headers.request.append]
 via = "fluxheim"
@@ -125,6 +127,61 @@ access-control-allow-origin = "https://example.test"
 
 [vhosts.headers.response.append]
 vary = ["Origin"]
+
+[[vhosts.routes]]
+name = "chat"
+path_prefix = "/chat/"
+strip_prefix = "/chat/"
+max_request_body_bytes = "64MiB"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:6012"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 600
+send_timeout_secs = 600
+
+[[vhosts.routes.proxy.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.routes.proxy.error_pages.web]
+root = "/srv/sites/errors"
+cache_control = "private, no-store"
+
+[[vhosts.routes]]
+name = "repo"
+path_prefix = "/repo"
+strip_prefix = "/repo"
+
+[vhosts.routes.web]
+root = "/srv/sites/example-repo"
+index_files = ["repo.html", "index.html"]
+deny_dotfiles = true
+
+[vhosts.routes.web.directory_listing]
+enabled = true
+exact_size = false
+
+[[vhosts.routes]]
+name = "fallback"
+fallback = true
+max_request_body_bytes = "16MiB"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 60
+
+[[vhosts.routes.proxy.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.routes.proxy.error_pages.web]
+root = "/srv/sites/errors"
+cache_control = "private, no-store"
 
 [vhosts.proxy.load_balance]
 max_iterations = 256

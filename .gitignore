@@ -37,6 +37,7 @@ tmp/
 temp/
 
 # Container/local generated artifacts
+/dist/
 *.tar
 *.tar.gz
 *.tgz

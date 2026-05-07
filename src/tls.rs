@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::config::{AcmeConfig, Config, StaticCertificateConfig};
+use crate::config::{AcmeConfig, Config, StaticCertificateConfig, normalize_host};
 
 pub const PRIVATE_KEY_MODE: u32 = 0o600;
 pub const ACME_STORAGE_MODE: u32 = 0o700;
@@ -294,6 +294,98 @@ pub fn recommended_acme_storage_mode() -> u32 {
 
 pub fn default_downstream_certificate(config: &Config) -> Option<&StaticCertificateConfig> {
     config.tls.certificates.first()
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DownstreamCertificateSelector {
+    certificates: Vec<StaticCertificateConfig>,
+    default_index: usize,
+    exact_hosts: std::collections::HashMap<String, usize>,
+    wildcard_hosts: Vec<WildcardCertificate>,
+}
+
+impl DownstreamCertificateSelector {
+    pub fn from_config(config: &Config) -> Option<Self> {
+        let default = config.tls.certificates.first()?.clone();
+        let mut selector = Self {
+            certificates: vec![default],
+            default_index: 0,
+            exact_hosts: std::collections::HashMap::new(),
+            wildcard_hosts: Vec::new(),
+        };
+
+        for vhost in &config.vhosts {
+            if !vhost.tls.enabled {
+                continue;
+            }
+            let Some(certificate) = &vhost.tls.certificate else {
+                continue;
+            };
+            let certificate_index = selector.certificates.len();
+            selector.certificates.push(certificate.clone());
+
+            for host in vhost.normalized_hosts() {
+                if let Some(suffix) = host.strip_prefix("*.") {
+                    selector.wildcard_hosts.push(WildcardCertificate {
+                        suffix: suffix.to_owned(),
+                        certificate_index,
+                    });
+                } else {
+                    selector.exact_hosts.insert(host, certificate_index);
+                }
+            }
+        }
+
+        selector
+            .wildcard_hosts
+            .sort_by_key(|wildcard| std::cmp::Reverse(wildcard.suffix.len()));
+
+        Some(selector)
+    }
+
+    pub fn has_sni_certificates(&self) -> bool {
+        !self.exact_hosts.is_empty() || !self.wildcard_hosts.is_empty()
+    }
+
+    pub fn certificates(&self) -> &[StaticCertificateConfig] {
+        &self.certificates
+    }
+
+    pub fn certificate_index_for_sni(&self, sni: Option<&str>) -> usize {
+        let Some(host) = sni.and_then(normalize_host) else {
+            return self.default_index;
+        };
+
+        if let Some(index) = self.exact_hosts.get(&host) {
+            return *index;
+        }
+
+        self.wildcard_hosts
+            .iter()
+            .find(|wildcard| wildcard.matches(&host))
+            .map(|wildcard| wildcard.certificate_index)
+            .unwrap_or(self.default_index)
+    }
+
+    pub fn certificate_for_sni(&self, sni: Option<&str>) -> &StaticCertificateConfig {
+        &self.certificates[self.certificate_index_for_sni(sni)]
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WildcardCertificate {
+    suffix: String,
+    certificate_index: usize,
+}
+
+impl WildcardCertificate {
+    fn matches(&self, host: &str) -> bool {
+        let Some(prefix) = host.strip_suffix(self.suffix.as_str()) else {
+            return false;
+        };
+
+        prefix.ends_with('.') && !prefix[..prefix.len() - 1].contains('.')
+    }
 }
 
 fn validate_static_certificate_storage(
@@ -744,16 +836,18 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use crate::config::{
-        AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, Config,
-        StaticCertificateConfig, TlsConfig,
+        AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, CacheConfig, Config,
+        ProxyConfig, StaticCertificateConfig, TlsConfig, VhostConfig, VhostHeaderPolicyConfig,
+        VhostTlsConfig, WebConfig,
     };
     #[cfg(unix)]
     use crate::test_support::unique_world_writable_child;
     use crate::test_support::{safe_child_path, unique_temp_path};
 
     use super::{
-        TlsStorageIssue, recommended_acme_storage_mode, recommended_private_key_mode,
-        secure_acme_storage_mode, secure_private_key_mode, validate_tls_storage,
+        DownstreamCertificateSelector, TlsStorageIssue, recommended_acme_storage_mode,
+        recommended_private_key_mode, secure_acme_storage_mode, secure_private_key_mode,
+        validate_tls_storage,
     };
 
     #[test]
@@ -1026,6 +1120,77 @@ mod tests {
                 path.display()
             )
         );
+    }
+
+    #[test]
+    fn downstream_certificate_selector_uses_vhost_sni() {
+        let default_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/default.pem"),
+            key_path: PathBuf::from("/tls/default.key"),
+        };
+        let exact_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/exact.pem"),
+            key_path: PathBuf::from("/tls/exact.key"),
+        };
+        let wildcard_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/wildcard.pem"),
+            key_path: PathBuf::from("/tls/wildcard.key"),
+        };
+        let config = Config {
+            tls: TlsConfig {
+                enabled: true,
+                certificates: vec![default_cert.clone()],
+                ..TlsConfig::default()
+            },
+            vhosts: vec![
+                VhostConfig {
+                    name: "exact".to_owned(),
+                    hosts: vec!["Example.TEST".to_owned()],
+                    tls: VhostTlsConfig {
+                        enabled: true,
+                        certificate: Some(exact_cert.clone()),
+                        ..VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+                VhostConfig {
+                    name: "wildcard".to_owned(),
+                    hosts: vec!["*.api.example.test".to_owned()],
+                    tls: VhostTlsConfig {
+                        enabled: true,
+                        certificate: Some(wildcard_cert.clone()),
+                        ..VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+            ],
+            ..Config::default()
+        };
+
+        let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+
+        assert!(selector.has_sni_certificates());
+        assert_eq!(
+            selector.certificate_for_sni(Some("example.test")),
+            &exact_cert
+        );
+        assert_eq!(
+            selector.certificate_for_sni(Some("service.api.example.test")),
+            &wildcard_cert
+        );
+        assert_eq!(
+            selector.certificate_for_sni(Some("deep.service.api.example.test")),
+            &default_cert
+        );
+        assert_eq!(selector.certificate_for_sni(None), &default_cert);
     }
 
     fn tls_config(cert_path: PathBuf, key_path: PathBuf, acme_storage: PathBuf) -> Config {

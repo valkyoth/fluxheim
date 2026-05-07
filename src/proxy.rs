@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::sync::{Arc, RwLock};
 #[cfg(not(feature = "privacy-mode"))]
 use std::time::Instant;
@@ -18,7 +18,7 @@ use pingora::cache::lock::CacheKeyLockImpl;
 use pingora::http::RequestHeader;
 use pingora::http::ResponseHeader;
 use pingora::prelude::{HttpPeer, Result};
-use pingora::proxy::{ProxyHttp, Session};
+use pingora::proxy::{FailToProxy, ProxyHttp, Session};
 use pingora::{Error, ErrorType};
 #[cfg(feature = "cache")]
 use pingora::{
@@ -27,7 +27,10 @@ use pingora::{
 
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
-use crate::config::{Config, HttpsRedirectConfig, ProxyConfig, ServerLimitsConfig, normalize_host};
+use crate::config::{
+    Config, HttpsRedirectConfig, ProxyConfig, RouteRedirectConfig, ServerLimitsConfig,
+    normalize_host,
+};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
 #[cfg(feature = "web")]
@@ -811,7 +814,7 @@ impl WildcardHost {
 struct RuntimeVhost {
     name: String,
     hosts: Vec<String>,
-    proxy: ProxyConfig,
+    proxy: RuntimeProxy,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
     #[cfg(feature = "cache")]
@@ -830,6 +833,7 @@ struct RuntimeVhost {
     load_balancer: Option<UpstreamLoadBalancer>,
     #[cfg(feature = "web")]
     web: Option<StaticFileServer>,
+    routes: Vec<RuntimeRoute>,
 }
 
 impl std::fmt::Debug for RuntimeVhost {
@@ -862,12 +866,188 @@ impl std::fmt::Debug for RuntimeVhost {
 
         #[cfg(feature = "web")]
         debug.field("web", &self.web);
+        debug.field("routes", &self.routes);
 
         debug.finish()
     }
 }
 
+#[derive(Debug, Clone)]
+struct RuntimeRoute {
+    matcher: RuntimeRouteMatcher,
+    strip_prefix: Option<String>,
+    max_request_body_bytes: Option<crate::config::ByteSize>,
+    action: RuntimeRouteAction,
+    request_headers: crate::config::RequestHeaderPolicyConfig,
+    response_headers: crate::config::ResponseHeaderPolicyConfig,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum RuntimeRouteMatcher {
+    Exact(String),
+    Prefix(String),
+    Fallback,
+}
+
+#[derive(Debug, Clone)]
+enum RuntimeRouteAction {
+    Redirect(RouteRedirectConfig),
+    Proxy(RuntimeProxy),
+    #[cfg(feature = "web")]
+    Web(StaticFileServer),
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeProxy {
+    config: ProxyConfig,
+    error_pages: Vec<RuntimeErrorPage>,
+}
+
+#[cfg(feature = "web")]
+#[derive(Debug, Clone)]
+struct RuntimeErrorPage {
+    status: u16,
+    path: String,
+    web: StaticFileServer,
+}
+
+#[cfg(not(feature = "web"))]
+#[derive(Debug, Clone)]
+struct RuntimeErrorPage {
+    status: u16,
+}
+
+impl RuntimeProxy {
+    fn from_config(config: &ProxyConfig) -> io::Result<Self> {
+        let error_pages = config
+            .error_pages
+            .iter()
+            .map(RuntimeErrorPage::from_config)
+            .collect::<io::Result<Vec<_>>>()?;
+        Ok(Self {
+            config: config.clone(),
+            error_pages,
+        })
+    }
+
+    fn error_page(&self, status: u16) -> Option<&RuntimeErrorPage> {
+        self.error_pages.iter().find(|page| page.status == status)
+    }
+}
+
+impl RuntimeErrorPage {
+    fn from_config(config: &crate::config::ProxyErrorPageConfig) -> io::Result<Self> {
+        #[cfg(feature = "web")]
+        {
+            let web = StaticFileServer::from_config(&config.web)?.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "proxy error page for status {} requires web.root",
+                        config.status
+                    ),
+                )
+            })?;
+            Ok(Self {
+                status: config.status,
+                path: config.path.clone(),
+                web,
+            })
+        }
+
+        #[cfg(not(feature = "web"))]
+        {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "proxy error page for status {} requires the web feature",
+                    config.status
+                ),
+            ))
+        }
+    }
+}
+
+impl RuntimeRoute {
+    fn from_config(
+        route: &crate::config::RouteConfig,
+        base_headers: &crate::config::HeaderPolicyConfig,
+    ) -> io::Result<Self> {
+        let headers = base_headers.with_vhost_overlay(&route.headers);
+        let matcher = if let Some(path) = &route.path_exact {
+            RuntimeRouteMatcher::Exact(path.clone())
+        } else if let Some(path) = &route.path_prefix {
+            RuntimeRouteMatcher::Prefix(path.clone())
+        } else {
+            RuntimeRouteMatcher::Fallback
+        };
+        let action = if let Some(redirect) = &route.redirect {
+            RuntimeRouteAction::Redirect(redirect.clone())
+        } else if let Some(proxy) = &route.proxy {
+            RuntimeRouteAction::Proxy(RuntimeProxy::from_config(proxy)?)
+        } else if let Some(web) = &route.web {
+            #[cfg(feature = "web")]
+            {
+                let web = StaticFileServer::from_config(web)?.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("route {:?} static web action requires web.root", route.name),
+                    )
+                })?;
+                RuntimeRouteAction::Web(web)
+            }
+            #[cfg(not(feature = "web"))]
+            {
+                let _ = web;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("route {:?} requires the web feature", route.name),
+                ));
+            }
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("route {:?} has no runtime action", route.name),
+            ));
+        };
+
+        Ok(Self {
+            matcher,
+            strip_prefix: route.strip_prefix.clone(),
+            max_request_body_bytes: route.max_request_body_bytes,
+            action,
+            request_headers: headers.request,
+            response_headers: headers.response,
+        })
+    }
+}
+
 impl RuntimeVhost {
+    fn route_index(&self, path: &str) -> Option<usize> {
+        let mut fallback = None;
+        let mut best_prefix: Option<(usize, usize)> = None;
+
+        for (index, route) in self.routes.iter().enumerate() {
+            match &route.matcher {
+                RuntimeRouteMatcher::Exact(exact) if path == exact => return Some(index),
+                RuntimeRouteMatcher::Prefix(prefix)
+                    if path.starts_with(prefix)
+                        && best_prefix.is_none_or(|(_, len)| prefix.len() > len) =>
+                {
+                    best_prefix = Some((index, prefix.len()));
+                }
+                RuntimeRouteMatcher::Fallback => fallback = Some(index),
+                _ => {}
+            }
+        }
+
+        best_prefix.map(|(index, _)| index).or(fallback)
+    }
+
+    fn route(&self, index: usize) -> &RuntimeRoute {
+        &self.routes[index]
+    }
+
     fn from_legacy(
         proxy: ProxyConfig,
         #[cfg_attr(not(feature = "cache"), allow(unused_variables))]
@@ -894,7 +1074,7 @@ impl RuntimeVhost {
             hosts: vec![],
             #[cfg(feature = "load-balancer")]
             load_balancer,
-            proxy,
+            proxy: RuntimeProxy::from_config(&proxy)?,
             request_headers: headers.request,
             response_headers: headers.response,
             #[cfg(feature = "cache")]
@@ -911,6 +1091,7 @@ impl RuntimeVhost {
             cache,
             #[cfg(feature = "web")]
             web: StaticFileServer::from_config(&web)?,
+            routes: Vec::new(),
         })
     }
 
@@ -920,6 +1101,15 @@ impl RuntimeVhost {
         #[cfg(feature = "load-balancer")] load_balancer: Option<UpstreamLoadBalancer>,
     ) -> io::Result<Self> {
         let headers = global_headers.with_vhost_overlay(&vhost.headers);
+        let route_base_headers = crate::config::HeaderPolicyConfig {
+            request: headers.request.clone(),
+            response: headers.response.clone(),
+        };
+        let routes = vhost
+            .routes
+            .iter()
+            .map(|route| RuntimeRoute::from_config(route, &route_base_headers))
+            .collect::<io::Result<Vec<_>>>()?;
         #[cfg(feature = "cache")]
         let pingora_memory_storage = crate::cache::pingora_memory_storage_from_config(&vhost.cache);
         #[cfg(feature = "cache")]
@@ -938,7 +1128,7 @@ impl RuntimeVhost {
             hosts: vhost.normalized_hosts(),
             #[cfg(feature = "load-balancer")]
             load_balancer,
-            proxy: vhost.proxy.clone(),
+            proxy: RuntimeProxy::from_config(&vhost.proxy)?,
             request_headers: headers.request,
             response_headers: headers.response,
             #[cfg(feature = "cache")]
@@ -955,6 +1145,7 @@ impl RuntimeVhost {
             cache: vhost.cache.clone(),
             #[cfg(feature = "web")]
             web: StaticFileServer::from_config(&vhost.web)?,
+            routes,
         })
     }
 }
@@ -963,6 +1154,8 @@ impl RuntimeVhost {
 pub struct RequestContext {
     state: Option<Arc<ProxyRuntimeState>>,
     vhost_index: Option<usize>,
+    route_index: Option<usize>,
+    request_body_limit_bytes: Option<u64>,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
     health_signal_recorded: bool,
@@ -992,32 +1185,59 @@ impl ProxyHttp for FluxProxy {
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         let state = self.state.load_full();
 
-        if let Some(status) = request_limit_status(&state.limits, session.req_header()) {
-            session.respond_error(status).await?;
-            return Ok(true);
-        }
-
         let vhost_index = state.vhost_index(request_host(session));
         ctx.state = Some(Arc::clone(&state));
         ctx.vhost_index = Some(vhost_index);
+        let vhost = state.vhost(vhost_index);
+        ctx.route_index = vhost.route_index(session.req_header().uri.path());
+        ctx.request_body_limit_bytes = ctx
+            .route_index
+            .and_then(|route_index| vhost.route(route_index).max_request_body_bytes)
+            .map(|bytes| bytes.as_u64())
+            .or(Some(state.limits.max_request_body_bytes.as_u64()));
+        if let Some(status) = request_limit_status(
+            &state.limits,
+            ctx.request_body_limit_bytes,
+            session.req_header(),
+        ) {
+            session.respond_error(status).await?;
+            return Ok(true);
+        }
         #[cfg(not(feature = "privacy-mode"))]
         {
             ctx.request_id = access_log_request_id(&state.access_log, session.req_header());
         }
+
+        if let Some(route_index) = ctx.route_index {
+            let route = vhost.route(route_index);
+            match &route.action {
+                RuntimeRouteAction::Redirect(redirect) => {
+                    respond_route_redirect(session, redirect, &route.response_headers).await?;
+                    return Ok(true);
+                }
+                RuntimeRouteAction::Proxy(_) => return Ok(false),
+                #[cfg(feature = "web")]
+                RuntimeRouteAction::Web(web) => {
+                    if serve_static_route(session, ctx, web, route).await? {
+                        return Ok(true);
+                    }
+                    return Ok(false);
+                }
+            }
+        }
+
         if state.https_redirect.enabled && !downstream_tls(session) {
-            let vhost = state.vhost(vhost_index);
             respond_https_redirect(session, &state.https_redirect, &vhost.response_headers).await?;
             return Ok(true);
         }
 
         #[cfg(feature = "web")]
         {
-            let vhost = state.vhost(vhost_index);
             let Some(web) = &vhost.web else {
                 return Ok(false);
             };
 
-            let method = session.req_header().method.as_str();
+            let method = session.req_header().method.as_str().to_owned();
             if method != "GET" && method != "HEAD" {
                 return Ok(false);
             }
@@ -1038,7 +1258,7 @@ impl ProxyHttp for FluxProxy {
                     let if_range = request_header_values_joined(session.req_header(), "if-range");
                     let plan = crate::web::plan_static_response(
                         &file,
-                        method,
+                        &method,
                         crate::web::StaticRequestConditions {
                             if_match: if_match.as_deref(),
                             if_unmodified_since: if_unmodified_since.as_deref(),
@@ -1065,6 +1285,16 @@ impl ProxyHttp for FluxProxy {
                         web,
                         &file,
                         &plan,
+                        &vhost.response_headers,
+                    )
+                    .await?;
+                    Ok(true)
+                }
+                Ok(ResolveResult::DirectoryListing(listing)) => {
+                    ctx.response_body_bytes_seen = crate::web::serve_directory_listing(
+                        session,
+                        &listing,
+                        &method,
                         &vhost.response_headers,
                     )
                     .await?;
@@ -1103,21 +1333,17 @@ impl ProxyHttp for FluxProxy {
             .vhost_index
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         let vhost = state.vhost(vhost_index);
-        let proxy = &vhost.proxy;
+        let proxy = selected_runtime_proxy(vhost, ctx);
 
         #[cfg(feature = "load-balancer")]
         if let Some(load_balancer) = &vhost.load_balancer
             && let Some(upstream) = load_balancer.select()
         {
-            let peer = HttpPeer::new(upstream, proxy.upstream_tls, proxy.upstream_sni());
+            let peer = http_peer_for_proxy(upstream, &proxy.config)?;
             return Ok(Box::new(peer));
         }
 
-        let peer = HttpPeer::new(
-            proxy.primary_upstream(),
-            proxy.upstream_tls,
-            proxy.upstream_sni(),
-        );
+        let peer = http_peer_for_proxy(proxy.config.primary_upstream(), &proxy.config)?;
 
         Ok(Box::new(peer))
     }
@@ -1137,6 +1363,24 @@ impl ProxyHttp for FluxProxy {
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
+        let request_headers = ctx
+            .route_index
+            .map(|route_index| &vhost.route(route_index).request_headers)
+            .unwrap_or(&vhost.request_headers);
+        if let Some(route_index) = ctx.route_index {
+            let route = vhost.route(route_index);
+            if let Some(rewritten) = route_rewritten_path_and_query(session.req_header(), route) {
+                upstream_request.uri = match rewritten.parse() {
+                    Ok(uri) => uri,
+                    Err(_) => {
+                        return Error::e_explain(
+                            ErrorType::HTTPStatus(400),
+                            "route rewrite produced an invalid URI",
+                        );
+                    }
+                };
+            }
+        }
         let downstream_tls = downstream_tls(session);
         let client_addr = session.client_addr().and_then(|addr| addr.as_inet());
         let trusted_proxy = client_addr
@@ -1147,12 +1391,17 @@ impl ProxyHttp for FluxProxy {
             upstream_request
                 .insert_header(state.access_log.request_id_header.clone(), request_id)?;
         }
+        #[cfg(not(feature = "privacy-mode"))]
+        let request_id = ctx.request_id.as_deref();
+        #[cfg(feature = "privacy-mode")]
+        let request_id = None;
         crate::headers::apply_upstream_request_policy(
             upstream_request,
-            &vhost.request_headers,
+            request_headers,
             client_addr,
             trusted_proxy,
             downstream_tls,
+            request_id,
         )
     }
 
@@ -1172,7 +1421,8 @@ impl ProxyHttp for FluxProxy {
 
         let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
         if let Some(status) = request_body_chunk_limit_status(
-            &state.limits,
+            ctx.request_body_limit_bytes
+                .unwrap_or(state.limits.max_request_body_bytes.as_u64()),
             &mut ctx.request_body_bytes_seen,
             body.len(),
         ) {
@@ -1199,7 +1449,9 @@ impl ProxyHttp for FluxProxy {
             .vhost_index
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         ctx.vhost_index = Some(vhost_index);
-        crate::headers::apply_response_policy(response, &state.vhost(vhost_index).response_headers)
+        let vhost = state.vhost(vhost_index);
+        let response_headers = selected_response_headers(vhost, ctx);
+        crate::headers::apply_response_policy(response, response_headers)
     }
 
     fn response_body_filter(
@@ -1214,6 +1466,50 @@ impl ProxyHttp for FluxProxy {
     {
         count_response_body_chunk(&mut ctx.response_body_bytes_seen, body.as_ref());
         Ok(None)
+    }
+
+    async fn fail_to_proxy(
+        &self,
+        session: &mut Session,
+        error: &Error,
+        ctx: &mut Self::CTX,
+    ) -> FailToProxy
+    where
+        Self::CTX: Send + Sync,
+    {
+        let code = proxy_error_status(error);
+        if code > 0 {
+            let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+            let vhost_index = ctx
+                .vhost_index
+                .unwrap_or_else(|| state.vhost_index(request_host(session)));
+            let vhost = state.vhost(vhost_index);
+            let proxy = selected_runtime_proxy(vhost, ctx);
+            let response_headers = selected_response_headers(vhost, ctx);
+            let custom_sent = match proxy.error_page(code) {
+                Some(page) => {
+                    match respond_custom_proxy_error_page(session, code, page, response_headers)
+                        .await
+                    {
+                        Ok(sent) => sent,
+                        Err(error) => {
+                            log::error!("failed to serve custom proxy error page: {error}");
+                            false
+                        }
+                    }
+                }
+                None => false,
+            };
+
+            if !custom_sent && let Err(error) = session.respond_error(code).await {
+                log::error!("failed to send error response to downstream: {error}");
+            }
+        }
+
+        FailToProxy {
+            error_code: code,
+            can_reuse_downstream: false,
+        }
     }
 
     async fn logging(&self, session: &mut Session, error: Option<&Error>, ctx: &mut Self::CTX)
@@ -1351,17 +1647,207 @@ fn no_default_cache_ttl(_status: StatusCode) -> Option<std::time::Duration> {
 }
 
 fn request_host(session: &Session) -> Option<&str> {
-    session
-        .req_header()
-        .headers
-        .get("host")
-        .and_then(|value| value.to_str().ok())
+    request_host_header(session.req_header())
 }
 
 fn downstream_tls(session: &Session) -> bool {
     session
         .digest()
         .is_some_and(|digest| digest.ssl_digest.is_some())
+}
+
+#[cfg(feature = "web")]
+async fn serve_static_route(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    web: &StaticFileServer,
+    route: &RuntimeRoute,
+) -> Result<bool> {
+    let method = session.req_header().method.as_str().to_owned();
+    if method != "GET" && method != "HEAD" {
+        return Ok(false);
+    }
+
+    let request_path = route
+        .strip_prefix
+        .as_deref()
+        .and_then(|_| route_rewritten_path_and_query(session.req_header(), route))
+        .and_then(|path_and_query| {
+            path_and_query
+                .split_once('?')
+                .map(|(path, _)| path.to_owned())
+                .or(Some(path_and_query))
+        })
+        .unwrap_or_else(|| session.req_header().uri.path().to_owned());
+
+    match web.resolve(&request_path) {
+        Ok(ResolveResult::Found(file)) => {
+            let if_match = request_header_values_joined(session.req_header(), "if-match");
+            let if_unmodified_since =
+                request_header_values_joined(session.req_header(), "if-unmodified-since");
+            let if_none_match = request_header_values_joined(session.req_header(), "if-none-match");
+            let if_modified_since =
+                request_header_values_joined(session.req_header(), "if-modified-since");
+            let cache_control = request_header_values_joined(session.req_header(), "cache-control");
+            let pragma = request_header_values_joined(session.req_header(), "pragma");
+            let range = request_header_values_joined(session.req_header(), "range");
+            let if_range = request_header_values_joined(session.req_header(), "if-range");
+            let plan = crate::web::plan_static_response(
+                &file,
+                &method,
+                crate::web::StaticRequestConditions {
+                    if_match: if_match.as_deref(),
+                    if_unmodified_since: if_unmodified_since.as_deref(),
+                    if_none_match: if_none_match.as_deref(),
+                    if_modified_since: if_modified_since.as_deref(),
+                    cache_control: cache_control.as_deref(),
+                    pragma: pragma.as_deref(),
+                    range: range.as_deref(),
+                    if_range: if_range.as_deref(),
+                },
+            );
+            if plan.response_body_bytes > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
+                session
+                    .respond_error_with_body(413, Bytes::from_static(b"static response too large"))
+                    .await?;
+                return Ok(true);
+            }
+            ctx.response_body_bytes_seen = plan.response_body_bytes;
+            crate::web::serve_static_file(session, web, &file, &plan, &route.response_headers)
+                .await?;
+            Ok(true)
+        }
+        Ok(ResolveResult::DirectoryListing(listing)) => {
+            ctx.response_body_bytes_seen = crate::web::serve_directory_listing(
+                session,
+                &listing,
+                &method,
+                &route.response_headers,
+            )
+            .await?;
+            Ok(true)
+        }
+        Ok(ResolveResult::Forbidden) => {
+            session
+                .respond_error_with_body(403, Bytes::from_static(b"forbidden"))
+                .await?;
+            Ok(true)
+        }
+        Ok(ResolveResult::NotFound) => Ok(false),
+        Err(error) => {
+            log::error!("static route resolver failed: {error}");
+            session
+                .respond_error_with_body(500, Bytes::from_static(b"internal server error"))
+                .await?;
+            Ok(true)
+        }
+    }
+}
+
+fn selected_runtime_proxy<'a>(vhost: &'a RuntimeVhost, ctx: &RequestContext) -> &'a RuntimeProxy {
+    ctx.route_index
+        .and_then(|route_index| match &vhost.route(route_index).action {
+            RuntimeRouteAction::Proxy(proxy) => Some(proxy),
+            _ => None,
+        })
+        .unwrap_or(&vhost.proxy)
+}
+
+fn selected_response_headers<'a>(
+    vhost: &'a RuntimeVhost,
+    ctx: &RequestContext,
+) -> &'a crate::config::ResponseHeaderPolicyConfig {
+    ctx.route_index
+        .map(|route_index| &vhost.route(route_index).response_headers)
+        .unwrap_or(&vhost.response_headers)
+}
+
+fn proxy_error_status(error: &Error) -> u16 {
+    match error.etype() {
+        ErrorType::HTTPStatus(code) => *code,
+        _ => match error.esource().as_str() {
+            "Upstream" => 502,
+            "Downstream" => match error.etype() {
+                ErrorType::WriteError | ErrorType::ReadError | ErrorType::ConnectionClosed => 0,
+                _ => 400,
+            },
+            "Internal" | "" => 500,
+            _ => 500,
+        },
+    }
+}
+
+#[cfg(feature = "web")]
+async fn respond_custom_proxy_error_page(
+    session: &mut Session,
+    status: u16,
+    error_page: &RuntimeErrorPage,
+    response_headers: &crate::config::ResponseHeaderPolicyConfig,
+) -> Result<bool> {
+    use pingora::prelude::{InternalError, OrErr};
+
+    let file = match error_page
+        .web
+        .resolve(&error_page.path)
+        .or_err(InternalError, "failed to resolve custom proxy error page")?
+    {
+        ResolveResult::Found(file) => file,
+        ResolveResult::DirectoryListing(_) | ResolveResult::NotFound | ResolveResult::Forbidden => {
+            return Ok(false);
+        }
+    };
+
+    let method = session.req_header().method.as_str();
+    let plan = crate::web::plan_static_response(
+        &file,
+        method,
+        crate::web::StaticRequestConditions::default(),
+    );
+    if plan.response_body_bytes > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
+        return Ok(false);
+    }
+
+    crate::web::serve_static_file_with_status(
+        session,
+        &error_page.web,
+        &file,
+        &plan,
+        response_headers,
+        status,
+    )
+    .await?;
+    Ok(true)
+}
+
+#[cfg(not(feature = "web"))]
+async fn respond_custom_proxy_error_page(
+    _session: &mut Session,
+    _status: u16,
+    _error_page: &RuntimeErrorPage,
+    _response_headers: &crate::config::ResponseHeaderPolicyConfig,
+) -> Result<bool> {
+    Ok(false)
+}
+
+async fn respond_route_redirect(
+    session: &mut Session,
+    redirect: &RouteRedirectConfig,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+) -> Result<()> {
+    let Some(location) = route_redirect_location(session.req_header(), redirect) else {
+        session
+            .respond_error_with_body(400, Bytes::from_static(b"invalid redirect target"))
+            .await?;
+        return Ok(());
+    };
+
+    let mut response = ResponseHeader::build(redirect.status, Some(4))?;
+    response.insert_header("location", location)?;
+    response.insert_header("content-length", 0)?;
+    crate::headers::apply_response_policy(&mut response, response_policy)?;
+    session
+        .write_response_header(Box::new(response), true)
+        .await
 }
 
 async fn respond_https_redirect(
@@ -1418,6 +1904,59 @@ fn redirect_authority(host: &str, target_port: Option<u16>) -> Option<String> {
         Some(443) | None => Some(host),
         Some(0) => None,
         Some(port) => Some(format!("{host}:{port}")),
+    }
+}
+
+fn route_redirect_location(
+    request: &RequestHeader,
+    redirect: &RouteRedirectConfig,
+) -> Option<String> {
+    let uri = request
+        .uri
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("/");
+    let path = request.uri.path();
+    let query = request.uri.query().unwrap_or("");
+    if !uri.starts_with('/') || uri.chars().any(char::is_control) {
+        return None;
+    }
+
+    let location = redirect
+        .to
+        .replace("{uri}", uri)
+        .replace("{path}", path)
+        .replace("{query}", query);
+    if location.contains('{')
+        || location.contains('}')
+        || location.contains('\\')
+        || location
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+        || !(location.starts_with("https://") || location.starts_with("http://"))
+    {
+        return None;
+    }
+    Some(location)
+}
+
+fn route_rewritten_path_and_query(request: &RequestHeader, route: &RuntimeRoute) -> Option<String> {
+    let strip_prefix = route.strip_prefix.as_deref()?;
+    let path = request.uri.path();
+    let suffix = path.strip_prefix(strip_prefix)?;
+    let rewritten_path = if suffix.is_empty() {
+        "/".to_owned()
+    } else if suffix.starts_with('/') {
+        suffix.to_owned()
+    } else {
+        format!("/{suffix}")
+    };
+    if rewritten_path.chars().any(char::is_control) {
+        return None;
+    }
+    match request.uri.query() {
+        Some(query) => Some(format!("{rewritten_path}?{query}")),
+        None => Some(rewritten_path),
     }
 }
 
@@ -1802,15 +2341,46 @@ fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<S
     }))
 }
 
-#[cfg(feature = "cache")]
+fn http_peer_for_proxy(address: &str, proxy: &ProxyConfig) -> Result<HttpPeer> {
+    let mut addrs = address.to_socket_addrs().map_err(|error| {
+        Error::because(
+            ErrorType::ConnectError,
+            format!("failed to resolve upstream {address:?}"),
+            error,
+        )
+    })?;
+    let address = addrs.next().ok_or_else(|| {
+        Error::explain(
+            ErrorType::ConnectError,
+            "upstream resolution returned no addresses",
+        )
+    })?;
+    let mut peer = HttpPeer::new(address, proxy.upstream_tls, proxy.upstream_sni());
+    apply_proxy_timeouts(&mut peer, proxy);
+    Ok(peer)
+}
+
+fn apply_proxy_timeouts(peer: &mut HttpPeer, proxy: &ProxyConfig) {
+    peer.options.connection_timeout = proxy
+        .connect_timeout_secs
+        .map(std::time::Duration::from_secs);
+    peer.options.read_timeout = proxy.read_timeout_secs.map(std::time::Duration::from_secs);
+    peer.options.write_timeout = proxy.send_timeout_secs.map(std::time::Duration::from_secs);
+}
+
 fn request_host_header(request: &RequestHeader) -> Option<&str> {
     request
         .headers
         .get("host")
         .and_then(|value| value.to_str().ok())
+        .or_else(|| request.uri.authority().map(|authority| authority.as_str()))
 }
 
-fn request_limit_status(limits: &ServerLimitsConfig, request: &RequestHeader) -> Option<u16> {
+fn request_limit_status(
+    limits: &ServerLimitsConfig,
+    request_body_limit_bytes: Option<u64>,
+    request: &RequestHeader,
+) -> Option<u16> {
     if request.uri.to_string().len() > limits.max_uri_bytes.as_usize() {
         return Some(414);
     }
@@ -1823,14 +2393,17 @@ fn request_limit_status(limits: &ServerLimitsConfig, request: &RequestHeader) ->
         return Some(431);
     }
 
-    if let Some(status) = request_body_limit_status(limits, request) {
+    if let Some(status) = request_body_limit_status(
+        request_body_limit_bytes.unwrap_or(limits.max_request_body_bytes.as_u64()),
+        request,
+    ) {
         return Some(status);
     }
 
     None
 }
 
-fn request_body_limit_status(limits: &ServerLimitsConfig, request: &RequestHeader) -> Option<u16> {
+fn request_body_limit_status(limit_bytes: u64, request: &RequestHeader) -> Option<u16> {
     let content_length = match content_length(request) {
         Ok(content_length) => content_length,
         Err(status) => return Some(status),
@@ -1844,7 +2417,7 @@ fn request_body_limit_status(limits: &ServerLimitsConfig, request: &RequestHeade
         };
     }
 
-    if content_length.is_some_and(|bytes| bytes > limits.max_request_body_bytes.as_u64()) {
+    if content_length.is_some_and(|bytes| bytes > limit_bytes) {
         return Some(413);
     }
 
@@ -1852,12 +2425,12 @@ fn request_body_limit_status(limits: &ServerLimitsConfig, request: &RequestHeade
 }
 
 fn request_body_chunk_limit_status(
-    limits: &ServerLimitsConfig,
+    limit_bytes: u64,
     bytes_seen: &mut u64,
     chunk_len: usize,
 ) -> Option<u16> {
     *bytes_seen = bytes_seen.saturating_add(chunk_len as u64);
-    if *bytes_seen > limits.max_request_body_bytes.as_u64() {
+    if *bytes_seen > limit_bytes {
         Some(413)
     } else {
         None
@@ -1912,13 +2485,15 @@ fn approximate_request_header_bytes(request: &RequestHeader) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use bytes::Bytes;
 
     use crate::config::{
-        ByteSize, CacheConfig, Config, HttpsRedirectConfig, ProxyConfig, ServerConfig,
-        ServerLimitsConfig, VhostConfig, WebConfig,
+        ByteSize, CacheConfig, Config, HttpsRedirectConfig, ProxyConfig, RouteConfig,
+        RouteRedirectConfig, ServerConfig, ServerLimitsConfig, VhostConfig, WebConfig,
     };
-    #[cfg(feature = "cache")]
+    #[cfg(any(feature = "cache", feature = "web"))]
     use crate::test_support::unique_temp_path;
 
     #[cfg(feature = "cache")]
@@ -1926,8 +2501,9 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, count_response_body_chunk, https_redirect_location, redirect_authority,
-        request_body_chunk_limit_status, request_limit_status,
+        FluxProxy, count_response_body_chunk, http_peer_for_proxy, https_redirect_location,
+        redirect_authority, request_body_chunk_limit_status, request_limit_status,
+        route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -1958,6 +2534,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
                 VhostConfig {
                     name: "two".to_owned(),
@@ -1970,6 +2547,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
             ],
             ..Config::default()
@@ -1991,6 +2569,7 @@ mod tests {
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2011,6 +2590,7 @@ mod tests {
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2026,6 +2606,7 @@ mod tests {
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2056,6 +2637,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
                 VhostConfig {
                     name: "two".to_owned(),
@@ -2065,6 +2647,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
             ],
             ..Config::default()
@@ -2094,6 +2677,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
                 VhostConfig {
                     name: "exact".to_owned(),
@@ -2103,6 +2687,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
             ],
             ..Config::default()
@@ -2170,6 +2755,178 @@ mod tests {
     }
 
     #[test]
+    fn vhost_routes_pick_exact_then_longest_prefix_then_fallback() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "gateway".to_owned(),
+                hosts: vec!["gateway.example".to_owned()],
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![
+                    RouteConfig {
+                        name: "fallback".to_owned(),
+                        fallback: true,
+                        redirect: Some(RouteRedirectConfig {
+                            to: "https://gateway.example{uri}".to_owned(),
+                            status: 308,
+                        }),
+                        path_exact: None,
+                        path_prefix: None,
+                        strip_prefix: None,
+                        max_request_body_bytes: None,
+                        proxy: None,
+                        web: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                    RouteConfig {
+                        name: "api".to_owned(),
+                        path_prefix: Some("/api/".to_owned()),
+                        proxy: Some(ProxyConfig {
+                            upstreams: vec!["127.0.0.1:6001".to_owned()],
+                            upstream: None,
+                            ..ProxyConfig::default()
+                        }),
+                        path_exact: None,
+                        fallback: false,
+                        strip_prefix: None,
+                        max_request_body_bytes: None,
+                        redirect: None,
+                        web: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                    RouteConfig {
+                        name: "api-v2".to_owned(),
+                        path_prefix: Some("/api/v2/".to_owned()),
+                        proxy: Some(ProxyConfig {
+                            upstreams: vec!["127.0.0.1:6002".to_owned()],
+                            upstream: None,
+                            ..ProxyConfig::default()
+                        }),
+                        path_exact: None,
+                        fallback: false,
+                        strip_prefix: None,
+                        max_request_body_bytes: None,
+                        redirect: None,
+                        web: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                    RouteConfig {
+                        name: "exact".to_owned(),
+                        path_exact: Some("/api/v2/status".to_owned()),
+                        proxy: Some(ProxyConfig {
+                            upstreams: vec!["127.0.0.1:6003".to_owned()],
+                            upstream: None,
+                            ..ProxyConfig::default()
+                        }),
+                        path_prefix: None,
+                        fallback: false,
+                        strip_prefix: None,
+                        max_request_body_bytes: None,
+                        redirect: None,
+                        web: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                ],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost = snapshot
+            .state
+            .vhost(snapshot.state.vhost_index(Some("gateway.example")));
+
+        assert_eq!(vhost.route_index("/api/v2/status"), Some(3));
+        assert_eq!(vhost.route_index("/api/v2/users"), Some(2));
+        assert_eq!(vhost.route_index("/api/users"), Some(1));
+        assert_eq!(vhost.route_index("/missing"), Some(0));
+    }
+
+    #[test]
+    fn route_redirect_templates_preserve_safe_uri() {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/old/path?x=1", None).unwrap();
+        request.insert_header("host", "www.example.test").unwrap();
+        let redirect = RouteRedirectConfig {
+            to: "https://example.test{uri}".to_owned(),
+            status: 301,
+        };
+
+        assert_eq!(
+            route_redirect_location(&request, &redirect).as_deref(),
+            Some("https://example.test/old/path?x=1")
+        );
+    }
+
+    #[test]
+    fn route_strip_prefix_rewrites_path_and_preserves_query() {
+        let request = pingora::http::RequestHeader::build("GET", b"/chat/room?id=7", None).unwrap();
+        let route = super::RuntimeRoute {
+            matcher: super::RuntimeRouteMatcher::Prefix("/chat/".to_owned()),
+            strip_prefix: Some("/chat/".to_owned()),
+            max_request_body_bytes: None,
+            action: super::RuntimeRouteAction::Proxy(
+                super::RuntimeProxy::from_config(&ProxyConfig::default()).unwrap(),
+            ),
+            request_headers: crate::config::RequestHeaderPolicyConfig::default(),
+            response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
+        };
+
+        assert_eq!(
+            route_rewritten_path_and_query(&request, &route).as_deref(),
+            Some("/room?id=7")
+        );
+    }
+
+    #[test]
+    fn proxy_timeout_config_maps_to_pingora_peer_options() {
+        let proxy = ProxyConfig {
+            upstream: Some("127.0.0.1:6010".to_owned()),
+            connect_timeout_secs: Some(5),
+            read_timeout_secs: Some(600),
+            send_timeout_secs: Some(30),
+            ..ProxyConfig::default()
+        };
+
+        let peer = http_peer_for_proxy(proxy.primary_upstream(), &proxy).unwrap();
+
+        assert_eq!(
+            peer.options.connection_timeout,
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(600)));
+        assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(30)));
+    }
+
+    #[cfg(feature = "web")]
+    #[test]
+    fn runtime_proxy_builds_static_error_pages() {
+        let root = unique_temp_path("proxy-error-page");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("502.html"), "bad gateway").unwrap();
+        let proxy = ProxyConfig {
+            error_pages: vec![crate::config::ProxyErrorPageConfig {
+                status: 502,
+                path: "/502.html".to_owned(),
+                web: WebConfig {
+                    root: Some(root.clone()),
+                    ..WebConfig::default()
+                },
+            }],
+            ..ProxyConfig::default()
+        };
+
+        let runtime = super::RuntimeProxy::from_config(&proxy).unwrap();
+
+        assert!(runtime.error_page(502).is_some());
+        assert!(runtime.error_page(503).is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn vhost_header_policy_overlays_global_policy() {
         let config = Config {
             headers: crate::config::HeaderPolicyConfig {
@@ -2229,6 +2986,7 @@ mod tests {
                     },
                 },
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2317,6 +3075,7 @@ mod tests {
                     },
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
                 VhostConfig {
                     name: "uncached".to_owned(),
@@ -2326,6 +3085,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
             ],
             ..Config::default()
@@ -2378,6 +3138,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2435,6 +3196,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2482,6 +3244,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2524,6 +3287,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2567,6 +3331,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2634,6 +3399,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
+                routes: Vec::new(),
             }],
             ..Config::default()
         };
@@ -2703,6 +3469,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
                 VhostConfig {
                     name: "two".to_owned(),
@@ -2715,6 +3482,7 @@ mod tests {
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     web: WebConfig::default(),
+                    routes: Vec::new(),
                 },
             ],
             ..Config::default()
@@ -2737,7 +3505,7 @@ mod tests {
         let mut request = pingora::http::RequestHeader::build("GET", b"/ok", None).unwrap();
         request.insert_header("host", "example.test").unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), None);
+        assert_eq!(request_limit_status(&limits, None, &request), None);
     }
 
     #[test]
@@ -2750,7 +3518,7 @@ mod tests {
         };
         let request = pingora::http::RequestHeader::build("GET", b"/too-long", None).unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), Some(414));
+        assert_eq!(request_limit_status(&limits, None, &request), Some(414));
     }
 
     #[test]
@@ -2765,7 +3533,7 @@ mod tests {
         request.append_header("x-one", "1").unwrap();
         request.append_header("x-two", "2").unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), Some(431));
+        assert_eq!(request_limit_status(&limits, None, &request), Some(431));
     }
 
     #[test]
@@ -2781,7 +3549,7 @@ mod tests {
             .insert_header("x-long-header", "this-value-is-too-large")
             .unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), Some(431));
+        assert_eq!(request_limit_status(&limits, None, &request), Some(431));
     }
 
     #[test]
@@ -2795,7 +3563,22 @@ mod tests {
         let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
         request.insert_header("content-length", "17").unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), Some(413));
+        assert_eq!(request_limit_status(&limits, None, &request), Some(413));
+    }
+
+    #[test]
+    fn route_body_limit_overrides_global_body_limit() {
+        let limits = ServerLimitsConfig {
+            max_request_header_bytes: ByteSize::from_bytes(512),
+            max_uri_bytes: ByteSize::from_bytes(128),
+            max_request_headers: 8,
+            max_request_body_bytes: ByteSize::from_bytes(1024),
+        };
+        let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
+        request.insert_header("content-length", "64").unwrap();
+
+        assert_eq!(request_limit_status(&limits, Some(32), &request), Some(413));
+        assert_eq!(request_limit_status(&limits, Some(128), &request), None);
     }
 
     #[test]
@@ -2809,7 +3592,7 @@ mod tests {
         let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
         request.insert_header("content-length", "invalid").unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), Some(400));
+        assert_eq!(request_limit_status(&limits, None, &request), Some(400));
     }
 
     #[test]
@@ -2826,7 +3609,7 @@ mod tests {
             .insert_header("transfer-encoding", "chunked")
             .unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), Some(400));
+        assert_eq!(request_limit_status(&limits, None, &request), Some(400));
     }
 
     #[test]
@@ -2842,7 +3625,7 @@ mod tests {
             .insert_header("transfer-encoding", "chunked")
             .unwrap();
 
-        assert_eq!(request_limit_status(&limits, &request), Some(411));
+        assert_eq!(request_limit_status(&limits, None, &request), Some(411));
     }
 
     #[cfg(feature = "cache")]
@@ -3089,6 +3872,29 @@ mod tests {
     }
 
     #[test]
+    fn request_host_header_falls_back_to_uri_authority() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/tls/check", None).unwrap();
+        request.uri = "https://app.example.test/tls/check".parse().unwrap();
+
+        assert_eq!(
+            super::request_host_header(&request),
+            Some("app.example.test")
+        );
+    }
+
+    #[test]
+    fn request_host_header_prefers_explicit_host_header() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/check", None).unwrap();
+        request.uri = "https://authority.example.test/check".parse().unwrap();
+        request.insert_header("host", "host.example.test").unwrap();
+
+        assert_eq!(
+            super::request_host_header(&request),
+            Some("host.example.test")
+        );
+    }
+
+    #[test]
     fn streaming_body_chunks_are_counted_against_global_limit() {
         let limits = ServerLimitsConfig {
             max_request_header_bytes: ByteSize::from_bytes(512),
@@ -3098,10 +3904,16 @@ mod tests {
         };
         let mut seen = 0;
 
-        assert_eq!(request_body_chunk_limit_status(&limits, &mut seen, 8), None);
-        assert_eq!(request_body_chunk_limit_status(&limits, &mut seen, 8), None);
         assert_eq!(
-            request_body_chunk_limit_status(&limits, &mut seen, 1),
+            request_body_chunk_limit_status(limits.max_request_body_bytes.as_u64(), &mut seen, 8),
+            None
+        );
+        assert_eq!(
+            request_body_chunk_limit_status(limits.max_request_body_bytes.as_u64(), &mut seen, 8),
+            None
+        );
+        assert_eq!(
+            request_body_chunk_limit_status(limits.max_request_body_bytes.as_u64(), &mut seen, 1),
             Some(413)
         );
     }
@@ -3117,7 +3929,7 @@ mod tests {
         let mut seen = u64::MAX - 1;
 
         assert_eq!(
-            request_body_chunk_limit_status(&limits, &mut seen, 8),
+            request_body_chunk_limit_status(limits.max_request_body_bytes.as_u64(), &mut seen, 8),
             Some(413)
         );
         assert_eq!(seen, u64::MAX);

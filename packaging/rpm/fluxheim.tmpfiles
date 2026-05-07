@@ -1,3 +1,6 @@
+d /etc/fluxheim 0755 root root -
+d /etc/fluxheim/conf.d 0755 root root -
+d /etc/fluxheim/tls 0750 root fluxheim -
 d /run/fluxheim 0750 fluxheim fluxheim -
 d /var/lib/fluxheim 0750 fluxheim fluxheim -
 d /var/cache/fluxheim 0750 fluxheim fluxheim -
