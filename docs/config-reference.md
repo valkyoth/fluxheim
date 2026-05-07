@@ -455,7 +455,9 @@ Exactly one matching TLS compile-time feature should be selected:
 uses `tls-rustls`.
 
 The first global `[[tls.certificates]]` entry is the default downstream
-certificate. Vhosts may provide their own static certificate:
+certificate. The default rustls build serves this default certificate for the
+TLS listener. Vhosts may provide their own static certificate when the selected
+TLS backend supports certificate callbacks:
 
 ```toml
 [vhosts.tls]
@@ -469,8 +471,9 @@ key_path = "tls/example-key.pem"
 When a TLS backend with certificate callbacks is compiled (`tls-openssl` or
 `tls-boringssl`), Fluxheim selects vhost certificates by SNI using the vhost
 `hosts` list, including one-label wildcards such as `*.api.example.test`.
-Backends without callback support reject vhost-specific certificates at startup
-instead of silently serving the default certificate.
+Backends without callback support, including the default rustls build in `1.0`,
+reject vhost-specific certificates at startup instead of silently serving the
+default certificate.
 
 Fluxheim does not expose user-configurable TLS cipher-suite or protocol-version
 settings yet. Downstream TLS listeners currently use the selected Pingora TLS

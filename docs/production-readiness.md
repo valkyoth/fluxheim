@@ -28,7 +28,9 @@ The `0.5.x` line is intentionally limited:
 The `1.0` line should be the first gateway-ready release for representative
 real multi-site configs. In addition to the `0.5.x` behavior, it must support:
 
-- SNI certificate selection across multiple configured certificates;
+- static TLS with one default certificate in the default rustls build;
+- SNI certificate selection across multiple configured certificates when using
+  a callback-capable TLS backend;
 - route-level exact, prefix, and fallback matching;
 - route actions for proxy, static serving, and redirects;
 - cleartext ACME challenge exception routes plus HTTPS redirect for everything

@@ -79,6 +79,10 @@ and release modes, plus the `scripts/smoke_1_0_core.sh` localhost smoke.
 
 - Static certificate chains and private keys are supported. Bought certificates
   remain a first-class deployment mode.
+- In the default rustls build, validate one default downstream certificate per
+  TLS listener. Multi-certificate SNI is only claimable for release artifacts
+  built with a callback-capable TLS backend such as `tls-openssl` or
+  `tls-boringssl`.
 - The core smoke generates a temporary static certificate and proves both
   static and proxied vhosts over a TLS listener.
 - ACME config and renewal queue planning are implemented, but account/order and

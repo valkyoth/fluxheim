@@ -184,8 +184,11 @@ Stable scope:
 - Vhost routing.
 - Caddy-inspired TOML config and `conf.d` loading.
 - Static/bought certificate support.
-- SNI certificate selection for multiple configured downstream certificates.
 - Rustls as the default TLS backend.
+- Single default downstream certificate support in the default rustls build.
+- SNI certificate selection for multiple configured downstream certificates
+  when Fluxheim is built with a callback-capable TLS backend such as
+  `tls-openssl` or `tls-boringssl`.
 - Optional OpenSSL and s2n TLS builds when they pass the release matrix.
 - Optional BoringSSL TLS builds on builders with `libclang` available for
   bindgen.
@@ -238,7 +241,10 @@ Exit criteria:
   gateway smoke suite.
 - A fixture set equivalent to the six representative gateway configs validates
   and passes local smoke tests.
-- SNI tests prove each configured host receives the intended certificate.
+- SNI selector tests prove each configured host maps to the intended
+  certificate, and callback-capable TLS backend validation must pass before
+  claiming multi-certificate SNI support for a release artifact. The default
+  rustls artifact is a single-default-certificate TLS build in `1.0`.
 - Route tests prove ACME challenge exceptions, `www` redirects, `/chat/`
   prefix stripping, websocket upgrade proxying, error-page fallback, and static
   alias/directory-listing behavior.

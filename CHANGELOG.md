@@ -128,10 +128,10 @@ Released: 2026-05-06
 - This is a preview release for normal static HTML websites and simple
   whole-vhost proxying with static TLS certificates. It is not the `1.0.0`
   gateway release.
-- Known `1.0.0` gaps include SNI certificate selection across multiple
-  certificates, route-level proxy/static/redirect behavior, websocket-safe
-  proxying, per-route limits and timeouts, custom upstream error pages, and
-  secure static alias/directory listing behavior.
+- At the `0.5.0` tag, known `1.0.0` gaps included multi-certificate SNI for
+  callback-capable TLS backends, route-level proxy/static/redirect behavior,
+  websocket-safe proxying, per-route limits and timeouts, custom upstream error
+  pages, and secure static alias/directory listing behavior.
 
 ## 0.1.0 - Repository Baseline
 
