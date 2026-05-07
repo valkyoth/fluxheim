@@ -2042,6 +2042,10 @@ pub struct VhostConfig {
     #[serde(default)]
     pub tls: VhostTlsConfig,
     #[serde(default)]
+    pub acme_challenge: VhostAcmeChallengeConfig,
+    #[serde(default)]
+    pub redirect: VhostRedirectConfig,
+    #[serde(default)]
     pub proxy: ProxyConfig,
     #[serde(default)]
     pub cache: CacheConfig,
@@ -2083,6 +2087,8 @@ impl VhostConfig {
         }
 
         self.proxy.validate()?;
+        self.acme_challenge.validate(&self.name)?;
+        self.redirect.validate(&self.name)?;
         self.cache.validate("vhosts.cache")?;
         self.headers.validate()?;
         self.web.validate()?;
@@ -2119,6 +2125,11 @@ impl VhostConfig {
                 fallback_seen = true;
             }
         }
+        if self.redirect.enabled && fallback_seen {
+            return Err(ConfigError::VhostRedirectConflictsWithFallback {
+                vhost: self.name.clone(),
+            });
+        }
         Ok(())
     }
 
@@ -2137,6 +2148,8 @@ pub struct RouteConfig {
     pub path_prefix: Option<String>,
     #[serde(default)]
     pub fallback: bool,
+    #[serde(default)]
+    pub https_redirect_exempt: bool,
     #[serde(default)]
     pub strip_prefix: Option<String>,
     #[serde(default)]
@@ -2286,6 +2299,65 @@ fn default_route_redirect_status() -> u16 {
     308
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VhostRedirectConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default = "default_route_redirect_status")]
+    pub status: u16,
+}
+
+impl Default for VhostRedirectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            to: None,
+            status: default_route_redirect_status(),
+        }
+    }
+}
+
+impl VhostRedirectConfig {
+    fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        let Some(to) = &self.to else {
+            return Err(ConfigError::MissingVhostRedirectTarget {
+                vhost: vhost.to_owned(),
+            });
+        };
+        RouteRedirectConfig {
+            to: to.clone(),
+            status: self.status,
+        }
+        .validate(vhost, "vhost-redirect")
+    }
+
+    pub fn route_config(&self) -> Option<RouteConfig> {
+        self.enabled.then(|| RouteConfig {
+            name: "vhost-redirect".to_owned(),
+            path_exact: None,
+            path_prefix: None,
+            fallback: true,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            max_request_body_bytes: None,
+            redirect: Some(RouteRedirectConfig {
+                to: self.to.clone().expect("validated vhost redirect target"),
+                status: self.status,
+            }),
+            proxy: None,
+            web: None,
+            headers: VhostHeaderPolicyConfig::default(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct VhostTlsConfig {
@@ -2387,6 +2459,99 @@ impl VhostAcmeConfig {
         }
 
         Ok(())
+    }
+}
+
+const ACME_HTTP_CHALLENGE_PREFIX: &str = "/.well-known/acme-challenge/";
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VhostAcmeChallengeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub upstream: Option<String>,
+    #[serde(default)]
+    pub upstreams: Vec<String>,
+    #[serde(default)]
+    pub upstream_tls: bool,
+    #[serde(default)]
+    pub connect_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub read_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub send_timeout_secs: Option<u64>,
+}
+
+impl VhostAcmeChallengeConfig {
+    fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        if self.upstream.is_some() && !self.upstreams.is_empty() {
+            return Err(ConfigError::ConflictingAcmeChallengeUpstreams {
+                vhost: vhost.to_owned(),
+            });
+        }
+        if self.upstream.is_none() && self.upstreams.is_empty() {
+            return Err(ConfigError::MissingAcmeChallengeUpstream {
+                vhost: vhost.to_owned(),
+            });
+        }
+
+        if let Some(upstream) = &self.upstream
+            && !valid_authority(upstream)
+        {
+            return Err(ConfigError::InvalidUpstream {
+                address: upstream.clone(),
+            });
+        }
+        for upstream in &self.upstreams {
+            if !valid_authority(upstream) {
+                return Err(ConfigError::InvalidUpstream {
+                    address: upstream.clone(),
+                });
+            }
+        }
+
+        validate_optional_timeout_secs(
+            "vhosts.acme_challenge.connect_timeout_secs",
+            self.connect_timeout_secs,
+        )?;
+        validate_optional_timeout_secs(
+            "vhosts.acme_challenge.read_timeout_secs",
+            self.read_timeout_secs,
+        )?;
+        validate_optional_timeout_secs(
+            "vhosts.acme_challenge.send_timeout_secs",
+            self.send_timeout_secs,
+        )?;
+        Ok(())
+    }
+
+    pub fn route_config(&self) -> Option<RouteConfig> {
+        self.enabled.then(|| RouteConfig {
+            name: "acme-http-01".to_owned(),
+            path_exact: None,
+            path_prefix: Some(ACME_HTTP_CHALLENGE_PREFIX.to_owned()),
+            fallback: false,
+            https_redirect_exempt: true,
+            strip_prefix: None,
+            max_request_body_bytes: None,
+            redirect: None,
+            proxy: Some(ProxyConfig {
+                upstream: self.upstream.clone(),
+                upstreams: self.upstreams.clone(),
+                upstream_tls: self.upstream_tls,
+                connect_timeout_secs: self.connect_timeout_secs,
+                read_timeout_secs: self.read_timeout_secs,
+                send_timeout_secs: self.send_timeout_secs,
+                ..ProxyConfig::default()
+            }),
+            web: None,
+            headers: VhostHeaderPolicyConfig::default(),
+        })
     }
 }
 
@@ -2660,6 +2825,8 @@ pub struct DirectoryListingConfig {
     pub enabled: bool,
     #[serde(default)]
     pub exact_size: bool,
+    #[serde(default)]
+    pub local_time: bool,
 }
 
 impl DirectoryListingConfig {
@@ -2836,6 +3003,12 @@ pub enum ConfigError {
         scope: &'static str,
         domain: String,
     },
+    MissingAcmeChallengeUpstream {
+        vhost: String,
+    },
+    ConflictingAcmeChallengeUpstreams {
+        vhost: String,
+    },
     InvalidUpstream {
         address: String,
     },
@@ -2908,6 +3081,12 @@ pub enum ConfigError {
     InvalidVhostLimit {
         vhost: String,
         field: &'static str,
+    },
+    MissingVhostRedirectTarget {
+        vhost: String,
+    },
+    VhostRedirectConflictsWithFallback {
+        vhost: String,
     },
     EmptyRouteName {
         vhost: String,
@@ -3142,6 +3321,14 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.acme.domains must contain concrete DNS names, got {domain:?}"
             ),
+            Self::MissingAcmeChallengeUpstream { vhost } => write!(
+                formatter,
+                "vhost {vhost:?} acme_challenge.enabled requires acme_challenge.upstream or acme_challenge.upstreams"
+            ),
+            Self::ConflictingAcmeChallengeUpstreams { vhost } => write!(
+                formatter,
+                "vhost {vhost:?} acme_challenge.upstream and acme_challenge.upstreams cannot both be configured"
+            ),
             Self::InvalidUpstream { address } => {
                 write!(
                     formatter,
@@ -3236,6 +3423,20 @@ impl Display for ConfigError {
             Self::InvalidVhostHost { vhost, host } => {
                 write!(formatter, "vhost {vhost:?} has invalid host {host:?}")
             }
+            Self::InvalidVhostLimit { vhost, field } => {
+                write!(
+                    formatter,
+                    "vhost {vhost:?} {field} must be greater than zero"
+                )
+            }
+            Self::MissingVhostRedirectTarget { vhost } => write!(
+                formatter,
+                "vhost {vhost:?} redirect.enabled requires redirect.to"
+            ),
+            Self::VhostRedirectConflictsWithFallback { vhost } => write!(
+                formatter,
+                "vhost {vhost:?} redirect.enabled cannot be combined with an explicit fallback route"
+            ),
             Self::EmptyRouteName { vhost } => {
                 write!(
                     formatter,
@@ -3260,12 +3461,6 @@ impl Display for ConfigError {
                 formatter,
                 "vhost {vhost:?} route {route:?} must define exactly one action: redirect, proxy, or web"
             ),
-            Self::InvalidVhostLimit { vhost, field } => {
-                write!(
-                    formatter,
-                    "vhost {vhost:?} {field} must be greater than zero"
-                )
-            }
             Self::InvalidRouteLimit {
                 vhost,
                 route,
@@ -4414,6 +4609,7 @@ mod tests {
             [web.directory_listing]
             enabled = true
             exact_size = true
+            local_time = true
             "#,
         )
         .unwrap();
@@ -4428,6 +4624,7 @@ mod tests {
         );
         assert!(config.web.directory_listing.enabled);
         assert!(config.web.directory_listing.exact_size);
+        assert!(config.web.directory_listing.local_time);
     }
 
     #[test]
@@ -6335,9 +6532,14 @@ mod tests {
             hosts = ["gateway.example"]
             max_request_body_bytes = "128MiB"
 
+            [vhosts.acme_challenge]
+            enabled = true
+            upstreams = ["127.0.0.1:8080"]
+
             [[vhosts.routes]]
             name = "chat"
             path_prefix = "/chat/"
+            https_redirect_exempt = true
             strip_prefix = "/chat/"
 
             [vhosts.routes.proxy]
@@ -6371,7 +6573,13 @@ mod tests {
             config.vhosts[0].max_request_body_bytes,
             Some(ByteSize::from_bytes(128 * 1024 * 1024))
         );
+        assert!(config.vhosts[0].acme_challenge.enabled);
+        assert_eq!(
+            config.vhosts[0].acme_challenge.upstreams,
+            ["127.0.0.1:8080"]
+        );
         assert_eq!(config.vhosts[0].routes[0].name, "chat");
+        assert!(config.vhosts[0].routes[0].https_redirect_exempt);
         assert_eq!(
             config.vhosts[0].routes[0]
                 .proxy
@@ -6415,6 +6623,74 @@ mod tests {
                 vhost,
                 field: "max_request_body_bytes"
             }) if vhost == "gateway"
+        ));
+    }
+
+    #[test]
+    fn rejects_enabled_acme_challenge_without_upstream() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [vhosts.acme_challenge]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::MissingAcmeChallengeUpstream { vhost }) if vhost == "gateway"
+        ));
+    }
+
+    #[test]
+    fn rejects_enabled_vhost_redirect_without_target() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "www"
+            hosts = ["www.example.test"]
+
+            [vhosts.redirect]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::MissingVhostRedirectTarget { vhost }) if vhost == "www"
+        ));
+    }
+
+    #[test]
+    fn rejects_vhost_redirect_with_explicit_fallback_route() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "www"
+            hosts = ["www.example.test"]
+
+            [vhosts.redirect]
+            enabled = true
+            to = "https://example.test{uri}"
+
+            [[vhosts.routes]]
+            name = "fallback"
+            fallback = true
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:3000"]
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::VhostRedirectConflictsWithFallback { vhost }) if vhost == "www"
         ));
     }
 
@@ -6490,6 +6766,8 @@ mod tests {
                     name: "first.example".to_owned(),
                     hosts: vec!["Example.com".to_owned()],
                     max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -6501,6 +6779,8 @@ mod tests {
                     name: "second.example".to_owned(),
                     hosts: vec!["example.com:443".to_owned()],
                     max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
@@ -6534,6 +6814,8 @@ mod tests {
                 name: "known".to_owned(),
                 hosts: vec!["known.example".to_owned()],
                 max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
@@ -6559,6 +6841,8 @@ mod tests {
                 name: "wild".to_owned(),
                 hosts: vec!["*.example.com".to_owned()],
                 max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),

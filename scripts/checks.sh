@@ -101,6 +101,7 @@ cargo run --quiet -- --check-config --config examples/vhosts.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/container/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/conf.d >/dev/null
+cargo run --quiet -- --check-config --config examples/gateway-1-0 >/dev/null
 cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml >/dev/null
 cargo deny check
 cargo audit

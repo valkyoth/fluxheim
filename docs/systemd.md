@@ -40,6 +40,12 @@ sudo systemd-tmpfiles --create fluxheim.conf
 sudo scripts/prepare-server.py --owner fluxheim:fluxheim
 ```
 
+The prepare script is intentionally path-restricted. Any path override must be
+absolute, must not pass through a symlinked existing directory, and must stay
+below one of Fluxheim's standard native roots: `/etc/fluxheim`, `/run/fluxheim`,
+`/var/lib/fluxheim`, `/var/cache/fluxheim`, `/var/log/fluxheim`, or
+`/srv/fluxheim`.
+
 Install the systemd unit and optional environment file:
 
 ```bash

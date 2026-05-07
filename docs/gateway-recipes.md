@@ -45,31 +45,27 @@ Fluxheim uses the direct peer address for generated client-IP headers.
 ## Cleartext Challenge Exception And HTTPS Redirect
 
 If a cleartext challenge helper must stay reachable while everything else moves
-to HTTPS, use a route for the challenge path and a fallback redirect route:
+to HTTPS, enable the global redirect and the vhost challenge helper:
 
 ```toml
+[server.https_redirect]
+enabled = true
+status = 308
+target_port = 443
+
 [[vhosts]]
 name = "site-cleartext"
 hosts = ["example.test", "www.example.test"]
 
-[[vhosts.routes]]
-name = "challenge"
-path_prefix = "/.well-known/acme-challenge/"
-
-[vhosts.routes.proxy]
+[vhosts.acme_challenge]
+enabled = true
 upstreams = ["host.containers.internal:8080"]
-
-[[vhosts.routes]]
-name = "https"
-fallback = true
-
-[vhosts.routes.redirect]
-to = "https://example.test{uri}"
-status = 308
+upstream_tls = false
 ```
 
-For sites that do not need a cleartext exception, the global
-`[server.https_redirect]` setting is shorter.
+This internally creates the standard HTTP-01 challenge route at
+`/.well-known/acme-challenge/` and exempts only that path from the global
+redirect. Normal proxy and static routes still redirect on cleartext requests.
 
 ## Canonical Host Redirect
 
@@ -88,11 +84,8 @@ enabled = true
 cert_path = "/etc/fluxheim/tls/example-fullchain.pem"
 key_path = "/etc/fluxheim/tls/example-key.pem"
 
-[[vhosts.routes]]
-name = "canonical"
-fallback = true
-
-[vhosts.routes.redirect]
+[vhosts.redirect]
+enabled = true
 to = "https://example.test{uri}"
 status = 308
 ```

@@ -167,6 +167,21 @@ matching, optional `strip_prefix`, and longer read/send timeouts. Header policy
 can still remove or replace those headers when an operator intentionally wants
 to disable upgrade tunneling for a route.
 
+When global HTTP-to-HTTPS redirect is enabled, proxy and static routes are also
+redirected by default on cleartext requests. Use the vhost ACME challenge helper
+for normal HTTP-01 challenge forwarding:
+
+```toml
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+upstream_tls = false
+```
+
+That helper creates the standard `/.well-known/acme-challenge/` route and marks
+only that route as cleartext-exempt. Advanced configs can still set
+`https_redirect_exempt = true` on an explicit route for other rare exceptions.
+
 Static route actions can serve repository-style aliases with optional directory
 listing. Directory listing is disabled by default, index files are preferred
 when present, dotfiles remain hidden when `deny_dotfiles = true`, and symlink

@@ -15,7 +15,7 @@ import socket
 
 sockets = []
 try:
-    for _ in range(3):
+    for _ in range(4):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -30,6 +30,7 @@ set -- $ports
 FLUXHEIM_PORT=$1
 FLUXHEIM_TLS_PORT=$2
 ORIGIN_PORT=$3
+ERROR_PORT=$4
 
 ORIGIN_PID=
 FLUXHEIM_PID=
@@ -66,10 +67,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$TMP_DIR/public"
+mkdir -p "$TMP_DIR/repo"
+mkdir -p "$TMP_DIR/errors"
 mkdir -p "$TMP_DIR/tls"
 mkdir -p "$TMP_DIR/run"
 printf '%s\n' '<!doctype html><title>Fluxheim 1.0 smoke</title><h1>static-ok</h1>' > "$TMP_DIR/public/index.html"
 printf '%s\n' 'secret' > "$TMP_DIR/public/.secret"
+printf '%s\n' 'repo-package-ok' > "$TMP_DIR/repo/pkg.txt"
+printf '%s\n' '<!doctype html><title>Bad gateway</title><h1>custom-502-ok</h1>' > "$TMP_DIR/errors/502.html"
 
 openssl req \
     -x509 \
@@ -101,6 +106,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"xri={self.headers.get('x-real-ip', '')}",
                 f"xou={self.headers.get('x-original-uri', '')}",
                 f"xpb={self.headers.get('x-proxy-by', '')}",
+                f"xcu={self.headers.get('x-client-upgrade', '')}",
             ]
         ).encode("ascii")
         self.send_response(200)
@@ -119,6 +125,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("connection", "Upgrade")
             self.send_header("sec-websocket-accept", "HSmrc0sMlYUkAGmm5OPpG2HaGWk=")
             self.send_header("x-upstream-path", self.path)
+            self.send_header("x-client-upgrade", self.headers.get("x-client-upgrade", ""))
             self.end_headers()
             data = self.connection.recv(64)
             if data:
@@ -183,6 +190,7 @@ unset = ["x-powered-by"]
 x-forwarded-host = "{host}"
 x-original-uri = "{uri}"
 x-proxy-by = "Fluxheim"
+x-client-upgrade = "{http.upgrade}"
 
 [headers.response]
 enabled = true
@@ -215,6 +223,15 @@ deny_dotfiles = true
 cache_control = "public, max-age=60"
 
 [[vhosts]]
+name = "www-static.test"
+hosts = ["www.static.test"]
+
+[vhosts.redirect]
+enabled = true
+to = "https://static.test{uri}"
+status = 308
+
+[[vhosts]]
 name = "static.test"
 hosts = ["static.test"]
 
@@ -223,6 +240,24 @@ root = "$TMP_DIR/public"
 index_files = ["index.html"]
 deny_dotfiles = true
 cache_control = "public, max-age=60"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["127.0.0.1:$ORIGIN_PORT"]
+
+[[vhosts.routes]]
+name = "repo"
+path_prefix = "/repo"
+strip_prefix = "/repo"
+
+[vhosts.routes.web]
+root = "$TMP_DIR/repo"
+index_files = ["index.html"]
+deny_dotfiles = true
+
+[vhosts.routes.web.directory_listing]
+enabled = true
+exact_size = false
 
 [[vhosts]]
 name = "app.test"
@@ -252,6 +287,23 @@ fallback = true
 [vhosts.routes.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
+
+[[vhosts]]
+name = "error.test"
+hosts = ["error.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:$ERROR_PORT"]
+upstream_tls = false
+
+[[vhosts.proxy.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.proxy.error_pages.web]
+root = "$TMP_DIR/errors"
+index_files = ["index.html"]
+deny_dotfiles = true
 EOF
 
 wait_http() {
@@ -355,6 +407,22 @@ if [ "$dot_status" = "200" ]; then
     exit 1
 fi
 
+REPO_LISTING="$TMP_DIR/repo-listing.html"
+curl -fsS -H "Host: static.test" "http://127.0.0.1:$FLUXHEIM_PORT/repo/" > "$REPO_LISTING"
+if ! grep -q "pkg.txt" "$REPO_LISTING"; then
+    echo "1.0 core smoke failed: route directory listing did not include pkg.txt" >&2
+    cat "$REPO_LISTING" >&2
+    exit 1
+fi
+
+REPO_FILE="$TMP_DIR/repo-file.txt"
+curl -fsS -H "Host: static.test" "http://127.0.0.1:$FLUXHEIM_PORT/repo/pkg.txt" > "$REPO_FILE"
+if ! grep -q "repo-package-ok" "$REPO_FILE"; then
+    echo "1.0 core smoke failed: route static alias did not serve pkg.txt" >&2
+    cat "$REPO_FILE" >&2
+    exit 1
+fi
+
 TLS_STATIC_BODY="$TMP_DIR/tls-static-body.txt"
 curl -kfsS -H "Host: static.test" "https://127.0.0.1:$FLUXHEIM_TLS_PORT/" > "$TLS_STATIC_BODY"
 if ! grep -q "static-ok" "$TLS_STATIC_BODY"; then
@@ -376,6 +444,19 @@ done
 VHOST_BODY_STATUS="$(printf '%064d' 0 | curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Host: app.test" --data-binary @- "http://127.0.0.1:$FLUXHEIM_PORT/api/upload" 2>/dev/null || true)"
 if [ "$VHOST_BODY_STATUS" != "413" ]; then
     echo "1.0 core smoke failed: vhost body limit returned $VHOST_BODY_STATUS instead of 413" >&2
+    exit 1
+fi
+
+CUSTOM_ERROR_BODY="$TMP_DIR/custom-error-body.html"
+custom_error_status="$(curl -sS -o "$CUSTOM_ERROR_BODY" -w '%{http_code}' -H "Host: error.test" "http://127.0.0.1:$FLUXHEIM_PORT/" 2>/dev/null || true)"
+if [ "$custom_error_status" != "502" ]; then
+    echo "1.0 core smoke failed: custom proxy error page returned $custom_error_status instead of 502" >&2
+    cat "$CUSTOM_ERROR_BODY" >&2
+    exit 1
+fi
+if ! grep -q "custom-502-ok" "$CUSTOM_ERROR_BODY"; then
+    echo "1.0 core smoke failed: custom proxy error page body was not served" >&2
+    cat "$CUSTOM_ERROR_BODY" >&2
     exit 1
 fi
 
@@ -409,6 +490,8 @@ with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
         raise SystemExit(f"upgrade did not return 101:\n{header_block}")
     if "x-upstream-path: /room?id=7" not in header_block.lower():
         raise SystemExit(f"upgrade route did not strip /chat/ prefix:\n{header_block}")
+    if "x-client-upgrade: websocket" not in header_block.lower():
+        raise SystemExit(f"upgrade template was not forwarded:\n{header_block}")
 
     sock.sendall(b"ping\n")
     echo = sock.recv(64)
@@ -438,6 +521,19 @@ for expected in "proxy-ok" "path=/tls/check" "xfh=app.test" "xfp=https" "xri=127
         exit 1
     fi
 done
+
+CANONICAL_HEADERS="$TMP_DIR/canonical-headers.txt"
+canonical_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: www.static.test" "http://127.0.0.1:$FLUXHEIM_PORT/some/path?x=1" 2>/dev/null || true)"
+if [ "$canonical_status" != "308" ]; then
+    echo "1.0 core smoke failed: canonical redirect returned $canonical_status instead of 308" >&2
+    exit 1
+fi
+curl -sSI -H "Host: www.static.test" "http://127.0.0.1:$FLUXHEIM_PORT/some/path?x=1" > "$CANONICAL_HEADERS"
+if ! grep -qi "^location: https://static.test/some/path?x=1" "$CANONICAL_HEADERS"; then
+    echo "1.0 core smoke failed: canonical redirect location was not expected" >&2
+    cat "$CANONICAL_HEADERS" >&2
+    exit 1
+fi
 
 kill "$FLUXHEIM_PID" 2>/dev/null || true
 sleep 0.2
@@ -478,6 +574,25 @@ curl -sSI -H "Host: static.test" "http://127.0.0.1:$FLUXHEIM_PORT/" > "$REDIRECT
 if ! grep -qi "^location: https://static.test:$FLUXHEIM_TLS_PORT/" "$REDIRECT_HEADERS"; then
     echo "1.0 core smoke failed: HTTPS redirect location was not safe/expected" >&2
     cat "$REDIRECT_HEADERS" >&2
+    exit 1
+fi
+
+ACME_BODY="$TMP_DIR/acme-body.txt"
+acme_status="$(curl -sS -o "$ACME_BODY" -w '%{http_code}' -H "Host: static.test" "http://127.0.0.1:$FLUXHEIM_PORT/.well-known/acme-challenge/token" 2>/dev/null || true)"
+if [ "$acme_status" != "200" ]; then
+    echo "1.0 core smoke failed: cleartext challenge exception returned $acme_status instead of 200" >&2
+    cat "$ACME_BODY" >&2
+    exit 1
+fi
+if ! grep -q "^proxy-ok$" "$ACME_BODY"; then
+    echo "1.0 core smoke failed: cleartext challenge exception did not reach upstream" >&2
+    cat "$ACME_BODY" >&2
+    exit 1
+fi
+
+repo_redirect_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: static.test" "http://127.0.0.1:$FLUXHEIM_PORT/repo/pkg.txt" 2>/dev/null || true)"
+if [ "$repo_redirect_status" != "308" ]; then
+    echo "1.0 core smoke failed: non-exempt static route returned $repo_redirect_status instead of HTTPS redirect" >&2
     exit 1
 fi
 

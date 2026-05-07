@@ -1,0 +1,102 @@
+[[vhosts]]
+name = "dev.pawalyze.com"
+hosts = ["dev.pawalyze.com"]
+max_request_body_bytes = "64MiB"
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/dev.pawalyze.com/fullchain.pem"
+key_path = "/etc/fluxheim/tls/dev.pawalyze.com/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[[vhosts.routes]]
+name = "chat"
+path_prefix = "/chat/"
+strip_prefix = "/chat/"
+max_request_body_bytes = "64MiB"
+
+[vhosts.routes.proxy]
+upstreams = ["host.containers.internal:6012"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 600
+send_timeout_secs = 600
+
+[vhosts.routes.headers.request.add]
+upgrade = "{http.upgrade}"
+connection = "upgrade"
+
+[[vhosts.routes]]
+name = "app"
+fallback = true
+
+[vhosts.routes.proxy]
+upstreams = ["host.containers.internal:6010"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 60
+
+[[vhosts]]
+name = "messages.dev.pawalyze.com"
+hosts = ["messages.dev.pawalyze.com"]
+max_request_body_bytes = "64MiB"
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/messages.dev.pawalyze.com/fullchain.pem"
+key_path = "/etc/fluxheim/tls/messages.dev.pawalyze.com/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.proxy]
+upstreams = ["host.containers.internal:6010"]
+upstream_tls = false
+
+[[vhosts.routes]]
+name = "chat"
+path_prefix = "/chat/"
+strip_prefix = "/chat/"
+max_request_body_bytes = "64MiB"
+
+[vhosts.routes.proxy]
+upstreams = ["host.containers.internal:6012"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 600
+send_timeout_secs = 600
+
+[[vhosts]]
+name = "identity.dev.pawalyze.com"
+hosts = ["identity.dev.pawalyze.com"]
+max_request_body_bytes = "10MiB"
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/identity.dev.pawalyze.com/fullchain.pem"
+key_path = "/etc/fluxheim/tls/identity.dev.pawalyze.com/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.proxy]
+upstreams = ["host.containers.internal:6014"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 60
+
+[vhosts.headers.request.add]
+x-forwarded-port = "443"

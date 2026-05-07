@@ -14,8 +14,8 @@ import argparse
 import os
 import pwd
 import grp
-import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -27,11 +27,24 @@ DEFAULT_STATE_DIR = Path("/var/lib/fluxheim")
 DEFAULT_CACHE_DIR = Path("/var/cache/fluxheim")
 DEFAULT_LOG_DIR = Path("/var/log/fluxheim")
 DEFAULT_WEB_ROOT = Path("/srv/fluxheim")
+ALLOWED_INSTALL_ROOTS = (
+    Path("/etc/fluxheim"),
+    Path("/run/fluxheim"),
+    Path("/var/lib/fluxheim"),
+    Path("/var/cache/fluxheim"),
+    Path("/var/log/fluxheim"),
+    Path("/srv/fluxheim"),
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create directories, config, and a default index.html for Fluxheim."
+        description="Create directories, config, and a default index.html for Fluxheim.",
+        epilog=(
+            "Path arguments must be absolute and stay below Fluxheim's standard "
+            "install roots: /etc/fluxheim, /run/fluxheim, /var/lib/fluxheim, "
+            "/var/cache/fluxheim, /var/log/fluxheim, or /srv/fluxheim."
+        ),
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--conf-d", type=Path, default=DEFAULT_CONF_D)
@@ -77,6 +90,47 @@ def owner_ids(owner: str | None) -> tuple[int, int]:
     uid = pwd.getpwnam(user).pw_uid
     gid = grp.getgrnam(group).gr_gid if group else pwd.getpwnam(user).pw_gid
     return uid, gid
+
+
+def path_has_existing_symlink_prefix(path: Path) -> bool:
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current = current / part
+        try:
+            if current.is_symlink():
+                return True
+        except OSError:
+            raise
+        if not current.exists():
+            return False
+    return False
+
+
+def validate_install_path(label: str, path: Path) -> Path:
+    expanded = path.expanduser()
+    if not expanded.is_absolute():
+        raise ValueError(f"{label} must be an absolute path")
+    if any(part in ("", ".", "..") for part in expanded.parts[1:]):
+        raise ValueError(f"{label} must not contain empty, current, or parent components")
+    if path_has_existing_symlink_prefix(expanded):
+        raise ValueError(f"{label} must not be below a symlinked path")
+
+    normalized = expanded.resolve(strict=False)
+    if not any(normalized == root or root in normalized.parents for root in ALLOWED_INSTALL_ROOTS):
+        allowed = ", ".join(str(root) for root in ALLOWED_INSTALL_ROOTS)
+        raise ValueError(f"{label} must be below one of: {allowed}")
+    return normalized
+
+
+def validate_paths(args: argparse.Namespace) -> None:
+    args.config = validate_install_path("--config", args.config)
+    args.conf_d = validate_install_path("--conf-d", args.conf_d)
+    args.tls_dir = validate_install_path("--tls-dir", args.tls_dir)
+    args.run_dir = validate_install_path("--run-dir", args.run_dir)
+    args.state_dir = validate_install_path("--state-dir", args.state_dir)
+    args.cache_dir = validate_install_path("--cache-dir", args.cache_dir)
+    args.log_dir = validate_install_path("--log-dir", args.log_dir)
+    args.web_root = validate_install_path("--web-root", args.web_root)
 
 
 def toml_string(value: str) -> str:
@@ -276,17 +330,30 @@ def write_file(path: Path, content: str, uid: int, gid: int, mode: int, force: b
         return
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.chmod(tmp, mode)
-    os.chown(tmp, uid, gid)
-    shutil.move(str(tmp), str(path))
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as tmp:
+            tmp_name = Path(tmp.name)
+            tmp.write(content)
+        os.chmod(tmp_name, mode)
+        os.chown(tmp_name, uid, gid)
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name is not None and tmp_name.exists():
+            tmp_name.unlink()
 
 
 def main() -> int:
     args = parse_args()
     try:
         uid, gid = owner_ids(args.owner)
+        validate_paths(args)
     except (KeyError, ValueError) as error:
         print(f"fluxheim prepare-server: {error}", file=sys.stderr)
         return 2

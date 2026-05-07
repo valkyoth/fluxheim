@@ -193,6 +193,8 @@ mod tests {
                 name: "example".to_owned(),
                 hosts: vec!["example.test".to_owned()],
                 max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),

@@ -1147,6 +1147,8 @@ mod tests {
                     name: "exact".to_owned(),
                     hosts: vec!["Example.TEST".to_owned()],
                     max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
                         enabled: true,
                         certificate: Some(exact_cert.clone()),
@@ -1162,6 +1164,8 @@ mod tests {
                     name: "wildcard".to_owned(),
                     hosts: vec!["*.api.example.test".to_owned()],
                     max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
                         enabled: true,
                         certificate: Some(wildcard_cert.clone()),

@@ -375,6 +375,7 @@ expires = "Wed, 21 Oct 2030 07:28:00 GMT"
 [web.directory_listing]
 enabled = false
 exact_size = false
+local_time = false
 ```
 
 Static serving requires `web.root` to be a real directory, not a symlink and
@@ -392,6 +393,8 @@ detection, `GET`/`HEAD`, `ETag`, `If-Match`, `If-Unmodified-Since`,
 generates a listing after no index file matches. Listings inherit dotfile
 protection, skip symlink entries, cap entry count, and use `private, no-store`
 so repository indexes are not accidentally cached by shared intermediaries.
+`local_time` is accepted for migration-friendly config shape; the current
+renderer emits HTTP-date timestamps.
 
 `cache_control` is emitted on static responses and defaults to
 `public, max-age=60`. Use response header policy when you need to append or
@@ -597,11 +600,16 @@ index_files = ["repo.html", "index.html"]
 enabled = true
 exact_size = false
 
-[[vhosts.routes]]
-name = "fallback-https"
-fallback = true
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 30
+send_timeout_secs = 30
 
-[vhosts.routes.redirect]
+[vhosts.redirect]
+enabled = true
 to = "https://example.test{uri}"
 status = 308
 ```
@@ -615,11 +623,26 @@ body limit for uploads handled by that route. Proxy actions accept
 proxy timeout values override the vhost/global proxy timeout values because the
 route owns its own proxy action.
 
+When global `[server.https_redirect]` is enabled, non-redirect routes are
+redirected on cleartext requests by default. `[vhosts.acme_challenge]` creates
+the standard HTTP-01 `/.well-known/acme-challenge/` proxy route and exempts only
+that path. Advanced route configs can still use `https_redirect_exempt = true`
+for deliberate non-ACME cleartext exceptions.
+Use either `upstream = "host:port"` or `upstreams = ["host:port"]`; do not set
+both. The helper accepts the same `upstream_tls` and upstream timeout fields as
+normal proxy actions.
+
+`[vhosts.redirect]` creates a fallback redirect route for the whole vhost. It is
+intended for canonical-host vhosts such as `www` to apex redirects. Do not
+combine it with an explicit fallback route on the same vhost.
+
 Static route actions support directory listing for repository-style file roots.
 Listings are disabled by default, index files still win when present, dotfiles
 remain denied when `deny_dotfiles = true`, symlink entries are skipped, and the
 generated HTML is sent with `cache-control: private, no-store`. Keep
 `exact_size = false` for large directories when approximate display is enough.
+`local_time` is accepted for migration-friendly config shape; the current
+renderer emits HTTP-date timestamps.
 
 For production readability, prefer one vhost per file in a split config
 directory. See [Vhost Config Guide](vhost-config.md) and

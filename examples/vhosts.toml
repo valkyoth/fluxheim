@@ -100,11 +100,20 @@ cache-control = "public, max-age=60"
 [headers.response.append]
 vary = ["Accept-Encoding"]
 
+[[vhosts]]
+name = "www.example.test"
+hosts = ["www.example.test"]
+
+[vhosts.redirect]
+enabled = true
+to = "https://example.test{uri}"
+status = 308
+
 # TOML note: [[vhosts]] starts one virtual host. Every [vhosts.*] table below
 # belongs to this vhost until the next [[vhosts]] line.
 [[vhosts]]
 name = "example.test"
-hosts = ["example.test", "www.example.test"]
+hosts = ["example.test"]
 max_request_body_bytes = "64MiB"
 
 [vhosts.tls]
@@ -118,6 +127,10 @@ root = "/srv/sites/example"
 index_files = ["index.html"]
 deny_dotfiles = true
 cache_control = "public, max-age=300"
+
+[vhosts.acme_challenge]
+enabled = false
+# upstreams = ["host.containers.internal:8080"]
 
 [vhosts.proxy]
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]

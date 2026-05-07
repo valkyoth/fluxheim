@@ -211,6 +211,8 @@ mod tests {
             name: "example".to_owned(),
             hosts: vec!["Example.TEST".to_owned(), "*.example.test".to_owned()],
             max_request_body_bytes: None,
+            acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+            redirect: crate::config::VhostRedirectConfig::default(),
             tls: VhostTlsConfig {
                 enabled: true,
                 acme: VhostAcmeConfig {
@@ -335,6 +337,8 @@ mod tests {
             name: name.to_owned(),
             hosts: vec![format!("{name}.test")],
             max_request_body_bytes: None,
+            acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+            redirect: crate::config::VhostRedirectConfig::default(),
             tls: VhostTlsConfig {
                 enabled: true,
                 acme: VhostAcmeConfig {

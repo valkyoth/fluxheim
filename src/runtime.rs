@@ -11,6 +11,14 @@ use std::path::Path;
 use crate::config::Config;
 #[cfg(feature = "proxy")]
 use crate::config::{LoggingFormat, LoggingTarget};
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+use pingora::tls::{
+    pkey::{PKey, Private},
+    x509::X509,
+};
 
 #[cfg(feature = "proxy")]
 pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -421,10 +429,7 @@ impl SniCertificateCallback {
         let mut certificates = Vec::with_capacity(selector.certificates().len());
         for certificate in selector.certificates() {
             let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
-            certificates.push(CallbackCertificate {
-                cert_path: cert_path.to_owned(),
-                key_path: key_path.to_owned(),
-            });
+            certificates.push(CallbackCertificate::load(cert_path, key_path)?);
         }
 
         Ok(Self {
@@ -444,14 +449,8 @@ impl pingora::listeners::TlsAccept for SniCertificateCallback {
         let sni = ssl.servername(pingora::tls::ssl::NameType::HOST_NAME);
         let index = self.selector.certificate_index_for_sni(sni);
         let certificate = &self.certificates[index];
-        if let Err(error) = ssl.set_certificate_chain_file(&certificate.cert_path) {
-            log::error!("failed to set downstream SNI certificate chain: {error}");
-            return;
-        }
-        if let Err(error) =
-            ssl.set_private_key_file(&certificate.key_path, pingora::tls::ssl::SslFiletype::PEM)
-        {
-            log::error!("failed to set downstream SNI private key: {error}");
+        if let Err(error) = certificate.apply_to_ssl(ssl) {
+            log::error!("failed to set downstream SNI certificate: {error}");
         }
     }
 }
@@ -461,8 +460,61 @@ impl pingora::listeners::TlsAccept for SniCertificateCallback {
     any(feature = "tls-openssl", feature = "tls-boringssl")
 ))]
 struct CallbackCertificate {
-    cert_path: String,
-    key_path: String,
+    chain: Vec<X509>,
+    private_key: PKey<Private>,
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+impl CallbackCertificate {
+    fn load(cert_path: &str, key_path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let cert_bytes = std::fs::read(cert_path)?;
+        let chain = X509::stack_from_pem(&cert_bytes)?;
+        if chain.is_empty() {
+            return Err("TLS certificate chain must contain at least one certificate".into());
+        }
+
+        let key_bytes = std::fs::read(key_path)?;
+        let private_key = PKey::private_key_from_pem(&key_bytes)?;
+
+        Ok(Self { chain, private_key })
+    }
+
+    #[cfg(all(feature = "tls-openssl", not(feature = "tls-boringssl")))]
+    fn apply_to_ssl(
+        &self,
+        ssl: &mut pingora::tls::ssl::SslRef,
+    ) -> Result<(), pingora::tls::error::ErrorStack> {
+        let (leaf, chain) = self
+            .chain
+            .split_first()
+            .expect("callback certificates are loaded with a non-empty chain");
+        ssl.set_certificate(leaf)?;
+        ssl.set_private_key(&self.private_key)?;
+        for certificate in chain {
+            ssl.add_chain_cert(certificate.clone())?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "tls-boringssl")]
+    fn apply_to_ssl(
+        &self,
+        ssl: &mut pingora::tls::ssl::SslRef,
+    ) -> Result<(), pingora::tls::error::ErrorStack> {
+        let (leaf, chain) = self
+            .chain
+            .split_first()
+            .expect("callback certificates are loaded with a non-empty chain");
+        ssl.set_certificate(leaf)?;
+        ssl.set_private_key(&self.private_key)?;
+        for certificate in chain {
+            ssl.add_chain_cert(certificate)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(all(

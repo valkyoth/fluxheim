@@ -1,0 +1,42 @@
+[[vhosts]]
+name = "www.science.chat"
+hosts = ["www.science.chat"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/science.chat/fullchain.pem"
+key_path = "/etc/fluxheim/tls/science.chat/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.redirect]
+enabled = true
+to = "https://science.chat{uri}"
+status = 308
+
+[[vhosts]]
+name = "science.chat"
+hosts = ["science.chat"]
+max_request_body_bytes = "512MiB"
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/science.chat/fullchain.pem"
+key_path = "/etc/fluxheim/tls/science.chat/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.proxy]
+upstreams = ["apache-answer-science:80"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 90
+send_timeout_secs = 90

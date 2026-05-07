@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 #[cfg(feature = "proxy")]
 use std::fs::OpenOptions;
 use std::io;
@@ -80,11 +81,10 @@ impl StaticFileServer {
             return Ok(ResolveResult::Forbidden);
         };
 
-        let candidate = self.root.join(relative_path);
-        self.resolve_candidate(&candidate)
+        self.resolve_relative_candidate(&relative_path)
     }
 
-    fn relative_request_path(&self, request_path: &str) -> io::Result<Option<PathBuf>> {
+    fn relative_request_path(&self, request_path: &str) -> io::Result<Option<SafeRelativePath>> {
         if !request_path.starts_with('/') {
             return Ok(None);
         }
@@ -97,7 +97,7 @@ impl StaticFileServer {
             return Ok(None);
         }
 
-        let mut relative = PathBuf::new();
+        let mut relative = SafeRelativePath::default();
         for segment in decoded.split('/') {
             if segment.is_empty() || segment == "." {
                 continue;
@@ -116,11 +116,12 @@ impl StaticFileServer {
         Ok(Some(relative))
     }
 
-    fn resolve_candidate(&self, candidate: &Path) -> io::Result<ResolveResult> {
-        if path_contains_symlink(&self.root, candidate)? {
+    fn resolve_relative_candidate(&self, relative: &SafeRelativePath) -> io::Result<ResolveResult> {
+        if path_contains_symlink(&self.root, relative)? {
             return Ok(ResolveResult::NotFound);
         }
 
+        let candidate = self.root.join(relative.as_path());
         let candidate = match candidate.canonicalize() {
             Ok(path) => path,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -163,7 +164,10 @@ impl StaticFileServer {
     }
 
     fn static_file(&self, candidate: &Path) -> io::Result<Option<StaticFile>> {
-        if path_contains_symlink(&self.root, candidate)? {
+        let Some(relative) = SafeRelativePath::from_rooted(&self.root, candidate) else {
+            return Ok(None);
+        };
+        if path_contains_symlink(&self.root, &relative)? {
             return Ok(None);
         }
 
@@ -201,7 +205,10 @@ impl StaticFileServer {
     }
 
     fn directory_listing(&self, directory: &Path) -> io::Result<ResolveResult> {
-        if path_contains_symlink(&self.root, directory)? {
+        let Some(relative) = SafeRelativePath::from_rooted(&self.root, directory) else {
+            return Ok(ResolveResult::NotFound);
+        };
+        if path_contains_symlink(&self.root, &relative)? {
             return Ok(ResolveResult::NotFound);
         }
         let mut entries = Vec::new();
@@ -255,17 +262,45 @@ impl StaticFileServer {
 
 const MAX_DIRECTORY_LISTING_ENTRIES: usize = 4096;
 
-fn path_contains_symlink(root: &Path, candidate: &Path) -> io::Result<bool> {
-    let Ok(relative) = candidate.strip_prefix(root) else {
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct SafeRelativePath {
+    components: Vec<OsString>,
+}
+
+impl SafeRelativePath {
+    fn push(&mut self, component: &str) {
+        self.components.push(OsString::from(component));
+    }
+
+    fn as_path(&self) -> PathBuf {
+        self.components.iter().collect()
+    }
+
+    fn from_path(path: &Path) -> Option<Self> {
+        let mut safe = Self::default();
+        for component in path.components() {
+            match component {
+                std::path::Component::Normal(component) => safe.components.push(component.into()),
+                _ => return None,
+            }
+        }
+        Some(safe)
+    }
+
+    fn from_rooted(root: &Path, candidate: &Path) -> Option<Self> {
+        candidate.strip_prefix(root).ok().and_then(Self::from_path)
+    }
+}
+
+fn path_contains_symlink(root: &Path, relative: &SafeRelativePath) -> io::Result<bool> {
+    let root_metadata = std::fs::symlink_metadata(root)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
         return Ok(true);
-    };
+    }
 
     let mut current = root.to_path_buf();
-    for component in relative.components() {
-        match component {
-            std::path::Component::Normal(_) => current.push(component),
-            _ => return Ok(true),
-        }
+    for component in &relative.components {
+        current.push(component);
         match std::fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
             Ok(_) => {}
@@ -803,7 +838,13 @@ fn read_static_body(file: &StaticFile, body: StaticResponseBody) -> io::Result<b
 
 #[cfg(feature = "proxy")]
 fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
-    if path_contains_symlink(&file.root, &file.path)? {
+    let relative = SafeRelativePath::from_rooted(&file.root, &file.path).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "static body path escaped web root",
+        )
+    })?;
+    if path_contains_symlink(&file.root, &relative)? {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "static body path contains a symlink",
@@ -931,6 +972,7 @@ mod tests {
             directory_listing: crate::config::DirectoryListingConfig {
                 enabled: true,
                 exact_size: true,
+                local_time: false,
             },
             ..WebConfig::default()
         })

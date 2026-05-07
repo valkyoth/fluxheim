@@ -81,7 +81,10 @@ Optional backend-specific packages:
 - `tls-openssl`: install OpenSSL development headers, such as `libssl-dev`,
   `openssl-devel`, or the distro equivalent.
 - `tls-boringssl`: install `clang` and a `libclang` development/runtime package
-  for bindgen.
+  for bindgen. On SUSE/openSUSE systems where `libclang` is installed but the
+  `clang` frontend is not on `PATH`, the validation helper automatically passes
+  discovered clang and GCC include paths to bindgen; set `BINDGEN_EXTRA_CLANG_ARGS`
+  manually only if your distro uses non-standard include locations.
 - `tls-s2n`: usually works with the default toolchain packages above, but keep
   `cmake` and `perl` installed.
 

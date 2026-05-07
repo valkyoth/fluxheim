@@ -1,0 +1,36 @@
+[[vhosts]]
+name = "repo.pawalyze.eu"
+hosts = ["repo.pawalyze.eu"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/repo.pawalyze.eu/fullchain.pem"
+key_path = "/etc/fluxheim/tls/repo.pawalyze.eu/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.web]
+root = "/srv/infra/repository/public"
+index_files = ["repo.html", "index.html"]
+deny_dotfiles = true
+cache_control = "public, max-age=300"
+
+[[vhosts.routes]]
+name = "repo-listing"
+path_prefix = "/repo"
+strip_prefix = "/repo"
+
+[vhosts.routes.web]
+root = "/srv/infra/repository/public"
+index_files = ["repo.html", "index.html"]
+deny_dotfiles = true
+cache_control = "public, max-age=300"
+
+[vhosts.routes.web.directory_listing]
+enabled = true
+exact_size = false
+local_time = true
