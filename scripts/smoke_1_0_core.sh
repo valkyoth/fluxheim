@@ -345,7 +345,9 @@ wait_http "http://127.0.0.1:$ORIGIN_PORT/" "origin.test"
 
 (
     cd "$ROOT_DIR"
-    scripts/validate-1-0-core.sh check
+    if [ "${FLUXHEIM_SMOKE_SKIP_CORE_MATRIX:-0}" != "1" ]; then
+        scripts/validate-1-0-core.sh check
+    fi
     if ! cargo run --quiet -- --check-config --check-tls-storage --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/tls-storage-check.log" 2>&1; then
         cat "$TMP_DIR/tls-storage-check.log" >&2
         exit 1

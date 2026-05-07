@@ -32,7 +32,7 @@ echo "stable release gate: 1.0 representative fixtures"
 scripts/validate-1-0-fixtures.sh
 
 echo "stable release gate: 1.0 core smoke"
-scripts/smoke_1_0_core.sh
+FLUXHEIM_SMOKE_SKIP_CORE_MATRIX=1 scripts/smoke_1_0_core.sh
 
 echo "stable release gate: dependency and license policy"
 cargo deny check

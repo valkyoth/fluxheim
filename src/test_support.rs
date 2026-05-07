@@ -6,11 +6,16 @@ static NEXT_TEST_PATH: AtomicU64 = AtomicU64::new(0);
 pub(crate) fn unique_temp_path(label: &str) -> PathBuf {
     assert_safe_label(label);
     let root = test_root();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before Unix epoch")
+        .as_nanos();
     safe_relative_path(
         &root,
         &format!(
-            "fluxheim-test-{}-{}",
+            "fluxheim-test-{}-{}-{}",
             std::process::id(),
+            nanos,
             NEXT_TEST_PATH.fetch_add(1, Ordering::Relaxed)
         ),
     )

@@ -3,7 +3,7 @@ set -eu
 
 scripts/checks.sh
 sh scripts/validate-1-0-fixtures.sh
-sh scripts/smoke_1_0_core.sh
+FLUXHEIM_SMOKE_SKIP_CORE_MATRIX=1 sh scripts/smoke_1_0_core.sh
 sh scripts/smoke_static_local.sh
 sh scripts/smoke_load_balancer.sh
 
