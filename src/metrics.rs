@@ -13,15 +13,17 @@ pub fn init() -> Result<(), prometheus::Error> {
 }
 
 pub fn record_proxy_outcome(vhost: &str, method: &str, status: Option<u16>, error: bool) {
-    proxy_requests_total()
-        .expect("Fluxheim metrics registry must initialize")
-        .with_label_values(&[
-            vhost,
-            method_bucket(method),
-            outcome_class(status, error),
-            status_class(status),
-        ])
-        .inc();
+    match proxy_requests_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                vhost,
+                method_bucket(method),
+                outcome_class(status, error),
+                status_class(status),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics counter unavailable: {error}"),
+    }
 }
 
 fn proxy_requests_total() -> Result<&'static IntCounterVec, prometheus::Error> {
@@ -43,9 +45,9 @@ fn proxy_requests_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     }
 
     let _ = PROXY_REQUESTS_TOTAL.set(counter);
-    Ok(PROXY_REQUESTS_TOTAL
+    PROXY_REQUESTS_TOTAL
         .get()
-        .expect("metrics counter is initialized"))
+        .ok_or_else(|| prometheus::Error::Msg("metrics counter failed to initialize".to_owned()))
 }
 
 fn outcome_class(status: Option<u16>, error: bool) -> &'static str {

@@ -14,6 +14,7 @@ RUN apt-get update \
 
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY build.rs ./
+COPY vendor ./vendor
 COPY src ./src
 COPY scripts/validate-features.sh ./scripts/validate-features.sh
 

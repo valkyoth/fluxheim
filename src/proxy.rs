@@ -146,17 +146,20 @@ impl FluxProxy {
     }
 
     pub fn set_health_reporter(&self, reporter: Arc<dyn ProxyHealthReporter>) {
-        let mut current = self
-            .health_reporter
-            .write()
-            .expect("proxy health reporter lock poisoned");
+        let mut current = self.health_reporter.write().unwrap_or_else(|poisoned| {
+            log::error!("proxy health reporter write lock poisoned; recovering state");
+            poisoned.into_inner()
+        });
         *current = Some(reporter);
     }
 
     pub(crate) fn has_health_reporter(&self) -> bool {
         self.health_reporter
             .read()
-            .expect("proxy health reporter lock poisoned")
+            .unwrap_or_else(|poisoned| {
+                log::error!("proxy health reporter read lock poisoned; recovering state");
+                poisoned.into_inner()
+            })
             .is_some()
     }
 
@@ -169,7 +172,10 @@ impl FluxProxy {
         let reporter = self
             .health_reporter
             .read()
-            .expect("proxy health reporter lock poisoned")
+            .unwrap_or_else(|poisoned| {
+                log::error!("proxy health reporter read lock poisoned; recovering state");
+                poisoned.into_inner()
+            })
             .clone();
         if let Some(reporter) = reporter {
             reporter.record_proxy_health_signal(signal);
@@ -4213,27 +4219,10 @@ mod tests {
     #[cfg(feature = "cache")]
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         use std::pin::pin;
-        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        use std::task::{Context, Poll, Waker};
 
-        fn raw_waker() -> RawWaker {
-            fn clone(_: *const ()) -> RawWaker {
-                raw_waker()
-            }
-            fn wake(_: *const ()) {}
-            fn wake_by_ref(_: *const ()) {}
-            fn drop(_: *const ()) {}
-
-            RawWaker::new(
-                std::ptr::null(),
-                &RawWakerVTable::new(clone, wake, wake_by_ref, drop),
-            )
-        }
-
-        // SAFETY: `raw_waker` uses a no-op vtable and a null data pointer that is
-        // never dereferenced. The waker is only used to poll immediately-ready
-        // test futures in this thread.
-        let waker = unsafe { Waker::from_raw(raw_waker()) };
-        let mut context = Context::from_waker(&waker);
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
         let mut future = pin!(future);
         loop {
             match future.as_mut().poll(&mut context) {

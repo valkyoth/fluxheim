@@ -810,12 +810,7 @@ fn validate_acme_eab_secret_permissions(
 
 #[cfg(unix)]
 fn current_effective_uid() -> u32 {
-    unsafe extern "C" {
-        fn geteuid() -> u32;
-    }
-
-    // SAFETY: geteuid has no preconditions and does not dereference pointers.
-    unsafe { geteuid() }
+    rustix::process::geteuid().as_raw()
 }
 
 #[cfg(not(unix))]

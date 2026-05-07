@@ -197,6 +197,7 @@ mod tests {
         CertificateObservation, next_retry_at, plan_renewal_queue, renewal_targets,
         toml_offset_datetime_to_system_time,
     };
+    use proptest::prelude::*;
 
     #[test]
     fn skips_targets_when_global_acme_is_disabled() {
@@ -302,6 +303,28 @@ mod tests {
             next_retry_at(now, 20, 300, 86_400),
             UNIX_EPOCH + Duration::from_secs(87_400)
         );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        #[test]
+        fn retry_backoff_never_exceeds_configured_cap(
+            failures in 0u32..=128,
+            initial_secs in 0u64..=86_400,
+            max_secs in 0u64..=604_800,
+        ) {
+            let now = UNIX_EPOCH + Duration::from_secs(1_000);
+            let due_at = next_retry_at(now, failures, initial_secs, max_secs);
+            let delay_secs = due_at.duration_since(now).unwrap().as_secs();
+            let multiplier = 1_u64
+                .checked_shl(failures.min(63))
+                .unwrap_or(u64::MAX);
+            let expected = initial_secs.saturating_mul(multiplier).min(max_secs);
+
+            prop_assert_eq!(delay_secs, expected);
+            prop_assert!(delay_secs <= max_secs);
+        }
     }
 
     #[test]

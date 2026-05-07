@@ -13,6 +13,8 @@ scripts/release_checks.sh
 cargo deny check
 cargo deny check licenses
 cargo audit
+scripts/generate-sbom.sh
+scripts/reproducible_build_check.sh
 ```
 
 GitHub Actions run CI, and GitHub CodeQL default setup should be enabled in the
@@ -46,6 +48,19 @@ Current reviewed dependency warnings:
 - `RUSTSEC-2025-0134` for `rustls-pemfile 2.2.0`: warning-only unmaintained
   transitive through Pingora's Rustls stack. Recheck on every Pingora or Rustls
   dependency upgrade.
+
+## Release Supply-Chain Evidence
+
+Stable releases must publish SPDX and CycloneDX SBOM files generated from the
+tagged source tree. The release notes must include SBOM checksums, source archive
+checksums, binary checksums, container digests, and the signed tag verification
+line.
+
+Fluxheim also runs a local reproducible-build check for release candidates. The
+check builds the release binary twice from separate target directories with the
+same lockfile and compares the resulting executable hash. This is a practical
+release-builder reproducibility gate, not a claim that every supported distro or
+container builder is bit-for-bit reproducible across machines.
 
 ## TLS File Policy
 

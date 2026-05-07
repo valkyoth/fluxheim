@@ -21,16 +21,17 @@ The `0.5.x` line is intentionally limited:
 - optional cleartext-to-HTTPS redirect;
 - rootless Podman deployment paths and container examples;
 - local release gates for formatting, linting, tests, license policy,
-  dependency advisories, core feature profiles, and localhost smoke checks.
+  dependency advisories, core feature profiles, SBOM generation, reproducible
+  build evidence, and localhost smoke checks.
 
 ## Stable 1.0 Target
 
 The `1.0` line should be the first gateway-ready release for representative
 real multi-site configs. In addition to the `0.5.x` behavior, it must support:
 
-- static TLS with one default certificate in the default rustls build;
-- SNI certificate selection across multiple configured certificates when using
-  a callback-capable TLS backend;
+- static TLS with one default certificate;
+- SNI certificate selection across multiple configured certificates in the
+  default rustls build;
 - route-level exact, prefix, and fallback matching;
 - route actions for proxy, static serving, and redirects;
 - cleartext ACME challenge exception routes plus HTTPS redirect for everything
@@ -45,9 +46,21 @@ real multi-site configs. In addition to the `0.5.x` behavior, it must support:
 - static aliases and secure directory listing;
 - container DNS behavior suitable for local Podman deployments, including
   graceful direct-proxy DNS failures;
+- property-based invariant tests for parser, normalization, and security policy
+  code that accepts attacker-controlled values;
+- crate-level direct unsafe prohibition with safe wrappers for OS calls and
+  safe test wakers;
+- release-profile abort-on-panic plus clippy enforcement that production code
+  does not use `unwrap()`, `expect()`, or `panic!()`;
+- zeroizing admin token buffers and vetted constant-time comparison for
+  authentication token verification;
 - native systemd support for manually compiled binaries, including a hardened
   service unit, documented install paths, runtime directory handling, config
-  validation before start, and graceful shutdown/reload behavior.
+  validation before start, graceful shutdown/reload behavior, no-new-privileges,
+  no ambient capabilities, strict filesystem protection, limited address
+  families, and a conservative syscall filter.
+- release evidence that includes SPDX/CycloneDX SBOMs, signed tags, checksums,
+  immutable container digests, and a local reproducible-build check.
 
 ## Not Stable In 1.0
 
@@ -61,6 +74,7 @@ not part of the `1.0` stable support promise:
 - metrics exporters;
 - OpenTelemetry tracing;
 - WAF, auth-request, image filters, media modules, or WASM extension points;
+- in-process seccomp or Landlock sandboxing;
 - PHP, CGI, or any dynamic script execution;
 - Cloudflare automation;
 - legacy HTTP compatibility listeners;

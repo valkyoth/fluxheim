@@ -28,9 +28,14 @@ behavior when the change improves security or project direction.
 - Static alias routes with secure optional directory listing and local-time
   timestamp rendering.
 - Safe dynamic request-header templates for common proxy migrations.
-- SNI certificate selection for callback-capable downstream TLS backends.
+- SNI certificate selection for the default rustls downstream TLS backend and
+  callback-capable downstream TLS backends.
 - Native systemd deployment files, sysusers/tmpfiles packaging, and manual
   server preparation helper for compiled binaries.
+- Zeroizing admin-token buffers and `subtle`-backed constant-time admin bearer
+  token verification.
+- SBOM generation and local reproducible-build checks in the stable release
+  gate and CI supply-chain evidence.
 
 ## 0.5.0 - Basic Sites Preview
 
@@ -128,10 +133,10 @@ Released: 2026-05-06
 - This is a preview release for normal static HTML websites and simple
   whole-vhost proxying with static TLS certificates. It is not the `1.0.0`
   gateway release.
-- At the `0.5.0` tag, known `1.0.0` gaps included multi-certificate SNI for
-  callback-capable TLS backends, route-level proxy/static/redirect behavior,
-  websocket-safe proxying, per-route limits and timeouts, custom upstream error
-  pages, and secure static alias/directory listing behavior.
+- At the `0.5.0` tag, known `1.0.0` gaps included multi-certificate SNI,
+  route-level proxy/static/redirect behavior, websocket-safe proxying,
+  per-route limits and timeouts, custom upstream error pages, and secure static
+  alias/directory listing behavior.
 
 ## 0.1.0 - Repository Baseline
 

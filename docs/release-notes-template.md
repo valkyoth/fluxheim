@@ -34,6 +34,8 @@ release-gate report path or copied summary.
 - Request-framing smoke result:
 - Fuzz target compile result:
 - Podman smoke result:
+- SBOM generation result:
+- Reproducible build result:
 
 ## Reviewed Advisory Exceptions
 
@@ -68,5 +70,7 @@ release. Include whether the dependency is direct or transitive.
 
 - Source archive checksum:
 - Binary checksums:
+- SBOM checksums:
+- Reproducible build hash:
 - Container digests:
 - Tag signature:

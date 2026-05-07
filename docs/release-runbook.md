@@ -31,6 +31,8 @@ cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --locked -- -D warnings
 cargo audit
+scripts/generate-sbom.sh
+scripts/reproducible_build_check.sh
 scripts/validate-release-metadata.sh
 scripts/podman_smoke.sh
 ```
@@ -98,6 +100,26 @@ sha256sum "dist/${DIST_NAME}.tar.gz"
 
 Record the binary checksum.
 
+Generate SBOMs for the tagged source tree:
+
+```bash
+scripts/generate-sbom.sh
+sha256sum target/release-evidence/fluxheim.spdx.json
+sha256sum target/release-evidence/fluxheim.cyclonedx.json
+```
+
+Upload both SBOM files as release assets, and record their checksums in the
+release notes.
+
+Verify that the local release builder can reproduce the release binary from two
+separate target directories:
+
+```bash
+scripts/reproducible_build_check.sh
+```
+
+Record the reported binary hash as reproducible-build evidence.
+
 Do not commit `dist/`; it is local release output.
 
 ## 5. Draft The GitHub Release
@@ -110,7 +132,9 @@ On GitHub:
 4. Use `$TITLE` as the release title.
 5. Paste the contents of `$RELEASE_NOTES`.
 6. Upload `dist/${DIST_NAME}.tar.gz`.
-7. Publish the release.
+7. Upload `target/release-evidence/fluxheim.spdx.json`.
+8. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
+9. Publish the release.
 
 It is normal to publish before every evidence field is filled. Source archives
 and container digests are available only after the tag/release and image
@@ -175,6 +199,11 @@ The release notes should end with concrete evidence, not placeholders:
   - `...  fluxheim-${RELEASE_VERSION}.zip`
 - Binary checksums:
   - `...  fluxheim-${RELEASE_VERSION}-linux-x86_64.tar.gz`
+- SBOM checksums:
+  - `...  fluxheim.spdx.json`
+  - `...  fluxheim.cyclonedx.json`
+- Reproducible build:
+  - `...  target/reproducible-a/release/fluxheim`
 - Container digests:
   - Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
   - Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`

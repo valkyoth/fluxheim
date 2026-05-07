@@ -185,10 +185,9 @@ Stable scope:
 - Caddy-inspired TOML config and `conf.d` loading.
 - Static/bought certificate support.
 - Rustls as the default TLS backend.
-- Single default downstream certificate support in the default rustls build.
-- SNI certificate selection for multiple configured downstream certificates
-  when Fluxheim is built with a callback-capable TLS backend such as
-  `tls-openssl` or `tls-boringssl`.
+- Default downstream certificate support in the default rustls build.
+- SNI certificate selection for multiple configured downstream certificates in
+  the default rustls build and callback-capable TLS backends.
 - Optional OpenSSL and s2n TLS builds when they pass the release matrix.
 - Optional BoringSSL TLS builds on builders with `libclang` available for
   bindgen.
@@ -213,7 +212,10 @@ Stable scope:
 - Native systemd deployment support for manually compiled binaries:
   `fluxheim.service`, optional environment file, tmpfiles/sysusers guidance,
   config validation before start, hardened service defaults, and documented
-  graceful stop/reload behavior.
+  graceful stop/reload behavior. The packaged unit is the stable `1.0` host
+  sandbox: non-root runtime user, no ambient capabilities, no-new-privileges,
+  strict filesystem protection, limited address families, namespace
+  restrictions, and a conservative syscall filter.
 - Explicit trusted proxy CIDR handling for forwarded client-IP headers. The
   richer trusted-client identity layer remains a later milestone.
 - Release/security checks.
@@ -231,6 +233,7 @@ Not in 1.0 stable scope:
 - PHP/CGI.
 - Legacy HTTP.
 - Sentinel Mesh/WireGuard.
+- In-process seccomp or Landlock sandboxing.
 
 Exit criteria:
 
@@ -242,9 +245,8 @@ Exit criteria:
 - A fixture set equivalent to the six representative gateway configs validates
   and passes local smoke tests.
 - SNI selector tests prove each configured host maps to the intended
-  certificate, and callback-capable TLS backend validation must pass before
-  claiming multi-certificate SNI support for a release artifact. The default
-  rustls artifact is a single-default-certificate TLS build in `1.0`.
+  certificate, and the stable gateway smoke suite verifies rustls SNI by
+  checking the certificate served for a vhost-specific TLS handshake.
 - Route tests prove ACME challenge exceptions, `www` redirects, `/chat/`
   prefix stripping, websocket upgrade proxying, error-page fallback, and static
   alias/directory-listing behavior.
@@ -751,6 +753,36 @@ Exit criteria:
 - No plaintext fallback exists unless explicitly configured.
 - Rootless Podman smoke coverage exists for the supported transport.
 - Mesh code is absent from default and privacy builds.
+
+### 1.15 - Optional Host Sandbox Module
+
+Goal: provide an opt-in in-process Linux sandbox for deployments that cannot
+rely only on systemd or container runtime policy.
+
+Research scope:
+
+- Compile-time `host-sandbox` module family, disabled by default.
+- Linux-only subfeatures such as `host-sandbox-seccomp` and
+  `host-sandbox-landlock`.
+- Apply the sandbox only after config parsing, certificate loading, listener
+  binding, and runtime directory setup are complete.
+- Deny process creation and executable loading after initialization:
+  `execve`, `execveat`, `fork`, `vfork`, and `clone` variants that create new
+  processes.
+- Landlock path policy for approved config, content, cache, log, runtime, and
+  state roots.
+- Compatibility mode for rootless containers and native systemd deployments.
+
+Exit criteria:
+
+- Sandbox features are absent from default builds until promoted and tested.
+- A failed sandbox install must fail closed unless the operator explicitly
+  configures report-only mode for testing.
+- Tests cover normal static/proxy serving, denied process execution, denied
+  unapproved path access, reload behavior, and container/native differences.
+- Documentation states that systemd/container sandboxing remains the stable
+  `1.0` boundary; in-process seccomp/Landlock is an additional hardening layer,
+  not a replacement for least-privilege deployment.
 
 ### 2.0 - Dynamic Runtime Boundary
 

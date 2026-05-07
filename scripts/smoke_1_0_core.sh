@@ -87,6 +87,18 @@ openssl req \
     -out "$TMP_DIR/tls/fullchain.pem" >/dev/null 2>&1
 chmod 600 "$TMP_DIR/tls/key.pem"
 
+openssl req \
+    -x509 \
+    -newkey rsa:2048 \
+    -nodes \
+    -sha256 \
+    -days 1 \
+    -subj "/CN=app.test" \
+    -addext "subjectAltName=DNS:app.test" \
+    -keyout "$TMP_DIR/tls/app-key.pem" \
+    -out "$TMP_DIR/tls/app-fullchain.pem" >/dev/null 2>&1
+chmod 600 "$TMP_DIR/tls/app-key.pem"
+
 cat > "$TMP_DIR/origin.py" <<'PY'
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -264,6 +276,13 @@ name = "app.test"
 hosts = ["app.test"]
 max_request_body_bytes = "32B"
 
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "$TMP_DIR/tls/app-fullchain.pem"
+key_path = "$TMP_DIR/tls/app-key.pem"
+
 [vhosts.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
@@ -381,6 +400,20 @@ FLUXHEIM_PID=$!
 
 wait_http "http://127.0.0.1:$FLUXHEIM_PORT/" "static.test"
 wait_https "https://127.0.0.1:$FLUXHEIM_TLS_PORT/" "static.test"
+
+SNI_SUBJECT="$(
+    printf '' |
+        openssl s_client -connect "127.0.0.1:$FLUXHEIM_TLS_PORT" -servername app.test 2>/dev/null |
+        openssl x509 -noout -subject
+)"
+case "$SNI_SUBJECT" in
+    *"CN = app.test"*|*"CN=app.test"*) ;;
+    *)
+        echo "1.0 core smoke failed: rustls SNI did not select app.test certificate" >&2
+        echo "$SNI_SUBJECT" >&2
+        exit 1
+        ;;
+esac
 
 STATIC_BODY="$TMP_DIR/static-body.txt"
 curl -fsS -H "Host: static.test" "http://127.0.0.1:$FLUXHEIM_PORT/" > "$STATIC_BODY"

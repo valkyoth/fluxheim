@@ -25,10 +25,17 @@ surface now present in the codebase: SNI certificate selection, path/location
 routing, route redirects, websocket-safe proxying, per-route body limits and
 timeouts, custom upstream error pages, static aliases, directory listing,
 cleartext ACME challenge exceptions, safe dynamic request headers, and native
-systemd service support for manually compiled binaries. ACME runtime, advanced
-load balancing, admin snapshots, metrics, Sentinel Mesh/WireGuard,
+systemd service support for manually compiled binaries. The 1.0 gate also needs
+property-based invariant tests for parser and policy code that handles
+attacker-controlled input. ACME runtime, advanced load balancing, admin
+snapshots, metrics, Sentinel Mesh/WireGuard,
 stale-while-revalidate, and persistent cache indexing remain important, but
 they should graduate after `1.0.0` according to the versioning plan.
+In-process Linux seccomp/Landlock sandboxing is also post-`1.0` work: the
+stable `1.0` boundary is hardened systemd/container deployment, while
+kernel-enforced in-process sandboxing should remain an optional compile-time
+module until path and syscall policies are proven across native and container
+deployments.
 
 After `1.0`, the first dedicated minor release should focus on TLS policy:
 explicit safe profiles, minimum protocol version, ALPN controls, backend
@@ -217,6 +224,11 @@ These are realistic additions to implement across the stable core and early
      `fluxheim.service`, optional environment file, tmpfiles/sysusers
      guidance, documented install paths, config validation before start, and
      graceful `SIGTERM`/reload behavior for manually compiled binaries.
+   - Treat the packaged systemd unit as the stable `1.0` host sandbox:
+     non-root runtime user, no ambient capabilities, no-new-privileges, strict
+     filesystem protection, private temporary/device namespaces, limited
+     address families, namespace restrictions, and a conservative syscall
+     filter.
 
 8. **Zero-Retention Privacy Build Profile**
    - Add a compile-time optional privacy profile for static web serving and
@@ -452,8 +464,9 @@ without parsing text fixtures for every module.
      certificate.
    - Config validation for downstream TLS listener prerequisites. Implemented:
      TLS listener addresses require `tls.enabled = true` and a global static
-     certificate until ACME/SNI runtime selection lands.
-   - Per-vhost/SNI downstream certificate selection.
+     certificate.
+   - Per-vhost/SNI downstream certificate selection. Implemented for the
+     default rustls backend and callback-capable TLS backends.
    - ACME account/order/challenge runtime.
    - Background renewal queue service.
    - Atomic certificate install and rollback on invalid renewed certificates.
@@ -946,7 +959,33 @@ without parsing text fixtures for every module.
      strict parsing, no downgrade shortcuts, no legacy protocol fallback on
      modern listeners, and the same vhost/cache/admin isolation rules.
 
-16. **Future Cluster-Native State**
+16. **Future Optional Host Sandbox**
+   - Plan as an optional compile-time module after the `1.0` native systemd
+     and container deployment boundaries are stable.
+   - Planned feature flags:
+     - `host-sandbox`: shared config, lifecycle hook, and operator docs.
+     - `host-sandbox-seccomp`: Linux syscall filtering after initialization.
+     - `host-sandbox-landlock`: Linux filesystem path restrictions after
+       config, certificates, listeners, state, cache, and log paths are opened
+       or validated.
+   - Scope:
+     bind listeners, load config/certificates, prepare runtime directories,
+     then install irreversible restrictions that deny process creation,
+     executable loading, and access to paths outside the configured roots.
+   - Do not compile this into default builds until it is proven across native
+     systemd, rootless Podman, and normal static/proxy workloads. Operators
+     with unusual logging, certificate reload, cache, or content paths must
+     have explicit allow-list config.
+   - WASM is a separate future plugin sandbox. Do not require Fluxheim itself
+     to run inside Wasmtime; use systemd/container policy for `1.0` and
+     optional seccomp/Landlock for later host hardening.
+   - Exit criteria before beta:
+     tests for denied `execve`/process creation, denied unapproved path access,
+     normal static/proxy traffic after sandbox installation, reload behavior,
+     report-only diagnostics, and release checks proving sandbox code is absent
+     from default and privacy builds.
+
+17. **Future Cluster-Native State**
    - Plan as an optional compile-time module after the load-balancer,
      metrics, admin, and security profiles are stable.
    - Goal: let multiple Fluxheim nodes coordinate selected security and routing
@@ -978,7 +1017,7 @@ without parsing text fixtures for every module.
      downgrade/version mismatch tests, and release checks proving cluster code
      is absent from default and privacy builds.
 
-17. **Future External Authorization And Identity-Aware Routing**
+18. **Future External Authorization And Identity-Aware Routing**
    - Architecture and security plan for external authorization requests is
      documented in [External Authorization Request](docs/auth-request.md).
    - Architecture and security plan for signed URL grants is documented in
@@ -1056,7 +1095,7 @@ without parsing text fixtures for every module.
      tests, signed-link expiry/path/method/audience tests, token redaction
      tests, recursive-auth rejection, and privacy-mode incompatibility guards.
 
-18. **Future Declarative Redirect And Rewrite Engine**
+19. **Future Declarative Redirect And Rewrite Engine**
    - Goal: provide a safe match-action pipeline for redirects and internal
      request rewrites without procedural phase ordering.
    - Global HTTPS redirect is part of the stable core. The future engine should
@@ -1081,7 +1120,7 @@ without parsing text fixtures for every module.
      only after the WASM host has fuel, wall-time, memory, host-call, and
      failure-mode limits.
 
-19. **Future AI Gateway**
+20. **Future AI Gateway**
    - Plan as an optional compile-time module family after metrics, WAF, cache,
      and identity foundations exist.
    - Goal: make Fluxheim understand AI API traffic enough to control cost,
@@ -1115,7 +1154,7 @@ without parsing text fixtures for every module.
      semantic-cache isolation tests, jailbreak/prompt-guard dry-run tests, and
      default/privacy build absence checks.
 
-20. **Future Traffic Mirroring**
+21. **Future Traffic Mirroring**
    - Plan as an optional compile-time `traffic-mirror` module after reverse
      proxy, load balancing, metrics, privacy profiles, and request body
      streaming limits are stable.
@@ -1140,7 +1179,7 @@ without parsing text fixtures for every module.
      redaction tests, sampling distribution tests, and proof that mirror
      failures never change the client response.
 
-21. **Future Sentinel Mesh Graduation**
+22. **Future Sentinel Mesh Graduation**
    - Keep the current Sentinel Mesh design as a research track until the
      load-balancer, TLS reload, admin, metrics, and cluster-state foundations
      are mature.
@@ -1165,7 +1204,7 @@ without parsing text fixtures for every module.
      tests, rootless Podman smoke coverage, and default/privacy build absence
      checks.
 
-22. **Future Programmable Media Edge**
+23. **Future Programmable Media Edge**
    - Architecture and security plan documented in
      [Programmable Media Edge](docs/programmable-media-edge.md).
    - Video-aware delivery must be optional, compile-time gated, and disabled by
@@ -1210,7 +1249,7 @@ without parsing text fixtures for every module.
      redaction tests, metrics cardinality tests, and default/privacy build
      absence checks.
 
-23. **Future WASM Extensibility**
+24. **Future WASM Extensibility**
    - Architecture and security plan documented in
      [WASM Extensibility](docs/wasm-extensibility.md).
    - WASM support must be optional, compile-time gated, and disabled by

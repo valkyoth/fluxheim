@@ -1,13 +1,9 @@
-#[cfg(unix)]
-use std::ffi::CStr;
 use std::ffi::OsString;
 #[cfg(feature = "proxy")]
 use std::fs::OpenOptions;
 use std::io;
 #[cfg(feature = "proxy")]
 use std::io::{Read, Seek};
-#[cfg(unix)]
-use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -297,20 +293,32 @@ impl SafeRelativePath {
     }
 }
 
-fn path_contains_symlink(root: &Path, relative: &SafeRelativePath) -> io::Result<bool> {
-    let root_metadata = std::fs::symlink_metadata(root)?;
-    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
-        return Ok(true);
+fn normal_component(component: &std::ffi::OsStr) -> Option<&std::ffi::OsStr> {
+    let mut components = Path::new(component).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(component)), None) => Some(component),
+        _ => None,
     }
+}
 
+fn symlink_walk_status(path: &Path) -> io::Result<Option<bool>> {
+    if path.is_symlink() {
+        return Ok(Some(true));
+    }
+    path.try_exists().map(|exists| exists.then_some(false))
+}
+
+fn path_contains_symlink(root: &Path, relative: &SafeRelativePath) -> io::Result<bool> {
     let mut current = root.to_path_buf();
     for component in &relative.components {
+        let Some(component) = normal_component(component) else {
+            return Ok(true);
+        };
         current.push(component);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
+        match symlink_walk_status(&current)? {
+            Some(true) => return Ok(true),
+            Some(false) => {}
+            None => return Ok(false),
         }
     }
 
@@ -320,12 +328,22 @@ fn path_contains_symlink(root: &Path, relative: &SafeRelativePath) -> io::Result
 fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
     let mut current = PathBuf::new();
     for component in path.components() {
-        current.push(component);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
+        match component {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                current.push(component);
+            }
+            std::path::Component::Normal(component) => {
+                let Some(component) = normal_component(component) else {
+                    return Ok(true);
+                };
+                current.push(component);
+            }
+            std::path::Component::CurDir | std::path::Component::ParentDir => return Ok(true),
+        }
+        match symlink_walk_status(&current)? {
+            Some(true) => return Ok(true),
+            Some(false) => {}
+            None => return Ok(false),
         }
     }
 
@@ -625,43 +643,9 @@ fn format_directory_listing_time(modified: SystemTime, local_time: bool) -> Stri
     httpdate::fmt_http_date(modified)
 }
 
-#[cfg(unix)]
 fn format_local_directory_listing_time(modified: SystemTime) -> Option<String> {
-    let seconds: libc::time_t = modified
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_secs()
-        .try_into()
-        .ok()?;
-
-    let mut local = MaybeUninit::<libc::tm>::uninit();
-    let mut output = [0 as libc::c_char; 64];
-    let format = b"%Y-%m-%d %H:%M:%S %z\0";
-
-    unsafe {
-        if libc::localtime_r(&seconds, local.as_mut_ptr()).is_null() {
-            return None;
-        }
-        let local = local.assume_init();
-        let written = libc::strftime(
-            output.as_mut_ptr(),
-            output.len(),
-            format.as_ptr().cast(),
-            &local,
-        );
-        if written == 0 {
-            return None;
-        }
-        CStr::from_ptr(output.as_ptr())
-            .to_str()
-            .ok()
-            .map(str::to_owned)
-    }
-}
-
-#[cfg(not(unix))]
-fn format_local_directory_listing_time(_modified: SystemTime) -> Option<String> {
-    None
+    let local: chrono::DateTime<chrono::Local> = modified.into();
+    Some(local.format("%Y-%m-%d %H:%M:%S %z").to_string())
 }
 
 #[cfg_attr(not(feature = "proxy"), allow(dead_code))]

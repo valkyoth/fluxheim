@@ -31,7 +31,7 @@ pub fn apply_upstream_request_policy(
     #[cfg(feature = "privacy-mode")]
     {
         let _ = (client_addr, trusted_proxy, downstream_tls, request_id);
-        return apply_privacy_upstream_request_policy(request, policy, request_id);
+        apply_privacy_upstream_request_policy(request, policy, request_id)
     }
 
     #[cfg(not(feature = "privacy-mode"))]
@@ -411,7 +411,11 @@ mod tests {
     #[cfg(feature = "privacy-mode")]
     use std::net::{Ipv4Addr, SocketAddr};
 
+    #[cfg(not(feature = "privacy-mode"))]
+    use super::{RequestHeaderTemplateContext, render_header_template};
     use super::{apply_response_policy, apply_upstream_request_policy};
+    #[cfg(not(feature = "privacy-mode"))]
+    use proptest::prelude::*;
 
     #[test]
     fn applies_default_response_headers() {
@@ -787,6 +791,65 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("websocket")
         );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    fn safe_header_template_fragment() -> impl Strategy<Value = String> {
+        prop::string::string_regex("[A-Za-z0-9 _./:;=,?&-]{0,48}")
+            .expect("valid safe header template fragment regex")
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    fn safe_dynamic_header_context() -> RequestHeaderTemplateContext {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/chat/?room=main", Some(8)).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        request.insert_header("upgrade", "websocket").unwrap();
+
+        RequestHeaderTemplateContext::new(
+            &request,
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))),
+            true,
+            Some("req-123"),
+        )
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        #[test]
+        fn dynamic_header_rendering_preserves_safe_header_values(
+            prefix in safe_header_template_fragment(),
+            middle in safe_header_template_fragment(),
+            suffix in safe_header_template_fragment(),
+        ) {
+            let template = format!(
+                "{prefix}{{host}}{middle}{{remote_addr}}{{scheme}}{{uri}}{{path}}{{query}}{{request_id}}{{http.upgrade}}{suffix}"
+            );
+            let rendered = render_header_template(&template, &safe_dynamic_header_context());
+
+            prop_assert!(!rendered.is_empty());
+            prop_assert!(rendered.bytes().all(|byte| !matches!(byte, 0x00..=0x1f | 0x7f)));
+            prop_assert!(rendered.contains("example.test"));
+            prop_assert!(rendered.contains("203.0.113.10"));
+            prop_assert!(rendered.contains("https"));
+            prop_assert!(rendered.contains("req-123"));
+            prop_assert!(rendered.contains("websocket"));
+        }
+
+        #[test]
+        fn unmatched_dynamic_header_template_opening_brace_is_preserved(
+            prefix in safe_header_template_fragment(),
+            suffix in safe_header_template_fragment(),
+        ) {
+            let template = format!("{prefix}{{{suffix}");
+
+            prop_assert_eq!(
+                render_header_template(&template, &safe_dynamic_header_context()),
+                template
+            );
+        }
     }
 
     #[cfg(not(feature = "privacy-mode"))]

@@ -4,7 +4,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -382,9 +382,7 @@ impl Display for SnapshotError {
 impl Error for SnapshotError {}
 
 fn new_snapshot_id() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after Unix epoch for snapshot ids");
+    let now = unix_duration();
     format!(
         "s{}-{:09}-{}-{}",
         now.as_secs(),
@@ -395,10 +393,13 @@ fn new_snapshot_id() -> String {
 }
 
 fn unix_secs() -> u64 {
+    unix_duration().as_secs()
+}
+
+fn unix_duration() -> Duration {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after Unix epoch for snapshot metadata")
-        .as_secs()
+        .unwrap_or_default()
 }
 
 fn snapshot_message(message: Option<&str>) -> Result<Option<String>, SnapshotError> {

@@ -122,6 +122,10 @@ def validate_install_path(label: str, path: Path) -> Path:
     return normalized
 
 
+def checked_install_path(label: str, path: Path) -> Path:
+    return validate_install_path(label, path)
+
+
 def validate_paths(args: argparse.Namespace) -> None:
     args.config = validate_install_path("--config", args.config)
     args.conf_d = validate_install_path("--conf-d", args.conf_d)
@@ -311,6 +315,7 @@ def index_template() -> str:
 
 
 def mkdir(path: Path, uid: int, gid: int, mode: int, dry_run: bool) -> None:
+    path = checked_install_path("directory", path)
     print(f"mkdir -p {path}")
     if dry_run:
         return
@@ -319,7 +324,17 @@ def mkdir(path: Path, uid: int, gid: int, mode: int, dry_run: bool) -> None:
     os.chown(path, uid, gid)
 
 
-def write_file(path: Path, content: str, uid: int, gid: int, mode: int, force: bool, dry_run: bool) -> None:
+def write_file(
+    path: Path,
+    content: str,
+    uid: int,
+    gid: int,
+    mode: int,
+    force: bool,
+    dry_run: bool,
+) -> None:
+    path = checked_install_path("file", path)
+    parent = checked_install_path("file parent", path.parent)
     if path.exists() and not force:
         print(f"skip existing {path} (use --force to replace)")
         return
@@ -329,13 +344,13 @@ def write_file(path: Path, content: str, uid: int, gid: int, mode: int, force: b
     if dry_run:
         return
 
-    path.parent.mkdir(parents=True, exist_ok=True)
+    parent.mkdir(parents=True, exist_ok=True)
     tmp_name = None
     try:
         with tempfile.NamedTemporaryFile(
             "w",
             encoding="utf-8",
-            dir=path.parent,
+            dir=parent,
             prefix=f".{path.name}.",
             delete=False,
         ) as tmp:

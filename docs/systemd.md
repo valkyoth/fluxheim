@@ -11,7 +11,15 @@ The packaged unit is intentionally conservative:
   `/var/log/fluxheim` as writable service paths;
 - keeps `/etc/fluxheim` and `/srv/fluxheim` readable but not writable by the
   service;
+- runs with `NoNewPrivileges`, no ambient Linux capabilities, strict system
+  path protection, private temporary and device namespaces, kernel/control-group
+  write protection, namespace restrictions, native syscall architecture
+  filtering, and a conservative system-service/network syscall allow-list;
+- limits address families to IPv4, IPv6, and Unix domain sockets;
 - stops with `SIGTERM` and lets Fluxheim/Pingora shut down gracefully.
+
+These systemd controls are the supported `1.0` host sandbox. They are
+deployment-level controls and do not require a special Fluxheim binary.
 
 ## Manual Binary Install
 
@@ -106,6 +114,30 @@ sudo systemctl restart fluxheim.service
 
 Fluxheim exits on `SIGTERM`; the unit uses `TimeoutStopSec=30s` so the process
 has time to drain and shut down cleanly before systemd escalates.
+
+## Sandbox Overrides
+
+The default unit is strict enough for normal static/proxy deployments. If a
+deployment needs extra host access, prefer a local drop-in instead of editing
+the packaged unit:
+
+```bash
+sudo systemctl edit fluxheim.service
+```
+
+For example, add another read-only content root:
+
+```ini
+[Service]
+ReadOnlyPaths=/etc/fluxheim /srv/fluxheim /srv/sites
+```
+
+Then validate and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart fluxheim.service
+```
 
 ## TLS And Content Paths
 

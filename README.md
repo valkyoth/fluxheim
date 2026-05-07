@@ -234,8 +234,9 @@ body limits, upstream connect/read/send timeout knobs, websocket-safe upgrade
 smoke coverage for `/chat/`-style routes, and custom upstream error pages,
 secure static aliases with optional directory listing, cleartext ACME challenge
 exceptions, safe dynamic request-header templates for common proxy migrations,
-SNI certificate selection for callback-capable TLS backends, and native systemd
-deployment files for manually compiled binaries. Direct proxy upstream DNS names
+SNI certificate selection for the default rustls TLS backend and
+callback-capable TLS backends, and native systemd deployment files for manually
+compiled binaries. Direct proxy upstream DNS names
 are resolved per request and resolution failures return upstream errors instead
 of panicking the worker, which covers local Podman service names for the non-LB
 gateway path.

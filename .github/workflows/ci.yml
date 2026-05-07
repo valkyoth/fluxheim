@@ -19,7 +19,7 @@ jobs:
   checks:
     name: Format, lint, test, and audit
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
 
     steps:
       - name: Checkout repository
@@ -37,6 +37,9 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny,cargo-audit
+
+      - name: Install SBOM tool
+        run: cargo install --locked cargo-sbom --version 0.10.0
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -68,6 +71,12 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
+
+      - name: Validate panic policy on feature profiles
+        run: |
+          cargo clippy --no-default-features --features proxy,tls-rustls,acme --all-targets -- -D warnings
+          cargo clippy --no-default-features --features proxy,web,tls-rustls,privacy-mode --all-targets -- -D warnings
+          cargo clippy --no-default-features --features web --all-targets -- -D warnings
 
       - name: Run default tests
         run: cargo test
@@ -122,3 +131,9 @@ jobs:
 
       - name: Check RustSec advisories
         run: cargo audit
+
+      - name: Generate SBOM
+        run: scripts/generate-sbom.sh
+
+      - name: Verify reproducible release build
+        run: scripts/reproducible_build_check.sh

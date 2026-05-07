@@ -2959,27 +2959,10 @@ mod tests {
     #[cfg(feature = "proxy")]
     fn block_on<F: std::future::Future>(future: F) -> F::Output {
         use std::pin::pin;
-        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        use std::task::{Context, Poll, Waker};
 
-        fn raw_waker() -> RawWaker {
-            fn clone(_: *const ()) -> RawWaker {
-                raw_waker()
-            }
-            fn wake(_: *const ()) {}
-            fn wake_by_ref(_: *const ()) {}
-            fn drop(_: *const ()) {}
-
-            RawWaker::new(
-                std::ptr::null(),
-                &RawWakerVTable::new(clone, wake, wake_by_ref, drop),
-            )
-        }
-
-        // SAFETY: `raw_waker` uses a no-op vtable and a null data pointer that is
-        // never dereferenced. The waker is only used to poll immediately-ready
-        // test futures in this thread.
-        let waker = unsafe { Waker::from_raw(raw_waker()) };
-        let mut context = Context::from_waker(&waker);
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
         let mut future = pin!(future);
         loop {
             match future.as_mut().poll(&mut context) {

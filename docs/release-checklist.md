@@ -21,6 +21,7 @@ scripts/validate-release-metadata.sh
 ```bash
 cargo info cargo-deny
 cargo info cargo-audit
+cargo info cargo-sbom
 ```
 
 Install or update the tools with locked dependency resolution:
@@ -28,6 +29,7 @@ Install or update the tools with locked dependency resolution:
 ```bash
 cargo install --locked cargo-deny
 cargo install --locked cargo-audit
+cargo install --locked cargo-sbom --version 0.10.0
 ```
 
 ## Dependency, License, And Advisory Gates
@@ -38,6 +40,11 @@ cargo install --locked cargo-audit
   stay denied.
 - Keep `.cargo/audit.toml` exceptions narrow, versioned, and documented with a
   removal condition.
+- For unmaintained transitive dependencies inherited from Pingora or TLS
+  backends, prefer upstream fixes over local forks. Track the package, advisory
+  ID, upstream source, Fluxheim reachability, and removal condition in
+  `SECURITY.md` and release notes. Do not promote an ignored advisory from
+  warning to accepted risk without a written reason.
 - Run the release wrapper:
 
 ```bash
@@ -79,12 +86,10 @@ and release modes, plus the `scripts/smoke_1_0_core.sh` localhost smoke.
 
 - Static certificate chains and private keys are supported. Bought certificates
   remain a first-class deployment mode.
-- In the default rustls build, validate one default downstream certificate per
-  TLS listener. Multi-certificate SNI is only claimable for release artifacts
-  built with a callback-capable TLS backend such as `tls-openssl` or
-  `tls-boringssl`.
-- The core smoke generates a temporary static certificate and proves both
-  static and proxied vhosts over a TLS listener.
+- In the default rustls build, validate the default downstream certificate and
+  at least one vhost-specific SNI certificate per TLS listener.
+- The core smoke generates temporary static certificates and proves static,
+  proxied, and SNI-selected vhosts over a TLS listener.
 - ACME config and renewal queue planning are implemented, but account/order and
   challenge runtime work is not release-ready yet. Do not document automated
   ACME issuance as operational until that runtime is implemented and tested.
@@ -168,6 +173,8 @@ FLUXHEIM_GATE_PODMAN=1 FLUXHEIM_GATE_PODMAN_VARIANTS=1 scripts/stable_release_ga
 ```bash
 cargo deny check
 cargo audit
+scripts/generate-sbom.sh
+scripts/reproducible_build_check.sh
 ```
 
 - Static analysis and regression suite:
@@ -179,6 +186,35 @@ cargo test
 scripts/validate-1-0-core.sh release
 scripts/smoke_1_0_core.sh
 ```
+
+- Direct unsafe policy. Fluxheim's crate roots use `#![forbid(unsafe_code)]`;
+  this is enforced by the normal compile, clippy, and feature-matrix gates.
+  Do not add direct `unsafe` blocks or raw FFI to Fluxheim source. Prefer safe
+  wrapper crates for platform APIs and safe task/waker primitives in tests.
+- Panic policy. Release artifacts build with `panic = "abort"`, and crate roots
+  deny production `unwrap()`, `expect()`, and `panic!()` through clippy. Keep
+  operational errors on `Result` or explicit fallback responses. Test-only
+  assertions may continue using panicking helpers.
+- Secret handling policy. Admin bearer tokens are read into zeroizing buffers,
+  hashed, and compared through a vetted constant-time equality primitive.
+  Keep new long-lived credentials in `zeroize`/`ZeroizeOnDrop` types, and use
+  `subtle` for any equality check involving authentication tokens, signing
+  secrets, or derived verifiers. Do not classify normal cache object bodies as
+  secrets unless a future module explicitly stores private user data.
+- Third-party unsafe inventory. Before a stable release, run `cargo-geiger` as
+  an informational dependency review and record unexpected changes in the
+  release notes. Do not treat every dependency-level unsafe finding as an
+  automatic blocker: the networking, TLS, OS, and runtime stack may contain
+  audited unsafe internals. Treat new unsafe in direct dependencies as a review
+  trigger alongside `cargo deny` and `cargo audit`.
+- Supply-chain evidence. Stable release gates must generate SPDX and CycloneDX
+  SBOMs with `cargo-sbom`, record their checksums, and run a local
+  reproducible-build check that compiles the release binary twice from separate
+  target directories and compares the resulting executable hash. This does not
+  prove cross-machine bit-for-bit reproducibility; it proves the published
+  builder can reproduce its own release artifact from the tagged source and
+  pinned lockfile. Cross-distro/container reproducibility remains a future
+  hardening goal.
 
 - Request framing and smuggling regression tests. The unit suite must keep
   coverage for ambiguous `Content-Length` and `Transfer-Encoding`, invalid
@@ -287,6 +323,26 @@ cargo fuzz run cache_headers -- -max_total_time=60
 Increase the runtime substantially before a stable tag. Keep generated corpora
 and artifacts out of git unless a minimized regression case should be promoted
 into a normal unit test.
+
+Property-testing gate:
+
+- `cargo test` includes property-based checks for Host normalization, dynamic
+  request-header templates, and ACME retry backoff. These tests are intended to
+  protect invariants that are easy to miss with hand-picked examples.
+- Add a property test when a parser, normalizer, path resolver, or security
+  policy accepts attacker-controlled input and the expected behavior can be
+  stated as an invariant.
+- Property-test failures are release-blocking if they show a panic, invalid
+  header generation, path escape, open redirect, arithmetic overflow, or
+  acceptance of a malformed security-sensitive value.
+
+Formal-verification note:
+
+- Kani or another Rust verifier is not part of the mandatory `1.0` release gate.
+  Before enabling it in CI, add a small harness for one bounded parser and prove
+  that the toolchain is reproducible on the supported release builders.
+- Candidate future harnesses are header-template parsing, Host normalization,
+  ACME date/backoff arithmetic, and static path containment checks.
 
 ## Incubator Feature Matrix
 

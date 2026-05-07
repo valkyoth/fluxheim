@@ -383,7 +383,7 @@ where
 
 #[cfg(all(
     feature = "proxy",
-    any(feature = "tls-rustls", feature = "tls-s2n"),
+    feature = "tls-rustls",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn add_downstream_tls_listener<S>(
@@ -395,8 +395,41 @@ where
     S: Send + Sync + 'static,
 {
     if selector.has_sni_certificates() {
+        let resolver = std::sync::Arc::new(RustlsSniCertificateResolver::new(selector)?);
+        let mut settings = pingora::listeners::tls::TlsSettings::with_cert_resolver(resolver)?;
+        settings.enable_h2();
+        service.add_tls_with_settings(listen, None, settings);
+        return Ok(());
+    }
+
+    let certificate = selector.certificate_for_sni(None);
+    let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
+    let mut settings = pingora::listeners::tls::TlsSettings::intermediate(cert_path, key_path)?;
+    settings.enable_h2();
+    service.add_tls_with_settings(listen, None, settings);
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-s2n",
+    not(any(
+        feature = "tls-rustls",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ))
+))]
+fn add_downstream_tls_listener<S>(
+    service: &mut pingora::services::listening::Service<S>,
+    listen: &str,
+    selector: &crate::tls::DownstreamCertificateSelector,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: Send + Sync + 'static,
+{
+    if selector.has_sni_certificates() {
         return Err(
-            "vhost TLS certificates require a TLS backend with SNI certificate callbacks; build with tls-openssl or tls-boringssl"
+            "vhost TLS certificates require a TLS backend with SNI certificate selection support"
                 .into(),
         );
     }
@@ -407,6 +440,90 @@ where
     settings.enable_h2();
     service.add_tls_with_settings(listen, None, settings);
     Ok(())
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+struct RustlsSniCertificateResolver {
+    selector: crate::tls::DownstreamCertificateSelector,
+    certificates: Vec<std::sync::Arc<rustls::sign::CertifiedKey>>,
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+impl std::fmt::Debug for RustlsSniCertificateResolver {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RustlsSniCertificateResolver")
+            .field("certificate_count", &self.certificates.len())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+impl RustlsSniCertificateResolver {
+    fn new(
+        selector: &crate::tls::DownstreamCertificateSelector,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let mut certificates = Vec::with_capacity(selector.certificates().len());
+        for certificate in selector.certificates() {
+            certificates.push(std::sync::Arc::new(load_rustls_certified_key(certificate)?));
+        }
+
+        Ok(Self {
+            selector: selector.clone(),
+            certificates,
+        })
+    }
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
+    fn resolve(
+        &self,
+        client_hello: rustls::server::ClientHello<'_>,
+    ) -> Option<std::sync::Arc<rustls::sign::CertifiedKey>> {
+        let index = self
+            .selector
+            .certificate_index_for_sni(client_hello.server_name());
+        self.certificates.get(index).cloned()
+    }
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+fn load_rustls_certified_key(
+    certificate: &crate::config::StaticCertificateConfig,
+) -> Result<rustls::sign::CertifiedKey, Box<dyn Error + Send + Sync>> {
+    let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
+    let Some((certs, key)) = pingora::tls::load_certs_and_key_files(cert_path, key_path)? else {
+        return Err("TLS certificate chain and private key must be readable PEM files".into());
+    };
+
+    let builder = rustls::ServerConfig::builder_with_protocol_versions(&[
+        &rustls::version::TLS12,
+        &rustls::version::TLS13,
+    ]);
+    let certified_key =
+        rustls::sign::CertifiedKey::from_der(certs, key, builder.crypto_provider())?;
+    Ok(certified_key)
 }
 
 #[cfg(all(
@@ -487,10 +604,10 @@ impl CallbackCertificate {
         &self,
         ssl: &mut pingora::tls::ssl::SslRef,
     ) -> Result<(), pingora::tls::error::ErrorStack> {
-        let (leaf, chain) = self
-            .chain
-            .split_first()
-            .expect("callback certificates are loaded with a non-empty chain");
+        let Some((leaf, chain)) = self.chain.split_first() else {
+            log::error!("TLS callback certificate chain unexpectedly empty");
+            return Ok(());
+        };
         ssl.set_certificate(leaf)?;
         ssl.set_private_key(&self.private_key)?;
         for certificate in chain {
@@ -504,10 +621,10 @@ impl CallbackCertificate {
         &self,
         ssl: &mut pingora::tls::ssl::SslRef,
     ) -> Result<(), pingora::tls::error::ErrorStack> {
-        let (leaf, chain) = self
-            .chain
-            .split_first()
-            .expect("callback certificates are loaded with a non-empty chain");
+        let Some((leaf, chain)) = self.chain.split_first() else {
+            log::error!("TLS callback certificate chain unexpectedly empty");
+            return Ok(());
+        };
         ssl.set_certificate(leaf)?;
         ssl.set_private_key(&self.private_key)?;
         for certificate in chain {

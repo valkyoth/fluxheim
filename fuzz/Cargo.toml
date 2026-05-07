@@ -11,6 +11,9 @@ cargo-fuzz = true
 fluxheim = { path = ".." }
 libfuzzer-sys = "0.4"
 
+[patch.crates-io]
+pingora-core = { path = "../vendor/pingora-core" }
+
 [[bin]]
 name = "host_normalization"
 path = "fuzz_targets/host_normalization.rs"

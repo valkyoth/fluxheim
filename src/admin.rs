@@ -16,6 +16,8 @@ use pingora::protocols::http::ServerSession;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::services::listening::Service;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::config::{AdminConfig, Config};
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
@@ -51,7 +53,7 @@ pub struct AdminApp {
     state: Arc<Mutex<AdminRuntimeState>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 struct AdminToken {
     len: usize,
     digest: [u8; 32],
@@ -128,7 +130,8 @@ impl AdminApp {
         config: &Config,
         proxy: FluxProxy,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let token = AdminToken::new(&load_admin_token(&config.admin)?);
+        let token_secret = load_admin_token(&config.admin)?;
+        let token = AdminToken::new(&token_secret);
         let snapshot_store = config
             .admin
             .snapshot_store
@@ -849,7 +852,10 @@ impl AdminApp {
     }
 
     fn lock_runtime_state(&self) -> std::sync::MutexGuard<'_, AdminRuntimeState> {
-        self.state.lock().expect("admin runtime state poisoned")
+        self.state.lock().unwrap_or_else(|poisoned| {
+            log::error!("admin runtime state lock poisoned; recovering state");
+            poisoned.into_inner()
+        })
     }
 }
 
@@ -975,13 +981,26 @@ impl ServeHttp for AdminApp {
             &request.headers,
         );
 
-        Response::builder()
+        let body_len = response.body.len();
+        match Response::builder()
             .status(response.status)
             .header(header::CONTENT_TYPE, response.content_type)
-            .header(header::CONTENT_LENGTH, response.body.len())
+            .header(header::CONTENT_LENGTH, body_len)
             .header(header::CACHE_CONTROL, "no-store")
             .body(response.body)
-            .expect("admin response builder accepts static headers")
+        {
+            Ok(response) => response,
+            Err(error) => {
+                log::error!("failed to build admin response: {error}");
+                let mut fallback = Response::new(br#"{"error":"internal_server_error"}"#.to_vec());
+                *fallback.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                fallback.headers_mut().insert(
+                    header::CONTENT_TYPE,
+                    http::HeaderValue::from_static("application/json"),
+                );
+                fallback
+            }
+        }
     }
 }
 
@@ -993,14 +1012,18 @@ fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
-fn load_admin_token(config: &AdminConfig) -> Result<String, Box<dyn Error + Send + Sync>> {
+fn load_admin_token(
+    config: &AdminConfig,
+) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {
     let raw = match (&config.token_env, &config.token_file) {
-        (Some(env_name), None) => env::var(env_name)
-            .map_err(|error| format!("failed to read admin token env {env_name:?}: {error}"))?,
+        (Some(env_name), None) => Zeroizing::new(
+            env::var(env_name)
+                .map_err(|error| format!("failed to read admin token env {env_name:?}: {error}"))?,
+        ),
         (None, Some(path)) => read_secret_file(path)?,
         _ => return Err("admin token source is invalid".into()),
     };
-    let token = raw.trim().to_owned();
+    let token = Zeroizing::new(raw.trim().to_owned());
     if token.is_empty() {
         Err("admin token cannot be empty".into())
     } else if token.len() > MAX_ADMIN_TOKEN_BYTES {
@@ -1010,7 +1033,7 @@ fn load_admin_token(config: &AdminConfig) -> Result<String, Box<dyn Error + Send
     }
 }
 
-fn read_secret_file(path: &Path) -> Result<String, Box<dyn Error + Send + Sync>> {
+fn read_secret_file(path: &Path) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {
     if secret_parent_path_contains_symlink(path).map_err(|error| {
         format!(
             "failed to inspect admin token parent path {}: {error}",
@@ -1063,8 +1086,8 @@ fn read_bounded_secret_file(
     file: fs::File,
     path: &Path,
     max_bytes: u64,
-) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let mut token = String::new();
+) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {
+    let mut token = Zeroizing::new(String::new());
     let mut limited = file.take(max_bytes.saturating_add(1));
     limited.read_to_string(&mut token).map_err(|error| {
         format!(
@@ -1181,11 +1204,9 @@ fn authorized(header: Option<&str>, token: &AdminToken) -> bool {
 
 fn constant_time_eq(candidate: &[u8], token: &AdminToken) -> bool {
     let candidate_digest = digest_admin_token(candidate);
-    let mut diff = candidate.len() ^ token.len;
-    for (&candidate_byte, &token_byte) in candidate_digest.iter().zip(token.digest.iter()) {
-        diff |= usize::from(candidate_byte ^ token_byte);
-    }
-    diff == 0
+    let candidate_len = (candidate.len() as u64).to_le_bytes();
+    let token_len = (token.len as u64).to_le_bytes();
+    bool::from(candidate_digest.ct_eq(&token.digest) & candidate_len.ct_eq(&token_len))
 }
 
 fn digest_admin_token(token: &[u8]) -> [u8; 32] {
@@ -1519,7 +1540,7 @@ fn parse_health_signal(value: &str) -> Option<bool> {
 fn unix_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock after Unix epoch")
+        .unwrap_or_default()
         .as_secs()
 }
 

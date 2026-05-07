@@ -38,6 +38,12 @@ echo "stable release gate: dependency and license policy"
 cargo deny check
 cargo audit
 
+echo "stable release gate: SBOM"
+scripts/generate-sbom.sh
+
+echo "stable release gate: reproducible release build"
+scripts/reproducible_build_check.sh
+
 if [ "${FLUXHEIM_GATE_TLS_BACKENDS:-0}" = "1" ]; then
     echo "stable release gate: TLS backend matrix ($mode)"
     scripts/validate-tls-backends.sh "$mode"

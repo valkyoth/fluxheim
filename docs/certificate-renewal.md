@@ -4,11 +4,12 @@ Fluxheim should support both operator-owned certificates and ACME-managed
 certificates. Manual certificates are configured with `cert_path` and `key_path`.
 ACME certificates are configured per vhost and managed under `tls.acme.storage`.
 
-Downstream TLS listeners are explicit in `server.tls_listen`. The current
-runtime uses the first global `[[tls.certificates]]` entry as the default
-certificate for those listeners, so config validation rejects `server.tls_listen`
-unless `tls.enabled = true` and a global static certificate is configured.
-Per-vhost SNI certificate lookup is a separate runtime milestone.
+Downstream TLS listeners are explicit in `server.tls_listen`. The runtime uses
+the first global `[[tls.certificates]]` entry as the default certificate for
+those listeners, so config validation rejects `server.tls_listen` unless
+`tls.enabled = true` and a global static certificate is configured. Vhosts can
+override that certificate with `[vhosts.tls.certificate]`; Fluxheim selects the
+matching certificate by SNI during the downstream TLS handshake.
 
 ## Storage Permissions
 

@@ -2339,7 +2339,12 @@ impl VhostRedirectConfig {
     }
 
     pub fn route_config(&self) -> Option<RouteConfig> {
-        self.enabled.then(|| RouteConfig {
+        if !self.enabled {
+            return None;
+        }
+        let to = self.to.clone()?;
+
+        Some(RouteConfig {
             name: "vhost-redirect".to_owned(),
             path_exact: None,
             path_prefix: None,
@@ -2348,7 +2353,7 @@ impl VhostRedirectConfig {
             strip_prefix: None,
             max_request_body_bytes: None,
             redirect: Some(RouteRedirectConfig {
-                to: self.to.clone().expect("validated vhost redirect target"),
+                to,
                 status: self.status,
             }),
             proxy: None,
@@ -4392,7 +4397,7 @@ pub fn normalize_host(host: &str) -> Option<String> {
 
     let host = if let Some((candidate, port)) = host.rsplit_once(':') {
         if !candidate.contains(':') && !candidate.is_empty() && port.parse::<u16>().is_ok() {
-            candidate
+            candidate.trim_end_matches('.')
         } else {
             host
         }
@@ -4462,11 +4467,13 @@ mod tests {
         AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, Config, ConfigError,
         ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig,
         ServerConfig, ServerLimitsConfig, VhostConfig, VhostHeaderPolicyConfig, WebConfig,
-        normalize_host, normalize_host_pattern,
+        normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+        validate_dynamic_header_template,
     };
     #[cfg(unix)]
     use crate::test_support::unique_world_writable_child;
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
+    use proptest::prelude::*;
 
     #[test]
     fn default_config_is_valid() {
@@ -6474,6 +6481,10 @@ mod tests {
             Some("example.com".to_owned())
         );
         assert_eq!(
+            normalize_host("Example.COM.:443"),
+            Some("example.com".to_owned())
+        );
+        assert_eq!(
             normalize_host("example.com."),
             Some("example.com".to_owned())
         );
@@ -6489,6 +6500,100 @@ mod tests {
             Some("*.example.com".to_owned())
         );
         assert_eq!(normalize_host_pattern("*bad.example.com"), None);
+    }
+
+    fn host_candidate() -> impl Strategy<Value = String> {
+        prop::string::string_regex("[A-Za-z0-9.-]{1,64}").expect("valid host candidate regex")
+    }
+
+    fn header_template_fragment() -> impl Strategy<Value = String> {
+        prop::string::string_regex("[A-Za-z0-9 _./:;=,?&-]{0,32}")
+            .expect("valid header template fragment regex")
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        #[test]
+        fn normalized_hosts_are_lowercase_and_idempotent(
+            candidate in host_candidate(),
+            port in prop::option::of(1u16..=u16::MAX),
+        ) {
+            let input = match port {
+                Some(port) => format!("{candidate}:{port}"),
+                None => candidate,
+            };
+
+            if let Some(normalized) = normalize_host(&input) {
+                prop_assert!(!normalized.is_empty());
+                let lowercase = normalized.to_ascii_lowercase();
+                prop_assert_eq!(normalized.as_str(), lowercase.as_str());
+                prop_assert!(!normalized.ends_with('.'));
+                prop_assert!(!normalized.contains('*'));
+                prop_assert!(!normalized.contains('/'));
+                prop_assert!(!normalized.contains('\\'));
+                prop_assert!(!normalized.contains('?'));
+                prop_assert!(!normalized.contains('#'));
+                prop_assert!(!normalized.contains('@'));
+                let normalized_again = normalize_host(&normalized);
+                prop_assert_eq!(normalized_again.as_deref(), Some(normalized.as_str()));
+            }
+        }
+
+        #[test]
+        fn host_normalization_rejects_forbidden_delimiters(
+            prefix in host_candidate(),
+            suffix in host_candidate(),
+            delimiter in prop_oneof![
+                Just('/'),
+                Just('\\'),
+                Just('?'),
+                Just('#'),
+                Just('@'),
+                Just('*'),
+                Just(' '),
+            ],
+        ) {
+            let input = format!("{prefix}{delimiter}{suffix}");
+
+            prop_assert_eq!(normalize_host(&input), None);
+        }
+
+        #[test]
+        fn dynamic_header_templates_accept_supported_variables(
+            prefix in header_template_fragment(),
+            suffix in header_template_fragment(),
+            variable in prop::sample::select(vec![
+                "host",
+                "remote_addr",
+                "scheme",
+                "uri",
+                "path",
+                "query",
+                "request_id",
+                "http.upgrade",
+                "http.x-forwarded-host",
+            ]),
+        ) {
+            let template = format!("{prefix}{{{variable}}}{suffix}");
+
+            prop_assert!(
+                validate_dynamic_header_template("headers.request", "x-test", &template).is_ok()
+            );
+        }
+
+        #[test]
+        fn dynamic_header_templates_reject_unknown_variables(
+            prefix in header_template_fragment(),
+            variable in "[a-z_]{1,16}",
+            suffix in header_template_fragment(),
+        ) {
+            prop_assume!(!valid_dynamic_header_variable(&variable));
+            let template = format!("{prefix}{{{variable}}}{suffix}");
+            let result = validate_dynamic_header_template("headers.request", "x-test", &template);
+
+            prop_assert!(result.is_err());
+        }
     }
 
     #[test]
