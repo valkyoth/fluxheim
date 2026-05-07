@@ -12,7 +12,9 @@ behavior when the change improves security or project direction.
 ### Added
 
 - `1.0` gateway migration fixtures and smoke coverage for representative
-  multi-site configs.
+  multi-site configs, including canonical redirects, app proxy vhosts, custom
+  error pages, static aliases, challenge exceptions, and multi-subdomain
+  route/proxy layouts.
 - Route-level exact, prefix, and fallback matching with proxy, static, and
   redirect actions.
 - Route prefix stripping, per-route request body limits, and route-local

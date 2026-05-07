@@ -49,6 +49,26 @@ root = "/srv/fluxheim/errors"
 cache_control = "private, no-store"
 
 [[vhosts]]
+name = "www.ulyaoth.eu"
+hosts = ["www.ulyaoth.eu"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/ulyaoth.eu/fullchain.pem"
+key_path = "/etc/fluxheim/tls/ulyaoth.eu/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.redirect]
+enabled = true
+to = "https://ulyaoth.eu{uri}"
+status = 308
+
+[[vhosts]]
 name = "ulyaoth.eu"
 hosts = ["ulyaoth.eu"]
 max_request_body_bytes = "64MiB"
@@ -74,6 +94,56 @@ send_timeout_secs = 90
 [[vhosts.proxy.error_pages]]
 status = 502
 path = "/ulyaoth_502.html"
+
+[vhosts.proxy.error_pages.web]
+root = "/srv/fluxheim/errors"
+cache_control = "private, no-store"
+
+[[vhosts]]
+name = "www.hashavatar.app"
+hosts = ["www.hashavatar.app"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/hashavatar.app/fullchain.pem"
+key_path = "/etc/fluxheim/tls/hashavatar.app/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.redirect]
+enabled = true
+to = "https://hashavatar.app{uri}"
+status = 308
+
+[[vhosts]]
+name = "hashavatar.app"
+hosts = ["hashavatar.app"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/hashavatar.app/fullchain.pem"
+key_path = "/etc/fluxheim/tls/hashavatar.app/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.proxy]
+upstreams = ["hashavatar_app:8080"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 60
+
+[[vhosts.proxy.error_pages]]
+status = 502
+path = "/hashavatar_502.html"
 
 [vhosts.proxy.error_pages.web]
 root = "/srv/fluxheim/errors"

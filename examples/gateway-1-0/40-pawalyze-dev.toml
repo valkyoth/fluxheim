@@ -75,6 +75,10 @@ connect_timeout_secs = 5
 read_timeout_secs = 600
 send_timeout_secs = 600
 
+[vhosts.routes.headers.request.add]
+upgrade = "{http.upgrade}"
+connection = "upgrade"
+
 [[vhosts]]
 name = "identity.dev.pawalyze.com"
 hosts = ["identity.dev.pawalyze.com"]
@@ -100,3 +104,77 @@ send_timeout_secs = 60
 
 [vhosts.headers.request.add]
 x-forwarded-port = "443"
+
+[[vhosts]]
+name = "support.dev.pawalyze.com"
+hosts = ["support.dev.pawalyze.com"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/support.dev.pawalyze.com/fullchain.pem"
+key_path = "/etc/fluxheim/tls/support.dev.pawalyze.com/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.proxy]
+upstreams = ["host.containers.internal:6013"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 60
+
+[[vhosts]]
+name = "account.dev.pawalyze.com"
+hosts = ["account.dev.pawalyze.com"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/account.dev.pawalyze.com/fullchain.pem"
+key_path = "/etc/fluxheim/tls/account.dev.pawalyze.com/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.proxy]
+upstreams = ["host.containers.internal:6015"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 60
+
+[vhosts.headers.request.add]
+upgrade = "{http.upgrade}"
+connection = "upgrade"
+
+[[vhosts]]
+name = "pawmins.dev.pawalyze.com"
+hosts = ["pawmins.dev.pawalyze.com"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/pawmins.dev.pawalyze.com/fullchain.pem"
+key_path = "/etc/fluxheim/tls/pawmins.dev.pawalyze.com/privkey.pem"
+
+[vhosts.acme_challenge]
+enabled = true
+upstreams = ["host.containers.internal:8080"]
+
+[vhosts.proxy]
+upstreams = ["host.containers.internal:6016"]
+upstream_tls = false
+connect_timeout_secs = 5
+read_timeout_secs = 60
+send_timeout_secs = 60
+
+[vhosts.headers.request.add]
+upgrade = "{http.upgrade}"
+connection = "upgrade"
