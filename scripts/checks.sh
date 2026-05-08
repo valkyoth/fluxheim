@@ -94,6 +94,7 @@ cargo test --no-default-features --features proxy,tls-rustls,acme
 cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
 cargo check --no-default-features --features proxy,tls
 cargo check --no-default-features --features proxy,tls-rustls
+python3 -m py_compile scripts/prepare-server.py scripts/build_fluxheim_rpm.py
 scripts/validate-tls-backends.sh check
 cargo run --quiet -- --check-config --config examples/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/admin.toml >/dev/null

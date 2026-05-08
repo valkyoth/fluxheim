@@ -440,6 +440,16 @@ which listens on port `80` by default; the bundled systemd unit grants only
 `CAP_NET_BIND_SERVICE` so the service can bind `80/443` while still running as
 the unprivileged `fluxheim` user.
 
+For local binary RPM smoke builds, use the containerized helper:
+
+```bash
+scripts/build_fluxheim_rpm.py 1.0.0 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.0.0 native --target fedora-44
+```
+
+This helper is intended for installation testing on RPM-based hosts. The
+release-grade RPM source of truth remains `packaging/rpm/fluxheim.spec`.
+
 ## Codex And Rootless Podman
 
 When running Codex in a sandbox, include the rootless Podman runtime directories
