@@ -2,5 +2,7 @@
 set -eu
 
 echo "1.0 fixtures: validate representative gateway config set"
-cargo run -- --validate-config --config examples/gateway-1-0
+# Gateway fixtures use placeholder /srv roots and upstreams. Keep this as a
+# static config check; deployment preflight uses --validate-config.
+cargo run -- --check-config --config examples/gateway-1-0
 echo "1.0 fixtures: ok"
