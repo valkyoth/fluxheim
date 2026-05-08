@@ -3229,7 +3229,7 @@ impl Display for ConfigError {
             Self::EmptyAdminPath { field } => write!(formatter, "{field} cannot be empty"),
             Self::UnsafePath { field, path } => write!(
                 formatter,
-                "{field} must not contain parent-directory traversal, got {}",
+                "{field} must be a safe filesystem path without parent-directory traversal, symlinked path components, or unsafe writable parents, got {}",
                 path.display()
             ),
             Self::InvalidAdminSelfHealing { field } => {
