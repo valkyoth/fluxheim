@@ -126,7 +126,29 @@ fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send +
     Ok(())
 }
 
-#[cfg(not(feature = "proxy"))]
+#[cfg(all(feature = "web", not(feature = "proxy")))]
+fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    validate_web_runtime_config(&config.web)?;
+    for vhost in &config.vhosts {
+        validate_web_runtime_config(&vhost.web)?;
+        for route in &vhost.routes {
+            if let Some(web) = &route.web {
+                validate_web_runtime_config(web)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "web", not(feature = "proxy")))]
+fn validate_web_runtime_config(
+    config: &crate::config::WebConfig,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    crate::web::StaticFileServer::from_config(config)?;
+    Ok(())
+}
+
+#[cfg(not(any(feature = "proxy", feature = "web")))]
 fn validate_runtime_config(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     Ok(())
 }
@@ -311,6 +333,7 @@ mod tests {
         .unwrap();
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn validate_config_rejects_missing_static_root() {
         let dir = TestDir::new("cli-validate-missing-root");
