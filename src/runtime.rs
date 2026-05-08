@@ -341,7 +341,10 @@ where
     }
 
     let Some(selector) = crate::tls::DownstreamCertificateSelector::from_config(config) else {
-        return Err("server.tls_listen requires at least one [[tls.certificates]] entry".into());
+        return Err(
+            "server.tls_listen requires a global certificate or a static certificate on server.default_vhost"
+                .into(),
+        );
     };
 
     for listen in &config.server.tls_listen {

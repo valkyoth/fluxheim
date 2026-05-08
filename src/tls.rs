@@ -293,7 +293,11 @@ pub fn recommended_acme_storage_mode() -> u32 {
 }
 
 pub fn default_downstream_certificate(config: &Config) -> Option<&StaticCertificateConfig> {
-    config.tls.certificates.first()
+    config
+        .tls
+        .certificates
+        .first()
+        .or_else(|| default_vhost_static_certificate(config))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -306,7 +310,7 @@ pub struct DownstreamCertificateSelector {
 
 impl DownstreamCertificateSelector {
     pub fn from_config(config: &Config) -> Option<Self> {
-        let default = config.tls.certificates.first()?.clone();
+        let default = default_downstream_certificate(config)?.clone();
         let mut selector = Self {
             certificates: vec![default],
             default_index: 0,
@@ -321,8 +325,15 @@ impl DownstreamCertificateSelector {
             let Some(certificate) = &vhost.tls.certificate else {
                 continue;
             };
-            let certificate_index = selector.certificates.len();
-            selector.certificates.push(certificate.clone());
+            let certificate_index = selector
+                .certificates
+                .iter()
+                .position(|existing| existing == certificate)
+                .unwrap_or_else(|| {
+                    let index = selector.certificates.len();
+                    selector.certificates.push(certificate.clone());
+                    index
+                });
 
             for host in vhost.normalized_hosts() {
                 if let Some(suffix) = host.strip_prefix("*.") {
@@ -370,6 +381,15 @@ impl DownstreamCertificateSelector {
     pub fn certificate_for_sni(&self, sni: Option<&str>) -> &StaticCertificateConfig {
         &self.certificates[self.certificate_index_for_sni(sni)]
     }
+}
+
+fn default_vhost_static_certificate(config: &Config) -> Option<&StaticCertificateConfig> {
+    let default_vhost = config.server.default_vhost.as_ref()?;
+    config
+        .vhosts
+        .iter()
+        .find(|vhost| &vhost.name == default_vhost && vhost.tls.enabled)
+        .and_then(|vhost| vhost.tls.certificate.as_ref())
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -832,8 +852,8 @@ mod tests {
 
     use crate::config::{
         AcmeConfig, AcmeExternalAccountBindingConfig, AcmeIssuerConfig, CacheConfig, Config,
-        ProxyConfig, StaticCertificateConfig, TlsConfig, VhostConfig, VhostHeaderPolicyConfig,
-        VhostTlsConfig, WebConfig,
+        ProxyConfig, ServerConfig, StaticCertificateConfig, TlsConfig, VhostConfig,
+        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
     };
     #[cfg(unix)]
     use crate::test_support::unique_world_writable_child;
@@ -1192,6 +1212,77 @@ mod tests {
             &default_cert
         );
         assert_eq!(selector.certificate_for_sni(None), &default_cert);
+    }
+
+    #[test]
+    fn downstream_certificate_selector_uses_default_vhost_without_global_certificate() {
+        let default_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/default-vhost.pem"),
+            key_path: PathBuf::from("/tls/default-vhost.key"),
+        };
+        let other_cert = StaticCertificateConfig {
+            cert_path: PathBuf::from("/tls/other.pem"),
+            key_path: PathBuf::from("/tls/other.key"),
+        };
+        let config = Config {
+            server: ServerConfig {
+                default_vhost: Some("default".to_owned()),
+                ..ServerConfig::default()
+            },
+            tls: TlsConfig {
+                enabled: true,
+                ..TlsConfig::default()
+            },
+            vhosts: vec![
+                VhostConfig {
+                    name: "default".to_owned(),
+                    hosts: vec!["default.example.test".to_owned()],
+                    max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
+                    tls: VhostTlsConfig {
+                        enabled: true,
+                        certificate: Some(default_cert.clone()),
+                        ..VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+                VhostConfig {
+                    name: "other".to_owned(),
+                    hosts: vec!["other.example.test".to_owned()],
+                    max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
+                    tls: VhostTlsConfig {
+                        enabled: true,
+                        certificate: Some(other_cert.clone()),
+                        ..VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+            ],
+            ..Config::default()
+        };
+
+        let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+
+        assert_eq!(selector.certificate_for_sni(None), &default_cert);
+        assert_eq!(
+            selector.certificate_for_sni(Some("default.example.test")),
+            &default_cert
+        );
+        assert_eq!(
+            selector.certificate_for_sni(Some("other.example.test")),
+            &other_cert
+        );
     }
 
     fn tls_config(cert_path: PathBuf, key_path: PathBuf, acme_storage: PathBuf) -> Config {

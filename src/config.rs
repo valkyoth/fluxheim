@@ -176,11 +176,25 @@ impl Config {
         if !self.tls.enabled {
             return Err(ConfigError::TlsListenerWithoutTls);
         }
-        if self.tls.certificates.is_empty() {
+        if !self.has_tls_listener_fallback_certificate() {
             return Err(ConfigError::TlsListenerWithoutStaticCertificate);
         }
 
         Ok(())
+    }
+
+    fn has_tls_listener_fallback_certificate(&self) -> bool {
+        if !self.tls.certificates.is_empty() {
+            return true;
+        }
+
+        let Some(default_vhost) = &self.server.default_vhost else {
+            return false;
+        };
+
+        self.vhosts.iter().any(|vhost| {
+            &vhost.name == default_vhost && vhost.tls.enabled && vhost.tls.certificate.is_some()
+        })
     }
 
     fn validate_vhosts(&self) -> Result<(), ConfigError> {
@@ -4525,9 +4539,9 @@ mod tests {
     use super::{
         AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, Config, ConfigError,
         ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig,
-        ServerConfig, ServerLimitsConfig, VhostConfig, VhostHeaderPolicyConfig, WebConfig,
-        normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
-        validate_dynamic_header_template,
+        ServerConfig, ServerLimitsConfig, StaticCertificateConfig, VhostConfig,
+        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+        valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     #[cfg(unix)]
     use crate::test_support::unique_world_writable_child;
@@ -6448,6 +6462,45 @@ mod tests {
                 }],
                 ..super::TlsConfig::default()
             },
+            ..Config::default()
+        };
+
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn accepts_tls_listener_with_default_vhost_static_certificate() {
+        let certificate = StaticCertificateConfig {
+            cert_path: PathBuf::from("fullchain.pem"),
+            key_path: PathBuf::from("key.pem"),
+        };
+        let config = Config {
+            server: ServerConfig {
+                tls_listen: vec!["127.0.0.1:8443".to_owned()],
+                default_vhost: Some("example".to_owned()),
+                ..ServerConfig::default()
+            },
+            tls: super::TlsConfig {
+                enabled: true,
+                ..super::TlsConfig::default()
+            },
+            vhosts: vec![VhostConfig {
+                name: "example".to_owned(),
+                hosts: vec!["example.test".to_owned()],
+                max_request_body_bytes: None,
+                tls: VhostTlsConfig {
+                    enabled: true,
+                    certificate: Some(certificate),
+                    ..VhostTlsConfig::default()
+                },
+                acme_challenge: super::VhostAcmeChallengeConfig::default(),
+                redirect: super::VhostRedirectConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
             ..Config::default()
         };
 
