@@ -332,10 +332,10 @@ root = "/srv/sites/example/public"
 For multi-site setups, prefer `/etc/fluxheim/conf.d/` with one vhost per file.
 `[[vhosts]]` starts a vhost, and each following `[vhosts.*]` table belongs to
 that vhost until the next `[[vhosts]]`.
-When Fluxheim starts from `/etc/fluxheim/fluxheim.toml`, it also loads visible
-`*.toml` files from `/etc/fluxheim/conf.d/` after the main file. When it starts
-from `/etc/fluxheim`, it loads top-level TOML files first and then
-`/etc/fluxheim/conf.d/*.toml`.
+The packaged `/etc/fluxheim/fluxheim.toml` sets `include_conf_d = true`, so it
+also loads visible `*.toml` files from `/etc/fluxheim/conf.d/` after the main
+file. When Fluxheim starts from `/etc/fluxheim`, it loads top-level TOML files
+first and then `/etc/fluxheim/conf.d/*.toml`.
 
 Podman run example:
 

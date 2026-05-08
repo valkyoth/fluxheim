@@ -15,11 +15,12 @@ For split config directories, Fluxheim reads `*.toml` files in sorted order:
 fluxheim --check-config --config examples/conf.d
 ```
 
-When the config path is a file, Fluxheim loads that file first and then loads
-visible `*.toml` files from a sibling `conf.d/` directory if it exists. When
-the config path is a directory, Fluxheim loads visible `*.toml` files in that
-directory first and then visible `*.toml` files in its `conf.d/` child. Files
-are loaded in lexical order within each directory.
+When the config path is a file, Fluxheim loads only that file unless the file
+sets `include_conf_d = true`. With that opt-in, visible `*.toml` files from a
+sibling `conf.d/` directory load after the main file. When the config path is a
+directory, Fluxheim loads visible `*.toml` files in that directory first and
+then visible `*.toml` files in its `conf.d/` child. Files are loaded in lexical
+order within each directory.
 
 Relative filesystem paths are resolved from the config file directory.
 Config sources must be real TOML files or real directories. Fluxheim rejects a

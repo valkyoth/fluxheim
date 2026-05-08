@@ -70,6 +70,7 @@ impl Config {
 
     fn load_file(path: &Path) -> Result<Self, ConfigLoadError> {
         let mut fragment = ConfigFragment::load(path)?;
+        let include_conf_d = fragment.include_conf_d;
         let parent = path.parent();
         if let Some(parent) = parent {
             fragment.resolve_relative_paths(parent);
@@ -77,7 +78,7 @@ impl Config {
 
         let mut config = Self::default();
         config.merge(fragment);
-        if let Some(parent) = parent {
+        if include_conf_d && let Some(parent) = parent {
             config.merge_conf_d(parent)?;
         }
         Ok(config)
@@ -225,6 +226,8 @@ impl Config {
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ConfigFragment {
+    #[serde(default)]
+    include_conf_d: bool,
     #[serde(default)]
     server: Option<ServerConfigFragment>,
     #[serde(default)]
@@ -7065,6 +7068,8 @@ mod tests {
         fs::write(
             dir.child("fluxheim.toml"),
             r#"
+            include_conf_d = true
+
             [server]
             listen = ["127.0.0.1:19090"]
             default_vhost = "example"
@@ -7089,6 +7094,33 @@ mod tests {
         assert_eq!(config.server.default_vhost, Some("example".to_owned()));
         assert_eq!(config.vhosts.len(), 1);
         assert_eq!(config.vhosts[0].web.root, Some(dir.child("conf.d/site")));
+    }
+
+    #[test]
+    fn loading_main_config_file_does_not_load_conf_d_without_opt_in() {
+        let dir = TestDir::new("config-file-with-conf-d-no-opt-in");
+        fs::create_dir_all(dir.child("conf.d")).unwrap();
+        fs::write(
+            dir.child("fluxheim.toml"),
+            r#"
+            [server]
+            listen = ["127.0.0.1:19090"]
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            dir.child("conf.d/10-vhost.toml"),
+            r#"
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.test"]
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+        assert!(config.vhosts.is_empty());
     }
 
     #[test]

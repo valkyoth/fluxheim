@@ -1,3 +1,5 @@
+include_conf_d = true
+
 [server]
 listen = ["0.0.0.0:80"]
 default_vhost = "default"

@@ -15,7 +15,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Sequence
 
 
 OS_CONTAINERS = {
@@ -29,11 +28,6 @@ OS_CONTAINERS = {
 
 SAFE_VERSION_TAG = re.compile(r"^(latest|v?[0-9]+(?:\.[0-9A-Za-z_+]+)*)$")
 SAFE_RPM_RELEASE = re.compile(r"^[0-9][0-9A-Za-z._+~]*$")
-
-
-def run_command(command: Sequence[str], cwd: Path | None = None) -> None:
-    print(f"Executing: {shlex.join(command)}")
-    subprocess.run(command, cwd=cwd, check=True)
 
 
 def get_container_tool(preferred: str | None) -> str:
@@ -90,6 +84,50 @@ def parse_args() -> argparse.Namespace:
 def print_targets() -> None:
     for name, image in OS_CONTAINERS.items():
         print(f"{name}: {image}")
+
+
+def run_container_build(
+    container_tool: str,
+    work_dir: Path,
+    container_image: str,
+    version_tag: str,
+    build_type: str,
+    rpm_release: str,
+) -> None:
+    print(
+        "Executing: "
+        + shlex.join(
+            [
+                container_tool,
+                "run",
+                "--rm",
+                "-v",
+                f"{work_dir}:/workspace:Z",
+                container_image,
+                "bash",
+                "/workspace/build_in_container.sh",
+                version_tag,
+                build_type,
+                rpm_release,
+            ]
+        )
+    )
+    subprocess.run(
+        [
+            container_tool,
+            "run",
+            "--rm",
+            "-v",
+            f"{work_dir}:/workspace:Z",
+            container_image,
+            "bash",
+            "/workspace/build_in_container.sh",
+            version_tag,
+            build_type,
+            rpm_release,
+        ],
+        check=True,
+    )
 
 
 def choose_target(target: str | None) -> tuple[str, str]:
@@ -325,20 +363,13 @@ def main() -> int:
         generate_build_script(build_script_path)
         build_script_path.chmod(0o755)
 
-        run_command(
-            [
-                container_tool,
-                "run",
-                "--rm",
-                "-v",
-                f"{work_dir}:/workspace:Z",
-                container_image,
-                "bash",
-                "/workspace/build_in_container.sh",
-                args.version_tag,
-                args.build_type,
-                args.rpm_release,
-            ]
+        run_container_build(
+            container_tool,
+            work_dir,
+            container_image,
+            args.version_tag,
+            args.build_type,
+            args.rpm_release,
         )
 
         rpms = sorted(work_dir.glob("*.rpm"))

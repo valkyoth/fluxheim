@@ -301,13 +301,6 @@ fn normal_component(component: &std::ffi::OsStr) -> Option<&std::ffi::OsStr> {
     }
 }
 
-fn symlink_walk_status(path: &Path) -> io::Result<Option<bool>> {
-    if path.is_symlink() {
-        return Ok(Some(true));
-    }
-    path.try_exists().map(|exists| exists.then_some(false))
-}
-
 fn path_contains_symlink(root: &Path, relative: &SafeRelativePath) -> io::Result<bool> {
     let mut current = root.to_path_buf();
     for component in &relative.components {
@@ -315,10 +308,11 @@ fn path_contains_symlink(root: &Path, relative: &SafeRelativePath) -> io::Result
             return Ok(true);
         };
         current.push(component);
-        match symlink_walk_status(&current)? {
-            Some(true) => return Ok(true),
-            Some(false) => {}
-            None => return Ok(false),
+        match std::fs::read_link(&current) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+            Err(error) => return Err(error),
         }
     }
 
@@ -340,10 +334,11 @@ fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
             }
             std::path::Component::CurDir | std::path::Component::ParentDir => return Ok(true),
         }
-        match symlink_walk_status(&current)? {
-            Some(true) => return Ok(true),
-            Some(false) => {}
-            None => return Ok(false),
+        match std::fs::read_link(&current) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+            Err(error) => return Err(error),
         }
     }
 
