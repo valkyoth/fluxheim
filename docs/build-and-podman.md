@@ -332,6 +332,10 @@ root = "/srv/sites/example/public"
 For multi-site setups, prefer `/etc/fluxheim/conf.d/` with one vhost per file.
 `[[vhosts]]` starts a vhost, and each following `[vhosts.*]` table belongs to
 that vhost until the next `[[vhosts]]`.
+When Fluxheim starts from `/etc/fluxheim/fluxheim.toml`, it also loads visible
+`*.toml` files from `/etc/fluxheim/conf.d/` after the main file. When it starts
+from `/etc/fluxheim`, it loads top-level TOML files first and then
+`/etc/fluxheim/conf.d/*.toml`.
 
 Podman run example:
 
@@ -446,6 +450,20 @@ For local binary RPM smoke builds, use the containerized helper:
 scripts/build_fluxheim_rpm.py 1.0.0 --target opensuse-tumbleweed
 scripts/build_fluxheim_rpm.py 1.0.0 native --target fedora-44
 ```
+
+Untagged `latest` builds use the package name `fluxheim-unstable` and a date
+version so they are clearly separated from stable release packages:
+
+```bash
+scripts/build_fluxheim_rpm.py latest native --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py latest native --target opensuse-tumbleweed --rpm-release 2
+```
+
+Those commands produce names shaped like
+`fluxheim-unstable-20260508-1.native.x86_64.rpm` and
+`fluxheim-unstable-20260508-2.native.x86_64.rpm`. The unstable package
+conflicts with the stable `fluxheim` package because both install the same
+binary, service, config, and content paths.
 
 This helper is intended for installation testing on RPM-based hosts. The
 release-grade RPM source of truth remains `packaging/rpm/fluxheim.spec`.

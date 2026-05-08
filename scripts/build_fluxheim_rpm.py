@@ -28,6 +28,7 @@ OS_CONTAINERS = {
 }
 
 SAFE_VERSION_TAG = re.compile(r"^(latest|v?[0-9]+(?:\.[0-9A-Za-z_+]+)*)$")
+SAFE_RPM_RELEASE = re.compile(r"^[0-9][0-9A-Za-z._+~]*$")
 
 
 def run_command(command: Sequence[str], cwd: Path | None = None) -> None:
@@ -74,6 +75,11 @@ def parse_args() -> argparse.Namespace:
         help="Container runtime to use. Defaults to podman, then docker.",
     )
     parser.add_argument(
+        "--rpm-release",
+        default="1",
+        help="RPM release value. Use 2, 3, etc. when rebuilding the same version for a repo.",
+    )
+    parser.add_argument(
         "--list-targets",
         action="store_true",
         help="List supported build targets and exit.",
@@ -111,12 +117,20 @@ def validate_version_tag(version_tag: str) -> None:
         )
 
 
+def validate_rpm_release(rpm_release: str) -> None:
+    if not SAFE_RPM_RELEASE.fullmatch(rpm_release):
+        raise SystemExit(
+            "error: --rpm-release must start with a digit and contain only RPM-safe letters, digits, '.', '_', '+', or '~'"
+        )
+
+
 def generate_build_script(script_path: Path) -> None:
     script_content = r"""#!/usr/bin/env bash
 set -euo pipefail
 
 TAG="$1"
 BUILD_TYPE="$2"
+RPM_RELEASE="$3"
 WORKSPACE="/workspace"
 REPO_URL="https://github.com/valkyoth/fluxheim.git"
 
@@ -198,19 +212,24 @@ echo "--- Generating binary RPM spec ---"
 RPMBUILD_ROOT="${WORKSPACE}/rpmbuild"
 mkdir -p "${RPMBUILD_ROOT}/"{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
+PACKAGE_NAME="fluxheim"
 VERSION="${TAG#v}"
+CONFLICTS_LINE=""
 if [ "$VERSION" = "latest" ]; then
-    VERSION="0.0.0.git$(date -u +%Y%m%d)"
+    PACKAGE_NAME="fluxheim-unstable"
+    VERSION="$(date -u +%Y%m%d)"
+    CONFLICTS_LINE="Conflicts:      fluxheim"
 fi
 
 SPEC_PATH="${RPMBUILD_ROOT}/SPECS/fluxheim.spec"
 cat > "$SPEC_PATH" <<SPEC_EOF
-Name:           fluxheim
+Name:           ${PACKAGE_NAME}
 Version:        ${VERSION}
-Release:        1${RPM_SUFFIX}%{?dist}
+Release:        ${RPM_RELEASE}${RPM_SUFFIX}%{?dist}
 Summary:        Memory-safe edge server and reverse proxy built on Pingora
 License:        EUPL-1.2
 URL:            https://github.com/valkyoth/fluxheim
+${CONFLICTS_LINE}
 
 %description
 Fluxheim is a memory-safe edge server and reverse proxy built on Pingora.
@@ -289,11 +308,13 @@ def main() -> int:
         return 0
 
     validate_version_tag(args.version_tag)
+    validate_rpm_release(args.rpm_release)
     target_name, container_image = choose_target(args.target)
     container_tool = get_container_tool(args.container_tool)
 
     print(f"Selected target: {target_name} ({container_image})")
     print(f"Version: {args.version_tag}")
+    print(f"RPM release: {args.rpm_release}")
     print(f"Build type: {args.build_type}")
     print(f"Container tool: {container_tool}")
 
@@ -316,6 +337,7 @@ def main() -> int:
                 "/workspace/build_in_container.sh",
                 args.version_tag,
                 args.build_type,
+                args.rpm_release,
             ]
         )
 

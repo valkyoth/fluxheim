@@ -70,18 +70,21 @@ impl Config {
 
     fn load_file(path: &Path) -> Result<Self, ConfigLoadError> {
         let mut fragment = ConfigFragment::load(path)?;
-        if let Some(parent) = path.parent() {
+        let parent = path.parent();
+        if let Some(parent) = parent {
             fragment.resolve_relative_paths(parent);
         }
 
         let mut config = Self::default();
         config.merge(fragment);
+        if let Some(parent) = parent {
+            config.merge_conf_d(parent)?;
+        }
         Ok(config)
     }
 
     fn load_dir(path: &Path) -> Result<Self, ConfigLoadError> {
-        let mut files = toml_files(path)?;
-        files.sort();
+        let files = config_directory_files(path)?;
 
         let mut config = Self::default();
         for file in files {
@@ -93,6 +96,30 @@ impl Config {
         }
 
         Ok(config)
+    }
+
+    fn merge_conf_d(&mut self, base_dir: &Path) -> Result<(), ConfigLoadError> {
+        let conf_dir = base_dir.join("conf.d");
+        if !conf_dir.try_exists().map_err(ConfigLoadError::Read)? {
+            return Ok(());
+        }
+
+        let metadata = fs::symlink_metadata(&conf_dir).map_err(ConfigLoadError::Read)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(ConfigLoadError::InvalidPath { path: conf_dir });
+        }
+
+        let mut files = toml_files(&conf_dir)?;
+        files.sort();
+        for file in files {
+            let mut fragment = ConfigFragment::load(&file)?;
+            if let Some(parent) = file.parent() {
+                fragment.resolve_relative_paths(parent);
+            }
+            self.merge(fragment);
+        }
+
+        Ok(())
     }
 
     fn merge(&mut self, fragment: ConfigFragment) {
@@ -3742,6 +3769,35 @@ fn toml_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
     Ok(files)
 }
 
+fn config_directory_files(dir: &Path) -> Result<Vec<PathBuf>, ConfigLoadError> {
+    let mut files = toml_files(dir)?;
+    files.sort();
+
+    let conf_dir = dir.join("conf.d");
+    if conf_dir.try_exists().map_err(ConfigLoadError::Read)? {
+        let metadata = fs::symlink_metadata(&conf_dir).map_err(ConfigLoadError::Read)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(ConfigLoadError::InvalidPath { path: conf_dir });
+        }
+
+        let mut conf_files = toml_files(&conf_dir)?;
+        conf_files.sort();
+        files.extend(conf_files);
+        if files.len() > MAX_CONFIG_DIRECTORY_FILES {
+            return Err(ConfigLoadError::Read(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "config directory {} and conf.d contain more than {} TOML files",
+                    dir.display(),
+                    MAX_CONFIG_DIRECTORY_FILES
+                ),
+            )));
+        }
+    }
+
+    Ok(files)
+}
+
 fn regular_visible_toml_file(path: &Path) -> Result<bool, ConfigLoadError> {
     if !is_visible_toml_file(path) {
         return Ok(false);
@@ -6999,6 +7055,73 @@ mod tests {
         assert_eq!(config.server.default_vhost, Some("example".to_owned()));
         assert_eq!(config.vhosts.len(), 1);
         assert_eq!(config.vhosts[0].web.root, Some(dir.child("site")));
+    }
+
+    #[test]
+    fn loading_main_config_file_also_loads_sibling_conf_d() {
+        let dir = TestDir::new("config-file-with-conf-d");
+        fs::create_dir_all(dir.child("conf.d")).unwrap();
+        fs::create_dir_all(dir.child("conf.d/site")).unwrap();
+        fs::write(
+            dir.child("fluxheim.toml"),
+            r#"
+            [server]
+            listen = ["127.0.0.1:19090"]
+            default_vhost = "example"
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            dir.child("conf.d/10-vhost.toml"),
+            r#"
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.test"]
+
+            [vhosts.web]
+            root = "site"
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+        assert_eq!(config.server.default_vhost, Some("example".to_owned()));
+        assert_eq!(config.vhosts.len(), 1);
+        assert_eq!(config.vhosts[0].web.root, Some(dir.child("conf.d/site")));
+    }
+
+    #[test]
+    fn loading_config_directory_also_loads_conf_d_after_top_level_files() {
+        let dir = TestDir::new("config-dir-with-conf-d");
+        fs::create_dir_all(dir.child("conf.d/site")).unwrap();
+        fs::write(
+            dir.child("00-server.toml"),
+            r#"
+            [server]
+            listen = ["127.0.0.1:19090"]
+            default_vhost = "example"
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            dir.child("conf.d/10-vhost.toml"),
+            r#"
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.test"]
+
+            [vhosts.web]
+            root = "site"
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(dir.path())).unwrap();
+
+        assert_eq!(config.server.default_vhost, Some("example".to_owned()));
+        assert_eq!(config.vhosts.len(), 1);
+        assert_eq!(config.vhosts[0].web.root, Some(dir.child("conf.d/site")));
     }
 
     #[test]
