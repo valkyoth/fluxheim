@@ -9,6 +9,10 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+## 1.0.0 - Gateway Foundation
+
+Released: 2026-05-08
+
 ### Added
 
 - `1.0` gateway migration fixtures and smoke coverage for representative

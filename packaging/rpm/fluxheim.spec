@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        0.5.0
+Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -15,7 +15,7 @@ URL:            https://github.com/valkyoth/fluxheim
 Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
 # Create with:
 #   cargo vendor vendor > /tmp/fluxheim-cargo-config.toml
-#   tar -czf fluxheim-0.5.0-vendor.tar.gz vendor
+#   tar -czf fluxheim-1.0.0-vendor.tar.gz vendor
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        fluxheim.tmpfiles
 Source3:        fluxheim.service
@@ -43,9 +43,10 @@ Requires(pre):   shadow-utils
 Requires:       ca-certificates
 
 %description
-Fluxheim is a modular Rust edge server built on Pingora. The 0.5.x release line
-is a basic-sites preview for static website hosting, static TLS certificates,
-vhost routing, secure header policy, and simple whole-vhost reverse proxying.
+Fluxheim is a modular Rust edge server built on Pingora. The 1.0 release is the
+gateway foundation for static website hosting, vhost routing, HTTP to HTTPS
+redirects, static TLS certificates with SNI, secure header policy, route-level
+proxy/static/redirect behavior, and native systemd deployment.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -118,7 +119,7 @@ fi
 
 %files
 %license LICENSE
-%doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_0.5.0.md docs examples
+%doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_1.0.0.md docs examples
 %{_bindir}/fluxheim
 %{_tmpfilesdir}/fluxheim.conf
 %{_sysusersdir}/fluxheim.conf
@@ -135,5 +136,8 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri May 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.0.0-1
+- Stable gateway foundation release with vhosts, TLS/SNI, redirects, static sites, routes, and systemd/RPM packaging.
+
 * Wed May 06 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 0.5.0-1
 - Initial RPM packaging spec for the basic-sites preview.

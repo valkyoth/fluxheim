@@ -225,24 +225,23 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Next Target: 1.0 Gateway Core
+## Current Stable: 1.0 Gateway Core
 
-Fluxheim will not treat every planned feature as part of `1.0`. The `1.0`
-target is the first release intended to migrate representative real multi-site
+Fluxheim does not treat every planned feature as part of `1.0`. The `1.0`
+release is the first release intended to migrate representative real multi-site
 gateway configs.
 
-Already landed after `0.5.0`: route-level exact/prefix/fallback matching,
-route actions for proxy/static/redirects, route prefix stripping, per-route
-body limits, upstream connect/read/send timeout knobs, websocket-safe upgrade
-smoke coverage for `/chat/`-style routes, and custom upstream error pages,
-secure static aliases with optional directory listing, cleartext ACME challenge
-exceptions, safe dynamic request-header templates for common proxy migrations,
-SNI certificate selection for the default rustls TLS backend and
-callback-capable TLS backends, and native systemd deployment files for manually
-compiled binaries. Direct proxy upstream DNS names
-are resolved per request and resolution failures return upstream errors instead
-of panicking the worker, which covers local Podman service names for the non-LB
-gateway path.
+Included in `1.0`: route-level exact/prefix/fallback matching, route actions
+for proxy/static/redirects, route prefix stripping, per-route body limits,
+upstream connect/read/send timeout knobs, websocket-safe upgrade smoke coverage
+for `/chat/`-style routes, custom upstream error pages, secure static aliases
+with optional directory listing, cleartext ACME challenge exceptions, safe
+dynamic request-header templates for common proxy migrations, SNI certificate
+selection for the default rustls TLS backend and callback-capable TLS backends,
+and native systemd deployment files for manually compiled binaries. Direct proxy
+upstream DNS names are resolved per request and resolution failures return
+upstream errors instead of panicking the worker, which covers local Podman
+service names for the non-LB gateway path.
 
 After `1.0`, the planned release ladder continues with TLS policy hardening,
 operations tooling, load balancing, cache improvements, certificate automation,
