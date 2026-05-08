@@ -469,6 +469,7 @@ mod tests {
             path
         }
 
+        #[cfg(feature = "web")]
         fn web_config(&self, name: &str, vhost_name: &str, host: &str, root: &Path) -> PathBuf {
             let path = safe_child_path(&self.path, name);
             fs::write(
