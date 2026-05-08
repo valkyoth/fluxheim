@@ -26,9 +26,10 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current `0.5.x` line is a
-basic-sites preview for static HTML sites, simple whole-vhost reverse proxying,
-static TLS certificates, secure headers, and container-friendly operation.
+[Pingora](https://github.com/cloudflare/pingora). The current `1.0.x` line is
+the gateway foundation release for static sites, vhosts, route-level proxying,
+redirects, static TLS certificates with SNI, secure headers, and
+container-friendly or native systemd operation.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -36,17 +37,21 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 - Static website hosting with MIME detection, index files, `GET`/`HEAD`,
   `ETag`, conditional `304`, and single byte ranges.
-- Basic vhost routing by Host header.
-- Simple whole-vhost reverse proxying to one upstream.
+- Vhost routing by Host header with default-vhost fallback.
+- Whole-vhost and route-level reverse proxying.
 - Static/bought certificate support with rustls as the default TLS backend.
+- Multi-certificate SNI selection on the default rustls TLS backend.
+- Route-level static, proxy, and redirect actions.
 - Optional global HTTP-to-HTTPS redirect with safe Host validation.
+- External ACME HTTP-01 challenge forwarding helper.
 - Secure request/response header policy, including `Server: fluxheim` by
   default and removable by config.
+- Native systemd/RPM deployment files.
 - Rootless Podman containers for Wolfi, Alpine, SUSE Micro, and Debian.
 - Packaged default page at `/srv/fluxheim/index.html` with no external assets.
 
 See [Production Readiness](docs/production-readiness.md) for the precise
-preview promise and deployment checks.
+`1.0` promise and deployment checks.
 
 ## Why Fluxheim
 
