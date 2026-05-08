@@ -66,16 +66,16 @@ Build the default development binary:
 cargo build
 ```
 
-Validate the packaged default config:
+Validate the local development config:
 
 ```bash
-cargo run -- --check-config --config packaging/default/fluxheim.toml
+cargo run -- --check-config --config examples/fluxheim.toml
 ```
 
 Run Fluxheim locally:
 
 ```bash
-cargo run -- --config packaging/default/fluxheim.toml
+cargo run -- --config examples/fluxheim.toml
 ```
 
 Then open `http://127.0.0.1:8080` with a Host header that matches the default
@@ -115,10 +115,13 @@ deny_dotfiles = true
 cache_control = "public, max-age=60"
 ```
 
-More examples live in [examples](examples), and packaged containers/RPMs use
-[packaging/default/fluxheim.toml](packaging/default/fluxheim.toml) unless a
-deployment supplies its own config. For the `[[vhosts]]` syntax and the
-recommended one-vhost-per-file layout, see
+More examples live in [examples](examples). Native packages use
+[packaging/default/fluxheim.toml](packaging/default/fluxheim.toml), which
+listens on port `80` under the hardened systemd unit with
+`CAP_NET_BIND_SERVICE`; containers use
+[packaging/container/fluxheim.toml](packaging/container/fluxheim.toml), which
+keeps rootless-friendly internal ports `8080` and `8443`. For the `[[vhosts]]`
+syntax and the recommended one-vhost-per-file layout, see
 [Vhost Config Guide](docs/vhost-config.md). For common multi-site proxy
 patterns, see [Gateway Recipes](docs/gateway-recipes.md).
 

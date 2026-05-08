@@ -1,6 +1,6 @@
 ARG RUST_IMAGE=docker.io/library/rust:1.95.0-bookworm
 ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-slim
-ARG FLUXHEIM_CONFIG=packaging/default/fluxheim.toml
+ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 
 FROM ${RUST_IMAGE} AS builder
 WORKDIR /usr/src/fluxheim
@@ -27,7 +27,7 @@ RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
     fi
 
 FROM ${RUNTIME_IMAGE}
-ARG FLUXHEIM_CONFIG=packaging/default/fluxheim.toml
+ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 ARG FLUXHEIM_RUNTIME_UID=65532
 ARG FLUXHEIM_RUNTIME_GID=65532
 

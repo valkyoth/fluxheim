@@ -42,8 +42,14 @@ run_features proxy
 echo "1.0 core: systemd sandbox policy"
 grep -q '^NoNewPrivileges=true$' packaging/systemd/fluxheim.service
 grep -q '^ProtectSystem=strict$' packaging/systemd/fluxheim.service
-grep -q '^CapabilityBoundingSet=$' packaging/systemd/fluxheim.service
-grep -q '^AmbientCapabilities=$' packaging/systemd/fluxheim.service
+grep -q '^CapabilityBoundingSet=CAP_NET_BIND_SERVICE$' packaging/systemd/fluxheim.service
+grep -q '^AmbientCapabilities=CAP_NET_BIND_SERVICE$' packaging/systemd/fluxheim.service
 grep -q '^RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX$' packaging/systemd/fluxheim.service
 grep -q '^RestrictNamespaces=true$' packaging/systemd/fluxheim.service
 grep -q '^SystemCallFilter=@system-service @network-io$' packaging/systemd/fluxheim.service
+
+echo "1.0 core: native/container port defaults"
+grep -q '^listen = \["0.0.0.0:80"\]$' packaging/default/fluxheim.toml
+grep -q '^listen = \["0.0.0.0:8080"\]$' packaging/container/fluxheim.toml
+grep -q '^ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml$' Containerfile
+grep -q '^ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml$' containers/Containerfile.wolfi

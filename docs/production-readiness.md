@@ -140,6 +140,11 @@ container as root for direct low-port binding, keep mounted config, content,
 certificate, cache, and runtime directories separate and permission them for the
 chosen runtime user.
 
+The recommended native package mode binds public ports directly. The packaged
+default config listens on `80`, and the systemd unit grants only
+`CAP_NET_BIND_SERVICE` so the service can also bind `443` when TLS is enabled
+without running Fluxheim as root.
+
 Fluxheim's memory-safety baseline does not replace operational security checks.
 Continue running dependency audits, license checks, malformed request framing
 tests, TLS scans, and load smoke tests for every stable release branch.

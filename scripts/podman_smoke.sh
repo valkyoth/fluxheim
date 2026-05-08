@@ -24,7 +24,7 @@ if [ -z "$CONFIG" ]; then
             CONFIG="examples/privacy.toml"
             ;;
         *)
-            CONFIG="packaging/default/fluxheim.toml"
+            CONFIG="packaging/container/fluxheim.toml"
             ;;
     esac
 fi

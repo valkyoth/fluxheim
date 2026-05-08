@@ -1,5 +1,5 @@
 [server]
-listen = ["0.0.0.0:80"]
+listen = ["0.0.0.0:8080"]
 default_vhost = "default"
 trusted_proxies = []
 
@@ -70,10 +70,11 @@ vary = ["Accept-Encoding"]
 enabled = false
 backend = "rustls"
 
-# To enable HTTPS, add server.tls_listen and certificate paths:
+# To enable HTTPS in a container, mount certificates under /etc/fluxheim/tls
+# and add:
 #
 # [server]
-# tls_listen = ["0.0.0.0:443"]
+# tls_listen = ["0.0.0.0:8443"]
 #
 # [tls]
 # enabled = true

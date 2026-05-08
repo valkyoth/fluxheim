@@ -11,15 +11,23 @@ The packaged unit is intentionally conservative:
   `/var/log/fluxheim` as writable service paths;
 - keeps `/etc/fluxheim` and `/srv/fluxheim` readable but not writable by the
   service;
-- runs with `NoNewPrivileges`, no ambient Linux capabilities, strict system
-  path protection, private temporary and device namespaces, kernel/control-group
-  write protection, namespace restrictions, native syscall architecture
-  filtering, and a conservative system-service/network syscall allow-list;
+- runs with `NoNewPrivileges` and grants only `CAP_NET_BIND_SERVICE`, allowing
+  the unprivileged `fluxheim` user to bind production ports `80` and `443`
+  without running the service as root;
+- uses strict system path protection, private temporary and device namespaces,
+  kernel/control-group write protection, namespace restrictions, native syscall
+  architecture filtering, and a conservative system-service/network syscall
+  allow-list;
 - limits address families to IPv4, IPv6, and Unix domain sockets;
 - stops with `SIGTERM` and lets Fluxheim/Pingora shut down gracefully.
 
 These systemd controls are the supported `1.0` host sandbox. They are
 deployment-level controls and do not require a special Fluxheim binary.
+
+The packaged native config listens on `0.0.0.0:80` by default. HTTPS uses
+`0.0.0.0:443` once `server.tls_listen` and certificate paths are enabled. This
+matches normal bare-metal web server expectations while keeping the process
+unprivileged.
 
 ## Manual Binary Install
 

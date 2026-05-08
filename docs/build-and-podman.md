@@ -418,8 +418,8 @@ The container config sets `grace_period_seconds = 2` and
 `graceful_shutdown_timeout_seconds = 5`; keep the Podman stop timeout higher
 than the sum of those values so normal shutdown does not fall back to `SIGKILL`.
 
-Published images default to
-[packaging/default/fluxheim.toml](../packaging/default/fluxheim.toml) and a
+Published images default to the rootless-friendly
+[packaging/container/fluxheim.toml](../packaging/container/fluxheim.toml) and a
 self-contained default page at
 [packaging/default/index.html](../packaging/default/index.html), installed in
 the image as `/srv/fluxheim/index.html`. Mount your own config or static root
@@ -435,6 +435,10 @@ For manually compiled binaries or RPM-style native installs, Fluxheim ships a
 systemd unit, sysusers file, tmpfiles file, and optional environment file under
 `packaging/systemd` and `packaging/rpm`. See
 [systemd Deployment](systemd.md) for the install steps and default paths.
+Native packages use [packaging/default/fluxheim.toml](../packaging/default/fluxheim.toml),
+which listens on port `80` by default; the bundled systemd unit grants only
+`CAP_NET_BIND_SERVICE` so the service can bind `80/443` while still running as
+the unprivileged `fluxheim` user.
 
 ## Codex And Rootless Podman
 
