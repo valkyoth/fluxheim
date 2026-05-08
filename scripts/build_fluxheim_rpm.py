@@ -94,11 +94,24 @@ def run_container_build(
     build_type: str,
     rpm_release: str,
 ) -> None:
-    print(
-        "Executing: "
-        + shlex.join(
+    common_args = [
+        "run",
+        "--rm",
+        "-v",
+        f"{work_dir}:/workspace:Z",
+        container_image,
+        "bash",
+        "/workspace/build_in_container.sh",
+        version_tag,
+        build_type,
+        rpm_release,
+    ]
+    if container_tool == "podman":
+        command = ["podman", *common_args]
+        print("Executing: " + shlex.join(command))
+        subprocess.run(
             [
-                container_tool,
+                "podman",
                 "run",
                 "--rm",
                 "-v",
@@ -109,25 +122,30 @@ def run_container_build(
                 version_tag,
                 build_type,
                 rpm_release,
-            ]
+            ],
+            check=True,
         )
-    )
-    subprocess.run(
-        [
-            container_tool,
-            "run",
-            "--rm",
-            "-v",
-            f"{work_dir}:/workspace:Z",
-            container_image,
-            "bash",
-            "/workspace/build_in_container.sh",
-            version_tag,
-            build_type,
-            rpm_release,
-        ],
-        check=True,
-    )
+    elif container_tool == "docker":
+        command = ["docker", *common_args]
+        print("Executing: " + shlex.join(command))
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{work_dir}:/workspace:Z",
+                container_image,
+                "bash",
+                "/workspace/build_in_container.sh",
+                version_tag,
+                build_type,
+                rpm_release,
+            ],
+            check=True,
+        )
+    else:
+        raise SystemExit(f"error: unsupported container tool: {container_tool}")
 
 
 def choose_target(target: str | None) -> tuple[str, str]:

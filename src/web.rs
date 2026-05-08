@@ -117,12 +117,8 @@ impl StaticFileServer {
     }
 
     fn resolve_relative_candidate(&self, relative: &SafeRelativePath) -> io::Result<ResolveResult> {
-        if path_contains_symlink(&self.root, relative)? {
-            return Ok(ResolveResult::NotFound);
-        }
-
         let candidate = self.root.join(relative.as_path());
-        let candidate = match candidate.canonicalize() {
+        let canonical = match candidate.canonicalize() {
             Ok(path) => path,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Ok(ResolveResult::NotFound);
@@ -130,11 +126,11 @@ impl StaticFileServer {
             Err(error) => return Err(error),
         };
 
-        if !candidate.starts_with(&self.root) {
+        if !canonical.starts_with(&self.root) || canonical != candidate {
             return Ok(ResolveResult::NotFound);
         }
 
-        let candidate_metadata = match candidate.metadata() {
+        let candidate_metadata = match canonical.metadata() {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 return Ok(ResolveResult::NotFound);
@@ -144,14 +140,14 @@ impl StaticFileServer {
 
         if candidate_metadata.is_dir() {
             for index in &self.index_files {
-                let index_candidate = candidate.join(index);
+                let index_candidate = canonical.join(index);
                 if let Some(file) = self.static_file(&index_candidate)? {
                     return Ok(ResolveResult::Found(file));
                 }
             }
 
             if self.directory_listing.enabled {
-                return self.directory_listing(&candidate);
+                return self.directory_listing(&canonical);
             }
 
             return Ok(ResolveResult::NotFound);
@@ -167,17 +163,15 @@ impl StaticFileServer {
         let Some(relative) = SafeRelativePath::from_rooted(&self.root, candidate) else {
             return Ok(None);
         };
-        if path_contains_symlink(&self.root, &relative)? {
-            return Ok(None);
-        }
 
+        let expected = self.root.join(relative.as_path());
         let canonical = match candidate.canonicalize() {
             Ok(path) => path,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
 
-        if !canonical.starts_with(&self.root) {
+        if !canonical.starts_with(&self.root) || canonical != expected {
             return Ok(None);
         }
 
@@ -208,7 +202,7 @@ impl StaticFileServer {
         let Some(relative) = SafeRelativePath::from_rooted(&self.root, directory) else {
             return Ok(ResolveResult::NotFound);
         };
-        if path_contains_symlink(&self.root, &relative)? {
+        if directory != self.root.join(relative.as_path()) {
             return Ok(ResolveResult::NotFound);
         }
         let mut entries = Vec::new();
@@ -293,56 +287,27 @@ impl SafeRelativePath {
     }
 }
 
-fn normal_component(component: &std::ffi::OsStr) -> Option<&std::ffi::OsStr> {
-    let mut components = Path::new(component).components();
-    match (components.next(), components.next()) {
-        (Some(std::path::Component::Normal(component)), None) => Some(component),
-        _ => None,
-    }
-}
-
-fn path_contains_symlink(root: &Path, relative: &SafeRelativePath) -> io::Result<bool> {
-    let mut current = root.to_path_buf();
-    for component in &relative.components {
-        let Some(component) = normal_component(component) else {
-            return Ok(true);
-        };
-        current.push(component);
-        match std::fs::read_link(&current) {
-            Ok(_) => return Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
-            Err(error) => return Err(error),
-        }
-    }
-
-    Ok(false)
-}
-
 fn configured_web_path_contains_symlink(path: &Path) -> io::Result<bool> {
-    let mut current = PathBuf::new();
     for component in path.components() {
         match component {
-            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
-                current.push(component);
-            }
-            std::path::Component::Normal(component) => {
-                let Some(component) = normal_component(component) else {
-                    return Ok(true);
-                };
-                current.push(component);
-            }
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::Normal(_) => {}
             std::path::Component::CurDir | std::path::Component::ParentDir => return Ok(true),
-        }
-        match std::fs::read_link(&current) {
-            Ok(_) => return Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
-            Err(error) => return Err(error),
         }
     }
 
-    Ok(false)
+    let expected = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    match path.canonicalize() {
+        Ok(canonical) => Ok(canonical != expected),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 fn directory_listing_path(relative: &Path) -> String {
@@ -880,7 +845,7 @@ fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
             "static body path escaped web root",
         )
     })?;
-    if path_contains_symlink(&file.root, &relative)? {
+    if file.path != file.root.join(relative.as_path()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "static body path contains a symlink",
