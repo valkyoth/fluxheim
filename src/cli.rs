@@ -109,6 +109,7 @@ where
     }
 
     if cli.validate_config {
+        validate_runtime_config(&config)?;
         return Ok(());
     }
 
@@ -117,6 +118,17 @@ where
     }
 
     crate::runtime::run(config)
+}
+
+#[cfg(feature = "proxy")]
+fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    crate::proxy::FluxProxy::from_config(config)?;
+    Ok(())
+}
+
+#[cfg(not(feature = "proxy"))]
+fn validate_runtime_config(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    Ok(())
 }
 
 fn run_command(
@@ -300,6 +312,23 @@ mod tests {
     }
 
     #[test]
+    fn validate_config_rejects_missing_static_root() {
+        let dir = TestDir::new("cli-validate-missing-root");
+        let missing_root = safe_child_path(&dir.path, "missing-site");
+        let config = dir.web_config("fluxheim.toml", "example", "example.test", &missing_root);
+
+        let error = run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "--validate-config",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("web root does not exist"));
+    }
+
+    #[test]
     fn snapshot_command_creates_store_snapshot() {
         let dir = TestDir::new("cli-snapshot-command");
         let config = dir.simple_config("fluxheim.toml", "example", "example.test");
@@ -411,6 +440,26 @@ mod tests {
                     name = "{vhost_name}"
                     hosts = ["{host}"]
                     "#
+                ),
+            )
+            .expect("write config");
+            path
+        }
+
+        fn web_config(&self, name: &str, vhost_name: &str, host: &str, root: &Path) -> PathBuf {
+            let path = safe_child_path(&self.path, name);
+            fs::write(
+                &path,
+                format!(
+                    r#"
+                    [[vhosts]]
+                    name = "{vhost_name}"
+                    hosts = ["{host}"]
+
+                    [vhosts.web]
+                    root = "{}"
+                    "#,
+                    root.display()
                 ),
             )
             .expect("write config");

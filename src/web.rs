@@ -50,7 +50,16 @@ impl StaticFileServer {
             ));
         }
 
-        let root_metadata = std::fs::symlink_metadata(root)?;
+        let root_metadata = match std::fs::symlink_metadata(root) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("web root does not exist: {}", root.display()),
+                ));
+            }
+            Err(error) => return Err(error),
+        };
         if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1139,6 +1148,23 @@ mod tests {
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         let _ = fs::remove_file(root);
+    }
+
+    #[test]
+    fn rejects_missing_static_root() {
+        let root = unique_temp_path("web-root-missing");
+
+        let error = StaticFileServer::from_config(&WebConfig {
+            root: Some(root.clone()),
+            index_files: vec!["index.html".to_owned()],
+            deny_dotfiles: true,
+            ..WebConfig::default()
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("web root does not exist"));
+        assert!(error.to_string().contains(&root.display().to_string()));
     }
 
     #[cfg(unix)]

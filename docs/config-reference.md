@@ -3,10 +3,19 @@
 Fluxheim config is TOML. Unknown fields are rejected, so misspelled settings
 fail during `--check-config` instead of being ignored.
 
-Validate a config before running it:
+Inspect a config before running it:
 
 ```bash
 fluxheim --check-config --config path/to/fluxheim.toml
+```
+
+For deployment preflight, use `--validate-config`. This performs the same
+static validation and also builds the runtime proxy state, so missing static
+web roots and other startup-blocking filesystem issues fail before systemd
+starts the service:
+
+```bash
+fluxheim --validate-config --config /etc/fluxheim/fluxheim.toml
 ```
 
 For split config directories, Fluxheim reads `*.toml` files in sorted order:
