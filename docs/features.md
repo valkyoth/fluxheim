@@ -32,7 +32,7 @@ before Cargo starts compiling Pingora.
 | --- | --- | --- |
 | `load-balancer` | No | Pingora load-balancing support and health-check setup. |
 | `metrics` | No | Prometheus metrics listener. |
-| `acme` | No | ACME config and renewal planning. Runtime issuance remains future work. |
+| `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 and rustls TLS-ALPN-01 challenge serving, and the renewal executor contract. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 
@@ -49,9 +49,20 @@ Select at most one:
 
 Cargo features are additive, and Pingora does not support compiling multiple
 TLS backends together. The feature validator catches this before build.
+Pingora `0.8.0` does not expose an mbedTLS backend; supporting mbedTLS would
+require a new Pingora TLS integration rather than a Fluxheim feature toggle.
 `tls-boringssl` requires a build host with `libclang` available for bindgen.
 Use `scripts/validate-tls-backends.sh` to validate the supported TLS backends on
 the current machine.
+
+## ACME Client Wiring
+
+`acme` contains the config, storage, challenge, certificate observation, and
+renewal-executor pieces. `acme-client` adds the live ACME HTTP client stack used
+to load or create issuer accounts and complete HTTP-01 or rustls TLS-ALPN-01
+orders through `instant-acme`, plus the runtime background renewal service. Keep
+`acme-client` enabled only in builds that perform certificate issuance or
+renewal.
 
 ## Profile Aliases
 

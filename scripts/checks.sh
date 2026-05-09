@@ -77,6 +77,7 @@ cargo test --no-default-features --features proxy,cache
 cargo test --no-default-features --features cache
 cargo test --no-default-features --features web
 cargo test --no-default-features --features profile-core
+cargo check --no-default-features --features profile-core,acme-client
 scripts/validate-1-0-core.sh check
 cargo check --no-default-features --features profile-static-site
 cargo check --no-default-features --features profile-reverse-proxy
@@ -91,6 +92,7 @@ expect_feature_validation_failure "profile-core,tls-openssl" "select only one Fl
 expect_feature_validation_failure "tls-rustls,tls-openssl" "select only one Fluxheim TLS backend feature"
 cargo test --no-default-features --features proxy,metrics
 cargo test --no-default-features --features proxy,tls-rustls,acme
+cargo test --no-default-features --features proxy,tls-rustls,acme-client
 cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
 cargo check --no-default-features --features proxy,tls
 cargo check --no-default-features --features proxy,tls-rustls
@@ -99,6 +101,10 @@ scripts/validate-tls-backends.sh check
 cargo run --quiet -- --check-config --config examples/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/admin.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/vhosts.toml >/dev/null
+cargo run --quiet -- --check-config --config examples/acme-http-01.toml >/dev/null
+cargo run --quiet -- --check-config --config examples/acme-actalis.toml >/dev/null
+cargo run --quiet -- --check-config --config examples/tls-modern.toml >/dev/null
+cargo run --quiet -- --check-config --config examples/tls-intermediate.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/container/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config packaging/container/fluxheim.toml >/dev/null

@@ -260,24 +260,43 @@ Exit criteria:
   logic that can affect request routing, filesystem access, redirects, cache
   keys, or cache-header decisions.
 
-### 1.1 - TLS Policy Hardening
+### 1.1 - TLS Policy And Certificate Operations
 
-Goal: expose explicit TLS policy without making insecure combinations easy.
+Goal: expose explicit TLS policy without making insecure combinations easy, and
+make normal ACME certificate issuance and renewal practical for production
+deployments without external copy scripts.
 
 Stable scope:
 
 - Named TLS policy profiles such as `modern` and `compat`, with `modern` as the
-  default.
+  TLS 1.3-only profile and `intermediate` as the default compatibility profile.
 - Minimum protocol version config, bounded to safe values.
 - ALPN policy for HTTP/1.1 and future HTTP/2/HTTP/3 work.
+- Downstream curve preferences and cipher-suite allow-lists for rustls,
+  OpenSSL, and BoringSSL where the selected backend exposes enforceable
+  listener controls.
+- Structured HSTS response policy.
 - Per-backend validation that rejects cipher or protocol settings unsupported
   by the selected TLS backend.
+- ACME runtime issuance for Let's Encrypt, Actalis, and Google Trust Services.
+- HTTP-01 and rustls TLS-ALPN-01 challenge handling for configured vhosts.
+- External Account Binding support for Actalis and Google Trust Services.
+- Safe ACME storage under a configured state directory, with private-key and
+  certificate permission validation.
+- Renewal queue with a user-chosen renew-before window.
+- Renewal failures must not drop active traffic or remove the last valid
+  certificate.
+- Own/bought static certificates remain fully supported.
 
 Beta scope:
 
-- Explicit cipher-suite allow-lists for operators with compliance requirements.
 - Separate upstream TLS policy if upstream transport needs different
   compatibility than public downstream listeners.
+- Zero-downtime dynamic certificate reload for reloadable downstream SNI
+  resolvers/callbacks.
+- Post-quantum hybrid groups, Encrypted Client Hello, TLS certificate
+  compression, and HTTP/3/QUIC remain later milestones until the selected TLS
+  and QUIC backends expose stable server APIs and release-grade interop tests.
 
 Exit criteria:
 
@@ -287,6 +306,11 @@ Exit criteria:
   matrix.
 - TLS policy changes are classified correctly as reload-safe or requiring a
   process restart.
+- ACME issuance and renewal tests cover issuer selection, EAB secret loading,
+  challenge routing, systemd/container secret-file deployment, storage
+  permissions, failed renewal, and keeping the previous valid certificate.
+- Release notes clearly state whether certificate reload is automatic,
+  restart-based, or deploy-hook based in `1.1.0`.
 
 ### 1.2 - Operations Pack
 
@@ -440,21 +464,22 @@ Exit criteria:
   format, dimensions, quality, and `Accept` bucket.
 - `privacy-mode` rejects incompatible transform/cache combinations.
 
-### 1.6 - Certificate Automation
+### 1.6 - Advanced Certificate Automation
 
-Goal: make certificate lifecycle operational without downtime.
+Goal: extend the `1.1` certificate lifecycle with provider-specific and
+zero-downtime automation that is too broad for the first ACME release.
 
 Stable scope:
 
-- ACME runtime issuance for Let's Encrypt and Actalis.
-- Renewal queue.
-- User-chosen renew-before window.
-- Zero-downtime certificate reload through the runtime/snapshot model.
-- Own/bought certificates remain fully supported.
+- Zero-downtime certificate reload through the runtime/snapshot model if it was
+  not promoted in `1.1`.
+- DNS-01 support for wildcard certificates if a safe provider interface exists.
+- Certificate deployment hooks for external secret stores.
 
 Beta scope:
 
 - Cloudflare Origin CA automation behind `cloudflare-origin-ca`.
+- Additional ACME providers with non-standard account or challenge behavior.
 
 Exit criteria:
 

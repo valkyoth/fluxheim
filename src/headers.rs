@@ -224,11 +224,12 @@ pub fn apply_response_policy(
         return Ok(());
     }
 
-    set_optional_header(
-        response,
-        "strict-transport-security",
-        policy.strict_transport_security.as_deref(),
-    )?;
+    let hsts_value = policy
+        .hsts
+        .as_ref()
+        .and_then(|hsts| hsts.header_value())
+        .or_else(|| policy.strict_transport_security.clone());
+    set_optional_header(response, "strict-transport-security", hsts_value.as_deref())?;
     set_optional_header(
         response,
         "content-security-policy",

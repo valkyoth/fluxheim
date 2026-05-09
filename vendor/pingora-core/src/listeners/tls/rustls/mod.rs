@@ -23,13 +23,20 @@ use pingora_rustls::load_certs_and_key_files;
 use pingora_rustls::ClientCertVerifier;
 use pingora_rustls::ServerConfig;
 use pingora_rustls::{version, TlsAcceptor as RusTlsAcceptor};
+use rustls::crypto::{CryptoProvider, SupportedKxGroup};
+use rustls::{SupportedCipherSuite, SupportedProtocolVersion};
 use rustls::server::ResolvesServerCert;
 
 use crate::protocols::{ALPN, IO};
 
+static TLS12_AND_13: [&SupportedProtocolVersion; 2] = [&version::TLS12, &version::TLS13];
+static TLS13_ONLY: [&SupportedProtocolVersion; 1] = [&version::TLS13];
+
 /// The TLS settings of a listening endpoint
 pub struct TlsSettings {
     alpn_protocols: Option<Vec<Vec<u8>>>,
+    protocol_versions: &'static [&'static SupportedProtocolVersion],
+    crypto_provider: CryptoProvider,
     cert_path: String,
     key_path: String,
     client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
@@ -50,8 +57,9 @@ impl TlsSettings {
     ///
     /// Todo: Return a result instead of panicking XD
     pub fn build(self) -> Acceptor {
-        let builder =
-            ServerConfig::builder_with_protocol_versions(&[&version::TLS12, &version::TLS13]);
+        let builder = ServerConfig::builder_with_provider(Arc::new(self.crypto_provider))
+            .with_protocol_versions(self.protocol_versions)
+            .unwrap();
         let builder = if let Some(verifier) = self.client_cert_verifier {
             builder.with_client_cert_verifier(verifier)
         } else {
@@ -96,6 +104,30 @@ impl TlsSettings {
         self.alpn_protocols = Some(alpn.to_wire_protocols());
     }
 
+    pub fn set_alpn_protocols(&mut self, protocols: Vec<Vec<u8>>) {
+        self.alpn_protocols = Some(protocols);
+    }
+
+    /// Require at least TLS 1.2 for this endpoint.
+    pub fn set_min_protocol_tls12(&mut self) {
+        self.protocol_versions = &TLS12_AND_13;
+    }
+
+    /// Require at least TLS 1.3 for this endpoint.
+    pub fn set_min_protocol_tls13(&mut self) {
+        self.protocol_versions = &TLS13_ONLY;
+    }
+
+    /// Set the supported cipher suites for this endpoint.
+    pub fn set_cipher_suites(&mut self, cipher_suites: Vec<SupportedCipherSuite>) {
+        self.crypto_provider.cipher_suites = cipher_suites;
+    }
+
+    /// Set the supported key exchange groups for this endpoint.
+    pub fn set_kx_groups(&mut self, kx_groups: Vec<&'static dyn SupportedKxGroup>) {
+        self.crypto_provider.kx_groups = kx_groups;
+    }
+
     /// Configure mTLS by providing a rustls client certificate verifier.
     pub fn set_client_cert_verifier(&mut self, verifier: Arc<dyn ClientCertVerifier>) {
         self.client_cert_verifier = Some(verifier);
@@ -107,6 +139,8 @@ impl TlsSettings {
     {
         Ok(TlsSettings {
             alpn_protocols: None,
+            protocol_versions: &TLS12_AND_13,
+            crypto_provider: rustls::crypto::ring::default_provider(),
             cert_path: cert_path.to_string(),
             key_path: key_path.to_string(),
             client_cert_verifier: None,
@@ -120,6 +154,8 @@ impl TlsSettings {
     {
         Ok(TlsSettings {
             alpn_protocols: None,
+            protocol_versions: &TLS12_AND_13,
+            crypto_provider: rustls::crypto::ring::default_provider(),
             cert_path: String::new(),
             key_path: String::new(),
             client_cert_verifier: None,

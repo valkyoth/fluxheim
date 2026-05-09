@@ -10,7 +10,7 @@ on:
       features:
         description: Fluxheim Cargo feature set.
         required: true
-        default: default
+        default: profile-core,acme-client
       config:
         description: Config file copied into /etc/fluxheim/fluxheim.toml.
         required: true
@@ -127,7 +127,7 @@ jobs:
           platforms: ${{ inputs.platforms || 'linux/amd64' }}
           push: true
           build-args: |
-            FLUXHEIM_FEATURES=${{ inputs.features || 'default' }}
+            FLUXHEIM_FEATURES=${{ inputs.features || 'profile-core,acme-client' }}
             FLUXHEIM_CONFIG=${{ inputs.config || 'packaging/default/fluxheim.toml' }}
             FLUXHEIM_RUNTIME_UID=${{ inputs.runtime_uid || '65532' }}
             FLUXHEIM_RUNTIME_GID=${{ inputs.runtime_gid || '65532' }}

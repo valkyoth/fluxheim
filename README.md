@@ -41,6 +41,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 - Whole-vhost and route-level reverse proxying.
 - Static/bought certificate support with rustls as the default TLS backend.
 - Multi-certificate SNI selection on the default rustls TLS backend.
+- Managed ACME certificate issuance and renewal for HTTP-01 and rustls
+  TLS-ALPN-01 builds.
 - Route-level static, proxy, and redirect actions.
 - Optional global HTTP-to-HTTPS redirect with safe Host validation.
 - External ACME HTTP-01 challenge forwarding helper.
@@ -160,9 +162,24 @@ Individual module features:
 | `load-balancer` | No | Pingora load-balancing module and health checks. |
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
+| `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `security` | Yes | Security helpers and release hardening checks. |
 | `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
+
+For checked TLS policy examples, see
+[`examples/tls-modern.toml`](examples/tls-modern.toml) and
+[`examples/tls-intermediate.toml`](examples/tls-intermediate.toml).
+For managed certificate issuance, see
+[`examples/acme-http-01.toml`](examples/acme-http-01.toml). For an issuer that
+requires External Account Binding, see
+[`examples/acme-actalis.toml`](examples/acme-actalis.toml).
+Packaged `1.1.x` builds include `acme-init` for guided issuer bootstrap:
+
+```bash
+sudo fluxheim acme-init actalis
+sudo fluxheim acme-init letsencrypt
+```
 
 Cargo does not provide a separate `--group` flag. Fluxheim uses normal Cargo
 feature aliases named `profile-*` for grouped builds.
@@ -248,11 +265,11 @@ upstream DNS names are resolved per request and resolution failures return
 upstream errors instead of panicking the worker, which covers local Podman
 service names for the non-LB gateway path.
 
-After `1.0`, the planned release ladder continues with TLS policy hardening,
-operations tooling, load balancing, cache improvements, certificate automation,
-privacy/security profiles, Cloudflare origin support, observability, auth,
-cluster state, AI-aware controls, Sentinel Mesh, PHP/CGI boundaries, media-edge
-work, and WASM extensibility.
+After `1.0`, the planned release ladder continues with TLS policy and ACME
+certificate operations, operations tooling, load balancing, cache improvements,
+advanced certificate automation, privacy/security profiles, Cloudflare origin
+support, observability, auth, cluster state, AI-aware controls, Sentinel Mesh,
+PHP/CGI boundaries, media-edge work, and WASM extensibility.
 
 See [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for
 the full release ladder.

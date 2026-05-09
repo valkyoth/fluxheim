@@ -665,6 +665,7 @@ impl ProxyRuntimeState {
             for configured in &config.vhosts {
                 let index = vhosts.len();
                 let runtime = RuntimeVhost::from_config(
+                    config,
                     configured,
                     &config.headers,
                     load_balancer(&configured.name, &configured.proxy)?,
@@ -721,7 +722,7 @@ impl ProxyRuntimeState {
         } else {
             for configured in &config.vhosts {
                 let index = vhosts.len();
-                let runtime = RuntimeVhost::from_config(configured, &config.headers)?;
+                let runtime = RuntimeVhost::from_config(config, configured, &config.headers)?;
                 for host in &runtime.hosts {
                     if let Some(suffix) = host.strip_prefix("*.") {
                         wildcard_hosts.push(WildcardHost {
@@ -902,6 +903,8 @@ enum RuntimeRouteMatcher {
 enum RuntimeRouteAction {
     Redirect(RouteRedirectConfig),
     Proxy(RuntimeProxy),
+    #[cfg(feature = "acme")]
+    AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore),
     #[cfg(feature = "web")]
     Web(StaticFileServer),
 }
@@ -1030,6 +1033,68 @@ impl RuntimeRoute {
             response_headers: headers.response,
         })
     }
+
+    #[cfg(feature = "acme")]
+    fn acme_http_01(
+        vhost_name: &str,
+        storage: &std::path::Path,
+        base_headers: &crate::config::HeaderPolicyConfig,
+    ) -> Self {
+        Self {
+            matcher: RuntimeRouteMatcher::Prefix("/.well-known/acme-challenge/".to_owned()),
+            https_redirect_exempt: true,
+            strip_prefix: None,
+            max_request_body_bytes: None,
+            action: RuntimeRouteAction::AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore::new(
+                storage, vhost_name,
+            )),
+            request_headers: base_headers.request.clone(),
+            response_headers: base_headers.response.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "acme")]
+fn managed_http_01_owner_vhost<'a>(
+    config: &'a Config,
+    request_vhost: &'a crate::config::VhostConfig,
+) -> Option<&'a str> {
+    if request_vhost.tls.enabled && request_vhost.tls.acme.enabled {
+        return Some(&request_vhost.name);
+    }
+
+    let request_hosts: std::collections::HashSet<String> = request_vhost
+        .hosts
+        .iter()
+        .filter_map(|host| normalize_host(host))
+        .collect();
+    if request_hosts.is_empty() {
+        return None;
+    }
+
+    config.vhosts.iter().find_map(|candidate| {
+        if !candidate.tls.enabled || !candidate.tls.acme.enabled {
+            return None;
+        }
+
+        let domains: Box<dyn Iterator<Item = &str> + '_> = if candidate.tls.acme.domains.is_empty()
+        {
+            Box::new(candidate.hosts.iter().map(String::as_str))
+        } else {
+            Box::new(candidate.tls.acme.domains.iter().map(String::as_str))
+        };
+
+        for domain in domains {
+            let Some(domain) = normalize_host(domain) else {
+                continue;
+            };
+            if request_hosts.contains(&domain) {
+                return Some(candidate.name.as_str());
+            }
+        }
+
+        None
+    })
 }
 
 impl RuntimeVhost {
@@ -1107,6 +1172,7 @@ impl RuntimeVhost {
     }
 
     fn from_config(
+        #[cfg_attr(not(feature = "acme"), allow(unused_variables))] config: &Config,
         vhost: &crate::config::VhostConfig,
         global_headers: &crate::config::HeaderPolicyConfig,
         #[cfg(feature = "load-balancer")] load_balancer: Option<UpstreamLoadBalancer>,
@@ -1116,14 +1182,30 @@ impl RuntimeVhost {
             request: headers.request.clone(),
             response: headers.response.clone(),
         };
-        let routes = vhost
-            .acme_challenge
-            .route_config()
-            .into_iter()
-            .chain(vhost.routes.iter().cloned())
-            .chain(vhost.redirect.route_config())
-            .map(|route| RuntimeRoute::from_config(&route, &route_base_headers))
-            .collect::<io::Result<Vec<_>>>()?;
+        let mut routes = Vec::new();
+        #[cfg(feature = "acme")]
+        if !vhost.acme_challenge.enabled
+            && config.tls.acme.enabled
+            && config.tls.acme.challenge == crate::config::AcmeChallenge::Http01
+            && let Some(storage) = config.tls.acme.storage.as_deref()
+            && let Some(acme_vhost_name) = managed_http_01_owner_vhost(config, vhost)
+        {
+            routes.push(RuntimeRoute::acme_http_01(
+                acme_vhost_name,
+                storage,
+                &route_base_headers,
+            ));
+        }
+        routes.extend(
+            vhost
+                .acme_challenge
+                .route_config()
+                .into_iter()
+                .chain(vhost.routes.iter().cloned())
+                .chain(vhost.redirect.route_config())
+                .map(|route| RuntimeRoute::from_config(&route, &route_base_headers))
+                .collect::<io::Result<Vec<_>>>()?,
+        );
         #[cfg(feature = "cache")]
         let pingora_memory_storage = crate::cache::pingora_memory_storage_from_config(&vhost.cache);
         #[cfg(feature = "cache")]
@@ -1245,6 +1327,11 @@ impl ProxyHttp for FluxProxy {
                     return Ok(true);
                 }
                 RuntimeRouteAction::Proxy(_) => return Ok(false),
+                #[cfg(feature = "acme")]
+                RuntimeRouteAction::AcmeHttp01(store) => {
+                    respond_acme_http_01_challenge(session, ctx, store, route).await?;
+                    return Ok(true);
+                }
                 #[cfg(feature = "web")]
                 RuntimeRouteAction::Web(web) => {
                     if serve_static_route(session, ctx, web, route).await? {
@@ -1784,6 +1871,63 @@ fn selected_response_headers<'a>(
     ctx.route_index
         .map(|route_index| &vhost.route(route_index).response_headers)
         .unwrap_or(&vhost.response_headers)
+}
+
+#[cfg(feature = "acme")]
+async fn respond_acme_http_01_challenge(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    store: &crate::acme::AcmeHttp01ChallengeStore,
+    route: &RuntimeRoute,
+) -> Result<()> {
+    let method = session.req_header().method.as_str();
+    if method != "GET" && method != "HEAD" {
+        session.respond_error(405).await?;
+        return Ok(());
+    }
+
+    let Some(token) = crate::acme::http_01_token_from_path(session.req_header().uri.path()) else {
+        session.respond_error(404).await?;
+        return Ok(());
+    };
+
+    let key_authorization = match store.load_key_authorization(token) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            session.respond_error(404).await?;
+            return Ok(());
+        }
+        Err(error) => {
+            log::error!("failed to load ACME HTTP-01 challenge token: {error}");
+            session
+                .respond_error_with_body(500, Bytes::from_static(b"internal server error"))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let body = Bytes::from(key_authorization);
+    let body_len = body.len();
+    let mut response = ResponseHeader::build(200, Some(5))?;
+    response.insert_header("content-type", "text/plain")?;
+    response.insert_header("cache-control", "no-store")?;
+    response.insert_header("content-length", body_len.to_string())?;
+    crate::headers::apply_response_policy(&mut response, &route.response_headers)?;
+
+    if method == "HEAD" {
+        ctx.response_body_bytes_seen = 0;
+        session
+            .write_response_header(Box::new(response), true)
+            .await?;
+    } else {
+        ctx.response_body_bytes_seen = body_len as u64;
+        session
+            .write_response_header(Box::new(response), false)
+            .await?;
+        session.write_response_body(Some(body), true).await?;
+    }
+
+    Ok(())
 }
 
 fn proxy_error_status(error: &Error) -> u16 {
@@ -2703,6 +2847,138 @@ mod tests {
         let proxy = FluxProxy::from_config(&config).unwrap();
 
         assert_eq!(proxy.route_host(Some("missing.example")), "two");
+    }
+
+    #[cfg(feature = "acme")]
+    #[test]
+    fn managed_acme_http_01_route_is_local_and_redirect_exempt() {
+        let config = Config {
+            tls: crate::config::TlsConfig {
+                enabled: true,
+                acme: crate::config::AcmeConfig {
+                    enabled: true,
+                    storage: Some(std::path::PathBuf::from("/var/lib/fluxheim/acme")),
+                    contact_email: Some("admin@example.test".to_owned()),
+                    challenge: crate::config::AcmeChallenge::Http01,
+                    ..crate::config::AcmeConfig::default()
+                },
+                ..crate::config::TlsConfig::default()
+            },
+            vhosts: vec![VhostConfig {
+                name: "example".to_owned(),
+                hosts: vec!["example.test".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig {
+                    enabled: true,
+                    acme: crate::config::VhostAcmeConfig {
+                        enabled: true,
+                        issuer: None,
+                        domains: Vec::new(),
+                    },
+                    ..crate::config::VhostTlsConfig::default()
+                },
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost = snapshot
+            .state
+            .vhost(snapshot.state.vhost_index(Some("example.test")));
+        let route_index = vhost
+            .route_index("/.well-known/acme-challenge/token_123")
+            .unwrap();
+        let route = vhost.route(route_index);
+
+        assert!(route.https_redirect_exempt);
+        assert!(matches!(
+            route.action,
+            super::RuntimeRouteAction::AcmeHttp01(_)
+        ));
+        assert_eq!(vhost.route_index("/other"), None);
+    }
+
+    #[cfg(feature = "acme")]
+    #[test]
+    fn managed_acme_http_01_route_covers_redirect_alias_vhost() {
+        let config = Config {
+            tls: crate::config::TlsConfig {
+                enabled: true,
+                acme: crate::config::AcmeConfig {
+                    enabled: true,
+                    storage: Some(std::path::PathBuf::from("/var/lib/fluxheim/acme")),
+                    contact_email: Some("admin@example.test".to_owned()),
+                    challenge: crate::config::AcmeChallenge::Http01,
+                    ..crate::config::AcmeConfig::default()
+                },
+                ..crate::config::TlsConfig::default()
+            },
+            vhosts: vec![
+                VhostConfig {
+                    name: "example".to_owned(),
+                    hosts: vec!["example.test".to_owned()],
+                    max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
+                    tls: crate::config::VhostTlsConfig {
+                        enabled: true,
+                        acme: crate::config::VhostAcmeConfig {
+                            enabled: true,
+                            issuer: None,
+                            domains: vec!["example.test".to_owned(), "www.example.test".to_owned()],
+                        },
+                        ..crate::config::VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+                VhostConfig {
+                    name: "example-www-redirect".to_owned(),
+                    hosts: vec!["www.example.test".to_owned()],
+                    max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig {
+                        enabled: true,
+                        to: Some("https://example.test{uri}".to_owned()),
+                        status: 308,
+                    },
+                    tls: crate::config::VhostTlsConfig::default(),
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+            ],
+            ..Config::default()
+        };
+
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost = snapshot
+            .state
+            .vhost(snapshot.state.vhost_index(Some("www.example.test")));
+        let route_index = vhost
+            .route_index("/.well-known/acme-challenge/token_123")
+            .unwrap();
+        let route = vhost.route(route_index);
+
+        assert!(route.https_redirect_exempt);
+        assert!(matches!(
+            route.action,
+            super::RuntimeRouteAction::AcmeHttp01(_)
+        ));
     }
 
     #[test]

@@ -81,7 +81,7 @@ key_path = "/etc/fluxheim/tls/key.pem"
 enabled = false
 storage = "/var/lib/fluxheim/acme"
 default_issuer = "letsencrypt"
-challenge = "tls-alpn-01"
+challenge = "http-01"
 
 [cache]
 enabled = true

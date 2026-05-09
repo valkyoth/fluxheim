@@ -1,0 +1,60 @@
+[server]
+listen = ["127.0.0.1:8080"]
+tls_listen = ["127.0.0.1:8443"]
+default_vhost = "intermediate.example.test"
+
+[server.https_redirect]
+enabled = true
+status = 308
+target_port = 8443
+
+[tls]
+enabled = true
+backend = "rustls"
+profile = "intermediate"
+min_protocol = "VersionTLS12"
+alpn = "http1-and-http2"
+curve_preferences = ["X25519", "CurveP256", "CurveP384"]
+cipher_suites = [
+  "TLS_AES_256_GCM_SHA384",
+  "TLS_CHACHA20_POLY1305_SHA256",
+  "TLS_AES_128_GCM_SHA256",
+  "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+  "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+  "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+  "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+  "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+  "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+]
+
+[[tls.certificates]]
+cert_path = "/etc/fluxheim/tls/intermediate.example.test/fullchain.pem"
+key_path = "/etc/fluxheim/tls/intermediate.example.test/privkey.pem"
+
+[headers.response]
+enabled = true
+x_content_type_options = "nosniff"
+x_frame_options = "DENY"
+referrer_policy = "no-referrer"
+remove = ["x-powered-by"]
+
+[headers.response.hsts]
+enabled = true
+max_age_secs = 63072000
+include_subdomains = false
+preload = false
+
+[[vhosts]]
+name = "intermediate.example.test"
+hosts = ["intermediate.example.test"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/intermediate.example.test/fullchain.pem"
+key_path = "/etc/fluxheim/tls/intermediate.example.test/privkey.pem"
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:3000"]
+upstream_tls = false

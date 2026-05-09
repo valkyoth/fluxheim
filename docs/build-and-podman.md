@@ -36,6 +36,13 @@ recommended backend.
 
 See [Feature Matrix](features.md) for the complete feature/profile list.
 
+Fluxheim's production RPM and published container images intentionally compile
+`profile-core,acme-client` for the `1.1.x` line. That keeps the normal gateway
+surface small while including the managed ACME issuer, renewal CLI, and
+background renewal service that operators expect from packaged builds. Custom
+source builds can still omit `acme-client` when certificate automation is not
+needed.
+
 For package scripts or custom CI that accept user-provided feature strings, run
 the feature preflight before invoking Cargo:
 
@@ -82,9 +89,11 @@ Optional backend-specific packages:
   `openssl-devel`, or the distro equivalent.
 - `tls-boringssl`: install `clang` and a `libclang` development/runtime package
   for bindgen. On SUSE/openSUSE systems where `libclang` is installed but the
-  `clang` frontend is not on `PATH`, the validation helper automatically passes
-  discovered clang and GCC include paths to bindgen; set `BINDGEN_EXTRA_CLANG_ARGS`
-  manually only if your distro uses non-standard include locations.
+  frontend is versioned, for example `clang-22`, the validation helper
+  automatically discovers the versioned compiler, `libclang`, and clang/GCC
+  include paths for bindgen. Set `CLANG_PATH`, `LIBCLANG_PATH`, or
+  `BINDGEN_EXTRA_CLANG_ARGS` manually only if your distro uses non-standard
+  locations.
 - `tls-s2n`: usually works with the default toolchain packages above, but keep
   `cmake` and `perl` installed.
 
@@ -143,6 +152,10 @@ Build the default Debian image:
 ```bash
 podman build -t fluxheim:dev -f Containerfile .
 ```
+
+By default, the bundled Containerfiles compile `profile-core,acme-client`.
+Override `FLUXHEIM_FEATURES` only when you intentionally want a smaller custom
+image.
 
 Build a specific runtime variant:
 
@@ -246,7 +259,7 @@ Required Docker Hub repository secrets:
 
 The workflow publishes variant-suffixed tags:
 
-- `v1.0.0-wolfi`, `v1.0.0-alpine`, `v1.0.0-suse-micro`, `v1.0.0-debian`
+- `v1.1.0-wolfi`, `v1.1.0-alpine`, `v1.1.0-suse-micro`, `v1.1.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
@@ -447,8 +460,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.0.0 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.0.0 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.1.0 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.1.0 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date

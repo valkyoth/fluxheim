@@ -9,6 +9,55 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+## 1.1.0 - TLS Policy And Certificate Operations
+
+Released: pending
+
+### Added
+
+- ACME-managed vhost certificate sources now derive safe on-disk certificate
+  paths and can satisfy the TLS listener fallback certificate requirement when
+  configured on `server.default_vhost`.
+- HTTP-01 challenge requests for ACME-managed vhosts can be served locally from
+  the managed ACME storage directory when `tls.acme.challenge = "http-01"`.
+- TLS-ALPN-01 challenge certificates can now be generated and served by the
+  rustls downstream listener when `tls.acme.challenge = "tls-alpn-01"`.
+- ACME EAB secret sources can now be loaded through a bounded, redacted,
+  zeroized helper for the runtime issuer client.
+- ACME-managed certificate files can now be installed through a guarded helper
+  that validates PEM shape, writes temporary files, rejects symlinked targets,
+  and preserves previous files on validation or staging failures.
+- ACME HTTP-01 challenge files can now be installed and removed through the
+  managed challenge store with token/value validation and symlink checks.
+- ACME account credentials are now stored under safe issuer-derived paths with
+  bounded JSON loading, owner-only writes on Unix, and symlink rejection.
+- `acme-client` adds live `instant-acme` account bootstrap plus HTTP-01 and
+  rustls TLS-ALPN-01 order/finalize support behind an explicit feature gate.
+- Google Trust Services production and staging are now built-in ACME issuers,
+  with separate default EAB environment variables for each environment.
+- Managed ACME certificate expiry is now observed from bounded, symlink-safe PEM
+  reads so Fluxheim can distinguish missing, due, and not-yet-due certificates.
+- `fluxheim acme-renew` runs due-only renewal once, while
+  `fluxheim acme-renew --all` forces every configured ACME vhost.
+- Builds with `acme-client` now register a background ACME renewal service for
+  configured ACME vhosts. It renews missing or due certificates on the
+  configured check interval and refreshes reloadable downstream SNI certificate
+  objects after successful renewal.
+- Downstream TLS listeners now have explicit policy config for named profiles,
+  minimum protocol version, ALPN selection, curve preferences, and cipher suite
+  allow-lists. `modern` now means TLS 1.3-only, while the default
+  `intermediate` profile preserves the 1.0 TLS 1.2+ / HTTP/1.1+HTTP/2
+  compatibility baseline with explicit AEAD ECDHE cipher policy.
+- Response HSTS can now be configured as structured policy with `max_age_secs`,
+  `include_subdomains`, and `preload` instead of requiring a raw header string.
+
+### Changed
+
+- `1.1.0` is now scoped as TLS policy and ACME certificate operations so normal
+  production deployments can avoid external certificate copy scripts.
+- Advanced provider-specific and zero-downtime certificate automation moved to
+  a later certificate milestone.
+
 ## 1.0.0 - Gateway Foundation
 
 Released: 2026-05-08
@@ -104,8 +153,8 @@ Released: 2026-05-06
   `latest-alpine`.
 - Roadmap now tracks a future declarative redirect and rewrite engine with
   match-action routing, loop detection, and safe URL handling.
-- Release ladder now focuses `1.1` on TLS policy hardening before operational
-  and load-balancing modules graduate.
+- Release ladder now focuses `1.1` on TLS policy and ACME certificate
+  operations before operational and load-balancing modules graduate.
 - Process runtime paths now default to `/run/fluxheim` instead of predictable
   files directly under `/tmp`.
 - Examples now prefer `upstreams = [...]`; the single `upstream` field remains

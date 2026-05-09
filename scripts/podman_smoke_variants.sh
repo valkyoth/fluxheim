@@ -2,7 +2,7 @@
 set -eu
 
 VARIANTS="${FLUXHEIM_CONTAINER_VARIANTS:-debian alpine wolfi suse-micro}"
-FEATURES="${FLUXHEIM_FEATURES:-default}"
+FEATURES="${FLUXHEIM_FEATURES:-profile-core,acme-client}"
 
 for variant in $VARIANTS; do
     case "$variant" in

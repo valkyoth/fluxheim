@@ -1,4 +1,4 @@
-%global fluxheim_features profile-core
+%global fluxheim_features profile-core,acme-client
 %global rust_min_version 1.95
 %bcond_without tests
 
@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.0.0
+Version:        1.1.0
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -15,12 +15,13 @@ URL:            https://github.com/valkyoth/fluxheim
 Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
 # Create with:
 #   cargo vendor vendor > /tmp/fluxheim-cargo-config.toml
-#   tar -czf fluxheim-1.0.0-vendor.tar.gz vendor
+#   tar -czf fluxheim-1.1.0-vendor.tar.gz vendor
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        fluxheim.tmpfiles
 Source3:        fluxheim.service
 Source4:        fluxheim.env
 Source5:        fluxheim.sysusers
+Source6:        actalis-eab.conf
 
 ExclusiveArch:  x86_64 aarch64
 
@@ -43,10 +44,9 @@ Requires(pre):   shadow-utils
 Requires:       ca-certificates
 
 %description
-Fluxheim is a modular Rust edge server built on Pingora. The 1.0 release is the
-gateway foundation for static website hosting, vhost routing, HTTP to HTTPS
-redirects, static TLS certificates with SNI, secure header policy, route-level
-proxy/static/redirect behavior, and native systemd deployment.
+Fluxheim is a modular Rust edge server built on Pingora. The 1.1 release builds
+on the stable gateway foundation with explicit TLS policy profiles and native
+ACME certificate operations for normal production deployments.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -80,9 +80,11 @@ install -Dm0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/fluxheim.conf
 install -Dm0644 %{SOURCE3} %{buildroot}%{_unitdir}/fluxheim.service
 install -Dm0644 %{SOURCE4} %{buildroot}%{_sysconfdir}/sysconfig/fluxheim
 install -Dm0644 %{SOURCE5} %{buildroot}%{_sysusersdir}/fluxheim.conf
+install -Dm0644 %{SOURCE6} %{buildroot}%{_docdir}/fluxheim/systemd/actalis-eab.conf
 
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/conf.d
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/tls
+install -d -m0700 %{buildroot}%{_sysconfdir}/fluxheim/secrets
 install -d -m0750 %{buildroot}%{_localstatedir}/lib/fluxheim
 install -d -m0750 %{buildroot}%{_localstatedir}/cache/fluxheim
 install -d -m0750 %{buildroot}%{_localstatedir}/log/fluxheim
@@ -119,7 +121,8 @@ fi
 
 %files
 %license LICENSE
-%doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_1.0.0.md docs examples
+%doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_1.1.0.md docs examples
+%{_docdir}/fluxheim/systemd/actalis-eab.conf
 %{_bindir}/fluxheim
 %{_tmpfilesdir}/fluxheim.conf
 %{_sysusersdir}/fluxheim.conf
@@ -127,6 +130,7 @@ fi
 %dir %{_sysconfdir}/fluxheim
 %dir %{_sysconfdir}/fluxheim/conf.d
 %dir %{_sysconfdir}/fluxheim/tls
+%dir %attr(0700,root,root) %{_sysconfdir}/fluxheim/secrets
 %config(noreplace) %{_sysconfdir}/fluxheim/fluxheim.toml
 %config(noreplace) %{_sysconfdir}/sysconfig/fluxheim
 %dir %attr(0750,fluxheim,fluxheim) %{_localstatedir}/lib/fluxheim
@@ -136,6 +140,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat May 09 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.1.0-1
+- TLS policy and ACME certificate operations release with modern/intermediate profiles and native renewal support.
+
 * Fri May 08 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.0.0-1
 - Stable gateway foundation release with vhosts, TLS/SNI, redirects, static sites, routes, and systemd/RPM packaging.
 

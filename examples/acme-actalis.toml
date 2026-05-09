@@ -1,0 +1,49 @@
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "actalis.example.test"
+
+[tls]
+enabled = true
+backend = "rustls"
+
+[tls.acme]
+enabled = true
+storage = "/var/lib/fluxheim/acme"
+contact_email = "admin@example.test"
+default_issuer = "actalis"
+challenge = "http-01"
+
+[tls.acme.renewal]
+enabled = true
+renew_before_secs = 2592000
+check_interval_secs = 3600
+retry_initial_secs = 300
+retry_max_secs = 86400
+reload_after_renewal = true
+zero_downtime_reload = true
+
+[[tls.acme.issuers]]
+name = "actalis"
+directory_url = "https://acme-api.actalis.com/acme/directory"
+
+[tls.acme.issuers.eab]
+key_id_file = "/run/credentials/fluxheim.service/actalis-eab-kid"
+hmac_key_file = "/run/credentials/fluxheim.service/actalis-eab-hmac-key"
+
+[[vhosts]]
+name = "actalis.example.test"
+hosts = ["actalis.example.test", "www.actalis.example.test"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.acme]
+enabled = true
+issuer = "actalis"
+domains = ["actalis.example.test", "www.actalis.example.test"]
+
+[vhosts.web]
+root = "/srv/sites/actalis.example.test/public"
+index_files = ["index.html"]
+deny_dotfiles = true
+cache_control = "public, max-age=300"

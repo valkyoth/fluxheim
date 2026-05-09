@@ -8,39 +8,32 @@ That plan treats `0.5.x` as the basic-sites preview and `1.0.0` as the first
 gateway-ready release for Fluxheim's representative real multi-site configs.
 Larger modules still graduate through later minor releases.
 
-## Current MVP Goal
+## Current Release Goal
 
-Fluxheim's `0.5.x` preview is a local/rootless-Podman friendly Pingora static
-web server and reverse proxy that can safely run small sites and simple origin
-frontends:
+Fluxheim `1.0.0` is the first gateway-ready baseline: static sites, SNI-backed
+TLS vhosts, route redirects, location-style proxying, websocket-safe proxy
+headers, directory listing, static aliases, cleartext ACME challenge
+exceptions, default HTTP service packaging, and native systemd deployment.
 
-- vhost routing with static web serving and single-upstream proxying;
-- cache module compiled by default but disabled unless configured;
-- static/bought-certificate TLS with rustls as the default backend;
-- strict header/body limits and basic secure header policy;
-- release checks, license checks, and rootless container packaging.
+The active `1.1.0` focus is TLS policy hardening plus ACME runtime issuance and
+renewal for Let's Encrypt and Actalis, so deployments do not depend on manual
+certificate copy scripts. The target surface is explicit safe TLS profiles,
+minimum protocol version controls, ALPN controls, backend validation, scanner
+gates, HTTP-01 issuance, Actalis EAB support, renewal scheduling, safe storage,
+and failure behavior that keeps the last valid certificate serving.
 
-The near-term focus is validating and hardening the `1.0.0` gateway migration
-surface now present in the codebase: SNI certificate selection, path/location
-routing, route redirects, websocket-safe proxying, per-route body limits and
-timeouts, custom upstream error pages, static aliases, directory listing,
-cleartext ACME challenge exceptions, safe dynamic request headers, and native
-systemd service support for manually compiled binaries. The 1.0 gate also needs
-property-based invariant tests for parser and policy code that handles
-attacker-controlled input. ACME runtime, advanced load balancing, admin
-snapshots, metrics, Sentinel Mesh/WireGuard,
-stale-while-revalidate, and persistent cache indexing remain important, but
-they should graduate after `1.0.0` according to the versioning plan.
+Advanced load balancing, admin snapshots, metrics, Sentinel Mesh/WireGuard,
+stale-while-revalidate, persistent cache indexing, and advanced certificate
+automation remain important, but they should graduate in later minor releases
+according to the versioning plan.
 In-process Linux seccomp/Landlock sandboxing is also post-`1.0` work: the
 stable `1.0` boundary is hardened systemd/container deployment, while
 kernel-enforced in-process sandboxing should remain an optional compile-time
 module until path and syscall policies are proven across native and container
 deployments.
 
-After `1.0`, the first dedicated minor release should focus on TLS policy:
-explicit safe profiles, minimum protocol version, ALPN controls, backend
-validation, and scanner-backed release gates. Operational/admin tooling then
-follows once the public TLS surface is configurable and tested.
+Operational and admin tooling follows once the public TLS and certificate
+lifecycle surface is configurable and tested.
 
 Future differentiating features should lean into infrastructure problems that
 are hard to solve safely with external glue: cluster-wide state, identity-aware
@@ -464,12 +457,17 @@ without parsing text fixtures for every module.
      certificate.
    - Config validation for downstream TLS listener prerequisites. Implemented:
      TLS listener addresses require `tls.enabled = true` and a global static
-     certificate.
+     certificate or a default-vhost static/ACME certificate source.
    - Per-vhost/SNI downstream certificate selection. Implemented for the
      default rustls backend and callback-capable TLS backends.
-   - ACME account/order/challenge runtime.
-   - Background renewal queue service.
+  - ACME account/order/challenge runtime. Implemented as one-shot and
+    background `acme-client` paths for HTTP-01.
+  - Background renewal queue service. Implemented for due-only checks on the
+    configured renewal interval.
+  - Runtime certificate adoption after renewal. Implemented for reloadable
+    downstream SNI resolvers/callbacks.
    - Atomic certificate install and rollback on invalid renewed certificates.
+     Implemented for the managed ACME install helper.
    - Runtime certificate/config reload with snapshot swapping for no downtime.
    - Reload impact classification. Implemented for snapshot-safe versus
      process-upgrade changes.
@@ -959,7 +957,27 @@ without parsing text fixtures for every module.
      strict parsing, no downgrade shortcuts, no legacy protocol fallback on
      modern listeners, and the same vhost/cache/admin isolation rules.
 
-16. **Future Optional Host Sandbox**
+16. **Future Advanced TLS Privacy And Post-Quantum Work**
+   - Track post-quantum hybrid key exchange as a dedicated TLS backend
+     milestone, not as a string-only config promise. The first target is
+     `X25519MLKEM768` once the default downstream TLS backend can enforce it
+     through a stable crypto provider.
+   - Evaluate ML-DSA/PQC certificate chain handling as part of certificate
+     parsing, storage, scan, and handshake-size testing. Larger certificate
+     chains must be tested against initial congestion window behavior and
+     mobile networks before being advertised as production-ready.
+   - Add Encrypted Client Hello only when the TLS backend, DNS publishing flow,
+     key rotation model, and operational docs are all in place. ECH changes
+     certificate/SNI visibility and needs explicit failure-mode tests.
+   - Track RFC 8879 TLS certificate compression separately from response
+     compression. Zstandard certificate compression is interesting for PQC
+     chain sizes, but it must be supported by the chosen TLS stack and tested
+     with real browsers before release.
+   - Do not build OCSP stapling unless a concrete modern deployment need
+     appears; ACME automation, short-lived certificates, and browser revocation
+     mechanisms are higher-priority.
+
+17. **Future Optional Host Sandbox**
    - Plan as an optional compile-time module after the `1.0` native systemd
      and container deployment boundaries are stable.
    - Planned feature flags:

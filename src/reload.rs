@@ -110,6 +110,13 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
         reasons.push(ReloadReason::TlsBackendChanged);
     }
 
+    if old.tls.profile != new.tls.profile
+        || old.tls.min_protocol != new.tls.min_protocol
+        || old.tls.alpn != new.tls.alpn
+    {
+        reasons.push(ReloadReason::TlsModeChanged);
+    }
+
     if old.admin != new.admin {
         reasons.push(ReloadReason::AdminServiceChanged);
     }
@@ -171,7 +178,7 @@ mod tests {
     use crate::config::{
         AdminConfig, Config, HttpsRedirectConfig, LoggingConfig, LoggingFileConfig, LoggingFormat,
         LoggingLevel, LoggingTarget, MetricsConfig, ProxyConfig, ServerConfig, ServerProcessConfig,
-        TlsBackend, TlsConfig, VhostConfig, WebConfig,
+        TlsBackend, TlsConfig, TlsPolicyProfile, VhostConfig, WebConfig,
     };
 
     use super::{ReloadImpact, ReloadReason, classify_reload};
@@ -434,6 +441,25 @@ mod tests {
             classify_reload(&old, &new),
             ReloadImpact::ProcessUpgrade {
                 reasons: vec![ReloadReason::TlsBackendChanged]
+            }
+        );
+    }
+
+    #[test]
+    fn tls_policy_change_requires_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            tls: TlsConfig {
+                profile: TlsPolicyProfile::Modern,
+                ..TlsConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::TlsModeChanged]
             }
         );
     }

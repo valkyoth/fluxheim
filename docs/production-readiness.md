@@ -1,7 +1,7 @@
 # Production Readiness
 
-Fluxheim is still pre-`1.0`. This page states what the current preview release
-is intended to support, what the first stable gateway release must support, and
+Fluxheim has a stable `1.0` gateway foundation release. This page states what
+the released line supports, what the next production milestone must add, and
 what operators should verify before using a build beyond local testing.
 
 ## 0.5 Basic-Sites Preview
@@ -24,10 +24,10 @@ The `0.5.x` line is intentionally limited:
   dependency advisories, core feature profiles, SBOM generation, reproducible
   build evidence, and localhost smoke checks.
 
-## Stable 1.0 Target
+## Stable 1.0 Gateway Foundation
 
-The `1.0` line should be the first gateway-ready release for representative
-real multi-site configs. In addition to the `0.5.x` behavior, it must support:
+The `1.0` line is the first gateway-ready release for representative real
+multi-site configs. In addition to the `0.5.x` behavior, it supports:
 
 - static TLS with one default certificate;
 - SNI certificate selection across multiple configured certificates in the
@@ -82,6 +82,28 @@ not part of the `1.0` stable support promise:
 
 Treat these as design or incubator work until a later versioning-plan milestone
 promotes them.
+
+## 1.1 Production Target
+
+The `1.1` line should make TLS and certificate operations practical for normal
+production deployments:
+
+- explicit safe TLS policy profiles;
+- minimum TLS version config bounded to safe values;
+- ALPN policy, curve preferences, cipher-suite allow-lists, and per-backend TLS
+  validation;
+- structured HSTS policy;
+- ACME runtime issuance for Let's Encrypt, Actalis, and Google Trust Services;
+- HTTP-01 and rustls TLS-ALPN-01 challenge handling for configured vhosts;
+- Actalis and Google Trust Services External Account Binding support;
+- safe ACME storage and key/certificate permission validation;
+- renewal scheduling with a configurable renew-before window;
+- renewal failure behavior that keeps the previous valid certificate serving.
+
+DNS-01, wildcard automation, Cloudflare Origin CA automation, external secret
+store deploy hooks, and full zero-downtime reload through the later snapshot
+model are not part of the first `1.1` promise unless they are explicitly
+promoted with tests and release evidence.
 
 ## Operator Checks
 

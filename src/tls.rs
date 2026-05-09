@@ -8,6 +8,11 @@ use crate::config::{AcmeConfig, Config, StaticCertificateConfig, normalize_host}
 pub const PRIVATE_KEY_MODE: u32 = 0o600;
 pub const ACME_STORAGE_MODE: u32 = 0o700;
 
+#[cfg(feature = "tls-rustls")]
+pub fn install_rustls_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TlsStorageCheck {
     pub issues: Vec<TlsStorageIssue>,
@@ -292,12 +297,13 @@ pub fn recommended_acme_storage_mode() -> u32 {
     ACME_STORAGE_MODE
 }
 
-pub fn default_downstream_certificate(config: &Config) -> Option<&StaticCertificateConfig> {
+pub fn default_downstream_certificate(config: &Config) -> Option<StaticCertificateConfig> {
     config
         .tls
         .certificates
         .first()
-        .or_else(|| default_vhost_static_certificate(config))
+        .cloned()
+        .or_else(|| default_vhost_certificate_source(config))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -310,7 +316,7 @@ pub struct DownstreamCertificateSelector {
 
 impl DownstreamCertificateSelector {
     pub fn from_config(config: &Config) -> Option<Self> {
-        let default = default_downstream_certificate(config)?.clone();
+        let default = default_downstream_certificate(config)?;
         let mut selector = Self {
             certificates: vec![default],
             default_index: 0,
@@ -322,16 +328,16 @@ impl DownstreamCertificateSelector {
             if !vhost.tls.enabled {
                 continue;
             }
-            let Some(certificate) = &vhost.tls.certificate else {
+            let Some(certificate) = vhost_certificate_source(config, vhost) else {
                 continue;
             };
             let certificate_index = selector
                 .certificates
                 .iter()
-                .position(|existing| existing == certificate)
+                .position(|existing| existing == &certificate)
                 .unwrap_or_else(|| {
                     let index = selector.certificates.len();
-                    selector.certificates.push(certificate.clone());
+                    selector.certificates.push(certificate);
                     index
                 });
 
@@ -383,13 +389,49 @@ impl DownstreamCertificateSelector {
     }
 }
 
-fn default_vhost_static_certificate(config: &Config) -> Option<&StaticCertificateConfig> {
+fn default_vhost_certificate_source(config: &Config) -> Option<StaticCertificateConfig> {
     let default_vhost = config.server.default_vhost.as_ref()?;
     config
         .vhosts
         .iter()
         .find(|vhost| &vhost.name == default_vhost && vhost.tls.enabled)
-        .and_then(|vhost| vhost.tls.certificate.as_ref())
+        .and_then(|vhost| vhost_certificate_source(config, vhost))
+}
+
+fn vhost_certificate_source(
+    config: &Config,
+    vhost: &crate::config::VhostConfig,
+) -> Option<StaticCertificateConfig> {
+    vhost
+        .tls
+        .certificate
+        .clone()
+        .or_else(|| managed_acme_certificate_source(config, vhost))
+}
+
+#[cfg(feature = "acme")]
+fn managed_acme_certificate_source(
+    config: &Config,
+    vhost: &crate::config::VhostConfig,
+) -> Option<StaticCertificateConfig> {
+    if !config.tls.acme.enabled || !vhost.tls.acme.enabled {
+        return None;
+    }
+
+    let storage = config.tls.acme.storage.as_ref()?;
+    let paths = crate::acme::managed_certificate_paths(storage, &vhost.name);
+    Some(StaticCertificateConfig {
+        cert_path: paths.cert_path,
+        key_path: paths.key_path,
+    })
+}
+
+#[cfg(not(feature = "acme"))]
+fn managed_acme_certificate_source(
+    _config: &Config,
+    _vhost: &crate::config::VhostConfig,
+) -> Option<StaticCertificateConfig> {
+    None
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1282,6 +1324,91 @@ mod tests {
         assert_eq!(
             selector.certificate_for_sni(Some("other.example.test")),
             &other_cert
+        );
+    }
+
+    #[cfg(feature = "acme")]
+    #[test]
+    fn downstream_certificate_selector_uses_managed_acme_certificate_paths() {
+        let storage = PathBuf::from("/var/lib/fluxheim/acme");
+        let config = Config {
+            server: ServerConfig {
+                default_vhost: Some("default".to_owned()),
+                ..ServerConfig::default()
+            },
+            tls: TlsConfig {
+                enabled: true,
+                acme: AcmeConfig {
+                    enabled: true,
+                    storage: Some(storage.clone()),
+                    ..AcmeConfig::default()
+                },
+                ..TlsConfig::default()
+            },
+            vhosts: vec![
+                VhostConfig {
+                    name: "default".to_owned(),
+                    hosts: vec!["default.example.test".to_owned()],
+                    max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
+                    tls: VhostTlsConfig {
+                        enabled: true,
+                        acme: crate::config::VhostAcmeConfig {
+                            enabled: true,
+                            issuer: None,
+                            domains: Vec::new(),
+                        },
+                        ..VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+                VhostConfig {
+                    name: "other".to_owned(),
+                    hosts: vec!["other.example.test".to_owned()],
+                    max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
+                    tls: VhostTlsConfig {
+                        enabled: true,
+                        acme: crate::config::VhostAcmeConfig {
+                            enabled: true,
+                            issuer: None,
+                            domains: Vec::new(),
+                        },
+                        ..VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+            ],
+            ..Config::default()
+        };
+
+        let selector = DownstreamCertificateSelector::from_config(&config).unwrap();
+        let default_paths = crate::acme::managed_certificate_paths(&storage, "default");
+        let other_paths = crate::acme::managed_certificate_paths(&storage, "other");
+
+        assert_eq!(
+            selector.certificate_for_sni(None),
+            &StaticCertificateConfig {
+                cert_path: default_paths.cert_path,
+                key_path: default_paths.key_path,
+            }
+        );
+        assert_eq!(
+            selector.certificate_for_sni(Some("other.example.test")),
+            &StaticCertificateConfig {
+                cert_path: other_paths.cert_path,
+                key_path: other_paths.key_path,
+            }
         );
     }
 

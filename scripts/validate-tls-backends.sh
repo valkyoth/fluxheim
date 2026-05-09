@@ -23,33 +23,91 @@ run_tls_backend() {
     echo "tls backend: $cargo_action --no-default-features --features $features"
     if [ "$backend" = "tls-boringssl" ]; then
         extra_args="$(bindgen_extra_clang_args)"
-        if [ -n "$extra_args" ]; then
-            BINDGEN_EXTRA_CLANG_ARGS="$extra_args" cargo $cargo_action --no-default-features --features "$features"
-        else
+        clang_path="$(resolve_clang_path || true)"
+        libclang_path="$(resolve_libclang_path || true)"
+        if [ -z "$clang_path" ] && [ -z "$libclang_path" ] && [ -z "$extra_args" ]; then
             cargo $cargo_action --no-default-features --features "$features"
+        else
+            (
+                if [ -n "$clang_path" ]; then
+                    export CLANG_PATH="$clang_path"
+                fi
+                if [ -n "$libclang_path" ]; then
+                    export LIBCLANG_PATH="$libclang_path"
+                fi
+                if [ -n "$extra_args" ]; then
+                    export BINDGEN_EXTRA_CLANG_ARGS="$extra_args"
+                fi
+                cargo $cargo_action --no-default-features --features "$features"
+            )
         fi
     else
         cargo $cargo_action --no-default-features --features "$features"
     fi
 }
 
-has_libclang() {
-    if [ -n "${LIBCLANG_PATH:-}" ]; then
+has_command() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+resolve_clang_path() {
+    if [ -n "${CLANG_PATH:-}" ]; then
+        printf '%s\n' "$CLANG_PATH"
+        return 0
+    fi
+    if has_command clang; then
+        command -v clang
         return 0
     fi
 
-    for candidate in \
-        /usr/lib*/libclang*.so* \
-        /usr/lib/*/libclang*.so* \
-        /usr/lib*/llvm*/lib/libclang*.so* \
-        /usr/lib/llvm*/lib/libclang*.so*
-    do
-        if [ -e "$candidate" ]; then
+    for candidate in clang-22 clang-21 clang-20 clang-19 clang-18 clang-17 clang-16 clang-15 clang-14 clang-13; do
+        if has_command "$candidate"; then
+            command -v "$candidate"
             return 0
         fi
     done
 
     return 1
+}
+
+resolve_libclang_path() {
+    if [ -n "${LIBCLANG_PATH:-}" ]; then
+        printf '%s\n' "$LIBCLANG_PATH"
+        return 0
+    fi
+
+    for candidate in \
+        /usr/lib*/libclang.so* \
+        /usr/lib/*/libclang.so* \
+        /usr/lib*/llvm*/lib/libclang.so* \
+        /usr/lib/llvm*/lib/libclang.so*
+    do
+        if [ -e "$candidate" ]; then
+            dirname "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+has_libclang() {
+    resolve_libclang_path >/dev/null 2>&1
+}
+
+has_bindgen_toolchain() {
+    if [ "${FLUXHEIM_REQUIRE_BORINGSSL:-0}" = "1" ]; then
+        return 0
+    fi
+
+    if [ -n "${BINDGEN_EXTRA_CLANG_ARGS:-}" ]; then
+        return 0
+    fi
+
+    has_libclang || return 1
+    resolve_clang_path >/dev/null 2>&1 || return 1
+
+    return 0
 }
 
 bindgen_extra_clang_args() {
@@ -87,12 +145,12 @@ run_tls_backend tls-rustls
 run_tls_backend tls-openssl
 run_tls_backend tls-s2n
 
-if has_libclang; then
+if has_bindgen_toolchain; then
     run_tls_backend tls-boringssl
 elif [ "${FLUXHEIM_REQUIRE_BORINGSSL:-0}" = "1" ]; then
-    echo "tls backend: tls-boringssl requires libclang for bindgen; set LIBCLANG_PATH or install libclang" >&2
+    echo "tls backend: tls-boringssl requires a complete bindgen toolchain; set LIBCLANG_PATH/BINDGEN_EXTRA_CLANG_ARGS or install clang/libclang" >&2
     exit 1
 else
-    echo "tls backend: skipping tls-boringssl because libclang is not available"
+    echo "tls backend: skipping tls-boringssl because a complete bindgen toolchain is not available"
     echo "tls backend: set FLUXHEIM_REQUIRE_BORINGSSL=1 to make this a hard failure"
 fi

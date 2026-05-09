@@ -14,7 +14,7 @@ COPY vendor ./vendor
 COPY src ./src
 COPY scripts/validate-features.sh ./scripts/validate-features.sh
 
-ARG FLUXHEIM_FEATURES=default
+ARG FLUXHEIM_FEATURES=profile-core,acme-client
 RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
         cargo build --locked --release; \
     else \

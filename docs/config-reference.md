@@ -307,15 +307,22 @@ Security headers are easy to enable globally:
 
 ```toml
 [headers.response]
-strict_transport_security = "max-age=31536000; includeSubDomains"
 content_security_policy = "default-src 'self'"
 x_content_type_options = "nosniff"
 x_frame_options = "DENY"
 referrer_policy = "no-referrer"
+
+[headers.response.hsts]
+enabled = true
+max_age_secs = 63072000
+include_subdomains = false
+preload = false
 ```
 
-HSTS and CSP are intentionally not enabled blindly in examples because they are
-site-specific and can break local HTTP testing or asset policies.
+You may still set `headers.response.strict_transport_security` directly as a raw
+header value, but do not combine it with `[headers.response.hsts]` in the same
+policy. HSTS and CSP are intentionally not enabled blindly in examples because
+they are site-specific and can break local HTTP testing or asset policies.
 
 Fluxheim sets `Server: fluxheim` and strips `X-Powered-By` by default. Operators
 who do not want a server banner can remove it with `remove = ["server"]`, and
@@ -458,6 +465,21 @@ Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 [tls]
 enabled = false
 backend = "rustls"
+profile = "intermediate"
+min_protocol = "tls1.2"
+alpn = "http1-and-http2"
+curve_preferences = ["X25519", "CurveP256", "CurveP384"]
+cipher_suites = [
+  "TLS_AES_256_GCM_SHA384",
+  "TLS_CHACHA20_POLY1305_SHA256",
+  "TLS_AES_128_GCM_SHA256",
+  "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+  "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+  "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+  "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+  "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+  "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+]
 
 [[tls.certificates]]
 cert_path = "tls/fullchain.pem"
@@ -469,6 +491,44 @@ TLS backend values: `rustls`, `openssl`, `boringssl`, `s2n`.
 Exactly one matching TLS compile-time feature should be selected:
 `tls-rustls`, `tls-openssl`, `tls-boringssl`, or `tls-s2n`. The default build
 uses `tls-rustls`.
+
+TLS policy values:
+
+- `profile = "modern"`: Mozilla-style modern baseline. It requires TLS 1.3 and
+  allows only TLS 1.3 cipher suites.
+- `profile = "intermediate"`: the default production compatibility baseline. It
+  requires TLS 1.2 or newer and uses the common AEAD ECDHE TLS 1.2 suites plus
+  TLS 1.3 suites.
+- `profile = "compat"`: keeps the TLS 1.2-or-newer baseline explicit for sites
+  that prioritize client compatibility. It currently maps to the same safe
+  baseline as `intermediate`; older protocol support is not planned for normal
+  listeners.
+
+See [examples/tls-modern.toml](../examples/tls-modern.toml) and
+[examples/tls-intermediate.toml](../examples/tls-intermediate.toml) for
+complete checked examples.
+
+`min_protocol` may be set to `tls1.2` or `tls1.3`; `VersionTLS12` and
+`VersionTLS13` are accepted as compatibility aliases for operators migrating
+from router-style TLS option files. `modern` rejects `min_protocol = "tls1.2"`
+so the named modern policy cannot be weakened by accident. `alpn` may be
+`http1`, `http2`, or `http1-and-http2`. The default is `http1-and-http2`,
+matching the 1.0 listener behavior.
+
+The rustls and OpenSSL backends enforce the configured minimum protocol, ALPN
+policy, curve preferences, and cipher suite allow-list. BoringSSL enforces
+minimum protocol, ALPN, curve preferences, and TLS 1.2 cipher allow-lists; its
+Rust API does not currently expose TLS 1.3 cipher-suite allow-lists, so explicit
+TLS 1.3 `cipher_suites` are rejected for that backend. The s2n backend
+currently accepts only Fluxheim's default TLS 1.2+ / HTTP/1.1+HTTP/2 listener
+policy because the project does not yet expose the needed s2n listener controls.
+
+Supported curve names are `X25519`, `CurveP256`, and `CurveP384`.
+`X25519MLKEM768` is accepted by the config schema for future post-quantum
+hybrid key exchange support, but the default rustls/ring backend rejects it
+until Fluxheim offers a rustls crypto provider with post-quantum groups. OpenSSL
+and BoringSSL pass configured group names to the TLS library; runtime startup
+fails if the installed library does not support a configured group.
 
 The first global `[[tls.certificates]]` entry is the default downstream
 certificate. Vhosts may provide their own static certificate for SNI selection:
@@ -489,11 +549,8 @@ backends use their native certificate callback APIs. TLS backends without SNI
 certificate selection support reject vhost-specific certificates at startup
 instead of silently serving the default certificate.
 
-Fluxheim does not expose user-configurable TLS cipher-suite or protocol-version
-settings yet. Downstream TLS listeners currently use the selected Pingora TLS
-backend defaults. Release validation must scan those defaults with a TLS scanner
-before publishing a stable release. Explicit named TLS policy profiles and
-optional cipher allow-lists are planned for a later stable release.
+Release validation must still scan every release candidate with a TLS scanner
+before publishing a stable release.
 
 Check certificate storage permissions separately:
 
@@ -513,8 +570,26 @@ files are checked with the same owner-only permission rule as private keys.
 
 ## ACME
 
-ACME config parsing and renewal planning exist, but automated issuance/runtime
-challenge handling is not considered release-ready yet.
+ACME config parsing, renewal planning, managed certificate storage paths, local
+HTTP-01 challenge serving, and the local renewal execution contract exist.
+Builds with `acme-client` can load or create issuer accounts and complete
+HTTP-01 or rustls TLS-ALPN-01 orders through `instant-acme`. The runtime also
+registers a background renewal service for configured ACME vhosts when
+`acme-client` is compiled in.
+The service observes managed certificate expiry and renews missing or due
+certificates on the configured check interval. After successful renewal,
+Fluxheim reloads downstream SNI certificate objects so new handshakes can use
+the renewed files without a restart when the selected TLS backend exposes a
+reloadable resolver or callback.
+
+You can also invoke the renewal command explicitly:
+
+```bash
+fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
+```
+
+By default the command renews missing or due certificates only. `--all` attempts
+every configured ACME vhost.
 
 ```toml
 [tls.acme]
@@ -522,7 +597,7 @@ enabled = false
 storage = "/var/lib/fluxheim/acme"
 contact_email = "admin@example.test"
 default_issuer = "letsencrypt"
-challenge = "tls-alpn-01"
+challenge = "http-01"
 
 [tls.acme.renewal]
 enabled = true
@@ -535,9 +610,122 @@ reload_after_renewal = true
 zero_downtime_reload = true
 ```
 
-Built-in issuer names include `letsencrypt`, `letsencrypt-staging`, and
-`actalis`. Actalis EAB secret sources are configured through environment
-variables or files.
+Managed ACME supports `http-01` and, with the default rustls backend,
+`tls-alpn-01`. HTTP-01 is easiest to operate when port 80 is reachable.
+TLS-ALPN-01 is useful when port 443 is reachable and Fluxheim owns the TLS
+listener; it requires `server.tls_listen`, `tls.backend = "rustls"`, and an
+ACME-managed or static fallback certificate for the listener. DNS-01 remains
+future work because provider integrations need explicit secret handling and
+record-cleanup behavior.
+See [examples/acme-http-01.toml](../examples/acme-http-01.toml) for a minimal
+HTTP-01 managed-certificate config that can be used for first issuance before
+enabling a public HTTPS listener. See
+[examples/acme-actalis.toml](../examples/acme-actalis.toml) for the same flow
+with file-backed External Account Binding secrets.
+
+Built-in issuer names include `letsencrypt`, `letsencrypt-staging`,
+`actalis`, `google-trust-services`, and `google-trust-services-staging`.
+Actalis and Google Trust Services require External Account Binding. Their EAB
+secret sources are configured through environment variables or files.
+File-backed secrets are preferred for production because they work with systemd
+credentials, Docker/Podman secrets, and Kubernetes secret volumes without
+exposing values in process environments or container metadata.
+
+Example with systemd credentials:
+
+```toml
+[[tls.acme.issuers]]
+name = "actalis"
+directory_url = "https://acme-api.actalis.com/acme/directory"
+
+[tls.acme.issuers.eab]
+key_id_file = "/run/credentials/fluxheim.service/actalis-eab-kid"
+hmac_key_file = "/run/credentials/fluxheim.service/actalis-eab-hmac-key"
+```
+
+Example with container secrets:
+
+```toml
+[[tls.acme.issuers]]
+name = "actalis"
+directory_url = "https://acme-api.actalis.com/acme/directory"
+
+[tls.acme.issuers.eab]
+key_id_file = "/run/secrets/actalis-eab-kid"
+hmac_key_file = "/run/secrets/actalis-eab-hmac-key"
+```
+
+Google Trust Services production uses
+`https://dv.acme-v02.api.pki.goog/directory`; staging uses
+`https://dv.acme-v02.test-api.pki.goog/directory`. Fluxheim provides separate
+built-in issuer names and default environment variables because Google EAB
+secrets are single-use and environment-specific:
+
+```toml
+[tls.acme]
+default_issuer = "google-trust-services"
+
+# Production defaults:
+# FLUXHEIM_GTS_EAB_KID
+# FLUXHEIM_GTS_EAB_HMAC_KEY
+#
+# Staging defaults:
+# FLUXHEIM_GTS_STAGING_EAB_KID
+# FLUXHEIM_GTS_STAGING_EAB_HMAC_KEY
+```
+
+EAB secret files are validated as sensitive files by
+`fluxheim --check-tls-storage`: they must be regular files, must not be
+symlinks, must not sit below symlinked or world-writable parent directories, and
+should be readable only by the Fluxheim process owner.
+
+When `[vhosts.tls.acme]` is enabled, Fluxheim derives managed certificate files
+below `tls.acme.storage` using a sanitized and hashed vhost directory:
+
+```text
+<storage>/certificates/<safe-vhost-segment>/fullchain.pem
+<storage>/certificates/<safe-vhost-segment>/privkey.pem
+```
+
+The exact directory segment is intentionally generated by Fluxheim rather than
+accepted from config, so vhost names cannot create path traversal or hidden
+filesystem locations.
+
+ACME account credentials are stored under the same storage root with a sanitized
+and hashed issuer directory:
+
+```text
+<storage>/accounts/<safe-issuer-segment>/credentials.json
+```
+
+These files contain account private key material. Fluxheim writes them with
+owner-only permissions on Unix, bounds their size, parses them as JSON, and
+rejects symlinked credential files.
+
+When `tls.acme.challenge = "http-01"` and `[vhosts.tls.acme]` is enabled,
+Fluxheim automatically serves `/.well-known/acme-challenge/<token>` for that
+vhost from:
+
+```text
+<storage>/http-01/<safe-vhost-segment>/<token>
+```
+
+Challenge tokens are restricted to one URL-safe path segment, challenge files
+must be regular files, and oversized or control-character-containing responses
+are rejected. If `[vhosts.acme_challenge]` is enabled, the explicit forwarding
+helper takes precedence instead of the local managed challenge store.
+
+When `tls.acme.challenge = "tls-alpn-01"` and `[vhosts.tls.acme]` is enabled,
+Fluxheim generates temporary ACME challenge certificates below:
+
+```text
+<storage>/tls-alpn-01/<safe-domain-segment>/fullchain.pem
+<storage>/tls-alpn-01/<safe-domain-segment>/privkey.pem
+```
+
+These certificates are served only for TLS handshakes that offer the
+`acme-tls/1` ALPN protocol. Normal browser and proxy traffic continues to use
+the configured static or ACME-managed vhost certificate selected by SNI.
 
 ## Vhosts
 

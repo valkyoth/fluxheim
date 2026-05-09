@@ -61,7 +61,7 @@ enabled = false
 # storage = "/var/lib/fluxheim/acme"
 # contact_email = "admin@example.test"
 default_issuer = "letsencrypt"
-challenge = "tls-alpn-01"
+challenge = "http-01"
 
 [tls.acme.renewal]
 enabled = true

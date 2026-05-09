@@ -1,0 +1,41 @@
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "site.example.test"
+
+[tls]
+enabled = true
+backend = "rustls"
+
+[tls.acme]
+enabled = true
+storage = "/var/lib/fluxheim/acme"
+contact_email = "admin@example.test"
+default_issuer = "letsencrypt-staging"
+challenge = "http-01"
+
+[tls.acme.renewal]
+enabled = true
+renew_before_secs = 2592000
+check_interval_secs = 3600
+retry_initial_secs = 300
+retry_max_secs = 86400
+reload_after_renewal = true
+zero_downtime_reload = true
+
+[[vhosts]]
+name = "site.example.test"
+hosts = ["site.example.test", "www.site.example.test"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.acme]
+enabled = true
+issuer = "letsencrypt-staging"
+domains = ["site.example.test", "www.site.example.test"]
+
+[vhosts.web]
+root = "/srv/sites/site.example.test/public"
+index_files = ["index.html"]
+deny_dotfiles = true
+cache_control = "public, max-age=300"

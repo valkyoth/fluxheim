@@ -140,7 +140,7 @@ impl Config {
             self.headers = headers;
         }
         if let Some(tls) = fragment.tls {
-            self.tls = tls;
+            self.tls.merge(tls);
         }
         if let Some(proxy) = fragment.proxy {
             self.proxy = proxy;
@@ -161,11 +161,32 @@ impl Config {
         self.logging.validate()?;
         self.headers.validate()?;
         self.tls.validate()?;
+        self.validate_acme_challenge_runtime()?;
         self.validate_tls_listeners()?;
         self.proxy.validate()?;
         self.cache.validate("cache")?;
         self.web.validate()?;
         self.validate_vhosts()?;
+        Ok(())
+    }
+
+    fn validate_acme_challenge_runtime(&self) -> Result<(), ConfigError> {
+        if !self.tls.acme.enabled || self.tls.acme.challenge != AcmeChallenge::TlsAlpn01 {
+            return Ok(());
+        }
+        if self.tls.backend != TlsBackend::Rustls {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.acme.challenge",
+                reason: "tls-alpn-01 managed ACME is currently supported only by the rustls backend",
+            });
+        }
+        if self.server.tls_listen.is_empty() {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.acme.challenge",
+                reason: "tls-alpn-01 managed ACME requires at least one server.tls_listen address",
+            });
+        }
+
         Ok(())
     }
 
@@ -193,8 +214,20 @@ impl Config {
         };
 
         self.vhosts.iter().any(|vhost| {
-            &vhost.name == default_vhost && vhost.tls.enabled && vhost.tls.certificate.is_some()
+            &vhost.name == default_vhost
+                && vhost.tls.enabled
+                && (vhost.tls.certificate.is_some() || self.vhost_has_managed_acme_source(vhost))
         })
+    }
+
+    #[cfg(feature = "acme")]
+    fn vhost_has_managed_acme_source(&self, vhost: &VhostConfig) -> bool {
+        self.tls.acme.enabled && self.tls.acme.storage.is_some() && vhost.tls.acme.enabled
+    }
+
+    #[cfg(not(feature = "acme"))]
+    fn vhost_has_managed_acme_source(&self, _vhost: &VhostConfig) -> bool {
+        false
     }
 
     fn validate_vhosts(&self) -> Result<(), ConfigError> {
@@ -253,7 +286,7 @@ struct ConfigFragment {
     #[serde(default)]
     headers: Option<HeaderPolicyConfig>,
     #[serde(default)]
-    tls: Option<TlsConfig>,
+    tls: Option<TlsConfigFragment>,
     #[serde(default)]
     proxy: Option<ProxyConfig>,
     #[serde(default)]
@@ -1135,6 +1168,8 @@ pub struct ResponseHeaderPolicyConfig {
     #[serde(default)]
     pub strict_transport_security: Option<String>,
     #[serde(default)]
+    pub hsts: Option<ResponseHstsConfig>,
+    #[serde(default)]
     pub content_security_policy: Option<String>,
     #[serde(default = "default_x_content_type_options")]
     pub x_content_type_options: Option<String>,
@@ -1161,6 +1196,7 @@ impl Default for ResponseHeaderPolicyConfig {
         Self {
             enabled: true,
             strict_transport_security: None,
+            hsts: None,
             content_security_policy: None,
             x_content_type_options: default_x_content_type_options(),
             x_frame_options: default_x_frame_options(),
@@ -1181,6 +1217,14 @@ impl ResponseHeaderPolicyConfig {
             "headers.response.strict_transport_security",
             self.strict_transport_security.as_deref(),
         )?;
+        if self.strict_transport_security.is_some() && self.hsts.is_some() {
+            return Err(ConfigError::InvalidResponseHeaderValue {
+                field: "headers.response.hsts",
+            });
+        }
+        if let Some(hsts) = &self.hsts {
+            hsts.validate("headers.response.hsts")?;
+        }
         validate_optional_header_value(
             "headers.response.content_security_policy",
             self.content_security_policy.as_deref(),
@@ -1225,6 +1269,9 @@ impl ResponseHeaderPolicyConfig {
         if let Some(value) = &overlay.strict_transport_security {
             self.strict_transport_security = value.clone();
         }
+        if let Some(value) = &overlay.hsts {
+            self.hsts = value.clone();
+        }
         if let Some(value) = &overlay.content_security_policy {
             self.content_security_policy = value.clone();
         }
@@ -1248,6 +1295,53 @@ impl ResponseHeaderPolicyConfig {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseHstsConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_hsts_max_age_secs")]
+    pub max_age_secs: u64,
+    #[serde(default)]
+    pub include_subdomains: bool,
+    #[serde(default)]
+    pub preload: bool,
+}
+
+impl Default for ResponseHstsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_age_secs: default_hsts_max_age_secs(),
+            include_subdomains: false,
+            preload: false,
+        }
+    }
+}
+
+impl ResponseHstsConfig {
+    fn validate(&self, field: &'static str) -> Result<(), ConfigError> {
+        if self.enabled && self.max_age_secs == 0 {
+            return Err(ConfigError::InvalidResponseHeaderValue { field });
+        }
+        Ok(())
+    }
+
+    pub fn header_value(&self) -> Option<String> {
+        if !self.enabled {
+            return None;
+        }
+        let mut value = format!("max-age={}", self.max_age_secs);
+        if self.include_subdomains {
+            value.push_str("; includeSubDomains");
+        }
+        if self.preload {
+            value.push_str("; preload");
+        }
+        Some(value)
+    }
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResponseHeaderPolicyOverlayConfig {
@@ -1255,6 +1349,8 @@ pub struct ResponseHeaderPolicyOverlayConfig {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub strict_transport_security: Option<Option<String>>,
+    #[serde(default)]
+    pub hsts: Option<Option<ResponseHstsConfig>>,
     #[serde(default)]
     pub content_security_policy: Option<Option<String>>,
     #[serde(default)]
@@ -1285,6 +1381,14 @@ impl ResponseHeaderPolicyOverlayConfig {
                 .as_ref()
                 .and_then(Option::as_deref),
         )?;
+        if self.strict_transport_security.is_some() && self.hsts.is_some() {
+            return Err(ConfigError::InvalidResponseHeaderValue {
+                field: "vhosts.headers.response.hsts",
+            });
+        }
+        if let Some(Some(hsts)) = &self.hsts {
+            hsts.validate("vhosts.headers.response.hsts")?;
+        }
         validate_optional_header_value(
             "vhosts.headers.response.content_security_policy",
             self.content_security_policy
@@ -1526,24 +1630,159 @@ pub struct TlsConfig {
     #[serde(default)]
     pub backend: TlsBackend,
     #[serde(default)]
+    pub profile: TlsPolicyProfile,
+    #[serde(default)]
+    pub min_protocol: Option<TlsProtocolVersion>,
+    #[serde(default)]
+    pub alpn: TlsAlpnPolicy,
+    #[serde(default)]
+    pub curve_preferences: Vec<TlsCurvePreference>,
+    #[serde(default)]
+    pub cipher_suites: Vec<TlsCipherSuite>,
+    #[serde(default)]
     pub certificates: Vec<StaticCertificateConfig>,
     #[serde(default)]
     pub acme: AcmeConfig,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TlsConfigFragment {
+    enabled: Option<bool>,
+    backend: Option<TlsBackend>,
+    profile: Option<TlsPolicyProfile>,
+    min_protocol: Option<TlsProtocolVersion>,
+    alpn: Option<TlsAlpnPolicy>,
+    curve_preferences: Option<Vec<TlsCurvePreference>>,
+    cipher_suites: Option<Vec<TlsCipherSuite>>,
+    certificates: Option<Vec<StaticCertificateConfig>>,
+    acme: Option<AcmeConfigFragment>,
+}
+
 impl TlsConfig {
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        for certificate in &mut self.certificates {
-            certificate.resolve_relative_paths(base_dir);
+    fn merge(&mut self, fragment: TlsConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
         }
-        self.acme.resolve_relative_paths(base_dir);
+        if let Some(backend) = fragment.backend {
+            self.backend = backend;
+        }
+        if let Some(profile) = fragment.profile {
+            self.profile = profile;
+        }
+        if let Some(min_protocol) = fragment.min_protocol {
+            self.min_protocol = Some(min_protocol);
+        }
+        if let Some(alpn) = fragment.alpn {
+            self.alpn = alpn;
+        }
+        if let Some(curve_preferences) = fragment.curve_preferences {
+            self.curve_preferences = curve_preferences;
+        }
+        if let Some(cipher_suites) = fragment.cipher_suites {
+            self.cipher_suites = cipher_suites;
+        }
+        if let Some(certificates) = fragment.certificates {
+            self.certificates = certificates;
+        }
+        if let Some(acme) = fragment.acme {
+            self.acme.merge(acme);
+        }
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
+        let effective_min_protocol = self.effective_min_protocol();
+        if self.profile == TlsPolicyProfile::Modern
+            && effective_min_protocol != TlsProtocolVersion::Tls13
+        {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.min_protocol",
+                reason: "tls.profile = \"modern\" requires min_protocol = \"tls1.3\"",
+            });
+        }
+        if effective_min_protocol == TlsProtocolVersion::Tls13
+            && !self.cipher_suites.is_empty()
+            && self.cipher_suites.iter().any(|cipher| cipher.is_tls12())
+        {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.cipher_suites",
+                reason: "TLS 1.2 cipher suites cannot be used when min_protocol = \"tls1.3\"",
+            });
+        }
+        if self.backend == TlsBackend::S2n {
+            if effective_min_protocol == TlsProtocolVersion::Tls13 {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.min_protocol",
+                    reason: "the s2n backend does not expose a Fluxheim-controlled TLS 1.3-only listener policy yet",
+                });
+            }
+            if self.effective_alpn() != TlsAlpnPolicy::Http1AndHttp2 {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.alpn",
+                    reason: "the s2n backend currently supports only \"http1-and-http2\" in Fluxheim listener policy",
+                });
+            }
+            if !self.curve_preferences.is_empty() {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.curve_preferences",
+                    reason: "the s2n backend does not expose Fluxheim-controlled listener curve preferences yet",
+                });
+            }
+            if !self.cipher_suites.is_empty() {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.cipher_suites",
+                    reason: "the s2n backend does not expose Fluxheim-controlled listener cipher allow-lists yet",
+                });
+            }
+        }
+        if self.backend == TlsBackend::Boringssl
+            && self.cipher_suites.iter().any(|cipher| !cipher.is_tls12())
+        {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.cipher_suites",
+                reason: "the BoringSSL backend does not expose Fluxheim-controlled TLS 1.3 cipher-suite allow-lists; omit TLS 1.3 cipher_suites or use the OpenSSL/rustls backend",
+            });
+        }
+        if self.backend == TlsBackend::Rustls
+            && self
+                .effective_curve_preferences()
+                .contains(&TlsCurvePreference::X25519MlKem768)
+        {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.curve_preferences",
+                reason: "X25519MLKEM768 needs a rustls crypto provider with post-quantum key exchange support; the default rustls backend currently uses ring",
+            });
+        }
+
         for certificate in &self.certificates {
             certificate.validate("tls.certificates")?;
         }
         self.acme.validate()
+    }
+
+    pub fn effective_min_protocol(&self) -> TlsProtocolVersion {
+        self.min_protocol
+            .unwrap_or_else(|| self.profile.default_min_protocol())
+    }
+
+    pub fn effective_alpn(&self) -> TlsAlpnPolicy {
+        self.alpn
+    }
+
+    pub fn effective_curve_preferences(&self) -> Vec<TlsCurvePreference> {
+        if self.curve_preferences.is_empty() {
+            self.profile.default_curve_preferences()
+        } else {
+            self.curve_preferences.clone()
+        }
+    }
+
+    pub fn effective_cipher_suites(&self) -> Vec<TlsCipherSuite> {
+        if self.cipher_suites.is_empty() {
+            self.profile.default_cipher_suites()
+        } else {
+            self.cipher_suites.clone()
+        }
     }
 
     fn acme_issuer_exists(&self, issuer: &str) -> bool {
@@ -1551,6 +1790,19 @@ impl TlsConfig {
             .issuers
             .iter()
             .any(|candidate| candidate.name == issuer)
+    }
+}
+
+impl TlsConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(certificates) = &mut self.certificates {
+            for certificate in certificates {
+                certificate.resolve_relative_paths(base_dir);
+            }
+        }
+        if let Some(acme) = &mut self.acme {
+            acme.resolve_relative_paths(base_dir);
+        }
     }
 }
 
@@ -1562,6 +1814,119 @@ pub enum TlsBackend {
     Openssl,
     Boringssl,
     S2n,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TlsPolicyProfile {
+    Modern,
+    #[default]
+    Intermediate,
+    Compat,
+}
+
+impl TlsPolicyProfile {
+    const fn default_min_protocol(self) -> TlsProtocolVersion {
+        match self {
+            Self::Modern => TlsProtocolVersion::Tls13,
+            Self::Intermediate | Self::Compat => TlsProtocolVersion::Tls12,
+        }
+    }
+
+    fn default_curve_preferences(self) -> Vec<TlsCurvePreference> {
+        vec![
+            TlsCurvePreference::X25519,
+            TlsCurvePreference::P256,
+            TlsCurvePreference::P384,
+        ]
+    }
+
+    fn default_cipher_suites(self) -> Vec<TlsCipherSuite> {
+        match self {
+            Self::Modern => vec![
+                TlsCipherSuite::Tls13Aes256GcmSha384,
+                TlsCipherSuite::Tls13Chacha20Poly1305Sha256,
+                TlsCipherSuite::Tls13Aes128GcmSha256,
+            ],
+            Self::Intermediate | Self::Compat => vec![
+                TlsCipherSuite::Tls13Aes256GcmSha384,
+                TlsCipherSuite::Tls13Chacha20Poly1305Sha256,
+                TlsCipherSuite::Tls13Aes128GcmSha256,
+                TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256,
+                TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256,
+                TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384,
+                TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384,
+                TlsCipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256,
+                TlsCipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256,
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+pub enum TlsProtocolVersion {
+    #[serde(rename = "tls1.2", alias = "TLS1.2", alias = "VersionTLS12")]
+    Tls12,
+    #[serde(rename = "tls1.3", alias = "TLS1.3", alias = "VersionTLS13")]
+    Tls13,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TlsAlpnPolicy {
+    Http1,
+    Http2,
+    #[default]
+    Http1AndHttp2,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+pub enum TlsCurvePreference {
+    #[serde(rename = "x25519", alias = "X25519")]
+    X25519,
+    #[serde(rename = "p256", alias = "P-256", alias = "CurveP256")]
+    P256,
+    #[serde(rename = "p384", alias = "P-384", alias = "CurveP384")]
+    P384,
+    #[serde(
+        rename = "x25519-mlkem768",
+        alias = "X25519MLKEM768",
+        alias = "X25519-MLKEM768"
+    )]
+    X25519MlKem768,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+pub enum TlsCipherSuite {
+    #[serde(rename = "TLS_AES_256_GCM_SHA384")]
+    Tls13Aes256GcmSha384,
+    #[serde(rename = "TLS_CHACHA20_POLY1305_SHA256")]
+    Tls13Chacha20Poly1305Sha256,
+    #[serde(rename = "TLS_AES_128_GCM_SHA256")]
+    Tls13Aes128GcmSha256,
+    #[serde(rename = "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256")]
+    TlsEcdheEcdsaWithAes128GcmSha256,
+    #[serde(rename = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")]
+    TlsEcdheRsaWithAes128GcmSha256,
+    #[serde(rename = "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384")]
+    TlsEcdheEcdsaWithAes256GcmSha384,
+    #[serde(rename = "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384")]
+    TlsEcdheRsaWithAes256GcmSha384,
+    #[serde(rename = "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256")]
+    TlsEcdheEcdsaWithChacha20Poly1305Sha256,
+    #[serde(rename = "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256")]
+    TlsEcdheRsaWithChacha20Poly1305Sha256,
+}
+
+impl TlsCipherSuite {
+    const fn is_tls12(&self) -> bool {
+        !matches!(
+            self,
+            Self::Tls13Aes256GcmSha384
+                | Self::Tls13Chacha20Poly1305Sha256
+                | Self::Tls13Aes128GcmSha256
+        )
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -1618,6 +1983,18 @@ pub struct AcmeConfig {
     pub issuers: Vec<AcmeIssuerConfig>,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AcmeConfigFragment {
+    enabled: Option<bool>,
+    storage: Option<PathBuf>,
+    contact_email: Option<String>,
+    default_issuer: Option<String>,
+    challenge: Option<AcmeChallenge>,
+    renewal: Option<AcmeRenewalConfigFragment>,
+    issuers: Option<Vec<AcmeIssuerConfig>>,
+}
+
 impl Default for AcmeConfig {
     fn default() -> Self {
         Self {
@@ -1633,14 +2010,27 @@ impl Default for AcmeConfig {
 }
 
 impl AcmeConfig {
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(storage) = &mut self.storage
-            && storage.is_relative()
-        {
-            *storage = base_dir.join(&storage);
+    fn merge(&mut self, fragment: AcmeConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
         }
-        for issuer in &mut self.issuers {
-            issuer.resolve_relative_paths(base_dir);
+        if let Some(storage) = fragment.storage {
+            self.storage = Some(storage);
+        }
+        if let Some(contact_email) = fragment.contact_email {
+            self.contact_email = Some(contact_email);
+        }
+        if let Some(default_issuer) = fragment.default_issuer {
+            self.default_issuer = default_issuer;
+        }
+        if let Some(challenge) = fragment.challenge {
+            self.challenge = challenge;
+        }
+        if let Some(renewal) = fragment.renewal {
+            self.renewal.merge(renewal);
+        }
+        if let Some(issuers) = fragment.issuers {
+            self.issuers = issuers;
         }
     }
 
@@ -1691,11 +2081,26 @@ impl AcmeConfig {
     }
 }
 
+impl AcmeConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(storage) = &mut self.storage
+            && storage.is_relative()
+        {
+            *storage = base_dir.join(&storage);
+        }
+        if let Some(issuers) = &mut self.issuers {
+            for issuer in issuers {
+                issuer.resolve_relative_paths(base_dir);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
 pub enum AcmeChallenge {
-    #[default]
     #[serde(rename = "tls-alpn-01")]
     TlsAlpn01,
+    #[default]
     #[serde(rename = "http-01")]
     Http01,
 }
@@ -1721,6 +2126,19 @@ pub struct AcmeRenewalConfig {
     pub zero_downtime_reload: bool,
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AcmeRenewalConfigFragment {
+    enabled: Option<bool>,
+    renew_before_secs: Option<u64>,
+    renew_after: Option<toml::value::Datetime>,
+    check_interval_secs: Option<u64>,
+    retry_initial_secs: Option<u64>,
+    retry_max_secs: Option<u64>,
+    reload_after_renewal: Option<bool>,
+    zero_downtime_reload: Option<bool>,
+}
+
 impl Default for AcmeRenewalConfig {
     fn default() -> Self {
         Self {
@@ -1737,6 +2155,33 @@ impl Default for AcmeRenewalConfig {
 }
 
 impl AcmeRenewalConfig {
+    fn merge(&mut self, fragment: AcmeRenewalConfigFragment) {
+        if let Some(enabled) = fragment.enabled {
+            self.enabled = enabled;
+        }
+        if let Some(renew_before_secs) = fragment.renew_before_secs {
+            self.renew_before_secs = renew_before_secs;
+        }
+        if let Some(renew_after) = fragment.renew_after {
+            self.renew_after = Some(renew_after);
+        }
+        if let Some(check_interval_secs) = fragment.check_interval_secs {
+            self.check_interval_secs = check_interval_secs;
+        }
+        if let Some(retry_initial_secs) = fragment.retry_initial_secs {
+            self.retry_initial_secs = retry_initial_secs;
+        }
+        if let Some(retry_max_secs) = fragment.retry_max_secs {
+            self.retry_max_secs = retry_max_secs;
+        }
+        if let Some(reload_after_renewal) = fragment.reload_after_renewal {
+            self.reload_after_renewal = reload_after_renewal;
+        }
+        if let Some(zero_downtime_reload) = fragment.zero_downtime_reload {
+            self.zero_downtime_reload = zero_downtime_reload;
+        }
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
@@ -2498,11 +2943,18 @@ impl VhostAcmeConfig {
             return Err(ConfigError::EmptyVhostAcmeDomains { scope });
         }
 
+        let mut seen_domains = std::collections::HashSet::new();
         for domain in domains {
-            if normalize_host(domain).is_none() {
+            let Some(normalized_domain) = normalize_host(domain) else {
                 return Err(ConfigError::InvalidVhostAcmeDomain {
                     scope,
                     domain: domain.to_owned(),
+                });
+            };
+            if !seen_domains.insert(normalized_domain.clone()) {
+                return Err(ConfigError::DuplicateVhostAcmeDomain {
+                    scope,
+                    domain: normalized_domain,
                 });
             }
         }
@@ -3011,11 +3463,18 @@ pub enum ConfigError {
     TlsEnabledWithoutCertificateSource {
         scope: &'static str,
     },
+    InvalidTlsPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
     TlsListenerWithoutTls,
     TlsListenerWithoutStaticCertificate,
     MissingAcmeStorage,
     EmptyAcmeStorage,
     InvalidAcmeContactEmail,
+    UnsupportedAcmeChallenge {
+        challenge: AcmeChallenge,
+    },
     InvalidAcmeRenewalDuration {
         field: &'static str,
     },
@@ -3049,6 +3508,10 @@ pub enum ConfigError {
         scope: &'static str,
     },
     InvalidVhostAcmeDomain {
+        scope: &'static str,
+        domain: String,
+    },
+    DuplicateVhostAcmeDomain {
         scope: &'static str,
         domain: String,
     },
@@ -3309,12 +3772,15 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.enabled requires a static certificate or ACME"
             ),
+            Self::InvalidTlsPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
             Self::TlsListenerWithoutTls => {
                 write!(formatter, "server.tls_listen requires tls.enabled = true")
             }
             Self::TlsListenerWithoutStaticCertificate => write!(
                 formatter,
-                "server.tls_listen requires at least one global [[tls.certificates]] entry"
+                "server.tls_listen requires a global certificate or a static/ACME certificate source on server.default_vhost"
             ),
             Self::MissingAcmeStorage => {
                 write!(
@@ -3329,6 +3795,10 @@ impl Display for ConfigError {
                     "tls.acme.contact_email must be a valid email address when ACME is enabled"
                 )
             }
+            Self::UnsupportedAcmeChallenge { challenge } => write!(
+                formatter,
+                "tls.acme.challenge {challenge:?} is not supported for managed ACME yet; use \"http-01\" or \"tls-alpn-01\""
+            ),
             Self::InvalidAcmeRenewalDuration { field } => {
                 write!(formatter, "{field} must be greater than zero")
             }
@@ -3369,6 +3839,10 @@ impl Display for ConfigError {
             Self::InvalidVhostAcmeDomain { scope, domain } => write!(
                 formatter,
                 "{scope}.acme.domains must contain concrete DNS names, got {domain:?}"
+            ),
+            Self::DuplicateVhostAcmeDomain { scope, domain } => write!(
+                formatter,
+                "{scope}.acme.domains contains duplicate domain {domain:?}"
             ),
             Self::MissingAcmeChallengeUpstream { vhost } => write!(
                 formatter,
@@ -3668,6 +4142,26 @@ fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
                 hmac_key_file: None,
             }),
         },
+        AcmeIssuerConfig {
+            name: "google-trust-services".to_owned(),
+            directory_url: "https://dv.acme-v02.api.pki.goog/directory".to_owned(),
+            eab: Some(AcmeExternalAccountBindingConfig {
+                key_id_env: Some("FLUXHEIM_GTS_EAB_KID".to_owned()),
+                key_id_file: None,
+                hmac_key_env: Some("FLUXHEIM_GTS_EAB_HMAC_KEY".to_owned()),
+                hmac_key_file: None,
+            }),
+        },
+        AcmeIssuerConfig {
+            name: "google-trust-services-staging".to_owned(),
+            directory_url: "https://dv.acme-v02.test-api.pki.goog/directory".to_owned(),
+            eab: Some(AcmeExternalAccountBindingConfig {
+                key_id_env: Some("FLUXHEIM_GTS_STAGING_EAB_KID".to_owned()),
+                key_id_file: None,
+                hmac_key_env: Some("FLUXHEIM_GTS_STAGING_EAB_HMAC_KEY".to_owned()),
+                hmac_key_file: None,
+            }),
+        },
     ]
 }
 
@@ -3720,6 +4214,10 @@ fn default_static_cache_control() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_hsts_max_age_secs() -> u64 {
+    63_072_000
 }
 
 fn default_x_content_type_options() -> Option<String> {
@@ -4539,7 +5037,8 @@ mod tests {
     use super::{
         AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, Config, ConfigError,
         ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig,
-        ServerConfig, ServerLimitsConfig, StaticCertificateConfig, VhostConfig,
+        ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
+        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, VhostConfig,
         VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
         valid_dynamic_header_variable, validate_dynamic_header_template,
     };
@@ -4599,6 +5098,25 @@ mod tests {
         assert_eq!(Config::default().server.process.threads, 1);
         assert_eq!(Config::default().server.process.listener_tasks_per_fd, 1);
         assert_eq!(Config::default().server.process.max_retries, 16);
+        let default_issuers = Config::default().tls.acme.issuers;
+        let issuer_names: Vec<&str> = default_issuers
+            .iter()
+            .map(|issuer| issuer.name.as_str())
+            .collect();
+        assert!(issuer_names.contains(&"google-trust-services"));
+        assert!(issuer_names.contains(&"google-trust-services-staging"));
+        let gts = default_issuers
+            .iter()
+            .find(|issuer| issuer.name == "google-trust-services")
+            .unwrap();
+        assert_eq!(
+            gts.directory_url,
+            "https://dv.acme-v02.api.pki.goog/directory"
+        );
+        assert_eq!(
+            gts.eab.as_ref().unwrap().key_id_env.as_deref(),
+            Some("FLUXHEIM_GTS_EAB_KID")
+        );
         #[cfg(not(feature = "privacy-mode"))]
         assert!(Config::default().logging.access.enabled);
         #[cfg(feature = "privacy-mode")]
@@ -5111,6 +5629,48 @@ mod tests {
     }
 
     #[test]
+    fn parses_structured_hsts_response_header_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.response.hsts]
+            enabled = true
+            max_age_secs = 63072000
+            include_subdomains = true
+            preload = true
+            "#,
+        )
+        .unwrap();
+
+        let hsts = config.headers.response.hsts.as_ref().unwrap();
+        assert_eq!(
+            hsts.header_value().as_deref(),
+            Some("max-age=63072000; includeSubDomains; preload")
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_conflicting_hsts_response_header_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.response]
+            strict_transport_security = "max-age=31536000"
+
+            [headers.response.hsts]
+            max_age_secs = 63072000
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidResponseHeaderValue {
+                field: "headers.response.hsts"
+            })
+        );
+    }
+
+    #[test]
     fn parses_vhost_header_policy_overlay() {
         let config: Config = toml::from_str(
             r#"
@@ -5466,7 +6026,7 @@ mod tests {
             storage = "/var/lib/fluxheim/acme"
             contact_email = "admin@example.test"
             default_issuer = "actalis"
-            challenge = "tls-alpn-01"
+            challenge = "http-01"
 
             [tls.acme.renewal]
             enabled = true
@@ -5497,8 +6057,181 @@ mod tests {
             Some(PathBuf::from("/var/lib/fluxheim/acme"))
         );
         assert_eq!(config.tls.acme.default_issuer, "actalis");
+        assert_eq!(config.tls.acme.challenge, super::AcmeChallenge::Http01);
         assert_eq!(config.tls.acme.renewal.renew_before_secs, 2_592_000);
         assert!(config.tls.acme.renewal.renew_after.is_some());
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn accepts_tls_alpn_acme_with_rustls_tls_listener() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            tls_listen = ["127.0.0.1:8443"]
+
+            [tls]
+            enabled = true
+            backend = "rustls"
+
+            [[tls.certificates]]
+            cert_path = "tests/fixtures/tls/localhost-cert.pem"
+            key_path = "tests/fixtures/tls/localhost-key.pem"
+
+            [tls.acme]
+            enabled = true
+            storage = "/var/lib/fluxheim/acme"
+            contact_email = "admin@example.test"
+            challenge = "tls-alpn-01"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.tls.acme.challenge, super::AcmeChallenge::TlsAlpn01);
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_tls_alpn_acme_without_tls_listener() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            enabled = true
+            backend = "rustls"
+
+            [tls.acme]
+            enabled = true
+            storage = "/var/lib/fluxheim/acme"
+            contact_email = "admin@example.test"
+            challenge = "tls-alpn-01"
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.acme.challenge",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parses_tls_policy_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            enabled = true
+            profile = "modern"
+            min_protocol = "tls1.3"
+            alpn = "http2"
+            curve_preferences = ["X25519", "CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.tls.profile, TlsPolicyProfile::Modern);
+        assert_eq!(
+            config.tls.effective_min_protocol(),
+            TlsProtocolVersion::Tls13
+        );
+        assert_eq!(config.tls.effective_alpn(), TlsAlpnPolicy::Http2);
+        assert_eq!(
+            config.tls.effective_curve_preferences(),
+            [
+                TlsCurvePreference::X25519,
+                TlsCurvePreference::P256,
+                TlsCurvePreference::P384
+            ]
+        );
+        assert_eq!(
+            config.tls.effective_cipher_suites(),
+            [
+                TlsCipherSuite::Tls13Aes256GcmSha384,
+                TlsCipherSuite::Tls13Chacha20Poly1305Sha256
+            ]
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_modern_tls_policy_with_tls12_override() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            profile = "modern"
+            min_protocol = "tls1.2"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.min_protocol",
+                reason: "tls.profile = \"modern\" requires min_protocol = \"tls1.3\""
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_tls12_cipher_suites_with_tls13_minimum() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            min_protocol = "tls1.3"
+            cipher_suites = ["TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.cipher_suites",
+                reason: "TLS 1.2 cipher suites cannot be used when min_protocol = \"tls1.3\""
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_boringssl_explicit_tls13_cipher_suites() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            backend = "boringssl"
+            cipher_suites = ["TLS_AES_256_GCM_SHA384"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.cipher_suites",
+                reason: "the BoringSSL backend does not expose Fluxheim-controlled TLS 1.3 cipher-suite allow-lists; omit TLS 1.3 cipher_suites or use the OpenSSL/rustls backend"
+            })
+        );
+    }
+
+    #[test]
+    fn allows_intermediate_profile_with_tls13_minimum_when_ciphers_are_implicit() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            profile = "intermediate"
+            min_protocol = "VersionTLS13"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.tls.profile, TlsPolicyProfile::Intermediate);
+        assert_eq!(
+            config.tls.effective_min_protocol(),
+            TlsProtocolVersion::Tls13
+        );
         config.validate().unwrap();
     }
 
@@ -5721,6 +6454,38 @@ mod tests {
         .unwrap();
 
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_duplicate_vhost_acme_domains() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.acme]
+            enabled = true
+            storage = "/var/lib/fluxheim/acme"
+            contact_email = "admin@example.test"
+
+            [[vhosts]]
+            name = "example"
+            hosts = ["example.test"]
+
+            [vhosts.tls]
+            enabled = true
+
+            [vhosts.tls.acme]
+            enabled = true
+            domains = ["Example.Test", "example.test"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::DuplicateVhostAcmeDomain {
+                scope: "vhosts.tls",
+                domain: "example.test".to_owned(),
+            })
+        );
     }
 
     #[test]
@@ -6507,6 +7272,52 @@ mod tests {
         config.validate().unwrap();
     }
 
+    #[cfg(feature = "acme")]
+    #[test]
+    fn accepts_tls_listener_with_default_vhost_acme_certificate_source() {
+        let config = Config {
+            server: ServerConfig {
+                tls_listen: vec!["127.0.0.1:8443".to_owned()],
+                default_vhost: Some("example".to_owned()),
+                ..ServerConfig::default()
+            },
+            tls: super::TlsConfig {
+                enabled: true,
+                acme: super::AcmeConfig {
+                    enabled: true,
+                    storage: Some(PathBuf::from("/var/lib/fluxheim/acme")),
+                    contact_email: Some("admin@example.test".to_owned()),
+                    ..super::AcmeConfig::default()
+                },
+                ..super::TlsConfig::default()
+            },
+            vhosts: vec![VhostConfig {
+                name: "example".to_owned(),
+                hosts: vec!["example.test".to_owned()],
+                max_request_body_bytes: None,
+                tls: VhostTlsConfig {
+                    enabled: true,
+                    acme: super::VhostAcmeConfig {
+                        enabled: true,
+                        issuer: None,
+                        domains: Vec::new(),
+                    },
+                    ..VhostTlsConfig::default()
+                },
+                acme_challenge: super::VhostAcmeChallengeConfig::default(),
+                redirect: super::VhostRedirectConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+
+        config.validate().unwrap();
+    }
+
     #[test]
     fn rejects_invalid_upstream() {
         let config = Config {
@@ -7147,6 +7958,76 @@ mod tests {
         assert_eq!(config.server.default_vhost, Some("example".to_owned()));
         assert_eq!(config.vhosts.len(), 1);
         assert_eq!(config.vhosts[0].web.root, Some(dir.child("conf.d/site")));
+    }
+
+    #[test]
+    fn conf_d_tls_acme_fragment_preserves_main_tls_settings() {
+        let dir = TestDir::new("config-file-with-tls-acme-conf-d");
+        fs::create_dir_all(dir.child("conf.d")).unwrap();
+        fs::create_dir_all(dir.child("site")).unwrap();
+        fs::write(dir.child("site/index.html"), "ok").unwrap();
+        fs::write(
+            dir.child("fluxheim.toml"),
+            r#"
+            include_conf_d = true
+
+            [server]
+            listen = ["127.0.0.1:19090"]
+            default_vhost = "example"
+
+            [tls]
+            enabled = true
+            backend = "rustls"
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            dir.child("conf.d/acme.toml"),
+            format!(
+                r#"
+                [tls.acme]
+                enabled = true
+                storage = "{}"
+                contact_email = "admin@example.test"
+                default_issuer = "letsencrypt"
+                challenge = "http-01"
+                "#,
+                dir.child("acme").display()
+            ),
+        )
+        .unwrap();
+        fs::write(
+            dir.child("conf.d/vhost.toml"),
+            format!(
+                r#"
+                [[vhosts]]
+                name = "example"
+                hosts = ["example.test"]
+
+                [vhosts.tls]
+                enabled = true
+
+                [vhosts.tls.acme]
+                enabled = true
+                domains = ["example.test"]
+
+                [vhosts.web]
+                root = "{}"
+                "#,
+                dir.child("site").display()
+            ),
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+        assert!(config.tls.enabled);
+        assert!(config.tls.acme.enabled);
+        assert_eq!(config.vhosts.len(), 1);
+        assert!(config.vhosts[0].tls.enabled);
+        assert!(config.vhosts[0].tls.acme.enabled);
+        #[cfg(feature = "acme")]
+        assert_eq!(crate::acme::renewal_targets(&config).len(), 1);
     }
 
     #[test]
