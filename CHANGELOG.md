@@ -18,6 +18,8 @@ behavior when the change improves security or project direction.
 - Cache policies can now hide selected upstream response headers before cache
   admission and downstream delivery, enabling tightly scoped static-asset routes
   to strip headers such as `Set-Cookie`.
+- Cache policies can now bypass lookup and storage when configured request
+  headers such as `Cookie` or `Authorization` are present.
 - Cache policies can now define positive response TTLs by HTTP status, which
   normalizes matching cache-participating origin responses before admission.
 - Explicit cache status TTLs now also opt matching non-200 origin responses

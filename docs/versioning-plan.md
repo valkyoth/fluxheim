@@ -460,6 +460,8 @@ Exit criteria:
   `Set-Cookie` stripping and cache-header override controls require explicit
   config, are tested only on matched paths, and are documented with Forgejo-like
   static asset examples before being called stable.
+- Route-scoped proxy cache can bypass lookup and storage when configured
+  request headers such as `Cookie` or `Authorization` are present.
 - Origin `Cache-Control`/`Expires` override controls are explicit opt-ins and
   remain scoped to matched cache routes.
 - Proxied static-cache admission stores `200 OK` origin responses only when

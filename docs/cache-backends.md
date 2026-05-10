@@ -32,6 +32,11 @@ internal cache implementation.
   upstream response headers before cache admission and downstream delivery.
   This is intended for tightly scoped static-asset routes where operators know
   a header such as `Set-Cookie` is not part of the cache identity.
+- `cache.bypass_request_headers`, `vhosts.cache.bypass_request_headers`, and
+  `vhosts.routes.cache.bypass_request_headers` bypass cache lookup and storage
+  when any listed request header is present. Use this for route policies where
+  headers such as `Cookie` or `Authorization` make the upstream response
+  request-specific.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream

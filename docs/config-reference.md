@@ -443,6 +443,7 @@ compiled.
 enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+bypass_request_headers = ["cookie", "authorization"]
 ignore_origin_cache_headers = false
 status_ttls = { "200" = 3600, "404" = 60 }
 include_query = true
@@ -481,6 +482,11 @@ as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.
+`bypass_request_headers` disables both cache lookup and cache storage when any
+listed request header is present. Use it on routes where a header such as
+`Cookie` or `Authorization` changes the upstream response but should not become
+part of the shared cache identity. The default is empty so explicit static
+asset routes can still cache browser requests that carry unrelated cookies.
 `ignore_origin_cache_headers` removes upstream `Cache-Control` and `Expires`
 before cache admission and downstream delivery. Keep the default `false` unless
 the matched route is known static content and Fluxheim policy is responsible for

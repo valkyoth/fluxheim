@@ -1881,8 +1881,11 @@ impl ProxyHttp for FluxProxy {
         let route_cache = ctx
             .route_index
             .and_then(|route_index| vhost.route(route_index).cache.as_ref());
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
 
-        if request_cache_bypass(session.req_header()) {
+        if request_cache_bypass(session.req_header(), cache_config) {
             return Ok(());
         }
 
@@ -1899,9 +1902,6 @@ impl ProxyHttp for FluxProxy {
         };
 
         let cache_request = cache_request_from_header(session.req_header());
-        let cache_config = route_cache
-            .map(|cache| &cache.config)
-            .unwrap_or(&vhost.cache);
         if crate::cache::image_cache_key(cache_config, &cache_request).is_none() {
             return Ok(());
         }
@@ -2720,7 +2720,15 @@ fn proxy_metrics_vhost(ctx: &RequestContext) -> &str {
 }
 
 #[cfg(feature = "cache")]
-fn request_cache_bypass(request: &RequestHeader) -> bool {
+fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheConfig) -> bool {
+    if cache
+        .bypass_request_headers
+        .iter()
+        .any(|header| request.headers.contains_key(header.as_str()))
+    {
+        return true;
+    }
+
     crate::cache_headers::request_values_force_cache_refresh(
         request_header_values(request, "cache-control"),
         request_header_values(request, "pragma"),
@@ -4615,7 +4623,10 @@ mod tests {
                 pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
             request.insert_header(name, value).unwrap();
 
-            assert!(request_cache_bypass(&request), "{name}: {value}");
+            assert!(
+                request_cache_bypass(&request, &CacheConfig::default()),
+                "{name}: {value}"
+            );
         }
 
         let mut request =
@@ -4624,7 +4635,7 @@ mod tests {
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
 
-        assert!(!request_cache_bypass(&request));
+        assert!(!request_cache_bypass(&request, &CacheConfig::default()));
     }
 
     #[cfg(feature = "cache")]
@@ -4637,14 +4648,37 @@ mod tests {
             .unwrap();
         request.append_header("cache-control", "no-cache").unwrap();
 
-        assert!(request_cache_bypass(&request));
+        assert!(request_cache_bypass(&request, &CacheConfig::default()));
 
         let mut request =
             pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request.append_header("pragma", "ignored").unwrap();
         request.append_header("pragma", "no-cache").unwrap();
 
-        assert!(request_cache_bypass(&request));
+        assert!(request_cache_bypass(&request, &CacheConfig::default()));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_configured_request_headers() {
+        let cache = CacheConfig {
+            bypass_request_headers: vec!["cookie".to_owned(), "authorization".to_owned()],
+            ..CacheConfig::default()
+        };
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        request.insert_header("cookie", "session=private").unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        request
+            .insert_header("authorization", "Bearer secret")
+            .unwrap();
+        assert!(request_cache_bypass(&request, &cache));
     }
 
     #[cfg(feature = "cache")]
