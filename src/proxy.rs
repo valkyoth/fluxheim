@@ -510,11 +510,13 @@ pub struct CacheRuntimeTotals {
     pub routes_total: u64,
     pub enabled_routes: u64,
     pub tiered_routes: u64,
+    pub memory_tiers: u64,
     pub memory_entries: u64,
     pub memory_weighted_size_bytes: u64,
     pub memory_max_size_bytes: u64,
     pub memory_purge_index_entries: u64,
     pub memory_purge_index_max_entries: u64,
+    pub disk_tiers: u64,
     pub disk_entries: u64,
     pub disk_size_bytes: u64,
     pub disk_max_size_bytes: u64,
@@ -1104,6 +1106,7 @@ fn accumulate_cache_stats(
     disk: Option<&crate::cache::DiskCacheStats>,
 ) {
     if let Some(memory) = memory {
+        totals.memory_tiers = totals.memory_tiers.saturating_add(1);
         totals.memory_entries = totals.memory_entries.saturating_add(memory.entries);
         totals.memory_weighted_size_bytes = totals
             .memory_weighted_size_bytes
@@ -1128,6 +1131,7 @@ fn accumulate_cache_stats(
     }
 
     if let Some(disk) = disk {
+        totals.disk_tiers = totals.disk_tiers.saturating_add(1);
         totals.disk_entries = totals.disk_entries.saturating_add(disk.entries);
         totals.disk_size_bytes = totals.disk_size_bytes.saturating_add(disk.size_bytes);
         totals.disk_max_size_bytes = totals

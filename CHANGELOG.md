@@ -20,6 +20,7 @@ behavior when the change improves security or project direction.
 - Cache activity reset responses now include route and vhost cache coverage
   ratios.
 - Cache status JSON now includes route and vhost cache coverage ratios.
+- Cache status JSON now includes aggregate memory and disk cache tier counts.
 - Cache policies can now emit an optional status response header, such as
   `X-Cache-Status`, for requests that participate in the proxy cache.
 - Cache policies can now hide selected upstream response headers before cache

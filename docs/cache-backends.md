@@ -166,8 +166,8 @@ internal cache implementation.
   `POST /_fluxheim/cache/activity/reset` returns the same vhost and route
   coverage counters alongside the reset tier counts, so operational scripts can
   log cache coverage at the same time they clear activity counters.
-  Memory and disk tier status also reports average object-size fields,
-  `fill_ratio_per_mille`,
+  Memory and disk tier status also reports `memory_tiers`, `disk_tiers`,
+  average object-size fields, `fill_ratio_per_mille`,
   `purge_index_entries`, `purge_index_max_entries`, and
   `purge_index_fill_ratio_per_mille`, and totals report the same values split
   by memory and disk tiers, so operators can tell whether storage is under
