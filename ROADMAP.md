@@ -630,7 +630,9 @@ without parsing text fixtures for every module.
      - `min_uses` style delayed admission before storing a response;
      - status-specific TTL rules, including `any` fallback TTL;
      - explicit request-side bypass rules and response-side no-store rules
-       based on bounded header, cookie, and query predicates;
+       based on bounded header, cookie, and query predicates. Implemented for
+       header-presence request bypass and response no-store controls; cookie
+       value and query predicate rules remain planned;
      - stale serving controls for origin error, timeout, updating, and selected
        status classes;
      - optional cache-status response headers for production debugging;

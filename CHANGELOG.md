@@ -18,6 +18,8 @@ behavior when the change improves security or project direction.
 - Cache policies can now hide selected upstream response headers before cache
   admission and downstream delivery, enabling tightly scoped static-asset routes
   to strip headers such as `Set-Cookie`.
+- Cache policies can now refuse shared cache storage when configured origin
+  response headers are present, while still delivering the response normally.
 - Cache policies can now bypass lookup and storage when configured request
   headers such as `Cookie` or `Authorization` are present.
 - Cache policies can now add safe request headers such as `Accept-Encoding` to

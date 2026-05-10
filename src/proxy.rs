@@ -2911,6 +2911,13 @@ fn response_cache_admission_rejection(
     if headers.contains_key("set-cookie") {
         return Some("set-cookie");
     }
+    if cache
+        .no_store_response_headers
+        .iter()
+        .any(|header| headers.contains_key(header.as_str()))
+    {
+        return Some("configured-no-store-response-header");
+    }
     if let Some(reason) = crate::cache_headers::response_values_forbid_shared_cache(
         response_header_values(response, "cache-control"),
     ) {
@@ -5279,6 +5286,27 @@ mod tests {
         assert_eq!(
             response_cache_admission_rejection(&response, &CacheConfig::default()),
             Some("set-cookie")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn response_cache_admission_rejects_configured_no_store_response_header() {
+        let cache = CacheConfig {
+            no_store_response_headers: vec!["x-app-no-store".to_owned()],
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        response
+            .insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        assert_eq!(response_cache_admission_rejection(&response, &cache), None);
+
+        response.insert_header("x-app-no-store", "1").unwrap();
+        assert_eq!(
+            response_cache_admission_rejection(&response, &cache),
+            Some("configured-no-store-response-header")
         );
     }
 

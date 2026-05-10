@@ -455,6 +455,7 @@ compiled.
 enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+no_store_response_headers = ["x-app-no-store"]
 bypass_request_headers = ["cookie", "authorization"]
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
@@ -498,6 +499,10 @@ as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.
+`no_store_response_headers` rejects shared cache admission when any listed
+origin response header is present, while still delivering the response to the
+client. Use it for application-specific no-store signals that are not expressed
+through standard `Cache-Control` directives.
 `bypass_request_headers` disables both cache lookup and cache storage when any
 listed request header is present. Use it on routes where a header such as
 `Cookie` or `Authorization` changes the upstream response but should not become

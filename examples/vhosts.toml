@@ -161,6 +161,7 @@ downstream_min_send_rate_bytes_per_sec = 8192
 enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+no_store_response_headers = ["x-app-no-store"]
 bypass_request_headers = ["cookie", "authorization"]
 vary_request_headers = ["accept-encoding"]
 key_namespace = "chat-assets-v1"

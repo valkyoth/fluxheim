@@ -3175,6 +3175,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
+    pub no_store_response_headers: Vec<String>,
+    #[serde(default)]
     pub bypass_request_headers: Vec<String>,
     #[serde(default)]
     pub vary_request_headers: Vec<String>,
@@ -3212,6 +3214,7 @@ impl Default for CacheConfig {
             enabled: false,
             status_header: None,
             hide_response_headers: Vec::new(),
+            no_store_response_headers: Vec::new(),
             bypass_request_headers: Vec::new(),
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
@@ -3245,6 +3248,9 @@ impl CacheConfig {
             validate_header_name(scope, status_header)?;
         }
         for header in &self.hide_response_headers {
+            validate_header_name(scope, header)?;
+        }
+        for header in &self.no_store_response_headers {
             validate_header_name(scope, header)?;
         }
         for header in &self.bypass_request_headers {
@@ -7108,6 +7114,7 @@ mod tests {
             enabled = true
             status_header = "X-Cache-Status"
             hide_response_headers = ["set-cookie"]
+            no_store_response_headers = ["x-fluxheim-no-store"]
             bypass_request_headers = ["cookie", "authorization"]
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
@@ -7146,6 +7153,10 @@ mod tests {
         assert_eq!(
             config.cache.hide_response_headers,
             ["set-cookie".to_owned()]
+        );
+        assert_eq!(
+            config.cache.no_store_response_headers,
+            ["x-fluxheim-no-store".to_owned()]
         );
         assert_eq!(
             config.cache.bypass_request_headers,
@@ -7241,6 +7252,25 @@ mod tests {
             r#"
             [cache]
             bypass_request_headers = ["bad header"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderName {
+                field: "cache",
+                name: "bad header".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_no_store_response_header_name() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            no_store_response_headers = ["bad header"]
             "#,
         )
         .unwrap();
