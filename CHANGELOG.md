@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
   `hit_ratio_per_mille`.
 - Cache activity JSON now includes `store_ratio_per_mille` alongside
   `store_refusal_ratio_per_mille`.
+- Cache activity reset responses now include route and vhost cache coverage
+  ratios.
 - Cache status JSON now includes route and vhost cache coverage ratios.
 - Cache policies can now emit an optional status response header, such as
   `X-Cache-Status`, for requests that participate in the proxy cache.

@@ -163,8 +163,11 @@ internal cache implementation.
   `enabled_routes`, `enabled_route_ratio_per_mille`, `tiered_routes`, and
   `tiered_route_ratio_per_mille` so route-cache coverage is visible without
   parsing the route list. Totals also include enabled and tiered vhost ratios.
-  Memory and disk tier
-  status also reports average object-size fields, `fill_ratio_per_mille`,
+  `POST /_fluxheim/cache/activity/reset` returns the same vhost and route
+  coverage counters alongside the reset tier counts, so operational scripts can
+  log cache coverage at the same time they clear activity counters.
+  Memory and disk tier status also reports average object-size fields,
+  `fill_ratio_per_mille`,
   `purge_index_entries`, `purge_index_max_entries`, and
   `purge_index_fill_ratio_per_mille`, and totals report the same values split
   by memory and disk tiers, so operators can tell whether storage is under

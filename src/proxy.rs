@@ -555,6 +555,10 @@ pub struct CacheRouteStats {
 #[cfg(feature = "cache")]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct CacheActivityResetResult {
+    pub vhosts: u64,
+    pub enabled_vhosts: u64,
+    pub routes_total: u64,
+    pub enabled_routes: u64,
     pub memory_tiers: u64,
     pub disk_tiers: u64,
     pub tiered_vhosts: u64,
@@ -674,12 +678,20 @@ impl ProxySnapshot {
     #[cfg(feature = "cache")]
     pub fn reset_cache_activity(&self) -> CacheActivityResetResult {
         let mut result = CacheActivityResetResult {
+            vhosts: 0,
+            enabled_vhosts: 0,
+            routes_total: 0,
+            enabled_routes: 0,
             memory_tiers: 0,
             disk_tiers: 0,
             tiered_vhosts: 0,
             tiered_routes: 0,
         };
         for vhost in &self.state.vhosts {
+            result.vhosts = result.vhosts.saturating_add(1);
+            if vhost.cache.enabled {
+                result.enabled_vhosts = result.enabled_vhosts.saturating_add(1);
+            }
             if let Some(storage) = vhost.pingora_memory_storage {
                 storage.reset_activity();
                 result.memory_tiers = result.memory_tiers.saturating_add(1);
@@ -695,6 +707,10 @@ impl ProxySnapshot {
                 let Some(cache) = &route.cache else {
                     continue;
                 };
+                result.routes_total = result.routes_total.saturating_add(1);
+                if cache.config.enabled {
+                    result.enabled_routes = result.enabled_routes.saturating_add(1);
+                }
                 if let Some(storage) = cache.pingora_memory_storage {
                     storage.reset_activity();
                     result.memory_tiers = result.memory_tiers.saturating_add(1);

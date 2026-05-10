@@ -401,8 +401,19 @@ impl AdminApp {
     fn cache_activity_reset_response(&self) -> AdminResponse {
         let result = self.proxy.reset_cache_activity();
         let body = format!(
-            r#"{{"status":"ok","memory_tiers":{},"disk_tiers":{},"tiered_vhosts":{},"tiered_routes":{}}}"#,
-            result.memory_tiers, result.disk_tiers, result.tiered_vhosts, result.tiered_routes
+            r#"{{"status":"ok","vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory_tiers":{},"disk_tiers":{}}}"#,
+            result.vhosts,
+            result.enabled_vhosts,
+            ratio_per_mille(result.enabled_vhosts, result.vhosts),
+            result.tiered_vhosts,
+            ratio_per_mille(result.tiered_vhosts, result.vhosts),
+            result.routes_total,
+            result.enabled_routes,
+            ratio_per_mille(result.enabled_routes, result.routes_total),
+            result.tiered_routes,
+            ratio_per_mille(result.tiered_routes, result.routes_total),
+            result.memory_tiers,
+            result.disk_tiers
         );
         json_response(StatusCode::OK, body.as_bytes())
     }
@@ -2744,10 +2755,18 @@ mod tests {
         assert_eq!(response.status, StatusCode::OK);
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""status":"ok""#));
+        assert!(body.contains(r#""vhosts":1"#));
+        assert!(body.contains(r#""enabled_vhosts":1"#));
+        assert!(body.contains(r#""enabled_vhost_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""tiered_vhosts":1"#));
+        assert!(body.contains(r#""tiered_vhost_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""routes_total":1"#));
+        assert!(body.contains(r#""enabled_routes":1"#));
+        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""tiered_routes":0"#));
+        assert!(body.contains(r#""tiered_route_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_tiers":2"#));
         assert!(body.contains(r#""disk_tiers":1"#));
-        assert!(body.contains(r#""tiered_vhosts":1"#));
-        assert!(body.contains(r#""tiered_routes":0"#));
 
         std::fs::remove_dir_all(cache_path).unwrap();
     }
