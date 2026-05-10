@@ -2350,6 +2350,10 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub send_timeout_secs: Option<u64>,
     #[serde(default)]
+    pub downstream_write_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub downstream_min_send_rate_bytes_per_sec: Option<usize>,
+    #[serde(default)]
     pub error_pages: Vec<ProxyErrorPageConfig>,
     #[serde(default)]
     pub load_balance: LoadBalanceConfig,
@@ -2365,6 +2369,8 @@ impl Default for ProxyConfig {
             connect_timeout_secs: None,
             read_timeout_secs: None,
             send_timeout_secs: None,
+            downstream_write_timeout_secs: None,
+            downstream_min_send_rate_bytes_per_sec: None,
             error_pages: Vec::new(),
             load_balance: LoadBalanceConfig::default(),
         }
@@ -2422,6 +2428,18 @@ impl ProxyConfig {
         validate_optional_timeout_secs("proxy.connect_timeout_secs", self.connect_timeout_secs)?;
         validate_optional_timeout_secs("proxy.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("proxy.send_timeout_secs", self.send_timeout_secs)?;
+        validate_optional_timeout_secs(
+            "proxy.downstream_write_timeout_secs",
+            self.downstream_write_timeout_secs,
+        )?;
+        if self
+            .downstream_min_send_rate_bytes_per_sec
+            .is_some_and(|rate| rate == 0)
+        {
+            return Err(ConfigError::InvalidProxyTimeout {
+                field: "proxy.downstream_min_send_rate_bytes_per_sec",
+            });
+        }
 
         let mut statuses = std::collections::HashSet::new();
         for error_page in &self.error_pages {
@@ -5324,6 +5342,8 @@ mod tests {
             upstream = "origin.example.test:443"
             upstream_tls = true
             upstream_sni = "origin.example.test"
+            downstream_write_timeout_secs = 20
+            downstream_min_send_rate_bytes_per_sec = 8192
             "#,
         )
         .unwrap();
@@ -5336,6 +5356,11 @@ mod tests {
         );
         assert!(config.proxy.upstream_tls);
         assert_eq!(config.proxy.upstream_sni(), "origin.example.test");
+        assert_eq!(config.proxy.downstream_write_timeout_secs, Some(20));
+        assert_eq!(
+            config.proxy.downstream_min_send_rate_bytes_per_sec,
+            Some(8192)
+        );
     }
 
     #[test]
@@ -5493,6 +5518,7 @@ mod tests {
             [proxy]
             upstream = "127.0.0.1:3000"
             read_timeout_secs = 0
+            downstream_min_send_rate_bytes_per_sec = 1
             "#,
         )
         .unwrap();
@@ -5501,6 +5527,38 @@ mod tests {
             config.validate(),
             Err(ConfigError::InvalidProxyTimeout {
                 field: "proxy.read_timeout_secs"
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            downstream_write_timeout_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProxyTimeout {
+                field: "proxy.downstream_write_timeout_secs"
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            downstream_min_send_rate_bytes_per_sec = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProxyTimeout {
+                field: "proxy.downstream_min_send_rate_bytes_per_sec"
             })
         );
     }

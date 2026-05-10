@@ -342,6 +342,8 @@ upstream_sni = "origin.example.test"
 connect_timeout_secs = 5
 read_timeout_secs = 60
 send_timeout_secs = 30
+downstream_write_timeout_secs = 30
+downstream_min_send_rate_bytes_per_sec = 8192
 
 [proxy.load_balance]
 max_iterations = 256
@@ -374,6 +376,12 @@ list for the Pingora load-balancer path when compiled with `load-balancer`.
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
 optional. They map to the upstream connection timeout, upstream response/read
 timeout, and upstream request-body/write timeout.
+`downstream_write_timeout_secs` and
+`downstream_min_send_rate_bytes_per_sec` protect the client-facing side of
+proxied responses. The write timeout caps stalled downstream writes; the minimum
+send rate asks Pingora to derive a timeout from each response chunk size and is
+mainly useful against slow HTTP/1 clients. These fields are optional and can be
+set globally, per vhost, or on a route-level proxy block.
 
 For websocket-style upgrades, Fluxheim keeps the downstream `Connection:
 Upgrade` and `Upgrade` headers unless your header policy removes or replaces

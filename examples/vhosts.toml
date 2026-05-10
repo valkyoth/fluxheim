@@ -154,6 +154,8 @@ upstream_tls = false
 connect_timeout_secs = 5
 read_timeout_secs = 600
 send_timeout_secs = 600
+downstream_write_timeout_secs = 30
+downstream_min_send_rate_bytes_per_sec = 8192
 
 [vhosts.routes.cache]
 enabled = true

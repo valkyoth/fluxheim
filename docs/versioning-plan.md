@@ -342,7 +342,9 @@ Stable scope:
   gateway migrations, including configurable response buffer count/size
   equivalents, bounded memory budgets per connection, safe streaming behavior
   when buffering is disabled, and tests proving slow clients cannot exhaust
-  worker memory.
+  worker memory. Initial 1.2 work exposes downstream write timeout and minimum
+  send-rate controls for proxied responses; full configurable response-buffer
+  count/size remains a follow-up if Pingora exposes a stable hook for it.
 - Route-scoped cache policies for selective production caches, such as
   repository avatar/assets paths, where only one proxy route should use a cache
   tier while the rest of the vhost remains uncached.

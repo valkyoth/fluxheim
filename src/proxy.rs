@@ -1652,6 +1652,7 @@ impl ProxyHttp for FluxProxy {
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
+        apply_downstream_flow_control(session, &selected_runtime_proxy(vhost, ctx).config);
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)
     }
@@ -1976,6 +1977,28 @@ fn selected_response_headers<'a>(
     ctx.route_index
         .map(|route_index| &vhost.route(route_index).response_headers)
         .unwrap_or(&vhost.response_headers)
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct DownstreamFlowControl {
+    write_timeout: Option<std::time::Duration>,
+    min_send_rate: Option<usize>,
+}
+
+fn downstream_flow_control(proxy: &ProxyConfig) -> DownstreamFlowControl {
+    DownstreamFlowControl {
+        write_timeout: proxy
+            .downstream_write_timeout_secs
+            .map(std::time::Duration::from_secs),
+        min_send_rate: proxy.downstream_min_send_rate_bytes_per_sec,
+    }
+}
+
+fn apply_downstream_flow_control(session: &mut Session, proxy: &ProxyConfig) {
+    let flow_control = downstream_flow_control(proxy);
+    let downstream = session.as_downstream_mut();
+    downstream.set_write_timeout(flow_control.write_timeout);
+    downstream.set_min_send_rate(flow_control.min_send_rate);
 }
 
 #[cfg(feature = "cache")]
@@ -3367,6 +3390,23 @@ mod tests {
         );
         assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(600)));
         assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn proxy_downstream_flow_control_maps_from_config() {
+        let proxy = ProxyConfig {
+            downstream_write_timeout_secs: Some(20),
+            downstream_min_send_rate_bytes_per_sec: Some(8192),
+            ..ProxyConfig::default()
+        };
+
+        assert_eq!(
+            super::downstream_flow_control(&proxy),
+            super::DownstreamFlowControl {
+                write_timeout: Some(Duration::from_secs(20)),
+                min_send_rate: Some(8192),
+            }
+        );
     }
 
     #[cfg(feature = "web")]
