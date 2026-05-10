@@ -15,8 +15,9 @@ RUN apt-get update \
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY build.rs ./
 COPY vendor ./vendor
+COPY packaging/systemd ./packaging/systemd
 COPY src ./src
-COPY scripts/validate-features.sh ./scripts/validate-features.sh
+COPY scripts/validate-features.sh scripts/feature-policy.sh ./scripts/
 
 ARG FLUXHEIM_FEATURES=profile-core,acme-client
 RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
