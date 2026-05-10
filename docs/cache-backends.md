@@ -159,13 +159,15 @@ internal cache implementation.
   `store_attempts`, `store_ratio_per_mille`, `store_refusal_ratio_per_mille`,
   and `eviction_ratio_per_mille` fields so operators can read hit-rate,
   miss-rate, admission health, and eviction pressure without external JSON
-  post-processing. Totals and per-vhost status include `routes_total`,
-  `enabled_routes`, `enabled_route_ratio_per_mille`, `tiered_routes`, and
+  post-processing. Totals and per-vhost status include `configured_routes`,
+  `routes_total`, `cache_route_coverage_ratio_per_mille`, `enabled_routes`,
+  `enabled_route_ratio_per_mille`, `tiered_routes`, and
   `tiered_route_ratio_per_mille` so route-cache coverage is visible without
-  parsing the route list. Per-vhost and per-route status also include
-  `storage_tiers` so dashboards can distinguish memory-only, disk-only, and
-  tiered caches without inspecting nested tier objects. Totals also include
-  enabled and tiered vhost ratios.
+  parsing the route list. `routes_total` counts routes with explicit cache
+  policy, while `configured_routes` counts all configured routes on the vhost.
+  Per-vhost and per-route status also include `storage_tiers` so dashboards can
+  distinguish memory-only, disk-only, and tiered caches without inspecting
+  nested tier objects. Totals also include enabled and tiered vhost ratios.
   `POST /_fluxheim/cache/activity/reset` returns the same vhost and route
   coverage counters alongside the reset tier counts, so operational scripts can
   log cache coverage at the same time they clear activity counters.

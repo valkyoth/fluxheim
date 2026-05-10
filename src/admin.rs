@@ -401,13 +401,15 @@ impl AdminApp {
     fn cache_activity_reset_response(&self) -> AdminResponse {
         let result = self.proxy.reset_cache_activity();
         let body = format!(
-            r#"{{"status":"ok","vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory_tiers":{},"disk_tiers":{}}}"#,
+            r#"{{"status":"ok","vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory_tiers":{},"disk_tiers":{}}}"#,
             result.vhosts,
             result.enabled_vhosts,
             ratio_per_mille(result.enabled_vhosts, result.vhosts),
             result.tiered_vhosts,
             ratio_per_mille(result.tiered_vhosts, result.vhosts),
+            result.configured_routes,
             result.routes_total,
+            ratio_per_mille(result.routes_total, result.configured_routes),
             result.enabled_routes,
             ratio_per_mille(result.enabled_routes, result.routes_total),
             result.tiered_routes,
@@ -1651,13 +1653,15 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
     format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory_tiers":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_tiers":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory_tiers":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_tiers":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
         totals.vhosts,
         totals.enabled_vhosts,
         ratio_per_mille(totals.enabled_vhosts, totals.vhosts),
         totals.tiered_vhosts,
         ratio_per_mille(totals.tiered_vhosts, totals.vhosts),
+        totals.configured_routes,
         totals.routes_total,
+        ratio_per_mille(totals.routes_total, totals.configured_routes),
         totals.enabled_routes,
         ratio_per_mille(totals.enabled_routes, totals.routes_total),
         totals.tiered_routes,
@@ -1708,12 +1712,14 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"storage_tiers":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"storage_tiers":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
             json_escape(&vhost.name),
             vhost.enabled,
             vhost.tiered,
             cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
+            vhost.configured_routes,
             vhost.routes_total,
+            ratio_per_mille(vhost.routes_total, vhost.configured_routes),
             vhost.enabled_routes,
             ratio_per_mille(vhost.enabled_routes, vhost.routes_total),
             vhost.tiered_routes,
@@ -2651,7 +2657,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
-                routes: vec![cached_assets_route()],
+                routes: vec![cached_assets_route(), uncached_api_route()],
             }],
             ..Config::default()
         };
@@ -2670,7 +2676,9 @@ mod tests {
         assert!(body.contains(r#""enabled_vhost_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_vhosts":1"#));
         assert!(body.contains(r#""tiered_vhost_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""configured_routes":2"#));
         assert!(body.contains(r#""routes_total":1"#));
+        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":500"#));
         assert!(body.contains(r#""enabled_routes":1"#));
         assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_routes":0"#));
@@ -2696,7 +2704,9 @@ mod tests {
         assert!(body.contains(r#""enabled":true"#));
         assert!(body.contains(r#""tiered":true"#));
         assert!(body.contains(r#""storage_tiers":2"#));
+        assert!(body.contains(r#""configured_routes":2"#));
         assert!(body.contains(r#""routes_total":1"#));
+        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":500"#));
         assert!(body.contains(r#""enabled_routes":1"#));
         assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_routes":0"#));
@@ -2746,7 +2756,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
-                routes: vec![cached_assets_route()],
+                routes: vec![cached_assets_route(), uncached_api_route()],
             }],
             ..Config::default()
         };
@@ -2775,7 +2785,9 @@ mod tests {
         assert!(body.contains(r#""enabled_vhost_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_vhosts":1"#));
         assert!(body.contains(r#""tiered_vhost_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""configured_routes":2"#));
         assert!(body.contains(r#""routes_total":1"#));
+        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":500"#));
         assert!(body.contains(r#""enabled_routes":1"#));
         assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_routes":0"#));
@@ -3811,6 +3823,24 @@ mod tests {
                 max_object_bytes: ByteSize::from_bytes(512),
                 ..CacheConfig::default()
             }),
+            headers: crate::config::VhostHeaderPolicyConfig::default(),
+        }
+    }
+
+    #[cfg(feature = "cache")]
+    fn uncached_api_route() -> RouteConfig {
+        RouteConfig {
+            name: "api".to_owned(),
+            path_exact: None,
+            path_prefix: Some("/api/".to_owned()),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            max_request_body_bytes: None,
+            redirect: None,
+            proxy: Some(ProxyConfig::default()),
+            web: None,
+            cache: None,
             headers: crate::config::VhostHeaderPolicyConfig::default(),
         }
     }

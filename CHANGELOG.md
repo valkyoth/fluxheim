@@ -23,6 +23,9 @@ behavior when the change improves security or project direction.
 - Cache status JSON now includes aggregate memory and disk cache tier counts.
 - Cache status JSON now includes per-vhost and per-route `storage_tiers`
   counters.
+- Cache status and activity-reset JSON now distinguish all configured routes
+  from routes with explicit cache policy, including a cache-route coverage
+  ratio.
 - Cache policies can now emit an optional status response header, such as
   `X-Cache-Status`, for requests that participate in the proxy cache.
 - Cache policies can now hide selected upstream response headers before cache

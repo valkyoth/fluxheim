@@ -507,6 +507,7 @@ pub struct CacheRuntimeTotals {
     pub vhosts: u64,
     pub enabled_vhosts: u64,
     pub tiered_vhosts: u64,
+    pub configured_routes: u64,
     pub routes_total: u64,
     pub enabled_routes: u64,
     pub tiered_routes: u64,
@@ -536,6 +537,7 @@ pub struct CacheVhostStats {
     pub name: String,
     pub enabled: bool,
     pub tiered: bool,
+    pub configured_routes: u64,
     pub routes_total: u64,
     pub enabled_routes: u64,
     pub tiered_routes: u64,
@@ -559,6 +561,7 @@ pub struct CacheRouteStats {
 pub struct CacheActivityResetResult {
     pub vhosts: u64,
     pub enabled_vhosts: u64,
+    pub configured_routes: u64,
     pub routes_total: u64,
     pub enabled_routes: u64,
     pub memory_tiers: u64,
@@ -623,6 +626,8 @@ impl ProxySnapshot {
             if vhost.pingora_tiered_storage.is_some() {
                 totals.tiered_vhosts = totals.tiered_vhosts.saturating_add(1);
             }
+            let configured_routes = vhost.routes.len() as u64;
+            totals.configured_routes = totals.configured_routes.saturating_add(configured_routes);
 
             let memory = vhost.pingora_memory_storage.map(|storage| storage.stats());
             let disk = vhost
@@ -666,6 +671,7 @@ impl ProxySnapshot {
                 name: vhost.name.clone(),
                 enabled: vhost.cache.enabled,
                 tiered: vhost.pingora_tiered_storage.is_some(),
+                configured_routes,
                 routes_total: routes.len() as u64,
                 enabled_routes,
                 tiered_routes,
@@ -682,6 +688,7 @@ impl ProxySnapshot {
         let mut result = CacheActivityResetResult {
             vhosts: 0,
             enabled_vhosts: 0,
+            configured_routes: 0,
             routes_total: 0,
             enabled_routes: 0,
             memory_tiers: 0,
@@ -694,6 +701,9 @@ impl ProxySnapshot {
             if vhost.cache.enabled {
                 result.enabled_vhosts = result.enabled_vhosts.saturating_add(1);
             }
+            result.configured_routes = result
+                .configured_routes
+                .saturating_add(vhost.routes.len() as u64);
             if let Some(storage) = vhost.pingora_memory_storage {
                 storage.reset_activity();
                 result.memory_tiers = result.memory_tiers.saturating_add(1);
