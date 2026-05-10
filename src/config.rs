@@ -3173,6 +3173,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub status_header: Option<String>,
     #[serde(default)]
+    pub status_reason_header: Option<String>,
+    #[serde(default)]
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
     pub no_store_response_headers: Vec<String>,
@@ -3235,6 +3237,7 @@ impl Default for CacheConfig {
         Self {
             enabled: false,
             status_header: None,
+            status_reason_header: None,
             hide_response_headers: Vec::new(),
             no_store_response_headers: Vec::new(),
             no_store_response_header_values: BTreeMap::new(),
@@ -3279,6 +3282,9 @@ impl CacheConfig {
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if let Some(status_header) = &self.status_header {
             validate_header_name(scope, status_header)?;
+        }
+        if let Some(status_reason_header) = &self.status_reason_header {
+            validate_header_name(scope, status_reason_header)?;
         }
         for header in &self.hide_response_headers {
             validate_header_name(scope, header)?;
@@ -7487,6 +7493,7 @@ mod tests {
             [cache]
             enabled = true
             status_header = "X-Cache-Status"
+            status_reason_header = "X-Cache-Reason"
             hide_response_headers = ["set-cookie"]
             no_store_response_headers = ["x-fluxheim-no-store"]
             no_store_response_header_values = { x-app-cache = "private" }
@@ -7534,6 +7541,10 @@ mod tests {
         assert_eq!(
             config.cache.status_header,
             Some("X-Cache-Status".to_owned())
+        );
+        assert_eq!(
+            config.cache.status_reason_header,
+            Some("X-Cache-Reason".to_owned())
         );
         assert_eq!(
             config.cache.hide_response_headers,
@@ -7645,6 +7656,25 @@ mod tests {
             r#"
             [cache]
             status_header = "bad header"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderName {
+                field: "cache",
+                name: "bad header".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_status_reason_header_name() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            status_reason_header = "bad header"
             "#,
         )
         .unwrap();

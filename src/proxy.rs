@@ -2183,7 +2183,7 @@ impl ProxyHttp for FluxProxy {
         let vhost = state.vhost(vhost_index);
         apply_downstream_flow_control(session, &selected_runtime_proxy(vhost, ctx).config);
         #[cfg(feature = "cache")]
-        insert_cache_status_header(session, response, selected_cache_config(vhost, ctx))?;
+        insert_cache_status_headers(session, response, selected_cache_config(vhost, ctx))?;
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)
     }
@@ -2580,19 +2580,26 @@ fn selected_cache_config<'a>(
 }
 
 #[cfg(feature = "cache")]
-fn insert_cache_status_header(
+fn insert_cache_status_headers(
     session: &Session,
     response: &mut ResponseHeader,
     cache: &crate::config::CacheConfig,
 ) -> Result<()> {
-    let Some(header_name) = cache.status_header.as_deref() else {
-        return Ok(());
-    };
-    let Some(status) = cache_status_header_value(session.cache.phase()) else {
-        return Ok(());
-    };
+    let phase = session.cache.phase();
 
-    response.insert_header(header_name.to_owned(), status)
+    if let Some(header_name) = cache.status_header.as_deref()
+        && let Some(status) = cache_status_header_value(phase)
+    {
+        response.insert_header(header_name.to_owned(), status)?;
+    }
+
+    if let Some(header_name) = cache.status_reason_header.as_deref()
+        && let Some(reason) = cache_status_reason_header_value(phase)
+    {
+        response.insert_header(header_name.to_owned(), reason)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "cache")]
@@ -2839,6 +2846,25 @@ fn cache_status_header_value(phase: CachePhase) -> Option<&'static str> {
         CachePhase::Expired => Some("EXPIRED"),
         CachePhase::Revalidated => Some("REVALIDATED"),
         CachePhase::RevalidatedNoCache(_) => Some("REVALIDATED-NOCACHE"),
+    }
+}
+
+#[cfg(feature = "cache")]
+fn cache_status_reason_header_value(phase: CachePhase) -> Option<&'static str> {
+    match phase {
+        CachePhase::Disabled(NoCacheReason::NeverEnabled)
+        | CachePhase::Uninit
+        | CachePhase::Bypass
+        | CachePhase::CacheKey
+        | CachePhase::Hit
+        | CachePhase::Miss
+        | CachePhase::Stale
+        | CachePhase::StaleUpdating
+        | CachePhase::Expired
+        | CachePhase::Revalidated => None,
+        CachePhase::Disabled(reason) | CachePhase::RevalidatedNoCache(reason) => {
+            Some(reason.as_str())
+        }
     }
 }
 
@@ -3844,8 +3870,8 @@ mod tests {
     use super::{
         CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
         cache_min_uses_allows_store, cache_request_participated, cache_should_serve_stale,
-        cache_stale_status_allows, cache_status_header_value, cache_vary_policy,
-        ignore_origin_cache_headers, response_cache_admission_rejection,
+        cache_stale_status_allows, cache_status_header_value, cache_status_reason_header_value,
+        cache_vary_policy, ignore_origin_cache_headers, response_cache_admission_rejection,
         strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
     use super::{
@@ -5692,6 +5718,34 @@ mod tests {
                 NoCacheReason::OriginNotCache
             )),
             Some("REVALIDATED-NOCACHE")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_status_reason_header_values_explain_uncacheable_phases() {
+        use pingora::cache::{CachePhase, NoCacheReason};
+
+        assert_eq!(
+            cache_status_reason_header_value(CachePhase::Disabled(NoCacheReason::NeverEnabled)),
+            None
+        );
+        assert_eq!(cache_status_reason_header_value(CachePhase::Bypass), None);
+        assert_eq!(
+            cache_status_reason_header_value(CachePhase::Disabled(NoCacheReason::OriginNotCache)),
+            Some("OriginNotCache")
+        );
+        assert_eq!(
+            cache_status_reason_header_value(CachePhase::Disabled(NoCacheReason::Custom(
+                "cache-min-uses"
+            ))),
+            Some("cache-min-uses")
+        );
+        assert_eq!(
+            cache_status_reason_header_value(CachePhase::RevalidatedNoCache(
+                NoCacheReason::ResponseTooLarge
+            )),
+            Some("ResponseTooLarge")
         );
     }
 

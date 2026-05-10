@@ -160,6 +160,7 @@ downstream_min_send_rate_bytes_per_sec = 8192
 [vhosts.routes.cache]
 enabled = true
 status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 no_store_response_header_values = { x-app-cache = "private" }

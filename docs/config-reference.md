@@ -454,6 +454,7 @@ compiled.
 [cache]
 enabled = false
 status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 no_store_response_header_values = { x-app-cache = "private" }
@@ -507,6 +508,10 @@ runtime directory.
 `status_header` is optional. When set, Fluxheim emits a cache debug header such
 as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 `REVALIDATED` for requests that participate in the proxy cache.
+`status_reason_header` is optional. When set, Fluxheim emits a bounded reason
+header such as `OriginNotCache`, `ResponseTooLarge`, or `cache-min-uses` when
+the cache phase has an explicit no-cache reason. Leave it unset unless you are
+actively debugging cache policy.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.
