@@ -665,9 +665,10 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
+                    ratio_per_mille_usize(result.purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
                     limit,
@@ -726,9 +727,10 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
+                    ratio_per_mille_usize(result.purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
                     limit,
@@ -788,9 +790,10 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
+                    ratio_per_mille_usize(result.purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
                     limit,
@@ -1729,6 +1732,14 @@ fn ratio_per_mille(numerator: u64, denominator: u64) -> u64 {
 }
 
 #[cfg(feature = "cache")]
+fn ratio_per_mille_usize(numerator: usize, denominator: usize) -> u64 {
+    ratio_per_mille(
+        u64::try_from(numerator).unwrap_or(u64::MAX),
+        u64::try_from(denominator).unwrap_or(u64::MAX),
+    )
+}
+
+#[cfg(feature = "cache")]
 fn average_bytes(total_bytes: u64, entries: u64) -> u64 {
     total_bytes.checked_div(entries).unwrap_or(0)
 }
@@ -2290,6 +2301,7 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""matched":0"#));
         assert!(body.contains(r#""purged":0"#));
+        assert!(body.contains(r#""purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""truncated":false"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
@@ -2337,6 +2349,7 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""path_prefix":"/assets/""#));
         assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
         assert!(body.contains(r#""scope":"vhost""#));
@@ -2396,6 +2409,7 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""path_pattern":"/assets/*.png""#));
         assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
         assert!(body.contains(r#""scope":"vhost""#));
@@ -2477,6 +2491,16 @@ mod tests {
         assert_eq!(super::ratio_per_mille(512, 2048), 250);
         assert_eq!(super::ratio_per_mille(2048, 2048), 1000);
         assert_eq!(super::ratio_per_mille(4096, 2048), 2000);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_ratio_per_mille_usize_handles_empty_and_full_capacity() {
+        assert_eq!(super::ratio_per_mille_usize(0, 0), 0);
+        assert_eq!(super::ratio_per_mille_usize(0, 1024), 0);
+        assert_eq!(super::ratio_per_mille_usize(512, 2048), 250);
+        assert_eq!(super::ratio_per_mille_usize(2048, 2048), 1000);
+        assert_eq!(super::ratio_per_mille_usize(4096, 2048), 2000);
     }
 
     #[cfg(feature = "cache")]
