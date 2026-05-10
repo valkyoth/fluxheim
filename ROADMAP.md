@@ -624,6 +624,43 @@ without parsing text fixtures for every module.
      ignoring upstream freshness headers or hiding `Set-Cookie` on cacheable
      static routes. This must remain opt-in per route and must not weaken the
      default refusal to store personalized responses.
+   - Full reverse-proxy cache policy parity. Planned:
+     - cache-key templates with a safe variable set rather than arbitrary
+       string interpolation;
+     - `min_uses` style delayed admission before storing a response;
+     - status-specific TTL rules, including `any` fallback TTL;
+     - explicit request-side bypass rules and response-side no-store rules
+       based on bounded header, cookie, and query predicates;
+     - stale serving controls for origin error, timeout, updating, and selected
+       status classes;
+     - optional cache-status response headers for production debugging;
+     - route-local controls for ignoring upstream freshness headers and hiding
+       `Set-Cookie`, allowed only when the route is explicitly marked static or
+       otherwise personalized-content safe;
+     - prefix/tag/wildcard purge backed by a bounded cache index, plus a
+       background purger for complete disk cleanup;
+     - startup cache-index loading that is incremental and bounded so large
+       disk caches do not block the gateway;
+     - byte-range/slice caching for large immutable files, with explicit
+       warnings that the source object must not change during slice fill.
+   - Dedicated cache-server feature track inspired by Varnish/Vinyl-style
+     accelerators. Planned:
+     - richer cache policy phases for receive, hash, hit, miss, backend
+       response, deliver, and synthetic responses without exposing unsafe
+       arbitrary code by default;
+     - object metadata fields for TTL, grace, keep, hit-for-pass/pass, tags,
+       surrogate keys, and variant identities;
+     - health-aware stale/grace behavior where stale objects can be served
+       differently for healthy versus unhealthy origins;
+     - ban/tag invalidation with asynchronous evaluation and bounded memory use;
+     - first-class cache observability: per-route hit/miss/pass/bypass/stale
+       counters, storage pressure, eviction reasons, origin fetch outcomes,
+       and structured cache decision logs;
+     - live administration for cache policy reload, purge/ban operations,
+       storage inspection, and safe config activation through the existing
+       admin/snapshot model;
+     - extension points for optional policy modules or WASM filters after the
+       stable typed policy language is complete.
    - HTTP cache semantics.
    - Stale-while-revalidate.
    - Purge/admin API. Implemented for protected single-key invalidation through
