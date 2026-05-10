@@ -422,6 +422,18 @@ impl CacheIndexedPurgeResult {
         self.memory_purged.saturating_add(self.disk_purged)
     }
 
+    pub fn not_purged(&self) -> usize {
+        self.matched().saturating_sub(self.purged())
+    }
+
+    pub fn memory_not_purged(&self) -> usize {
+        self.memory_matched.saturating_sub(self.memory_purged)
+    }
+
+    pub fn disk_not_purged(&self) -> usize {
+        self.disk_matched.saturating_sub(self.disk_purged)
+    }
+
     pub fn truncated(&self) -> bool {
         self.memory_truncated || self.disk_truncated
     }

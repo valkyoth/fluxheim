@@ -673,9 +673,10 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
+                    result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
@@ -685,10 +686,12 @@ impl AdminApp {
                     cache_scope(result.route.as_deref()),
                     result.memory_matched,
                     result.memory_purged,
+                    result.memory_not_purged(),
                     ratio_per_mille_usize(result.memory_purged, result.memory_matched),
                     result.memory_truncated,
                     result.disk_matched,
                     result.disk_purged,
+                    result.disk_not_purged(),
                     ratio_per_mille_usize(result.disk_purged, result.disk_matched),
                     result.disk_truncated
                 );
@@ -737,9 +740,10 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
+                    result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
@@ -750,10 +754,12 @@ impl AdminApp {
                     json_escape(path_prefix),
                     result.memory_matched,
                     result.memory_purged,
+                    result.memory_not_purged(),
                     ratio_per_mille_usize(result.memory_purged, result.memory_matched),
                     result.memory_truncated,
                     result.disk_matched,
                     result.disk_purged,
+                    result.disk_not_purged(),
                     ratio_per_mille_usize(result.disk_purged, result.disk_matched),
                     result.disk_truncated
                 );
@@ -802,9 +808,10 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
+                    result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
@@ -815,10 +822,12 @@ impl AdminApp {
                     json_escape(path_pattern),
                     result.memory_matched,
                     result.memory_purged,
+                    result.memory_not_purged(),
                     ratio_per_mille_usize(result.memory_purged, result.memory_matched),
                     result.memory_truncated,
                     result.disk_matched,
                     result.disk_purged,
+                    result.disk_not_purged(),
                     ratio_per_mille_usize(result.disk_purged, result.disk_matched),
                     result.disk_truncated
                 );
@@ -2315,8 +2324,11 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""matched":0"#));
         assert!(body.contains(r#""purged":0"#));
+        assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""memory_not_purged":0"#));
         assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_not_purged":0"#));
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""truncated":false"#));
         assert!(body.contains(r#""repeat_required":false"#));
@@ -2365,8 +2377,11 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""path_prefix":"/assets/""#));
         assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""memory_not_purged":0"#));
         assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_not_purged":0"#));
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
@@ -2427,8 +2442,11 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""path_pattern":"/assets/*.png""#));
         assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""memory_not_purged":0"#));
         assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_not_purged":0"#));
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));

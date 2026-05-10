@@ -211,7 +211,8 @@ internal cache implementation.
   the effective `limit`, cache `scope`, and `purged_ratio_per_mille` in their
   response. The ratio reports how much of the matched batch was actually
   purged, where `1000` means every matched entry was removed. Indexed purge
-  responses also include `memory_purged_ratio_per_mille` and
+  responses also include `not_purged`, `memory_not_purged`,
+  `disk_not_purged`, `memory_purged_ratio_per_mille`, and
   `disk_purged_ratio_per_mille` so operators can see which tier needs cleanup.
   They return
   `truncated = true` and `repeat_required = true` when more indexed entries
