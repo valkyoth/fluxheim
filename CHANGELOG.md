@@ -9,6 +9,14 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+### Added
+
+- Route-scoped cache runtime stats now appear in the protected admin cache
+  status endpoint and activity-reset response.
+- ACME HTTP-01 client failures now include published challenge URLs after
+  challenge material has been written, making failed authorization checks easier
+  to debug from production logs.
+
 ## 1.1.0 - TLS Policy And Certificate Operations
 
 Released: pending

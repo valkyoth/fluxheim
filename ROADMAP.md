@@ -234,7 +234,10 @@ These are realistic additions to implement across the stable core and early
    - Improve ACME command output for production runs: report per-target
      `skipped`, `renewed`, and `failed` status, include domain/order context
      on issuer failures, and print the HTTP-01 challenge path/URL when an
-     authorization fails.
+     authorization fails. Implemented for target statuses, per-target
+     success/failure lines, due-only status messaging, and HTTP-01 URL context
+     after challenge files are published. Planned: richer issuer
+     authorization/order context when the client library exposes it cleanly.
    - Add native systemd deployment support before `1.0.0`: a hardened
      `fluxheim.service`, optional environment file, tmpfiles/sysusers
      guidance, documented install paths, config validation before start, and

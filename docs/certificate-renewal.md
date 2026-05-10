@@ -163,8 +163,10 @@ with `acme attempted: 0` and a status message saying no certificates are due.
 First issuance normally does not need `--force-renew`: missing certificate files
 are due targets. The command prints every target with `status=due`,
 `status=skipped`, or `status=forced`, then reports per-target `renewed:` and
-`failed:` lines. It exits non-zero if any target failed, while still reporting
-successful renewals from the same run.
+`failed:` lines. For HTTP-01 failures after challenge files are published, the
+failure includes `published_http_01=` URLs so operators can test the exact public
+challenge paths that the issuer should have reached. It exits non-zero if any
+target failed, while still reporting successful renewals from the same run.
 
 Use `--force-renew` only for deliberate emergency rotation or testing when you
 really need to reissue certificates that are still valid; repeated forced

@@ -531,7 +531,11 @@ pub fn execute_renewal<Client: AcmeIssuerClient>(
             .finalize_http_01_order(&order, &challenge_store)
             .map_err(|error| AcmeRenewalError::Client {
                 issuer: item.target.issuer.clone(),
-                message: error.to_string(),
+                message: acme_client_error_message_with_http_01_context(
+                    error,
+                    &item.target.domains,
+                    &published,
+                ),
             })?;
         let certificate = install_managed_certificate(
             storage,
@@ -713,7 +717,11 @@ async fn execute_instant_http_01_renewal(
                     .await
                     .map_err(|error| AcmeRenewalError::Client {
                         issuer: item.target.issuer.clone(),
-                        message: error.to_string(),
+                        message: acme_client_error_message_with_http_01_context(
+                            error,
+                            &item.target.domains,
+                            &published,
+                        ),
                     })?;
             }
         }
@@ -724,7 +732,11 @@ async fn execute_instant_http_01_renewal(
             .await
             .map_err(|error| AcmeRenewalError::Client {
                 issuer: item.target.issuer.clone(),
-                message: error.to_string(),
+                message: acme_client_error_message_with_http_01_context(
+                    error,
+                    &item.target.domains,
+                    &published,
+                ),
             })?;
         let private_key_pem = Zeroizing::new(
             order
@@ -732,7 +744,11 @@ async fn execute_instant_http_01_renewal(
                 .await
                 .map_err(|error| AcmeRenewalError::Client {
                     issuer: item.target.issuer.clone(),
-                    message: error.to_string(),
+                    message: acme_client_error_message_with_http_01_context(
+                        error,
+                        &item.target.domains,
+                        &published,
+                    ),
                 })?
                 .into_bytes(),
         );
@@ -741,7 +757,11 @@ async fn execute_instant_http_01_renewal(
             .await
             .map_err(|error| AcmeRenewalError::Client {
                 issuer: item.target.issuer.clone(),
-                message: error.to_string(),
+                message: acme_client_error_message_with_http_01_context(
+                    error,
+                    &item.target.domains,
+                    &published,
+                ),
             })?
             .into_bytes();
         let certificate = install_managed_certificate(
@@ -1288,6 +1308,31 @@ fn cleanup_http_01_challenges(
             })?;
     }
     Ok(())
+}
+
+fn acme_client_error_message_with_http_01_context(
+    error: impl fmt::Display,
+    domains: &[String],
+    tokens: &[String],
+) -> String {
+    let message = error.to_string();
+    let urls = http_01_challenge_urls(domains, tokens);
+    if urls.is_empty() {
+        return message;
+    }
+    format!("{message}; published_http_01={}", urls.join(","))
+}
+
+fn http_01_challenge_urls(domains: &[String], tokens: &[String]) -> Vec<String> {
+    let mut urls = Vec::new();
+    for domain in domains {
+        for token in tokens {
+            urls.push(format!(
+                "http://{domain}/.well-known/acme-challenge/{token}"
+            ));
+        }
+    }
+    urls
 }
 
 #[cfg(feature = "acme-client")]
@@ -3116,12 +3161,30 @@ mod tests {
         let error = execute_renewal(&config, &item, &mut client).unwrap_err();
 
         assert!(matches!(error, AcmeRenewalError::Client { .. }));
+        assert!(error.to_string().contains(
+            "published_http_01=http://example.test/.well-known/acme-challenge/token_123"
+        ));
         assert_eq!(client.finalize_calls, 1);
         let store = AcmeHttp01ChallengeStore::new(&storage, "example");
         assert_eq!(store.load_key_authorization("token_123").unwrap(), None);
         let paths = managed_certificate_paths(&storage, "example");
         assert!(!paths.cert_path.exists());
         assert!(!paths.key_path.exists());
+    }
+
+    #[test]
+    fn http_01_error_context_lists_all_published_urls() {
+        let message = super::acme_client_error_message_with_http_01_context(
+            "authorization failed",
+            &["example.test".to_owned(), "www.example.test".to_owned()],
+            &["token-a".to_owned(), "token-b".to_owned()],
+        );
+
+        assert!(message.starts_with("authorization failed; published_http_01="));
+        assert!(message.contains("http://example.test/.well-known/acme-challenge/token-a"));
+        assert!(message.contains("http://example.test/.well-known/acme-challenge/token-b"));
+        assert!(message.contains("http://www.example.test/.well-known/acme-challenge/token-a"));
+        assert!(message.contains("http://www.example.test/.well-known/acme-challenge/token-b"));
     }
 
     #[test]
