@@ -2,7 +2,11 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+#[cfg(feature = "cache")]
+use std::sync::OnceLock;
 use std::sync::{Arc, RwLock};
+#[cfg(feature = "cache")]
+use std::time::Duration;
 #[cfg(not(feature = "privacy-mode"))]
 use std::time::Instant;
 
@@ -41,6 +45,12 @@ use crate::web::{ResolveResult, StaticFileServer};
 const MAX_VARY_HEADER_BYTES: usize = 2048;
 #[cfg(feature = "cache")]
 const MAX_VARY_FIELDS: usize = 16;
+#[cfg(feature = "cache")]
+const CACHE_MIN_USES_REASON: &str = "cache-min-uses";
+#[cfg(feature = "cache")]
+const CACHE_MIN_USES_COUNTER_CAPACITY: u64 = 65_536;
+#[cfg(feature = "cache")]
+const CACHE_MIN_USES_COUNTER_TTL_SECS: u64 = 600;
 
 #[derive(Clone)]
 pub struct FluxProxy {
@@ -2023,12 +2033,24 @@ impl ProxyHttp for FluxProxy {
         let cache_control =
             pingora::cache::cache_control::CacheControl::from_resp_headers(response);
         let authorization_present = session.req_header().headers.contains_key("authorization");
-        Ok(pingora::cache::filters::resp_cacheable(
+        let decision = pingora::cache::filters::resp_cacheable(
             cache_control.as_ref(),
             response.clone(),
             authorization_present,
             &FLUXHEIM_CACHE_DEFAULTS,
-        ))
+        );
+        if decision.is_cacheable()
+            && !cache_min_uses_allows_store(
+                cache_min_uses_counter(),
+                cache,
+                &session.cache.cache_key().combined(),
+            )
+        {
+            return Ok(RespCacheable::Uncacheable(NoCacheReason::Custom(
+                CACHE_MIN_USES_REASON,
+            )));
+        }
+        Ok(decision)
     }
 
     #[cfg(feature = "cache")]
@@ -2358,6 +2380,37 @@ fn cache_request_participated(phase: CachePhase) -> bool {
         phase,
         CachePhase::Disabled(NoCacheReason::NeverEnabled) | CachePhase::Uninit | CachePhase::Bypass
     )
+}
+
+#[cfg(feature = "cache")]
+fn cache_min_uses_counter() -> &'static moka::sync::Cache<String, u32> {
+    static COUNTER: OnceLock<moka::sync::Cache<String, u32>> = OnceLock::new();
+    COUNTER.get_or_init(|| {
+        moka::sync::Cache::builder()
+            .max_capacity(CACHE_MIN_USES_COUNTER_CAPACITY)
+            .time_to_live(Duration::from_secs(CACHE_MIN_USES_COUNTER_TTL_SECS))
+            .build()
+    })
+}
+
+#[cfg(feature = "cache")]
+fn cache_min_uses_allows_store(
+    counter: &moka::sync::Cache<String, u32>,
+    cache: &crate::config::CacheConfig,
+    cache_key: &str,
+) -> bool {
+    if cache.min_uses <= 1 {
+        return true;
+    }
+
+    let uses = counter.get(cache_key).unwrap_or(0).saturating_add(1);
+    if uses >= cache.min_uses {
+        counter.invalidate(cache_key);
+        true
+    } else {
+        counter.insert(cache_key.to_owned(), uses);
+        false
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -3333,10 +3386,10 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{
-        MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl, cache_request_participated,
-        cache_status_header_value, cache_vary_policy, ignore_origin_cache_headers,
-        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
-        vary_request_hash,
+        MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl, cache_min_uses_allows_store,
+        cache_request_participated, cache_status_header_value, cache_vary_policy,
+        ignore_origin_cache_headers, response_cache_admission_rejection,
+        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
 
     #[test]
@@ -5109,6 +5162,28 @@ mod tests {
             )),
             Some("REVALIDATED-NOCACHE")
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_min_uses_delays_store_until_threshold() {
+        let counter = moka::sync::Cache::builder().max_capacity(16).build();
+        let cache = CacheConfig {
+            min_uses: 3,
+            ..CacheConfig::default()
+        };
+
+        assert!(!cache_min_uses_allows_store(&counter, &cache, "key"));
+        assert!(!cache_min_uses_allows_store(&counter, &cache, "key"));
+        assert!(cache_min_uses_allows_store(&counter, &cache, "key"));
+        assert!(!cache_min_uses_allows_store(&counter, &cache, "key"));
+
+        let default_cache = CacheConfig::default();
+        assert!(cache_min_uses_allows_store(
+            &counter,
+            &default_cache,
+            "other-key"
+        ));
     }
 
     #[cfg(feature = "cache")]

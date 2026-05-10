@@ -627,7 +627,8 @@ without parsing text fixtures for every module.
    - Full reverse-proxy cache policy parity. Planned:
      - cache-key templates with a safe variable set rather than arbitrary
        string interpolation;
-     - `min_uses` style delayed admission before storing a response;
+     - `min_uses` style delayed admission before storing a response.
+       Implemented with a bounded short-lived admission counter per cache key;
      - status-specific TTL rules, including `any` fallback TTL. Implemented
        through typed `status_ttls` and `default_status_ttl_secs` policy;
      - explicit request-side bypass rules and response-side no-store rules

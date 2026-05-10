@@ -462,6 +462,7 @@ bypass_query_params = ["preview", "token"]
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
+min_uses = 2
 status_ttls = { "200" = 3600, "404" = 60 }
 default_status_ttl_secs = 15
 stale_while_revalidate_secs = 30
@@ -530,6 +531,11 @@ rejected here; use `bypass_request_headers` for those.
 cache key, which gives operators a simple cache-versioning knob. Bump it, for
 example from `repoheim-assets-v1` to `repoheim-assets-v2`, to isolate new
 objects from an older route cache without changing URLs.
+`min_uses` delays cache admission until the same cache key has produced a
+cacheable origin response at least that many times within a short bounded
+window. The default is `1`, which stores the first cacheable response. Increase
+it on routes where one-off URLs should pass through without occupying shared
+cache space.
 `ignore_origin_cache_headers` removes upstream `Cache-Control` and `Expires`
 before cache admission and downstream delivery. Keep the default `false` unless
 the matched route is known static content and Fluxheim policy is responsible for

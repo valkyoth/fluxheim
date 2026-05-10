@@ -3188,6 +3188,8 @@ pub struct CacheConfig {
     pub ignore_origin_cache_headers: bool,
     #[serde(default)]
     pub key_namespace: Option<String>,
+    #[serde(default = "default_cache_min_uses")]
+    pub min_uses: u32,
     #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
     #[serde(default)]
@@ -3227,6 +3229,7 @@ impl Default for CacheConfig {
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
             key_namespace: None,
+            min_uses: default_cache_min_uses(),
             status_ttls: BTreeMap::new(),
             default_status_ttl_secs: None,
             stale_while_revalidate_secs: None,
@@ -3282,6 +3285,9 @@ impl CacheConfig {
         }
         if let Some(namespace) = &self.key_namespace {
             validate_cache_key_namespace(scope, namespace)?;
+        }
+        if self.min_uses == 0 {
+            return Err(ConfigError::InvalidCacheMinUses { scope });
         }
         for (status, ttl_secs) in &self.status_ttls {
             if !(100..=599).contains(status) || *ttl_secs == 0 {
@@ -3931,6 +3937,9 @@ pub enum ConfigError {
     InvalidCacheDefaultStatusTtl {
         scope: &'static str,
     },
+    InvalidCacheMinUses {
+        scope: &'static str,
+    },
     InvalidCacheBypassQueryParam {
         scope: &'static str,
         param: String,
@@ -4348,6 +4357,9 @@ impl Display for ConfigError {
                     "{scope}.default_status_ttl_secs must be greater than zero"
                 )
             }
+            Self::InvalidCacheMinUses { scope } => {
+                write!(formatter, "{scope}.min_uses must be greater than zero")
+            }
             Self::InvalidCacheBypassQueryParam { scope, param } => write!(
                 formatter,
                 "{scope}.bypass_query_params must contain raw query parameter names without whitespace, controls, '&', '=', '#', '?', or ';', got {param:?}"
@@ -4678,6 +4690,10 @@ fn default_lb_health_check_threshold() -> usize {
 
 fn default_cache_include_query() -> bool {
     true
+}
+
+fn default_cache_min_uses() -> u32 {
+    1
 }
 
 fn default_cache_lock_enabled() -> bool {
@@ -7195,6 +7211,7 @@ mod tests {
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
             key_namespace = "repoheim-assets-v1"
+            min_uses = 2
             status_ttls = { "200" = 3600, "404" = 60 }
             default_status_ttl_secs = 15
             stale_while_revalidate_secs = 30
@@ -7256,6 +7273,7 @@ mod tests {
             config.cache.key_namespace,
             Some("repoheim-assets-v1".to_owned())
         );
+        assert_eq!(config.cache.min_uses, 2);
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
         assert_eq!(config.cache.default_status_ttl_secs, Some(15));
@@ -7513,6 +7531,22 @@ mod tests {
                 status: 200,
                 ttl_secs: 0,
             })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_min_uses() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            min_uses = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheMinUses { scope: "cache" })
         );
     }
 

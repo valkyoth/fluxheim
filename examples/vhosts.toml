@@ -167,6 +167,7 @@ bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
 bypass_query_params = ["preview", "token"]
 vary_request_headers = ["accept-encoding"]
 key_namespace = "chat-assets-v1"
+min_uses = 2
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 default_status_ttl_secs = 15
 stale_while_revalidate_secs = 30
