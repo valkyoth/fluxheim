@@ -429,6 +429,12 @@ impl CacheIndexedPurgeResult {
 
 #[cfg(feature = "cache")]
 impl CacheBulkPurgeResult {
+    pub fn route(&self) -> Option<&str> {
+        self.results
+            .first()
+            .and_then(|result| result.route.as_deref())
+    }
+
     pub fn requested(&self) -> usize {
         self.results.len()
     }

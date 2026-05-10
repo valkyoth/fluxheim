@@ -184,8 +184,9 @@ internal cache implementation.
   audit bulk purges without decoding cache keys.
   `POST /_fluxheim/cache/purge-bulk` invalidates multiple identities that share
   the same host, method, vhost, optional route, and optional original URL query.
-  Bulk purge responses include `purged_ratio_per_mille` so operators can see
-  how much of the requested batch matched existing cache entries.
+  Bulk purge responses echo the cache `scope` and optional `route`, and include
+  `purged_ratio_per_mille` so operators can see how much of the requested batch
+  matched existing cache entries.
   Purge identities are bounded before key derivation: hosts, methods, paths,
   queries, and bulk path count have explicit limits; paths must start with `/`;
   path traversal segments, encoded path separators, encoded dots, backslashes,

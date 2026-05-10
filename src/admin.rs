@@ -620,11 +620,13 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","requested":{},"purged":{},"purged_ratio_per_mille":{},"vhost":"{}","results":[{}]}}"#,
+                    r#"{{"status":"ok","requested":{},"purged":{},"purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","results":[{}]}}"#,
                     result.requested(),
                     result.purged(),
                     ratio_per_mille_usize(result.purged(), result.requested()),
                     json_escape(&result.vhost),
+                    cache_route_json(result.route()),
+                    cache_scope(result.route()),
                     cache_purge_results_json(&result.results)
                 );
                 json_response(StatusCode::OK, body.as_bytes())
@@ -2697,9 +2699,48 @@ mod tests {
         assert!(body.contains(r#""requested":2"#));
         assert!(body.contains(r#""purged":0"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""route":null"#));
+        assert!(body.contains(r#""scope":"vhost""#));
         assert!(body.contains(r#""results":["#));
         assert!(body.contains(r#""path":"/img/one.png""#));
         assert!(body.contains(r#""path":"/img/two.png""#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_bulk_endpoint_reports_route_scope() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![cached_assets_route()],
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge-bulk",
+            Some("vhost=cached&route=assets&host=cached.example&path=/assets/one.png&path=/assets/two.png"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""requested":2"#));
+        assert!(body.contains(r#""route":"assets""#));
+        assert!(body.contains(r#""scope":"route""#));
+        assert!(body.contains(r#""path":"/assets/one.png""#));
+        assert!(body.contains(r#""path":"/assets/two.png""#));
     }
 
     #[cfg(feature = "cache")]
