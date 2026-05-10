@@ -402,6 +402,142 @@ services:
       - gateway_net
 ```
 
+### Container ACME First Issuance
+
+For HTTP-01 ACME, the CA must be able to reach Fluxheim on public port `80`.
+During first issuance, run Fluxheim with the HTTP listener enabled, keep
+`server.tls_listen` commented out, and keep `[server.https_redirect]` disabled
+until certificates exist.
+
+Example container main config shape for first issuance:
+
+```toml
+include_conf_d = true
+
+[server]
+listen = ["0.0.0.0:8080"]
+# tls_listen = ["0.0.0.0:8443"]
+default_vhost = "example.com"
+
+[server.https_redirect]
+enabled = false
+status = 308
+
+[tls]
+enabled = true
+backend = "rustls"
+
+[tls.acme]
+enabled = true
+storage = "/var/lib/fluxheim/acme"
+contact_email = "admin@example.com"
+default_issuer = "actalis"
+challenge = "http-01"
+
+[[tls.acme.issuers]]
+name = "actalis"
+directory_url = "https://acme-api.actalis.com/acme/directory"
+
+[tls.acme.issuers.eab]
+key_id_file = "/run/secrets/actalis-eab-kid"
+hmac_key_file = "/run/secrets/actalis-eab-hmac-key"
+```
+
+For container secret files, mount the files read-only. If the host tree is
+already labeled with `container_file_t`, do not add a `:Z` relabel suffix to
+individual secret-file mounts:
+
+```bash
+-v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
+-v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+```
+
+Validate the mounted config directly with `podman run --rm`. This avoids
+compose-provider differences around one-shot commands:
+
+```bash
+podman run --rm \
+  --name fluxheim_validate \
+  --network gateway_net \
+  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
+  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
+  ghcr.io/valkyoth/fluxheim:latest-wolfi \
+  --config /etc/fluxheim/fluxheim.toml \
+  --validate-config
+```
+
+Then start Fluxheim on HTTP only, replacing any existing gateway on port `80`:
+
+```bash
+podman run -d \
+  --name fluxheim_gateway \
+  --network gateway_net \
+  --restart always \
+  -p 80:8080 \
+  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
+  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
+  ghcr.io/valkyoth/fluxheim:latest-wolfi \
+  --config /etc/fluxheim/fluxheim.toml
+```
+
+Run due-only renewal from a second container. Missing certificate files are due
+targets, so first issuance does not require `--force-renew`:
+
+```bash
+podman run --rm \
+  --name fluxheim_acme_due \
+  --network gateway_net \
+  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
+  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
+  ghcr.io/valkyoth/fluxheim:latest-wolfi \
+  --config /etc/fluxheim/fluxheim.toml \
+  acme-renew
+```
+
+After every configured ACME target has renewed, enable HTTPS in the main config:
+
+```toml
+[server]
+listen = ["0.0.0.0:8080"]
+tls_listen = ["0.0.0.0:8443"]
+
+[server.https_redirect]
+enabled = true
+status = 308
+```
+
+Recreate the gateway with both published ports and verify SNI:
+
+```bash
+podman rm -f fluxheim_gateway
+podman compose -f gateway-fluxheim.yml up -d
+
+openssl s_client -connect example.com:443 -servername example.com </dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+```
+
+Optional mounted error pages should use a path whose parent already exists in
+the runtime image, such as `/var/lib/fluxheim/errors`. Avoid nested mountpoints
+below read-only image paths such as `/srv/fluxheim/errors`.
+
 The same deployment shape is available as
 [examples/podman-compose.yml](../examples/podman-compose.yml), with a matching
 container-oriented config at

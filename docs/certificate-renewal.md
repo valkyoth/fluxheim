@@ -158,8 +158,15 @@ fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
 By default the command observes the managed certificate files and attempts only
 missing or due certificates. If nothing needs renewal, it exits successfully
 with `acme attempted: 0` and a status message saying no certificates are due.
-Use `--force-renew` only for first issuance testing or deliberate emergency
-rotation; repeated forced renewals can hit issuer rate limits:
+First issuance normally does not need `--force-renew`: missing certificate files
+are due targets. The command prints every target with `status=due`,
+`status=skipped`, or `status=forced`, then reports per-target `renewed:` and
+`failed:` lines. It exits non-zero if any target failed, while still reporting
+successful renewals from the same run.
+
+Use `--force-renew` only for deliberate emergency rotation or testing when you
+really need to reissue certificates that are still valid; repeated forced
+renewals can hit issuer rate limits:
 
 ```bash
 fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew
@@ -211,7 +218,7 @@ the renewal command:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart fluxheim
-sudo fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew
+sudo fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
 ```
 
 ## Packaged Actalis Credentials
