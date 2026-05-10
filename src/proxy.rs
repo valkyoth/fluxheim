@@ -1691,6 +1691,11 @@ impl ProxyHttp for FluxProxy {
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
+        apply_cache_status_ttl(
+            upstream_response,
+            selected_cache_config(vhost, ctx),
+            session.cache.phase(),
+        )?;
         strip_cache_response_headers(
             upstream_response,
             selected_cache_config(vhost, ctx),
@@ -2098,6 +2103,24 @@ fn insert_cache_status_header(
     };
 
     response.insert_header(header_name.to_owned(), status)
+}
+
+#[cfg(feature = "cache")]
+fn apply_cache_status_ttl(
+    response: &mut ResponseHeader,
+    cache: &crate::config::CacheConfig,
+    phase: CachePhase,
+) -> Result<()> {
+    if !cache_request_participated(phase) {
+        return Ok(());
+    }
+    let status = response.status.as_u16();
+    let Some(ttl_secs) = cache.status_ttls.get(&status) else {
+        return Ok(());
+    };
+
+    response.remove_header("expires");
+    response.insert_header("cache-control", format!("public, max-age={ttl_secs}"))
 }
 
 #[cfg(feature = "cache")]
@@ -2981,9 +3004,9 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{
-        MAX_VARY_FIELDS, VaryCachePolicy, cache_request_participated, cache_status_header_value,
-        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
-        vary_request_hash,
+        MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl, cache_request_participated,
+        cache_status_header_value, response_cache_admission_rejection,
+        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
 
     #[test]
@@ -4542,6 +4565,68 @@ mod tests {
         assert!(response.headers.contains_key("set-cookie"));
         assert!(!cache_request_participated(CachePhase::Bypass));
         assert!(cache_request_participated(CachePhase::Miss));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_applies_status_ttl_before_admission() {
+        use std::collections::BTreeMap;
+
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            status_ttls: BTreeMap::from([(200, 3600), (404, 60)]),
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response
+            .insert_header("expires", "Wed, 21 Oct 2015 07:28:00 GMT")
+            .unwrap();
+        response
+            .insert_header("cache-control", "private, no-store")
+            .unwrap();
+
+        assert_eq!(
+            response_cache_admission_rejection(&response),
+            Some("cache-control-private")
+        );
+
+        apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
+
+        assert!(!response.headers.contains_key("expires"));
+        assert_eq!(
+            response.headers.get("cache-control").unwrap().to_str().ok(),
+            Some("public, max-age=3600")
+        );
+        assert_eq!(response_cache_admission_rejection(&response), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_does_not_apply_status_ttl_to_non_participating_responses() {
+        use std::collections::BTreeMap;
+
+        use pingora::cache::{CachePhase, NoCacheReason};
+
+        let cache = CacheConfig {
+            status_ttls: BTreeMap::from([(200, 3600)]),
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        response.insert_header("cache-control", "private").unwrap();
+
+        apply_cache_status_ttl(
+            &mut response,
+            &cache,
+            CachePhase::Disabled(NoCacheReason::NeverEnabled),
+        )
+        .unwrap();
+
+        assert_eq!(
+            response.headers.get("cache-control").unwrap().to_str().ok(),
+            Some("private")
+        );
     }
 
     #[cfg(feature = "cache")]

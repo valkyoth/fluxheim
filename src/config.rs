@@ -3174,6 +3174,8 @@ pub struct CacheConfig {
     pub status_header: Option<String>,
     #[serde(default)]
     pub hide_response_headers: Vec<String>,
+    #[serde(default)]
+    pub status_ttls: BTreeMap<u16, u32>,
     #[serde(default = "default_cache_image_extensions")]
     pub image_extensions: Vec<String>,
     #[serde(default = "default_cache_methods")]
@@ -3192,6 +3194,7 @@ impl Default for CacheConfig {
             enabled: false,
             status_header: None,
             hide_response_headers: Vec::new(),
+            status_ttls: BTreeMap::new(),
             image_extensions: default_cache_image_extensions(),
             methods: default_cache_methods(),
             max_object_bytes: default_cache_max_object_bytes(),
@@ -3216,6 +3219,15 @@ impl CacheConfig {
         }
         for header in &self.hide_response_headers {
             validate_header_name(scope, header)?;
+        }
+        for (status, ttl_secs) in &self.status_ttls {
+            if !(100..=599).contains(status) || *ttl_secs == 0 {
+                return Err(ConfigError::InvalidCacheStatusTtl {
+                    scope,
+                    status: *status,
+                    ttl_secs: *ttl_secs,
+                });
+            }
         }
 
         if self.image_extensions.is_empty() {
@@ -3714,6 +3726,11 @@ pub enum ConfigError {
     InvalidCacheMaxObjectBytes {
         scope: &'static str,
     },
+    InvalidCacheStatusTtl {
+        scope: &'static str,
+        status: u16,
+        ttl_secs: u32,
+    },
     CacheEnabledWithoutStorageTier {
         scope: &'static str,
     },
@@ -4082,6 +4099,14 @@ impl Display for ConfigError {
                     "{scope}.max_object_bytes must be greater than zero"
                 )
             }
+            Self::InvalidCacheStatusTtl {
+                scope,
+                status,
+                ttl_secs,
+            } => write!(
+                formatter,
+                "{scope}.status_ttls[{status}] must use an HTTP status code from 100 to 599 and a positive TTL, got {ttl_secs}"
+            ),
             Self::CacheEnabledWithoutStorageTier { scope } => {
                 write!(
                     formatter,
@@ -6856,6 +6881,7 @@ mod tests {
             enabled = true
             status_header = "X-Cache-Status"
             hide_response_headers = ["set-cookie"]
+            status_ttls = { "200" = 3600, "404" = 60 }
             image_extensions = ["jpg", "webp"]
             methods = ["GET"]
             max_object_bytes = "4MiB"
@@ -6881,6 +6907,8 @@ mod tests {
             config.cache.hide_response_headers,
             ["set-cookie".to_owned()]
         );
+        assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
+        assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
         assert_eq!(
             config.cache.image_extensions,
             ["jpg".to_owned(), "webp".to_owned()]
@@ -6940,6 +6968,43 @@ mod tests {
             Err(ConfigError::InvalidHeaderName {
                 field: "cache",
                 name: "bad header".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_status_ttl() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            status_ttls = { "99" = 60 }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheStatusTtl {
+                scope: "cache",
+                status: 99,
+                ttl_secs: 60,
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            status_ttls = { "200" = 0 }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheStatusTtl {
+                scope: "cache",
+                status: 200,
+                ttl_secs: 0,
             })
         );
     }

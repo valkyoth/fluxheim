@@ -29,6 +29,11 @@ internal cache implementation.
   upstream response headers before cache admission and downstream delivery.
   This is intended for tightly scoped static-asset routes where operators know
   a header such as `Set-Cookie` is not part of the cache identity.
+- `cache.status_ttls`, `vhosts.cache.status_ttls`, and
+  `vhosts.routes.cache.status_ttls` define explicit positive TTLs by response
+  status. Matching cache-participating origin responses have their freshness
+  headers normalized to `Cache-Control: public, max-age=<ttl>` before cache
+  admission.
 - The first Pingora memory adapter stores complete objects only; it buffers up to
   `cache.max_object_bytes` and refuses anything larger.
 - The first Pingora disk adapter stores complete objects below `cache.disk.path`

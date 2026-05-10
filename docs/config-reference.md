@@ -443,6 +443,7 @@ compiled.
 enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+status_ttls = { "200" = 3600, "404" = 60 }
 image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
@@ -472,6 +473,10 @@ as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.
+`status_ttls` is optional. Each key is an HTTP status code and each value is a
+positive TTL in seconds. When a cache-participating origin response matches, the
+cache policy replaces response freshness headers with
+`Cache-Control: public, max-age=<ttl>` before cache admission.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`.
@@ -811,6 +816,7 @@ send_timeout_secs = 600
 enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 
