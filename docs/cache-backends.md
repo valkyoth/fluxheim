@@ -202,9 +202,10 @@ internal cache implementation.
   Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
   endpoints accept `limit` /
   `x-fluxheim-cache-limit`, default to a bounded batch size, and return
-  `truncated = true` when more indexed entries remain for the requested scope.
-  The index is bounded in memory, mirrors disk-tier writes, and is designed for
-  operational invalidation rather than as a complete filesystem scan.
+  the effective `limit` in their response. They return `truncated = true` when
+  more indexed entries remain for the requested scope. The index is bounded in
+  memory, mirrors disk-tier writes, and is designed for operational
+  invalidation rather than as a complete filesystem scan.
   A background disk purger remains planned.
 
 Example admin cache invalidation requests:

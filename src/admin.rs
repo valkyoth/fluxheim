@@ -664,10 +664,11 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"vhost":"{}","route":{},"memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"limit":{},"vhost":"{}","route":{},"memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.truncated(),
+                    limit,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
                     result.memory_matched,
@@ -722,10 +723,11 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"vhost":"{}","route":{},"path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"limit":{},"vhost":"{}","route":{},"path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.truncated(),
+                    limit,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
                     json_escape(path_prefix),
@@ -781,10 +783,11 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"vhost":"{}","route":{},"path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"limit":{},"vhost":"{}","route":{},"path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.truncated(),
+                    limit,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
                     json_escape(path_pattern),
@@ -2273,6 +2276,7 @@ mod tests {
         assert!(body.contains(r#""matched":0"#));
         assert!(body.contains(r#""purged":0"#));
         assert!(body.contains(r#""truncated":false"#));
+        assert!(body.contains(r#""limit":16"#));
     }
 
     #[cfg(feature = "cache")]
@@ -2316,6 +2320,7 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""path_prefix":"/assets/""#));
         assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""limit":16"#));
     }
 
     #[cfg(feature = "cache")]
@@ -2372,6 +2377,7 @@ mod tests {
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""path_pattern":"/assets/*.png""#));
         assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""limit":16"#));
     }
 
     #[cfg(feature = "cache")]
