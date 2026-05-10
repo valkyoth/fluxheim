@@ -1708,10 +1708,11 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"storage_tiers":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
             json_escape(&vhost.name),
             vhost.enabled,
             vhost.tiered,
+            cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
             vhost.routes_total,
             vhost.enabled_routes,
             ratio_per_mille(vhost.enabled_routes, vhost.routes_total),
@@ -1733,15 +1734,21 @@ fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"memory":{},"disk":{}}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"storage_tiers":{},"memory":{},"disk":{}}}"#,
             json_escape(&route.name),
             route.enabled,
             route.tiered,
+            cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
             memory_cache_stats_json(route.memory.as_ref()),
             disk_cache_stats_json(route.disk.as_ref())
         ));
     }
     body
+}
+
+#[cfg(feature = "cache")]
+fn cache_storage_tiers(memory: bool, disk: bool) -> u8 {
+    u8::from(memory).saturating_add(u8::from(disk))
 }
 
 #[cfg(feature = "cache")]
@@ -2688,6 +2695,7 @@ mod tests {
         assert!(body.contains(r#""name":"cached""#));
         assert!(body.contains(r#""enabled":true"#));
         assert!(body.contains(r#""tiered":true"#));
+        assert!(body.contains(r#""storage_tiers":2"#));
         assert!(body.contains(r#""routes_total":1"#));
         assert!(body.contains(r#""enabled_routes":1"#));
         assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
@@ -2702,6 +2710,9 @@ mod tests {
         assert!(body.contains(r#""disk":{"entries":0"#));
         assert!(body.contains(r#""average_object_size_bytes":0"#));
         assert!(body.contains(r#""routes":[{"name":"assets""#));
+        assert!(body.contains(
+            r#""routes":[{"name":"assets","enabled":true,"tiered":false,"storage_tiers":1"#
+        ));
 
         std::fs::remove_dir_all(cache_path).unwrap();
     }
