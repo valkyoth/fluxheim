@@ -157,8 +157,9 @@ internal cache implementation.
   stores, disk evictions, and purges. Activity blocks include derived
   `requests` and `hit_ratio_per_mille` fields so operators can read hit-rate
   health without external JSON post-processing. Memory and disk tier status
-  also reports `purge_index_entries` and `purge_index_max_entries`, and totals
-  report the same values split by memory and disk tiers, so operators can tell
+  also reports `fill_ratio_per_mille`, `purge_index_entries`, and
+  `purge_index_max_entries`, and totals report the same values split by memory
+  and disk tiers, so operators can tell whether storage is under pressure and
   whether indexed scope, prefix, and wildcard purges have useful coverage or
   are near the bounded index cap. `POST /_fluxheim/cache/activity/reset`
   resets vhost and route activity counters without clearing cached objects.
