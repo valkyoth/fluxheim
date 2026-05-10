@@ -298,6 +298,15 @@ impl FluxProxy {
     ) -> io::Result<CacheIndexedPurgeResult> {
         self.snapshot().purge_indexed_image_cache(request)
     }
+
+    #[cfg(feature = "cache")]
+    pub fn purge_indexed_image_cache_path_prefix(
+        &self,
+        request: CacheIndexedPathPrefixPurgeRequest<'_>,
+    ) -> io::Result<CacheIndexedPurgeResult> {
+        self.snapshot()
+            .purge_indexed_image_cache_path_prefix(request)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +341,15 @@ pub struct CacheBulkPurgeRequest<'a> {
 pub struct CacheIndexedPurgeRequest<'a> {
     pub vhost: &'a str,
     pub route: Option<&'a str>,
+    pub limit: usize,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheIndexedPathPrefixPurgeRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub path_prefix: &'a str,
     pub limit: usize,
 }
 
@@ -784,6 +802,88 @@ impl ProxySnapshot {
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| storage.purge_indexed_user_tag(&user_tag, request.limit))
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok(CacheIndexedPurgeResult {
+            vhost: vhost.name.clone(),
+            route: route_cache.map(|cache| cache.name.clone()),
+            memory_matched: memory.matched,
+            memory_purged: memory.purged,
+            memory_truncated: memory.truncated,
+            disk_matched: disk.matched,
+            disk_purged: disk.purged,
+            disk_truncated: disk.truncated,
+        })
+    }
+
+    #[cfg(feature = "cache")]
+    pub fn purge_indexed_image_cache_path_prefix(
+        &self,
+        request: CacheIndexedPathPrefixPurgeRequest<'_>,
+    ) -> io::Result<CacheIndexedPurgeResult> {
+        if request.limit == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache indexed purge limit must be greater than zero",
+            ));
+        }
+        if !request.path_prefix.starts_with('/') || request.path_prefix == "/" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache indexed path-prefix purge requires a non-root path prefix",
+            ));
+        }
+
+        let vhost = self
+            .state
+            .vhosts
+            .iter()
+            .find(|vhost| vhost.name == request.vhost)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("vhost not found: {}", request.vhost),
+                )
+            })?;
+
+        let route_cache = if let Some(route_name) = request.route {
+            Some(
+                vhost
+                    .routes
+                    .iter()
+                    .filter_map(|route| route.cache.as_ref())
+                    .find(|cache| cache.name == route_name)
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("route cache not found: {}/{}", vhost.name, route_name),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let user_tag = route_cache
+            .map(|cache| format!("{}:route:{}", vhost.name, cache.name))
+            .unwrap_or_else(|| vhost.name.clone());
+
+        let memory = route_cache
+            .and_then(|cache| cache.pingora_memory_storage)
+            .or(vhost
+                .pingora_memory_storage
+                .filter(|_| route_cache.is_none()))
+            .map(|storage| {
+                storage.purge_indexed_path_prefix(&user_tag, request.path_prefix, request.limit)
+            })
+            .unwrap_or_default();
+        let disk = route_cache
+            .and_then(|cache| cache.pingora_disk_storage)
+            .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
+            .map(|storage| {
+                storage.purge_indexed_path_prefix(&user_tag, request.path_prefix, request.limit)
+            })
             .transpose()?
             .unwrap_or_default();
 

@@ -649,8 +649,9 @@ without parsing text fixtures for every module.
        otherwise personalized-content safe;
      - bounded cache-key indexing for memory and disk tiers is implemented as
        the foundation for broader invalidation. Indexed vhost/route scope
-       purge is implemented through the admin API. Path-prefix/wildcard purge
-       and a background purger for complete disk cleanup are still planned;
+       purge and path-prefix purge are implemented through the admin API.
+       Wildcard purge and a background purger for complete disk cleanup are
+       still planned;
      - startup cache-index loading that is incremental and bounded so large
        disk caches do not block the gateway;
      - byte-range/slice caching for large immutable files, with explicit
