@@ -467,6 +467,7 @@ pub struct CacheRuntimeTotals {
     pub misses: u64,
     pub stores: u64,
     pub store_refusals: u64,
+    pub evictions: u64,
     pub purges: u64,
 }
 
@@ -1038,6 +1039,7 @@ fn accumulate_cache_stats(
         totals.store_refusals = totals
             .store_refusals
             .saturating_add(memory.activity.store_refusals);
+        totals.evictions = totals.evictions.saturating_add(memory.activity.evictions);
         totals.purges = totals.purges.saturating_add(memory.activity.purges);
     }
 
@@ -1059,6 +1061,7 @@ fn accumulate_cache_stats(
         totals.store_refusals = totals
             .store_refusals
             .saturating_add(disk.activity.store_refusals);
+        totals.evictions = totals.evictions.saturating_add(disk.activity.evictions);
         totals.purges = totals.purges.saturating_add(disk.activity.purges);
     }
 }

@@ -133,6 +133,7 @@ pub struct CacheActivityStats {
     pub misses: u64,
     pub stores: u64,
     pub store_refusals: u64,
+    pub evictions: u64,
     pub purges: u64,
 }
 
@@ -143,6 +144,7 @@ struct CacheActivityCounters {
     misses: std::sync::atomic::AtomicU64,
     stores: std::sync::atomic::AtomicU64,
     store_refusals: std::sync::atomic::AtomicU64,
+    evictions: std::sync::atomic::AtomicU64,
     purges: std::sync::atomic::AtomicU64,
 }
 
@@ -156,6 +158,7 @@ impl CacheActivityCounters {
             store_refusals: self
                 .store_refusals
                 .load(std::sync::atomic::Ordering::Relaxed),
+            evictions: self.evictions.load(std::sync::atomic::Ordering::Relaxed),
             purges: self.purges.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
@@ -165,6 +168,8 @@ impl CacheActivityCounters {
         self.misses.store(0, std::sync::atomic::Ordering::Relaxed);
         self.stores.store(0, std::sync::atomic::Ordering::Relaxed);
         self.store_refusals
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        self.evictions
             .store(0, std::sync::atomic::Ordering::Relaxed);
         self.purges.store(0, std::sync::atomic::Ordering::Relaxed);
     }
@@ -185,6 +190,11 @@ impl CacheActivityCounters {
 
     fn store_refusal(&self) {
         self.store_refusals
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn eviction(&self) {
+        self.evictions
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -1053,6 +1063,7 @@ impl PingoraDiskStorage {
         for entry in entries {
             match remove_disk_cache_object(&self.root, &entry.path) {
                 Ok(true) => {
+                    self.activity.eviction();
                     bytes_to_free = bytes_to_free.saturating_sub(entry.size);
                     if bytes_to_free == 0 {
                         return Ok(true);
@@ -3724,7 +3735,9 @@ mod tests {
 
         assert!(block_on(storage.lookup(&first, &span)).unwrap().is_none());
         assert!(block_on(storage.lookup(&second, &span)).unwrap().is_some());
-        assert!(storage.stats().unwrap().size_bytes <= 512);
+        let stats = storage.stats().unwrap();
+        assert!(stats.size_bytes <= 512);
+        assert_eq!(stats.activity.evictions, 1);
 
         std::fs::remove_dir_all(root).unwrap();
     }

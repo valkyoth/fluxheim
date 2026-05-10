@@ -1599,6 +1599,7 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
             misses: totals.misses,
             stores: totals.stores,
             store_refusals: totals.store_refusals,
+            evictions: totals.evictions,
             purges: totals.purges,
         })
     )
@@ -1688,13 +1689,14 @@ fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
         .checked_div(requests)
         .unwrap_or(0);
     format!(
-        r#"{{"hits":{},"misses":{},"requests":{},"hit_ratio_per_mille":{},"stores":{},"store_refusals":{},"purges":{}}}"#,
+        r#"{{"hits":{},"misses":{},"requests":{},"hit_ratio_per_mille":{},"stores":{},"store_refusals":{},"evictions":{},"purges":{}}}"#,
         activity.hits,
         activity.misses,
         requests,
         hit_ratio_per_mille,
         activity.stores,
         activity.store_refusals,
+        activity.evictions,
         activity.purges
     )
 }
@@ -2383,12 +2385,13 @@ mod tests {
             misses: 3,
             stores: 4,
             store_refusals: 2,
+            evictions: 5,
             purges: 1,
         });
 
         assert_eq!(
             body,
-            r#"{"hits":7,"misses":3,"requests":10,"hit_ratio_per_mille":700,"stores":4,"store_refusals":2,"purges":1}"#
+            r#"{"hits":7,"misses":3,"requests":10,"hit_ratio_per_mille":700,"stores":4,"store_refusals":2,"evictions":5,"purges":1}"#
         );
     }
 
@@ -2447,7 +2450,7 @@ mod tests {
         assert!(body.contains(r#""disk_purge_index_entries":0"#));
         assert!(body.contains(r#""disk_purge_index_max_entries":65536"#));
         assert!(body.contains(
-            r#""activity":{"hits":0,"misses":0,"requests":0,"hit_ratio_per_mille":0,"stores":0"#
+            r#""activity":{"hits":0,"misses":0,"requests":0,"hit_ratio_per_mille":0,"stores":0,"store_refusals":0,"evictions":0,"purges":0"#
         ));
         assert!(body.contains(r#""name":"cached""#));
         assert!(body.contains(r#""enabled":true"#));
