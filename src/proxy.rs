@@ -1922,9 +1922,16 @@ impl ProxyHttp for FluxProxy {
         &self,
         session: &Session,
         response: &ResponseHeader,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> Result<RespCacheable> {
-        if let Some(reason) = response_cache_admission_rejection(response) {
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let vhost_index = ctx
+            .vhost_index
+            .unwrap_or_else(|| state.vhost_index(request_host(session)));
+        let vhost = state.vhost(vhost_index);
+        let cache = selected_cache_config(vhost, ctx);
+
+        if let Some(reason) = response_cache_admission_rejection(response, cache) {
             return Ok(RespCacheable::Uncacheable(NoCacheReason::Custom(reason)));
         }
 
@@ -2671,13 +2678,18 @@ fn request_cache_bypass(request: &RequestHeader) -> bool {
 }
 
 #[cfg(feature = "cache")]
-fn response_cache_admission_rejection(response: &ResponseHeader) -> Option<&'static str> {
+fn response_cache_admission_rejection(
+    response: &ResponseHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<&'static str> {
     let headers = &response.headers;
-    if response.status != StatusCode::OK {
-        return Some("status-not-ok");
+    let status = response.status.as_u16();
+    let status_has_explicit_ttl = cache.status_ttls.contains_key(&status);
+    if response.status != StatusCode::OK && !status_has_explicit_ttl {
+        return Some("status-not-cacheable");
     }
 
-    if !response_content_type_is_image(headers) {
+    if response.status == StatusCode::OK && !response_content_type_is_image(headers) {
         return if headers.contains_key("content-type") {
             Some("content-type-not-image")
         } else {
@@ -4533,7 +4545,7 @@ mod tests {
         response.insert_header("x-internal", "origin").unwrap();
 
         assert_eq!(
-            response_cache_admission_rejection(&response),
+            response_cache_admission_rejection(&response, &cache),
             Some("set-cookie")
         );
 
@@ -4541,7 +4553,7 @@ mod tests {
 
         assert!(!response.headers.contains_key("set-cookie"));
         assert!(!response.headers.contains_key("x-internal"));
-        assert_eq!(response_cache_admission_rejection(&response), None);
+        assert_eq!(response_cache_admission_rejection(&response, &cache), None);
     }
 
     #[cfg(feature = "cache")]
@@ -4588,7 +4600,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            response_cache_admission_rejection(&response),
+            response_cache_admission_rejection(&response, &cache),
             Some("cache-control-private")
         );
 
@@ -4599,7 +4611,7 @@ mod tests {
             response.headers.get("cache-control").unwrap().to_str().ok(),
             Some("public, max-age=3600")
         );
-        assert_eq!(response_cache_admission_rejection(&response), None);
+        assert_eq!(response_cache_admission_rejection(&response, &cache), None);
     }
 
     #[cfg(feature = "cache")]
@@ -4676,13 +4688,16 @@ mod tests {
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
         response.insert_header("content-type", "image/png").unwrap();
-        assert_eq!(response_cache_admission_rejection(&response), None);
+        assert_eq!(
+            response_cache_admission_rejection(&response, &CacheConfig::default()),
+            None
+        );
 
         response
             .insert_header("set-cookie", "session=abc; HttpOnly; Secure")
             .unwrap();
         assert_eq!(
-            response_cache_admission_rejection(&response),
+            response_cache_admission_rejection(&response, &CacheConfig::default()),
             Some("set-cookie")
         );
     }
@@ -4702,7 +4717,7 @@ mod tests {
             response.insert_header("cache-control", value).unwrap();
 
             assert_eq!(
-                response_cache_admission_rejection(&response),
+                response_cache_admission_rejection(&response, &CacheConfig::default()),
                 Some(reason),
                 "cache-control: {value}"
             );
@@ -4712,14 +4727,25 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn response_cache_admission_requires_image_content_type() {
+        use std::collections::BTreeMap;
+
         let mut redirect = pingora::http::ResponseHeader::build(302, Some(2)).unwrap();
         redirect
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
         redirect.insert_header("content-type", "image/png").unwrap();
         assert_eq!(
-            response_cache_admission_rejection(&redirect),
-            Some("status-not-ok")
+            response_cache_admission_rejection(&redirect, &CacheConfig::default()),
+            Some("status-not-cacheable")
+        );
+
+        let cache_302 = CacheConfig {
+            status_ttls: BTreeMap::from([(302, 3600)]),
+            ..CacheConfig::default()
+        };
+        assert_eq!(
+            response_cache_admission_rejection(&redirect, &cache_302),
+            None
         );
 
         let mut missing = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
@@ -4727,7 +4753,7 @@ mod tests {
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
         assert_eq!(
-            response_cache_admission_rejection(&missing),
+            response_cache_admission_rejection(&missing, &CacheConfig::default()),
             Some("content-type-missing")
         );
 
@@ -4737,7 +4763,7 @@ mod tests {
         html.insert_header("content-type", "text/html; charset=utf-8")
             .unwrap();
         assert_eq!(
-            response_cache_admission_rejection(&html),
+            response_cache_admission_rejection(&html, &CacheConfig::default()),
             Some("content-type-not-image")
         );
 
@@ -4748,7 +4774,10 @@ mod tests {
         image
             .insert_header("content-type", "IMAGE/WebP; charset=binary")
             .unwrap();
-        assert_eq!(response_cache_admission_rejection(&image), None);
+        assert_eq!(
+            response_cache_admission_rejection(&image, &CacheConfig::default()),
+            None
+        );
     }
 
     #[cfg(feature = "cache")]

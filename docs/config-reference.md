@@ -476,7 +476,10 @@ for example to strip `Set-Cookie` from known static asset responses.
 `status_ttls` is optional. Each key is an HTTP status code and each value is a
 positive TTL in seconds. When a cache-participating origin response matches, the
 cache policy replaces response freshness headers with
-`Cache-Control: public, max-age=<ttl>` before cache admission.
+`Cache-Control: public, max-age=<ttl>` before cache admission. Non-200 origin
+responses are admitted only when their status appears in `status_ttls`; statuses
+without an explicit TTL remain rejected. Under the current image-cache policy,
+`200 OK` responses still require an image `Content-Type`.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`.

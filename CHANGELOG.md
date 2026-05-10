@@ -20,6 +20,8 @@ behavior when the change improves security or project direction.
   to strip headers such as `Set-Cookie`.
 - Cache policies can now define positive response TTLs by HTTP status, which
   normalizes matching cache-participating origin responses before admission.
+- Explicit cache status TTLs now also opt matching non-200 origin responses
+  into proxy cache admission; statuses without a configured TTL remain rejected.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

@@ -456,8 +456,9 @@ Exit criteria:
   `Set-Cookie` stripping and cache-header override controls require explicit
   config, are tested only on matched paths, and are documented with Forgejo-like
   static asset examples before being called stable.
-- Proxied image-cache admission only stores `200 OK` origin responses with an
-  `image/*` `Content-Type`.
+- Proxied image-cache admission stores `200 OK` origin responses with an
+  `image/*` `Content-Type`; non-200 statuses are admitted only when explicitly
+  listed in cache `status_ttls`.
 - Cache hits emit correct validator/freshness behavior, including `Age` where
   Fluxheim serves from cache. Pingora provides the cache-hit `Age`,
   conditional, and range hooks; Fluxheim still needs an end-to-end regression
