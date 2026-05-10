@@ -1578,7 +1578,7 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
     format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"tiered_vhosts":{},"enabled_routes":{},"tiered_routes":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_entries":{},"disk_size_bytes":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+        r#"{{"vhosts":{},"enabled_vhosts":{},"tiered_vhosts":{},"enabled_routes":{},"tiered_routes":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
         totals.vhosts,
         totals.enabled_vhosts,
         totals.tiered_vhosts,
@@ -1586,6 +1586,7 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
         totals.tiered_routes,
         totals.memory_entries,
         totals.memory_weighted_size_bytes,
+        average_bytes(totals.memory_weighted_size_bytes, totals.memory_entries),
         totals.memory_max_size_bytes,
         ratio_per_mille(
             totals.memory_weighted_size_bytes,
@@ -1599,6 +1600,7 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
         ),
         totals.disk_entries,
         totals.disk_size_bytes,
+        average_bytes(totals.disk_size_bytes, totals.disk_entries),
         totals.disk_max_size_bytes,
         ratio_per_mille(totals.disk_size_bytes, totals.disk_max_size_bytes),
         totals.disk_purge_index_entries,
@@ -1665,9 +1667,10 @@ fn memory_cache_stats_json(stats: Option<&crate::cache::MemoryCacheStats>) -> St
     stats
         .map(|stats| {
             format!(
-                r#"{{"entries":{},"weighted_size_bytes":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+                r#"{{"entries":{},"weighted_size_bytes":{},"average_weighted_size_bytes":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
                 stats.entries,
                 stats.weighted_size_bytes,
+                average_bytes(stats.weighted_size_bytes, stats.entries),
                 stats.max_size_bytes.as_u64(),
                 ratio_per_mille(stats.weighted_size_bytes, stats.max_size_bytes.as_u64()),
                 stats.max_object_bytes.as_u64(),
@@ -1685,9 +1688,10 @@ fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> String
     stats
         .map(|stats| {
             format!(
-                r#"{{"entries":{},"size_bytes":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+                r#"{{"entries":{},"size_bytes":{},"average_object_size_bytes":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
                 stats.entries,
                 stats.size_bytes,
+                average_bytes(stats.size_bytes, stats.entries),
                 stats.max_size_bytes.as_u64(),
                 ratio_per_mille(stats.size_bytes, stats.max_size_bytes.as_u64()),
                 stats.max_object_bytes.as_u64(),
@@ -1706,6 +1710,11 @@ fn ratio_per_mille(numerator: u64, denominator: u64) -> u64 {
         .saturating_mul(1000)
         .checked_div(denominator)
         .unwrap_or(0)
+}
+
+#[cfg(feature = "cache")]
+fn average_bytes(total_bytes: u64, entries: u64) -> u64 {
+    total_bytes.checked_div(entries).unwrap_or(0)
 }
 
 #[cfg(feature = "cache")]
@@ -2443,6 +2452,15 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_average_bytes_handles_empty_and_partial_capacity() {
+        assert_eq!(super::average_bytes(0, 0), 0);
+        assert_eq!(super::average_bytes(0, 8), 0);
+        assert_eq!(super::average_bytes(1024, 4), 256);
+        assert_eq!(super::average_bytes(1025, 4), 256);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_status_endpoint_reports_vhost_cache_tiers() {
         let cache_path = unique_temp_path("admin-cache-status");
         let config = Config {
@@ -2490,11 +2508,13 @@ mod tests {
         assert!(body.contains(r#""enabled_routes":1"#));
         assert!(body.contains(r#""tiered_routes":0"#));
         assert!(body.contains(r#""memory_entries":0"#));
+        assert!(body.contains(r#""memory_average_weighted_size_bytes":0"#));
         assert!(body.contains(r#""memory_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_purge_index_entries":0"#));
         assert!(body.contains(r#""memory_purge_index_max_entries":131072"#));
         assert!(body.contains(r#""memory_purge_index_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_entries":0"#));
+        assert!(body.contains(r#""disk_average_object_size_bytes":0"#));
         assert!(body.contains(r#""disk_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_purge_index_entries":0"#));
         assert!(body.contains(r#""disk_purge_index_max_entries":65536"#));
@@ -2509,11 +2529,13 @@ mod tests {
         assert!(body.contains(r#""enabled_routes":1"#));
         assert!(body.contains(r#""tiered_routes":0"#));
         assert!(body.contains(r#""memory":{"entries":0"#));
+        assert!(body.contains(r#""average_weighted_size_bytes":0"#));
         assert!(body.contains(r#""fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""purge_index_entries":0"#));
         assert!(body.contains(r#""purge_index_max_entries":65536"#));
         assert!(body.contains(r#""purge_index_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk":{"entries":0"#));
+        assert!(body.contains(r#""average_object_size_bytes":0"#));
         assert!(body.contains(r#""routes":[{"name":"assets""#));
 
         std::fs::remove_dir_all(cache_path).unwrap();

@@ -160,11 +160,13 @@ internal cache implementation.
   admission health without external JSON post-processing. Per-vhost status
   includes `routes_total`, `enabled_routes`, and `tiered_routes` so route-cache
   coverage is visible without parsing the route list. Memory and disk tier
-  status also reports `fill_ratio_per_mille`, `purge_index_entries`,
-  `purge_index_max_entries`, and `purge_index_fill_ratio_per_mille`, and
-  totals report the same values split by memory and disk tiers, so operators
-  can tell whether storage is under pressure and whether indexed scope, prefix,
-  and wildcard purges have useful coverage or are near the bounded index cap.
+  status also reports average object-size fields, `fill_ratio_per_mille`,
+  `purge_index_entries`, `purge_index_max_entries`, and
+  `purge_index_fill_ratio_per_mille`, and totals report the same values split
+  by memory and disk tiers, so operators can tell whether storage is under
+  pressure, whether object-size budgets are realistic, and whether indexed
+  scope, prefix, and wildcard purges have useful coverage or are near the
+  bounded index cap.
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as
