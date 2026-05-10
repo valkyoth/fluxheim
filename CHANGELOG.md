@@ -65,6 +65,8 @@ behavior when the change improves security or project direction.
   auditing.
 - Protected bulk cache purge responses now include `purged_ratio_per_mille` so
   operators can quickly see how much of a requested purge batch matched.
+- Protected bulk cache purge responses now include `not_purged`, avoiding
+  manual subtraction when checking purge misses.
 - Protected bulk cache purge responses now also echo the selected `route` and
   cache `scope`, matching single and indexed purge responses.
 - Protected bulk cache purge responses now include memory and disk purged

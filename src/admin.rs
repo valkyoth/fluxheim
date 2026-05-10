@@ -620,9 +620,10 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","requested":{},"purged":{},"purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","memory_purged":{},"memory_purged_ratio_per_mille":{},"disk_purged":{},"disk_purged_ratio_per_mille":{},"results":[{}]}}"#,
+                    r#"{{"status":"ok","requested":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","memory_purged":{},"memory_purged_ratio_per_mille":{},"disk_purged":{},"disk_purged_ratio_per_mille":{},"results":[{}]}}"#,
                     result.requested(),
                     result.purged(),
+                    result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.requested()),
                     json_escape(&result.vhost),
                     cache_route_json(result.route()),
@@ -2714,6 +2715,7 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""requested":2"#));
         assert!(body.contains(r#""purged":0"#));
+        assert!(body.contains(r#""not_purged":2"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""route":null"#));
         assert!(body.contains(r#""scope":"vhost""#));
@@ -2757,6 +2759,7 @@ mod tests {
         assert_eq!(response.status, StatusCode::OK);
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""requested":2"#));
+        assert!(body.contains(r#""not_purged":2"#));
         assert!(body.contains(r#""route":"assets""#));
         assert!(body.contains(r#""scope":"route""#));
         assert!(body.contains(r#""memory_purged":0"#));

@@ -443,6 +443,10 @@ impl CacheBulkPurgeResult {
         self.results.iter().filter(|result| result.purged()).count()
     }
 
+    pub fn not_purged(&self) -> usize {
+        self.requested().saturating_sub(self.purged())
+    }
+
     pub fn memory_purged(&self) -> usize {
         self.results
             .iter()
