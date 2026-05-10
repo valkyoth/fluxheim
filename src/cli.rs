@@ -69,8 +69,11 @@ pub enum CliCommand {
 
     /// Run ACME issuance/renewal once for all configured ACME vhosts.
     AcmeRenew {
-        /// Confirm that all configured ACME vhosts should be attempted.
-        #[arg(long)]
+        /// Force renewal for every configured ACME vhost, even when certificates are not due.
+        #[arg(long, alias = "all")]
+        force_renew: bool,
+        /// Deprecated alias for --force-renew.
+        #[arg(long, hide = true)]
         all: bool,
     },
 
@@ -255,7 +258,9 @@ fn run_command(
             }
             Ok(())
         }
-        CliCommand::AcmeRenew { all } => run_acme_renew_command(config_path, *all),
+        CliCommand::AcmeRenew { force_renew, all } => {
+            run_acme_renew_command(config_path, *force_renew || *all)
+        }
         CliCommand::AcmeInit {
             issuer,
             email,
@@ -302,7 +307,7 @@ struct AcmeInitOptions {
 #[cfg(feature = "acme-client")]
 fn run_acme_renew_command(
     config_path: Option<&std::path::Path>,
-    all: bool,
+    force_renew: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     crate::tls::install_rustls_crypto_provider();
 
@@ -352,15 +357,20 @@ fn run_acme_renew_command(
         }
     }
 
-    let run = if all {
+    let run = if force_renew {
         runtime.block_on(crate::acme::renew_all_instant_acme_targets(&config, now))?
     } else {
         runtime.block_on(crate::acme::renew_due_instant_acme_targets(&config, now))?
     };
 
     println!("acme attempted: {}", run.attempted);
-    if all && !targets.is_empty() && run.attempted == 0 {
-        return Err("ACME renewal planner produced targets, but --all attempted none".into());
+    if force_renew && !targets.is_empty() && run.attempted == 0 {
+        return Err(
+            "ACME renewal planner produced targets, but --force-renew attempted none".into(),
+        );
+    }
+    if !force_renew && run.attempted == 0 {
+        println!("acme status: no certificates are missing or due for renewal");
     }
     for outcome in &run.renewed {
         println!(
@@ -455,7 +465,9 @@ fn run_acme_init_command(options: AcmeInitOptions) -> Result<(), Box<dyn Error +
     }
     println!("next: add [vhosts.tls.acme] to each vhost that should receive a managed certificate");
     println!("next: run `systemctl daemon-reload` if a systemd drop-in was created");
-    println!("next: run `fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --all`");
+    println!(
+        "next: run `fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew` for first issuance"
+    );
     Ok(())
 }
 

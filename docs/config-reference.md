@@ -588,8 +588,10 @@ You can also invoke the renewal command explicitly:
 fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
 ```
 
-By default the command renews missing or due certificates only. `--all` attempts
-every configured ACME vhost.
+By default the command renews missing or due certificates only. `--force-renew`
+attempts every configured ACME vhost even when certificates are still valid;
+use it sparingly because repeated forced renewals can hit issuer rate limits.
+`--all` is accepted as a backward-compatible alias.
 
 ```toml
 [tls.acme]

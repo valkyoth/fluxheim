@@ -156,11 +156,16 @@ fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
 ```
 
 By default the command observes the managed certificate files and attempts only
-missing or due certificates. Use `--all` to force every configured ACME vhost:
+missing or due certificates. If nothing needs renewal, it exits successfully
+with `acme attempted: 0` and a status message saying no certificates are due.
+Use `--force-renew` only for first issuance testing or deliberate emergency
+rotation; repeated forced renewals can hit issuer rate limits:
 
 ```bash
-fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --all
+fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew
 ```
+
+`--all` is accepted as a backward-compatible alias for `--force-renew`.
 
 The official `1.1.x` RPM and container images include `acme-client` by default.
 If you compile from source with a custom feature list, include it explicitly:
@@ -206,7 +211,7 @@ the renewal command:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart fluxheim
-sudo fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --all
+sudo fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew
 ```
 
 ## Packaged Actalis Credentials
