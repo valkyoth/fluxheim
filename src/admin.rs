@@ -1578,7 +1578,7 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
     format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"tiered_vhosts":{},"enabled_routes":{},"tiered_routes":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_max_size_bytes":{},"disk_entries":{},"disk_size_bytes":{},"disk_max_size_bytes":{},"activity":{}}}"#,
+        r#"{{"vhosts":{},"enabled_vhosts":{},"tiered_vhosts":{},"enabled_routes":{},"tiered_routes":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_purge_index_entries":{},"disk_entries":{},"disk_size_bytes":{},"disk_max_size_bytes":{},"disk_purge_index_entries":{},"activity":{}}}"#,
         totals.vhosts,
         totals.enabled_vhosts,
         totals.tiered_vhosts,
@@ -1587,9 +1587,11 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
         totals.memory_entries,
         totals.memory_weighted_size_bytes,
         totals.memory_max_size_bytes,
+        totals.memory_purge_index_entries,
         totals.disk_entries,
         totals.disk_size_bytes,
         totals.disk_max_size_bytes,
+        totals.disk_purge_index_entries,
         cache_activity_json(&crate::cache::CacheActivityStats {
             hits: totals.hits,
             misses: totals.misses,
@@ -1644,11 +1646,12 @@ fn memory_cache_stats_json(stats: Option<&crate::cache::MemoryCacheStats>) -> St
     stats
         .map(|stats| {
             format!(
-                r#"{{"entries":{},"weighted_size_bytes":{},"max_size_bytes":{},"max_object_bytes":{},"activity":{}}}"#,
+                r#"{{"entries":{},"weighted_size_bytes":{},"max_size_bytes":{},"max_object_bytes":{},"purge_index_entries":{},"activity":{}}}"#,
                 stats.entries,
                 stats.weighted_size_bytes,
                 stats.max_size_bytes.as_u64(),
                 stats.max_object_bytes.as_u64(),
+                stats.purge_index_entries,
                 cache_activity_json(&stats.activity)
             )
         })
@@ -1660,11 +1663,12 @@ fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> String
     stats
         .map(|stats| {
             format!(
-                r#"{{"entries":{},"size_bytes":{},"max_size_bytes":{},"max_object_bytes":{},"activity":{}}}"#,
+                r#"{{"entries":{},"size_bytes":{},"max_size_bytes":{},"max_object_bytes":{},"purge_index_entries":{},"activity":{}}}"#,
                 stats.entries,
                 stats.size_bytes,
                 stats.max_size_bytes.as_u64(),
                 stats.max_object_bytes.as_u64(),
+                stats.purge_index_entries,
                 cache_activity_json(&stats.activity)
             )
         })
@@ -2404,12 +2408,15 @@ mod tests {
         assert!(body.contains(r#""enabled_routes":1"#));
         assert!(body.contains(r#""tiered_routes":0"#));
         assert!(body.contains(r#""memory_entries":0"#));
+        assert!(body.contains(r#""memory_purge_index_entries":0"#));
         assert!(body.contains(r#""disk_entries":0"#));
+        assert!(body.contains(r#""disk_purge_index_entries":0"#));
         assert!(body.contains(r#""activity":{"hits":0,"misses":0,"stores":0"#));
         assert!(body.contains(r#""name":"cached""#));
         assert!(body.contains(r#""enabled":true"#));
         assert!(body.contains(r#""tiered":true"#));
         assert!(body.contains(r#""memory":{"entries":0"#));
+        assert!(body.contains(r#""purge_index_entries":0"#));
         assert!(body.contains(r#""disk":{"entries":0"#));
         assert!(body.contains(r#""routes":[{"name":"assets""#));
 

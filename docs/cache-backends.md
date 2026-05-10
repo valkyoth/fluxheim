@@ -154,8 +154,12 @@ internal cache implementation.
 - The protected admin endpoint `GET /_fluxheim/cache/status` reports aggregate,
   per-vhost, and per-route cache enablement, tiering, memory counters, disk
   counters, and cache activity counters for hits, misses, stores, refused
-  stores, and purges. `POST /_fluxheim/cache/activity/reset` resets vhost and
-  route activity counters without clearing cached objects.
+  stores, and purges. Memory and disk tier status also reports
+  `purge_index_entries`, and totals report `memory_purge_index_entries` and
+  `disk_purge_index_entries`, so operators can tell whether indexed scope,
+  prefix, and wildcard purges have useful coverage. `POST
+  /_fluxheim/cache/activity/reset` resets vhost and route activity counters
+  without clearing cached objects.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,
