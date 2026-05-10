@@ -65,8 +65,13 @@ internal cache implementation.
 - `cache.stale_if_error_on`, `vhosts.cache.stale_if_error_on`, and
   `vhosts.routes.cache.stale_if_error_on` can narrow that behavior to selected
   upstream error classes such as `connect`, `timeout`, `read`, `write`,
-  `connection-closed`, `protocol`, `tls`, and `other`. The default includes all
-  classes for compatibility with the stale-if-error window.
+  `connection-closed`, `http-status`, `protocol`, `tls`, and `other`. The
+  default includes all classes for compatibility with the stale-if-error
+  window.
+- `cache.stale_if_error_statuses`, `vhosts.cache.stale_if_error_statuses`, and
+  `vhosts.routes.cache.stale_if_error_statuses` can narrow HTTP-status
+  stale-if-error serving to selected 5xx origin statuses. An empty list means
+  all upstream 5xx statuses that Pingora marks stale-if-error eligible.
 - `cache.stale_while_revalidate_secs`,
   `vhosts.cache.stale_while_revalidate_secs`, and
   `vhosts.routes.cache.stale_while_revalidate_secs` add an explicit

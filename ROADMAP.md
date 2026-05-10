@@ -640,8 +640,9 @@ without parsing text fixtures for every module.
      - stale serving controls for origin error and updating are implemented
        through explicit `stale_if_error_secs` and
        `stale_while_revalidate_secs` windows, with `stale_if_error_on` for
-       connect, timeout, read, write, connection-closed, protocol, TLS, and
-       other upstream error classes; selected status classes remain planned;
+       connect, timeout, read, write, connection-closed, HTTP status, protocol,
+       TLS, and other upstream error classes, plus
+       `stale_if_error_statuses` for selected 5xx origin statuses;
      - optional cache-status response headers for production debugging;
      - route-local controls for ignoring upstream freshness headers and hiding
        `Set-Cookie`, allowed only when the route is explicitly marked static or

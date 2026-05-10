@@ -3208,6 +3208,8 @@ pub struct CacheConfig {
     pub stale_if_error_secs: Option<u32>,
     #[serde(default = "default_cache_stale_if_error_on")]
     pub stale_if_error_on: Vec<CacheStaleErrorKind>,
+    #[serde(default)]
+    pub stale_if_error_statuses: Vec<u16>,
     #[serde(default = "default_cache_include_query")]
     pub include_query: bool,
     #[serde(default = "default_cache_content_types")]
@@ -3249,6 +3251,7 @@ impl Default for CacheConfig {
             stale_while_revalidate_secs: None,
             stale_if_error_secs: None,
             stale_if_error_on: default_cache_stale_if_error_on(),
+            stale_if_error_statuses: Vec::new(),
             include_query: default_cache_include_query(),
             content_types: default_cache_content_types(),
             image_extensions: default_cache_static_extensions(),
@@ -3340,6 +3343,14 @@ impl CacheConfig {
         }
         if self.stale_if_error_secs.is_some() && self.stale_if_error_on.is_empty() {
             return Err(ConfigError::EmptyCacheStaleIfErrorOn { scope });
+        }
+        for status in &self.stale_if_error_statuses {
+            if !(500..=599).contains(status) {
+                return Err(ConfigError::InvalidCacheStaleIfErrorStatus {
+                    scope,
+                    status: *status,
+                });
+            }
         }
 
         if self.content_types.is_empty() {
@@ -3560,6 +3571,7 @@ pub enum CacheStaleErrorKind {
     Read,
     Write,
     ConnectionClosed,
+    HttpStatus,
     Protocol,
     Tls,
     Other,
@@ -3572,6 +3584,7 @@ fn default_cache_stale_if_error_on() -> Vec<CacheStaleErrorKind> {
         CacheStaleErrorKind::Read,
         CacheStaleErrorKind::Write,
         CacheStaleErrorKind::ConnectionClosed,
+        CacheStaleErrorKind::HttpStatus,
         CacheStaleErrorKind::Protocol,
         CacheStaleErrorKind::Tls,
         CacheStaleErrorKind::Other,
@@ -4118,6 +4131,10 @@ pub enum ConfigError {
     EmptyCacheStaleIfErrorOn {
         scope: &'static str,
     },
+    InvalidCacheStaleIfErrorStatus {
+        scope: &'static str,
+        status: u16,
+    },
     InvalidCacheVaryRequestHeader {
         scope: &'static str,
         header: String,
@@ -4578,6 +4595,10 @@ impl Display for ConfigError {
                     "{scope}.stale_if_error_on must not be empty when stale_if_error_secs is set"
                 )
             }
+            Self::InvalidCacheStaleIfErrorStatus { scope, status } => write!(
+                formatter,
+                "{scope}.stale_if_error_statuses must contain HTTP 5xx status codes, got {status}"
+            ),
             Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
                 formatter,
                 "{scope}.vary_request_headers must not include sensitive request header {header:?}; use bypass_request_headers for request-specific responses"
@@ -7418,7 +7439,8 @@ mod tests {
             default_status_ttl_secs = 15
             stale_while_revalidate_secs = 30
             stale_if_error_secs = 120
-            stale_if_error_on = ["connect", "timeout", "connection-closed"]
+            stale_if_error_on = ["connect", "timeout", "connection-closed", "http-status"]
+            stale_if_error_statuses = [500, 502, 503, 504]
             include_query = false
             content_types = ["image/*", "text/css"]
             extensions = ["jpg", "webp", "css"]
@@ -7509,9 +7531,11 @@ mod tests {
             [
                 CacheStaleErrorKind::Connect,
                 CacheStaleErrorKind::Timeout,
-                CacheStaleErrorKind::ConnectionClosed
+                CacheStaleErrorKind::ConnectionClosed,
+                CacheStaleErrorKind::HttpStatus
             ]
         );
+        assert_eq!(config.cache.stale_if_error_statuses, [500, 502, 503, 504]);
         assert!(!config.cache.include_query);
         assert_eq!(
             config.cache.content_types,
@@ -7917,6 +7941,25 @@ mod tests {
         assert_eq!(
             config.validate(),
             Err(ConfigError::EmptyCacheStaleIfErrorOn { scope: "cache" })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_stale_if_error_statuses() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            stale_if_error_statuses = [404]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheStaleIfErrorStatus {
+                scope: "cache",
+                status: 404,
+            })
         );
     }
 

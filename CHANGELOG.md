@@ -69,7 +69,11 @@ behavior when the change improves security or project direction.
   window instead of serving stale for every upstream error.
 - Cache policies can now narrow stale-on-error serving with
   `stale_if_error_on`, covering upstream error classes such as `connect`,
-  `timeout`, `read`, `write`, `connection-closed`, `protocol`, and `tls`.
+  `timeout`, `read`, `write`, `connection-closed`, `http-status`, `protocol`,
+  and `tls`.
+- Cache policies can now narrow HTTP-status stale-on-error serving with
+  `stale_if_error_statuses`, for example to serve stale only on `500`, `502`,
+  `503`, and `504` origin responses.
 - Cache policies can now set `stale_while_revalidate_secs` to permit serving
   stale cached objects while Fluxheim revalidates them in the background.
 - ACME HTTP-01 client failures now include published challenge URLs after

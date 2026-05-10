@@ -471,7 +471,8 @@ status_ttls = { "200" = 3600, "404" = 60 }
 default_status_ttl_secs = 15
 stale_while_revalidate_secs = 30
 stale_if_error_secs = 120
-stale_if_error_on = ["connect", "timeout", "read", "write", "connection-closed"]
+stale_if_error_on = ["connect", "timeout", "http-status"]
+stale_if_error_statuses = [500, 502, 503, 504]
 include_query = true
 content_types = ["image/*", "text/css", "application/javascript", "font/*"]
 extensions = ["avif", "css", "gif", "ico", "jpg", "js", "png", "svg", "webp", "woff2"]
@@ -576,8 +577,11 @@ normal freshness expires. If `stale_if_error_secs` is unset, Fluxheim will not
 serve stale solely because the upstream failed. `stale_if_error_on` optionally
 narrows which upstream error classes may use that stale-on-error window. Valid
 values are `connect`, `timeout`, `read`, `write`, `connection-closed`,
-`protocol`, `tls`, and `other`. The default includes all classes. `content_types`
-is the allow-list for `200 OK` origin
+`http-status`, `protocol`, `tls`, and `other`. The default includes all
+classes. `stale_if_error_statuses` optionally narrows HTTP-status stale serving
+to selected 5xx origin statuses; when it is empty, any upstream 5xx status that
+Pingora reports as stale-if-error eligible is allowed. `content_types` is the
+allow-list for `200 OK` origin
 response media types. Entries may be exact media types such as `text/css` or
 subtype wildcards such as `image/*`. `extensions` is the user-facing alias for
 the request-path extension allow-list; the older `image_extensions` key remains
@@ -940,7 +944,8 @@ bypass_query_values = { mode = "private" }
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 stale_while_revalidate_secs = 30
 stale_if_error_secs = 120
-stale_if_error_on = ["connect", "timeout"]
+stale_if_error_on = ["connect", "timeout", "http-status"]
+stale_if_error_statuses = [500, 502, 503, 504]
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 

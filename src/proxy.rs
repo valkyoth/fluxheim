@@ -2067,7 +2067,11 @@ impl ProxyHttp for FluxProxy {
         let vhost = state.vhost(vhost_index);
         let event = match error {
             Some(error) if error.esource() == &ErrorSource::Upstream => {
-                CacheStaleEvent::UpstreamError(cache_stale_error_kind(error))
+                if let ErrorType::HTTPStatus(status) = error.etype() {
+                    CacheStaleEvent::UpstreamHttpStatus(*status)
+                } else {
+                    CacheStaleEvent::UpstreamError(cache_stale_error_kind(error))
+                }
             }
             Some(_) => CacheStaleEvent::OtherError,
             None => CacheStaleEvent::Updating,
@@ -2421,9 +2425,23 @@ fn cache_should_serve_stale(cache: &crate::config::CacheConfig, event: CacheStal
         CacheStaleEvent::UpstreamError(kind) => {
             cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)
         }
+        CacheStaleEvent::UpstreamHttpStatus(status) => {
+            cache.stale_if_error_secs.is_some()
+                && cache
+                    .stale_if_error_on
+                    .contains(&crate::config::CacheStaleErrorKind::HttpStatus)
+                && cache_stale_status_allows(cache, status)
+        }
         CacheStaleEvent::OtherError => false,
         CacheStaleEvent::Updating => cache.stale_while_revalidate_secs.is_some(),
     }
+}
+
+#[cfg(feature = "cache")]
+fn cache_stale_status_allows(cache: &crate::config::CacheConfig, status: u16) -> bool {
+    (500..=599).contains(&status)
+        && (cache.stale_if_error_statuses.is_empty()
+            || cache.stale_if_error_statuses.contains(&status))
 }
 
 #[cfg(feature = "cache")]
@@ -2431,6 +2449,7 @@ fn cache_should_serve_stale(cache: &crate::config::CacheConfig, event: CacheStal
 enum CacheStaleEvent {
     Updating,
     UpstreamError(crate::config::CacheStaleErrorKind),
+    UpstreamHttpStatus(u16),
     OtherError,
 }
 
@@ -2458,6 +2477,7 @@ fn cache_stale_error_kind(error: &Error) -> crate::config::CacheStaleErrorKind {
         | ErrorType::TLSHandshakeFailure
         | ErrorType::InvalidCert
         | ErrorType::HandshakeError => crate::config::CacheStaleErrorKind::Tls,
+        ErrorType::HTTPStatus(_) => crate::config::CacheStaleErrorKind::HttpStatus,
         _ => crate::config::CacheStaleErrorKind::Other,
     }
 }
@@ -3481,9 +3501,9 @@ mod tests {
     use super::{
         CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
         cache_min_uses_allows_store, cache_request_participated, cache_should_serve_stale,
-        cache_status_header_value, cache_vary_policy, ignore_origin_cache_headers,
-        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
-        vary_request_hash,
+        cache_stale_status_allows, cache_status_header_value, cache_vary_policy,
+        ignore_origin_cache_headers, response_cache_admission_rejection,
+        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
     use super::{
         FluxProxy, count_response_body_chunk, http_peer_for_proxy, https_redirect_location,
@@ -5393,6 +5413,43 @@ mod tests {
         assert!(!cache_should_serve_stale(
             &cache,
             CacheStaleEvent::UpstreamError(crate::config::CacheStaleErrorKind::Connect)
+        ));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_stale_error_policy_filters_http_statuses() {
+        let default_cache = CacheConfig {
+            stale_if_error_secs: Some(120),
+            ..CacheConfig::default()
+        };
+        assert!(cache_should_serve_stale(
+            &default_cache,
+            CacheStaleEvent::UpstreamHttpStatus(500)
+        ));
+        assert!(cache_should_serve_stale(
+            &default_cache,
+            CacheStaleEvent::UpstreamHttpStatus(599)
+        ));
+        assert!(!cache_should_serve_stale(
+            &default_cache,
+            CacheStaleEvent::UpstreamHttpStatus(404)
+        ));
+
+        let narrowed_cache = CacheConfig {
+            stale_if_error_secs: Some(120),
+            stale_if_error_statuses: vec![502, 503],
+            ..CacheConfig::default()
+        };
+        assert!(cache_stale_status_allows(&narrowed_cache, 502));
+        assert!(!cache_stale_status_allows(&narrowed_cache, 500));
+        assert!(cache_should_serve_stale(
+            &narrowed_cache,
+            CacheStaleEvent::UpstreamHttpStatus(503)
+        ));
+        assert!(!cache_should_serve_stale(
+            &narrowed_cache,
+            CacheStaleEvent::UpstreamHttpStatus(500)
         ));
     }
 
