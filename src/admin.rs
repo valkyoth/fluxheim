@@ -620,18 +620,23 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","requested":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","memory_purged":{},"memory_purged_ratio_per_mille":{},"disk_purged":{},"disk_purged_ratio_per_mille":{},"results":[{}]}}"#,
+                    r#"{{"status":"ok","requested":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"results":[{}]}}"#,
                     result.requested(),
                     result.purged(),
                     result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.requested()),
+                    ratio_per_mille_usize(result.not_purged(), result.requested()),
                     json_escape(&result.vhost),
                     cache_route_json(result.route()),
                     cache_scope(result.route()),
                     result.memory_purged(),
+                    result.memory_not_purged(),
                     ratio_per_mille_usize(result.memory_purged(), result.requested()),
+                    ratio_per_mille_usize(result.memory_not_purged(), result.requested()),
                     result.disk_purged(),
+                    result.disk_not_purged(),
                     ratio_per_mille_usize(result.disk_purged(), result.requested()),
+                    ratio_per_mille_usize(result.disk_not_purged(), result.requested()),
                     cache_purge_results_json(&result.results)
                 );
                 json_response(StatusCode::OK, body.as_bytes())
@@ -673,11 +678,12 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.matched()),
+                    ratio_per_mille_usize(result.not_purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
                     limit,
@@ -688,11 +694,13 @@ impl AdminApp {
                     result.memory_purged,
                     result.memory_not_purged(),
                     ratio_per_mille_usize(result.memory_purged, result.memory_matched),
+                    ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
                     result.memory_truncated,
                     result.disk_matched,
                     result.disk_purged,
                     result.disk_not_purged(),
                     ratio_per_mille_usize(result.disk_purged, result.disk_matched),
+                    ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
                     result.disk_truncated
                 );
                 json_response(StatusCode::OK, body.as_bytes())
@@ -740,11 +748,12 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.matched()),
+                    ratio_per_mille_usize(result.not_purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
                     limit,
@@ -756,11 +765,13 @@ impl AdminApp {
                     result.memory_purged,
                     result.memory_not_purged(),
                     ratio_per_mille_usize(result.memory_purged, result.memory_matched),
+                    ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
                     result.memory_truncated,
                     result.disk_matched,
                     result.disk_purged,
                     result.disk_not_purged(),
                     ratio_per_mille_usize(result.disk_purged, result.disk_matched),
+                    ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
                     result.disk_truncated
                 );
                 json_response(StatusCode::OK, body.as_bytes())
@@ -808,11 +819,12 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.matched()),
+                    ratio_per_mille_usize(result.not_purged(), result.matched()),
                     result.truncated(),
                     result.truncated(),
                     limit,
@@ -824,11 +836,13 @@ impl AdminApp {
                     result.memory_purged,
                     result.memory_not_purged(),
                     ratio_per_mille_usize(result.memory_purged, result.memory_matched),
+                    ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
                     result.memory_truncated,
                     result.disk_matched,
                     result.disk_purged,
                     result.disk_not_purged(),
                     ratio_per_mille_usize(result.disk_purged, result.disk_matched),
+                    ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
                     result.disk_truncated
                 );
                 json_response(StatusCode::OK, body.as_bytes())
@@ -2326,10 +2340,13 @@ mod tests {
         assert!(body.contains(r#""purged":0"#));
         assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_not_purged":0"#));
         assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""memory_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_not_purged":0"#));
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""truncated":false"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
@@ -2379,10 +2396,13 @@ mod tests {
         assert!(body.contains(r#""matched":0"#));
         assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_not_purged":0"#));
         assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""memory_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_not_purged":0"#));
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
         assert!(body.contains(r#""scope":"vhost""#));
@@ -2444,10 +2464,13 @@ mod tests {
         assert!(body.contains(r#""matched":0"#));
         assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_not_purged":0"#));
         assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""memory_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_not_purged":0"#));
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
         assert!(body.contains(r#""scope":"vhost""#));
@@ -2735,12 +2758,17 @@ mod tests {
         assert!(body.contains(r#""purged":0"#));
         assert!(body.contains(r#""not_purged":2"#));
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""not_purged_ratio_per_mille":1000"#));
         assert!(body.contains(r#""route":null"#));
         assert!(body.contains(r#""scope":"vhost""#));
         assert!(body.contains(r#""memory_purged":0"#));
+        assert!(body.contains(r#""memory_not_purged":2"#));
         assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""memory_not_purged_ratio_per_mille":1000"#));
         assert!(body.contains(r#""disk_purged":0"#));
+        assert!(body.contains(r#""disk_not_purged":2"#));
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_not_purged_ratio_per_mille":1000"#));
         assert!(body.contains(r#""results":["#));
         assert!(body.contains(r#""path":"/img/one.png""#));
         assert!(body.contains(r#""path":"/img/two.png""#));
@@ -2778,6 +2806,7 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""requested":2"#));
         assert!(body.contains(r#""not_purged":2"#));
+        assert!(body.contains(r#""not_purged_ratio_per_mille":1000"#));
         assert!(body.contains(r#""route":"assets""#));
         assert!(body.contains(r#""scope":"route""#));
         assert!(body.contains(r#""memory_purged":0"#));

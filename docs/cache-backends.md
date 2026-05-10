@@ -185,11 +185,13 @@ internal cache implementation.
   `POST /_fluxheim/cache/purge-bulk` invalidates multiple identities that share
   the same host, method, vhost, optional route, and optional original URL query.
   Bulk purge responses echo the cache `scope` and optional `route`, and include
-  `not_purged` plus `purged_ratio_per_mille` so operators can see how much of
-  the requested batch missed or matched existing cache entries. They also
-  include `memory_purged`, `memory_purged_ratio_per_mille`, `disk_purged`, and
-  `disk_purged_ratio_per_mille` so tier-specific cleanup is visible without
-  parsing each result.
+  `not_purged`, `purged_ratio_per_mille`, and
+  `not_purged_ratio_per_mille` so operators can see how much of the requested
+  batch missed or matched existing cache entries. They also include
+  `memory_purged`, `memory_not_purged`, `memory_purged_ratio_per_mille`,
+  `memory_not_purged_ratio_per_mille`, `disk_purged`, `disk_not_purged`,
+  `disk_purged_ratio_per_mille`, and `disk_not_purged_ratio_per_mille` so
+  tier-specific cleanup is visible without parsing each result.
   Purge identities are bounded before key derivation: hosts, methods, paths,
   queries, and bulk path count have explicit limits; paths must start with `/`;
   path traversal segments, encoded path separators, encoded dots, backslashes,
@@ -211,9 +213,11 @@ internal cache implementation.
   the effective `limit`, cache `scope`, and `purged_ratio_per_mille` in their
   response. The ratio reports how much of the matched batch was actually
   purged, where `1000` means every matched entry was removed. Indexed purge
-  responses also include `not_purged`, `memory_not_purged`,
-  `disk_not_purged`, `memory_purged_ratio_per_mille`, and
-  `disk_purged_ratio_per_mille` so operators can see which tier needs cleanup.
+  responses also include `not_purged`, `not_purged_ratio_per_mille`,
+  `memory_not_purged`, `memory_not_purged_ratio_per_mille`,
+  `disk_not_purged`, `disk_not_purged_ratio_per_mille`,
+  `memory_purged_ratio_per_mille`, and `disk_purged_ratio_per_mille` so
+  operators can see which tier needs cleanup.
   They return
   `truncated = true` and `repeat_required = true` when more indexed entries
   remain for the requested scope and the same purge should be run again. The

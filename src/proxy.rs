@@ -466,11 +466,19 @@ impl CacheBulkPurgeResult {
             .count()
     }
 
+    pub fn memory_not_purged(&self) -> usize {
+        self.requested().saturating_sub(self.memory_purged())
+    }
+
     pub fn disk_purged(&self) -> usize {
         self.results
             .iter()
             .filter(|result| result.disk_purged)
             .count()
+    }
+
+    pub fn disk_not_purged(&self) -> usize {
+        self.requested().saturating_sub(self.disk_purged())
     }
 }
 

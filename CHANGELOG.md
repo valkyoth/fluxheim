@@ -75,6 +75,8 @@ behavior when the change improves security or project direction.
   `memory_purged_ratio_per_mille` and `disk_purged_ratio_per_mille` fields.
 - Protected indexed cache purge responses now include aggregate and per-tier
   `not_purged` counts for entries that matched the index but were not removed.
+- Protected bulk and indexed cache purge responses now include aggregate and
+  per-tier `not_purged_ratio_per_mille` fields for easier dashboarding.
 - `server.default_vhost` validation now hints at `include_conf_d = true` or
   directory-based config loading when the named vhost is not loaded.
 - Cache policies can now set `stale_if_error_secs` to permit serving stale
