@@ -507,6 +507,7 @@ pub struct CacheRuntimeTotals {
     pub vhosts: u64,
     pub enabled_vhosts: u64,
     pub tiered_vhosts: u64,
+    pub routes_total: u64,
     pub enabled_routes: u64,
     pub tiered_routes: u64,
     pub memory_entries: u64,
@@ -631,6 +632,7 @@ impl ProxySnapshot {
                 let Some(cache) = &route.cache else {
                     continue;
                 };
+                totals.routes_total = totals.routes_total.saturating_add(1);
                 if cache.config.enabled {
                     totals.enabled_routes = totals.enabled_routes.saturating_add(1);
                     enabled_routes = enabled_routes.saturating_add(1);

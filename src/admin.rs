@@ -1640,12 +1640,17 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
     format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"tiered_vhosts":{},"enabled_routes":{},"tiered_routes":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
         totals.vhosts,
         totals.enabled_vhosts,
+        ratio_per_mille(totals.enabled_vhosts, totals.vhosts),
         totals.tiered_vhosts,
+        ratio_per_mille(totals.tiered_vhosts, totals.vhosts),
+        totals.routes_total,
         totals.enabled_routes,
+        ratio_per_mille(totals.enabled_routes, totals.routes_total),
         totals.tiered_routes,
+        ratio_per_mille(totals.tiered_routes, totals.routes_total),
         totals.memory_entries,
         totals.memory_weighted_size_bytes,
         average_bytes(totals.memory_weighted_size_bytes, totals.memory_entries),
@@ -1690,13 +1695,15 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"routes_total":{},"enabled_routes":{},"tiered_routes":{},"memory":{},"disk":{},"routes":[{}]}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"routes_total":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
             json_escape(&vhost.name),
             vhost.enabled,
             vhost.tiered,
             vhost.routes_total,
             vhost.enabled_routes,
+            ratio_per_mille(vhost.enabled_routes, vhost.routes_total),
             vhost.tiered_routes,
+            ratio_per_mille(vhost.tiered_routes, vhost.routes_total),
             memory_cache_stats_json(vhost.memory.as_ref()),
             disk_cache_stats_json(vhost.disk.as_ref()),
             cache_route_stats_json(&vhost.routes)
@@ -2640,9 +2647,14 @@ mod tests {
         assert!(body.contains(r#""status":"ok""#));
         assert!(body.contains(r#""totals":{"vhosts":1"#));
         assert!(body.contains(r#""enabled_vhosts":1"#));
+        assert!(body.contains(r#""enabled_vhost_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_vhosts":1"#));
+        assert!(body.contains(r#""tiered_vhost_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""routes_total":1"#));
         assert!(body.contains(r#""enabled_routes":1"#));
+        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_routes":0"#));
+        assert!(body.contains(r#""tiered_route_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_entries":0"#));
         assert!(body.contains(r#""memory_average_weighted_size_bytes":0"#));
         assert!(body.contains(r#""memory_fill_ratio_per_mille":0"#));
@@ -2663,7 +2675,9 @@ mod tests {
         assert!(body.contains(r#""tiered":true"#));
         assert!(body.contains(r#""routes_total":1"#));
         assert!(body.contains(r#""enabled_routes":1"#));
+        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
         assert!(body.contains(r#""tiered_routes":0"#));
+        assert!(body.contains(r#""tiered_route_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory":{"entries":0"#));
         assert!(body.contains(r#""average_weighted_size_bytes":0"#));
         assert!(body.contains(r#""fill_ratio_per_mille":0"#));

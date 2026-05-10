@@ -159,9 +159,11 @@ internal cache implementation.
   `store_attempts`, `store_ratio_per_mille`, `store_refusal_ratio_per_mille`,
   and `eviction_ratio_per_mille` fields so operators can read hit-rate,
   miss-rate, admission health, and eviction pressure without external JSON
-  post-processing. Per-vhost status
-  includes `routes_total`, `enabled_routes`, and `tiered_routes` so route-cache
-  coverage is visible without parsing the route list. Memory and disk tier
+  post-processing. Totals and per-vhost status include `routes_total`,
+  `enabled_routes`, `enabled_route_ratio_per_mille`, `tiered_routes`, and
+  `tiered_route_ratio_per_mille` so route-cache coverage is visible without
+  parsing the route list. Totals also include enabled and tiered vhost ratios.
+  Memory and disk tier
   status also reports average object-size fields, `fill_ratio_per_mille`,
   `purge_index_entries`, `purge_index_max_entries`, and
   `purge_index_fill_ratio_per_mille`, and totals report the same values split
