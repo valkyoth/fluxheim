@@ -305,7 +305,10 @@ impl ConfigFragment {
             });
         }
         let raw = read_regular_config_file_to_string(path)?;
-        toml::from_str(&raw).map_err(ConfigLoadError::Parse)
+        toml::from_str(&raw).map_err(|source| ConfigLoadError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })
     }
 
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
@@ -3338,9 +3341,14 @@ impl DirectoryListingConfig {
 
 #[derive(Debug)]
 pub enum ConfigLoadError {
-    InvalidPath { path: PathBuf },
+    InvalidPath {
+        path: PathBuf,
+    },
     Read(std::io::Error),
-    Parse(toml::de::Error),
+    Parse {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
     Validate(ConfigError),
 }
 
@@ -3355,7 +3363,13 @@ impl Display for ConfigLoadError {
                 )
             }
             Self::Read(error) => write!(formatter, "failed to read config: {error}"),
-            Self::Parse(error) => write!(formatter, "failed to parse config: {error}"),
+            Self::Parse { path, source } => {
+                write!(
+                    formatter,
+                    "failed to parse config {}: {source}",
+                    path.display()
+                )
+            }
             Self::Validate(error) => write!(formatter, "invalid config: {error}"),
         }
     }
@@ -3366,7 +3380,7 @@ impl Error for ConfigLoadError {
         match self {
             Self::InvalidPath { .. } => None,
             Self::Read(error) => Some(error),
-            Self::Parse(error) => Some(error),
+            Self::Parse { source, .. } => Some(source),
             Self::Validate(error) => Some(error),
         }
     }
@@ -7958,6 +7972,34 @@ mod tests {
         assert_eq!(config.server.default_vhost, Some("example".to_owned()));
         assert_eq!(config.vhosts.len(), 1);
         assert_eq!(config.vhosts[0].web.root, Some(dir.child("conf.d/site")));
+    }
+
+    #[test]
+    fn conf_d_parse_error_reports_source_file() {
+        let dir = TestDir::new("config-file-with-bad-conf-d");
+        fs::create_dir_all(dir.child("conf.d")).unwrap();
+        fs::write(
+            dir.child("fluxheim.toml"),
+            r#"
+            include_conf_d = true
+
+            [server]
+            listen = ["127.0.0.1:19090"]
+            "#,
+        )
+        .unwrap();
+        let bad_config = dir.child("conf.d/10-bad.toml");
+        fs::write(
+            &bad_config,
+            "[vhosts.proxy.error_pages.web]\nroot = \"/tmp\"\n",
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains(&bad_config.display().to_string()));
+        assert!(message.contains("failed to parse config"));
     }
 
     #[test]

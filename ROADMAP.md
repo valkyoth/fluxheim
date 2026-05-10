@@ -200,6 +200,13 @@ These are realistic additions to implement across the stable core and early
      over-limit, and saturating counter behavior; end-to-end upload tests
      remain future work.
 
+5a. **Proxy Response Buffering**
+   - Add proxy response buffering and backpressure controls for migrations that
+     currently rely on gateway buffer knobs for WordPress and app backends.
+     The design should expose bounded per-connection response buffer
+     count/size equivalents, clear defaults, streaming behavior when disabled,
+     and tests proving slow clients cannot exhaust worker memory.
+
 6. **Load-Balancing Policy Options**
    - Keep round-robin as the stable default.
    - Add explicit config for additional Pingora-supported policies where they
@@ -213,6 +220,21 @@ These are realistic additions to implement across the stable core and early
      still experimental. Implemented in
      [Production Readiness](docs/production-readiness.md).
    - Keep example configs in sync with every new global section.
+   - Improve config diagnostics for real multi-file deployments: `conf.d`
+     parse errors should include the source file path, validation errors should
+     include vhost and route context where possible, and common TOML table-shape
+     mistakes should get actionable hints.
+   - Add production container migration docs from the `1.1` gateway cutover:
+     direct `podman run --rm` config validation and ACME commands, an
+     HTTP-only first-issuance sequence for HTTP-01, explicit notes that
+     Fluxheim must serve public port 80 during validation, container secret
+     mount examples for EAB files, and safer optional error-page mount paths
+     such as `/var/lib/fluxheim/errors` instead of nested paths below a
+     read-only image directory.
+   - Improve ACME command output for production runs: report per-target
+     `skipped`, `renewed`, and `failed` status, include domain/order context
+     on issuer failures, and print the HTTP-01 challenge path/URL when an
+     authorization fails.
    - Add native systemd deployment support before `1.0.0`: a hardened
      `fluxheim.service`, optional environment file, tmpfiles/sysusers
      guidance, documented install paths, config validation before start, and
@@ -590,6 +612,15 @@ without parsing text fixtures for every module.
    - Pingora `Storage` adapter partial streaming admission. Planned with a
      bounded in-progress spool; disabled for memory and disk tiers until
      unknown-size origin responses can be bounded safely.
+   - Route-scoped reverse-proxy cache policy for production gateway migrations.
+     Needed for Forgejo-style static path caching such as
+     `/avatars`, `/repo-avatars`, `/assets`, and `/img`, with explicit path
+     matchers, operator-controlled cache keys, status-specific TTLs,
+     stale-on-error behavior, cache-lock request collapsing, optional
+     `X-Cache-Status` style response headers, and carefully gated controls for
+     ignoring upstream freshness headers or hiding `Set-Cookie` on cacheable
+     static routes. This must remain opt-in per route and must not weaken the
+     default refusal to store personalized responses.
    - HTTP cache semantics.
    - Stale-while-revalidate.
    - Purge/admin API. Implemented for protected single-key invalidation through

@@ -324,7 +324,25 @@ Stable scope:
 - Dry-run reload validation.
 - Rollback.
 - Basic self-healing rollback.
+- Better config diagnostics for production operators: include source file paths
+  for `conf.d` parse errors, vhost/route context for validation errors where
+  available, and actionable hints for common table-shape mistakes.
+- Production container migration docs and helpers:
+  - document the first-issuance sequence for HTTP-01, including the requirement
+    that Fluxheim is the process serving public port 80 before ACME validation;
+  - provide direct `podman run --rm` validation and ACME examples for operators
+    whose compose provider handles one-shot commands poorly;
+  - avoid example mounts that require creating nested mountpoints inside
+    read-only image paths, and prefer stable paths such as
+    `/var/lib/fluxheim/errors` for optional mounted error pages;
+  - document container secret mounts for EAB files without relabel suffixes
+    when the host tree is already labeled for container access.
 - Prometheus metrics baseline on loopback by default.
+- Proxy response buffering and streaming/backpressure controls for production
+  gateway migrations, including configurable response buffer count/size
+  equivalents, bounded memory budgets per connection, safe streaming behavior
+  when buffering is disabled, and tests proving slow clients cannot exhaust
+  worker memory.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
@@ -342,6 +360,13 @@ Stable scope:
   - Add an explicit config knob such as `tls.acme.automation = "background" |
     "external"` or equivalent packaging policy so production installs can
     prefer the service/timer model without losing the simple integrated mode.
+  - Improve renewal command output so each target reports `skipped`, `renewed`,
+    or `failed`; failures should include the domain/order context and, for
+    HTTP-01 authorization failures, the challenge URL/path that the CA could
+    not validate.
+  - Make first issuance clearer: missing certificate files should be reported
+    as due targets in normal due-only renewal output, while forced renewal
+    remains documented as a rate-limit-sensitive recovery/testing command.
 
 Exit criteria:
 
@@ -350,6 +375,10 @@ Exit criteria:
 - Snapshot and rollback tests pass.
 - Logs redact secrets by default.
 - Metrics labels are cardinality-safe.
+- ACME CLI output is actionable for partial-success production runs and does
+  not require operators to infer which target failed from issuer-level errors.
+- Container migration docs include a validated HTTP-only first-issuance flow,
+  HTTPS enablement flow, and SNI verification checklist.
 
 ### 1.3 - Load Balancer
 
@@ -390,6 +419,12 @@ Stable scope:
   `Cache-Control`, `Pragma`, `Range`, and `If-Range`.
 - User-configurable browser/CDN cache headers through global and per-vhost
   header policy.
+- Route-scoped reverse-proxy cache policy for common gateway migrations,
+  including path matchers for static upstream paths, operator-controlled cache
+  keys, positive/negative status TTLs, stale-on-error behavior, cache-lock
+  request collapsing, upstream `Cache-Control`/`Expires` override controls,
+  response-header hiding for `Set-Cookie`, and optional cache-status response
+  headers.
 - Protected purge/status endpoints if admin module is enabled.
 - Cache activity counters.
 
@@ -409,6 +444,10 @@ Exit criteria:
   initially with Pingora cache variance keys and unsafe/sensitive `Vary`
   rejection.
 - Shared cache admission refuses `Set-Cookie` responses.
+- Route-scoped proxy cache cannot leak personalized responses: upstream
+  `Set-Cookie` stripping and cache-header override controls require explicit
+  config, are tested only on matched paths, and are documented with Forgejo-like
+  static asset examples before being called stable.
 - Proxied image-cache admission only stores `200 OK` origin responses with an
   `image/*` `Content-Type`.
 - Cache hits emit correct validator/freshness behavior, including `Age` where
