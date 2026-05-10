@@ -86,6 +86,10 @@ Notes:
 - TLS listeners are explicit through `tls_listen`; Fluxheim does not infer TLS
   from port numbers.
 - `default_vhost`, when set, must match a configured `[[vhosts]].name`.
+- If vhosts live in a sibling `conf.d` directory and `--config` points at the
+  main file, set top-level `include_conf_d = true`; alternatively point
+  `--config` at the config directory so visible `.toml` files are loaded in
+  sorted order.
 - `trusted_proxies` should contain only direct peers whose forwarded client-IP
   headers are allowed to influence routing/log context.
 - In `1.0`, trusted proxy support is intentionally explicit and CIDR-based.

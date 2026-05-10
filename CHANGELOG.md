@@ -42,6 +42,8 @@ behavior when the change improves security or project direction.
 - Protected cache purge responses now echo the normalized purge identity
   (`host`, `method`, `path`, and optional query) for easier bulk-operation
   auditing.
+- `server.default_vhost` validation now hints at `include_conf_d = true` or
+  directory-based config loading when the named vhost is not loaded.
 - Cache policies can now set `stale_if_error_secs` to permit serving stale
   cached objects during upstream errors after normal freshness expires.
 - Cache policies can now set `stale_while_revalidate_secs` to permit serving

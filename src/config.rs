@@ -3993,7 +3993,7 @@ impl Display for ConfigError {
             Self::UnknownDefaultVhost { name } => {
                 write!(
                     formatter,
-                    "server.default_vhost references unknown vhost {name:?}"
+                    "server.default_vhost references unknown vhost {name:?}; if that vhost is defined in conf.d, set include_conf_d = true in the main config or validate the config directory instead of only the main file"
                 )
             }
             Self::InvalidTrustedProxy { value } => write!(
@@ -8832,6 +8832,9 @@ mod tests {
                 name: "missing".to_owned()
             })
         );
+        let message = config.validate().unwrap_err().to_string();
+        assert!(message.contains("include_conf_d = true"));
+        assert!(message.contains("validate the config directory"));
     }
 
     #[test]
