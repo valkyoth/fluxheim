@@ -65,6 +65,8 @@ behavior when the change improves security or project direction.
   directory-based config loading when the named vhost is not loaded.
 - Cache policies can now set `stale_if_error_secs` to permit serving stale
   cached objects during upstream errors after normal freshness expires.
+- Stale-on-error serving now requires an explicit `stale_if_error_secs` policy
+  window instead of serving stale for every upstream error.
 - Cache policies can now set `stale_while_revalidate_secs` to permit serving
   stale cached objects while Fluxheim revalidates them in the background.
 - ACME HTTP-01 client failures now include published challenge URLs after

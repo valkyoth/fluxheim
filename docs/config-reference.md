@@ -571,7 +571,9 @@ and must be greater than zero when set.
 `stale_while_revalidate_secs` permits serving an already-stored stale object
 while Fluxheim revalidates it in the background, and `stale_if_error_secs`
 permits serving stale during upstream errors. Both windows are counted after
-normal freshness expires. `content_types` is the allow-list for `200 OK` origin
+normal freshness expires. If `stale_if_error_secs` is unset, Fluxheim will not
+serve stale solely because the upstream failed. `content_types` is the
+allow-list for `200 OK` origin
 response media types. Entries may be exact media types such as `text/css` or
 subtype wildcards such as `image/*`. `extensions` is the user-facing alias for
 the request-path extension allow-list; the older `image_extensions` key remains

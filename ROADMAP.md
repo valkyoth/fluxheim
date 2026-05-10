@@ -637,8 +637,10 @@ without parsing text fixtures for every module.
        query-parameter and exact query-value request bypass, cookie-name and
        exact cookie-value request bypass, plus response header-presence and
        exact header-value no-store controls;
-     - stale serving controls for origin error, timeout, updating, and selected
-       status classes;
+     - stale serving controls for origin error and updating are implemented
+       through explicit `stale_if_error_secs` and
+       `stale_while_revalidate_secs` windows; timeout and selected status
+       classes remain planned;
      - optional cache-status response headers for production debugging;
      - route-local controls for ignoring upstream freshness headers and hiding
        `Set-Cookie`, allowed only when the route is explicitly marked static or

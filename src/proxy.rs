@@ -2065,12 +2065,8 @@ impl ProxyHttp for FluxProxy {
             .vhost_index
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         let vhost = state.vhost(vhost_index);
-        match error {
-            Some(error) => error.esource() == &ErrorSource::Upstream,
-            None => selected_cache_config(vhost, ctx)
-                .stale_while_revalidate_secs
-                .is_some(),
-        }
+        let error_is_upstream = error.map(|error| error.esource() == &ErrorSource::Upstream);
+        cache_should_serve_stale(selected_cache_config(vhost, ctx), error_is_upstream)
     }
 
     #[cfg(feature = "cache")]
@@ -2410,6 +2406,18 @@ fn cache_min_uses_allows_store(
     } else {
         counter.insert(cache_key.to_owned(), uses);
         false
+    }
+}
+
+#[cfg(feature = "cache")]
+fn cache_should_serve_stale(
+    cache: &crate::config::CacheConfig,
+    error_is_upstream: Option<bool>,
+) -> bool {
+    match error_is_upstream {
+        Some(true) => cache.stale_if_error_secs.is_some(),
+        Some(false) => false,
+        None => cache.stale_while_revalidate_secs.is_some(),
     }
 }
 
@@ -3436,8 +3444,8 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{
         MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl, cache_min_uses_allows_store,
-        cache_request_participated, cache_status_header_value, cache_vary_policy,
-        ignore_origin_cache_headers, response_cache_admission_rejection,
+        cache_request_participated, cache_should_serve_stale, cache_status_header_value,
+        cache_vary_policy, ignore_origin_cache_headers, response_cache_admission_rejection,
         strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
 
@@ -5302,6 +5310,33 @@ mod tests {
             &default_cache,
             "other-key"
         ));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_stale_error_policy_requires_stale_if_error_window() {
+        let default_cache = CacheConfig::default();
+        assert!(!cache_should_serve_stale(&default_cache, Some(true)));
+
+        let cache = CacheConfig {
+            stale_if_error_secs: Some(120),
+            ..CacheConfig::default()
+        };
+        assert!(cache_should_serve_stale(&cache, Some(true)));
+        assert!(!cache_should_serve_stale(&cache, Some(false)));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_stale_updating_policy_requires_stale_while_revalidate_window() {
+        let default_cache = CacheConfig::default();
+        assert!(!cache_should_serve_stale(&default_cache, None));
+
+        let cache = CacheConfig {
+            stale_while_revalidate_secs: Some(30),
+            ..CacheConfig::default()
+        };
+        assert!(cache_should_serve_stale(&cache, None));
     }
 
     #[cfg(feature = "cache")]
