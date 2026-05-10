@@ -463,6 +463,34 @@ impl CachePurgeIndex {
             .collect()
     }
 
+    pub fn entries_for_user_tag_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> Vec<CachePurgeIndexEntry> {
+        if user_tag.is_empty() || path_pattern.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let Ok(inner) = self.inner.read() else {
+            return Vec::new();
+        };
+        inner
+            .order
+            .iter()
+            .filter_map(|key| inner.entries.get(key))
+            .filter(|entry| {
+                entry.user_tag == user_tag
+                    && entry
+                        .path
+                        .as_deref()
+                        .is_some_and(|path| cache_path_wildcard_matches(path_pattern, path))
+            })
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         let Ok(inner) = self.inner.read() else {
             return 0;
@@ -473,6 +501,35 @@ impl CachePurgeIndex {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+#[cfg(feature = "proxy")]
+fn cache_path_wildcard_matches(pattern: &str, path: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    let anchored_start = !pattern.starts_with('*');
+    let anchored_end = !pattern.ends_with('*');
+    let mut rest = path;
+    let mut first_part = true;
+
+    for part in pattern.split('*').filter(|part| !part.is_empty()) {
+        if first_part && anchored_start {
+            let Some(after_prefix) = rest.strip_prefix(part) else {
+                return false;
+            };
+            rest = after_prefix;
+        } else {
+            let Some(index) = rest.find(part) else {
+                return false;
+            };
+            rest = &rest[index + part.len()..];
+        }
+        first_part = false;
+    }
+
+    !anchored_end || pattern.ends_with('*') || rest.is_empty()
 }
 
 #[cfg(feature = "proxy")]
@@ -616,6 +673,40 @@ impl PingoraMemoryStorage {
         let mut entries = self.purge_index.entries_for_user_tag_path_prefix(
             user_tag,
             path_prefix,
+            limit.saturating_add(1),
+        );
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            if self.inner.get(&entry.combined_key).is_some() {
+                purged += 1;
+            }
+            self.inner.invalidate(&entry.combined_key);
+            self.purge_index.remove_combined(&entry.combined_key);
+        }
+        self.inner.run_pending_tasks();
+        if purged > 0 {
+            self.activity.purge();
+        }
+
+        CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        }
+    }
+
+    pub fn purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> CacheIndexedPurgeResult {
+        let mut entries = self.purge_index.entries_for_user_tag_path_pattern(
+            user_tag,
+            path_pattern,
             limit.saturating_add(1),
         );
         let truncated = entries.len() > limit;
@@ -836,6 +927,36 @@ impl PingoraDiskStorage {
         let mut entries = self.purge_index.entries_for_user_tag_path_prefix(
             user_tag,
             path_prefix,
+            limit.saturating_add(1),
+        );
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            let path = self.path_for_combined_key(&entry.combined_key);
+            if self.purge_object_path(path)? {
+                purged += 1;
+            }
+            self.purge_index.remove_combined(&entry.combined_key);
+        }
+
+        Ok(CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        })
+    }
+
+    pub fn purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let mut entries = self.purge_index.entries_for_user_tag_path_pattern(
+            user_tag,
+            path_pattern,
             limit.saturating_add(1),
         );
         let truncated = entries.len() > limit;
@@ -2383,8 +2504,37 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["combined:b".to_owned(), "combined:c".to_owned()]
         );
+        assert_eq!(
+            index
+                .entries_for_user_tag_path_pattern("vhost-b", "/assets/*.js", 8)
+                .into_iter()
+                .map(|entry| entry.combined_key)
+                .collect::<Vec<_>>(),
+            vec!["combined:b".to_owned(), "combined:c".to_owned()]
+        );
         assert!(index.remove_combined("combined:b"));
         assert_eq!(index.len(), 1);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn cache_path_wildcard_matches_absolute_path_patterns() {
+        assert!(super::cache_path_wildcard_matches(
+            "/assets/*.png",
+            "/assets/logo.png"
+        ));
+        assert!(super::cache_path_wildcard_matches(
+            "/assets/*/logo.*",
+            "/assets/icons/logo.webp"
+        ));
+        assert!(!super::cache_path_wildcard_matches(
+            "/assets/*.png",
+            "/assets/logo.webp"
+        ));
+        assert!(!super::cache_path_wildcard_matches(
+            "/assets/*.png",
+            "/img/logo.png"
+        ));
     }
 
     #[cfg(feature = "proxy")]
@@ -3134,6 +3284,81 @@ mod tests {
                 .is_none()
         );
         assert!(block_on(storage.lookup(&image, &span)).unwrap().is_some());
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_memory_storage_purges_indexed_path_pattern() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 8,
+        });
+        let config = enabled_cache();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        let png = super::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &config,
+            &CacheRequest {
+                method: "GET",
+                host: Some("example.test"),
+                path: "/assets/logo.png",
+                query: None,
+            },
+            "vhost-a",
+        )
+        .unwrap();
+        let webp = super::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &config,
+            &CacheRequest {
+                method: "GET",
+                host: Some("example.test"),
+                path: "/assets/logo.webp",
+                query: None,
+            },
+            "vhost-a",
+        )
+        .unwrap();
+        let nested_png = super::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &config,
+            &CacheRequest {
+                method: "GET",
+                host: Some("example.test"),
+                path: "/assets/icons/menu.png",
+                query: None,
+            },
+            "vhost-a",
+        )
+        .unwrap();
+
+        for key in [&png, &webp, &nested_png] {
+            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let result = storage.purge_indexed_path_pattern("vhost-a", "/assets/*.png", 8);
+
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 2,
+                purged: 2,
+                truncated: false,
+            }
+        );
+        assert!(block_on(storage.lookup(&png, &span)).unwrap().is_none());
+        assert!(
+            block_on(storage.lookup(&nested_png, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(block_on(storage.lookup(&webp, &span)).unwrap().is_some());
     }
 
     #[cfg(feature = "proxy")]

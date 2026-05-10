@@ -264,6 +264,18 @@ impl AdminApp {
                 header_value(headers, "x-fluxheim-cache-limit")
                     .or_else(|| query_param(query, "limit")),
             ),
+            ("POST", "/_fluxheim/cache/purge-wildcard") => self.cache_purge_wildcard_response(
+                header_value(headers, "x-fluxheim-cache-vhost")
+                    .or_else(|| query_param(query, "vhost")),
+                header_value(headers, "x-fluxheim-cache-route")
+                    .or_else(|| query_param(query, "route")),
+                header_value(headers, "x-fluxheim-cache-path-pattern")
+                    .or_else(|| query_param(query, "path_pattern"))
+                    .or_else(|| query_param(query, "pattern"))
+                    .or_else(|| query_param(query, "wildcard")),
+                header_value(headers, "x-fluxheim-cache-limit")
+                    .or_else(|| query_param(query, "limit")),
+            ),
             ("POST", "/_fluxheim/snapshot") => {
                 self.create_snapshot_response(header_value(headers, "x-fluxheim-message"))
             }
@@ -288,6 +300,7 @@ impl AdminApp {
                 | "/_fluxheim/cache/purge-bulk"
                 | "/_fluxheim/cache/purge-index"
                 | "/_fluxheim/cache/purge-prefix"
+                | "/_fluxheim/cache/purge-wildcard"
                 | "/_fluxheim/snapshot"
                 | "/_fluxheim/rollback"
                 | "/_fluxheim/reload",
@@ -735,6 +748,65 @@ impl AdminApp {
         }
     }
 
+    #[cfg(feature = "cache")]
+    fn cache_purge_wildcard_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        path_pattern: Option<&str>,
+        limit: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "cache wildcard purge vhost is required",
+            );
+        };
+        let path_pattern = match validated_cache_purge_path_pattern(path_pattern) {
+            Ok(path_pattern) => path_pattern,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+        let limit = match validated_cache_indexed_purge_limit(limit) {
+            Ok(limit) => limit,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+
+        match self.proxy.purge_indexed_image_cache_path_pattern(
+            crate::proxy::CacheIndexedPathPatternPurgeRequest {
+                vhost,
+                route: route.filter(|route| !route.trim().is_empty()),
+                path_pattern,
+                limit,
+            },
+        ) {
+            Ok(result) => {
+                let body = format!(
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"vhost":"{}","route":{},"path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    result.matched(),
+                    result.purged(),
+                    result.truncated(),
+                    json_escape(&result.vhost),
+                    cache_route_json(result.route.as_deref()),
+                    json_escape(path_pattern),
+                    result.memory_matched,
+                    result.memory_purged,
+                    result.memory_truncated,
+                    result.disk_matched,
+                    result.disk_purged,
+                    result.disk_truncated
+                );
+                json_response(StatusCode::OK, body.as_bytes())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                error_response(StatusCode::NOT_FOUND, &error.to_string())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+        }
+    }
+
     #[cfg(not(feature = "cache"))]
     fn cache_purge_response(
         &self,
@@ -777,6 +849,17 @@ impl AdminApp {
         _vhost: Option<&str>,
         _route: Option<&str>,
         _path_prefix: Option<&str>,
+        _limit: Option<&str>,
+    ) -> AdminResponse {
+        error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
+    }
+
+    #[cfg(not(feature = "cache"))]
+    fn cache_purge_wildcard_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _path_pattern: Option<&str>,
         _limit: Option<&str>,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
@@ -1714,6 +1797,28 @@ fn validated_cache_purge_path_prefix(prefix: Option<&str>) -> Result<&str, &'sta
 }
 
 #[cfg(feature = "cache")]
+fn validated_cache_purge_path_pattern(pattern: Option<&str>) -> Result<&str, &'static str> {
+    let Some(pattern) = pattern.map(str::trim).filter(|pattern| !pattern.is_empty()) else {
+        return Err("cache wildcard purge pattern is required and must start with /");
+    };
+    validate_cache_purge_path_value(pattern)?;
+    if !pattern.contains('*') {
+        return Err("cache wildcard purge pattern must contain *");
+    }
+    if pattern
+        .chars()
+        .filter(|character| *character != '*')
+        .collect::<String>()
+        == "/"
+    {
+        return Err(
+            "cache wildcard purge pattern must not target the whole cache; use scope purge instead",
+        );
+    }
+    Ok(pattern)
+}
+
+#[cfg(feature = "cache")]
 fn path_contains_traversal_segment(path: &str) -> bool {
     path.split('/').any(|segment| matches!(segment, "." | ".."))
 }
@@ -2155,6 +2260,67 @@ mod tests {
         );
 
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_wildcard_endpoint_accepts_path_pattern() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge-wildcard",
+            Some("vhost=cached&pattern=/assets/*.png&limit=16"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""path_pattern":"/assets/*.png""#));
+        assert!(body.contains(r#""matched":0"#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_wildcard_endpoint_rejects_root_pattern() {
+        for query in [
+            Some("vhost=cached&pattern=/*"),
+            Some("vhost=cached&pattern=/***"),
+        ] {
+            let response = app().handle(
+                "POST",
+                "/_fluxheim/cache/purge-wildcard",
+                query,
+                &auth_headers(),
+            );
+
+            assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        }
     }
 
     #[cfg(feature = "cache")]

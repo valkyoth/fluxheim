@@ -178,12 +178,15 @@ internal cache implementation.
   or route whose normalized request path starts with `path_prefix` / `prefix` /
   `x-fluxheim-cache-path-prefix`. Prefix purge requires a non-root prefix such
   as `/assets/`; `/` is rejected so complete cache clears stay explicit through
-  scope purge. Both indexed endpoints accept `limit` /
+  scope purge. `POST /_fluxheim/cache/purge-wildcard` invalidates indexed
+  entries by absolute path pattern using `*`, for example `/assets/*.png`.
+  Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
+  endpoints accept `limit` /
   `x-fluxheim-cache-limit`, default to a bounded batch size, and return
   `truncated = true` when more indexed entries remain for the requested scope.
   The index is bounded in memory, mirrors disk-tier writes, and is designed for
   operational invalidation rather than as a complete filesystem scan.
-  Wildcard purge and a background disk purger remain planned.
+  A background disk purger remains planned.
 
 Example admin cache invalidation requests:
 
@@ -193,6 +196,9 @@ curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-prefix?vhost=repoheim.eu&path_prefix=/assets/&limit=500"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-wildcard?vhost=repoheim.eu&pattern=/assets/*.png&limit=500"
 ```
 
 Example: `cache.memory.max_size_bytes = "1GiB"` with
