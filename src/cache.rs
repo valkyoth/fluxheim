@@ -1,8 +1,12 @@
+#[cfg(feature = "proxy")]
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write as _;
 #[cfg(feature = "proxy")]
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(feature = "proxy")]
+use std::sync::RwLock;
 
 #[cfg(feature = "proxy")]
 use async_trait::async_trait;
@@ -35,6 +39,8 @@ const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 128;
 const DISK_CACHE_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-v1\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V2: &[u8] = b"FLUXHEIM-CACHE-v2\n";
+#[cfg(feature = "proxy")]
+const CACHE_PURGE_INDEX_MAX_ENTRIES: usize = 65_536;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheStoragePlan {
@@ -282,9 +288,148 @@ pub fn memory_image_cache_from_config(config: &CacheConfig) -> Option<MemoryImag
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Debug, Clone)]
+pub struct CachePurgeIndex {
+    inner: Arc<RwLock<CachePurgeIndexInner>>,
+    max_entries: usize,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Default)]
+struct CachePurgeIndexInner {
+    entries: HashMap<String, CachePurgeIndexEntry>,
+    order: VecDeque<String>,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CachePurgeIndexEntry {
+    pub combined_key: String,
+    pub primary_key: String,
+    pub user_tag: String,
+}
+
+#[cfg(feature = "proxy")]
+impl CachePurgeIndex {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(CachePurgeIndexInner::default())),
+            max_entries,
+        }
+    }
+
+    pub fn insert(&self, combined_key: String, primary_key: String, user_tag: String) {
+        if self.max_entries == 0 {
+            return;
+        }
+        let Ok(mut inner) = self.inner.write() else {
+            return;
+        };
+
+        if inner.entries.contains_key(&combined_key) {
+            inner.entries.insert(
+                combined_key.clone(),
+                CachePurgeIndexEntry {
+                    combined_key,
+                    primary_key,
+                    user_tag,
+                },
+            );
+            return;
+        }
+
+        inner.order.push_back(combined_key.clone());
+        inner.entries.insert(
+            combined_key.clone(),
+            CachePurgeIndexEntry {
+                combined_key,
+                primary_key,
+                user_tag,
+            },
+        );
+
+        while inner.entries.len() > self.max_entries {
+            let Some(oldest) = inner.order.pop_front() else {
+                break;
+            };
+            inner.entries.remove(&oldest);
+        }
+    }
+
+    pub fn remove_combined(&self, combined_key: &str) -> bool {
+        let Ok(mut inner) = self.inner.write() else {
+            return false;
+        };
+        let removed = inner.entries.remove(combined_key).is_some();
+        if removed {
+            inner.order.retain(|candidate| candidate != combined_key);
+        }
+        removed
+    }
+
+    pub fn combined_keys_for_primary(&self, primary_key: &str) -> Vec<String> {
+        let Ok(inner) = self.inner.read() else {
+            return Vec::new();
+        };
+        inner
+            .entries
+            .values()
+            .filter(|entry| entry.primary_key == primary_key)
+            .map(|entry| entry.combined_key.clone())
+            .collect()
+    }
+
+    pub fn entries_with_prefix(&self, prefix: &str, limit: usize) -> Vec<CachePurgeIndexEntry> {
+        if prefix.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let Ok(inner) = self.inner.read() else {
+            return Vec::new();
+        };
+        inner
+            .order
+            .iter()
+            .filter_map(|key| inner.entries.get(key))
+            .filter(|entry| entry.combined_key.starts_with(prefix))
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    pub fn entries_for_user_tag(&self, user_tag: &str, limit: usize) -> Vec<CachePurgeIndexEntry> {
+        if user_tag.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let Ok(inner) = self.inner.read() else {
+            return Vec::new();
+        };
+        inner
+            .order
+            .iter()
+            .filter_map(|key| inner.entries.get(key))
+            .filter(|entry| entry.user_tag == user_tag)
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        let Ok(inner) = self.inner.read() else {
+            return 0;
+        };
+        inner.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[cfg(feature = "proxy")]
 #[derive(Debug)]
 pub struct PingoraMemoryStorage {
     inner: moka::sync::Cache<String, PingoraStoredObject>,
+    purge_index: CachePurgeIndex,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
     activity: CacheActivityCounters,
@@ -303,6 +448,7 @@ impl PingoraMemoryStorage {
             .build();
         Self {
             inner,
+            purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
             activity: CacheActivityCounters::default(),
@@ -331,19 +477,28 @@ impl PingoraMemoryStorage {
     pub fn purge_cache_key(&self, key: &pingora::cache::CacheKey) -> bool {
         let primary = key.primary();
         let combined = key.combined();
-        let keys: Vec<String> = self
-            .inner
-            .iter()
-            .filter_map(|(candidate_key, object)| {
-                (object.primary_key.as_deref() == Some(primary.as_str())
-                    || *candidate_key == combined)
-                    .then(|| candidate_key.as_ref().clone())
-            })
-            .collect();
+        let mut keys = self.purge_index.combined_keys_for_primary(primary.as_str());
+        if !keys.iter().any(|candidate| candidate == &combined) {
+            keys.push(combined.clone());
+        }
+        let mut indexed = keys.iter().cloned().collect::<HashSet<_>>();
+        keys.extend(
+            self.inner
+                .iter()
+                .filter_map(|(candidate_key, object)| {
+                    let candidate_key = candidate_key.as_ref();
+                    (object.primary_key.as_deref() == Some(primary.as_str())
+                        || candidate_key == combined.as_str())
+                    .then(|| candidate_key.clone())
+                })
+                .filter(|candidate_key| indexed.insert(candidate_key.clone())),
+        );
 
-        let existed = !keys.is_empty();
+        let mut existed = false;
         for key in keys {
+            existed |= self.inner.get(&key).is_some();
             self.inner.invalidate(&key);
+            self.purge_index.remove_combined(&key);
         }
         self.inner.run_pending_tasks();
         if existed {
@@ -360,12 +515,20 @@ impl PingoraMemoryStorage {
         &self,
         key: String,
         primary_key: String,
+        user_tag: String,
         meta: CacheMeta,
         body: Arc<[u8]>,
     ) -> pingora::Result<usize> {
         let (internal_meta, response_header) = meta.serialize()?;
         Ok(self
-            .put_serialized_object(key, primary_key, internal_meta, response_header, body)?
+            .put_serialized_object(
+                key,
+                primary_key,
+                user_tag,
+                internal_meta,
+                response_header,
+                body,
+            )?
             .unwrap_or(0))
     }
 
@@ -373,6 +536,7 @@ impl PingoraMemoryStorage {
         &self,
         key: String,
         primary_key: String,
+        user_tag: String,
         internal_meta: Vec<u8>,
         response_header: Vec<u8>,
         body: Arc<[u8]>,
@@ -392,16 +556,18 @@ impl PingoraMemoryStorage {
         })?;
 
         let body_len = body.len();
+        let combined_key = key.clone();
         self.inner.insert(
             key,
             PingoraStoredObject {
-                primary_key: Some(primary_key),
+                primary_key: Some(primary_key.clone()),
                 internal_meta,
                 response_header,
                 body,
                 weight,
             },
         );
+        self.purge_index.insert(combined_key, primary_key, user_tag);
         self.activity.store();
         Ok(Some(body_len))
     }
@@ -411,6 +577,7 @@ impl PingoraMemoryStorage {
 #[derive(Debug)]
 pub struct PingoraDiskStorage {
     root: PathBuf,
+    purge_index: CachePurgeIndex,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
     activity: CacheActivityCounters,
@@ -430,6 +597,7 @@ impl PingoraDiskStorage {
         let root = prepare_disk_cache_root(&root)?;
         Ok(Self {
             root,
+            purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
             activity: CacheActivityCounters::default(),
@@ -464,8 +632,23 @@ impl PingoraDiskStorage {
 
     fn purge_cache_primary(&self, key: &pingora::cache::CacheKey) -> std::io::Result<bool> {
         let primary = key.primary();
+        let combined = key.combined();
         let exact_path = self.path_for_key(key);
         let mut purged = self.purge_object_path(exact_path.clone())?;
+        self.purge_index.remove_combined(&combined);
+
+        let mut indexed = HashSet::from([combined]);
+        for indexed_key in self.purge_index.combined_keys_for_primary(primary.as_str()) {
+            if !indexed.insert(indexed_key.clone()) {
+                continue;
+            }
+            let path = self.path_for_combined_key(&indexed_key);
+            if path == exact_path {
+                continue;
+            }
+            purged |= self.purge_object_path(path)?;
+            self.purge_index.remove_combined(&indexed_key);
+        }
 
         for entry in disk_cache_entries(&self.root)? {
             if entry.path == exact_path {
@@ -529,17 +712,26 @@ impl PingoraDiskStorage {
         &self,
         key: String,
         primary_key: String,
+        user_tag: String,
         meta: CacheMeta,
         body: Arc<[u8]>,
     ) -> pingora::Result<Option<usize>> {
         let (internal_meta, response_header) = meta.serialize()?;
-        self.put_serialized_object(key, primary_key, internal_meta, response_header, body)
+        self.put_serialized_object(
+            key,
+            primary_key,
+            user_tag,
+            internal_meta,
+            response_header,
+            body,
+        )
     }
 
     fn put_serialized_object(
         &self,
         key: String,
         primary_key: String,
+        user_tag: String,
         internal_meta: Vec<u8>,
         response_header: Vec<u8>,
         body: Arc<[u8]>,
@@ -553,6 +745,7 @@ impl PingoraDiskStorage {
         }
 
         let path = self.path_for_combined_key(&key);
+        let combined_key = key.clone();
         if !self
             .evict_until_admissible(&path, object_bytes)
             .map_err(|error| cache_io_error("evict disk cache objects", error))?
@@ -577,6 +770,7 @@ impl PingoraDiskStorage {
                 self.activity.store_refusal();
                 cache_io_error("write disk cache object", error)
             })?;
+        self.purge_index.insert(combined_key, primary_key, user_tag);
         self.activity.store();
         Ok(Some(body.len()))
     }
@@ -1142,6 +1336,7 @@ impl Storage for PingoraMemoryStorage {
             storage: self,
             key: key.combined(),
             primary_key: key.primary(),
+            user_tag: key.user_tag.clone(),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -1158,6 +1353,7 @@ impl Storage for PingoraMemoryStorage {
         let key = key.combined();
         let existed = self.inner.get(&key).is_some();
         self.inner.invalidate(&key);
+        self.purge_index.remove_combined(&key);
         self.inner.run_pending_tasks();
         if existed {
             self.activity.purge();
@@ -1171,14 +1367,15 @@ impl Storage for PingoraMemoryStorage {
         meta: &CacheMeta,
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
-        let key = key.combined();
-        let Some(mut object) = self.inner.get(&key) else {
+        let combined_key = key.combined();
+        let Some(mut object) = self.inner.get(&combined_key) else {
             return Ok(false);
         };
         let (internal_meta, response_header) = meta.serialize()?;
         let weight_bytes = pingora_object_weight(&internal_meta, &response_header, &object.body);
         if weight_bytes > self.max_object_bytes.as_u64() {
-            self.inner.invalidate(&key);
+            self.inner.invalidate(&combined_key);
+            self.purge_index.remove_combined(&combined_key);
             self.inner.run_pending_tasks();
             self.activity.store_refusal();
             return Ok(false);
@@ -1195,7 +1392,12 @@ impl Storage for PingoraMemoryStorage {
         object.internal_meta = internal_meta;
         object.response_header = response_header;
         object.weight = weight;
-        self.inner.insert(key, object);
+        self.purge_index.insert(
+            combined_key.clone(),
+            object.primary_key.clone().unwrap_or_else(|| key.primary()),
+            key.user_tag.clone(),
+        );
+        self.inner.insert(combined_key, object);
         self.activity.store();
         Ok(true)
     }
@@ -1241,6 +1443,7 @@ impl Storage for PingoraDiskStorage {
             storage: self,
             key: key.combined(),
             primary_key: key.primary(),
+            user_tag: key.user_tag.clone(),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -1254,9 +1457,13 @@ impl Storage for PingoraDiskStorage {
         _purge_type: PurgeType,
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<bool> {
-        let path = self.path_for_combined_key(&key.combined());
-        self.purge_object_path(path)
-            .map_err(|error| cache_io_error("purge disk cache object", error))
+        let combined_key = key.combined();
+        let path = self.path_for_combined_key(&combined_key);
+        let purged = self
+            .purge_object_path(path)
+            .map_err(|error| cache_io_error("purge disk cache object", error))?;
+        self.purge_index.remove_combined(&combined_key);
+        Ok(purged)
     }
 
     async fn update_meta(
@@ -1273,6 +1480,7 @@ impl Storage for PingoraDiskStorage {
             .put_serialized_object(
                 key.combined(),
                 key.primary(),
+                key.user_tag.clone(),
                 internal_meta,
                 response_header,
                 object.body,
@@ -1319,6 +1527,7 @@ impl Storage for PingoraTieredStorage {
         let _promoted = self.memory.put_serialized_object(
             key.combined(),
             primary_key,
+            key.user_tag.clone(),
             object.internal_meta.clone(),
             object.response_header.clone(),
             Arc::clone(&object.body),
@@ -1341,6 +1550,7 @@ impl Storage for PingoraTieredStorage {
             storage: self,
             key: key.combined(),
             primary_key: key.primary(),
+            user_tag: key.user_tag.clone(),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self
@@ -1450,6 +1660,7 @@ struct PingoraMemoryMissHandler {
     storage: &'static PingoraMemoryStorage,
     key: String,
     primary_key: String,
+    user_tag: String,
     serialized_meta: (Vec<u8>, Vec<u8>),
     body: Vec<u8>,
     max_object_bytes: u64,
@@ -1483,6 +1694,7 @@ impl pingora::cache::storage::HandleMiss for PingoraMemoryMissHandler {
         let created = self.storage.put_object(
             self.key,
             self.primary_key,
+            self.user_tag,
             meta,
             Arc::<[u8]>::from(self.body),
         )?;
@@ -1495,6 +1707,7 @@ struct PingoraDiskMissHandler {
     storage: &'static PingoraDiskStorage,
     key: String,
     primary_key: String,
+    user_tag: String,
     serialized_meta: (Vec<u8>, Vec<u8>),
     body: Vec<u8>,
     max_object_bytes: u64,
@@ -1528,6 +1741,7 @@ impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
         let Some(created) = self.storage.put_object(
             self.key,
             self.primary_key,
+            self.user_tag,
             meta,
             Arc::<[u8]>::from(self.body),
         )?
@@ -1543,6 +1757,7 @@ struct PingoraTieredMissHandler {
     storage: &'static PingoraTieredStorage,
     key: String,
     primary_key: String,
+    user_tag: String,
     serialized_meta: (Vec<u8>, Vec<u8>),
     body: Vec<u8>,
     max_object_bytes: u64,
@@ -1576,6 +1791,7 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
         let memory_created = self.storage.memory.put_serialized_object(
             self.key.clone(),
             self.primary_key.clone(),
+            self.user_tag.clone(),
             self.serialized_meta.0.clone(),
             self.serialized_meta.1.clone(),
             Arc::clone(&body),
@@ -1583,6 +1799,7 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
         let disk_created = self.storage.disk.put_serialized_object(
             self.key,
             self.primary_key,
+            self.user_tag,
             self.serialized_meta.0,
             self.serialized_meta.1,
             body,
@@ -1920,6 +2137,53 @@ mod tests {
             },
             ..CacheConfig::default()
         }
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn cache_purge_index_bounds_and_matches_entries() {
+        let index = super::CachePurgeIndex::new(2);
+
+        index.insert(
+            "combined:a".to_owned(),
+            "primary:a".to_owned(),
+            "vhost-a".to_owned(),
+        );
+        index.insert(
+            "combined:b".to_owned(),
+            "primary:b".to_owned(),
+            "vhost-b".to_owned(),
+        );
+        index.insert(
+            "combined:c".to_owned(),
+            "primary:c".to_owned(),
+            "vhost-b".to_owned(),
+        );
+
+        assert_eq!(index.len(), 2);
+        assert!(index.combined_keys_for_primary("primary:a").is_empty());
+        assert_eq!(
+            index.combined_keys_for_primary("primary:b"),
+            vec!["combined:b".to_owned()]
+        );
+        assert_eq!(
+            index
+                .entries_for_user_tag("vhost-b", 8)
+                .into_iter()
+                .map(|entry| entry.combined_key)
+                .collect::<Vec<_>>(),
+            vec!["combined:b".to_owned(), "combined:c".to_owned()]
+        );
+        assert_eq!(
+            index
+                .entries_with_prefix("combined:", 1)
+                .into_iter()
+                .map(|entry| entry.combined_key)
+                .collect::<Vec<_>>(),
+            vec!["combined:b".to_owned()]
+        );
+        assert!(index.remove_combined("combined:b"));
+        assert_eq!(index.len(), 1);
     }
 
     #[test]
@@ -2531,6 +2795,7 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        assert_eq!(storage.purge_index.len(), 2);
 
         assert!(storage.purge_cache_key(&base_key));
         assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_none());
@@ -2539,6 +2804,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(storage.purge_index.is_empty());
     }
 
     #[cfg(feature = "proxy")]
@@ -2611,6 +2877,7 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        assert_eq!(storage.purge_index.len(), 2);
 
         assert!(storage.purge_cache_key(&base_key).unwrap());
         assert!(block_on(storage.lookup(&br_key, &span)).unwrap().is_none());
@@ -2620,6 +2887,7 @@ mod tests {
                 .is_none()
         );
         assert_eq!(storage.stats().unwrap().entries, 0);
+        assert!(storage.purge_index.is_empty());
 
         std::fs::remove_dir_all(root).unwrap();
     }

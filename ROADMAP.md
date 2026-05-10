@@ -647,8 +647,10 @@ without parsing text fixtures for every module.
      - route-local controls for ignoring upstream freshness headers and hiding
        `Set-Cookie`, allowed only when the route is explicitly marked static or
        otherwise personalized-content safe;
-     - prefix/tag/wildcard purge backed by a bounded cache index, plus a
-       background purger for complete disk cleanup;
+     - bounded cache-key indexing for memory and disk tiers is implemented as
+       the foundation for broader invalidation. Prefix/tag/wildcard purge API
+       support and a background purger for complete disk cleanup are still
+       planned;
      - startup cache-index loading that is incremental and bounded so large
        disk caches do not block the gateway;
      - byte-range/slice caching for large immutable files, with explicit
