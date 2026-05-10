@@ -102,6 +102,8 @@ pub struct MemoryCacheStats {
     #[cfg(feature = "proxy")]
     pub purge_index_entries: u64,
     #[cfg(feature = "proxy")]
+    pub purge_index_max_entries: u64,
+    #[cfg(feature = "proxy")]
     pub activity: CacheActivityStats,
 }
 
@@ -113,6 +115,7 @@ pub struct DiskCacheStats {
     pub max_size_bytes: ByteSize,
     pub max_object_bytes: ByteSize,
     pub purge_index_entries: u64,
+    pub purge_index_max_entries: u64,
     pub activity: CacheActivityStats,
 }
 
@@ -276,6 +279,8 @@ impl MemoryImageCache {
             max_object_bytes: self.max_object_bytes,
             #[cfg(feature = "proxy")]
             purge_index_entries: 0,
+            #[cfg(feature = "proxy")]
+            purge_index_max_entries: 0,
             #[cfg(feature = "proxy")]
             activity: CacheActivityStats::default(),
         }
@@ -484,6 +489,10 @@ impl CachePurgeIndex {
         inner.entries.len()
     }
 
+    pub fn max_entries(&self) -> usize {
+        self.max_entries
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -583,6 +592,7 @@ impl PingoraMemoryStorage {
             max_size_bytes: self.max_size_bytes,
             max_object_bytes: self.max_object_bytes,
             purge_index_entries: self.purge_index.len() as u64,
+            purge_index_max_entries: self.purge_index.max_entries() as u64,
             activity: self.activity.snapshot(),
         }
     }
@@ -793,6 +803,7 @@ impl PingoraDiskStorage {
             max_size_bytes: self.max_size_bytes,
             max_object_bytes: self.max_object_bytes,
             purge_index_entries: self.purge_index.len() as u64,
+            purge_index_max_entries: self.purge_index.max_entries() as u64,
             activity: self.activity.snapshot(),
         })
     }

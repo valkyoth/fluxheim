@@ -155,11 +155,11 @@ internal cache implementation.
   per-vhost, and per-route cache enablement, tiering, memory counters, disk
   counters, and cache activity counters for hits, misses, stores, refused
   stores, and purges. Memory and disk tier status also reports
-  `purge_index_entries`, and totals report `memory_purge_index_entries` and
-  `disk_purge_index_entries`, so operators can tell whether indexed scope,
-  prefix, and wildcard purges have useful coverage. `POST
-  /_fluxheim/cache/activity/reset` resets vhost and route activity counters
-  without clearing cached objects.
+  `purge_index_entries` and `purge_index_max_entries`, and totals report the
+  same values split by memory and disk tiers, so operators can tell whether
+  indexed scope, prefix, and wildcard purges have useful coverage or are near
+  the bounded index cap. `POST /_fluxheim/cache/activity/reset` resets vhost
+  and route activity counters without clearing cached objects.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,

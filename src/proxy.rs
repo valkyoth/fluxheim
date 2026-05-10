@@ -457,10 +457,12 @@ pub struct CacheRuntimeTotals {
     pub memory_weighted_size_bytes: u64,
     pub memory_max_size_bytes: u64,
     pub memory_purge_index_entries: u64,
+    pub memory_purge_index_max_entries: u64,
     pub disk_entries: u64,
     pub disk_size_bytes: u64,
     pub disk_max_size_bytes: u64,
     pub disk_purge_index_entries: u64,
+    pub disk_purge_index_max_entries: u64,
     pub hits: u64,
     pub misses: u64,
     pub stores: u64,
@@ -1027,6 +1029,9 @@ fn accumulate_cache_stats(
         totals.memory_purge_index_entries = totals
             .memory_purge_index_entries
             .saturating_add(memory.purge_index_entries);
+        totals.memory_purge_index_max_entries = totals
+            .memory_purge_index_max_entries
+            .saturating_add(memory.purge_index_max_entries);
         totals.hits = totals.hits.saturating_add(memory.activity.hits);
         totals.misses = totals.misses.saturating_add(memory.activity.misses);
         totals.stores = totals.stores.saturating_add(memory.activity.stores);
@@ -1045,6 +1050,9 @@ fn accumulate_cache_stats(
         totals.disk_purge_index_entries = totals
             .disk_purge_index_entries
             .saturating_add(disk.purge_index_entries);
+        totals.disk_purge_index_max_entries = totals
+            .disk_purge_index_max_entries
+            .saturating_add(disk.purge_index_max_entries);
         totals.hits = totals.hits.saturating_add(disk.activity.hits);
         totals.misses = totals.misses.saturating_add(disk.activity.misses);
         totals.stores = totals.stores.saturating_add(disk.activity.stores);
