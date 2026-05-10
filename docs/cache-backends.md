@@ -20,6 +20,10 @@ internal cache implementation.
   admission for eligible image requests with a configured memory or disk tier.
 - Pingora cache locks collapse concurrent misses for the same cache key, with a
   30 second writer age timeout and 30 second waiter timeout.
+- `cache.status_header`, `vhosts.cache.status_header`, and
+  `vhosts.routes.cache.status_header` optionally emit a cache debug header such
+  as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
+  `REVALIDATED` for requests that participate in the proxy cache.
 - The first Pingora memory adapter stores complete objects only; it buffers up to
   `cache.max_object_bytes` and refuses anything larger.
 - The first Pingora disk adapter stores complete objects below `cache.disk.path`

@@ -13,6 +13,8 @@ behavior when the change improves security or project direction.
 
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
+- Cache policies can now emit an optional status response header, such as
+  `X-Cache-Status`, for requests that participate in the proxy cache.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

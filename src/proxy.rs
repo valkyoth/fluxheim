@@ -22,7 +22,8 @@ use pingora::proxy::{FailToProxy, ProxyHttp, Session};
 use pingora::{Error, ErrorType};
 #[cfg(feature = "cache")]
 use pingora::{
-    cache::CacheOptionOverrides, cache::NoCacheReason, cache::RespCacheable, http::StatusCode,
+    cache::CacheOptionOverrides, cache::CachePhase, cache::NoCacheReason, cache::RespCacheable,
+    http::StatusCode,
 };
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -1720,6 +1721,8 @@ impl ProxyHttp for FluxProxy {
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
         apply_downstream_flow_control(session, &selected_runtime_proxy(vhost, ctx).config);
+        #[cfg(feature = "cache")]
+        insert_cache_status_header(session, response, selected_cache_config(vhost, ctx))?;
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)
     }
@@ -2044,6 +2047,50 @@ fn selected_response_headers<'a>(
     ctx.route_index
         .map(|route_index| &vhost.route(route_index).response_headers)
         .unwrap_or(&vhost.response_headers)
+}
+
+#[cfg(feature = "cache")]
+fn selected_cache_config<'a>(
+    vhost: &'a RuntimeVhost,
+    ctx: &RequestContext,
+) -> &'a crate::config::CacheConfig {
+    ctx.route_index
+        .and_then(|route_index| vhost.route(route_index).cache.as_ref())
+        .map(|cache| &cache.config)
+        .unwrap_or(&vhost.cache)
+}
+
+#[cfg(feature = "cache")]
+fn insert_cache_status_header(
+    session: &Session,
+    response: &mut ResponseHeader,
+    cache: &crate::config::CacheConfig,
+) -> Result<()> {
+    let Some(header_name) = cache.status_header.as_deref() else {
+        return Ok(());
+    };
+    let Some(status) = cache_status_header_value(session.cache.phase()) else {
+        return Ok(());
+    };
+
+    response.insert_header(header_name.to_owned(), status)
+}
+
+#[cfg(feature = "cache")]
+fn cache_status_header_value(phase: CachePhase) -> Option<&'static str> {
+    match phase {
+        CachePhase::Disabled(NoCacheReason::NeverEnabled)
+        | CachePhase::Uninit
+        | CachePhase::CacheKey => None,
+        CachePhase::Disabled(_) | CachePhase::Bypass => Some("BYPASS"),
+        CachePhase::Hit => Some("HIT"),
+        CachePhase::Miss => Some("MISS"),
+        CachePhase::Stale => Some("STALE"),
+        CachePhase::StaleUpdating => Some("STALE-UPDATING"),
+        CachePhase::Expired => Some("EXPIRED"),
+        CachePhase::Revalidated => Some("REVALIDATED"),
+        CachePhase::RevalidatedNoCache(_) => Some("REVALIDATED-NOCACHE"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -2888,8 +2935,8 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{
-        MAX_VARY_FIELDS, VaryCachePolicy, response_cache_admission_rejection, vary_cache_policy,
-        vary_request_hash,
+        MAX_VARY_FIELDS, VaryCachePolicy, cache_status_header_value,
+        response_cache_admission_rejection, vary_cache_policy, vary_request_hash,
     };
 
     #[test]
@@ -4359,6 +4406,44 @@ mod tests {
         request.append_header("pragma", "no-cache").unwrap();
 
         assert!(request_cache_bypass(&request));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_status_header_values_are_common_debug_tokens() {
+        use pingora::cache::{CachePhase, NoCacheReason};
+
+        assert_eq!(
+            cache_status_header_value(CachePhase::Disabled(NoCacheReason::NeverEnabled)),
+            None
+        );
+        assert_eq!(cache_status_header_value(CachePhase::Uninit), None);
+        assert_eq!(cache_status_header_value(CachePhase::CacheKey), None);
+        assert_eq!(
+            cache_status_header_value(CachePhase::Bypass),
+            Some("BYPASS")
+        );
+        assert_eq!(cache_status_header_value(CachePhase::Hit), Some("HIT"));
+        assert_eq!(cache_status_header_value(CachePhase::Miss), Some("MISS"));
+        assert_eq!(cache_status_header_value(CachePhase::Stale), Some("STALE"));
+        assert_eq!(
+            cache_status_header_value(CachePhase::StaleUpdating),
+            Some("STALE-UPDATING")
+        );
+        assert_eq!(
+            cache_status_header_value(CachePhase::Expired),
+            Some("EXPIRED")
+        );
+        assert_eq!(
+            cache_status_header_value(CachePhase::Revalidated),
+            Some("REVALIDATED")
+        );
+        assert_eq!(
+            cache_status_header_value(CachePhase::RevalidatedNoCache(
+                NoCacheReason::OriginNotCache
+            )),
+            Some("REVALIDATED-NOCACHE")
+        );
     }
 
     #[cfg(feature = "cache")]

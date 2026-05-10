@@ -441,6 +441,7 @@ compiled.
 ```toml
 [cache]
 enabled = false
+status_header = "X-Cache-Status"
 image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
@@ -463,6 +464,10 @@ Fluxheim also rejects disk cache roots whose nearest existing parent is
 world-writable, such as creating a cache root directly below `/tmp`; use a
 dedicated cache directory such as `/var/cache/fluxheim` or a pre-created private
 runtime directory.
+
+`status_header` is optional. When set, Fluxheim emits a cache debug header such
+as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
+`REVALIDATED` for requests that participate in the proxy cache.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`.
@@ -800,6 +805,7 @@ send_timeout_secs = 600
 
 [vhosts.routes.cache]
 enabled = true
+status_header = "X-Cache-Status"
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 

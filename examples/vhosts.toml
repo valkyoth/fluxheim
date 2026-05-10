@@ -159,6 +159,7 @@ downstream_min_send_rate_bytes_per_sec = 8192
 
 [vhosts.routes.cache]
 enabled = true
+status_header = "X-Cache-Status"
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 
@@ -220,6 +221,7 @@ parallel = false
 
 [vhosts.cache]
 enabled = true
+status_header = "X-Cache-Status"
 image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"

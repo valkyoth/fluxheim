@@ -3170,6 +3170,8 @@ impl VhostAcmeChallengeConfig {
 pub struct CacheConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub status_header: Option<String>,
     #[serde(default = "default_cache_image_extensions")]
     pub image_extensions: Vec<String>,
     #[serde(default = "default_cache_methods")]
@@ -3186,6 +3188,7 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            status_header: None,
             image_extensions: default_cache_image_extensions(),
             methods: default_cache_methods(),
             max_object_bytes: default_cache_max_object_bytes(),
@@ -3205,6 +3208,10 @@ impl CacheConfig {
     }
 
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if let Some(status_header) = &self.status_header {
+            validate_header_name(scope, status_header)?;
+        }
+
         if self.image_extensions.is_empty() {
             return Err(ConfigError::EmptyCacheImageExtensions { scope });
         }
@@ -6841,6 +6848,7 @@ mod tests {
             r#"
             [cache]
             enabled = true
+            status_header = "X-Cache-Status"
             image_extensions = ["jpg", "webp"]
             methods = ["GET"]
             max_object_bytes = "4MiB"
@@ -6858,6 +6866,10 @@ mod tests {
         .unwrap();
 
         assert!(config.cache.enabled);
+        assert_eq!(
+            config.cache.status_header,
+            Some("X-Cache-Status".to_owned())
+        );
         assert_eq!(
             config.cache.image_extensions,
             ["jpg".to_owned(), "webp".to_owned()]
@@ -6881,6 +6893,25 @@ mod tests {
             ByteSize::from_bytes(10 * 1024 * 1024 * 1024)
         );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_cache_status_header_name() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            status_header = "bad header"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderName {
+                field: "cache",
+                name: "bad header".to_owned()
+            })
+        );
     }
 
     #[test]
