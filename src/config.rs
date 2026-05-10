@@ -236,7 +236,13 @@ impl Config {
 
         for vhost in &self.vhosts {
             vhost.validate()?;
-            vhost.validate_tls(&self.tls)?;
+            vhost
+                .validate_tls(&self.tls)
+                .map_err(|source| ConfigError::VhostSection {
+                    vhost: vhost.name.clone(),
+                    section: "tls",
+                    source: Box::new(source),
+                })?;
 
             if !seen_names.insert(vhost.name.clone()) {
                 return Err(ConfigError::DuplicateVhostName {
@@ -2584,12 +2590,36 @@ impl VhostConfig {
             });
         }
 
-        self.proxy.validate()?;
+        self.proxy
+            .validate()
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "proxy",
+                source: Box::new(source),
+            })?;
         self.acme_challenge.validate(&self.name)?;
         self.redirect.validate(&self.name)?;
-        self.cache.validate("vhosts.cache")?;
-        self.headers.validate()?;
-        self.web.validate()?;
+        self.cache
+            .validate("vhosts.cache")
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "cache",
+                source: Box::new(source),
+            })?;
+        self.headers
+            .validate()
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "headers",
+                source: Box::new(source),
+            })?;
+        self.web
+            .validate()
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "web",
+                source: Box::new(source),
+            })?;
         self.validate_routes()?;
         if matches!(self.max_request_body_bytes, Some(bytes) if bytes.as_u64() == 0) {
             return Err(ConfigError::InvalidVhostLimit {
@@ -2750,10 +2780,22 @@ impl RouteConfig {
             redirect.validate(vhost, &self.name)?;
         }
         if let Some(proxy) = &self.proxy {
-            proxy.validate()?;
+            proxy
+                .validate()
+                .map_err(|source| ConfigError::RouteSection {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                    section: "proxy",
+                    source: Box::new(source),
+                })?;
         }
         if let Some(web) = &self.web {
-            web.validate()?;
+            web.validate().map_err(|source| ConfigError::RouteSection {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                section: "web",
+                source: Box::new(source),
+            })?;
             if !web.enabled() {
                 return Err(ConfigError::InvalidRouteAction {
                     vhost: vhost.to_owned(),
@@ -2761,7 +2803,14 @@ impl RouteConfig {
                 });
             }
         }
-        self.headers.validate()?;
+        self.headers
+            .validate()
+            .map_err(|source| ConfigError::RouteSection {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                section: "headers",
+                source: Box::new(source),
+            })?;
         Ok(())
     }
 }
@@ -3671,6 +3720,17 @@ pub enum ConfigError {
         vhost: String,
         route: String,
     },
+    VhostSection {
+        vhost: String,
+        section: &'static str,
+        source: Box<ConfigError>,
+    },
+    RouteSection {
+        vhost: String,
+        route: String,
+        section: &'static str,
+        source: Box<ConfigError>,
+    },
     DuplicateVhostName {
         name: String,
     },
@@ -4051,13 +4111,34 @@ impl Display for ConfigError {
                 formatter,
                 "vhost {vhost:?} route {route:?} redirect.to must be a safe absolute http(s) URL template"
             ),
+            Self::VhostSection {
+                vhost,
+                section,
+                source,
+            } => write!(formatter, "vhost {vhost:?} {section}: {source}"),
+            Self::RouteSection {
+                vhost,
+                route,
+                section,
+                source,
+            } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} {section}: {source}"
+            ),
             Self::DuplicateVhostName { name } => write!(formatter, "duplicate vhost name {name:?}"),
             Self::DuplicateVhostHost { host } => write!(formatter, "duplicate vhost host {host:?}"),
         }
     }
 }
 
-impl Error for ConfigError {}
+impl Error for ConfigError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::VhostSection { source, .. } | Self::RouteSection { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 fn default_listen() -> Vec<String> {
     vec!["127.0.0.1:8080".to_owned()]
@@ -5642,9 +5723,13 @@ mod tests {
 
         assert_eq!(
             config.validate(),
-            Err(ConfigError::ConflictingHeaderAdd {
-                field: "vhosts.headers.request",
-                name: "x-route".to_owned()
+            Err(ConfigError::VhostSection {
+                vhost: "api".to_owned(),
+                section: "headers",
+                source: Box::new(ConfigError::ConflictingHeaderAdd {
+                    field: "vhosts.headers.request",
+                    name: "x-route".to_owned()
+                })
             })
         );
     }
@@ -6536,8 +6621,12 @@ mod tests {
 
         assert_eq!(
             config.validate(),
-            Err(ConfigError::TlsEnabledWithoutCertificateSource {
-                scope: "vhosts.tls"
+            Err(ConfigError::VhostSection {
+                vhost: "example".to_owned(),
+                section: "tls",
+                source: Box::new(ConfigError::TlsEnabledWithoutCertificateSource {
+                    scope: "vhosts.tls"
+                })
             })
         );
     }
@@ -6561,8 +6650,12 @@ mod tests {
 
         assert_eq!(
             config.validate(),
-            Err(ConfigError::VhostAcmeWithoutGlobalAcme {
-                scope: "vhosts.tls"
+            Err(ConfigError::VhostSection {
+                vhost: "example".to_owned(),
+                section: "tls",
+                source: Box::new(ConfigError::VhostAcmeWithoutGlobalAcme {
+                    scope: "vhosts.tls"
+                })
             })
         );
     }
@@ -6617,9 +6710,13 @@ mod tests {
 
         assert_eq!(
             config.validate(),
-            Err(ConfigError::DuplicateVhostAcmeDomain {
-                scope: "vhosts.tls",
-                domain: "example.test".to_owned(),
+            Err(ConfigError::VhostSection {
+                vhost: "example".to_owned(),
+                section: "tls",
+                source: Box::new(ConfigError::DuplicateVhostAcmeDomain {
+                    scope: "vhosts.tls",
+                    domain: "example.test".to_owned(),
+                })
             })
         );
     }
@@ -7479,6 +7576,74 @@ mod tests {
             Err(ConfigError::InvalidUpstream {
                 address: "https://origin.example.test".to_owned()
             })
+        );
+    }
+
+    #[test]
+    fn vhost_section_errors_include_vhost_context() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [vhosts.proxy]
+            upstream = "https://origin.example.test"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err();
+        assert!(matches!(
+            &error,
+            ConfigError::VhostSection {
+                vhost,
+                section: "proxy",
+                source,
+            } if vhost == "gateway"
+                && matches!(source.as_ref(), ConfigError::InvalidUpstream { .. })
+        ));
+        assert!(
+            error
+                .to_string()
+                .contains("vhost \"gateway\" proxy: upstream must be host:port")
+        );
+    }
+
+    #[test]
+    fn route_section_errors_include_vhost_and_route_context() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "api"
+            path_prefix = "/api/"
+
+            [vhosts.routes.proxy]
+            upstream = "https://api.example.test"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err();
+        assert!(matches!(
+            &error,
+            ConfigError::RouteSection {
+                vhost,
+                route,
+                section: "proxy",
+                source,
+            } if vhost == "gateway"
+                && route == "api"
+                && matches!(source.as_ref(), ConfigError::InvalidUpstream { .. })
+        ));
+        assert!(
+            error
+                .to_string()
+                .contains("vhost \"gateway\" route \"api\" proxy: upstream must be host:port")
         );
     }
 
