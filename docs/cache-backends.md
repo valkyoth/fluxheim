@@ -169,7 +169,31 @@ internal cache implementation.
   queries, and bulk path count have explicit limits; paths must start with `/`;
   path traversal segments, encoded path separators, encoded dots, backslashes,
   control bytes, and malformed host/method/query values are rejected.
-  Prefix and tag purge need a cache index and remain planned.
+  `POST /_fluxheim/cache/purge-index` invalidates entries from the bounded cache
+  index for a whole vhost cache, or for a route cache when `route` /
+  `x-fluxheim-cache-route` is provided. This is the intended operator command
+  for full-scope vhost or route invalidation without constructing individual
+  cache keys.
+  `POST /_fluxheim/cache/purge-prefix` invalidates indexed entries for a vhost
+  or route whose normalized request path starts with `path_prefix` / `prefix` /
+  `x-fluxheim-cache-path-prefix`. Prefix purge requires a non-root prefix such
+  as `/assets/`; `/` is rejected so complete cache clears stay explicit through
+  scope purge. Both indexed endpoints accept `limit` /
+  `x-fluxheim-cache-limit`, default to a bounded batch size, and return
+  `truncated = true` when more indexed entries remain for the requested scope.
+  The index is bounded in memory, mirrors disk-tier writes, and is designed for
+  operational invalidation rather than as a complete filesystem scan.
+  Wildcard purge and a background disk purger remain planned.
+
+Example admin cache invalidation requests:
+
+```sh
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-index?vhost=repoheim.eu&limit=500"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-prefix?vhost=repoheim.eu&path_prefix=/assets/&limit=500"
+```
 
 Example: `cache.memory.max_size_bytes = "1GiB"` with
 `cache.max_object_bytes = "32MiB"` plans 32 in-memory object slots.
