@@ -290,6 +290,14 @@ impl FluxProxy {
     ) -> io::Result<CacheBulkPurgeResult> {
         self.snapshot().purge_image_cache_bulk(request)
     }
+
+    #[cfg(feature = "cache")]
+    pub fn purge_indexed_image_cache(
+        &self,
+        request: CacheIndexedPurgeRequest<'_>,
+    ) -> io::Result<CacheIndexedPurgeResult> {
+        self.snapshot().purge_indexed_image_cache(request)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -321,6 +329,14 @@ pub struct CacheBulkPurgeRequest<'a> {
 
 #[cfg(feature = "cache")]
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheIndexedPurgeRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub limit: usize,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CachePurgeResult {
     pub vhost: String,
     pub route: Option<String>,
@@ -345,6 +361,34 @@ impl CachePurgeResult {
 pub struct CacheBulkPurgeResult {
     pub vhost: String,
     pub results: Vec<CachePurgeResult>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheIndexedPurgeResult {
+    pub vhost: String,
+    pub route: Option<String>,
+    pub memory_matched: usize,
+    pub memory_purged: usize,
+    pub memory_truncated: bool,
+    pub disk_matched: usize,
+    pub disk_purged: usize,
+    pub disk_truncated: bool,
+}
+
+#[cfg(feature = "cache")]
+impl CacheIndexedPurgeResult {
+    pub fn matched(&self) -> usize {
+        self.memory_matched.saturating_add(self.disk_matched)
+    }
+
+    pub fn purged(&self) -> usize {
+        self.memory_purged.saturating_add(self.disk_purged)
+    }
+
+    pub fn truncated(&self) -> bool {
+        self.memory_truncated || self.disk_truncated
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -681,6 +725,78 @@ impl ProxySnapshot {
             .map(|result| result.vhost.clone())
             .unwrap_or_default();
         Ok(CacheBulkPurgeResult { vhost, results })
+    }
+
+    #[cfg(feature = "cache")]
+    pub fn purge_indexed_image_cache(
+        &self,
+        request: CacheIndexedPurgeRequest<'_>,
+    ) -> io::Result<CacheIndexedPurgeResult> {
+        if request.limit == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache indexed purge limit must be greater than zero",
+            ));
+        }
+
+        let vhost = self
+            .state
+            .vhosts
+            .iter()
+            .find(|vhost| vhost.name == request.vhost)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("vhost not found: {}", request.vhost),
+                )
+            })?;
+
+        let route_cache = if let Some(route_name) = request.route {
+            Some(
+                vhost
+                    .routes
+                    .iter()
+                    .filter_map(|route| route.cache.as_ref())
+                    .find(|cache| cache.name == route_name)
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("route cache not found: {}/{}", vhost.name, route_name),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let user_tag = route_cache
+            .map(|cache| format!("{}:route:{}", vhost.name, cache.name))
+            .unwrap_or_else(|| vhost.name.clone());
+
+        let memory = route_cache
+            .and_then(|cache| cache.pingora_memory_storage)
+            .or(vhost
+                .pingora_memory_storage
+                .filter(|_| route_cache.is_none()))
+            .map(|storage| storage.purge_indexed_user_tag(&user_tag, request.limit))
+            .unwrap_or_default();
+        let disk = route_cache
+            .and_then(|cache| cache.pingora_disk_storage)
+            .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
+            .map(|storage| storage.purge_indexed_user_tag(&user_tag, request.limit))
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok(CacheIndexedPurgeResult {
+            vhost: vhost.name.clone(),
+            route: route_cache.map(|cache| cache.name.clone()),
+            memory_matched: memory.matched,
+            memory_purged: memory.purged,
+            memory_truncated: memory.truncated,
+            disk_matched: disk.matched,
+            disk_purged: disk.purged,
+            disk_truncated: disk.truncated,
+        })
     }
 }
 

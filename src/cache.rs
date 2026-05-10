@@ -310,6 +310,14 @@ pub struct CachePurgeIndexEntry {
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct CacheIndexedPurgeResult {
+    pub matched: usize,
+    pub purged: usize,
+    pub truncated: bool,
+}
+
+#[cfg(feature = "proxy")]
 impl CachePurgeIndex {
     pub fn new(max_entries: usize) -> Self {
         Self {
@@ -507,6 +515,33 @@ impl PingoraMemoryStorage {
         existed
     }
 
+    pub fn purge_indexed_user_tag(&self, user_tag: &str, limit: usize) -> CacheIndexedPurgeResult {
+        let mut entries = self
+            .purge_index
+            .entries_for_user_tag(user_tag, limit.saturating_add(1));
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            if self.inner.get(&entry.combined_key).is_some() {
+                purged += 1;
+            }
+            self.inner.invalidate(&entry.combined_key);
+            self.purge_index.remove_combined(&entry.combined_key);
+        }
+        self.inner.run_pending_tasks();
+        if purged > 0 {
+            self.activity.purge();
+        }
+
+        CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        }
+    }
+
     fn lookup_object(&self, key: &pingora::cache::CacheKey) -> Option<PingoraStoredObject> {
         self.inner.get(&key.combined())
     }
@@ -670,6 +705,33 @@ impl PingoraDiskStorage {
         }
 
         Ok(purged)
+    }
+
+    pub fn purge_indexed_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let mut entries = self
+            .purge_index
+            .entries_for_user_tag(user_tag, limit.saturating_add(1));
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            let path = self.path_for_combined_key(&entry.combined_key);
+            if self.purge_object_path(path)? {
+                purged += 1;
+            }
+            self.purge_index.remove_combined(&entry.combined_key);
+        }
+
+        Ok(CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        })
     }
 
     fn purge_object_path(&self, path: PathBuf) -> std::io::Result<bool> {
@@ -2805,6 +2867,43 @@ mod tests {
                 .is_none()
         );
         assert!(storage.purge_index.is_empty());
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_memory_storage_purges_indexed_user_tag() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 4,
+        });
+        let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost-a");
+        let second = pingora::cache::CacheKey::new("fluxheim-test", "second", "vhost-a");
+        let other = pingora::cache::CacheKey::new("fluxheim-test", "other", "vhost-b");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        for key in [&first, &second, &other] {
+            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let result = storage.purge_indexed_user_tag("vhost-a", 8);
+
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 2,
+                purged: 2,
+                truncated: false,
+            }
+        );
+        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_none());
+        assert!(block_on(storage.lookup(&second, &span)).unwrap().is_none());
+        assert!(block_on(storage.lookup(&other, &span)).unwrap().is_some());
     }
 
     #[cfg(feature = "proxy")]

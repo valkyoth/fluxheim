@@ -38,6 +38,10 @@ const MAX_CACHE_PURGE_PATH_BYTES: usize = 4096;
 const MAX_CACHE_PURGE_QUERY_BYTES: usize = 8192;
 #[cfg(feature = "cache")]
 const MAX_CACHE_PURGE_BULK_PATHS: usize = 256;
+#[cfg(feature = "cache")]
+const DEFAULT_CACHE_INDEXED_PURGE_LIMIT: usize = 1024;
+#[cfg(feature = "cache")]
+const MAX_CACHE_INDEXED_PURGE_LIMIT: usize = 10_000;
 
 #[derive(Clone)]
 pub struct AdminApp {
@@ -241,6 +245,14 @@ impl AdminApp {
                     .or_else(|| query_param(query, "url_query"))
                     .or_else(|| query_param(query, "cache_query")),
             ),
+            ("POST", "/_fluxheim/cache/purge-index") => self.cache_purge_index_response(
+                header_value(headers, "x-fluxheim-cache-vhost")
+                    .or_else(|| query_param(query, "vhost")),
+                header_value(headers, "x-fluxheim-cache-route")
+                    .or_else(|| query_param(query, "route")),
+                header_value(headers, "x-fluxheim-cache-limit")
+                    .or_else(|| query_param(query, "limit")),
+            ),
             ("POST", "/_fluxheim/snapshot") => {
                 self.create_snapshot_response(header_value(headers, "x-fluxheim-message"))
             }
@@ -263,6 +275,7 @@ impl AdminApp {
                 | "/_fluxheim/self-heal/report"
                 | "/_fluxheim/cache/purge"
                 | "/_fluxheim/cache/purge-bulk"
+                | "/_fluxheim/cache/purge-index"
                 | "/_fluxheim/snapshot"
                 | "/_fluxheim/rollback"
                 | "/_fluxheim/reload",
@@ -599,6 +612,58 @@ impl AdminApp {
         }
     }
 
+    #[cfg(feature = "cache")]
+    fn cache_purge_index_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        limit: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "cache indexed purge vhost is required",
+            );
+        };
+        let limit = match validated_cache_indexed_purge_limit(limit) {
+            Ok(limit) => limit,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+
+        match self
+            .proxy
+            .purge_indexed_image_cache(crate::proxy::CacheIndexedPurgeRequest {
+                vhost,
+                route: route.filter(|route| !route.trim().is_empty()),
+                limit,
+            }) {
+            Ok(result) => {
+                let body = format!(
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"vhost":"{}","route":{},"memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    result.matched(),
+                    result.purged(),
+                    result.truncated(),
+                    json_escape(&result.vhost),
+                    cache_route_json(result.route.as_deref()),
+                    result.memory_matched,
+                    result.memory_purged,
+                    result.memory_truncated,
+                    result.disk_matched,
+                    result.disk_purged,
+                    result.disk_truncated
+                );
+                json_response(StatusCode::OK, body.as_bytes())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                error_response(StatusCode::NOT_FOUND, &error.to_string())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+        }
+    }
+
     #[cfg(not(feature = "cache"))]
     fn cache_purge_response(
         &self,
@@ -621,6 +686,16 @@ impl AdminApp {
         _method: Option<&str>,
         _paths: Vec<&str>,
         _query: Option<&str>,
+    ) -> AdminResponse {
+        error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
+    }
+
+    #[cfg(not(feature = "cache"))]
+    fn cache_purge_index_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _limit: Option<&str>,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -1570,6 +1645,20 @@ fn validated_cache_purge_query(query: Option<&str>) -> Result<Option<&str>, &'st
     Ok(Some(query))
 }
 
+#[cfg(feature = "cache")]
+fn validated_cache_indexed_purge_limit(limit: Option<&str>) -> Result<usize, &'static str> {
+    let Some(limit) = limit.map(str::trim).filter(|limit| !limit.is_empty()) else {
+        return Ok(DEFAULT_CACHE_INDEXED_PURGE_LIMIT);
+    };
+    let limit = limit
+        .parse::<usize>()
+        .map_err(|_| "cache indexed purge limit is invalid")?;
+    if limit == 0 || limit > MAX_CACHE_INDEXED_PURGE_LIMIT {
+        return Err("cache indexed purge limit is out of range");
+    }
+    Ok(limit)
+}
+
 fn truthy_header(headers: &HeaderMap, name: &str) -> bool {
     header_value(headers, name).is_some_and(truthy)
 }
@@ -1872,6 +1961,50 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""route":"assets""#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_index_endpoint_accepts_vhost_scope() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge-index",
+            Some("vhost=cached&limit=16"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""purged":0"#));
+        assert!(body.contains(r#""truncated":false"#));
     }
 
     #[cfg(feature = "cache")]
