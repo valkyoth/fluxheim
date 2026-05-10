@@ -538,10 +538,11 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","purged":{},"vhost":"{}","route":{},"host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+                    r#"{{"status":"ok","purged":{},"vhost":"{}","route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
                     result.purged(),
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
+                    cache_scope(result.route.as_deref()),
                     json_escape(&result.host),
                     json_escape(&result.method),
                     json_escape(&result.path),
@@ -664,7 +665,7 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.truncated(),
@@ -672,6 +673,7 @@ impl AdminApp {
                     limit,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
+                    cache_scope(result.route.as_deref()),
                     result.memory_matched,
                     result.memory_purged,
                     result.memory_truncated,
@@ -724,7 +726,7 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.truncated(),
@@ -732,6 +734,7 @@ impl AdminApp {
                     limit,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
+                    cache_scope(result.route.as_deref()),
                     json_escape(path_prefix),
                     result.memory_matched,
                     result.memory_purged,
@@ -785,7 +788,7 @@ impl AdminApp {
         ) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.truncated(),
@@ -793,6 +796,7 @@ impl AdminApp {
                     limit,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
+                    cache_scope(result.route.as_deref()),
                     json_escape(path_pattern),
                     result.memory_matched,
                     result.memory_purged,
@@ -1552,6 +1556,11 @@ fn cache_route_json(route: Option<&str>) -> String {
 }
 
 #[cfg(feature = "cache")]
+fn cache_scope(route: Option<&str>) -> &'static str {
+    if route.is_some() { "route" } else { "vhost" }
+}
+
+#[cfg(feature = "cache")]
 fn cache_query_json(query: Option<&str>) -> String {
     query
         .map(|query| format!(r#""{}""#, json_escape(query)))
@@ -1566,9 +1575,10 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"purged":{},"route":{},"host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+            r#"{{"purged":{},"route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
             result.purged(),
             cache_route_json(result.route.as_deref()),
+            cache_scope(result.route.as_deref()),
             json_escape(&result.host),
             json_escape(&result.method),
             json_escape(&result.path),
@@ -2172,6 +2182,7 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""purged":false"#));
         assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""scope":"vhost""#));
         assert!(body.contains(r#""host":"cached.example""#));
         assert!(body.contains(r#""method":"GET""#));
         assert!(body.contains(r#""path":"/img/logo.png""#));
@@ -2235,6 +2246,7 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""route":"assets""#));
+        assert!(body.contains(r#""scope":"route""#));
     }
 
     #[cfg(feature = "cache")]
@@ -2281,6 +2293,7 @@ mod tests {
         assert!(body.contains(r#""truncated":false"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""scope":"vhost""#));
     }
 
     #[cfg(feature = "cache")]
@@ -2326,6 +2339,7 @@ mod tests {
         assert!(body.contains(r#""matched":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""scope":"vhost""#));
     }
 
     #[cfg(feature = "cache")]
@@ -2384,6 +2398,7 @@ mod tests {
         assert!(body.contains(r#""matched":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""scope":"vhost""#));
     }
 
     #[cfg(feature = "cache")]

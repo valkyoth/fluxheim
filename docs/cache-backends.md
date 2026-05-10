@@ -179,9 +179,9 @@ internal cache implementation.
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,
   memory and disk purge remove every stored variant for that primary identity.
-  Purge responses echo the normalized host, method, path, and optional query
-  for each requested identity so operators can audit bulk purges without
-  decoding cache keys.
+  Purge responses echo the cache `scope` (`vhost` or `route`), normalized host,
+  method, path, and optional query for each requested identity so operators can
+  audit bulk purges without decoding cache keys.
   `POST /_fluxheim/cache/purge-bulk` invalidates multiple identities that share
   the same host, method, vhost, optional route, and optional original URL query.
   Purge identities are bounded before key derivation: hosts, methods, paths,
@@ -202,11 +202,11 @@ internal cache implementation.
   Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
   endpoints accept `limit` /
   `x-fluxheim-cache-limit`, default to a bounded batch size, and return
-  the effective `limit` in their response. They return `truncated = true` and
-  `repeat_required = true` when more indexed entries remain for the requested
-  scope and the same purge should be run again. The index is bounded in memory,
-  mirrors disk-tier writes, and is designed for operational invalidation rather
-  than as a complete filesystem scan.
+  the effective `limit` and cache `scope` in their response. They return
+  `truncated = true` and `repeat_required = true` when more indexed entries
+  remain for the requested scope and the same purge should be run again. The
+  index is bounded in memory, mirrors disk-tier writes, and is designed for
+  operational invalidation rather than as a complete filesystem scan.
   A background disk purger remains planned.
 
 Example admin cache invalidation requests:
