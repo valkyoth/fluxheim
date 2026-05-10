@@ -462,6 +462,8 @@ Exit criteria:
   static asset examples before being called stable.
 - Route-scoped proxy cache can bypass lookup and storage when configured
   request headers such as `Cookie` or `Authorization` are present.
+- Route-scoped proxy cache can explicitly include safe request headers such as
+  `Accept-Encoding` in the cache variance key when the origin omits `Vary`.
 - Origin `Cache-Control`/`Expires` override controls are explicit opt-ins and
   remain scoped to matched cache routes.
 - Proxied static-cache admission stores `200 OK` origin responses only when

@@ -444,6 +444,7 @@ enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 bypass_request_headers = ["cookie", "authorization"]
+vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 status_ttls = { "200" = 3600, "404" = 60 }
 include_query = true
@@ -487,6 +488,11 @@ listed request header is present. Use it on routes where a header such as
 `Cookie` or `Authorization` changes the upstream response but should not become
 part of the shared cache identity. The default is empty so explicit static
 asset routes can still cache browser requests that carry unrelated cookies.
+`vary_request_headers` adds safe request headers to the cache variance key even
+when the origin does not emit a matching `Vary` header. Use this for negotiated
+static assets, for example `Accept-Encoding`. Sensitive request-specific
+headers such as `Cookie`, `Authorization`, and `Proxy-Authorization` are
+rejected here; use `bypass_request_headers` for those.
 `ignore_origin_cache_headers` removes upstream `Cache-Control` and `Expires`
 before cache admission and downstream delivery. Keep the default `false` unless
 the matched route is known static content and Fluxheim policy is responsible for

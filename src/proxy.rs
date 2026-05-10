@@ -1987,10 +1987,17 @@ impl ProxyHttp for FluxProxy {
     fn cache_vary_filter(
         &self,
         meta: &pingora::cache::CacheMeta,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
         request: &RequestHeader,
     ) -> Option<HashBinary> {
-        match vary_cache_policy(meta.headers()) {
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let vhost_index = ctx
+            .vhost_index
+            .unwrap_or_else(|| state.vhost_index(request_host_header(request)));
+        let vhost = state.vhost(vhost_index);
+        let cache = selected_cache_config(vhost, ctx);
+
+        match cache_vary_policy(meta.headers(), cache) {
             VaryCachePolicy::Fields(fields) => Some(vary_request_hash(&fields, request)),
             VaryCachePolicy::None | VaryCachePolicy::Uncacheable(_) => None,
         }
@@ -2770,6 +2777,35 @@ fn response_cache_admission_rejection(
 }
 
 #[cfg(feature = "cache")]
+fn cache_vary_policy(
+    headers: &http::HeaderMap,
+    cache: &crate::config::CacheConfig,
+) -> VaryCachePolicy {
+    let mut fields = match vary_cache_policy(headers) {
+        VaryCachePolicy::None => Vec::new(),
+        VaryCachePolicy::Fields(fields) => fields,
+        VaryCachePolicy::Uncacheable(reason) => return VaryCachePolicy::Uncacheable(reason),
+    };
+
+    for configured in &cache.vary_request_headers {
+        let field = configured.to_ascii_lowercase();
+        if !fields.contains(&field) {
+            fields.push(field);
+        }
+        if fields.len() > MAX_VARY_FIELDS {
+            return VaryCachePolicy::Uncacheable("vary-too-many-fields");
+        }
+    }
+
+    if fields.is_empty() {
+        VaryCachePolicy::None
+    } else {
+        fields.sort();
+        VaryCachePolicy::Fields(fields)
+    }
+}
+
+#[cfg(feature = "cache")]
 fn response_content_type_is_cacheable(
     headers: &http::HeaderMap,
     cache: &crate::config::CacheConfig,
@@ -3095,8 +3131,9 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{
         MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl, cache_request_participated,
-        cache_status_header_value, ignore_origin_cache_headers, response_cache_admission_rejection,
-        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
+        cache_status_header_value, cache_vary_policy, ignore_origin_cache_headers,
+        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
+        vary_request_hash,
     };
 
     #[test]
@@ -5051,6 +5088,40 @@ mod tests {
                 "accept-encoding".to_owned(),
                 "accept-language".to_owned()
             ])
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_vary_policy_merges_configured_request_headers() {
+        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        response.append_header("vary", "Accept-Encoding").unwrap();
+        let cache = CacheConfig {
+            vary_request_headers: vec!["accept-language".to_owned(), "accept-encoding".to_owned()],
+            ..CacheConfig::default()
+        };
+
+        assert_eq!(
+            cache_vary_policy(&response.headers, &cache),
+            VaryCachePolicy::Fields(vec![
+                "accept-encoding".to_owned(),
+                "accept-language".to_owned()
+            ])
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_vary_policy_uses_configured_request_headers_without_origin_vary() {
+        let response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let cache = CacheConfig {
+            vary_request_headers: vec!["accept-encoding".to_owned()],
+            ..CacheConfig::default()
+        };
+
+        assert_eq!(
+            cache_vary_policy(&response.headers, &cache),
+            VaryCachePolicy::Fields(vec!["accept-encoding".to_owned()])
         );
     }
 

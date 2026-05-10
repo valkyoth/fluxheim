@@ -37,6 +37,12 @@ internal cache implementation.
   when any listed request header is present. Use this for route policies where
   headers such as `Cookie` or `Authorization` make the upstream response
   request-specific.
+- `cache.vary_request_headers`, `vhosts.cache.vary_request_headers`, and
+  `vhosts.routes.cache.vary_request_headers` add safe request headers to the
+  Pingora cache variance key even when the origin does not emit a matching
+  `Vary` header. Sensitive headers such as `Cookie`, `Authorization`, and
+  `Proxy-Authorization` are rejected here; use `bypass_request_headers` for
+  request-specific responses.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream

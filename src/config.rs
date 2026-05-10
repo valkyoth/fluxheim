@@ -3177,6 +3177,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub bypass_request_headers: Vec<String>,
     #[serde(default)]
+    pub vary_request_headers: Vec<String>,
+    #[serde(default)]
     pub ignore_origin_cache_headers: bool,
     #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
@@ -3205,6 +3207,7 @@ impl Default for CacheConfig {
             status_header: None,
             hide_response_headers: Vec::new(),
             bypass_request_headers: Vec::new(),
+            vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
             status_ttls: BTreeMap::new(),
             include_query: default_cache_include_query(),
@@ -3237,6 +3240,15 @@ impl CacheConfig {
         }
         for header in &self.bypass_request_headers {
             validate_header_name(scope, header)?;
+        }
+        for header in &self.vary_request_headers {
+            validate_header_name(scope, header)?;
+            if cache_sensitive_request_header(header) {
+                return Err(ConfigError::InvalidCacheVaryRequestHeader {
+                    scope,
+                    header: header.clone(),
+                });
+            }
         }
         for (status, ttl_secs) in &self.status_ttls {
             if !(100..=599).contains(status) || *ttl_secs == 0 {
@@ -3322,6 +3334,13 @@ impl CacheConfig {
     pub fn has_enabled_tier(&self) -> bool {
         self.memory.enabled || self.disk.enabled
     }
+}
+
+fn cache_sensitive_request_header(header: &str) -> bool {
+    matches!(
+        header.to_ascii_lowercase().as_str(),
+        "authorization" | "cookie" | "proxy-authorization"
+    )
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -3821,6 +3840,10 @@ pub enum ConfigError {
         status: u16,
         ttl_secs: u32,
     },
+    InvalidCacheVaryRequestHeader {
+        scope: &'static str,
+        header: String,
+    },
     InvalidCacheLockTimeout {
         field: String,
     },
@@ -4209,6 +4232,10 @@ impl Display for ConfigError {
             } => write!(
                 formatter,
                 "{scope}.status_ttls[{status}] must use an HTTP status code from 100 to 599 and a positive TTL, got {ttl_secs}"
+            ),
+            Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
+                formatter,
+                "{scope}.vary_request_headers must not include sensitive request header {header:?}; use bypass_request_headers for request-specific responses"
             ),
             Self::InvalidCacheLockTimeout { field } => {
                 write!(formatter, "{field} must be greater than zero")
@@ -7023,6 +7050,7 @@ mod tests {
             status_header = "X-Cache-Status"
             hide_response_headers = ["set-cookie"]
             bypass_request_headers = ["cookie", "authorization"]
+            vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
             status_ttls = { "200" = 3600, "404" = 60 }
             include_query = false
@@ -7060,6 +7088,10 @@ mod tests {
         assert_eq!(
             config.cache.bypass_request_headers,
             ["cookie".to_owned(), "authorization".to_owned()]
+        );
+        assert_eq!(
+            config.cache.vary_request_headers,
+            ["accept-encoding".to_owned(), "accept-language".to_owned()]
         );
         assert!(config.cache.ignore_origin_cache_headers);
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
@@ -7152,6 +7184,47 @@ mod tests {
                 name: "bad header".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_vary_request_header_name() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            vary_request_headers = ["bad header"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderName {
+                field: "cache",
+                name: "bad header".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_sensitive_cache_vary_request_header() {
+        for header in ["cookie", "authorization", "proxy-authorization"] {
+            let config: Config = toml::from_str(&format!(
+                r#"
+                [cache]
+                vary_request_headers = [{header:?}]
+                "#
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.validate(),
+                Err(ConfigError::InvalidCacheVaryRequestHeader {
+                    scope: "cache",
+                    header: header.to_owned(),
+                }),
+                "{header}"
+            );
+        }
     }
 
     #[test]
