@@ -444,7 +444,8 @@ enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 status_ttls = { "200" = 3600, "404" = 60 }
-image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
+content_types = ["image/*", "text/css", "application/javascript", "font/*"]
+extensions = ["avif", "css", "gif", "ico", "jpg", "js", "png", "svg", "webp", "woff2"]
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 
@@ -478,8 +479,13 @@ positive TTL in seconds. When a cache-participating origin response matches, the
 cache policy replaces response freshness headers with
 `Cache-Control: public, max-age=<ttl>` before cache admission. Non-200 origin
 responses are admitted only when their status appears in `status_ttls`; statuses
-without an explicit TTL remain rejected. Under the current image-cache policy,
-`200 OK` responses still require an image `Content-Type`.
+without an explicit TTL remain rejected. `content_types` is the allow-list for
+`200 OK` origin response media types. Entries may be exact media types such as
+`text/css` or subtype wildcards such as `image/*`. `extensions` is the
+user-facing alias for the request-path extension allow-list; the older
+`image_extensions` key remains accepted for compatibility. A request must match
+the extension policy and a `200 OK` response must match `content_types` before
+it can enter the shared proxy cache.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`.

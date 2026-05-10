@@ -34,6 +34,11 @@ internal cache implementation.
   status. Matching cache-participating origin responses have their freshness
   headers normalized to `Cache-Control: public, max-age=<ttl>` before cache
   admission. Non-200 statuses are only admitted when explicitly listed here.
+- `cache.content_types`, `vhosts.cache.content_types`, and
+  `vhosts.routes.cache.content_types` allow exact media types and subtype
+  wildcards such as `image/*`. The `extensions` key is accepted as the
+  user-facing alias for the request-path extension allow-list, while
+  `image_extensions` remains accepted for older configs.
 - The first Pingora memory adapter stores complete objects only; it buffers up to
   `cache.max_object_bytes` and refuses anything larger.
 - The first Pingora disk adapter stores complete objects below `cache.disk.path`
@@ -78,11 +83,12 @@ internal cache implementation.
   variance hook for `Vary`; repeated `Vary` headers are normalized, request variant headers are
   hashed into the variant key, and unsafe or identity-sensitive `Vary` headers
   are rejected from cache admission. Responses carrying `Set-Cookie` are not
-  admitted into the shared image cache. Origin responses must be successful
-  `200 OK` image responses unless the selected cache policy explicitly defines
-  a positive TTL for their non-200 status. Missing or non-image `Content-Type`
-  values still reject `200 OK` responses, and redirects or error statuses
-  without an explicit TTL are rejected from shared image-cache admission.
+  admitted into the shared static cache. Origin `200 OK` responses must match
+  the selected cache policy `content_types`, unless the selected cache policy
+  explicitly defines a positive TTL for their non-200 status. Missing or
+  disallowed `Content-Type` values still reject `200 OK` responses, and
+  redirects or error statuses without an explicit TTL are rejected from shared
+  cache admission.
   Pingora's cache
   pipeline injects `Age` on stored-response hits and applies downstream
   conditional/range handling when cache is enabled. Planned work covers

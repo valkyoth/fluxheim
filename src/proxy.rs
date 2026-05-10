@@ -2689,9 +2689,9 @@ fn response_cache_admission_rejection(
         return Some("status-not-cacheable");
     }
 
-    if response.status == StatusCode::OK && !response_content_type_is_image(headers) {
+    if response.status == StatusCode::OK && !response_content_type_is_cacheable(headers, cache) {
         return if headers.contains_key("content-type") {
-            Some("content-type-not-image")
+            Some("content-type-not-cacheable")
         } else {
             Some("content-type-missing")
         };
@@ -2712,15 +2712,35 @@ fn response_cache_admission_rejection(
 }
 
 #[cfg(feature = "cache")]
-fn response_content_type_is_image(headers: &http::HeaderMap) -> bool {
-    headers
+fn response_content_type_is_cacheable(
+    headers: &http::HeaderMap,
+    cache: &crate::config::CacheConfig,
+) -> bool {
+    let Some(media_type) = headers
         .get("content-type")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split(';').next())
-        .is_some_and(|media_type| {
-            media_type.trim().eq_ignore_ascii_case("image/*")
-                || media_type.trim().to_ascii_lowercase().starts_with("image/")
-        })
+        .map(str::trim)
+    else {
+        return false;
+    };
+    cache
+        .content_types
+        .iter()
+        .any(|candidate| content_type_pattern_matches(candidate, media_type))
+}
+
+#[cfg(feature = "cache")]
+fn content_type_pattern_matches(pattern: &str, media_type: &str) -> bool {
+    let pattern = pattern.trim();
+    let media_type = media_type.trim();
+    if let Some(prefix) = pattern.strip_suffix("/*") {
+        let Some((kind, _subtype)) = media_type.split_once('/') else {
+            return false;
+        };
+        return kind.eq_ignore_ascii_case(prefix);
+    }
+    pattern.eq_ignore_ascii_case(media_type)
 }
 
 #[cfg(feature = "cache")]
@@ -4726,7 +4746,7 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
-    fn response_cache_admission_requires_image_content_type() {
+    fn response_cache_admission_requires_allowed_content_type() {
         use std::collections::BTreeMap;
 
         let mut redirect = pingora::http::ResponseHeader::build(302, Some(2)).unwrap();
@@ -4764,7 +4784,17 @@ mod tests {
             .unwrap();
         assert_eq!(
             response_cache_admission_rejection(&html, &CacheConfig::default()),
-            Some("content-type-not-image")
+            Some("content-type-not-cacheable")
+        );
+
+        let mut css = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        css.insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        css.insert_header("content-type", "TEXT/CSS; charset=utf-8")
+            .unwrap();
+        assert_eq!(
+            response_cache_admission_rejection(&css, &CacheConfig::default()),
+            None
         );
 
         let mut image = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();

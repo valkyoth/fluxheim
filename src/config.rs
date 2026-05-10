@@ -3176,7 +3176,9 @@ pub struct CacheConfig {
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
-    #[serde(default = "default_cache_image_extensions")]
+    #[serde(default = "default_cache_content_types")]
+    pub content_types: Vec<String>,
+    #[serde(default = "default_cache_static_extensions", alias = "extensions")]
     pub image_extensions: Vec<String>,
     #[serde(default = "default_cache_methods")]
     pub methods: Vec<String>,
@@ -3195,7 +3197,8 @@ impl Default for CacheConfig {
             status_header: None,
             hide_response_headers: Vec::new(),
             status_ttls: BTreeMap::new(),
-            image_extensions: default_cache_image_extensions(),
+            content_types: default_cache_content_types(),
+            image_extensions: default_cache_static_extensions(),
             methods: default_cache_methods(),
             max_object_bytes: default_cache_max_object_bytes(),
             memory: CacheMemoryConfig::default(),
@@ -3226,6 +3229,32 @@ impl CacheConfig {
                     scope,
                     status: *status,
                     ttl_secs: *ttl_secs,
+                });
+            }
+        }
+
+        if self.content_types.is_empty() {
+            return Err(ConfigError::EmptyCacheContentTypes { scope });
+        }
+        for content_type in &self.content_types {
+            let content_type = content_type.trim();
+            let Some((kind, subtype)) = content_type.split_once('/') else {
+                return Err(ConfigError::InvalidCacheContentType {
+                    scope,
+                    content_type: content_type.to_owned(),
+                });
+            };
+            if kind.is_empty()
+                || subtype.is_empty()
+                || kind == "*"
+                || content_type.contains(';')
+                || content_type.chars().any(char::is_whitespace)
+                || content_type.chars().any(char::is_control)
+                || (subtype.contains('*') && subtype != "*")
+            {
+                return Err(ConfigError::InvalidCacheContentType {
+                    scope,
+                    content_type: content_type.to_owned(),
                 });
             }
         }
@@ -3723,6 +3752,13 @@ pub enum ConfigError {
         scope: &'static str,
         method: String,
     },
+    EmptyCacheContentTypes {
+        scope: &'static str,
+    },
+    InvalidCacheContentType {
+        scope: &'static str,
+        content_type: String,
+    },
     InvalidCacheMaxObjectBytes {
         scope: &'static str,
     },
@@ -4093,6 +4129,16 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.methods must contain uppercase HTTP method tokens, got {method:?}"
             ),
+            Self::EmptyCacheContentTypes { scope } => {
+                write!(formatter, "{scope}.content_types cannot be empty")
+            }
+            Self::InvalidCacheContentType {
+                scope,
+                content_type,
+            } => write!(
+                formatter,
+                "{scope}.content_types must contain media types such as \"image/*\" or \"text/css\", got {content_type:?}"
+            ),
             Self::InvalidCacheMaxObjectBytes { scope } => {
                 write!(
                     formatter,
@@ -4404,11 +4450,30 @@ fn default_lb_health_check_threshold() -> usize {
     1
 }
 
-fn default_cache_image_extensions() -> Vec<String> {
-    ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
+fn default_cache_content_types() -> Vec<String> {
+    [
+        "image/*",
+        "text/css",
+        "text/javascript",
+        "application/javascript",
+        "application/wasm",
+        "font/*",
+        "application/font-woff",
+        "application/vnd.ms-fontobject",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+fn default_cache_static_extensions() -> Vec<String> {
+    [
+        "avif", "css", "eot", "gif", "ico", "jpeg", "jpg", "js", "mjs", "otf", "png", "svg", "ttf",
+        "wasm", "webp", "woff", "woff2",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
 }
 
 fn default_cache_methods() -> Vec<String> {
@@ -6882,7 +6947,8 @@ mod tests {
             status_header = "X-Cache-Status"
             hide_response_headers = ["set-cookie"]
             status_ttls = { "200" = 3600, "404" = 60 }
-            image_extensions = ["jpg", "webp"]
+            content_types = ["image/*", "text/css"]
+            extensions = ["jpg", "webp", "css"]
             methods = ["GET"]
             max_object_bytes = "4MiB"
 
@@ -6910,8 +6976,12 @@ mod tests {
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
         assert_eq!(
+            config.cache.content_types,
+            ["image/*".to_owned(), "text/css".to_owned()]
+        );
+        assert_eq!(
             config.cache.image_extensions,
-            ["jpg".to_owned(), "webp".to_owned()]
+            ["jpg".to_owned(), "webp".to_owned(), "css".to_owned()]
         );
         assert_eq!(config.cache.methods, ["GET".to_owned()]);
         assert_eq!(
@@ -7007,6 +7077,41 @@ mod tests {
                 ttl_secs: 0,
             })
         );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_content_type() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            content_types = []
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::EmptyCacheContentTypes { scope: "cache" })
+        );
+
+        for content_type in ["image", "*/json", "image/p*ng", "text/html; charset=utf-8"] {
+            let config: Config = toml::from_str(&format!(
+                r#"
+                [cache]
+                content_types = [{content_type:?}]
+                "#
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.validate(),
+                Err(ConfigError::InvalidCacheContentType {
+                    scope: "cache",
+                    content_type: content_type.to_owned(),
+                }),
+                "{content_type}"
+            );
+        }
     }
 
     #[test]

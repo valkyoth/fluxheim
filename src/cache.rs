@@ -1955,6 +1955,26 @@ mod tests {
     }
 
     #[test]
+    fn default_cache_policy_allows_common_static_extensions() {
+        let config = enabled_cache();
+        for path in [
+            "/assets/site.css",
+            "/assets/app.mjs",
+            "/assets/app.wasm",
+            "/assets/fonts/site.woff2",
+            "/favicon.ico",
+        ] {
+            let request = CacheRequest {
+                method: "GET",
+                host: Some("example.test"),
+                path,
+                query: None,
+            };
+            assert!(eligible_image_request(&config, &request), "{path}");
+        }
+    }
+
+    #[test]
     fn rejects_unconfigured_methods() {
         let request = CacheRequest {
             method: "POST",

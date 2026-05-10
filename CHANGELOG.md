@@ -22,6 +22,9 @@ behavior when the change improves security or project direction.
   normalizes matching cache-participating origin responses before admission.
 - Explicit cache status TTLs now also opt matching non-200 origin responses
   into proxy cache admission; statuses without a configured TTL remain rejected.
+- Cache policies now support `content_types` plus an `extensions` alias for
+  `image_extensions`, so route-scoped proxy cache can safely target common
+  static assets such as CSS, JavaScript, WebAssembly, fonts, and images.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.
