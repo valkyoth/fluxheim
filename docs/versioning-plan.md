@@ -416,7 +416,31 @@ Exit criteria:
 
 Goal: add controlled image/static caching.
 
-Stable scope:
+Current implementation status:
+
+- Implemented in the current 1.2 development line:
+  - memory, disk, and tiered memory+disk Pingora cache storage;
+  - route-scoped cache policies for selective production paths such as
+    repository avatars/assets;
+  - method, extension, content-type, query participation, cache-key namespace,
+    and cache-key-part controls;
+  - positive and negative status TTLs, optional origin freshness override,
+    `stale-if-error`, and `stale-while-revalidate` windows;
+  - configurable cache locks for request collapsing;
+  - shared-cache safety controls for `Set-Cookie`, request bypass headers,
+    request bypass cookies, request bypass query parameters, response-header
+    hiding, origin `Cache-Control`/`Expires` override, explicit `Vary`
+    request-header keys, and unsafe/sensitive `Vary` rejection;
+  - optional cache-status and cache-status-reason response headers;
+  - protected admin cache status, activity reset, single purge, bulk purge,
+    indexed scope purge, prefix purge, and wildcard purge endpoints;
+  - per-vhost and per-route admin status for storage tiers, storage pressure,
+    purge-index fill, activity counters, hit/miss/store/refusal/eviction
+    ratios, configured route count, cache-policy route count, and cache-route
+    coverage ratio;
+  - bounded in-memory purge indexes for memory and disk tiers.
+
+Stable scope for declaring the cache pack complete:
 
 - Memory cache with global and per-vhost size limits.
 - Disk cache with global and per-vhost directory/size limits.
@@ -438,9 +462,12 @@ Stable scope:
 
 Beta scope:
 
-- Persistent cache index.
-- Stale-while-revalidate.
+- Persistent cache index across process restarts.
 - Partial streaming admission.
+- Background disk purger or incremental cleanup worker for very large purge
+  scopes.
+- End-to-end cache-hit regressions for Pingora-provided `Age`, conditional, and
+  range behavior under the Fluxheim proxy path.
 
 Exit criteria:
 
