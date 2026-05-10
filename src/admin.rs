@@ -620,9 +620,10 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","requested":{},"purged":{},"vhost":"{}","results":[{}]}}"#,
+                    r#"{{"status":"ok","requested":{},"purged":{},"purged_ratio_per_mille":{},"vhost":"{}","results":[{}]}}"#,
                     result.requested(),
                     result.purged(),
+                    ratio_per_mille_usize(result.purged(), result.requested()),
                     json_escape(&result.vhost),
                     cache_purge_results_json(&result.results)
                 );
@@ -2695,6 +2696,7 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""requested":2"#));
         assert!(body.contains(r#""purged":0"#));
+        assert!(body.contains(r#""purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""results":["#));
         assert!(body.contains(r#""path":"/img/one.png""#));
         assert!(body.contains(r#""path":"/img/two.png""#));
