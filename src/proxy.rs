@@ -3044,6 +3044,10 @@ fn response_cache_admission_rejection(
     {
         return Some("configured-no-store-response-header");
     }
+    if response_headers_match_cache_no_store_value(response, &cache.no_store_response_header_values)
+    {
+        return Some("configured-no-store-response-header-value");
+    }
     if let Some(reason) = crate::cache_headers::response_values_forbid_shared_cache(
         response_header_values(response, "cache-control"),
     ) {
@@ -3053,6 +3057,17 @@ fn response_cache_admission_rejection(
         VaryCachePolicy::Uncacheable(reason) => Some(reason),
         VaryCachePolicy::None | VaryCachePolicy::Fields(_) => None,
     }
+}
+
+#[cfg(feature = "cache")]
+fn response_headers_match_cache_no_store_value(
+    response: &ResponseHeader,
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    !configured_values.is_empty()
+        && configured_values.iter().any(|(header, configured)| {
+            response_header_values(response, header).any(|value| value == configured)
+        })
 }
 
 #[cfg(feature = "cache")]
@@ -5582,6 +5597,35 @@ mod tests {
         assert_eq!(
             response_cache_admission_rejection(&response, &cache),
             Some("configured-no-store-response-header")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn response_cache_admission_rejects_configured_no_store_response_header_value() {
+        let cache = CacheConfig {
+            no_store_response_header_values: [("x-app-cache".to_owned(), "private".to_owned())]
+                .into(),
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        response
+            .insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response.insert_header("x-app-cache", "public").unwrap();
+        assert_eq!(response_cache_admission_rejection(&response, &cache), None);
+
+        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        response
+            .insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response.append_header("x-app-cache", "public").unwrap();
+        response.append_header("x-app-cache", "private").unwrap();
+        assert_eq!(
+            response_cache_admission_rejection(&response, &cache),
+            Some("configured-no-store-response-header-value")
         );
     }
 

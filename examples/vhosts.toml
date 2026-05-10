@@ -162,6 +162,7 @@ enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
+no_store_response_header_values = { x-app-cache = "private" }
 bypass_request_headers = ["cookie", "authorization"]
 bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]

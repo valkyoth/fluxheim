@@ -20,6 +20,8 @@ behavior when the change improves security or project direction.
   to strip headers such as `Set-Cookie`.
 - Cache policies can now refuse shared cache storage when configured origin
   response headers are present, while still delivering the response normally.
+- Cache policies can now refuse shared cache storage when configured origin
+  response header values such as `x-app-cache = "private"` are present.
 - Cache policies can now bypass lookup and storage when configured request
   headers such as `Cookie` or `Authorization` are present.
 - Cache policies can now bypass lookup and storage when configured request

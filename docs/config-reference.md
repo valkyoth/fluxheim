@@ -456,6 +456,7 @@ enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
+no_store_response_header_values = { x-app-cache = "private" }
 bypass_request_headers = ["cookie", "authorization"]
 bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
@@ -509,6 +510,10 @@ for example to strip `Set-Cookie` from known static asset responses.
 origin response header is present, while still delivering the response to the
 client. Use it for application-specific no-store signals that are not expressed
 through standard `Cache-Control` directives.
+`no_store_response_header_values` rejects shared cache admission only when a
+listed origin response header has the exact configured value. Use it for
+bounded app signals such as `x-app-cache = "private"` when header presence
+alone is too broad.
 `bypass_request_headers` disables both cache lookup and cache storage when any
 listed request header is present. Use it on routes where a header such as
 `Cookie` or `Authorization` changes the upstream response but should not become
@@ -917,6 +922,7 @@ send_timeout_secs = 600
 enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+no_store_response_header_values = { x-app-cache = "private" }
 bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_values = { preview = "1" }
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }

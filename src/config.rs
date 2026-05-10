@@ -3177,6 +3177,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub no_store_response_headers: Vec<String>,
     #[serde(default)]
+    pub no_store_response_header_values: BTreeMap<String, String>,
+    #[serde(default)]
     pub bypass_request_headers: Vec<String>,
     #[serde(default)]
     pub bypass_request_header_values: BTreeMap<String, String>,
@@ -3227,6 +3229,7 @@ impl Default for CacheConfig {
             status_header: None,
             hide_response_headers: Vec::new(),
             no_store_response_headers: Vec::new(),
+            no_store_response_header_values: BTreeMap::new(),
             bypass_request_headers: Vec::new(),
             bypass_request_header_values: BTreeMap::new(),
             bypass_cookie_names: Vec::new(),
@@ -3270,6 +3273,10 @@ impl CacheConfig {
         }
         for header in &self.no_store_response_headers {
             validate_header_name(scope, header)?;
+        }
+        for (header, value) in &self.no_store_response_header_values {
+            validate_header_name(scope, header)?;
+            validate_cache_no_store_response_header_value(scope, header, value)?;
         }
         for header in &self.bypass_request_headers {
             validate_header_name(scope, header)?;
@@ -3433,6 +3440,27 @@ fn validate_cache_bypass_request_header_value(
             .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
     {
         return Err(ConfigError::InvalidCacheBypassRequestHeaderValue {
+            scope,
+            header: header.to_owned(),
+            value: value.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_cache_no_store_response_header_value(
+    scope: &'static str,
+    header: &str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    if value.trim().is_empty()
+        || value.len() > 4096
+        || value
+            .as_bytes()
+            .iter()
+            .any(|byte| matches!(byte, 0x00..=0x08 | 0x0a..=0x1f | 0x7f))
+    {
+        return Err(ConfigError::InvalidCacheNoStoreResponseHeaderValue {
             scope,
             header: header.to_owned(),
             value: value.to_owned(),
@@ -4003,6 +4031,11 @@ pub enum ConfigError {
         header: String,
         value: String,
     },
+    InvalidCacheNoStoreResponseHeaderValue {
+        scope: &'static str,
+        header: String,
+        value: String,
+    },
     InvalidCacheBypassCookieName {
         scope: &'static str,
         name: String,
@@ -4435,6 +4468,14 @@ impl Display for ConfigError {
             } => write!(
                 formatter,
                 "{scope}.bypass_request_header_values[{header:?}] must contain a non-empty safe header value without controls, got {value:?}"
+            ),
+            Self::InvalidCacheNoStoreResponseHeaderValue {
+                scope,
+                header,
+                value,
+            } => write!(
+                formatter,
+                "{scope}.no_store_response_header_values[{header:?}] must contain a non-empty safe header value without controls, got {value:?}"
             ),
             Self::InvalidCacheBypassCookieName { scope, name } => write!(
                 formatter,
@@ -7281,6 +7322,7 @@ mod tests {
             status_header = "X-Cache-Status"
             hide_response_headers = ["set-cookie"]
             no_store_response_headers = ["x-fluxheim-no-store"]
+            no_store_response_header_values = { x-app-cache = "private" }
             bypass_request_headers = ["cookie", "authorization"]
             bypass_request_header_values = { x-preview-mode = "1" }
             bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
@@ -7329,6 +7371,13 @@ mod tests {
         assert_eq!(
             config.cache.no_store_response_headers,
             ["x-fluxheim-no-store".to_owned()]
+        );
+        assert_eq!(
+            config
+                .cache
+                .no_store_response_header_values
+                .get("x-app-cache"),
+            Some(&"private".to_owned())
         );
         assert_eq!(
             config.cache.bypass_request_headers,
@@ -7497,6 +7546,28 @@ mod tests {
                 name: "bad header".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_no_store_response_header_value() {
+        for value in ["", " ", "bad\nvalue"] {
+            let config: Config = toml::from_str(&format!(
+                r#"
+                [cache]
+                no_store_response_header_values = {{ x-app-cache = {value:?} }}
+                "#,
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.validate(),
+                Err(ConfigError::InvalidCacheNoStoreResponseHeaderValue {
+                    scope: "cache",
+                    header: "x-app-cache".to_owned(),
+                    value: value.to_owned()
+                })
+            );
+        }
     }
 
     #[test]
