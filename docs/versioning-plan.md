@@ -325,6 +325,23 @@ Stable scope:
 - Rollback.
 - Basic self-healing rollback.
 - Prometheus metrics baseline on loopback by default.
+- Production ACME companion operating mode:
+  - Keep the `1.1` in-process ACME background worker for simple single-binary
+    installs.
+  - Add a `fluxheim-acme` command or binary that reuses the same ACME engine
+    for `init`, due-only renewal, and forced renewal.
+  - Ship `fluxheim-acme.service` as a one-shot unit and
+    `fluxheim-acme.timer` for scheduled renewal. The main `fluxheim.service`
+    remains the traffic-serving webserver and should not spawn long-lived child
+    processes itself.
+  - Run the companion service as the same runtime user as Fluxheim by default,
+    using systemd credentials or container secrets for EAB material.
+  - Share only the configured ACME storage directory with the webserver. The
+    webserver continues to serve HTTP-01 challenge files and to reload
+    certificate handles after files change.
+  - Add an explicit config knob such as `tls.acme.automation = "background" |
+    "external"` or equivalent packaging policy so production installs can
+    prefer the service/timer model without losing the simple integrated mode.
 
 Exit criteria:
 

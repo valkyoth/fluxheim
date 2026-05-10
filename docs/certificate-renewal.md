@@ -276,6 +276,17 @@ resolver or callback so new handshakes can use the freshly installed files
 without restarting. If a TLS backend or listener shape cannot provide a reload
 handle, Fluxheim logs that a restart or process reload is required.
 
+Future production packaging should add a companion ACME operating mode while
+keeping the integrated background worker for simple installs. In that model,
+`fluxheim.service` stays focused on serving traffic and challenge files, while a
+one-shot `fluxheim-acme.service` and scheduled `fluxheim-acme.timer` run
+renewals as the Fluxheim runtime user. The companion command should reuse the
+same ACME engine and storage layout as `fluxheim acme-renew`, use systemd
+credentials or container secrets for EAB material, and write certificates below
+the configured `tls.acme.storage` so the running webserver can reload them
+without a restart. Do not make the webserver spawn a long-lived helper process;
+let the service manager or container orchestrator supervise the companion.
+
 ## Runtime Crate Candidates
 
 Latest checked ACME runtime candidates:

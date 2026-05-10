@@ -466,6 +466,13 @@ without parsing text fixtures for every module.
     configured renewal interval.
   - Runtime certificate adoption after renewal. Implemented for reloadable
     downstream SNI resolvers/callbacks.
+  - Production ACME companion mode. Planned for the operations pack: keep the
+    integrated background worker for simple installs, but add a `fluxheim-acme`
+    command/binary plus `fluxheim-acme.service` and `fluxheim-acme.timer` for
+    production renewals. The companion should run as the Fluxheim runtime user,
+    reuse the same ACME engine, share only the ACME storage directory, and let
+    the main webserver focus on serving traffic, HTTP-01 challenge files, and
+    reloading certificate handles.
    - Atomic certificate install and rollback on invalid renewed certificates.
      Implemented for the managed ACME install helper.
    - Runtime certificate/config reload with snapshot swapping for no downtime.
