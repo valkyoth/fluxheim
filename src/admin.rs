@@ -1681,9 +1681,21 @@ fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> String
 
 #[cfg(feature = "cache")]
 fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
+    let requests = activity.hits.saturating_add(activity.misses);
+    let hit_ratio_per_mille = activity
+        .hits
+        .saturating_mul(1000)
+        .checked_div(requests)
+        .unwrap_or(0);
     format!(
-        r#"{{"hits":{},"misses":{},"stores":{},"store_refusals":{},"purges":{}}}"#,
-        activity.hits, activity.misses, activity.stores, activity.store_refusals, activity.purges
+        r#"{{"hits":{},"misses":{},"requests":{},"hit_ratio_per_mille":{},"stores":{},"store_refusals":{},"purges":{}}}"#,
+        activity.hits,
+        activity.misses,
+        requests,
+        hit_ratio_per_mille,
+        activity.stores,
+        activity.store_refusals,
+        activity.purges
     )
 }
 
@@ -2365,6 +2377,23 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_activity_json_reports_request_count_and_hit_ratio() {
+        let body = super::cache_activity_json(&crate::cache::CacheActivityStats {
+            hits: 7,
+            misses: 3,
+            stores: 4,
+            store_refusals: 2,
+            purges: 1,
+        });
+
+        assert_eq!(
+            body,
+            r#"{"hits":7,"misses":3,"requests":10,"hit_ratio_per_mille":700,"stores":4,"store_refusals":2,"purges":1}"#
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_status_endpoint_reports_vhost_cache_tiers() {
         let cache_path = unique_temp_path("admin-cache-status");
         let config = Config {
@@ -2417,7 +2446,9 @@ mod tests {
         assert!(body.contains(r#""disk_entries":0"#));
         assert!(body.contains(r#""disk_purge_index_entries":0"#));
         assert!(body.contains(r#""disk_purge_index_max_entries":65536"#));
-        assert!(body.contains(r#""activity":{"hits":0,"misses":0,"stores":0"#));
+        assert!(body.contains(
+            r#""activity":{"hits":0,"misses":0,"requests":0,"hit_ratio_per_mille":0,"stores":0"#
+        ));
         assert!(body.contains(r#""name":"cached""#));
         assert!(body.contains(r#""enabled":true"#));
         assert!(body.contains(r#""tiered":true"#));
