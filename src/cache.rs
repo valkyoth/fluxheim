@@ -1853,6 +1853,9 @@ pub fn image_cache_key(config: &CacheConfig, request: &CacheRequest<'_>) -> Opti
     }
 
     let mut key = String::from("fluxheim-image-v1;");
+    if let Some(namespace) = config.key_namespace.as_deref() {
+        append_component(&mut key, "namespace", namespace);
+    }
     append_component(&mut key, "method", request.method);
     append_component(
         &mut key,
@@ -2057,6 +2060,32 @@ mod tests {
             "fluxheim-image-v1;method:3:GET;host:12:example.test;path:14:/assets/app.js;"
         );
         assert_eq!(image_cache_key(&config, &second), Some(key));
+    }
+
+    #[test]
+    fn cache_key_includes_operator_namespace_when_configured() {
+        let config = CacheConfig {
+            key_namespace: Some("repoheim-assets-v1".to_owned()),
+            ..enabled_cache()
+        };
+        let request = CacheRequest {
+            method: "GET",
+            host: Some("example.test"),
+            path: "/assets/app.js",
+            query: Some("v=1"),
+        };
+
+        let key = image_cache_key(&config, &request).unwrap();
+        assert_eq!(
+            key.as_str(),
+            "fluxheim-image-v1;namespace:18:repoheim-assets-v1;method:3:GET;host:12:example.test;path:14:/assets/app.js;query:3:v=1;"
+        );
+
+        let other_config = CacheConfig {
+            key_namespace: Some("repoheim-assets-v2".to_owned()),
+            ..enabled_cache()
+        };
+        assert_ne!(image_cache_key(&other_config, &request).unwrap(), key);
     }
 
     #[test]

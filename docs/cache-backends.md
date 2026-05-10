@@ -43,6 +43,10 @@ internal cache implementation.
   `Vary` header. Sensitive headers such as `Cookie`, `Authorization`, and
   `Proxy-Authorization` are rejected here; use `bypass_request_headers` for
   request-specific responses.
+- `cache.key_namespace`, `vhosts.cache.key_namespace`, and
+  `vhosts.routes.cache.key_namespace` add an operator-controlled namespace
+  component to the primary cache key. Bump this value to isolate new objects
+  from older route-cache contents without changing URLs.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream

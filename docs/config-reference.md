@@ -446,6 +446,7 @@ hide_response_headers = ["set-cookie"]
 bypass_request_headers = ["cookie", "authorization"]
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
+key_namespace = "repoheim-assets-v1"
 status_ttls = { "200" = 3600, "404" = 60 }
 include_query = true
 content_types = ["image/*", "text/css", "application/javascript", "font/*"]
@@ -493,6 +494,10 @@ when the origin does not emit a matching `Vary` header. Use this for negotiated
 static assets, for example `Accept-Encoding`. Sensitive request-specific
 headers such as `Cookie`, `Authorization`, and `Proxy-Authorization` are
 rejected here; use `bypass_request_headers` for those.
+`key_namespace` is optional. When set, Fluxheim adds the string to the primary
+cache key, which gives operators a simple cache-versioning knob. Bump it, for
+example from `repoheim-assets-v1` to `repoheim-assets-v2`, to isolate new
+objects from an older route cache without changing URLs.
 `ignore_origin_cache_headers` removes upstream `Cache-Control` and `Expires`
 before cache admission and downstream delivery. Keep the default `false` unless
 the matched route is known static content and Fluxheim policy is responsible for

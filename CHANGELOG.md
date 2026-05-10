@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
   headers such as `Cookie` or `Authorization` are present.
 - Cache policies can now add safe request headers such as `Accept-Encoding` to
   the cache variance key when an origin does not emit the needed `Vary` header.
+- Cache policies can now set an operator-controlled `key_namespace` to isolate
+  new cached objects from older route-cache contents without changing URLs.
 - Cache policies can now define positive response TTLs by HTTP status, which
   normalizes matching cache-participating origin responses before admission.
 - Explicit cache status TTLs now also opt matching non-200 origin responses

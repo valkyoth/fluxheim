@@ -3181,6 +3181,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub ignore_origin_cache_headers: bool,
     #[serde(default)]
+    pub key_namespace: Option<String>,
+    #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
     #[serde(default = "default_cache_include_query")]
     pub include_query: bool,
@@ -3209,6 +3211,7 @@ impl Default for CacheConfig {
             bypass_request_headers: Vec::new(),
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
+            key_namespace: None,
             status_ttls: BTreeMap::new(),
             include_query: default_cache_include_query(),
             content_types: default_cache_content_types(),
@@ -3249,6 +3252,9 @@ impl CacheConfig {
                     header: header.clone(),
                 });
             }
+        }
+        if let Some(namespace) = &self.key_namespace {
+            validate_cache_key_namespace(scope, namespace)?;
         }
         for (status, ttl_secs) in &self.status_ttls {
             if !(100..=599).contains(status) || *ttl_secs == 0 {
@@ -3341,6 +3347,21 @@ fn cache_sensitive_request_header(header: &str) -> bool {
         header.to_ascii_lowercase().as_str(),
         "authorization" | "cookie" | "proxy-authorization"
     )
+}
+
+fn validate_cache_key_namespace(scope: &'static str, namespace: &str) -> Result<(), ConfigError> {
+    if namespace.is_empty()
+        || namespace.len() > 128
+        || namespace
+            .chars()
+            .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':')))
+    {
+        return Err(ConfigError::InvalidCacheKeyNamespace {
+            scope,
+            namespace: namespace.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -3844,6 +3865,10 @@ pub enum ConfigError {
         scope: &'static str,
         header: String,
     },
+    InvalidCacheKeyNamespace {
+        scope: &'static str,
+        namespace: String,
+    },
     InvalidCacheLockTimeout {
         field: String,
     },
@@ -4236,6 +4261,10 @@ impl Display for ConfigError {
             Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
                 formatter,
                 "{scope}.vary_request_headers must not include sensitive request header {header:?}; use bypass_request_headers for request-specific responses"
+            ),
+            Self::InvalidCacheKeyNamespace { scope, namespace } => write!(
+                formatter,
+                "{scope}.key_namespace must be 1-128 characters and contain only ASCII letters, digits, '-', '_', '.', or ':', got {namespace:?}"
             ),
             Self::InvalidCacheLockTimeout { field } => {
                 write!(formatter, "{field} must be greater than zero")
@@ -7052,6 +7081,7 @@ mod tests {
             bypass_request_headers = ["cookie", "authorization"]
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
+            key_namespace = "repoheim-assets-v1"
             status_ttls = { "200" = 3600, "404" = 60 }
             include_query = false
             content_types = ["image/*", "text/css"]
@@ -7094,6 +7124,10 @@ mod tests {
             ["accept-encoding".to_owned(), "accept-language".to_owned()]
         );
         assert!(config.cache.ignore_origin_cache_headers);
+        assert_eq!(
+            config.cache.key_namespace,
+            Some("repoheim-assets-v1".to_owned())
+        );
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
         assert!(!config.cache.include_query);
@@ -7223,6 +7257,32 @@ mod tests {
                     header: header.to_owned(),
                 }),
                 "{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_cache_key_namespace() {
+        for namespace in ["", "bad namespace", "bad/namespace", "bad;namespace"]
+            .into_iter()
+            .map(str::to_owned)
+            .chain(std::iter::once("x".repeat(129)))
+        {
+            let config: Config = toml::from_str(&format!(
+                r#"
+                [cache]
+                key_namespace = {namespace:?}
+                "#
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.validate(),
+                Err(ConfigError::InvalidCacheKeyNamespace {
+                    scope: "cache",
+                    namespace: namespace.to_owned(),
+                }),
+                "{namespace:?}"
             );
         }
     }
