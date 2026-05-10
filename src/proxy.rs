@@ -2886,6 +2886,12 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
     {
         return true;
     }
+    if request_cookies_match_cache_bypass_name(
+        request_header_values(request, "cookie"),
+        &cache.bypass_cookie_names,
+    ) {
+        return true;
+    }
     if request
         .uri
         .query()
@@ -2898,6 +2904,25 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
         request_header_values(request, "cache-control"),
         request_header_values(request, "pragma"),
     )
+}
+
+#[cfg(feature = "cache")]
+fn request_cookies_match_cache_bypass_name<'a>(
+    cookie_headers: impl Iterator<Item = &'a str>,
+    configured_names: &[String],
+) -> bool {
+    !configured_names.is_empty()
+        && cookie_headers
+            .flat_map(cookie_header_names)
+            .any(|name| configured_names.iter().any(|configured| configured == name))
+}
+
+#[cfg(feature = "cache")]
+fn cookie_header_names(header: &str) -> impl Iterator<Item = &str> {
+    header.split(';').filter_map(|part| {
+        let name = part.trim_start().split_once('=').map(|(name, _)| name)?;
+        (!name.is_empty()).then_some(name)
+    })
 }
 
 #[cfg(feature = "cache")]
@@ -4989,6 +5014,34 @@ mod tests {
             pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request
             .insert_header("authorization", "Bearer secret")
+            .unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_configured_cookie_names() {
+        let cache = CacheConfig {
+            bypass_cookie_names: vec!["sessionid".to_owned(), "wordpress_logged_in".to_owned()],
+            ..CacheConfig::default()
+        };
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        request
+            .insert_header("cookie", "theme=dark; sessionid=abc")
+            .unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        request.insert_header("cookie", "session=abc").unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        request
+            .append_header("cookie", "wordpress_logged_in=1")
             .unwrap();
         assert!(request_cache_bypass(&request, &cache));
     }
