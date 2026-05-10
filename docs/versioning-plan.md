@@ -360,9 +360,9 @@ Stable scope:
   - Share only the configured ACME storage directory with the webserver. The
     webserver continues to serve HTTP-01 challenge files and to reload
     certificate handles after files change.
-  - Add an explicit config knob such as `tls.acme.automation = "background" |
-    "external"` or equivalent packaging policy so production installs can
-    prefer the service/timer model without losing the simple integrated mode.
+  - Add an explicit `tls.acme.automation = "background" | "external"` config
+    knob so production installs can prefer the service/timer model without
+    losing the simple integrated mode.
   - Improve renewal command output so each target reports `skipped`, `renewed`,
     or `failed`; failures should include the domain/order context and, for
     HTTP-01 authorization failures, the challenge URL/path that the CA could

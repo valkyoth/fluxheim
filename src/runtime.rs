@@ -8,6 +8,8 @@ use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "proxy")]
 use std::path::Path;
 
+#[cfg(all(feature = "proxy", feature = "acme-client"))]
+use crate::config::AcmeAutomationMode;
 #[cfg(all(
     feature = "acme",
     feature = "proxy",
@@ -116,7 +118,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "acme-client")]
-    if !crate::acme::renewal_targets(&config).is_empty() {
+    if acme_background_service_enabled(&config) {
         log::info!(
             "ACME renewal service enabled; interval={}s",
             config.tls.acme.renewal.check_interval_secs
@@ -132,6 +134,12 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(all(feature = "proxy", feature = "acme-client"))]
+fn acme_background_service_enabled(config: &Config) -> bool {
+    config.tls.acme.automation == AcmeAutomationMode::Background
+        && !crate::acme::renewal_targets(config).is_empty()
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client"))]
@@ -433,6 +441,50 @@ mod tests {
         assert_eq!(pingora.max_retries, 8);
         assert_eq!(pingora.grace_period_seconds, Some(10));
         assert_eq!(pingora.graceful_shutdown_timeout_seconds, Some(30));
+    }
+
+    #[cfg(feature = "acme-client")]
+    #[test]
+    fn acme_background_service_honors_automation_mode() {
+        let mut config = crate::config::Config {
+            tls: crate::config::TlsConfig {
+                enabled: true,
+                acme: crate::config::AcmeConfig {
+                    enabled: true,
+                    storage: Some(std::path::PathBuf::from("/var/lib/fluxheim/acme")),
+                    ..crate::config::AcmeConfig::default()
+                },
+                ..crate::config::TlsConfig::default()
+            },
+            vhosts: vec![crate::config::VhostConfig {
+                name: "example".to_owned(),
+                hosts: vec!["example.test".to_owned()],
+                max_request_body_bytes: None,
+                tls: crate::config::VhostTlsConfig {
+                    enabled: true,
+                    acme: crate::config::VhostAcmeConfig {
+                        enabled: true,
+                        issuer: None,
+                        domains: Vec::new(),
+                    },
+                    ..crate::config::VhostTlsConfig::default()
+                },
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                proxy: crate::config::ProxyConfig::default(),
+                cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: crate::config::WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..crate::config::Config::default()
+        };
+
+        assert!(super::acme_background_service_enabled(&config));
+
+        config.tls.acme.automation = crate::config::AcmeAutomationMode::External;
+
+        assert!(!super::acme_background_service_enabled(&config));
     }
 
     #[test]

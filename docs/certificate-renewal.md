@@ -281,10 +281,11 @@ offset datetime, for example `2026-06-01T00:00:00Z`. Local TOML datetimes are
 rejected so the queue cannot interpret operator intent in the wrong timezone.
 
 When Fluxheim is built with `acme-client`, the runtime registers a background
-renewal service when ACME-managed vhosts are configured. The service observes
-managed certificate expiry, wakes every
-`tls.acme.renewal.check_interval_secs`, and renews missing or due certificates
-through the same ACME challenge path used by the CLI.
+renewal service when ACME-managed vhosts are configured and
+`tls.acme.automation = "background"`. This is the default for simple
+single-process installs. The service observes managed certificate expiry, wakes
+every `tls.acme.renewal.check_interval_secs`, and renews missing or due
+certificates through the same ACME challenge path used by the CLI.
 
 After successful renewal, Fluxheim reloads the downstream SNI certificate
 resolver or callback so new handshakes can use the freshly installed files
@@ -298,7 +299,8 @@ the one-shot `fluxheim-acme.service` and scheduled `fluxheim-acme.timer` run
 renewals as the Fluxheim runtime user. The companion command reuses the same
 ACME engine and storage layout as `fluxheim acme-renew`, uses systemd
 credentials or container secrets for EAB material, and writes certificates below
-the configured `tls.acme.storage`.
+the configured `tls.acme.storage`. Set `tls.acme.automation = "external"` in
+this mode so the webserver does not also run the background renewal loop.
 
 Enable the packaged timer after ACME config and credentials are installed:
 

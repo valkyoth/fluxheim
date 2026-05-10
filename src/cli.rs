@@ -570,6 +570,7 @@ struct AcmeInitAcmeToml {
     contact_email: String,
     default_issuer: String,
     challenge: String,
+    automation: String,
     renewal: AcmeInitRenewalToml,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     issuers: Vec<AcmeInitIssuerToml>,
@@ -654,6 +655,11 @@ fn build_acme_init_toml(
                 contact_email: email.to_owned(),
                 default_issuer: issuer.name().to_owned(),
                 challenge: "http-01".to_owned(),
+                automation: if use_systemd_credentials {
+                    "external".to_owned()
+                } else {
+                    "background".to_owned()
+                },
                 renewal: AcmeInitRenewalToml {
                     enabled: true,
                     renew_before_secs: 2_592_000,
@@ -1118,6 +1124,7 @@ mod tests {
         assert!(systemd_dir.join("actalis-eab.conf").exists());
         let config = fs::read_to_string(output).unwrap();
         assert!(config.contains("default_issuer = \"actalis\""));
+        assert!(config.contains("automation = \"external\""));
         assert!(config.contains("key_id_credential = \"actalis-eab-kid\""));
         assert!(config.contains("hmac_key_credential = \"actalis-eab-hmac-key\""));
     }

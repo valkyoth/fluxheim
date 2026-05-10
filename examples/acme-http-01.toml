@@ -12,6 +12,7 @@ storage = "/var/lib/fluxheim/acme"
 contact_email = "admin@example.test"
 default_issuer = "letsencrypt-staging"
 challenge = "http-01"
+automation = "background"
 
 [tls.acme.renewal]
 enabled = true

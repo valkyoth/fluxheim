@@ -1987,6 +1987,8 @@ pub struct AcmeConfig {
     #[serde(default)]
     pub challenge: AcmeChallenge,
     #[serde(default)]
+    pub automation: AcmeAutomationMode,
+    #[serde(default)]
     pub renewal: AcmeRenewalConfig,
     #[serde(default = "default_acme_issuers")]
     pub issuers: Vec<AcmeIssuerConfig>,
@@ -2000,6 +2002,7 @@ struct AcmeConfigFragment {
     contact_email: Option<String>,
     default_issuer: Option<String>,
     challenge: Option<AcmeChallenge>,
+    automation: Option<AcmeAutomationMode>,
     renewal: Option<AcmeRenewalConfigFragment>,
     issuers: Option<Vec<AcmeIssuerConfig>>,
 }
@@ -2012,6 +2015,7 @@ impl Default for AcmeConfig {
             contact_email: default_acme_contact_email(),
             default_issuer: default_acme_default_issuer(),
             challenge: AcmeChallenge::default(),
+            automation: AcmeAutomationMode::default(),
             renewal: AcmeRenewalConfig::default(),
             issuers: default_acme_issuers(),
         }
@@ -2034,6 +2038,9 @@ impl AcmeConfig {
         }
         if let Some(challenge) = fragment.challenge {
             self.challenge = challenge;
+        }
+        if let Some(automation) = fragment.automation {
+            self.automation = automation;
         }
         if let Some(renewal) = fragment.renewal {
             self.renewal.merge(renewal);
@@ -2112,6 +2119,15 @@ pub enum AcmeChallenge {
     #[default]
     #[serde(rename = "http-01")]
     Http01,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum AcmeAutomationMode {
+    #[default]
+    #[serde(rename = "background")]
+    Background,
+    #[serde(rename = "external")]
+    External,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -6187,6 +6203,7 @@ mod tests {
             contact_email = "admin@example.test"
             default_issuer = "actalis"
             challenge = "http-01"
+            automation = "external"
 
             [tls.acme.renewal]
             enabled = true
@@ -6218,6 +6235,10 @@ mod tests {
         );
         assert_eq!(config.tls.acme.default_issuer, "actalis");
         assert_eq!(config.tls.acme.challenge, super::AcmeChallenge::Http01);
+        assert_eq!(
+            config.tls.acme.automation,
+            super::AcmeAutomationMode::External
+        );
         assert_eq!(config.tls.acme.renewal.renew_before_secs, 2_592_000);
         assert!(config.tls.acme.renewal.renew_after.is_some());
         config.validate().unwrap();

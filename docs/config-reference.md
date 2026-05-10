@@ -573,11 +573,12 @@ files are checked with the same owner-only permission rule as private keys.
 ACME config parsing, renewal planning, managed certificate storage paths, local
 HTTP-01 challenge serving, and the local renewal execution contract exist.
 Builds with `acme-client` can load or create issuer accounts and complete
-HTTP-01 or rustls TLS-ALPN-01 orders through `instant-acme`. The runtime also
-registers a background renewal service for configured ACME vhosts when
-`acme-client` is compiled in.
-The service observes managed certificate expiry and renews missing or due
-certificates on the configured check interval. After successful renewal,
+HTTP-01 or rustls TLS-ALPN-01 orders through `instant-acme`. By default, the
+runtime registers a background renewal service for configured ACME vhosts when
+`acme-client` is compiled in. Set `tls.acme.automation = "external"` when a
+systemd timer, container scheduler, or another supervisor runs `acme-renew`.
+The background service observes managed certificate expiry and renews missing or
+due certificates on the configured check interval. After successful renewal,
 Fluxheim reloads downstream SNI certificate objects so new handshakes can use
 the renewed files without a restart when the selected TLS backend exposes a
 reloadable resolver or callback.
@@ -600,6 +601,7 @@ storage = "/var/lib/fluxheim/acme"
 contact_email = "admin@example.test"
 default_issuer = "letsencrypt"
 challenge = "http-01"
+automation = "background" # or "external" for fluxheim-acme.timer/container cron
 
 [tls.acme.renewal]
 enabled = true

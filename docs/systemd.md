@@ -133,6 +133,8 @@ RPM packages install a one-shot renewal unit and timer:
 The service runs `fluxheim --config ${FLUXHEIM_CONFIG} acme-renew` as the same
 `fluxheim` user, with the same state/cache/log directories as the web service.
 It does not bind ports and does not receive `CAP_NET_BIND_SERVICE`.
+Set `tls.acme.automation = "external"` when using the timer so the main
+webserver does not also run the background renewal loop.
 
 For issuers with External Account Binding, install the ACME credential drop-in
 for the ACME unit and use credential names in the TOML:
