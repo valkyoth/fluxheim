@@ -628,7 +628,8 @@ without parsing text fixtures for every module.
      - cache-key templates with a safe variable set rather than arbitrary
        string interpolation;
      - `min_uses` style delayed admission before storing a response;
-     - status-specific TTL rules, including `any` fallback TTL;
+     - status-specific TTL rules, including `any` fallback TTL. Implemented
+       through typed `status_ttls` and `default_status_ttl_secs` policy;
      - explicit request-side bypass rules and response-side no-store rules
        based on bounded header, cookie, and query predicates. Implemented for
        header-presence request bypass and response no-store controls; cookie

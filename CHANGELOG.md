@@ -28,8 +28,11 @@ behavior when the change improves security or project direction.
   new cached objects from older route-cache contents without changing URLs.
 - Cache policies can now define positive response TTLs by HTTP status, which
   normalizes matching cache-participating origin responses before admission.
-- Explicit cache status TTLs now also opt matching non-200 origin responses
-  into proxy cache admission; statuses without a configured TTL remain rejected.
+- Cache policies can now set `default_status_ttl_secs` as an explicit fallback
+  TTL for cache-participating origin statuses not listed in `status_ttls`.
+- Configured cache status TTLs now also opt matching non-200 origin responses
+  into proxy cache admission; statuses without an explicit or fallback TTL
+  remain rejected.
 - Cache policies now support `content_types` plus an `extensions` alias for
   `image_extensions`, so route-scoped proxy cache can safely target common
   static assets such as CSS, JavaScript, WebAssembly, fonts, and images.

@@ -2247,12 +2247,17 @@ fn apply_cache_status_ttl(
         return Ok(());
     }
     let status = response.status.as_u16();
-    if let Some(ttl_secs) = cache.status_ttls.get(&status) {
+    if let Some(ttl_secs) = cache
+        .status_ttls
+        .get(&status)
+        .copied()
+        .or(cache.default_status_ttl_secs)
+    {
         response.remove_header("expires");
         return response.insert_header(
             "cache-control",
             cache_control_freshness_value(
-                *ttl_secs,
+                ttl_secs,
                 cache.stale_while_revalidate_secs,
                 cache.stale_if_error_secs,
             ),
@@ -2895,8 +2900,9 @@ fn response_cache_admission_rejection(
 ) -> Option<&'static str> {
     let headers = &response.headers;
     let status = response.status.as_u16();
-    let status_has_explicit_ttl = cache.status_ttls.contains_key(&status);
-    if response.status != StatusCode::OK && !status_has_explicit_ttl {
+    let status_has_ttl =
+        cache.status_ttls.contains_key(&status) || cache.default_status_ttl_secs.is_some();
+    if response.status != StatusCode::OK && !status_has_ttl {
         return Some("status-not-cacheable");
     }
 
@@ -5145,6 +5151,33 @@ mod tests {
         assert_eq!(
             response.headers.get("cache-control").unwrap().to_str().ok(),
             Some("public, max-age=3600, stale-while-revalidate=30, stale-if-error=120")
+        );
+        assert_eq!(response_cache_admission_rejection(&response, &cache), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_applies_default_status_ttl_fallback() {
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            default_status_ttl_secs: Some(15),
+            stale_if_error_secs: Some(60),
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(418, Some(1)).unwrap();
+        response
+            .insert_header("cache-control", "private, no-store")
+            .unwrap();
+
+        assert_eq!(
+            response_cache_admission_rejection(&response, &cache),
+            Some("cache-control-private")
+        );
+        apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
+        assert_eq!(
+            response.headers.get("cache-control").unwrap().to_str().ok(),
+            Some("public, max-age=15, stale-if-error=60")
         );
         assert_eq!(response_cache_admission_rejection(&response, &cache), None);
     }

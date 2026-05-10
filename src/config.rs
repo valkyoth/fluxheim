@@ -3187,6 +3187,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
     #[serde(default)]
+    pub default_status_ttl_secs: Option<u32>,
+    #[serde(default)]
     pub stale_while_revalidate_secs: Option<u32>,
     #[serde(default)]
     pub stale_if_error_secs: Option<u32>,
@@ -3220,6 +3222,7 @@ impl Default for CacheConfig {
             ignore_origin_cache_headers: false,
             key_namespace: None,
             status_ttls: BTreeMap::new(),
+            default_status_ttl_secs: None,
             stale_while_revalidate_secs: None,
             stale_if_error_secs: None,
             include_query: default_cache_include_query(),
@@ -3276,6 +3279,9 @@ impl CacheConfig {
                     ttl_secs: *ttl_secs,
                 });
             }
+        }
+        if self.default_status_ttl_secs == Some(0) {
+            return Err(ConfigError::InvalidCacheDefaultStatusTtl { scope });
         }
         if self.stale_if_error_secs == Some(0) {
             return Err(ConfigError::InvalidCacheStaleIfErrorTtl { scope });
@@ -3879,6 +3885,9 @@ pub enum ConfigError {
         status: u16,
         ttl_secs: u32,
     },
+    InvalidCacheDefaultStatusTtl {
+        scope: &'static str,
+    },
     InvalidCacheStaleIfErrorTtl {
         scope: &'static str,
     },
@@ -4282,6 +4291,12 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.status_ttls[{status}] must use an HTTP status code from 100 to 599 and a positive TTL, got {ttl_secs}"
             ),
+            Self::InvalidCacheDefaultStatusTtl { scope } => {
+                write!(
+                    formatter,
+                    "{scope}.default_status_ttl_secs must be greater than zero"
+                )
+            }
             Self::InvalidCacheStaleIfErrorTtl { scope } => {
                 write!(
                     formatter,
@@ -7120,6 +7135,7 @@ mod tests {
             ignore_origin_cache_headers = true
             key_namespace = "repoheim-assets-v1"
             status_ttls = { "200" = 3600, "404" = 60 }
+            default_status_ttl_secs = 15
             stale_while_revalidate_secs = 30
             stale_if_error_secs = 120
             include_query = false
@@ -7173,6 +7189,7 @@ mod tests {
         );
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
+        assert_eq!(config.cache.default_status_ttl_secs, Some(15));
         assert_eq!(config.cache.stale_while_revalidate_secs, Some(30));
         assert_eq!(config.cache.stale_if_error_secs, Some(120));
         assert!(!config.cache.include_query);
@@ -7385,6 +7402,22 @@ mod tests {
                 status: 200,
                 ttl_secs: 0,
             })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_default_status_ttl() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            default_status_ttl_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheDefaultStatusTtl { scope: "cache" })
         );
     }
 
