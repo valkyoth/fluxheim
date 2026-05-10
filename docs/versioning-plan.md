@@ -473,6 +473,9 @@ Exit criteria:
 - Route-scoped proxy cache can opt into `stale-if-error` windows so stored
   static objects may be served during upstream failures after normal freshness
   expires.
+- Route-scoped proxy cache can opt into `stale-while-revalidate` windows so
+  stored static objects may be served while Fluxheim revalidates them in the
+  background.
 - Proxied static-cache admission stores `200 OK` origin responses only when
   both the request extension and response media type match cache policy;
   non-200 statuses are admitted only when explicitly listed in cache

@@ -41,6 +41,8 @@ behavior when the change improves security or project direction.
   policies through `route` or `x-fluxheim-cache-route`.
 - Cache policies can now set `stale_if_error_secs` to permit serving stale
   cached objects during upstream errors after normal freshness expires.
+- Cache policies can now set `stale_while_revalidate_secs` to permit serving
+  stale cached objects while Fluxheim revalidates them in the background.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

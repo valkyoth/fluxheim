@@ -62,6 +62,11 @@ internal cache implementation.
   `vhosts.routes.cache.stale_if_error_secs` add an explicit stale-if-error
   window to cache-participating responses. Pingora can then serve an expired
   stored object during upstream errors while the stale window is still valid.
+- `cache.stale_while_revalidate_secs`,
+  `vhosts.cache.stale_while_revalidate_secs`, and
+  `vhosts.routes.cache.stale_while_revalidate_secs` add an explicit
+  stale-while-revalidate window to cache-participating responses. Pingora can
+  then serve an expired stored object while revalidating it with the upstream.
 - `cache.content_types`, `vhosts.cache.content_types`, and
   `vhosts.routes.cache.content_types` allow exact media types and subtype
   wildcards such as `image/*`. The `extensions` key is accepted as the

@@ -454,6 +454,7 @@ vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
 status_ttls = { "200" = 3600, "404" = 60 }
+stale_while_revalidate_secs = 30
 stale_if_error_secs = 120
 include_query = true
 content_types = ["image/*", "text/css", "application/javascript", "font/*"]
@@ -514,10 +515,12 @@ positive TTL in seconds. When a cache-participating origin response matches, the
 cache policy replaces response freshness headers with
 `Cache-Control: public, max-age=<ttl>` before cache admission. Non-200 origin
 responses are admitted only when their status appears in `status_ttls`; statuses
-without an explicit TTL remain rejected. `stale_if_error_secs` is optional and
-must be greater than zero when set. It permits serving an already-stored stale
-object during upstream errors for the configured number of seconds after normal
-freshness expires. `content_types` is the allow-list for `200 OK` origin
+without an explicit TTL remain rejected. `stale_while_revalidate_secs` and
+`stale_if_error_secs` are optional and must be greater than zero when set.
+`stale_while_revalidate_secs` permits serving an already-stored stale object
+while Fluxheim revalidates it in the background, and `stale_if_error_secs`
+permits serving stale during upstream errors. Both windows are counted after
+normal freshness expires. `content_types` is the allow-list for `200 OK` origin
 response media types. Entries may be exact media types such as `text/css` or
 subtype wildcards such as `image/*`. `extensions` is the user-facing alias for
 the request-path extension allow-list; the older `image_extensions` key remains
@@ -873,6 +876,7 @@ enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
+stale_while_revalidate_secs = 30
 stale_if_error_secs = 120
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"

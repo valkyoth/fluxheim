@@ -19,7 +19,7 @@ use pingora::http::RequestHeader;
 use pingora::http::ResponseHeader;
 use pingora::prelude::{HttpPeer, Result};
 use pingora::proxy::{FailToProxy, ProxyHttp, Session};
-use pingora::{Error, ErrorType};
+use pingora::{Error, ErrorSource, ErrorType};
 #[cfg(feature = "cache")]
 use pingora::{
     cache::CacheOptionOverrides, cache::CachePhase, cache::NoCacheReason, cache::RespCacheable,
@@ -2024,6 +2024,26 @@ impl ProxyHttp for FluxProxy {
     }
 
     #[cfg(feature = "cache")]
+    fn should_serve_stale(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+        error: Option<&Error>,
+    ) -> bool {
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let vhost_index = ctx
+            .vhost_index
+            .unwrap_or_else(|| state.vhost_index(request_host(session)));
+        let vhost = state.vhost(vhost_index);
+        match error {
+            Some(error) => error.esource() == &ErrorSource::Upstream,
+            None => selected_cache_config(vhost, ctx)
+                .stale_while_revalidate_secs
+                .is_some(),
+        }
+    }
+
+    #[cfg(feature = "cache")]
     fn cache_vary_filter(
         &self,
         meta: &pingora::cache::CacheMeta,
@@ -2223,14 +2243,28 @@ fn apply_cache_status_ttl(
         response.remove_header("expires");
         return response.insert_header(
             "cache-control",
-            cache_control_freshness_value(*ttl_secs, cache.stale_if_error_secs),
+            cache_control_freshness_value(
+                *ttl_secs,
+                cache.stale_while_revalidate_secs,
+                cache.stale_if_error_secs,
+            ),
         );
     }
 
-    if let Some(stale_if_error_secs) = cache.stale_if_error_secs
-        && response.headers.contains_key("cache-control")
-        && response_cache_admission_rejection(response, cache).is_none()
+    if !response.headers.contains_key("cache-control")
+        || response_cache_admission_rejection(response, cache).is_some()
     {
+        return Ok(());
+    }
+
+    if let Some(stale_while_revalidate_secs) = cache.stale_while_revalidate_secs {
+        append_cache_control_directive(
+            response,
+            &format!("stale-while-revalidate={stale_while_revalidate_secs}"),
+            "stale-while-revalidate",
+        )?;
+    }
+    if let Some(stale_if_error_secs) = cache.stale_if_error_secs {
         append_cache_control_directive(
             response,
             &format!("stale-if-error={stale_if_error_secs}"),
@@ -2256,8 +2290,16 @@ fn strip_cache_response_headers(
 }
 
 #[cfg(feature = "cache")]
-fn cache_control_freshness_value(ttl_secs: u32, stale_if_error_secs: Option<u32>) -> String {
+fn cache_control_freshness_value(
+    ttl_secs: u32,
+    stale_while_revalidate_secs: Option<u32>,
+    stale_if_error_secs: Option<u32>,
+) -> String {
     let mut value = format!("public, max-age={ttl_secs}");
+    if let Some(stale_while_revalidate_secs) = stale_while_revalidate_secs {
+        value.push_str(", stale-while-revalidate=");
+        value.push_str(&stale_while_revalidate_secs.to_string());
+    }
     if let Some(stale_if_error_secs) = stale_if_error_secs {
         value.push_str(", stale-if-error=");
         value.push_str(&stale_if_error_secs.to_string());
@@ -5060,6 +5102,7 @@ mod tests {
 
         let cache = CacheConfig {
             status_ttls: BTreeMap::from([(200, 3600), (404, 60)]),
+            stale_while_revalidate_secs: Some(30),
             stale_if_error_secs: Some(120),
             ..CacheConfig::default()
         };
@@ -5082,17 +5125,18 @@ mod tests {
         assert!(!response.headers.contains_key("expires"));
         assert_eq!(
             response.headers.get("cache-control").unwrap().to_str().ok(),
-            Some("public, max-age=3600, stale-if-error=120")
+            Some("public, max-age=3600, stale-while-revalidate=30, stale-if-error=120")
         );
         assert_eq!(response_cache_admission_rejection(&response, &cache), None);
     }
 
     #[cfg(feature = "cache")]
     #[test]
-    fn cache_policy_adds_stale_if_error_without_status_ttl() {
+    fn cache_policy_adds_stale_directives_without_status_ttl() {
         use pingora::cache::CachePhase;
 
         let cache = CacheConfig {
+            stale_while_revalidate_secs: Some(15),
             stale_if_error_secs: Some(45),
             ..CacheConfig::default()
         };
@@ -5104,21 +5148,25 @@ mod tests {
         response
             .append_header("cache-control", "stale-if-error=10")
             .unwrap();
+        response
+            .append_header("cache-control", "stale-while-revalidate=5")
+            .unwrap();
 
         apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
 
         assert_eq!(
             response.headers.get("cache-control").unwrap().to_str().ok(),
-            Some("public, max-age=60, stale-if-error=45")
+            Some("public, max-age=60, stale-while-revalidate=15, stale-if-error=45")
         );
     }
 
     #[cfg(feature = "cache")]
     #[test]
-    fn cache_policy_does_not_add_stale_if_error_to_rejected_origin_response() {
+    fn cache_policy_does_not_add_stale_directives_to_rejected_origin_response() {
         use pingora::cache::CachePhase;
 
         let cache = CacheConfig {
+            stale_while_revalidate_secs: Some(15),
             stale_if_error_secs: Some(45),
             ..CacheConfig::default()
         };
