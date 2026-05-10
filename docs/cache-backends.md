@@ -134,10 +134,11 @@ internal cache implementation.
   stores, and purges. `POST /_fluxheim/cache/activity/reset` resets vhost and
   route activity counters without clearing cached objects.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
-  selected vhost. If the object has negotiated `Vary` variants, memory and disk
-  purge remove every stored variant for that primary identity. `POST
-  /_fluxheim/cache/purge-bulk` invalidates multiple identities that share the
-  same host, method, vhost, and optional original URL query.
+  selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
+  the selected route cache. If the object has negotiated `Vary` variants,
+  memory and disk purge remove every stored variant for that primary identity.
+  `POST /_fluxheim/cache/purge-bulk` invalidates multiple identities that share
+  the same host, method, vhost, optional route, and optional original URL query.
   Purge identities are bounded before key derivation: hosts, methods, paths,
   queries, and bulk path count have explicit limits; paths must start with `/`;
   path traversal segments, encoded path separators, encoded dots, backslashes,
@@ -206,7 +207,7 @@ A production adapter must:
   for the memory tier.
 - Expose purge semantics for the future admin API. Implemented in the storage
   adapters and protected admin endpoint for single-key and same-host bulk exact
-  invalidation.
+  invalidation, including vhost and route-scoped cache policies.
 - Expose operator cache counters. Implemented through the protected
   `GET /_fluxheim/cache/status` admin endpoint.
 - Have focused tests for hit, miss, oversized object, purge, and vhost key

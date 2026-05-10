@@ -291,6 +291,7 @@ pub struct ProxySnapshot {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CachePurgeRequest<'a> {
     pub vhost: Option<&'a str>,
+    pub route: Option<&'a str>,
     pub host: &'a str,
     pub method: &'a str,
     pub path: &'a str,
@@ -301,6 +302,7 @@ pub struct CachePurgeRequest<'a> {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheBulkPurgeRequest<'a> {
     pub vhost: Option<&'a str>,
+    pub route: Option<&'a str>,
     pub host: &'a str,
     pub method: &'a str,
     pub paths: Vec<&'a str>,
@@ -311,6 +313,7 @@ pub struct CacheBulkPurgeRequest<'a> {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CachePurgeResult {
     pub vhost: String,
+    pub route: Option<String>,
     pub cache_key: String,
     pub memory_purged: bool,
     pub disk_purged: bool,
@@ -561,6 +564,33 @@ impl ProxySnapshot {
             self.state.vhost_index(Some(request.host))
         };
         let vhost = self.state.vhost(vhost_index);
+        let route_cache = if let Some(route_name) = request.route {
+            Some(
+                vhost
+                    .routes
+                    .iter()
+                    .filter_map(|route| route.cache.as_ref())
+                    .find(|cache| cache.name == route_name)
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("route cache not found: {}/{}", vhost.name, route_name),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
+        let route_user_tag;
+        let user_tag = if let Some(route_cache) = route_cache {
+            route_user_tag = format!("{}:route:{}", vhost.name, route_cache.name);
+            route_user_tag.as_str()
+        } else {
+            vhost.name.as_str()
+        };
         let cache_request = crate::cache::CacheRequest {
             method: request.method,
             host: Some(request.host),
@@ -569,27 +599,36 @@ impl ProxySnapshot {
         };
         let key = crate::cache::pingora_image_cache_key(
             "fluxheim-image-v1",
-            &vhost.cache,
+            cache_config,
             &cache_request,
-            &vhost.name,
+            user_tag,
         )
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "request is not eligible for this vhost cache policy",
+                if route_cache.is_some() {
+                    "request is not eligible for this route cache policy"
+                } else {
+                    "request is not eligible for this vhost cache policy"
+                },
             )
         })?;
         let cache_key = key.combined();
-        let memory_purged = vhost
-            .pingora_memory_storage
+        let memory_purged = route_cache
+            .and_then(|cache| cache.pingora_memory_storage)
+            .or(vhost
+                .pingora_memory_storage
+                .filter(|_| route_cache.is_none()))
             .is_some_and(|storage| storage.purge_cache_key(&key));
-        let disk_purged = vhost
-            .pingora_disk_storage
+        let disk_purged = route_cache
+            .and_then(|cache| cache.pingora_disk_storage)
+            .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| storage.purge_cache_key(&key))
             .transpose()?
             .unwrap_or(false);
         Ok(CachePurgeResult {
             vhost: vhost.name.clone(),
+            route: route_cache.map(|cache| cache.name.clone()),
             cache_key,
             memory_purged,
             disk_purged,
@@ -612,6 +651,7 @@ impl ProxySnapshot {
         for path in request.paths {
             results.push(self.purge_image_cache(CachePurgeRequest {
                 vhost: request.vhost,
+                route: request.route,
                 host: request.host,
                 method: request.method,
                 path,
@@ -4373,6 +4413,7 @@ mod tests {
         let result = proxy
             .purge_image_cache(CachePurgeRequest {
                 vhost: Some("cached"),
+                route: None,
                 host: "cached.example",
                 method: "GET",
                 path: "/img/logo.png",
@@ -4380,6 +4421,97 @@ mod tests {
             })
             .unwrap();
 
+        assert!(result.memory_purged);
+        assert!(result.purged());
+        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn purge_image_cache_can_target_route_cache() {
+        use bytes::Bytes;
+        use pingora::cache::Storage;
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "assets".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/assets/".to_owned()),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    max_request_body_bytes: None,
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstream: Some("127.0.0.1:3000".to_owned()),
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    cache: Some(CacheConfig {
+                        enabled: true,
+                        memory: crate::config::CacheMemoryConfig {
+                            enabled: true,
+                            max_size_bytes: ByteSize::from_bytes(2048),
+                        },
+                        max_object_bytes: ByteSize::from_bytes(512),
+                        ..CacheConfig::default()
+                    }),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let route_cache = vhost.routes[0].cache.as_ref().unwrap();
+        let storage = route_cache.pingora_memory_storage.unwrap();
+        let cache_request = crate::cache::CacheRequest {
+            method: "GET",
+            host: Some("cached.example"),
+            path: "/assets/logo.png",
+            query: None,
+        };
+        let key = crate::cache::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &route_cache.config,
+            &cache_request,
+            "cached:route:assets",
+        )
+        .unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_some());
+
+        let result = proxy
+            .purge_image_cache(CachePurgeRequest {
+                vhost: Some("cached"),
+                route: Some("assets"),
+                host: "cached.example",
+                method: "GET",
+                path: "/assets/logo.png",
+                query: None,
+            })
+            .unwrap();
+
+        assert_eq!(result.vhost, "cached");
+        assert_eq!(result.route.as_deref(), Some("assets"));
         assert!(result.memory_purged);
         assert!(result.purged());
         assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
@@ -4451,6 +4583,7 @@ mod tests {
         let result = proxy
             .purge_image_cache_bulk(CacheBulkPurgeRequest {
                 vhost: Some("cached"),
+                route: None,
                 host: "cached.example",
                 method: "GET",
                 paths: paths.to_vec(),

@@ -37,6 +37,8 @@ behavior when the change improves security or project direction.
   headers before proxy cache admission for tightly scoped static routes.
 - Cache request-collapsing locks are now configurable per cache policy through
   `[cache.lock]`, while preserving the previous 30 second defaults.
+- Protected cache purge endpoints can now target named route-scoped cache
+  policies through `route` or `x-fluxheim-cache-route`.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

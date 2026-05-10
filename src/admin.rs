@@ -215,6 +215,8 @@ impl AdminApp {
             ("POST", "/_fluxheim/cache/purge") => self.cache_purge_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
                     .or_else(|| query_param(query, "vhost")),
+                header_value(headers, "x-fluxheim-cache-route")
+                    .or_else(|| query_param(query, "route")),
                 header_value(headers, "x-fluxheim-cache-host")
                     .or_else(|| query_param(query, "host")),
                 header_value(headers, "x-fluxheim-cache-method")
@@ -228,6 +230,8 @@ impl AdminApp {
             ("POST", "/_fluxheim/cache/purge-bulk") => self.cache_purge_bulk_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
                     .or_else(|| query_param(query, "vhost")),
+                header_value(headers, "x-fluxheim-cache-route")
+                    .or_else(|| query_param(query, "route")),
                 header_value(headers, "x-fluxheim-cache-host")
                     .or_else(|| query_param(query, "host")),
                 header_value(headers, "x-fluxheim-cache-method")
@@ -461,6 +465,7 @@ impl AdminApp {
     fn cache_purge_response(
         &self,
         vhost: Option<&str>,
+        route: Option<&str>,
         host: Option<&str>,
         method: Option<&str>,
         path: Option<&str>,
@@ -487,6 +492,7 @@ impl AdminApp {
             .proxy
             .purge_image_cache(crate::proxy::CachePurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
+                route: route.filter(|route| !route.trim().is_empty()),
                 host,
                 method,
                 path,
@@ -494,9 +500,10 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","purged":{},"vhost":"{}","cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+                    r#"{{"status":"ok","purged":{},"vhost":"{}","route":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
                     result.purged(),
                     json_escape(&result.vhost),
+                    cache_route_json(result.route.as_deref()),
                     json_escape(&result.cache_key),
                     result.memory_purged,
                     result.disk_purged
@@ -517,6 +524,7 @@ impl AdminApp {
     fn cache_purge_bulk_response(
         &self,
         vhost: Option<&str>,
+        route: Option<&str>,
         host: Option<&str>,
         method: Option<&str>,
         paths: Vec<&str>,
@@ -561,6 +569,7 @@ impl AdminApp {
             .proxy
             .purge_image_cache_bulk(crate::proxy::CacheBulkPurgeRequest {
                 vhost: vhost.filter(|vhost| !vhost.trim().is_empty()),
+                route: route.filter(|route| !route.trim().is_empty()),
                 host,
                 method,
                 paths,
@@ -590,6 +599,7 @@ impl AdminApp {
     fn cache_purge_response(
         &self,
         _vhost: Option<&str>,
+        _route: Option<&str>,
         _host: Option<&str>,
         _method: Option<&str>,
         _path: Option<&str>,
@@ -602,6 +612,7 @@ impl AdminApp {
     fn cache_purge_bulk_response(
         &self,
         _vhost: Option<&str>,
+        _route: Option<&str>,
         _host: Option<&str>,
         _method: Option<&str>,
         _paths: Vec<&str>,
@@ -1284,6 +1295,13 @@ fn reload_reasons_json(reasons: &[ReloadReason]) -> String {
 }
 
 #[cfg(feature = "cache")]
+fn cache_route_json(route: Option<&str>) -> String {
+    route
+        .map(|route| format!(r#""{}""#, json_escape(route)))
+        .unwrap_or_else(|| "null".to_owned())
+}
+
+#[cfg(feature = "cache")]
 fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> String {
     let mut body = String::new();
     for (index, result) in results.iter().enumerate() {
@@ -1291,8 +1309,9 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"purged":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+            r#"{{"purged":{},"route":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
             result.purged(),
+            cache_route_json(result.route.as_deref()),
             json_escape(&result.cache_key),
             result.memory_purged,
             result.disk_purged
@@ -1776,6 +1795,64 @@ mod tests {
         assert!(body.contains(r#""purged":false"#));
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""memory_purged":false"#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_endpoint_accepts_route_target() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "assets".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/assets/".to_owned()),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    max_request_body_bytes: None,
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstream: Some("127.0.0.1:3000".to_owned()),
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    cache: Some(CacheConfig {
+                        enabled: true,
+                        memory: crate::config::CacheMemoryConfig {
+                            enabled: true,
+                            max_size_bytes: ByteSize::from_bytes(2048),
+                        },
+                        max_object_bytes: ByteSize::from_bytes(512),
+                        ..CacheConfig::default()
+                    }),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge",
+            Some("vhost=cached&route=assets&host=cached.example&path=/assets/logo.png"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""route":"assets""#));
     }
 
     #[cfg(feature = "cache")]

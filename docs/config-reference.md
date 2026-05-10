@@ -141,6 +141,12 @@ Admin endpoint paths are capped at 2048 bytes and query strings are capped at
 16 KiB before endpoint-specific parsing. Prefer headers for long cache purge
 values.
 
+The protected cache purge endpoints accept the optional `vhost` and `route`
+query parameters, or `x-fluxheim-cache-vhost` and
+`x-fluxheim-cache-route` headers, to target either a vhost cache policy or a
+named route-scoped cache policy. Route names are resolved within the selected
+vhost.
+
 `admin.self_healing.health_path` must be an absolute path no longer than 2048
 bytes and cannot contain whitespace, control characters, backslashes, `?`, or
 `#`. Custom health paths must not use the protected `/_fluxheim/` admin prefix;

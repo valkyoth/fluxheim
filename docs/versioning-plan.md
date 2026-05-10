@@ -452,6 +452,8 @@ Exit criteria:
   isolate old and new route-cache contents without URL changes.
 - Cache request-collapsing lock enablement and timeouts are configurable per
   cache policy.
+- Protected cache purge endpoints can target route-scoped cache policies by
+  route name.
 - Cache respects method/content-type policy and request/response cache
   directives.
 - `Vary` handling is tested before negotiated variants are stable. Implemented
