@@ -29,6 +29,12 @@ internal cache implementation.
   upstream response headers before cache admission and downstream delivery.
   This is intended for tightly scoped static-asset routes where operators know
   a header such as `Set-Cookie` is not part of the cache identity.
+- `cache.ignore_origin_cache_headers`,
+  `vhosts.cache.ignore_origin_cache_headers`, and
+  `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream
+  `Cache-Control` and `Expires` before cache admission and downstream delivery.
+  Keep this disabled except on tightly scoped static-asset routes where
+  Fluxheim's cache policy owns freshness.
 - `cache.status_ttls`, `vhosts.cache.status_ttls`, and
   `vhosts.routes.cache.status_ttls` define explicit positive TTLs by response
   status. Matching cache-participating origin responses have their freshness

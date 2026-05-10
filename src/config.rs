@@ -3175,6 +3175,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
+    pub ignore_origin_cache_headers: bool,
+    #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
     #[serde(default = "default_cache_include_query")]
     pub include_query: bool,
@@ -3198,6 +3200,7 @@ impl Default for CacheConfig {
             enabled: false,
             status_header: None,
             hide_response_headers: Vec::new(),
+            ignore_origin_cache_headers: false,
             status_ttls: BTreeMap::new(),
             include_query: default_cache_include_query(),
             content_types: default_cache_content_types(),
@@ -6953,6 +6956,7 @@ mod tests {
             enabled = true
             status_header = "X-Cache-Status"
             hide_response_headers = ["set-cookie"]
+            ignore_origin_cache_headers = true
             status_ttls = { "200" = 3600, "404" = 60 }
             include_query = false
             content_types = ["image/*", "text/css"]
@@ -6981,6 +6985,7 @@ mod tests {
             config.cache.hide_response_headers,
             ["set-cookie".to_owned()]
         );
+        assert!(config.cache.ignore_origin_cache_headers);
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
         assert!(!config.cache.include_query);

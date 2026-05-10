@@ -27,6 +27,8 @@ behavior when the change improves security or project direction.
   static assets such as CSS, JavaScript, WebAssembly, fonts, and images.
 - Cache policies now support `include_query = false` for tightly matched static
   routes where query parameters should not vary the cache key.
+- Cache policies can now explicitly ignore origin `Cache-Control` and `Expires`
+  headers before proxy cache admission for tightly scoped static routes.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

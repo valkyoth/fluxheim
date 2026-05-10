@@ -458,6 +458,8 @@ Exit criteria:
   `Set-Cookie` stripping and cache-header override controls require explicit
   config, are tested only on matched paths, and are documented with Forgejo-like
   static asset examples before being called stable.
+- Origin `Cache-Control`/`Expires` override controls are explicit opt-ins and
+  remain scoped to matched cache routes.
 - Proxied static-cache admission stores `200 OK` origin responses only when
   both the request extension and response media type match cache policy;
   non-200 statuses are admitted only when explicitly listed in cache

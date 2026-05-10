@@ -1691,6 +1691,11 @@ impl ProxyHttp for FluxProxy {
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
+        ignore_origin_cache_headers(
+            upstream_response,
+            selected_cache_config(vhost, ctx),
+            session.cache.phase(),
+        );
         apply_cache_status_ttl(
             upstream_response,
             selected_cache_config(vhost, ctx),
@@ -2110,6 +2115,19 @@ fn insert_cache_status_header(
     };
 
     response.insert_header(header_name.to_owned(), status)
+}
+
+#[cfg(feature = "cache")]
+fn ignore_origin_cache_headers(
+    response: &mut ResponseHeader,
+    cache: &crate::config::CacheConfig,
+    phase: CachePhase,
+) {
+    if !cache_request_participated(phase) || !cache.ignore_origin_cache_headers {
+        return;
+    }
+    response.remove_header("cache-control");
+    response.remove_header("expires");
 }
 
 #[cfg(feature = "cache")]
@@ -3037,7 +3055,7 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{
         MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl, cache_request_participated,
-        cache_status_header_value, response_cache_admission_rejection,
+        cache_status_header_value, ignore_origin_cache_headers, response_cache_admission_rejection,
         strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
 
@@ -4597,6 +4615,61 @@ mod tests {
         assert!(response.headers.contains_key("set-cookie"));
         assert!(!cache_request_participated(CachePhase::Bypass));
         assert!(cache_request_participated(CachePhase::Miss));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_can_ignore_origin_cache_headers_before_admission() {
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            ignore_origin_cache_headers: true,
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        response.insert_header("content-type", "text/css").unwrap();
+        response
+            .insert_header("cache-control", "private, no-store")
+            .unwrap();
+        response
+            .insert_header("expires", "Wed, 21 Oct 2015 07:28:00 GMT")
+            .unwrap();
+
+        assert_eq!(
+            response_cache_admission_rejection(&response, &cache),
+            Some("cache-control-private")
+        );
+
+        ignore_origin_cache_headers(&mut response, &cache, CachePhase::Miss);
+
+        assert!(!response.headers.contains_key("cache-control"));
+        assert!(!response.headers.contains_key("expires"));
+        assert_eq!(response_cache_admission_rejection(&response, &cache), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_does_not_ignore_origin_cache_headers_for_non_participating_responses() {
+        use pingora::cache::{CachePhase, NoCacheReason};
+
+        let cache = CacheConfig {
+            ignore_origin_cache_headers: true,
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        response.insert_header("cache-control", "private").unwrap();
+        response
+            .insert_header("expires", "Wed, 21 Oct 2015 07:28:00 GMT")
+            .unwrap();
+
+        ignore_origin_cache_headers(
+            &mut response,
+            &cache,
+            CachePhase::Disabled(NoCacheReason::NeverEnabled),
+        );
+
+        assert!(response.headers.contains_key("cache-control"));
+        assert!(response.headers.contains_key("expires"));
     }
 
     #[cfg(feature = "cache")]

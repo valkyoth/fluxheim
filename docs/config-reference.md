@@ -443,6 +443,7 @@ compiled.
 enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+ignore_origin_cache_headers = false
 status_ttls = { "200" = 3600, "404" = 60 }
 include_query = true
 content_types = ["image/*", "text/css", "application/javascript", "font/*"]
@@ -475,6 +476,10 @@ as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.
+`ignore_origin_cache_headers` removes upstream `Cache-Control` and `Expires`
+before cache admission and downstream delivery. Keep the default `false` unless
+the matched route is known static content and Fluxheim policy is responsible for
+freshness.
 `status_ttls` is optional. Each key is an HTTP status code and each value is a
 positive TTL in seconds. When a cache-participating origin response matches, the
 cache policy replaces response freshness headers with
