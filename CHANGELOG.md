@@ -39,6 +39,8 @@ behavior when the change improves security or project direction.
   `[cache.lock]`, while preserving the previous 30 second defaults.
 - Protected cache purge endpoints can now target named route-scoped cache
   policies through `route` or `x-fluxheim-cache-route`.
+- Cache policies can now set `stale_if_error_secs` to permit serving stale
+  cached objects during upstream errors after normal freshness expires.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

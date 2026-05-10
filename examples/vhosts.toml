@@ -165,6 +165,7 @@ bypass_request_headers = ["cookie", "authorization"]
 vary_request_headers = ["accept-encoding"]
 key_namespace = "chat-assets-v1"
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
+stale_if_error_secs = 120
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 

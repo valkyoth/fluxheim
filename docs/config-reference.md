@@ -454,6 +454,7 @@ vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
 status_ttls = { "200" = 3600, "404" = 60 }
+stale_if_error_secs = 120
 include_query = true
 content_types = ["image/*", "text/css", "application/javascript", "font/*"]
 extensions = ["avif", "css", "gif", "ico", "jpg", "js", "png", "svg", "webp", "woff2"]
@@ -513,16 +514,19 @@ positive TTL in seconds. When a cache-participating origin response matches, the
 cache policy replaces response freshness headers with
 `Cache-Control: public, max-age=<ttl>` before cache admission. Non-200 origin
 responses are admitted only when their status appears in `status_ttls`; statuses
-without an explicit TTL remain rejected. `content_types` is the allow-list for
-`200 OK` origin response media types. Entries may be exact media types such as
-`text/css` or subtype wildcards such as `image/*`. `extensions` is the
-user-facing alias for the request-path extension allow-list; the older
-`image_extensions` key remains accepted for compatibility. A request must match
-the extension policy and a `200 OK` response must match `content_types` before
-it can enter the shared proxy cache. `include_query` controls whether the query
-string is part of the cache key. It defaults to `true`; set it to `false` only
-on tightly matched static-asset routes where query parameters are not part of
-the response identity.
+without an explicit TTL remain rejected. `stale_if_error_secs` is optional and
+must be greater than zero when set. It permits serving an already-stored stale
+object during upstream errors for the configured number of seconds after normal
+freshness expires. `content_types` is the allow-list for `200 OK` origin
+response media types. Entries may be exact media types such as `text/css` or
+subtype wildcards such as `image/*`. `extensions` is the user-facing alias for
+the request-path extension allow-list; the older `image_extensions` key remains
+accepted for compatibility. A request must match the extension policy and a
+`200 OK` response must match `content_types` before it can enter the shared
+proxy cache. `include_query` controls whether the query string is part of the
+cache key. It defaults to `true`; set it to `false` only on tightly matched
+static-asset routes where query parameters are not part of the response
+identity.
 `[cache.lock]` controls request collapsing for concurrent misses on the same
 cache key. Keep it enabled for expensive static misses. `age_timeout_secs`
 controls how long an active writer lock is considered valid, while
@@ -869,6 +873,7 @@ enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
+stale_if_error_secs = 120
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 

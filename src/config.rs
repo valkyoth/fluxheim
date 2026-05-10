@@ -3184,6 +3184,8 @@ pub struct CacheConfig {
     pub key_namespace: Option<String>,
     #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
+    #[serde(default)]
+    pub stale_if_error_secs: Option<u32>,
     #[serde(default = "default_cache_include_query")]
     pub include_query: bool,
     #[serde(default = "default_cache_content_types")]
@@ -3213,6 +3215,7 @@ impl Default for CacheConfig {
             ignore_origin_cache_headers: false,
             key_namespace: None,
             status_ttls: BTreeMap::new(),
+            stale_if_error_secs: None,
             include_query: default_cache_include_query(),
             content_types: default_cache_content_types(),
             image_extensions: default_cache_static_extensions(),
@@ -3264,6 +3267,9 @@ impl CacheConfig {
                     ttl_secs: *ttl_secs,
                 });
             }
+        }
+        if self.stale_if_error_secs == Some(0) {
+            return Err(ConfigError::InvalidCacheStaleIfErrorTtl { scope });
         }
 
         if self.content_types.is_empty() {
@@ -3861,6 +3867,9 @@ pub enum ConfigError {
         status: u16,
         ttl_secs: u32,
     },
+    InvalidCacheStaleIfErrorTtl {
+        scope: &'static str,
+    },
     InvalidCacheVaryRequestHeader {
         scope: &'static str,
         header: String,
@@ -4258,6 +4267,12 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.status_ttls[{status}] must use an HTTP status code from 100 to 599 and a positive TTL, got {ttl_secs}"
             ),
+            Self::InvalidCacheStaleIfErrorTtl { scope } => {
+                write!(
+                    formatter,
+                    "{scope}.stale_if_error_secs must be greater than zero"
+                )
+            }
             Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
                 formatter,
                 "{scope}.vary_request_headers must not include sensitive request header {header:?}; use bypass_request_headers for request-specific responses"
@@ -7083,6 +7098,7 @@ mod tests {
             ignore_origin_cache_headers = true
             key_namespace = "repoheim-assets-v1"
             status_ttls = { "200" = 3600, "404" = 60 }
+            stale_if_error_secs = 120
             include_query = false
             content_types = ["image/*", "text/css"]
             extensions = ["jpg", "webp", "css"]
@@ -7130,6 +7146,7 @@ mod tests {
         );
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
+        assert_eq!(config.cache.stale_if_error_secs, Some(120));
         assert!(!config.cache.include_query);
         assert_eq!(
             config.cache.content_types,
@@ -7321,6 +7338,22 @@ mod tests {
                 status: 200,
                 ttl_secs: 0,
             })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_stale_if_error_ttl() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            stale_if_error_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheStaleIfErrorTtl { scope: "cache" })
         );
     }
 

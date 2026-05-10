@@ -470,6 +470,9 @@ Exit criteria:
   `Accept-Encoding` in the cache variance key when the origin omits `Vary`.
 - Origin `Cache-Control`/`Expires` override controls are explicit opt-ins and
   remain scoped to matched cache routes.
+- Route-scoped proxy cache can opt into `stale-if-error` windows so stored
+  static objects may be served during upstream failures after normal freshness
+  expires.
 - Proxied static-cache admission stores `200 OK` origin responses only when
   both the request extension and response media type match cache policy;
   non-200 statuses are admitted only when explicitly listed in cache

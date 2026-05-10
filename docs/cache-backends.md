@@ -58,6 +58,10 @@ internal cache implementation.
   status. Matching cache-participating origin responses have their freshness
   headers normalized to `Cache-Control: public, max-age=<ttl>` before cache
   admission. Non-200 statuses are only admitted when explicitly listed here.
+- `cache.stale_if_error_secs`, `vhosts.cache.stale_if_error_secs`, and
+  `vhosts.routes.cache.stale_if_error_secs` add an explicit stale-if-error
+  window to cache-participating responses. Pingora can then serve an expired
+  stored object during upstream errors while the stale window is still valid.
 - `cache.content_types`, `vhosts.cache.content_types`, and
   `vhosts.routes.cache.content_types` allow exact media types and subtype
   wildcards such as `image/*`. The `extensions` key is accepted as the

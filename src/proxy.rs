@@ -2219,12 +2219,26 @@ fn apply_cache_status_ttl(
         return Ok(());
     }
     let status = response.status.as_u16();
-    let Some(ttl_secs) = cache.status_ttls.get(&status) else {
-        return Ok(());
-    };
+    if let Some(ttl_secs) = cache.status_ttls.get(&status) {
+        response.remove_header("expires");
+        return response.insert_header(
+            "cache-control",
+            cache_control_freshness_value(*ttl_secs, cache.stale_if_error_secs),
+        );
+    }
 
-    response.remove_header("expires");
-    response.insert_header("cache-control", format!("public, max-age={ttl_secs}"))
+    if let Some(stale_if_error_secs) = cache.stale_if_error_secs
+        && response.headers.contains_key("cache-control")
+        && response_cache_admission_rejection(response, cache).is_none()
+    {
+        append_cache_control_directive(
+            response,
+            &format!("stale-if-error={stale_if_error_secs}"),
+            "stale-if-error",
+        )?;
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "cache")]
@@ -2239,6 +2253,48 @@ fn strip_cache_response_headers(
     for header in &cache.hide_response_headers {
         response.remove_header(header.as_str());
     }
+}
+
+#[cfg(feature = "cache")]
+fn cache_control_freshness_value(ttl_secs: u32, stale_if_error_secs: Option<u32>) -> String {
+    let mut value = format!("public, max-age={ttl_secs}");
+    if let Some(stale_if_error_secs) = stale_if_error_secs {
+        value.push_str(", stale-if-error=");
+        value.push_str(&stale_if_error_secs.to_string());
+    }
+    value
+}
+
+#[cfg(feature = "cache")]
+fn append_cache_control_directive(
+    response: &mut ResponseHeader,
+    directive: &str,
+    directive_name: &str,
+) -> Result<()> {
+    let mut directives = Vec::new();
+    for value in response.headers.get_all("cache-control") {
+        let Ok(value) = value.to_str() else {
+            return Ok(());
+        };
+        directives.extend(
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|part| {
+                    !part.is_empty()
+                        && !part
+                            .split_once('=')
+                            .map(|(name, _)| name.trim())
+                            .unwrap_or(part)
+                            .eq_ignore_ascii_case(directive_name)
+                })
+                .map(str::to_owned),
+        );
+    }
+
+    directives.push(directive.to_owned());
+    response.remove_header("cache-control");
+    response.insert_header("cache-control", directives.join(", "))
 }
 
 #[cfg(feature = "cache")]
@@ -5004,6 +5060,7 @@ mod tests {
 
         let cache = CacheConfig {
             status_ttls: BTreeMap::from([(200, 3600), (404, 60)]),
+            stale_if_error_secs: Some(120),
             ..CacheConfig::default()
         };
         let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
@@ -5025,9 +5082,56 @@ mod tests {
         assert!(!response.headers.contains_key("expires"));
         assert_eq!(
             response.headers.get("cache-control").unwrap().to_str().ok(),
-            Some("public, max-age=3600")
+            Some("public, max-age=3600, stale-if-error=120")
         );
         assert_eq!(response_cache_admission_rejection(&response, &cache), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_adds_stale_if_error_without_status_ttl() {
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            stale_if_error_secs: Some(45),
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response
+            .append_header("cache-control", "public, max-age=60")
+            .unwrap();
+        response
+            .append_header("cache-control", "stale-if-error=10")
+            .unwrap();
+
+        apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
+
+        assert_eq!(
+            response.headers.get("cache-control").unwrap().to_str().ok(),
+            Some("public, max-age=60, stale-if-error=45")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_does_not_add_stale_if_error_to_rejected_origin_response() {
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            stale_if_error_secs: Some(45),
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response.insert_header("cache-control", "private").unwrap();
+
+        apply_cache_status_ttl(&mut response, &cache, CachePhase::Miss).unwrap();
+
+        assert_eq!(
+            response.headers.get("cache-control").unwrap().to_str().ok(),
+            Some("private")
+        );
     }
 
     #[cfg(feature = "cache")]
