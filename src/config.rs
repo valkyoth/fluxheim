@@ -3192,6 +3192,8 @@ pub struct CacheConfig {
     pub memory: CacheMemoryConfig,
     #[serde(default)]
     pub disk: CacheDiskConfig,
+    #[serde(default)]
+    pub lock: CacheLockConfig,
 }
 
 impl Default for CacheConfig {
@@ -3209,6 +3211,7 @@ impl Default for CacheConfig {
             max_object_bytes: default_cache_max_object_bytes(),
             memory: CacheMemoryConfig::default(),
             disk: CacheDiskConfig::default(),
+            lock: CacheLockConfig::default(),
         }
     }
 }
@@ -3299,6 +3302,8 @@ impl CacheConfig {
             return Err(ConfigError::InvalidCacheMaxObjectBytes { scope });
         }
 
+        self.lock.validate(scope)?;
+
         if self.enabled && !self.has_enabled_tier() {
             return Err(ConfigError::CacheEnabledWithoutStorageTier { scope });
         }
@@ -3310,6 +3315,43 @@ impl CacheConfig {
 
     pub fn has_enabled_tier(&self) -> bool {
         self.memory.enabled || self.disk.enabled
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheLockConfig {
+    #[serde(default = "default_cache_lock_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_cache_lock_age_timeout_secs")]
+    pub age_timeout_secs: u64,
+    #[serde(default = "default_cache_lock_wait_timeout_secs")]
+    pub wait_timeout_secs: u64,
+}
+
+impl Default for CacheLockConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cache_lock_enabled(),
+            age_timeout_secs: default_cache_lock_age_timeout_secs(),
+            wait_timeout_secs: default_cache_lock_wait_timeout_secs(),
+        }
+    }
+}
+
+impl CacheLockConfig {
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if self.age_timeout_secs == 0 {
+            return Err(ConfigError::InvalidCacheLockTimeout {
+                field: format!("{scope}.lock.age_timeout_secs"),
+            });
+        }
+        if self.wait_timeout_secs == 0 {
+            return Err(ConfigError::InvalidCacheLockTimeout {
+                field: format!("{scope}.lock.wait_timeout_secs"),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -3773,6 +3815,9 @@ pub enum ConfigError {
         status: u16,
         ttl_secs: u32,
     },
+    InvalidCacheLockTimeout {
+        field: String,
+    },
     CacheEnabledWithoutStorageTier {
         scope: &'static str,
     },
@@ -4159,6 +4204,9 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.status_ttls[{status}] must use an HTTP status code from 100 to 599 and a positive TTL, got {ttl_secs}"
             ),
+            Self::InvalidCacheLockTimeout { field } => {
+                write!(formatter, "{field} must be greater than zero")
+            }
             Self::CacheEnabledWithoutStorageTier { scope } => {
                 write!(
                     formatter,
@@ -4458,6 +4506,18 @@ fn default_lb_health_check_threshold() -> usize {
 
 fn default_cache_include_query() -> bool {
     true
+}
+
+fn default_cache_lock_enabled() -> bool {
+    true
+}
+
+fn default_cache_lock_age_timeout_secs() -> u64 {
+    30
+}
+
+fn default_cache_lock_wait_timeout_secs() -> u64 {
+    30
 }
 
 fn default_cache_content_types() -> Vec<String> {
@@ -6972,6 +7032,11 @@ mod tests {
             enabled = true
             path = "/var/cache/fluxheim"
             max_size_bytes = "10GiB"
+
+            [cache.lock]
+            enabled = false
+            age_timeout_secs = 45
+            wait_timeout_secs = 10
             "#,
         )
         .unwrap();
@@ -7015,6 +7080,9 @@ mod tests {
             config.cache.disk.max_size_bytes,
             ByteSize::from_bytes(10 * 1024 * 1024 * 1024)
         );
+        assert!(!config.cache.lock.enabled);
+        assert_eq!(config.cache.lock.age_timeout_secs, 45);
+        assert_eq!(config.cache.lock.wait_timeout_secs, 10);
         config.validate().unwrap();
     }
 
@@ -7126,6 +7194,39 @@ mod tests {
                 "{content_type}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_invalid_cache_lock_timeout() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache.lock]
+            age_timeout_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheLockTimeout {
+                field: "cache.lock.age_timeout_secs".to_owned()
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [cache.lock]
+            wait_timeout_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheLockTimeout {
+                field: "cache.lock.wait_timeout_secs".to_owned()
+            })
+        );
     }
 
     #[test]

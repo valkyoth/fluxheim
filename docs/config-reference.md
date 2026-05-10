@@ -459,6 +459,11 @@ max_size_bytes = "1GiB"
 enabled = false
 path = "/var/cache/fluxheim"
 max_size_bytes = "10GiB"
+
+[cache.lock]
+enabled = true
+age_timeout_secs = 30
+wait_timeout_secs = 30
 ```
 
 If `cache.enabled = true`, at least one storage tier must be enabled.
@@ -495,9 +500,15 @@ it can enter the shared proxy cache. `include_query` controls whether the query
 string is part of the cache key. It defaults to `true`; set it to `false` only
 on tightly matched static-asset routes where query parameters are not part of
 the response identity.
+`[cache.lock]` controls request collapsing for concurrent misses on the same
+cache key. Keep it enabled for expensive static misses. `age_timeout_secs`
+controls how long an active writer lock is considered valid, while
+`wait_timeout_secs` controls how long readers wait for the writer before
+falling back to their own origin fetch.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
-`[vhosts.cache.disk]`.
+`[vhosts.cache.disk]`. Route cache settings use `[vhosts.routes.cache]` and
+the same nested `memory`, `disk`, and `lock` subtables.
 
 ## TLS
 

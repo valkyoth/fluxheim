@@ -29,6 +29,8 @@ behavior when the change improves security or project direction.
   routes where query parameters should not vary the cache key.
 - Cache policies can now explicitly ignore origin `Cache-Control` and `Expires`
   headers before proxy cache admission for tightly scoped static routes.
+- Cache request-collapsing locks are now configurable per cache policy through
+  `[cache.lock]`, while preserving the previous 30 second defaults.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

@@ -448,6 +448,8 @@ Exit criteria:
 - Cache keys are collision-resistant and vhost-isolated.
 - Operators can explicitly decide whether the query string participates in
   route-scoped static cache keys.
+- Cache request-collapsing lock enablement and timeouts are configurable per
+  cache policy.
 - Cache respects method/content-type policy and request/response cache
   directives.
 - `Vary` handling is tested before negotiated variants are stable. Implemented

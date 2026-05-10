@@ -38,10 +38,6 @@ use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
 use crate::web::{ResolveResult, StaticFileServer};
 
 #[cfg(feature = "cache")]
-const CACHE_LOCK_AGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-#[cfg(feature = "cache")]
-const CACHE_LOCK_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-#[cfg(feature = "cache")]
 const MAX_VARY_HEADER_BYTES: usize = 2048;
 #[cfg(feature = "cache")]
 const MAX_VARY_FIELDS: usize = 16;
@@ -917,6 +913,8 @@ struct RuntimeVhost {
     pingora_tiered_storage: Option<&'static crate::cache::PingoraTieredStorage>,
     #[cfg(feature = "cache")]
     pingora_cache_lock: Option<&'static CacheKeyLockImpl>,
+    #[cfg(feature = "cache")]
+    cache_lock_wait_timeout: std::time::Duration,
     #[cfg(feature = "load-balancer")]
     load_balancer: Option<UpstreamLoadBalancer>,
     #[cfg(feature = "web")]
@@ -948,7 +946,8 @@ impl std::fmt::Debug for RuntimeVhost {
                 "pingora_tiered_storage",
                 &self.pingora_tiered_storage.is_some(),
             )
-            .field("pingora_cache_lock", &self.pingora_cache_lock.is_some());
+            .field("pingora_cache_lock", &self.pingora_cache_lock.is_some())
+            .field("cache_lock_wait_timeout", &self.cache_lock_wait_timeout);
 
         #[cfg(feature = "load-balancer")]
         debug.field("load_balancer", &self.load_balancer);
@@ -984,6 +983,7 @@ struct RuntimeRouteCache {
     pingora_disk_storage: Option<&'static crate::cache::PingoraDiskStorage>,
     pingora_tiered_storage: Option<&'static crate::cache::PingoraTieredStorage>,
     pingora_cache_lock: Option<&'static CacheKeyLockImpl>,
+    cache_lock_wait_timeout: std::time::Duration,
 }
 
 #[cfg(feature = "cache")]
@@ -1004,6 +1004,7 @@ impl std::fmt::Debug for RuntimeRouteCache {
                 &self.pingora_tiered_storage.is_some(),
             )
             .field("pingora_cache_lock", &self.pingora_cache_lock.is_some())
+            .field("cache_lock_wait_timeout", &self.cache_lock_wait_timeout)
             .finish()
     }
 }
@@ -1016,9 +1017,10 @@ impl RuntimeRouteCache {
         let pingora_tiered_storage = pingora_memory_storage
             .zip(pingora_disk_storage)
             .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
-        let pingora_cache_lock = (pingora_memory_storage.is_some()
-            || pingora_disk_storage.is_some())
-        .then(|| crate::cache::pingora_cache_lock(CACHE_LOCK_AGE_TIMEOUT));
+        let pingora_cache_lock = cache_lock_from_config(
+            config,
+            pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
+        );
 
         Ok(Self {
             name: name.to_owned(),
@@ -1028,6 +1030,7 @@ impl RuntimeRouteCache {
             pingora_disk_storage,
             pingora_tiered_storage,
             pingora_cache_lock,
+            cache_lock_wait_timeout: cache_lock_wait_timeout(config),
         })
     }
 
@@ -1041,6 +1044,23 @@ impl RuntimeRouteCache {
                 .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
         }
     }
+}
+
+#[cfg(feature = "cache")]
+fn cache_lock_from_config(
+    config: &crate::config::CacheConfig,
+    has_storage: bool,
+) -> Option<&'static CacheKeyLockImpl> {
+    (has_storage && config.lock.enabled).then(|| {
+        crate::cache::pingora_cache_lock(std::time::Duration::from_secs(
+            config.lock.age_timeout_secs,
+        ))
+    })
+}
+
+#[cfg(feature = "cache")]
+fn cache_lock_wait_timeout(config: &crate::config::CacheConfig) -> std::time::Duration {
+    std::time::Duration::from_secs(config.lock.wait_timeout_secs)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1299,9 +1319,10 @@ impl RuntimeVhost {
             .zip(pingora_disk_storage)
             .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
         #[cfg(feature = "cache")]
-        let pingora_cache_lock = (pingora_memory_storage.is_some()
-            || pingora_disk_storage.is_some())
-        .then(|| crate::cache::pingora_cache_lock(CACHE_LOCK_AGE_TIMEOUT));
+        let pingora_cache_lock = cache_lock_from_config(
+            &cache,
+            pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
+        );
 
         Ok(Self {
             name: "default".to_owned(),
@@ -1322,6 +1343,8 @@ impl RuntimeVhost {
             pingora_tiered_storage,
             #[cfg(feature = "cache")]
             pingora_cache_lock,
+            #[cfg(feature = "cache")]
+            cache_lock_wait_timeout: cache_lock_wait_timeout(&cache),
             #[cfg(feature = "cache")]
             cache,
             #[cfg(feature = "web")]
@@ -1374,9 +1397,10 @@ impl RuntimeVhost {
             .zip(pingora_disk_storage)
             .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
         #[cfg(feature = "cache")]
-        let pingora_cache_lock = (pingora_memory_storage.is_some()
-            || pingora_disk_storage.is_some())
-        .then(|| crate::cache::pingora_cache_lock(CACHE_LOCK_AGE_TIMEOUT));
+        let pingora_cache_lock = cache_lock_from_config(
+            &vhost.cache,
+            pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
+        );
 
         Ok(Self {
             name: vhost.name.clone(),
@@ -1397,6 +1421,8 @@ impl RuntimeVhost {
             pingora_tiered_storage,
             #[cfg(feature = "cache")]
             pingora_cache_lock,
+            #[cfg(feature = "cache")]
+            cache_lock_wait_timeout: cache_lock_wait_timeout(&vhost.cache),
             #[cfg(feature = "cache")]
             cache: vhost.cache.clone(),
             #[cfg(feature = "web")]
@@ -1881,10 +1907,16 @@ impl ProxyHttp for FluxProxy {
         }
 
         let mut cache_option_overrides = CacheOptionOverrides::default();
-        cache_option_overrides.wait_timeout = Some(CACHE_LOCK_WAIT_TIMEOUT);
         let cache_lock = route_cache
             .map(|cache| cache.pingora_cache_lock)
             .unwrap_or(vhost.pingora_cache_lock);
+        if cache_lock.is_some() {
+            cache_option_overrides.wait_timeout = Some(
+                route_cache
+                    .map(|cache| cache.cache_lock_wait_timeout)
+                    .unwrap_or(vhost.cache_lock_wait_timeout),
+            );
+        }
         session.cache.enable(
             storage,
             None,
@@ -4055,6 +4087,93 @@ mod tests {
                 .vhost(vhost_index)
                 .pingora_cache_lock
                 .is_some()
+        );
+        assert_eq!(
+            snapshot.state.vhost(vhost_index).cache_lock_wait_timeout,
+            std::time::Duration::from_secs(30)
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_lock_policy_can_disable_request_collapsing() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    lock: crate::config::CacheLockConfig {
+                        enabled: false,
+                        ..crate::config::CacheLockConfig::default()
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+
+        assert!(vhost.pingora_memory_storage.is_some());
+        assert!(vhost.pingora_cache_lock.is_none());
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_lock_policy_maps_wait_timeout() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    lock: crate::config::CacheLockConfig {
+                        wait_timeout_secs: 7,
+                        ..crate::config::CacheLockConfig::default()
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+
+        assert!(vhost.pingora_cache_lock.is_some());
+        assert_eq!(
+            vhost.cache_lock_wait_timeout,
+            std::time::Duration::from_secs(7)
         );
     }
 
