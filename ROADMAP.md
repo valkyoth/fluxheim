@@ -634,9 +634,9 @@ without parsing text fixtures for every module.
      - explicit request-side bypass rules and response-side no-store rules
        based on bounded header, cookie, and query predicates. Implemented for
        header-presence and exact header-value request bypass, raw
-       query-parameter request bypass, cookie-name and exact cookie-value
-       request bypass, plus response header-presence and exact header-value
-       no-store controls;
+       query-parameter and exact query-value request bypass, cookie-name and
+       exact cookie-value request bypass, plus response header-presence and
+       exact header-value no-store controls;
      - stale serving controls for origin error, timeout, updating, and selected
        status classes;
      - optional cache-status response headers for production debugging;

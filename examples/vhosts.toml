@@ -168,6 +168,7 @@ bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
+bypass_query_values = { mode = "private" }
 vary_request_headers = ["accept-encoding"]
 key_namespace = "chat-assets-v1"
 min_uses = 2

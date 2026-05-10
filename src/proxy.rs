@@ -2949,11 +2949,13 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
     ) {
         return true;
     }
-    if request
-        .uri
-        .query()
-        .is_some_and(|query| query_matches_cache_bypass_param(query, &cache.bypass_query_params))
-    {
+    if request.uri.query().is_some_and(|query| {
+        query_matches_cache_bypass(
+            query,
+            &cache.bypass_query_params,
+            &cache.bypass_query_values,
+        )
+    }) {
         return true;
     }
 
@@ -3002,15 +3004,24 @@ fn cookie_header_pairs(header: &str) -> impl Iterator<Item = (&str, &str)> {
 }
 
 #[cfg(feature = "cache")]
-fn query_matches_cache_bypass_param(query: &str, configured_params: &[String]) -> bool {
-    !configured_params.is_empty()
-        && query.split('&').any(|part| {
-            let name = part.split_once('=').map(|(name, _)| name).unwrap_or(part);
-            !name.is_empty()
-                && configured_params
-                    .iter()
-                    .any(|configured| configured == name)
-        })
+fn query_matches_cache_bypass(
+    query: &str,
+    configured_params: &[String],
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    if configured_params.is_empty() && configured_values.is_empty() {
+        return false;
+    }
+    query.split('&').any(|part| {
+        let (name, value) = part.split_once('=').unwrap_or((part, ""));
+        !name.is_empty()
+            && (configured_params
+                .iter()
+                .any(|configured| configured == name)
+                || configured_values
+                    .get(name)
+                    .is_some_and(|configured| configured == value))
+    })
 }
 
 #[cfg(feature = "cache")]
@@ -5205,6 +5216,30 @@ mod tests {
 
         let request =
             pingora::http::RequestHeader::build("GET", b"/assets/app.js?previewed=true", None)
+                .unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_configured_query_values() {
+        let cache = CacheConfig {
+            bypass_query_values: [("mode".to_owned(), "private".to_owned())].into(),
+            ..CacheConfig::default()
+        };
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?mode=public", None)
+                .unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1&mode=private", None)
+                .unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?moder=private", None)
                 .unwrap();
         assert!(!request_cache_bypass(&request, &cache));
     }

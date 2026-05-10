@@ -3189,6 +3189,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub bypass_query_params: Vec<String>,
     #[serde(default)]
+    pub bypass_query_values: BTreeMap<String, String>,
+    #[serde(default)]
     pub vary_request_headers: Vec<String>,
     #[serde(default)]
     pub ignore_origin_cache_headers: bool,
@@ -3235,6 +3237,7 @@ impl Default for CacheConfig {
             bypass_cookie_names: Vec::new(),
             bypass_cookie_values: BTreeMap::new(),
             bypass_query_params: Vec::new(),
+            bypass_query_values: BTreeMap::new(),
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
             key_namespace: None,
@@ -3294,6 +3297,10 @@ impl CacheConfig {
         }
         for param in &self.bypass_query_params {
             validate_cache_query_param(scope, param)?;
+        }
+        for (param, value) in &self.bypass_query_values {
+            validate_cache_query_param(scope, param)?;
+            validate_cache_query_value(scope, param, value)?;
         }
         for header in &self.vary_request_headers {
             validate_header_name(scope, header)?;
@@ -3422,6 +3429,26 @@ fn validate_cache_query_param(scope: &'static str, param: &str) -> Result<(), Co
         return Err(ConfigError::InvalidCacheBypassQueryParam {
             scope,
             param: param.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_cache_query_value(
+    scope: &'static str,
+    param: &str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    if value.trim().is_empty()
+        || value.len() > 4096
+        || value
+            .chars()
+            .any(|ch| ch.is_control() || ch.is_whitespace() || matches!(ch, '&' | '#' | ';'))
+    {
+        return Err(ConfigError::InvalidCacheBypassQueryValue {
+            scope,
+            param: param.to_owned(),
+            value: value.to_owned(),
         });
     }
     Ok(())
@@ -4026,6 +4053,11 @@ pub enum ConfigError {
         scope: &'static str,
         param: String,
     },
+    InvalidCacheBypassQueryValue {
+        scope: &'static str,
+        param: String,
+        value: String,
+    },
     InvalidCacheBypassRequestHeaderValue {
         scope: &'static str,
         header: String,
@@ -4460,6 +4492,14 @@ impl Display for ConfigError {
             Self::InvalidCacheBypassQueryParam { scope, param } => write!(
                 formatter,
                 "{scope}.bypass_query_params must contain raw query parameter names without whitespace, controls, '&', '=', '#', '?', or ';', got {param:?}"
+            ),
+            Self::InvalidCacheBypassQueryValue {
+                scope,
+                param,
+                value,
+            } => write!(
+                formatter,
+                "{scope}.bypass_query_values[{param:?}] must contain a non-empty safe raw query value without whitespace, controls, '&', '#', or ';', got {value:?}"
             ),
             Self::InvalidCacheBypassRequestHeaderValue {
                 scope,
@@ -7328,6 +7368,7 @@ mod tests {
             bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
             bypass_cookie_values = { preview = "1" }
             bypass_query_params = ["preview", "token"]
+            bypass_query_values = { mode = "private" }
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
             key_namespace = "repoheim-assets-v1"
@@ -7401,6 +7442,10 @@ mod tests {
         assert_eq!(
             config.cache.bypass_query_params,
             ["preview".to_owned(), "token".to_owned()]
+        );
+        assert_eq!(
+            config.cache.bypass_query_values.get("mode"),
+            Some(&"private".to_owned())
         );
         assert_eq!(
             config.cache.vary_request_headers,
@@ -7586,6 +7631,28 @@ mod tests {
                 Err(ConfigError::InvalidCacheBypassQueryParam {
                     scope: "cache",
                     param: param.to_owned()
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_cache_bypass_query_value() {
+        for value in ["", " ", "bad value", "bad&value", "bad\nvalue"] {
+            let config: Config = toml::from_str(&format!(
+                r#"
+                [cache]
+                bypass_query_values = {{ mode = {value:?} }}
+                "#,
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.validate(),
+                Err(ConfigError::InvalidCacheBypassQueryValue {
+                    scope: "cache",
+                    param: "mode".to_owned(),
+                    value: value.to_owned()
                 })
             );
         }

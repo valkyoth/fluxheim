@@ -462,6 +462,7 @@ bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
+bypass_query_values = { mode = "private" }
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
@@ -535,6 +536,10 @@ request query string contains any listed parameter name. Matching is exact on
 the raw key before `=`, so `preview=true` matches `preview`, while
 `previewed=true` does not. Use it for preview, token, or other app-specific
 query switches that make a response unsafe to share.
+`bypass_query_values` disables both cache lookup and cache storage when a raw
+query parameter has the exact configured value. Matching is performed before
+URL decoding, so keep values simple and encode spaces or separators at the
+application edge.
 `vary_request_headers` adds safe request headers to the cache variance key even
 when the origin does not emit a matching `Vary` header. Use this for negotiated
 static assets, for example `Accept-Encoding`. Sensitive request-specific
@@ -925,6 +930,7 @@ hide_response_headers = ["set-cookie"]
 no_store_response_header_values = { x-app-cache = "private" }
 bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_values = { preview = "1" }
+bypass_query_values = { mode = "private" }
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 stale_while_revalidate_secs = 30
 stale_if_error_secs = 120
