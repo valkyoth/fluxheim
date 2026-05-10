@@ -444,6 +444,7 @@ enabled = false
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 status_ttls = { "200" = 3600, "404" = 60 }
+include_query = true
 content_types = ["image/*", "text/css", "application/javascript", "font/*"]
 extensions = ["avif", "css", "gif", "ico", "jpg", "js", "png", "svg", "webp", "woff2"]
 methods = ["GET", "HEAD"]
@@ -485,7 +486,10 @@ without an explicit TTL remain rejected. `content_types` is the allow-list for
 user-facing alias for the request-path extension allow-list; the older
 `image_extensions` key remains accepted for compatibility. A request must match
 the extension policy and a `200 OK` response must match `content_types` before
-it can enter the shared proxy cache.
+it can enter the shared proxy cache. `include_query` controls whether the query
+string is part of the cache key. It defaults to `true`; set it to `false` only
+on tightly matched static-asset routes where query parameters are not part of
+the response identity.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`.

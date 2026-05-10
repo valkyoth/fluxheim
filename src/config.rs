@@ -3176,6 +3176,8 @@ pub struct CacheConfig {
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
+    #[serde(default = "default_cache_include_query")]
+    pub include_query: bool,
     #[serde(default = "default_cache_content_types")]
     pub content_types: Vec<String>,
     #[serde(default = "default_cache_static_extensions", alias = "extensions")]
@@ -3197,6 +3199,7 @@ impl Default for CacheConfig {
             status_header: None,
             hide_response_headers: Vec::new(),
             status_ttls: BTreeMap::new(),
+            include_query: default_cache_include_query(),
             content_types: default_cache_content_types(),
             image_extensions: default_cache_static_extensions(),
             methods: default_cache_methods(),
@@ -4448,6 +4451,10 @@ fn default_lb_health_check_interval_secs() -> u64 {
 
 fn default_lb_health_check_threshold() -> usize {
     1
+}
+
+fn default_cache_include_query() -> bool {
+    true
 }
 
 fn default_cache_content_types() -> Vec<String> {
@@ -6947,6 +6954,7 @@ mod tests {
             status_header = "X-Cache-Status"
             hide_response_headers = ["set-cookie"]
             status_ttls = { "200" = 3600, "404" = 60 }
+            include_query = false
             content_types = ["image/*", "text/css"]
             extensions = ["jpg", "webp", "css"]
             methods = ["GET"]
@@ -6975,6 +6983,7 @@ mod tests {
         );
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
+        assert!(!config.cache.include_query);
         assert_eq!(
             config.cache.content_types,
             ["image/*".to_owned(), "text/css".to_owned()]

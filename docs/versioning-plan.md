@@ -446,6 +446,8 @@ Exit criteria:
 
 - Cache cannot exceed configured memory/disk budgets.
 - Cache keys are collision-resistant and vhost-isolated.
+- Operators can explicitly decide whether the query string participates in
+  route-scoped static cache keys.
 - Cache respects method/content-type policy and request/response cache
   directives.
 - `Vary` handling is tested before negotiated variants are stable. Implemented

@@ -1860,7 +1860,9 @@ pub fn image_cache_key(config: &CacheConfig, request: &CacheRequest<'_>) -> Opti
         &request.host.and_then(normalize_host).unwrap_or_default(),
     );
     append_component(&mut key, "path", request.path);
-    append_component(&mut key, "query", request.query.unwrap_or_default());
+    if config.include_query {
+        append_component(&mut key, "query", request.query.unwrap_or_default());
+    }
     Some(CacheKey(key))
 }
 
@@ -2028,6 +2030,33 @@ mod tests {
         );
         assert_eq!(image_cache_key(&config, &first), Some(first_key.clone()));
         assert_ne!(image_cache_key(&config, &second), Some(first_key));
+    }
+
+    #[test]
+    fn cache_key_can_ignore_query_when_configured() {
+        let config = CacheConfig {
+            include_query: false,
+            ..enabled_cache()
+        };
+        let first = CacheRequest {
+            method: "GET",
+            host: Some("example.test"),
+            path: "/assets/app.js",
+            query: Some("v=1"),
+        };
+        let second = CacheRequest {
+            method: "GET",
+            host: Some("example.test"),
+            path: "/assets/app.js",
+            query: Some("v=2"),
+        };
+
+        let key = image_cache_key(&config, &first).unwrap();
+        assert_eq!(
+            key.as_str(),
+            "fluxheim-image-v1;method:3:GET;host:12:example.test;path:14:/assets/app.js;"
+        );
+        assert_eq!(image_cache_key(&config, &second), Some(key));
     }
 
     #[test]

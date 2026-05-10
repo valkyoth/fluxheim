@@ -25,6 +25,8 @@ behavior when the change improves security or project direction.
 - Cache policies now support `content_types` plus an `extensions` alias for
   `image_extensions`, so route-scoped proxy cache can safely target common
   static assets such as CSS, JavaScript, WebAssembly, fonts, and images.
+- Cache policies now support `include_query = false` for tightly matched static
+  routes where query parameters should not vary the cache key.
 - ACME HTTP-01 client failures now include published challenge URLs after
   challenge material has been written, making failed authorization checks easier
   to debug from production logs.

@@ -39,6 +39,11 @@ internal cache implementation.
   wildcards such as `image/*`. The `extensions` key is accepted as the
   user-facing alias for the request-path extension allow-list, while
   `image_extensions` remains accepted for older configs.
+- `cache.include_query`, `vhosts.cache.include_query`, and
+  `vhosts.routes.cache.include_query` control whether the request query string
+  participates in the cache key. The default is `true`; disabling it should be
+  limited to static routes where the query string is not part of origin
+  response identity.
 - The first Pingora memory adapter stores complete objects only; it buffers up to
   `cache.max_object_bytes` and refuses anything larger.
 - The first Pingora disk adapter stores complete objects below `cache.disk.path`
