@@ -24,6 +24,11 @@ internal cache implementation.
   `vhosts.routes.cache.status_header` optionally emit a cache debug header such
   as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
   `REVALIDATED` for requests that participate in the proxy cache.
+- `cache.hide_response_headers`, `vhosts.cache.hide_response_headers`, and
+  `vhosts.routes.cache.hide_response_headers` remove explicitly configured
+  upstream response headers before cache admission and downstream delivery.
+  This is intended for tightly scoped static-asset routes where operators know
+  a header such as `Set-Cookie` is not part of the cache identity.
 - The first Pingora memory adapter stores complete objects only; it buffers up to
   `cache.max_object_bytes` and refuses anything larger.
 - The first Pingora disk adapter stores complete objects below `cache.disk.path`

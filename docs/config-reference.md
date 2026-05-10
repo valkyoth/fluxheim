@@ -442,6 +442,7 @@ compiled.
 [cache]
 enabled = false
 status_header = "X-Cache-Status"
+hide_response_headers = ["set-cookie"]
 image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
@@ -468,6 +469,9 @@ runtime directory.
 `status_header` is optional. When set, Fluxheim emits a cache debug header such
 as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 `REVALIDATED` for requests that participate in the proxy cache.
+`hide_response_headers` removes selected upstream response headers before cache
+admission and downstream delivery. Use it only on tightly matched cache routes,
+for example to strip `Set-Cookie` from known static asset responses.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`.
@@ -806,6 +810,7 @@ send_timeout_secs = 600
 [vhosts.routes.cache]
 enabled = true
 status_header = "X-Cache-Status"
+hide_response_headers = ["set-cookie"]
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 

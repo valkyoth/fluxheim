@@ -1675,6 +1675,30 @@ impl ProxyHttp for FluxProxy {
         )
     }
 
+    #[cfg(feature = "cache")]
+    async fn upstream_response_filter(
+        &self,
+        session: &mut Session,
+        upstream_response: &mut ResponseHeader,
+        ctx: &mut Self::CTX,
+    ) -> Result<()>
+    where
+        Self::CTX: Send + Sync,
+    {
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let vhost_index = ctx
+            .vhost_index
+            .unwrap_or_else(|| state.vhost_index(request_host(session)));
+        ctx.vhost_index = Some(vhost_index);
+        let vhost = state.vhost(vhost_index);
+        strip_cache_response_headers(
+            upstream_response,
+            selected_cache_config(vhost, ctx),
+            session.cache.phase(),
+        );
+        Ok(())
+    }
+
     async fn request_body_filter(
         &self,
         _session: &mut Session,
@@ -2074,6 +2098,28 @@ fn insert_cache_status_header(
     };
 
     response.insert_header(header_name.to_owned(), status)
+}
+
+#[cfg(feature = "cache")]
+fn strip_cache_response_headers(
+    response: &mut ResponseHeader,
+    cache: &crate::config::CacheConfig,
+    phase: CachePhase,
+) {
+    if !cache_request_participated(phase) {
+        return;
+    }
+    for header in &cache.hide_response_headers {
+        response.remove_header(header.as_str());
+    }
+}
+
+#[cfg(feature = "cache")]
+fn cache_request_participated(phase: CachePhase) -> bool {
+    !matches!(
+        phase,
+        CachePhase::Disabled(NoCacheReason::NeverEnabled) | CachePhase::Uninit | CachePhase::Bypass
+    )
 }
 
 #[cfg(feature = "cache")]
@@ -2935,8 +2981,9 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{
-        MAX_VARY_FIELDS, VaryCachePolicy, cache_status_header_value,
-        response_cache_admission_rejection, vary_cache_policy, vary_request_hash,
+        MAX_VARY_FIELDS, VaryCachePolicy, cache_request_participated, cache_status_header_value,
+        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
+        vary_request_hash,
     };
 
     #[test]
@@ -4444,6 +4491,57 @@ mod tests {
             )),
             Some("REVALIDATED-NOCACHE")
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_can_strip_origin_response_headers_before_admission() {
+        use pingora::cache::CachePhase;
+
+        let cache = CacheConfig {
+            hide_response_headers: vec!["set-cookie".to_owned(), "x-internal".to_owned()],
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        response.insert_header("content-type", "image/png").unwrap();
+        response
+            .insert_header("set-cookie", "session=abc; HttpOnly; Secure")
+            .unwrap();
+        response.insert_header("x-internal", "origin").unwrap();
+
+        assert_eq!(
+            response_cache_admission_rejection(&response),
+            Some("set-cookie")
+        );
+
+        strip_cache_response_headers(&mut response, &cache, CachePhase::Miss);
+
+        assert!(!response.headers.contains_key("set-cookie"));
+        assert!(!response.headers.contains_key("x-internal"));
+        assert_eq!(response_cache_admission_rejection(&response), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_policy_does_not_strip_non_participating_responses() {
+        use pingora::cache::{CachePhase, NoCacheReason};
+
+        let cache = CacheConfig {
+            hide_response_headers: vec!["set-cookie".to_owned()],
+            ..CacheConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        response.insert_header("set-cookie", "session=abc").unwrap();
+
+        strip_cache_response_headers(
+            &mut response,
+            &cache,
+            CachePhase::Disabled(NoCacheReason::NeverEnabled),
+        );
+
+        assert!(response.headers.contains_key("set-cookie"));
+        assert!(!cache_request_participated(CachePhase::Bypass));
+        assert!(cache_request_participated(CachePhase::Miss));
     }
 
     #[cfg(feature = "cache")]

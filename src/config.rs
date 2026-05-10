@@ -3172,6 +3172,8 @@ pub struct CacheConfig {
     pub enabled: bool,
     #[serde(default)]
     pub status_header: Option<String>,
+    #[serde(default)]
+    pub hide_response_headers: Vec<String>,
     #[serde(default = "default_cache_image_extensions")]
     pub image_extensions: Vec<String>,
     #[serde(default = "default_cache_methods")]
@@ -3189,6 +3191,7 @@ impl Default for CacheConfig {
         Self {
             enabled: false,
             status_header: None,
+            hide_response_headers: Vec::new(),
             image_extensions: default_cache_image_extensions(),
             methods: default_cache_methods(),
             max_object_bytes: default_cache_max_object_bytes(),
@@ -3210,6 +3213,9 @@ impl CacheConfig {
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         if let Some(status_header) = &self.status_header {
             validate_header_name(scope, status_header)?;
+        }
+        for header in &self.hide_response_headers {
+            validate_header_name(scope, header)?;
         }
 
         if self.image_extensions.is_empty() {
@@ -6849,6 +6855,7 @@ mod tests {
             [cache]
             enabled = true
             status_header = "X-Cache-Status"
+            hide_response_headers = ["set-cookie"]
             image_extensions = ["jpg", "webp"]
             methods = ["GET"]
             max_object_bytes = "4MiB"
@@ -6869,6 +6876,10 @@ mod tests {
         assert_eq!(
             config.cache.status_header,
             Some("X-Cache-Status".to_owned())
+        );
+        assert_eq!(
+            config.cache.hide_response_headers,
+            ["set-cookie".to_owned()]
         );
         assert_eq!(
             config.cache.image_extensions,
@@ -6901,6 +6912,25 @@ mod tests {
             r#"
             [cache]
             status_header = "bad header"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderName {
+                field: "cache",
+                name: "bad header".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_hidden_response_header_name() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            hide_response_headers = ["bad header"]
             "#,
         )
         .unwrap();
