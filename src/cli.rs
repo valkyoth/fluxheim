@@ -259,6 +259,9 @@ fn run_command(
             Ok(())
         }
         CliCommand::AcmeRenew { force_renew, all } => {
+            if *all {
+                eprintln!("warning: --all is deprecated; use --force-renew");
+            }
             run_acme_renew_command(config_path, *force_renew || *all)
         }
         CliCommand::AcmeInit {

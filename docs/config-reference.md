@@ -679,7 +679,8 @@ fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
 By default the command renews missing or due certificates only. `--force-renew`
 attempts every configured ACME vhost even when certificates are still valid;
 use it sparingly because repeated forced renewals can hit issuer rate limits.
-`--all` is accepted as a backward-compatible alias.
+`--all` is accepted as a backward-compatible alias, but it prints a deprecation
+warning and should not be used in new automation.
 
 ```toml
 [tls.acme]

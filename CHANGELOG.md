@@ -81,7 +81,8 @@ Released: pending
 - Managed ACME certificate expiry is now observed from bounded, symlink-safe PEM
   reads so Fluxheim can distinguish missing, due, and not-yet-due certificates.
 - `fluxheim acme-renew` runs due-only renewal once, while
-  `fluxheim acme-renew --all` forces every configured ACME vhost.
+  `fluxheim acme-renew --force-renew` forces every configured ACME vhost.
+  The old `--all` alias still works but now prints a deprecation warning.
 - Builds with `acme-client` now register a background ACME renewal service for
   configured ACME vhosts. It renews missing or due certificates on the
   configured check interval and refreshes reloadable downstream SNI certificate
