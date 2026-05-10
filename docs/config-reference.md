@@ -457,6 +457,7 @@ status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 bypass_request_headers = ["cookie", "authorization"]
+bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
@@ -513,6 +514,9 @@ listed request header is present. Use it on routes where a header such as
 `Cookie` or `Authorization` changes the upstream response but should not become
 part of the shared cache identity. The default is empty so explicit static
 asset routes can still cache browser requests that carry unrelated cookies.
+`bypass_request_header_values` disables lookup and storage only when a listed
+request header has the exact configured value. Use it for bounded flags such as
+`x-preview-mode = "1"` when header presence alone is too broad.
 `bypass_cookie_names` disables both cache lookup and cache storage when a
 listed cookie name appears in any `Cookie` request header. Only names are
 matched; values are ignored. This is narrower than bypassing on every `Cookie`
@@ -913,6 +917,7 @@ send_timeout_secs = 600
 enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_values = { preview = "1" }
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 stale_while_revalidate_secs = 30

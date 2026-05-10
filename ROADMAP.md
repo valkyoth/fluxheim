@@ -633,9 +633,9 @@ without parsing text fixtures for every module.
        through typed `status_ttls` and `default_status_ttl_secs` policy;
      - explicit request-side bypass rules and response-side no-store rules
        based on bounded header, cookie, and query predicates. Implemented for
-       header-presence request bypass, raw query-parameter request bypass, and
-       cookie-name and exact cookie-value request bypass, plus response
-       no-store controls;
+       header-presence and exact header-value request bypass, raw
+       query-parameter request bypass, cookie-name and exact cookie-value
+       request bypass, plus response no-store controls;
      - stale serving controls for origin error, timeout, updating, and selected
        status classes;
      - optional cache-status response headers for production debugging;

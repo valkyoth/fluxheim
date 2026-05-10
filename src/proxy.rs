@@ -2939,6 +2939,9 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
     {
         return true;
     }
+    if request_headers_match_cache_bypass_value(request, &cache.bypass_request_header_values) {
+        return true;
+    }
     if request_cookies_match_cache_bypass(
         request_header_values(request, "cookie"),
         &cache.bypass_cookie_names,
@@ -2958,6 +2961,17 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
         request_header_values(request, "cache-control"),
         request_header_values(request, "pragma"),
     )
+}
+
+#[cfg(feature = "cache")]
+fn request_headers_match_cache_bypass_value(
+    request: &RequestHeader,
+    configured_values: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    !configured_values.is_empty()
+        && configured_values.iter().any(|(header, configured)| {
+            request_header_values(request, header).any(|value| value == configured)
+        })
 }
 
 #[cfg(feature = "cache")]
@@ -5077,6 +5091,28 @@ mod tests {
         request
             .insert_header("authorization", "Bearer secret")
             .unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_configured_request_header_values() {
+        let cache = CacheConfig {
+            bypass_request_header_values: [("x-preview-mode".to_owned(), "1".to_owned())].into(),
+            ..CacheConfig::default()
+        };
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        request.insert_header("x-preview-mode", "0").unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        request.append_header("x-preview-mode", "0").unwrap();
+        request.append_header("x-preview-mode", "1").unwrap();
         assert!(request_cache_bypass(&request, &cache));
     }
 
