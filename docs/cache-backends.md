@@ -47,6 +47,10 @@ internal cache implementation.
   `vhosts.routes.cache.key_namespace` add an operator-controlled namespace
   component to the primary cache key. Bump this value to isolate new objects
   from older route-cache contents without changing URLs.
+- `cache.key_parts`, `vhosts.cache.key_parts`, and
+  `vhosts.routes.cache.key_parts` provide a constrained cache-key template made
+  from safe request fields: `method`, `host`, `path`, and `query`. `path` is
+  required, duplicates are rejected, and `query` still obeys `include_query`.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream

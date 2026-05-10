@@ -38,6 +38,8 @@ behavior when the change improves security or project direction.
   the cache variance key when an origin does not emit the needed `Vary` header.
 - Cache policies can now set an operator-controlled `key_namespace` to isolate
   new cached objects from older route-cache contents without changing URLs.
+- Cache policies can now set `key_parts` to safely customize primary cache keys
+  from `method`, `host`, `path`, and `query` without arbitrary interpolation.
 - Cache policies can now set `min_uses` to delay shared cache storage until a
   cache key has produced repeated cacheable origin responses.
 - Cache policies can now define positive response TTLs by HTTP status, which

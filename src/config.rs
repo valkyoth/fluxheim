@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
-use std::fmt::{Display, Formatter};
+use std::fmt::{self, Display, Formatter};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
@@ -3196,6 +3196,8 @@ pub struct CacheConfig {
     pub ignore_origin_cache_headers: bool,
     #[serde(default)]
     pub key_namespace: Option<String>,
+    #[serde(default = "default_cache_key_parts")]
+    pub key_parts: Vec<CacheKeyPart>,
     #[serde(default = "default_cache_min_uses")]
     pub min_uses: u32,
     #[serde(default)]
@@ -3245,6 +3247,7 @@ impl Default for CacheConfig {
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
             key_namespace: None,
+            key_parts: default_cache_key_parts(),
             min_uses: default_cache_min_uses(),
             status_ttls: BTreeMap::new(),
             default_status_ttl_secs: None,
@@ -3319,6 +3322,18 @@ impl CacheConfig {
         }
         if let Some(namespace) = &self.key_namespace {
             validate_cache_key_namespace(scope, namespace)?;
+        }
+        if self.key_parts.is_empty() {
+            return Err(ConfigError::EmptyCacheKeyParts { scope });
+        }
+        let mut seen_parts = BTreeSet::new();
+        for part in &self.key_parts {
+            if !seen_parts.insert(*part) {
+                return Err(ConfigError::DuplicateCacheKeyPart { scope, part: *part });
+            }
+        }
+        if !seen_parts.contains(&CacheKeyPart::Path) {
+            return Err(ConfigError::MissingCacheKeyPath { scope });
         }
         if self.min_uses == 0 {
             return Err(ConfigError::InvalidCacheMinUses { scope });
@@ -3546,6 +3561,35 @@ fn valid_cookie_name(value: &str) -> bool {
     value.bytes().all(|byte| {
         matches!(byte, 0x21 | 0x23..=0x27 | 0x2a..=0x2b | 0x2d..=0x2e | 0x30..=0x39 | 0x41..=0x5a | 0x5e..=0x7a | 0x7c | 0x7e)
     })
+}
+
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheKeyPart {
+    Method,
+    Host,
+    Path,
+    Query,
+}
+
+impl Display for CacheKeyPart {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Method => formatter.write_str("method"),
+            Self::Host => formatter.write_str("host"),
+            Self::Path => formatter.write_str("path"),
+            Self::Query => formatter.write_str("query"),
+        }
+    }
+}
+
+fn default_cache_key_parts() -> Vec<CacheKeyPart> {
+    vec![
+        CacheKeyPart::Method,
+        CacheKeyPart::Host,
+        CacheKeyPart::Path,
+        CacheKeyPart::Query,
+    ]
 }
 
 fn validate_cache_key_namespace(scope: &'static str, namespace: &str) -> Result<(), ConfigError> {
@@ -4143,6 +4187,16 @@ pub enum ConfigError {
         scope: &'static str,
         namespace: String,
     },
+    EmptyCacheKeyParts {
+        scope: &'static str,
+    },
+    DuplicateCacheKeyPart {
+        scope: &'static str,
+        part: CacheKeyPart,
+    },
+    MissingCacheKeyPath {
+        scope: &'static str,
+    },
     InvalidCacheLockTimeout {
         field: String,
     },
@@ -4607,6 +4661,16 @@ impl Display for ConfigError {
                 formatter,
                 "{scope}.key_namespace must be 1-128 characters and contain only ASCII letters, digits, '-', '_', '.', or ':', got {namespace:?}"
             ),
+            Self::EmptyCacheKeyParts { scope } => {
+                write!(formatter, "{scope}.key_parts must not be empty")
+            }
+            Self::DuplicateCacheKeyPart { scope, part } => write!(
+                formatter,
+                "{scope}.key_parts must not contain duplicate cache key part {part}"
+            ),
+            Self::MissingCacheKeyPath { scope } => {
+                write!(formatter, "{scope}.key_parts must include path")
+            }
             Self::InvalidCacheLockTimeout { field } => {
                 write!(formatter, "{field} must be greater than zero")
             }
@@ -5822,12 +5886,13 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, CacheStaleErrorKind, Config,
-        ConfigError, ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig,
-        ProxyConfig, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
-        TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, VhostConfig,
-        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
-        valid_dynamic_header_variable, validate_dynamic_header_template,
+        AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, CacheKeyPart,
+        CacheStaleErrorKind, Config, ConfigError, ConfigLoadError, HeaderPolicyConfig,
+        LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig, ServerLimitsConfig,
+        StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsCurvePreference,
+        TlsPolicyProfile, TlsProtocolVersion, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig,
+        WebConfig, normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+        validate_dynamic_header_template,
     };
     #[cfg(unix)]
     use crate::test_support::unique_world_writable_child;
@@ -7434,6 +7499,7 @@ mod tests {
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
             key_namespace = "repoheim-assets-v1"
+            key_parts = ["method", "host", "path"]
             min_uses = 2
             status_ttls = { "200" = 3600, "404" = 60 }
             default_status_ttl_secs = 15
@@ -7519,6 +7585,10 @@ mod tests {
         assert_eq!(
             config.cache.key_namespace,
             Some("repoheim-assets-v1".to_owned())
+        );
+        assert_eq!(
+            config.cache.key_parts,
+            [CacheKeyPart::Method, CacheKeyPart::Host, CacheKeyPart::Path]
         );
         assert_eq!(config.cache.min_uses, 2);
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
@@ -7840,6 +7910,57 @@ mod tests {
                 "{namespace:?}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_empty_cache_key_parts() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            key_parts = []
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::EmptyCacheKeyParts { scope: "cache" })
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_cache_key_parts() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            key_parts = ["method", "path", "path"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::DuplicateCacheKeyPart {
+                scope: "cache",
+                part: CacheKeyPart::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_cache_key_parts_without_path() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            key_parts = ["method", "host"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::MissingCacheKeyPath { scope: "cache" })
+        );
     }
 
     #[test]

@@ -466,6 +466,7 @@ bypass_query_values = { mode = "private" }
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
+key_parts = ["method", "host", "path", "query"]
 min_uses = 2
 status_ttls = { "200" = 3600, "404" = 60 }
 default_status_ttl_secs = 15
@@ -551,6 +552,11 @@ rejected here; use `bypass_request_headers` for those.
 cache key, which gives operators a simple cache-versioning knob. Bump it, for
 example from `repoheim-assets-v1` to `repoheim-assets-v2`, to isolate new
 objects from an older route cache without changing URLs.
+`key_parts` controls which safe request fields are included in the primary
+cache key. Valid values are `method`, `host`, `path`, and `query`; `path` is
+required and duplicates are rejected. This gives operators the useful part of
+cache-key templates without allowing arbitrary interpolation. `query` is still
+ignored when `include_query = false`.
 `min_uses` delays cache admission until the same cache key has produced a
 cacheable origin response at least that many times within a short bounded
 window. The default is `1`, which stores the first cacheable response. Increase

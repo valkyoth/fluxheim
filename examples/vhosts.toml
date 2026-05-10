@@ -171,6 +171,7 @@ bypass_query_params = ["preview", "token"]
 bypass_query_values = { mode = "private" }
 vary_request_headers = ["accept-encoding"]
 key_namespace = "chat-assets-v1"
+key_parts = ["method", "host", "path", "query"]
 min_uses = 2
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 default_status_ttl_secs = 15

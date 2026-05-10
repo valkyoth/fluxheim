@@ -21,7 +21,7 @@ use pingora::{Error, ErrorType};
 #[cfg(feature = "proxy")]
 use sha2::{Digest, Sha256};
 
-use crate::config::{ByteSize, CacheConfig, normalize_host};
+use crate::config::{ByteSize, CacheConfig, CacheKeyPart, normalize_host};
 
 #[cfg(all(feature = "proxy", target_os = "linux"))]
 use std::os::unix::fs::OpenOptionsExt;
@@ -1856,15 +1856,20 @@ pub fn image_cache_key(config: &CacheConfig, request: &CacheRequest<'_>) -> Opti
     if let Some(namespace) = config.key_namespace.as_deref() {
         append_component(&mut key, "namespace", namespace);
     }
-    append_component(&mut key, "method", request.method);
-    append_component(
-        &mut key,
-        "host",
-        &request.host.and_then(normalize_host).unwrap_or_default(),
-    );
-    append_component(&mut key, "path", request.path);
-    if config.include_query {
-        append_component(&mut key, "query", request.query.unwrap_or_default());
+    for part in &config.key_parts {
+        match part {
+            CacheKeyPart::Method => append_component(&mut key, "method", request.method),
+            CacheKeyPart::Host => append_component(
+                &mut key,
+                "host",
+                &request.host.and_then(normalize_host).unwrap_or_default(),
+            ),
+            CacheKeyPart::Path => append_component(&mut key, "path", request.path),
+            CacheKeyPart::Query if config.include_query => {
+                append_component(&mut key, "query", request.query.unwrap_or_default());
+            }
+            CacheKeyPart::Query => {}
+        }
     }
     Some(CacheKey(key))
 }
@@ -1902,7 +1907,7 @@ mod tests {
         CacheRequest, CacheStoreError, CachedHeader, CachedImageObject, MemoryImageCache,
         eligible_image_request, image_cache_key, memory_image_cache_from_config, storage_plan,
     };
-    use crate::config::{ByteSize, CacheConfig, CacheDiskConfig, CacheMemoryConfig};
+    use crate::config::{ByteSize, CacheConfig, CacheDiskConfig, CacheKeyPart, CacheMemoryConfig};
     #[cfg(feature = "proxy")]
     use crate::test_support::unique_temp_path;
 
@@ -2060,6 +2065,51 @@ mod tests {
             "fluxheim-image-v1;method:3:GET;host:12:example.test;path:14:/assets/app.js;"
         );
         assert_eq!(image_cache_key(&config, &second), Some(key));
+    }
+
+    #[test]
+    fn cache_key_parts_choose_safe_identity_components() {
+        let config = CacheConfig {
+            key_parts: vec![CacheKeyPart::Host, CacheKeyPart::Path],
+            ..enabled_cache()
+        };
+        let first = CacheRequest {
+            method: "GET",
+            host: Some("example.test"),
+            path: "/assets/app.js",
+            query: Some("v=1"),
+        };
+        let second = CacheRequest {
+            method: "HEAD",
+            host: Some("example.test"),
+            path: "/assets/app.js",
+            query: Some("v=2"),
+        };
+
+        let key = image_cache_key(&config, &first).unwrap();
+        assert_eq!(
+            key.as_str(),
+            "fluxheim-image-v1;host:12:example.test;path:14:/assets/app.js;"
+        );
+        assert_eq!(image_cache_key(&config, &second), Some(key));
+    }
+
+    #[test]
+    fn cache_key_parts_query_still_obeys_include_query() {
+        let config = CacheConfig {
+            key_parts: vec![CacheKeyPart::Path, CacheKeyPart::Query],
+            include_query: false,
+            ..enabled_cache()
+        };
+        let request = CacheRequest {
+            method: "GET",
+            host: Some("example.test"),
+            path: "/assets/app.js",
+            query: Some("v=1"),
+        };
+
+        let key = image_cache_key(&config, &request).unwrap();
+        assert_eq!(key.as_str(), "fluxheim-image-v1;path:14:/assets/app.js;");
     }
 
     #[test]
