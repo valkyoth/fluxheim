@@ -26,10 +26,13 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current `1.0.x` line is
-the gateway foundation release for static sites, vhosts, route-level proxying,
-redirects, static TLS certificates with SNI, secure headers, and
-container-friendly or native systemd operation.
+[Pingora](https://github.com/cloudflare/pingora). The current `1.1.x` line is
+the production gateway baseline for static sites, vhosts, route-level proxying,
+redirects, rustls SNI, managed ACME issuance and renewal, secure headers, and
+container-friendly or native systemd operation. Active `1.2` work focuses on
+operations polish: clearer multi-file config diagnostics, production container
+runbooks, ACME companion/timer workflows, metrics/admin tooling, and proxy
+runtime tuning.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -53,7 +56,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 - Packaged default page at `/srv/fluxheim/index.html` with no external assets.
 
 See [Production Readiness](docs/production-readiness.md) for the precise
-`1.0` promise and deployment checks.
+stable-core promise and deployment checks.
 
 ## Why Fluxheim
 
@@ -247,11 +250,12 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Stable: 1.0 Gateway Core
+## Current Stable: 1.1 Certificate Operations
 
-Fluxheim does not treat every planned feature as part of `1.0`. The `1.0`
-release is the first release intended to migrate representative real multi-site
-gateway configs.
+Fluxheim does not treat every planned feature as part of the stable core. The
+`1.0` release established the first gateway-ready baseline for representative
+real multi-site configs. The `1.1` release adds production certificate
+operations on top of that baseline.
 
 Included in `1.0`: route-level exact/prefix/fallback matching, route actions
 for proxy/static/redirects, route prefix stripping, per-route body limits,
@@ -265,11 +269,22 @@ upstream DNS names are resolved per request and resolution failures return
 upstream errors instead of panicking the worker, which covers local Podman
 service names for the non-LB gateway path.
 
-After `1.0`, the planned release ladder continues with TLS policy and ACME
-certificate operations, operations tooling, load balancing, cache improvements,
-advanced certificate automation, privacy/security profiles, Cloudflare origin
-support, observability, auth, cluster state, AI-aware controls, Sentinel Mesh,
-PHP/CGI boundaries, media-edge work, and WASM extensibility.
+Added in `1.1`: named TLS policy profiles, minimum protocol and ALPN controls,
+multi-certificate rustls SNI, managed ACME issuance and renewal for HTTP-01 and
+rustls TLS-ALPN-01 builds, Actalis and Google Trust Services EAB-capable issuer
+configuration, file-backed secret support for containers/systemd credentials,
+safe ACME storage, and guided `acme-init` bootstrap.
+
+Active `1.2` work: operations diagnostics and runbooks. The planned scope
+includes clearer `conf.d` parse and validation errors, production Podman
+validation/ACME examples, a separate ACME companion service/timer flow,
+admin/metrics operations tooling, rollback/snapshot improvements, and proxy
+buffering/backpressure controls for app migrations.
+
+Later releases continue with load balancing, cache improvements, advanced
+certificate automation, privacy/security profiles, Cloudflare origin support,
+observability, auth, cluster state, AI-aware controls, Sentinel Mesh, PHP/CGI
+boundaries, media-edge work, and WASM extensibility.
 
 See [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for
 the full release ladder.

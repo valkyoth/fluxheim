@@ -3368,7 +3368,11 @@ impl Display for ConfigLoadError {
                     formatter,
                     "failed to parse config {}: {source}",
                     path.display()
-                )
+                )?;
+                if let Some(hint) = config_parse_hint(source) {
+                    write!(formatter, "\n{hint}")?;
+                }
+                Ok(())
             }
             Self::Validate(error) => write!(formatter, "invalid config: {error}"),
         }
@@ -3384,6 +3388,16 @@ impl Error for ConfigLoadError {
             Self::Validate(error) => Some(error),
         }
     }
+}
+
+fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
+    let message = error.to_string();
+    if message.contains("vhosts.proxy.error_pages.web") {
+        return Some(
+            "hint: proxy error pages are arrays; define [[vhosts.proxy.error_pages]] before [vhosts.proxy.error_pages.web]",
+        );
+    }
+    None
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -8000,6 +8014,7 @@ mod tests {
 
         assert!(message.contains(&bad_config.display().to_string()));
         assert!(message.contains("failed to parse config"));
+        assert!(message.contains("define [[vhosts.proxy.error_pages]]"));
     }
 
     #[test]
