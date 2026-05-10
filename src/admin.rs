@@ -620,13 +620,17 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","requested":{},"purged":{},"purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","results":[{}]}}"#,
+                    r#"{{"status":"ok","requested":{},"purged":{},"purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","memory_purged":{},"memory_purged_ratio_per_mille":{},"disk_purged":{},"disk_purged_ratio_per_mille":{},"results":[{}]}}"#,
                     result.requested(),
                     result.purged(),
                     ratio_per_mille_usize(result.purged(), result.requested()),
                     json_escape(&result.vhost),
                     cache_route_json(result.route()),
                     cache_scope(result.route()),
+                    result.memory_purged(),
+                    ratio_per_mille_usize(result.memory_purged(), result.requested()),
+                    result.disk_purged(),
+                    ratio_per_mille_usize(result.disk_purged(), result.requested()),
                     cache_purge_results_json(&result.results)
                 );
                 json_response(StatusCode::OK, body.as_bytes())
@@ -2713,6 +2717,10 @@ mod tests {
         assert!(body.contains(r#""purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""route":null"#));
         assert!(body.contains(r#""scope":"vhost""#));
+        assert!(body.contains(r#""memory_purged":0"#));
+        assert!(body.contains(r#""memory_purged_ratio_per_mille":0"#));
+        assert!(body.contains(r#""disk_purged":0"#));
+        assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""results":["#));
         assert!(body.contains(r#""path":"/img/one.png""#));
         assert!(body.contains(r#""path":"/img/two.png""#));
@@ -2751,6 +2759,8 @@ mod tests {
         assert!(body.contains(r#""requested":2"#));
         assert!(body.contains(r#""route":"assets""#));
         assert!(body.contains(r#""scope":"route""#));
+        assert!(body.contains(r#""memory_purged":0"#));
+        assert!(body.contains(r#""disk_purged":0"#));
         assert!(body.contains(r#""path":"/assets/one.png""#));
         assert!(body.contains(r#""path":"/assets/two.png""#));
     }

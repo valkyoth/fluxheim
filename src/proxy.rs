@@ -442,6 +442,20 @@ impl CacheBulkPurgeResult {
     pub fn purged(&self) -> usize {
         self.results.iter().filter(|result| result.purged()).count()
     }
+
+    pub fn memory_purged(&self) -> usize {
+        self.results
+            .iter()
+            .filter(|result| result.memory_purged)
+            .count()
+    }
+
+    pub fn disk_purged(&self) -> usize {
+        self.results
+            .iter()
+            .filter(|result| result.disk_purged)
+            .count()
+    }
 }
 
 #[cfg(feature = "cache")]

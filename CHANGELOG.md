@@ -67,6 +67,8 @@ behavior when the change improves security or project direction.
   operators can quickly see how much of a requested purge batch matched.
 - Protected bulk cache purge responses now also echo the selected `route` and
   cache `scope`, matching single and indexed purge responses.
+- Protected bulk cache purge responses now include memory and disk purged
+  counts plus per-tier purge ratios.
 - Protected indexed cache purge responses now include per-tier
   `memory_purged_ratio_per_mille` and `disk_purged_ratio_per_mille` fields.
 - `server.default_vhost` validation now hints at `include_conf_d = true` or
