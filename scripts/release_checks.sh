@@ -6,6 +6,7 @@ sh scripts/validate-1-0-fixtures.sh
 FLUXHEIM_SMOKE_SKIP_CORE_MATRIX=1 sh scripts/smoke_1_0_core.sh
 sh scripts/smoke_static_local.sh
 sh scripts/smoke_load_balancer.sh
+sh scripts/smoke_proxy_cache.sh
 
 if [ "${FLUXHEIM_RELEASE_PODMAN:-0}" = "1" ]; then
     scripts/podman_smoke.sh

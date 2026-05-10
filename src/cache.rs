@@ -222,9 +222,11 @@ impl CacheActivityCounters {
         self.record("purge");
     }
 
-    fn record(&self, event: &'static str) {
+    fn record(&self, _event: &'static str) {
         #[cfg(feature = "metrics")]
-        crate::metrics::record_cache_activity(self.tier, event);
+        crate::metrics::record_cache_activity(self.tier, _event);
+        #[cfg(not(feature = "metrics"))]
+        let _ = self.tier;
     }
 }
 

@@ -141,11 +141,11 @@ internal cache implementation.
   disallowed `Content-Type` values still reject `200 OK` responses, and
   redirects or error statuses without an explicit TTL are rejected from shared
   cache admission.
-  Pingora's cache
-  pipeline injects `Age` on stored-response hits and applies downstream
-  conditional/range handling when cache is enabled. Planned work covers
-  end-to-end cached-hit verification for those Pingora behaviors, full
-  validator-based revalidation for proxied cache responses, and broader
+  Pingora's cache pipeline injects `Age` on stored-response hits and applies
+  downstream conditional/range handling when cache is enabled. The release smoke
+  suite verifies proxy cache HIT behavior, cached-hit `Age`, conditional `304`,
+  and byte-range `206` behavior end to end. Planned work still covers full
+  validator-based revalidation for proxied cache responses and broader
   cache-header tests for static and proxied responses.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
@@ -302,8 +302,10 @@ A production adapter must:
   `Cache-Control`, `Pragma`, `Range`, and `If-Range`.
 - Implemented now: static validators/ranges/client refresh controls, proxied
   client refresh bypass, Pingora `Vary` variance keys with unsafe/sensitive
-  `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, and
-  `image/*` origin response admission for proxied image cache.
+  `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, `image/*`
+  origin response admission for proxied image cache, and end-to-end smoke
+  coverage for cached HIT `Age`, conditional `304`, and byte-range `206`
+  behavior.
 - Keep CDN/browser cache headers configurable through header policy and
   examples instead of hardcoded provider-specific defaults.
 - Avoid unbounded buffering for large responses. Implemented for memory by

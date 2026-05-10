@@ -15,6 +15,8 @@ behavior when the change improves security or project direction.
   route, policy, and storage-tier coverage.
 - Metrics builds now publish bounded cache activity counters for memory and disk
   hits, misses, stores, store refusals, evictions, and purges.
+- The release smoke suite now verifies proxy cache HIT behavior, cached-hit
+  `Age`, conditional `304`, and byte-range `206` behavior end to end.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside

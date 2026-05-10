@@ -364,8 +364,8 @@ Stable scope:
     immediately;
   - hit-for-pass/pass-cache decisions for repeatedly uncacheable dynamic
     objects;
-  - end-to-end proxy regressions for cache-hit `Age`, conditional, and range
-    behavior;
+  - broader end-to-end proxy regressions beyond the current cache HIT `Age`,
+    conditional `304`, and byte-range `206` release smoke;
   - cache observability through both Prometheus and OpenTelemetry, including
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals.
