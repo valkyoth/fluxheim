@@ -319,19 +319,33 @@ fn run_acme_renew_command(
         .enable_all()
         .build()?;
     let now = std::time::SystemTime::now();
-    let targets = crate::acme::renewal_targets(&config);
-    println!("acme targets: {}", targets.len());
-    for target in &targets {
+    let queue = if force_renew {
+        crate::acme::plan_renewal_queue(&config, &[], now)
+    } else {
+        let observations = crate::acme::observe_configured_certificates(&config);
+        crate::acme::plan_renewal_queue(&config, &observations, now)
+    };
+    println!("acme targets: {}", queue.len());
+    for item in &queue {
+        let target = &item.target;
+        let status = if force_renew {
+            "forced"
+        } else if item.due_now {
+            "due"
+        } else {
+            "skipped"
+        };
         println!(
-            "target: {} issuer={} domains={} cert={} key={}",
+            "target: {} status={} issuer={} domains={} cert={} key={}",
             target.vhost_name,
+            status,
             target.issuer,
             target.domains.join(","),
             target.certificate.cert_path.display(),
             target.certificate.key_path.display()
         );
     }
-    if targets.is_empty() {
+    if queue.is_empty() {
         println!(
             "acme state: tls_enabled={} acme_enabled={} renewal_enabled={} storage={} vhosts={}",
             config.tls.enabled,
@@ -364,7 +378,7 @@ fn run_acme_renew_command(
     };
 
     println!("acme attempted: {}", run.attempted);
-    if force_renew && !targets.is_empty() && run.attempted == 0 {
+    if force_renew && !queue.is_empty() && run.attempted == 0 {
         return Err(
             "ACME renewal planner produced targets, but --force-renew attempted none".into(),
         );
@@ -381,6 +395,18 @@ fn run_acme_renew_command(
             outcome.certificate.key_path.display(),
             outcome.published_challenges
         );
+    }
+    for failure in &run.failed {
+        println!(
+            "failed: {} issuer={} domains={} error={}",
+            failure.vhost_name,
+            failure.issuer,
+            failure.domains.join(","),
+            failure.error.replace('\n', " ")
+        );
+    }
+    if !run.failed.is_empty() {
+        return Err(format!("ACME renewal failed for {} target(s)", run.failed.len()).into());
     }
     Ok(())
 }

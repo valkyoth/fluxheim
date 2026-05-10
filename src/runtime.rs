@@ -171,10 +171,12 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
         }
         Ok(run) => {
             log::info!(
-                "ACME renewal check complete; attempted={} renewed={}",
+                "ACME renewal check complete; attempted={} renewed={} failed={}",
                 run.attempted,
-                run.renewed.len()
+                run.renewed.len(),
+                run.failed.len()
             );
+            let renewed_count = run.renewed.len();
             for outcome in run.renewed {
                 log::info!(
                     "ACME renewed vhost={} issuer={} cert={} key={} challenges={}",
@@ -185,7 +187,18 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
                     outcome.published_challenges
                 );
             }
-            if let Some(reloader) = reloader {
+            for failure in run.failed {
+                log::error!(
+                    "ACME renewal failed vhost={} issuer={} domains={} error={}",
+                    failure.vhost_name,
+                    failure.issuer,
+                    failure.domains.join(","),
+                    failure.error
+                );
+            }
+            if renewed_count == 0 {
+                log::debug!("ACME renewal check completed without renewed certificates");
+            } else if let Some(reloader) = reloader {
                 if let Err(error) = reloader.reload() {
                     log::error!(
                         "failed to reload downstream TLS certificates after ACME renewal: {error}"

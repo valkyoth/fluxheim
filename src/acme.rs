@@ -144,9 +144,18 @@ pub struct AcmeRenewalOutcome {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AcmeRenewalFailure {
+    pub vhost_name: String,
+    pub issuer: String,
+    pub domains: Vec<String>,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AcmeRenewalRun {
     pub attempted: usize,
     pub renewed: Vec<AcmeRenewalOutcome>,
+    pub failed: Vec<AcmeRenewalFailure>,
 }
 
 pub fn acme_tls_alpn_protocol() -> &'static [u8] {
@@ -907,14 +916,24 @@ async fn execute_instant_acme_queue(
     queue: &[AcmeRenewalItem],
 ) -> Result<AcmeRenewalRun, AcmeRenewalError> {
     let mut renewed = Vec::with_capacity(queue.len());
+    let mut failed = Vec::new();
 
     for item in queue {
-        renewed.push(execute_instant_acme_renewal(config, item).await?);
+        match execute_instant_acme_renewal(config, item).await {
+            Ok(outcome) => renewed.push(outcome),
+            Err(error) => failed.push(AcmeRenewalFailure {
+                vhost_name: item.target.vhost_name.clone(),
+                issuer: item.target.issuer.clone(),
+                domains: item.target.domains.clone(),
+                error: error.to_string(),
+            }),
+        }
     }
 
     Ok(AcmeRenewalRun {
         attempted: queue.len(),
         renewed,
+        failed,
     })
 }
 
