@@ -3206,6 +3206,8 @@ pub struct CacheConfig {
     pub stale_while_revalidate_secs: Option<u32>,
     #[serde(default)]
     pub stale_if_error_secs: Option<u32>,
+    #[serde(default = "default_cache_stale_if_error_on")]
+    pub stale_if_error_on: Vec<CacheStaleErrorKind>,
     #[serde(default = "default_cache_include_query")]
     pub include_query: bool,
     #[serde(default = "default_cache_content_types")]
@@ -3246,6 +3248,7 @@ impl Default for CacheConfig {
             default_status_ttl_secs: None,
             stale_while_revalidate_secs: None,
             stale_if_error_secs: None,
+            stale_if_error_on: default_cache_stale_if_error_on(),
             include_query: default_cache_include_query(),
             content_types: default_cache_content_types(),
             image_extensions: default_cache_static_extensions(),
@@ -3334,6 +3337,9 @@ impl CacheConfig {
         }
         if self.stale_while_revalidate_secs == Some(0) {
             return Err(ConfigError::InvalidCacheStaleWhileRevalidateTtl { scope });
+        }
+        if self.stale_if_error_secs.is_some() && self.stale_if_error_on.is_empty() {
+            return Err(ConfigError::EmptyCacheStaleIfErrorOn { scope });
         }
 
         if self.content_types.is_empty() {
@@ -3544,6 +3550,32 @@ fn validate_cache_key_namespace(scope: &'static str, namespace: &str) -> Result<
         });
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheStaleErrorKind {
+    Connect,
+    Timeout,
+    Read,
+    Write,
+    ConnectionClosed,
+    Protocol,
+    Tls,
+    Other,
+}
+
+fn default_cache_stale_if_error_on() -> Vec<CacheStaleErrorKind> {
+    vec![
+        CacheStaleErrorKind::Connect,
+        CacheStaleErrorKind::Timeout,
+        CacheStaleErrorKind::Read,
+        CacheStaleErrorKind::Write,
+        CacheStaleErrorKind::ConnectionClosed,
+        CacheStaleErrorKind::Protocol,
+        CacheStaleErrorKind::Tls,
+        CacheStaleErrorKind::Other,
+    ]
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -4083,6 +4115,9 @@ pub enum ConfigError {
     InvalidCacheStaleWhileRevalidateTtl {
         scope: &'static str,
     },
+    EmptyCacheStaleIfErrorOn {
+        scope: &'static str,
+    },
     InvalidCacheVaryRequestHeader {
         scope: &'static str,
         header: String,
@@ -4535,6 +4570,12 @@ impl Display for ConfigError {
                 write!(
                     formatter,
                     "{scope}.stale_while_revalidate_secs must be greater than zero"
+                )
+            }
+            Self::EmptyCacheStaleIfErrorOn { scope } => {
+                write!(
+                    formatter,
+                    "{scope}.stale_if_error_on must not be empty when stale_if_error_secs is set"
                 )
             }
             Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
@@ -5760,10 +5801,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, Config, ConfigError,
-        ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig,
-        ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
-        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, VhostConfig,
+        AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, CacheStaleErrorKind, Config,
+        ConfigError, ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig,
+        ProxyConfig, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
+        TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, VhostConfig,
         VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
         valid_dynamic_header_variable, validate_dynamic_header_template,
     };
@@ -7377,6 +7418,7 @@ mod tests {
             default_status_ttl_secs = 15
             stale_while_revalidate_secs = 30
             stale_if_error_secs = 120
+            stale_if_error_on = ["connect", "timeout", "connection-closed"]
             include_query = false
             content_types = ["image/*", "text/css"]
             extensions = ["jpg", "webp", "css"]
@@ -7462,6 +7504,14 @@ mod tests {
         assert_eq!(config.cache.default_status_ttl_secs, Some(15));
         assert_eq!(config.cache.stale_while_revalidate_secs, Some(30));
         assert_eq!(config.cache.stale_if_error_secs, Some(120));
+        assert_eq!(
+            config.cache.stale_if_error_on,
+            [
+                CacheStaleErrorKind::Connect,
+                CacheStaleErrorKind::Timeout,
+                CacheStaleErrorKind::ConnectionClosed
+            ]
+        );
         assert!(!config.cache.include_query);
         assert_eq!(
             config.cache.content_types,
@@ -7850,6 +7900,23 @@ mod tests {
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidCacheStaleIfErrorTtl { scope: "cache" })
+        );
+    }
+
+    #[test]
+    fn rejects_empty_cache_stale_if_error_on_when_error_stale_is_enabled() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            stale_if_error_secs = 30
+            stale_if_error_on = []
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::EmptyCacheStaleIfErrorOn { scope: "cache" })
         );
     }
 

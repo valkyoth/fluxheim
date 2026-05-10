@@ -62,6 +62,11 @@ internal cache implementation.
   `vhosts.routes.cache.stale_if_error_secs` add an explicit stale-if-error
   window to cache-participating responses. Pingora can then serve an expired
   stored object during upstream errors while the stale window is still valid.
+- `cache.stale_if_error_on`, `vhosts.cache.stale_if_error_on`, and
+  `vhosts.routes.cache.stale_if_error_on` can narrow that behavior to selected
+  upstream error classes such as `connect`, `timeout`, `read`, `write`,
+  `connection-closed`, `protocol`, `tls`, and `other`. The default includes all
+  classes for compatibility with the stale-if-error window.
 - `cache.stale_while_revalidate_secs`,
   `vhosts.cache.stale_while_revalidate_secs`, and
   `vhosts.routes.cache.stale_while_revalidate_secs` add an explicit

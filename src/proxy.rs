@@ -2065,8 +2065,14 @@ impl ProxyHttp for FluxProxy {
             .vhost_index
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         let vhost = state.vhost(vhost_index);
-        let error_is_upstream = error.map(|error| error.esource() == &ErrorSource::Upstream);
-        cache_should_serve_stale(selected_cache_config(vhost, ctx), error_is_upstream)
+        let event = match error {
+            Some(error) if error.esource() == &ErrorSource::Upstream => {
+                CacheStaleEvent::UpstreamError(cache_stale_error_kind(error))
+            }
+            Some(_) => CacheStaleEvent::OtherError,
+            None => CacheStaleEvent::Updating,
+        };
+        cache_should_serve_stale(selected_cache_config(vhost, ctx), event)
     }
 
     #[cfg(feature = "cache")]
@@ -2410,14 +2416,49 @@ fn cache_min_uses_allows_store(
 }
 
 #[cfg(feature = "cache")]
-fn cache_should_serve_stale(
-    cache: &crate::config::CacheConfig,
-    error_is_upstream: Option<bool>,
-) -> bool {
-    match error_is_upstream {
-        Some(true) => cache.stale_if_error_secs.is_some(),
-        Some(false) => false,
-        None => cache.stale_while_revalidate_secs.is_some(),
+fn cache_should_serve_stale(cache: &crate::config::CacheConfig, event: CacheStaleEvent) -> bool {
+    match event {
+        CacheStaleEvent::UpstreamError(kind) => {
+            cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)
+        }
+        CacheStaleEvent::OtherError => false,
+        CacheStaleEvent::Updating => cache.stale_while_revalidate_secs.is_some(),
+    }
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CacheStaleEvent {
+    Updating,
+    UpstreamError(crate::config::CacheStaleErrorKind),
+    OtherError,
+}
+
+#[cfg(feature = "cache")]
+fn cache_stale_error_kind(error: &Error) -> crate::config::CacheStaleErrorKind {
+    match error.etype() {
+        ErrorType::ConnectTimedout
+        | ErrorType::TLSHandshakeTimedout
+        | ErrorType::ReadTimedout
+        | ErrorType::WriteTimedout => crate::config::CacheStaleErrorKind::Timeout,
+        ErrorType::ConnectRefused
+        | ErrorType::ConnectNoRoute
+        | ErrorType::ConnectError
+        | ErrorType::SocketError
+        | ErrorType::ConnectProxyFailure => crate::config::CacheStaleErrorKind::Connect,
+        ErrorType::ReadError => crate::config::CacheStaleErrorKind::Read,
+        ErrorType::WriteError => crate::config::CacheStaleErrorKind::Write,
+        ErrorType::ConnectionClosed => crate::config::CacheStaleErrorKind::ConnectionClosed,
+        ErrorType::InvalidHTTPHeader
+        | ErrorType::H1Error
+        | ErrorType::H2Error
+        | ErrorType::H2Downgrade
+        | ErrorType::InvalidH2 => crate::config::CacheStaleErrorKind::Protocol,
+        ErrorType::TLSWantX509Lookup
+        | ErrorType::TLSHandshakeFailure
+        | ErrorType::InvalidCert
+        | ErrorType::HandshakeError => crate::config::CacheStaleErrorKind::Tls,
+        _ => crate::config::CacheStaleErrorKind::Other,
     }
 }
 
@@ -3436,17 +3477,18 @@ mod tests {
     use super::request_cache_bypass;
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
+    #[cfg(feature = "cache")]
+    use super::{
+        CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
+        cache_min_uses_allows_store, cache_request_participated, cache_should_serve_stale,
+        cache_status_header_value, cache_vary_policy, ignore_origin_cache_headers,
+        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
+        vary_request_hash,
+    };
     use super::{
         FluxProxy, count_response_body_chunk, http_peer_for_proxy, https_redirect_location,
         redirect_authority, request_body_chunk_limit_status, request_limit_status,
         route_redirect_location, route_rewritten_path_and_query,
-    };
-    #[cfg(feature = "cache")]
-    use super::{
-        MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl, cache_min_uses_allows_store,
-        cache_request_participated, cache_should_serve_stale, cache_status_header_value,
-        cache_vary_policy, ignore_origin_cache_headers, response_cache_admission_rejection,
-        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
 
     #[test]
@@ -5316,27 +5358,58 @@ mod tests {
     #[test]
     fn cache_stale_error_policy_requires_stale_if_error_window() {
         let default_cache = CacheConfig::default();
-        assert!(!cache_should_serve_stale(&default_cache, Some(true)));
+        assert!(!cache_should_serve_stale(
+            &default_cache,
+            CacheStaleEvent::UpstreamError(crate::config::CacheStaleErrorKind::Connect)
+        ));
 
         let cache = CacheConfig {
             stale_if_error_secs: Some(120),
             ..CacheConfig::default()
         };
-        assert!(cache_should_serve_stale(&cache, Some(true)));
-        assert!(!cache_should_serve_stale(&cache, Some(false)));
+        assert!(cache_should_serve_stale(
+            &cache,
+            CacheStaleEvent::UpstreamError(crate::config::CacheStaleErrorKind::Connect)
+        ));
+        assert!(!cache_should_serve_stale(
+            &cache,
+            CacheStaleEvent::OtherError
+        ));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_stale_error_policy_filters_upstream_error_kinds() {
+        let cache = CacheConfig {
+            stale_if_error_secs: Some(120),
+            stale_if_error_on: vec![crate::config::CacheStaleErrorKind::Timeout],
+            ..CacheConfig::default()
+        };
+
+        assert!(cache_should_serve_stale(
+            &cache,
+            CacheStaleEvent::UpstreamError(crate::config::CacheStaleErrorKind::Timeout)
+        ));
+        assert!(!cache_should_serve_stale(
+            &cache,
+            CacheStaleEvent::UpstreamError(crate::config::CacheStaleErrorKind::Connect)
+        ));
     }
 
     #[cfg(feature = "cache")]
     #[test]
     fn cache_stale_updating_policy_requires_stale_while_revalidate_window() {
         let default_cache = CacheConfig::default();
-        assert!(!cache_should_serve_stale(&default_cache, None));
+        assert!(!cache_should_serve_stale(
+            &default_cache,
+            CacheStaleEvent::Updating
+        ));
 
         let cache = CacheConfig {
             stale_while_revalidate_secs: Some(30),
             ..CacheConfig::default()
         };
-        assert!(cache_should_serve_stale(&cache, None));
+        assert!(cache_should_serve_stale(&cache, CacheStaleEvent::Updating));
     }
 
     #[cfg(feature = "cache")]
