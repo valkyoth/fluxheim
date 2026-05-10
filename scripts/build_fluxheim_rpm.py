@@ -284,9 +284,12 @@ install -Dm0644 packaging/default/fluxheim.toml "${INSTALL_ROOT}/etc/fluxheim/fl
 install -Dm0644 packaging/default/index.html "${INSTALL_ROOT}/srv/fluxheim/index.html"
 install -Dm0644 packaging/rpm/fluxheim.tmpfiles "${INSTALL_ROOT}/usr/lib/tmpfiles.d/fluxheim.conf"
 install -Dm0644 packaging/systemd/fluxheim.service "${INSTALL_ROOT}/usr/lib/systemd/system/fluxheim.service"
+install -Dm0644 packaging/systemd/fluxheim-acme.service "${INSTALL_ROOT}/usr/lib/systemd/system/fluxheim-acme.service"
+install -Dm0644 packaging/systemd/fluxheim-acme.timer "${INSTALL_ROOT}/usr/lib/systemd/system/fluxheim-acme.timer"
 install -Dm0644 packaging/systemd/fluxheim.env "${INSTALL_ROOT}/etc/sysconfig/fluxheim"
 install -Dm0644 packaging/systemd/fluxheim.sysusers "${INSTALL_ROOT}/usr/lib/sysusers.d/fluxheim.conf"
 install -Dm0644 packaging/systemd/actalis-eab.conf "${INSTALL_ROOT}/usr/share/doc/fluxheim/systemd/actalis-eab.conf"
+install -Dm0644 packaging/systemd/actalis-eab-acme.conf "${INSTALL_ROOT}/usr/share/doc/fluxheim/systemd/actalis-eab-acme.conf"
 install -Dm0644 LICENSE "${INSTALL_ROOT}/usr/share/licenses/fluxheim/LICENSE"
 for doc in README.md CHANGELOG.md ROADMAP.md SECURITY.md; do
     if [ -f "$doc" ]; then
@@ -368,6 +371,8 @@ cp -a "${INSTALL_ROOT}/." %{buildroot}/
 /usr/lib/tmpfiles.d/fluxheim.conf
 /usr/lib/sysusers.d/fluxheim.conf
 /usr/lib/systemd/system/fluxheim.service
+/usr/lib/systemd/system/fluxheim-acme.service
+/usr/lib/systemd/system/fluxheim-acme.timer
 %dir /etc/fluxheim
 %dir /etc/fluxheim/conf.d
 %dir /etc/fluxheim/tls

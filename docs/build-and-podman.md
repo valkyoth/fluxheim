@@ -439,8 +439,8 @@ name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
 
 [tls.acme.issuers.eab]
-key_id_file = "/run/secrets/actalis-eab-kid"
-hmac_key_file = "/run/secrets/actalis-eab-hmac-key"
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
 ```
 
 For container secret files, mount the files read-only. If the host tree is

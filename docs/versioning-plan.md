@@ -346,14 +346,17 @@ Stable scope:
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
-  - Add a `fluxheim-acme` command or binary that reuses the same ACME engine
-    for `init`, due-only renewal, and forced renewal.
+  - Use the existing `fluxheim acme-init` and `fluxheim acme-renew` commands as
+    the first companion interface; split to a dedicated `fluxheim-acme` binary
+    only if packaging or operator ergonomics require it later.
   - Ship `fluxheim-acme.service` as a one-shot unit and
     `fluxheim-acme.timer` for scheduled renewal. The main `fluxheim.service`
     remains the traffic-serving webserver and should not spawn long-lived child
     processes itself.
   - Run the companion service as the same runtime user as Fluxheim by default,
-    using systemd credentials or container secrets for EAB material.
+    using systemd credentials or container secrets for EAB material. Prefer
+    `key_id_credential` and `hmac_key_credential` config fields so the same
+    TOML works under the web service, ACME service, and container secrets.
   - Share only the configured ACME storage directory with the webserver. The
     webserver continues to serve HTTP-01 challenge files and to reload
     certificate handles after files change.

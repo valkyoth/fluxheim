@@ -22,6 +22,9 @@ Source3:        fluxheim.service
 Source4:        fluxheim.env
 Source5:        fluxheim.sysusers
 Source6:        actalis-eab.conf
+Source7:        fluxheim-acme.service
+Source8:        fluxheim-acme.timer
+Source9:        actalis-eab-acme.conf
 
 ExclusiveArch:  x86_64 aarch64
 
@@ -81,6 +84,9 @@ install -Dm0644 %{SOURCE3} %{buildroot}%{_unitdir}/fluxheim.service
 install -Dm0644 %{SOURCE4} %{buildroot}%{_sysconfdir}/sysconfig/fluxheim
 install -Dm0644 %{SOURCE5} %{buildroot}%{_sysusersdir}/fluxheim.conf
 install -Dm0644 %{SOURCE6} %{buildroot}%{_docdir}/fluxheim/systemd/actalis-eab.conf
+install -Dm0644 %{SOURCE7} %{buildroot}%{_unitdir}/fluxheim-acme.service
+install -Dm0644 %{SOURCE8} %{buildroot}%{_unitdir}/fluxheim-acme.timer
+install -Dm0644 %{SOURCE9} %{buildroot}%{_docdir}/fluxheim/systemd/actalis-eab-acme.conf
 
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/conf.d
 install -d -m0755 %{buildroot}%{_sysconfdir}/fluxheim/tls
@@ -123,10 +129,13 @@ fi
 %license LICENSE
 %doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_1.1.0.md docs examples
 %{_docdir}/fluxheim/systemd/actalis-eab.conf
+%{_docdir}/fluxheim/systemd/actalis-eab-acme.conf
 %{_bindir}/fluxheim
 %{_tmpfilesdir}/fluxheim.conf
 %{_sysusersdir}/fluxheim.conf
 %{_unitdir}/fluxheim.service
+%{_unitdir}/fluxheim-acme.service
+%{_unitdir}/fluxheim-acme.timer
 %dir %{_sysconfdir}/fluxheim
 %dir %{_sysconfdir}/fluxheim/conf.d
 %dir %{_sysconfdir}/fluxheim/tls

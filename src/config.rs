@@ -2269,9 +2269,13 @@ pub struct AcmeExternalAccountBindingConfig {
     #[serde(default)]
     pub key_id_file: Option<PathBuf>,
     #[serde(default)]
+    pub key_id_credential: Option<String>,
+    #[serde(default)]
     pub hmac_key_env: Option<String>,
     #[serde(default)]
     pub hmac_key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub hmac_key_credential: Option<String>,
 }
 
 impl AcmeExternalAccountBindingConfig {
@@ -2294,12 +2298,14 @@ impl AcmeExternalAccountBindingConfig {
             "key_id",
             self.key_id_env.as_deref(),
             self.key_id_file.as_ref(),
+            self.key_id_credential.as_deref(),
         )?;
         validate_secret_source(
             issuer,
             "hmac_key",
             self.hmac_key_env.as_deref(),
             self.hmac_key_file.as_ref(),
+            self.hmac_key_credential.as_deref(),
         )
     }
 }
@@ -3525,6 +3531,11 @@ pub enum ConfigError {
         issuer: String,
         field: &'static str,
     },
+    InvalidAcmeEabCredentialName {
+        issuer: String,
+        field: &'static str,
+        credential: String,
+    },
     ConflictingAcmeEabSecretSource {
         issuer: String,
         field: &'static str,
@@ -3849,11 +3860,19 @@ impl Display for ConfigError {
             ),
             Self::InvalidAcmeEabSecretSource { issuer, field } => write!(
                 formatter,
-                "ACME issuer {issuer:?} EAB {field} must be read from an env var or file"
+                "ACME issuer {issuer:?} EAB {field} must be read from an env var, file, or credential"
+            ),
+            Self::InvalidAcmeEabCredentialName {
+                issuer,
+                field,
+                credential,
+            } => write!(
+                formatter,
+                "ACME issuer {issuer:?} EAB {field} credential name {credential:?} must be a safe credential name"
             ),
             Self::ConflictingAcmeEabSecretSource { issuer, field } => write!(
                 formatter,
-                "ACME issuer {issuer:?} EAB {field} cannot use both env var and file"
+                "ACME issuer {issuer:?} EAB {field} cannot use more than one secret source"
             ),
             Self::VhostAcmeWithoutGlobalAcme { scope } => {
                 write!(formatter, "{scope}.acme.enabled requires tls.acme.enabled")
@@ -4166,8 +4185,10 @@ fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_ACTALIS_EAB_KID".to_owned()),
                 key_id_file: None,
+                key_id_credential: None,
                 hmac_key_env: Some("FLUXHEIM_ACTALIS_EAB_HMAC_KEY".to_owned()),
                 hmac_key_file: None,
+                hmac_key_credential: None,
             }),
         },
         AcmeIssuerConfig {
@@ -4176,8 +4197,10 @@ fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_GTS_EAB_KID".to_owned()),
                 key_id_file: None,
+                key_id_credential: None,
                 hmac_key_env: Some("FLUXHEIM_GTS_EAB_HMAC_KEY".to_owned()),
                 hmac_key_file: None,
+                hmac_key_credential: None,
             }),
         },
         AcmeIssuerConfig {
@@ -4186,8 +4209,10 @@ fn default_acme_issuers() -> Vec<AcmeIssuerConfig> {
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: Some("FLUXHEIM_GTS_STAGING_EAB_KID".to_owned()),
                 key_id_file: None,
+                key_id_credential: None,
                 hmac_key_env: Some("FLUXHEIM_GTS_STAGING_EAB_HMAC_KEY".to_owned()),
                 hmac_key_file: None,
+                hmac_key_credential: None,
             }),
         },
     ]
@@ -4578,24 +4603,46 @@ fn validate_secret_source(
     field: &'static str,
     env: Option<&str>,
     file: Option<&PathBuf>,
+    credential: Option<&str>,
 ) -> Result<(), ConfigError> {
     let env = env.map(str::trim).filter(|value| !value.is_empty());
     let file = file.filter(|path| !path.as_os_str().is_empty());
+    let credential = credential.map(str::trim).filter(|value| !value.is_empty());
     let file_field = format!("tls.acme.issuers.{issuer}.eab.{field}_file");
     validate_path(file_field.clone(), file.map(PathBuf::as_path))?;
     validate_non_world_writable_parent(file_field, file.map(PathBuf::as_path))?;
 
-    match (env, file) {
-        (Some(_), None) | (None, Some(_)) => Ok(()),
-        (None, None) => Err(ConfigError::InvalidAcmeEabSecretSource {
+    if let Some(credential) = credential
+        && !valid_credential_name(credential)
+    {
+        return Err(ConfigError::InvalidAcmeEabCredentialName {
+            issuer: issuer.to_owned(),
+            field,
+            credential: credential.to_owned(),
+        });
+    }
+
+    match (env.is_some(), file.is_some(), credential.is_some()) {
+        (true, false, false) | (false, true, false) | (false, false, true) => Ok(()),
+        (false, false, false) => Err(ConfigError::InvalidAcmeEabSecretSource {
             issuer: issuer.to_owned(),
             field,
         }),
-        (Some(_), Some(_)) => Err(ConfigError::ConflictingAcmeEabSecretSource {
+        _ => Err(ConfigError::ConflictingAcmeEabSecretSource {
             issuer: issuer.to_owned(),
             field,
         }),
     }
+}
+
+fn valid_credential_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && !value.starts_with('.')
+        && !value.contains("..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn validate_optional_env(field: &'static str, env: Option<&str>) -> Result<(), ConfigError> {
@@ -6345,6 +6392,67 @@ mod tests {
             Err(ConfigError::UnsafePath { field, .. })
                 if field == "tls.acme.issuers.actalis.eab.key_id_file"
         ));
+    }
+
+    #[test]
+    fn accepts_acme_eab_credential_sources() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.acme]
+            enabled = true
+            storage = "/var/lib/fluxheim/acme"
+            contact_email = "admin@example.test"
+            default_issuer = "actalis"
+
+            [[tls.acme.issuers]]
+            name = "actalis"
+            directory_url = "https://acme-api.actalis.com/acme/directory"
+
+            [tls.acme.issuers.eab]
+            key_id_credential = "actalis-eab-kid"
+            hmac_key_credential = "actalis-eab-hmac-key"
+            "#,
+        )
+        .unwrap();
+
+        let eab = config.tls.acme.issuers[0].eab.as_ref().unwrap();
+        assert_eq!(eab.key_id_credential.as_deref(), Some("actalis-eab-kid"));
+        assert_eq!(
+            eab.hmac_key_credential.as_deref(),
+            Some("actalis-eab-hmac-key")
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_unsafe_acme_eab_credential_source() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.acme]
+            enabled = true
+            storage = "/var/lib/fluxheim/acme"
+            contact_email = "admin@example.test"
+            default_issuer = "actalis"
+
+            [[tls.acme.issuers]]
+            name = "actalis"
+            directory_url = "https://acme-api.actalis.com/acme/directory"
+
+            [tls.acme.issuers.eab]
+            key_id_credential = "../actalis-eab-kid"
+            hmac_key_credential = "actalis-eab-hmac-key"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidAcmeEabCredentialName {
+                issuer: "actalis".to_owned(),
+                field: "key_id",
+                credential: "../actalis-eab-kid".to_owned(),
+            })
+        );
     }
 
     #[test]

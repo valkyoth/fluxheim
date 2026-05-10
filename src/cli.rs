@@ -491,9 +491,7 @@ fn run_acme_init_command(options: AcmeInitOptions) -> Result<(), Box<dyn Error +
     }
     println!("next: add [vhosts.tls.acme] to each vhost that should receive a managed certificate");
     println!("next: run `systemctl daemon-reload` if a systemd drop-in was created");
-    println!(
-        "next: run `fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew` for first issuance"
-    );
+    println!("next: run `fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew`");
     Ok(())
 }
 
@@ -600,8 +598,14 @@ struct AcmeInitIssuerToml {
 #[cfg(feature = "acme-client")]
 #[derive(serde::Serialize)]
 struct AcmeInitEabToml {
-    key_id_file: String,
-    hmac_key_file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_id_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_id_credential: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hmac_key_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hmac_key_credential: Option<String>,
 }
 
 #[cfg(feature = "acme-client")]
@@ -613,27 +617,30 @@ fn build_acme_init_toml(
     use_systemd_credentials: bool,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let issuers = if issuer.requires_eab() {
-        let (key_id_file, hmac_key_file) = if use_systemd_credentials {
-            (
-                "/run/credentials/fluxheim.service/actalis-eab-kid".to_owned(),
-                "/run/credentials/fluxheim.service/actalis-eab-hmac-key".to_owned(),
-            )
+        let eab = if use_systemd_credentials {
+            AcmeInitEabToml {
+                key_id_file: None,
+                key_id_credential: Some("actalis-eab-kid".to_owned()),
+                hmac_key_file: None,
+                hmac_key_credential: Some("actalis-eab-hmac-key".to_owned()),
+            }
         } else {
-            (
-                secrets_dir.join("actalis-eab-kid").display().to_string(),
-                secrets_dir
-                    .join("actalis-eab-hmac-key")
-                    .display()
-                    .to_string(),
-            )
+            AcmeInitEabToml {
+                key_id_file: Some(secrets_dir.join("actalis-eab-kid").display().to_string()),
+                key_id_credential: None,
+                hmac_key_file: Some(
+                    secrets_dir
+                        .join("actalis-eab-hmac-key")
+                        .display()
+                        .to_string(),
+                ),
+                hmac_key_credential: None,
+            }
         };
         vec![AcmeInitIssuerToml {
             name: issuer.name().to_owned(),
             directory_url: issuer.directory_url().to_owned(),
-            eab: AcmeInitEabToml {
-                key_id_file,
-                hmac_key_file,
-            },
+            eab,
         }]
     } else {
         Vec::new()
@@ -1111,9 +1118,8 @@ mod tests {
         assert!(systemd_dir.join("actalis-eab.conf").exists());
         let config = fs::read_to_string(output).unwrap();
         assert!(config.contains("default_issuer = \"actalis\""));
-        assert!(
-            config.contains("key_id_file = \"/run/credentials/fluxheim.service/actalis-eab-kid\"")
-        );
+        assert!(config.contains("key_id_credential = \"actalis-eab-kid\""));
+        assert!(config.contains("hmac_key_credential = \"actalis-eab-hmac-key\""));
     }
 
     #[test]

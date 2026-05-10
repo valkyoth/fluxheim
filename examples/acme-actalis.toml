@@ -27,8 +27,8 @@ name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
 
 [tls.acme.issuers.eab]
-key_id_file = "/run/credentials/fluxheim.service/actalis-eab-kid"
-hmac_key_file = "/run/credentials/fluxheim.service/actalis-eab-hmac-key"
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
 
 [[vhosts]]
 name = "actalis.example.test"

@@ -1386,12 +1386,14 @@ fn load_external_account_binding_from_config(
             "key_id",
             eab.key_id_env.as_deref(),
             eab.key_id_file.as_deref(),
+            eab.key_id_credential.as_deref(),
         )?,
         hmac_key: load_eab_secret(
             issuer,
             "hmac_key",
             eab.hmac_key_env.as_deref(),
             eab.hmac_key_file.as_deref(),
+            eab.hmac_key_credential.as_deref(),
         )?,
     })
 }
@@ -1944,17 +1946,24 @@ fn load_eab_secret(
     field: &'static str,
     env_name: Option<&str>,
     file_path: Option<&Path>,
+    credential_name: Option<&str>,
 ) -> Result<Zeroizing<String>, AcmeSecretLoadError> {
-    let value = match (env_name, file_path) {
-        (Some(env_name), None) => Zeroizing::new(std::env::var(env_name).map_err(|error| {
-            AcmeSecretLoadError::EnvRead {
-                issuer: issuer.to_owned(),
-                field,
-                env: env_name.to_owned(),
-                message: error.to_string(),
-            }
-        })?),
-        (None, Some(path)) => read_eab_secret_file(issuer, field, path)?,
+    let value = match (env_name, file_path, credential_name) {
+        (Some(env_name), None, None) => {
+            Zeroizing::new(std::env::var(env_name).map_err(|error| {
+                AcmeSecretLoadError::EnvRead {
+                    issuer: issuer.to_owned(),
+                    field,
+                    env: env_name.to_owned(),
+                    message: error.to_string(),
+                }
+            })?)
+        }
+        (None, Some(path), None) => read_eab_secret_file(issuer, field, path)?,
+        (None, None, Some(credential_name)) => {
+            let path = resolve_eab_credential_path(credential_name);
+            read_eab_secret_file(issuer, field, &path)?
+        }
         _ => {
             return Err(AcmeSecretLoadError::InvalidSecretSource {
                 issuer: issuer.to_owned(),
@@ -1964,6 +1973,13 @@ fn load_eab_secret(
     };
 
     normalize_eab_secret(issuer, field, value)
+}
+
+fn resolve_eab_credential_path(credential_name: &str) -> PathBuf {
+    std::env::var_os("CREDENTIALS_DIRECTORY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/secrets"))
+        .join(credential_name)
 }
 
 fn read_eab_secret_file(
@@ -3297,8 +3313,10 @@ mod tests {
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: None,
                 key_id_file: Some(key_id.to_path_buf()),
+                key_id_credential: None,
                 hmac_key_env: None,
                 hmac_key_file: Some(hmac_key.to_path_buf()),
+                hmac_key_credential: None,
             }),
         }
     }

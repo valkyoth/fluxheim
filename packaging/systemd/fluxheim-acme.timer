@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Fluxheim ACME renewal periodically
+Documentation=https://github.com/valkyoth/fluxheim
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=12h
+RandomizedDelaySec=30min
+Persistent=true
+Unit=fluxheim-acme.service
+
+[Install]
+WantedBy=timers.target

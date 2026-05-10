@@ -1094,8 +1094,10 @@ mod tests {
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: None,
                 key_id_file: Some(key_id.clone()),
+                key_id_credential: None,
                 hmac_key_env: None,
                 hmac_key_file: Some(hmac.clone()),
+                hmac_key_credential: None,
             }),
         }];
 
@@ -1134,8 +1136,10 @@ mod tests {
             eab: Some(AcmeExternalAccountBindingConfig {
                 key_id_env: None,
                 key_id_file: Some(key_id.clone()),
+                key_id_credential: None,
                 hmac_key_env: Some("FLUXHEIM_ACTALIS_EAB_HMAC_KEY".to_owned()),
                 hmac_key_file: None,
+                hmac_key_credential: None,
             }),
         }];
 

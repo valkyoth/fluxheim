@@ -123,6 +123,40 @@ sudo systemctl restart fluxheim.service
 Fluxheim exits on `SIGTERM`; the unit uses `TimeoutStopSec=30s` so the process
 has time to drain and shut down cleanly before systemd escalates.
 
+## ACME Timer
+
+RPM packages install a one-shot renewal unit and timer:
+
+- `fluxheim-acme.service`
+- `fluxheim-acme.timer`
+
+The service runs `fluxheim --config ${FLUXHEIM_CONFIG} acme-renew` as the same
+`fluxheim` user, with the same state/cache/log directories as the web service.
+It does not bind ports and does not receive `CAP_NET_BIND_SERVICE`.
+
+For issuers with External Account Binding, install the ACME credential drop-in
+for the ACME unit and use credential names in the TOML:
+
+```bash
+sudo install -d /etc/systemd/system/fluxheim-acme.service.d
+sudo cp /usr/share/doc/fluxheim/systemd/actalis-eab-acme.conf \
+  /etc/systemd/system/fluxheim-acme.service.d/actalis-eab.conf
+sudo systemctl daemon-reload
+```
+
+```toml
+[tls.acme.issuers.eab]
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
+```
+
+Enable scheduled renewal:
+
+```bash
+sudo systemctl enable --now fluxheim-acme.timer
+sudo systemctl start fluxheim-acme.service
+```
+
 ## Sandbox Overrides
 
 The default unit is strict enough for normal static/proxy deployments. If a

@@ -85,7 +85,9 @@ LoadCredential=actalis-eab-kid:/etc/fluxheim/secrets/actalis-eab-kid.cred
 LoadCredential=actalis-eab-hmac-key:/etc/fluxheim/secrets/actalis-eab-hmac-key.cred
 ```
 
-Matching Fluxheim config:
+Matching Fluxheim config. Credential names resolve below
+`$CREDENTIALS_DIRECTORY` when Fluxheim is launched by systemd, and below
+`/run/secrets` for normal container-style secret mounts:
 
 ```toml
 [[tls.acme.issuers]]
@@ -93,8 +95,8 @@ name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
 
 [tls.acme.issuers.eab]
-key_id_file = "/run/credentials/fluxheim.service/actalis-eab-kid"
-hmac_key_file = "/run/credentials/fluxheim.service/actalis-eab-hmac-key"
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
 ```
 
 Built-in issuer names:
@@ -117,8 +119,8 @@ mounted files:
 
 ```toml
 [tls.acme.issuers.eab]
-key_id_file = "/run/secrets/actalis-eab-kid"
-hmac_key_file = "/run/secrets/actalis-eab-hmac-key"
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
 ```
 
 Environment variables remain useful for local testing, but they should not be
@@ -244,7 +246,8 @@ sudo systemctl daemon-reload
 sudo systemctl restart fluxheim
 ```
 
-Then point the issuer EAB paths at systemd's mounted credential directory:
+Then point the issuer EAB sources at credential names. The same TOML works for
+`fluxheim.service`, `fluxheim-acme.service`, and container secrets:
 
 ```toml
 [[tls.acme.issuers]]
@@ -252,8 +255,8 @@ name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
 
 [tls.acme.issuers.eab]
-key_id_file = "/run/credentials/fluxheim.service/actalis-eab-kid"
-hmac_key_file = "/run/credentials/fluxheim.service/actalis-eab-hmac-key"
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
 ```
 
 ## Renewal Queue Planning
@@ -288,16 +291,28 @@ resolver or callback so new handshakes can use the freshly installed files
 without restarting. If a TLS backend or listener shape cannot provide a reload
 handle, Fluxheim logs that a restart or process reload is required.
 
-Future production packaging should add a companion ACME operating mode while
-keeping the integrated background worker for simple installs. In that model,
-`fluxheim.service` stays focused on serving traffic and challenge files, while a
-one-shot `fluxheim-acme.service` and scheduled `fluxheim-acme.timer` run
-renewals as the Fluxheim runtime user. The companion command should reuse the
-same ACME engine and storage layout as `fluxheim acme-renew`, use systemd
-credentials or container secrets for EAB material, and write certificates below
-the configured `tls.acme.storage` so the running webserver can reload them
-without a restart. Do not make the webserver spawn a long-lived helper process;
-let the service manager or container orchestrator supervise the companion.
+Production packages include a companion ACME operating mode while keeping the
+integrated background worker for simple installs. In this model,
+`fluxheim.service` stays focused on serving traffic and challenge files, while
+the one-shot `fluxheim-acme.service` and scheduled `fluxheim-acme.timer` run
+renewals as the Fluxheim runtime user. The companion command reuses the same
+ACME engine and storage layout as `fluxheim acme-renew`, uses systemd
+credentials or container secrets for EAB material, and writes certificates below
+the configured `tls.acme.storage`.
+
+Enable the packaged timer after ACME config and credentials are installed:
+
+```bash
+sudo install -d /etc/systemd/system/fluxheim-acme.service.d
+sudo cp /usr/share/doc/fluxheim/systemd/actalis-eab-acme.conf \
+  /etc/systemd/system/fluxheim-acme.service.d/actalis-eab.conf
+sudo systemctl daemon-reload
+sudo systemctl enable --now fluxheim-acme.timer
+sudo systemctl start fluxheim-acme.service
+```
+
+Do not make the webserver spawn a long-lived helper process; let the service
+manager or container orchestrator supervise the companion.
 
 ## Runtime Crate Candidates
 

@@ -1,0 +1,45 @@
+[Unit]
+Description=Fluxheim ACME certificate renewal
+Documentation=https://github.com/valkyoth/fluxheim
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fluxheim
+Group=fluxheim
+Environment=FLUXHEIM_CONFIG=/etc/fluxheim/fluxheim.toml
+EnvironmentFile=-/etc/sysconfig/fluxheim
+ExecStart=/usr/bin/fluxheim --config ${FLUXHEIM_CONFIG} acme-renew
+RuntimeDirectory=fluxheim
+RuntimeDirectoryMode=0750
+StateDirectory=fluxheim
+StateDirectoryMode=0750
+CacheDirectory=fluxheim
+CacheDirectoryMode=0750
+LogsDirectory=fluxheim
+LogsDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+ReadWritePaths=/run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /var/log/fluxheim
+ReadOnlyPaths=/etc/fluxheim /srv/fluxheim
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @network-io
+SystemCallErrorNumber=EPERM

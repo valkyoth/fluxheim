@@ -628,10 +628,11 @@ with file-backed External Account Binding secrets.
 Built-in issuer names include `letsencrypt`, `letsencrypt-staging`,
 `actalis`, `google-trust-services`, and `google-trust-services-staging`.
 Actalis and Google Trust Services require External Account Binding. Their EAB
-secret sources are configured through environment variables or files.
-File-backed secrets are preferred for production because they work with systemd
-credentials, Docker/Podman secrets, and Kubernetes secret volumes without
-exposing values in process environments or container metadata.
+secret sources are configured through environment variables, files, or
+credential names. Credential names are preferred for production because the same
+config works with systemd credentials, Docker/Podman secrets, and Kubernetes
+secret volumes without exposing values in process environments or container
+metadata.
 
 Example with systemd credentials:
 
@@ -641,8 +642,8 @@ name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
 
 [tls.acme.issuers.eab]
-key_id_file = "/run/credentials/fluxheim.service/actalis-eab-kid"
-hmac_key_file = "/run/credentials/fluxheim.service/actalis-eab-hmac-key"
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
 ```
 
 Example with container secrets:
@@ -653,8 +654,8 @@ name = "actalis"
 directory_url = "https://acme-api.actalis.com/acme/directory"
 
 [tls.acme.issuers.eab]
-key_id_file = "/run/secrets/actalis-eab-kid"
-hmac_key_file = "/run/secrets/actalis-eab-hmac-key"
+key_id_credential = "actalis-eab-kid"
+hmac_key_credential = "actalis-eab-hmac-key"
 ```
 
 Google Trust Services production uses
