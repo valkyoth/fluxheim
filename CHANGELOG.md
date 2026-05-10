@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
   response headers are present, while still delivering the response normally.
 - Cache policies can now bypass lookup and storage when configured request
   headers such as `Cookie` or `Authorization` are present.
+- Cache policies can now bypass lookup and storage when configured raw query
+  parameter names such as `preview` or `token` are present.
 - Cache policies can now add safe request headers such as `Accept-Encoding` to
   the cache variance key when an origin does not emit the needed `Vary` header.
 - Cache policies can now set an operator-controlled `key_namespace` to isolate

@@ -163,6 +163,7 @@ status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 bypass_request_headers = ["cookie", "authorization"]
+bypass_query_params = ["preview", "token"]
 vary_request_headers = ["accept-encoding"]
 key_namespace = "chat-assets-v1"
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }

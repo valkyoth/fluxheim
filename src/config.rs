@@ -3179,6 +3179,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub bypass_request_headers: Vec<String>,
     #[serde(default)]
+    pub bypass_query_params: Vec<String>,
+    #[serde(default)]
     pub vary_request_headers: Vec<String>,
     #[serde(default)]
     pub ignore_origin_cache_headers: bool,
@@ -3218,6 +3220,7 @@ impl Default for CacheConfig {
             hide_response_headers: Vec::new(),
             no_store_response_headers: Vec::new(),
             bypass_request_headers: Vec::new(),
+            bypass_query_params: Vec::new(),
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
             key_namespace: None,
@@ -3258,6 +3261,9 @@ impl CacheConfig {
         }
         for header in &self.bypass_request_headers {
             validate_header_name(scope, header)?;
+        }
+        for param in &self.bypass_query_params {
+            validate_cache_query_param(scope, param)?;
         }
         for header in &self.vary_request_headers {
             validate_header_name(scope, header)?;
@@ -3371,6 +3377,21 @@ fn cache_sensitive_request_header(header: &str) -> bool {
         header.to_ascii_lowercase().as_str(),
         "authorization" | "cookie" | "proxy-authorization"
     )
+}
+
+fn validate_cache_query_param(scope: &'static str, param: &str) -> Result<(), ConfigError> {
+    if param.is_empty()
+        || param.len() > 128
+        || param.chars().any(|ch| {
+            ch.is_control() || ch.is_whitespace() || matches!(ch, '&' | '=' | '#' | '?' | ';')
+        })
+    {
+        return Err(ConfigError::InvalidCacheBypassQueryParam {
+            scope,
+            param: param.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn validate_cache_key_namespace(scope: &'static str, namespace: &str) -> Result<(), ConfigError> {
@@ -3888,6 +3909,10 @@ pub enum ConfigError {
     InvalidCacheDefaultStatusTtl {
         scope: &'static str,
     },
+    InvalidCacheBypassQueryParam {
+        scope: &'static str,
+        param: String,
+    },
     InvalidCacheStaleIfErrorTtl {
         scope: &'static str,
     },
@@ -4297,6 +4322,10 @@ impl Display for ConfigError {
                     "{scope}.default_status_ttl_secs must be greater than zero"
                 )
             }
+            Self::InvalidCacheBypassQueryParam { scope, param } => write!(
+                formatter,
+                "{scope}.bypass_query_params must contain raw query parameter names without whitespace, controls, '&', '=', '#', '?', or ';', got {param:?}"
+            ),
             Self::InvalidCacheStaleIfErrorTtl { scope } => {
                 write!(
                     formatter,
@@ -7131,6 +7160,7 @@ mod tests {
             hide_response_headers = ["set-cookie"]
             no_store_response_headers = ["x-fluxheim-no-store"]
             bypass_request_headers = ["cookie", "authorization"]
+            bypass_query_params = ["preview", "token"]
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
             key_namespace = "repoheim-assets-v1"
@@ -7177,6 +7207,10 @@ mod tests {
         assert_eq!(
             config.cache.bypass_request_headers,
             ["cookie".to_owned(), "authorization".to_owned()]
+        );
+        assert_eq!(
+            config.cache.bypass_query_params,
+            ["preview".to_owned(), "token".to_owned()]
         );
         assert_eq!(
             config.cache.vary_request_headers,
@@ -7299,6 +7333,27 @@ mod tests {
                 name: "bad header".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_bypass_query_param() {
+        for param in ["", "bad param", "token=value", "a&b", "a?b"] {
+            let config: Config = toml::from_str(&format!(
+                r#"
+                [cache]
+                bypass_query_params = [{param:?}]
+                "#,
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.validate(),
+                Err(ConfigError::InvalidCacheBypassQueryParam {
+                    scope: "cache",
+                    param: param.to_owned()
+                })
+            );
+        }
     }
 
     #[test]

@@ -457,6 +457,7 @@ status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 bypass_request_headers = ["cookie", "authorization"]
+bypass_query_params = ["preview", "token"]
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
@@ -509,6 +510,11 @@ listed request header is present. Use it on routes where a header such as
 `Cookie` or `Authorization` changes the upstream response but should not become
 part of the shared cache identity. The default is empty so explicit static
 asset routes can still cache browser requests that carry unrelated cookies.
+`bypass_query_params` disables both cache lookup and cache storage when the raw
+request query string contains any listed parameter name. Matching is exact on
+the raw key before `=`, so `preview=true` matches `preview`, while
+`previewed=true` does not. Use it for preview, token, or other app-specific
+query switches that make a response unsafe to share.
 `vary_request_headers` adds safe request headers to the cache variance key even
 when the origin does not emit a matching `Vary` header. Use this for negotiated
 static assets, for example `Accept-Encoding`. Sensitive request-specific

@@ -2886,11 +2886,30 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
     {
         return true;
     }
+    if request
+        .uri
+        .query()
+        .is_some_and(|query| query_matches_cache_bypass_param(query, &cache.bypass_query_params))
+    {
+        return true;
+    }
 
     crate::cache_headers::request_values_force_cache_refresh(
         request_header_values(request, "cache-control"),
         request_header_values(request, "pragma"),
     )
+}
+
+#[cfg(feature = "cache")]
+fn query_matches_cache_bypass_param(query: &str, configured_params: &[String]) -> bool {
+    !configured_params.is_empty()
+        && query.split('&').any(|part| {
+            let name = part.split_once('=').map(|(name, _)| name).unwrap_or(part);
+            !name.is_empty()
+                && configured_params
+                    .iter()
+                    .any(|configured| configured == name)
+        })
 }
 
 #[cfg(feature = "cache")]
@@ -4972,6 +4991,33 @@ mod tests {
             .insert_header("authorization", "Bearer secret")
             .unwrap();
         assert!(request_cache_bypass(&request, &cache));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_configured_query_params() {
+        let cache = CacheConfig {
+            bypass_query_params: vec!["preview".to_owned(), "token".to_owned()],
+            ..CacheConfig::default()
+        };
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1", None).unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1&preview=true", None)
+                .unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?token", None).unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?previewed=true", None)
+                .unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
     }
 
     #[cfg(feature = "cache")]
