@@ -181,7 +181,9 @@ internal cache implementation.
   memory and disk purge remove every stored variant for that primary identity.
   Purge responses echo the cache `scope` (`vhost` or `route`), normalized host,
   method, path, and optional query for each requested identity so operators can
-  audit bulk purges without decoding cache keys.
+  audit purges without decoding cache keys. Single purge responses and each
+  bulk result include `not_purged`, `memory_not_purged`, and `disk_not_purged`
+  booleans alongside the corresponding purged booleans.
   `POST /_fluxheim/cache/purge-bulk` invalidates multiple identities that share
   the same host, method, vhost, optional route, and optional original URL query.
   Bulk purge responses echo the cache `scope` and optional `route`, and include

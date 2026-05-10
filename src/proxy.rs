@@ -390,6 +390,18 @@ impl CachePurgeResult {
     pub fn purged(&self) -> bool {
         self.memory_purged || self.disk_purged
     }
+
+    pub fn not_purged(&self) -> bool {
+        !self.purged()
+    }
+
+    pub fn memory_not_purged(&self) -> bool {
+        !self.memory_purged
+    }
+
+    pub fn disk_not_purged(&self) -> bool {
+        !self.disk_purged
+    }
 }
 
 #[cfg(feature = "cache")]

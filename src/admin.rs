@@ -538,8 +538,9 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","purged":{},"vhost":"{}","route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+                    r#"{{"status":"ok","purged":{},"not_purged":{},"vhost":"{}","route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"memory_not_purged":{},"disk_purged":{},"disk_not_purged":{}}}"#,
                     result.purged(),
+                    result.not_purged(),
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
                     cache_scope(result.route.as_deref()),
@@ -549,7 +550,9 @@ impl AdminApp {
                     cache_query_json(result.query.as_deref()),
                     json_escape(&result.cache_key),
                     result.memory_purged,
-                    result.disk_purged
+                    result.memory_not_purged(),
+                    result.disk_purged,
+                    result.disk_not_purged()
                 );
                 json_response(StatusCode::OK, body.as_bytes())
             }
@@ -1615,8 +1618,9 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"purged":{},"route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+            r#"{{"purged":{},"not_purged":{},"route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"memory_not_purged":{},"disk_purged":{},"disk_not_purged":{}}}"#,
             result.purged(),
+            result.not_purged(),
             cache_route_json(result.route.as_deref()),
             cache_scope(result.route.as_deref()),
             json_escape(&result.host),
@@ -1625,7 +1629,9 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
             cache_query_json(result.query.as_deref()),
             json_escape(&result.cache_key),
             result.memory_purged,
-            result.disk_purged
+            result.memory_not_purged(),
+            result.disk_purged,
+            result.disk_not_purged()
         ));
     }
     body
@@ -2229,6 +2235,7 @@ mod tests {
         assert_eq!(response.status, StatusCode::OK);
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""purged":false"#));
+        assert!(body.contains(r#""not_purged":true"#));
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""scope":"vhost""#));
         assert!(body.contains(r#""host":"cached.example""#));
@@ -2236,6 +2243,9 @@ mod tests {
         assert!(body.contains(r#""path":"/img/logo.png""#));
         assert!(body.contains(r#""query":"v=1""#));
         assert!(body.contains(r#""memory_purged":false"#));
+        assert!(body.contains(r#""memory_not_purged":true"#));
+        assert!(body.contains(r#""disk_purged":false"#));
+        assert!(body.contains(r#""disk_not_purged":true"#));
     }
 
     #[cfg(feature = "cache")]
@@ -2770,8 +2780,11 @@ mod tests {
         assert!(body.contains(r#""disk_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_not_purged_ratio_per_mille":1000"#));
         assert!(body.contains(r#""results":["#));
+        assert!(body.contains(r#""not_purged":true"#));
         assert!(body.contains(r#""path":"/img/one.png""#));
         assert!(body.contains(r#""path":"/img/two.png""#));
+        assert!(body.contains(r#""memory_not_purged":true"#));
+        assert!(body.contains(r#""disk_not_purged":true"#));
     }
 
     #[cfg(feature = "cache")]

@@ -63,6 +63,8 @@ behavior when the change improves security or project direction.
 - Protected cache purge responses now echo the normalized purge identity
   (`host`, `method`, `path`, and optional query) for easier bulk-operation
   auditing.
+- Protected single cache purge responses and per-item bulk purge results now
+  include aggregate and per-tier `not_purged` booleans.
 - Protected bulk cache purge responses now include `purged_ratio_per_mille` so
   operators can quickly see how much of a requested purge batch matched.
 - Protected bulk cache purge responses now include `not_purged`, avoiding
