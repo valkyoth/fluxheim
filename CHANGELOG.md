@@ -13,6 +13,8 @@ behavior when the change improves security or project direction.
 
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
+- Cache activity JSON now includes `miss_ratio_per_mille` alongside
+  `hit_ratio_per_mille`.
 - Cache policies can now emit an optional status response header, such as
   `X-Cache-Status`, for requests that participate in the proxy cache.
 - Cache policies can now hide selected upstream response headers before cache
