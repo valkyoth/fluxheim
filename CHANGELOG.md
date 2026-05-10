@@ -13,6 +13,8 @@ behavior when the change improves security or project direction.
 
 - Metrics builds now publish aggregate cache configuration gauges for vhost,
   route, policy, and storage-tier coverage.
+- Metrics builds now publish bounded cache activity counters for memory and disk
+  hits, misses, stores, store refusals, evictions, and purges.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside

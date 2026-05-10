@@ -138,8 +138,9 @@ pub struct CacheActivityStats {
 }
 
 #[cfg(feature = "proxy")]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct CacheActivityCounters {
+    tier: &'static str,
     hits: std::sync::atomic::AtomicU64,
     misses: std::sync::atomic::AtomicU64,
     stores: std::sync::atomic::AtomicU64,
@@ -150,6 +151,18 @@ struct CacheActivityCounters {
 
 #[cfg(feature = "proxy")]
 impl CacheActivityCounters {
+    fn new(tier: &'static str) -> Self {
+        Self {
+            tier,
+            hits: std::sync::atomic::AtomicU64::new(0),
+            misses: std::sync::atomic::AtomicU64::new(0),
+            stores: std::sync::atomic::AtomicU64::new(0),
+            store_refusals: std::sync::atomic::AtomicU64::new(0),
+            evictions: std::sync::atomic::AtomicU64::new(0),
+            purges: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
     fn snapshot(&self) -> CacheActivityStats {
         CacheActivityStats {
             hits: self.hits.load(std::sync::atomic::Ordering::Relaxed),
@@ -176,31 +189,42 @@ impl CacheActivityCounters {
 
     fn hit(&self) {
         self.hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.record("hit");
     }
 
     fn miss(&self) {
         self.misses
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.record("miss");
     }
 
     fn store(&self) {
         self.stores
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.record("store");
     }
 
     fn store_refusal(&self) {
         self.store_refusals
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.record("store_refusal");
     }
 
     fn eviction(&self) {
         self.evictions
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.record("eviction");
     }
 
     fn purge(&self) {
         self.purges
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.record("purge");
+    }
+
+    fn record(&self, event: &'static str) {
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_cache_activity(self.tier, event);
     }
 }
 
@@ -586,7 +610,7 @@ impl PingoraMemoryStorage {
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
-            activity: CacheActivityCounters::default(),
+            activity: CacheActivityCounters::new("memory"),
         }
     }
 
@@ -794,7 +818,7 @@ impl PingoraDiskStorage {
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
-            activity: CacheActivityCounters::default(),
+            activity: CacheActivityCounters::new("disk"),
         })
     }
 

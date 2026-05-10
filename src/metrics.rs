@@ -12,6 +12,7 @@ static CACHE_ENABLED_ROUTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_ROUTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
 pub fn enabled() -> bool {
     true
@@ -28,6 +29,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_tiered_routes()?;
     cache_memory_tiers()?;
     cache_disk_tiers()?;
+    cache_activity_total()?;
     Ok(())
 }
 
@@ -53,6 +55,15 @@ pub fn record_proxy_outcome(vhost: &str, method: &str, status: Option<u16>, erro
                 outcome_class(status, error),
                 status_class(status),
             ])
+            .inc(),
+        Err(error) => log::debug!("metrics counter unavailable: {error}"),
+    }
+}
+
+pub fn record_cache_activity(tier: &str, event: &str) {
+    match cache_activity_total() {
+        Ok(counter) => counter
+            .with_label_values(&[cache_tier_label(tier), cache_event_label(event)])
             .inc(),
         Err(error) => log::debug!("metrics counter unavailable: {error}"),
     }
@@ -227,6 +238,30 @@ fn cache_disk_tiers() -> Result<&'static IntGauge, prometheus::Error> {
     )
 }
 
+fn cache_activity_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = CACHE_ACTIVITY_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_cache_activity_total",
+            "Fluxheim cache activity events by storage tier and bounded event name.",
+        ),
+        &["tier", "event"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = CACHE_ACTIVITY_TOTAL.set(counter);
+    CACHE_ACTIVITY_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_cache_activity_total failed to initialize".to_owned())
+    })
+}
+
 fn int_gauge(
     cell: &'static OnceLock<IntGauge>,
     name: &'static str,
@@ -291,6 +326,26 @@ fn status_class(status: Option<u16>) -> &'static str {
     }
 }
 
+fn cache_tier_label(tier: &str) -> &'static str {
+    match tier {
+        "memory" => "memory",
+        "disk" => "disk",
+        _ => "other",
+    }
+}
+
+fn cache_event_label(event: &str) -> &'static str {
+    match event {
+        "hit" => "hit",
+        "miss" => "miss",
+        "store" => "store",
+        "store_refusal" => "store_refusal",
+        "eviction" => "eviction",
+        "purge" => "purge",
+        _ => "other",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use prometheus::Encoder;
@@ -302,7 +357,8 @@ mod tests {
     };
 
     use super::{
-        cache_config_stats, init, method_bucket, record_config, record_proxy_outcome, status_class,
+        cache_config_stats, init, method_bucket, record_cache_activity, record_config,
+        record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -349,6 +405,29 @@ mod tests {
         assert!(output.contains("fluxheim_cache_disk_tiers 1"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
+    }
+
+    #[test]
+    fn records_cache_activity_counter_with_bounded_labels() {
+        init().unwrap();
+
+        record_cache_activity("memory", "hit");
+        record_cache_activity("disk", "store_refusal");
+        record_cache_activity("attacker-tier", "attacker-event");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(r#"fluxheim_cache_activity_total{event="hit",tier="memory"}"#));
+        assert!(
+            output.contains(r#"fluxheim_cache_activity_total{event="store_refusal",tier="disk"}"#)
+        );
+        assert!(output.contains(r#"fluxheim_cache_activity_total{event="other",tier="other"}"#));
+        assert!(!output.contains("attacker-tier"));
+        assert!(!output.contains("attacker-event"));
     }
 
     #[test]
