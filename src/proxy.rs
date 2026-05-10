@@ -314,6 +314,10 @@ pub struct CacheBulkPurgeRequest<'a> {
 pub struct CachePurgeResult {
     pub vhost: String,
     pub route: Option<String>,
+    pub host: String,
+    pub method: String,
+    pub path: String,
+    pub query: Option<String>,
     pub cache_key: String,
     pub memory_purged: bool,
     pub disk_purged: bool,
@@ -629,6 +633,10 @@ impl ProxySnapshot {
         Ok(CachePurgeResult {
             vhost: vhost.name.clone(),
             route: route_cache.map(|cache| cache.name.clone()),
+            host: request.host.to_owned(),
+            method: request.method.to_owned(),
+            path: request.path.to_owned(),
+            query: request.query.map(str::to_owned),
             cache_key,
             memory_purged,
             disk_purged,
@@ -4521,6 +4529,10 @@ mod tests {
 
         assert!(result.memory_purged);
         assert!(result.purged());
+        assert_eq!(result.host, "cached.example");
+        assert_eq!(result.method, "GET");
+        assert_eq!(result.path, "/img/logo.png");
+        assert_eq!(result.query.as_deref(), Some("v=1"));
         assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
     }
 

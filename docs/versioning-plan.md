@@ -454,6 +454,9 @@ Exit criteria:
   cache policy.
 - Protected cache purge endpoints can target route-scoped cache policies by
   route name.
+- Protected cache purge responses identify each requested host/method/path/query
+  alongside the selected vhost/route and per-tier result, so production bulk
+  purges are auditable.
 - Cache respects method/content-type policy and request/response cache
   directives.
 - `Vary` handling is tested before negotiated variants are stable. Implemented

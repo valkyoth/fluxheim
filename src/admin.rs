@@ -500,10 +500,14 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","purged":{},"vhost":"{}","route":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+                    r#"{{"status":"ok","purged":{},"vhost":"{}","route":{},"host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
                     result.purged(),
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
+                    json_escape(&result.host),
+                    json_escape(&result.method),
+                    json_escape(&result.path),
+                    cache_query_json(result.query.as_deref()),
                     json_escape(&result.cache_key),
                     result.memory_purged,
                     result.disk_purged
@@ -1302,6 +1306,13 @@ fn cache_route_json(route: Option<&str>) -> String {
 }
 
 #[cfg(feature = "cache")]
+fn cache_query_json(query: Option<&str>) -> String {
+    query
+        .map(|query| format!(r#""{}""#, json_escape(query)))
+        .unwrap_or_else(|| "null".to_owned())
+}
+
+#[cfg(feature = "cache")]
 fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> String {
     let mut body = String::new();
     for (index, result) in results.iter().enumerate() {
@@ -1309,9 +1320,13 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"purged":{},"route":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
+            r#"{{"purged":{},"route":{},"host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"disk_purged":{}}}"#,
             result.purged(),
             cache_route_json(result.route.as_deref()),
+            json_escape(&result.host),
+            json_escape(&result.method),
+            json_escape(&result.path),
+            cache_query_json(result.query.as_deref()),
             json_escape(&result.cache_key),
             result.memory_purged,
             result.disk_purged
@@ -1794,6 +1809,10 @@ mod tests {
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""purged":false"#));
         assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""host":"cached.example""#));
+        assert!(body.contains(r#""method":"GET""#));
+        assert!(body.contains(r#""path":"/img/logo.png""#));
+        assert!(body.contains(r#""query":"v=1""#));
         assert!(body.contains(r#""memory_purged":false"#));
     }
 
@@ -2050,6 +2069,8 @@ mod tests {
         assert!(body.contains(r#""requested":2"#));
         assert!(body.contains(r#""purged":0"#));
         assert!(body.contains(r#""results":["#));
+        assert!(body.contains(r#""path":"/img/one.png""#));
+        assert!(body.contains(r#""path":"/img/two.png""#));
     }
 
     #[cfg(feature = "cache")]

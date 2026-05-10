@@ -39,6 +39,9 @@ behavior when the change improves security or project direction.
   `[cache.lock]`, while preserving the previous 30 second defaults.
 - Protected cache purge endpoints can now target named route-scoped cache
   policies through `route` or `x-fluxheim-cache-route`.
+- Protected cache purge responses now echo the normalized purge identity
+  (`host`, `method`, `path`, and optional query) for easier bulk-operation
+  auditing.
 - Cache policies can now set `stale_if_error_secs` to permit serving stale
   cached objects during upstream errors after normal freshness expires.
 - Cache policies can now set `stale_while_revalidate_secs` to permit serving

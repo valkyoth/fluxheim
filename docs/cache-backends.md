@@ -146,6 +146,9 @@ internal cache implementation.
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,
   memory and disk purge remove every stored variant for that primary identity.
+  Purge responses echo the normalized host, method, path, and optional query
+  for each requested identity so operators can audit bulk purges without
+  decoding cache keys.
   `POST /_fluxheim/cache/purge-bulk` invalidates multiple identities that share
   the same host, method, vhost, optional route, and optional original URL query.
   Purge identities are bounded before key derivation: hosts, methods, paths,
