@@ -23,6 +23,9 @@ Fluxheim and its upstream services.
 - Keep OpenTelemetry code out of default builds.
 - Use W3C Trace Context propagation.
 - Correlate access logs, security events, and traces through a trace ID.
+- Pair new operational observability with Prometheus metrics where practical:
+  metrics provide aggregate service health, while OpenTelemetry explains the
+  request path behind those aggregate signals.
 - Keep tracing overhead bounded through sampling and background export.
 - Avoid storing secrets, cookies, authorization headers, raw request bodies, or
   high-cardinality labels in spans.
@@ -59,6 +62,8 @@ Planned spans:
 - `fluxheim.auth_request`: future external authorization probe;
 - `fluxheim.cache_lookup`: memory/disk cache lookup and hit/miss decision;
 - `fluxheim.cache_store`: cache admission and write;
+- `fluxheim.cache_purge`: admin-triggered cache invalidation by scope, prefix,
+  wildcard, tag, or future soft-purge operation;
 - `fluxheim.upstream_select`: load-balancer selection;
 - `fluxheim.upstream_connect`: TCP/TLS connect and handshake;
 - `fluxheim.upstream_response`: upstream first-byte and response metadata;

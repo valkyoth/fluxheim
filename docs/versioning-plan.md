@@ -312,9 +312,11 @@ Exit criteria:
 - Release notes clearly state whether certificate reload is automatic,
   restart-based, or deploy-hook based in `1.1.0`.
 
-### 1.2 - Operations Pack
+### 1.2 - Operations And Cache Completion Pack
 
-Goal: add safe operational visibility and controlled reload tooling.
+Goal: add safe operational visibility, controlled reload tooling, and finish
+the production cache platform already started during the 1.2 gateway migration
+work.
 
 Stable scope:
 
@@ -338,6 +340,11 @@ Stable scope:
   - document container secret mounts for EAB files without relabel suffixes
     when the host tree is already labeled for container access.
 - Prometheus metrics baseline on loopback by default.
+- Observability changes should be designed as paired surfaces where practical:
+  Prometheus metrics for aggregate dashboards and OpenTelemetry
+  traces/attributes/events for request-path diagnosis. Cache observability in
+  particular should expose the same low-cardinality vhost, route, tier, status,
+  and reason concepts across admin JSON, Prometheus, and OpenTelemetry.
 - Proxy response buffering and streaming/backpressure controls for production
   gateway migrations, including configurable response buffer count/size
   equivalents, bounded memory budgets per connection, safe streaming behavior
@@ -348,6 +355,20 @@ Stable scope:
 - Route-scoped cache policies for selective production caches, such as
   repository avatar/assets paths, where only one proxy route should use a cache
   tier while the rest of the vhost remains uncached.
+- Cache completion work promoted into 1.2:
+  - persistent cache index across process restarts;
+  - background or incremental disk purge/cleanup for very large purge scopes;
+  - cache warmer/preload command or admin workflow for release deploys;
+  - surrogate-key/cache-tag purge for application-level invalidation;
+  - soft purge, where objects are marked stale and refreshed instead of removed
+    immediately;
+  - hit-for-pass/pass-cache decisions for repeatedly uncacheable dynamic
+    objects;
+  - end-to-end proxy regressions for cache-hit `Age`, conditional, and range
+    behavior;
+  - cache observability through both Prometheus and OpenTelemetry, including
+    per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
+    purge, and storage-pressure signals.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
@@ -383,6 +404,8 @@ Exit criteria:
 - Snapshot and rollback tests pass.
 - Logs redact secrets by default.
 - Metrics labels are cardinality-safe.
+- Cache metrics and OpenTelemetry attributes are cardinality-safe and never use
+  raw path, query, cookie, authorization, or cache-key values by default.
 - ACME CLI output is actionable for partial-success production runs and does
   not require operators to infer which target failed from issuer-level errors.
 - Container migration docs include a validated HTTP-only first-issuance flow,
@@ -415,6 +438,10 @@ Exit criteria:
 ### 1.4 - Cache Pack
 
 Goal: add controlled image/static caching.
+
+Status: mostly promoted into the 1.2 Operations And Cache Completion Pack. Keep
+this section as the cache maturity checklist and move completed items upward as
+they land.
 
 Current implementation status:
 
@@ -462,12 +489,13 @@ Stable scope for declaring the cache pack complete:
 
 Beta scope:
 
-- Persistent cache index across process restarts.
 - Partial streaming admission.
-- Background disk purger or incremental cleanup worker for very large purge
-  scopes.
-- End-to-end cache-hit regressions for Pingora-provided `Age`, conditional, and
-  range behavior under the Fluxheim proxy path.
+- Distributed cache metadata or peer-fill support, if production deployments
+  need multi-node cache coherence.
+- Cache import/export/debug tooling for inspecting individual cached objects,
+  metadata, TTL, headers, and purge-index entries.
+- Programmable cache policy hooks remain a later design problem; the default
+  cache model should stay declarative and safe.
 
 Exit criteria:
 
