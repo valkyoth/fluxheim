@@ -3181,6 +3181,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub bypass_cookie_names: Vec<String>,
     #[serde(default)]
+    pub bypass_cookie_values: BTreeMap<String, String>,
+    #[serde(default)]
     pub bypass_query_params: Vec<String>,
     #[serde(default)]
     pub vary_request_headers: Vec<String>,
@@ -3225,6 +3227,7 @@ impl Default for CacheConfig {
             no_store_response_headers: Vec::new(),
             bypass_request_headers: Vec::new(),
             bypass_cookie_names: Vec::new(),
+            bypass_cookie_values: BTreeMap::new(),
             bypass_query_params: Vec::new(),
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
@@ -3270,6 +3273,10 @@ impl CacheConfig {
         }
         for cookie in &self.bypass_cookie_names {
             validate_cache_cookie_name(scope, cookie)?;
+        }
+        for (cookie, value) in &self.bypass_cookie_values {
+            validate_cache_cookie_name(scope, cookie)?;
+            validate_cache_cookie_value(scope, cookie, value)?;
         }
         for param in &self.bypass_query_params {
             validate_cache_query_param(scope, param)?;
@@ -3411,6 +3418,25 @@ fn validate_cache_cookie_name(scope: &'static str, name: &str) -> Result<(), Con
         return Err(ConfigError::InvalidCacheBypassCookieName {
             scope,
             name: name.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_cache_cookie_value(
+    scope: &'static str,
+    name: &str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    if value.len() > 1024
+        || value
+            .bytes()
+            .any(|byte| byte < 0x20 || byte == 0x7f || matches!(byte, b';' | b','))
+    {
+        return Err(ConfigError::InvalidCacheBypassCookieValue {
+            scope,
+            name: name.to_owned(),
+            value: value.to_owned(),
         });
     }
     Ok(())
@@ -3948,6 +3974,11 @@ pub enum ConfigError {
         scope: &'static str,
         name: String,
     },
+    InvalidCacheBypassCookieValue {
+        scope: &'static str,
+        name: String,
+        value: String,
+    },
     InvalidCacheStaleIfErrorTtl {
         scope: &'static str,
     },
@@ -4367,6 +4398,10 @@ impl Display for ConfigError {
             Self::InvalidCacheBypassCookieName { scope, name } => write!(
                 formatter,
                 "{scope}.bypass_cookie_names must contain cookie name tokens without whitespace or separators, got {name:?}"
+            ),
+            Self::InvalidCacheBypassCookieValue { scope, name, value } => write!(
+                formatter,
+                "{scope}.bypass_cookie_values[{name:?}] must contain a safe cookie value without controls, ';', or ',', got {value:?}"
             ),
             Self::InvalidCacheStaleIfErrorTtl { scope } => {
                 write!(
@@ -7207,6 +7242,7 @@ mod tests {
             no_store_response_headers = ["x-fluxheim-no-store"]
             bypass_request_headers = ["cookie", "authorization"]
             bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
+            bypass_cookie_values = { preview = "1" }
             bypass_query_params = ["preview", "token"]
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
@@ -7259,6 +7295,10 @@ mod tests {
         assert_eq!(
             config.cache.bypass_cookie_names,
             ["sessionid".to_owned(), "wordpress_logged_in".to_owned()]
+        );
+        assert_eq!(
+            config.cache.bypass_cookie_values.get("preview"),
+            Some(&"1".to_owned())
         );
         assert_eq!(
             config.cache.bypass_query_params,
@@ -7425,6 +7465,28 @@ mod tests {
                 Err(ConfigError::InvalidCacheBypassCookieName {
                     scope: "cache",
                     name: name.to_owned()
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_cache_bypass_cookie_value() {
+        for value in ["bad;value", "bad,value", "bad\nvalue"] {
+            let config: Config = toml::from_str(&format!(
+                r#"
+                [cache]
+                bypass_cookie_values = {{ preview = {value:?} }}
+                "#,
+            ))
+            .unwrap();
+
+            assert_eq!(
+                config.validate(),
+                Err(ConfigError::InvalidCacheBypassCookieValue {
+                    scope: "cache",
+                    name: "preview".to_owned(),
+                    value: value.to_owned()
                 })
             );
         }

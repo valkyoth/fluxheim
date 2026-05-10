@@ -458,6 +458,7 @@ hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 bypass_request_headers = ["cookie", "authorization"]
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
+bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
@@ -517,6 +518,9 @@ listed cookie name appears in any `Cookie` request header. Only names are
 matched; values are ignored. This is narrower than bypassing on every `Cookie`
 header and is useful for static routes where only session or preview cookies
 make the response unsafe to share.
+`bypass_cookie_values` disables both cache lookup and cache storage when a
+listed cookie name appears with the exact configured value. Use it for bounded
+flags such as `preview = "1"` when the cookie name alone is too broad.
 `bypass_query_params` disables both cache lookup and cache storage when the raw
 request query string contains any listed parameter name. Matching is exact on
 the raw key before `=`, so `preview=true` matches `preview`, while
@@ -909,6 +913,7 @@ send_timeout_secs = 600
 enabled = true
 status_header = "X-Cache-Status"
 hide_response_headers = ["set-cookie"]
+bypass_cookie_values = { preview = "1" }
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 stale_while_revalidate_secs = 30
 stale_if_error_secs = 120

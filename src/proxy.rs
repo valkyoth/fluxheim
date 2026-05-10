@@ -2939,9 +2939,10 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
     {
         return true;
     }
-    if request_cookies_match_cache_bypass_name(
+    if request_cookies_match_cache_bypass(
         request_header_values(request, "cookie"),
         &cache.bypass_cookie_names,
+        &cache.bypass_cookie_values,
     ) {
         return true;
     }
@@ -2960,21 +2961,29 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
 }
 
 #[cfg(feature = "cache")]
-fn request_cookies_match_cache_bypass_name<'a>(
+fn request_cookies_match_cache_bypass<'a>(
     cookie_headers: impl Iterator<Item = &'a str>,
     configured_names: &[String],
+    configured_values: &std::collections::BTreeMap<String, String>,
 ) -> bool {
-    !configured_names.is_empty()
-        && cookie_headers
-            .flat_map(cookie_header_names)
-            .any(|name| configured_names.iter().any(|configured| configured == name))
+    if configured_names.is_empty() && configured_values.is_empty() {
+        return false;
+    }
+    cookie_headers
+        .flat_map(cookie_header_pairs)
+        .any(|(name, value)| {
+            configured_names.iter().any(|configured| configured == name)
+                || configured_values
+                    .get(name)
+                    .is_some_and(|configured| configured == value)
+        })
 }
 
 #[cfg(feature = "cache")]
-fn cookie_header_names(header: &str) -> impl Iterator<Item = &str> {
+fn cookie_header_pairs(header: &str) -> impl Iterator<Item = (&str, &str)> {
     header.split(';').filter_map(|part| {
-        let name = part.trim_start().split_once('=').map(|(name, _)| name)?;
-        (!name.is_empty()).then_some(name)
+        let (name, value) = part.trim_start().split_once('=')?;
+        (!name.is_empty()).then_some((name, value))
     })
 }
 
@@ -5095,6 +5104,29 @@ mod tests {
 
         request
             .append_header("cookie", "wordpress_logged_in=1")
+            .unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_configured_cookie_values() {
+        let cache = CacheConfig {
+            bypass_cookie_values: [("preview".to_owned(), "1".to_owned())].into(),
+            ..CacheConfig::default()
+        };
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        request.insert_header("cookie", "preview=0").unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        request
+            .insert_header("cookie", "theme=dark; preview=1")
             .unwrap();
         assert!(request_cache_bypass(&request, &cache));
     }

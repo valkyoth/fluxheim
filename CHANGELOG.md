@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
   headers such as `Cookie` or `Authorization` are present.
 - Cache policies can now bypass lookup and storage when configured cookie names
   such as `sessionid` or `wordpress_logged_in` are present.
+- Cache policies can now bypass lookup and storage when configured cookie
+  values such as `preview = "1"` are present.
 - Cache policies can now bypass lookup and storage when configured raw query
   parameter names such as `preview` or `token` are present.
 - Cache policies can now add safe request headers such as `Accept-Encoding` to

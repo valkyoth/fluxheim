@@ -164,6 +164,7 @@ hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 bypass_request_headers = ["cookie", "authorization"]
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
+bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
 vary_request_headers = ["accept-encoding"]
 key_namespace = "chat-assets-v1"
