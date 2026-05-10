@@ -1801,6 +1801,11 @@ fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
         .checked_div(requests)
         .unwrap_or(0);
     let store_attempts = activity.stores.saturating_add(activity.store_refusals);
+    let store_ratio_per_mille = activity
+        .stores
+        .saturating_mul(1000)
+        .checked_div(store_attempts)
+        .unwrap_or(0);
     let store_refusal_ratio_per_mille = activity
         .store_refusals
         .saturating_mul(1000)
@@ -1808,7 +1813,7 @@ fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
         .unwrap_or(0);
     let eviction_ratio_per_mille = ratio_per_mille(activity.evictions, activity.stores);
     format!(
-        r#"{{"hits":{},"misses":{},"requests":{},"hit_ratio_per_mille":{},"miss_ratio_per_mille":{},"stores":{},"store_refusals":{},"store_attempts":{},"store_refusal_ratio_per_mille":{},"evictions":{},"eviction_ratio_per_mille":{},"purges":{}}}"#,
+        r#"{{"hits":{},"misses":{},"requests":{},"hit_ratio_per_mille":{},"miss_ratio_per_mille":{},"stores":{},"store_refusals":{},"store_attempts":{},"store_ratio_per_mille":{},"store_refusal_ratio_per_mille":{},"evictions":{},"eviction_ratio_per_mille":{},"purges":{}}}"#,
         activity.hits,
         activity.misses,
         requests,
@@ -1817,6 +1822,7 @@ fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
         activity.stores,
         activity.store_refusals,
         store_attempts,
+        store_ratio_per_mille,
         store_refusal_ratio_per_mille,
         activity.evictions,
         eviction_ratio_per_mille,
@@ -2556,7 +2562,7 @@ mod tests {
 
         assert_eq!(
             body,
-            r#"{"hits":7,"misses":3,"requests":10,"hit_ratio_per_mille":700,"miss_ratio_per_mille":300,"stores":4,"store_refusals":2,"store_attempts":6,"store_refusal_ratio_per_mille":333,"evictions":5,"eviction_ratio_per_mille":1250,"purges":1}"#
+            r#"{"hits":7,"misses":3,"requests":10,"hit_ratio_per_mille":700,"miss_ratio_per_mille":300,"stores":4,"store_refusals":2,"store_attempts":6,"store_ratio_per_mille":666,"store_refusal_ratio_per_mille":333,"evictions":5,"eviction_ratio_per_mille":1250,"purges":1}"#
         );
     }
 
@@ -2650,7 +2656,7 @@ mod tests {
         assert!(body.contains(r#""disk_purge_index_max_entries":65536"#));
         assert!(body.contains(r#""disk_purge_index_fill_ratio_per_mille":0"#));
         assert!(body.contains(
-            r#""activity":{"hits":0,"misses":0,"requests":0,"hit_ratio_per_mille":0,"miss_ratio_per_mille":0,"stores":0,"store_refusals":0,"store_attempts":0,"store_refusal_ratio_per_mille":0,"evictions":0,"eviction_ratio_per_mille":0,"purges":0"#
+            r#""activity":{"hits":0,"misses":0,"requests":0,"hit_ratio_per_mille":0,"miss_ratio_per_mille":0,"stores":0,"store_refusals":0,"store_attempts":0,"store_ratio_per_mille":0,"store_refusal_ratio_per_mille":0,"evictions":0,"eviction_ratio_per_mille":0,"purges":0"#
         ));
         assert!(body.contains(r#""name":"cached""#));
         assert!(body.contains(r#""enabled":true"#));

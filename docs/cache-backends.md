@@ -156,9 +156,9 @@ internal cache implementation.
   counters, and cache activity counters for hits, misses, stores, refused
   stores, disk evictions, and purges. Activity blocks include derived
   `requests`, `hit_ratio_per_mille`, `miss_ratio_per_mille`,
-  `store_attempts`, `store_refusal_ratio_per_mille`, and
-  `eviction_ratio_per_mille` fields so operators can read hit-rate, miss-rate,
-  admission health, and eviction pressure without external JSON
+  `store_attempts`, `store_ratio_per_mille`, `store_refusal_ratio_per_mille`,
+  and `eviction_ratio_per_mille` fields so operators can read hit-rate,
+  miss-rate, admission health, and eviction pressure without external JSON
   post-processing. Per-vhost status
   includes `routes_total`, `enabled_routes`, and `tiered_routes` so route-cache
   coverage is visible without parsing the route list. Memory and disk tier
