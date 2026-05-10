@@ -790,6 +790,15 @@ connect_timeout_secs = 5
 read_timeout_secs = 600
 send_timeout_secs = 600
 
+[vhosts.routes.cache]
+enabled = true
+methods = ["GET", "HEAD"]
+max_object_bytes = "32MiB"
+
+[vhosts.routes.cache.memory]
+enabled = true
+max_size_bytes = "256MiB"
+
 [[vhosts.routes.proxy.error_pages]]
 status = 502
 path = "/502.html"
@@ -832,6 +841,11 @@ body limit for uploads handled by that route. Proxy actions accept
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs`; route
 proxy timeout values override the vhost/global proxy timeout values because the
 route owns its own proxy action.
+
+`[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache
+policy for that matched route only. Routes without a cache block continue to use
+the vhost cache policy, so selective caches can cover paths such as `/assets/`,
+`/avatars/`, or repository image content without caching every backend response.
 
 When global `[server.https_redirect]` is enabled, non-redirect routes are
 redirected on cleartext requests by default. `[vhosts.acme_challenge]` creates

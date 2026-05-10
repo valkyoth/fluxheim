@@ -789,14 +789,26 @@ impl ProxyRuntimeState {
         &self,
         request: &RequestHeader,
         vhost_index: usize,
+        route_index: Option<usize>,
     ) -> Option<PingoraCacheKey> {
         let vhost = self.vhost(vhost_index);
+        let route_cache = route_index.and_then(|index| vhost.route(index).cache.as_ref());
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
         let cache_request = cache_request_from_header(request);
+        let route_user_tag;
+        let user_tag = if let Some(route_cache) = route_cache {
+            route_user_tag = format!("{}:route:{}", vhost.name, route_cache.name);
+            route_user_tag.as_str()
+        } else {
+            vhost.name.as_str()
+        };
         crate::cache::pingora_image_cache_key(
             "fluxheim-image-v1",
-            &vhost.cache,
+            cache_config,
             &cache_request,
-            &vhost.name,
+            user_tag,
         )
     }
 }
@@ -888,8 +900,79 @@ struct RuntimeRoute {
     strip_prefix: Option<String>,
     max_request_body_bytes: Option<crate::config::ByteSize>,
     action: RuntimeRouteAction,
+    #[cfg(feature = "cache")]
+    cache: Option<RuntimeRouteCache>,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone)]
+struct RuntimeRouteCache {
+    name: String,
+    config: crate::config::CacheConfig,
+    memory_cache: Option<crate::cache::MemoryImageCache>,
+    pingora_memory_storage: Option<&'static crate::cache::PingoraMemoryStorage>,
+    pingora_disk_storage: Option<&'static crate::cache::PingoraDiskStorage>,
+    pingora_tiered_storage: Option<&'static crate::cache::PingoraTieredStorage>,
+    pingora_cache_lock: Option<&'static CacheKeyLockImpl>,
+}
+
+#[cfg(feature = "cache")]
+impl std::fmt::Debug for RuntimeRouteCache {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeRouteCache")
+            .field("name", &self.name)
+            .field("config", &self.config)
+            .field("memory_cache", &self.memory_cache)
+            .field(
+                "pingora_memory_storage",
+                &self.pingora_memory_storage.is_some(),
+            )
+            .field("pingora_disk_storage", &self.pingora_disk_storage.is_some())
+            .field(
+                "pingora_tiered_storage",
+                &self.pingora_tiered_storage.is_some(),
+            )
+            .field("pingora_cache_lock", &self.pingora_cache_lock.is_some())
+            .finish()
+    }
+}
+
+#[cfg(feature = "cache")]
+impl RuntimeRouteCache {
+    fn from_config(name: &str, config: &crate::config::CacheConfig) -> io::Result<Self> {
+        let pingora_memory_storage = crate::cache::pingora_memory_storage_from_config(config);
+        let pingora_disk_storage = crate::cache::pingora_disk_storage_from_config(config)?;
+        let pingora_tiered_storage = pingora_memory_storage
+            .zip(pingora_disk_storage)
+            .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
+        let pingora_cache_lock = (pingora_memory_storage.is_some()
+            || pingora_disk_storage.is_some())
+        .then(|| crate::cache::pingora_cache_lock(CACHE_LOCK_AGE_TIMEOUT));
+
+        Ok(Self {
+            name: name.to_owned(),
+            config: config.clone(),
+            memory_cache: crate::cache::memory_image_cache_from_config(config),
+            pingora_memory_storage,
+            pingora_disk_storage,
+            pingora_tiered_storage,
+            pingora_cache_lock,
+        })
+    }
+
+    fn storage(&self) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+        if let Some(storage) = self.pingora_tiered_storage {
+            Some(storage)
+        } else if let Some(storage) = self.pingora_memory_storage {
+            Some(storage)
+        } else {
+            self.pingora_disk_storage
+                .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1029,6 +1112,12 @@ impl RuntimeRoute {
             strip_prefix: route.strip_prefix.clone(),
             max_request_body_bytes: route.max_request_body_bytes,
             action,
+            #[cfg(feature = "cache")]
+            cache: route
+                .cache
+                .as_ref()
+                .map(|cache| RuntimeRouteCache::from_config(&route.name, cache))
+                .transpose()?,
             request_headers: headers.request,
             response_headers: headers.response,
         })
@@ -1048,6 +1137,8 @@ impl RuntimeRoute {
             action: RuntimeRouteAction::AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore::new(
                 storage, vhost_name,
             )),
+            #[cfg(feature = "cache")]
+            cache: None,
             request_headers: base_headers.request.clone(),
             response_headers: base_headers.response.clone(),
         }
@@ -1656,39 +1747,49 @@ impl ProxyHttp for FluxProxy {
             .vhost_index
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         let vhost = state.vhost(vhost_index);
+        let route_cache = ctx
+            .route_index
+            .and_then(|route_index| vhost.route(route_index).cache.as_ref());
 
         if request_cache_bypass(session.req_header()) {
             return Ok(());
         }
 
-        let storage: &'static (dyn pingora::cache::Storage + Sync) =
-            if let Some(storage) = vhost.pingora_tiered_storage {
-                storage
-            } else if let Some(storage) = vhost.pingora_memory_storage {
-                storage
-            } else if let Some(storage) = vhost.pingora_disk_storage {
-                storage
-            } else {
-                return Ok(());
-            };
+        let storage = route_cache
+            .and_then(RuntimeRouteCache::storage)
+            .or_else(|| {
+                route_cache
+                    .is_none()
+                    .then(|| vhost_cache_storage(vhost))
+                    .flatten()
+            });
+        let Some(storage) = storage else {
+            return Ok(());
+        };
 
         let cache_request = cache_request_from_header(session.req_header());
-        if crate::cache::image_cache_key(&vhost.cache, &cache_request).is_none() {
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
+        if crate::cache::image_cache_key(cache_config, &cache_request).is_none() {
             return Ok(());
         }
 
         let mut cache_option_overrides = CacheOptionOverrides::default();
         cache_option_overrides.wait_timeout = Some(CACHE_LOCK_WAIT_TIMEOUT);
+        let cache_lock = route_cache
+            .map(|cache| cache.pingora_cache_lock)
+            .unwrap_or(vhost.pingora_cache_lock);
         session.cache.enable(
             storage,
             None,
             None,
-            vhost.pingora_cache_lock,
+            cache_lock,
             Some(cache_option_overrides),
         );
         session
             .cache
-            .set_max_file_size_bytes(vhost.cache.max_object_bytes.as_usize());
+            .set_max_file_size_bytes(cache_config.max_object_bytes.as_usize());
         Ok(())
     }
 
@@ -1703,7 +1804,11 @@ impl ProxyHttp for FluxProxy {
             .vhost_index
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         state
-            .pingora_image_cache_key_for_request_header(session.req_header(), vhost_index)
+            .pingora_image_cache_key_for_request_header(
+                session.req_header(),
+                vhost_index,
+                ctx.route_index,
+            )
             .ok_or_else(|| {
                 Error::explain(
                     ErrorType::InternalError,
@@ -1871,6 +1976,21 @@ fn selected_response_headers<'a>(
     ctx.route_index
         .map(|route_index| &vhost.route(route_index).response_headers)
         .unwrap_or(&vhost.response_headers)
+}
+
+#[cfg(feature = "cache")]
+fn vhost_cache_storage(
+    vhost: &RuntimeVhost,
+) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+    if let Some(storage) = vhost.pingora_tiered_storage {
+        Some(storage)
+    } else if let Some(storage) = vhost.pingora_memory_storage {
+        Some(storage)
+    } else {
+        vhost
+            .pingora_disk_storage
+            .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+    }
 }
 
 #[cfg(feature = "acme")]
@@ -3113,6 +3233,7 @@ mod tests {
                         max_request_body_bytes: None,
                         proxy: None,
                         web: None,
+                        cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                     RouteConfig {
@@ -3130,6 +3251,7 @@ mod tests {
                         max_request_body_bytes: None,
                         redirect: None,
                         web: None,
+                        cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                     RouteConfig {
@@ -3147,6 +3269,7 @@ mod tests {
                         max_request_body_bytes: None,
                         redirect: None,
                         web: None,
+                        cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                     RouteConfig {
@@ -3164,6 +3287,7 @@ mod tests {
                         max_request_body_bytes: None,
                         redirect: None,
                         web: None,
+                        cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                 ],
@@ -3213,6 +3337,8 @@ mod tests {
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default()).unwrap(),
             ),
+            #[cfg(feature = "cache")]
+            cache: None,
             request_headers: crate::config::RequestHeaderPolicyConfig::default(),
             response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
         };
@@ -3466,6 +3592,85 @@ mod tests {
                 snapshot.state.vhost_index(Some("uncached.example"))
             ),
             None
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn route_cache_policy_overrides_disabled_vhost_cache() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "assets".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/assets/".to_owned()),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    max_request_body_bytes: None,
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstream: Some("127.0.0.1:3000".to_owned()),
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    cache: Some(CacheConfig {
+                        enabled: true,
+                        memory: crate::config::CacheMemoryConfig {
+                            enabled: true,
+                            max_size_bytes: ByteSize::from_bytes(2048),
+                        },
+                        max_object_bytes: ByteSize::from_bytes(512),
+                        ..CacheConfig::default()
+                    }),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let route_index = vhost.route_index("/assets/logo.png").unwrap();
+        let route_cache = vhost.route(route_index).cache.as_ref().unwrap();
+        assert!(route_cache.pingora_memory_storage.is_some());
+        assert!(route_cache.pingora_cache_lock.is_some());
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+        let key = snapshot
+            .state
+            .pingora_image_cache_key_for_request_header(&request, vhost_index, Some(route_index))
+            .unwrap();
+
+        assert_eq!(key.user_tag, "cached:route:assets");
+        assert_eq!(
+            key.primary_key_str(),
+            Some(
+                "fluxheim-image-v1;method:3:GET;host:14:cached.example;path:16:/assets/logo.png;query:3:v=1;"
+            )
+        );
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+        assert!(
+            snapshot
+                .state
+                .pingora_image_cache_key_for_request_header(&request, vhost_index, None)
+                .is_none()
         );
     }
 

@@ -2705,6 +2705,8 @@ pub struct RouteConfig {
     #[serde(default)]
     pub web: Option<WebConfig>,
     #[serde(default)]
+    pub cache: Option<CacheConfig>,
+    #[serde(default)]
     pub headers: VhostHeaderPolicyConfig,
 }
 
@@ -2715,6 +2717,9 @@ impl RouteConfig {
         }
         if let Some(web) = &mut self.web {
             web.resolve_relative_paths(base_dir);
+        }
+        if let Some(cache) = &mut self.cache {
+            cache.resolve_relative_paths(base_dir);
         }
     }
 
@@ -2819,6 +2824,16 @@ impl RouteConfig {
                 });
             }
         }
+        if let Some(cache) = &self.cache {
+            cache
+                .validate("vhosts.routes.cache")
+                .map_err(|source| ConfigError::RouteSection {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                    section: "cache",
+                    source: Box::new(source),
+                })?;
+        }
         self.headers
             .validate()
             .map_err(|source| ConfigError::RouteSection {
@@ -2921,6 +2936,7 @@ impl VhostRedirectConfig {
             }),
             proxy: None,
             web: None,
+            cache: None,
             headers: VhostHeaderPolicyConfig::default(),
         })
     }
@@ -3125,6 +3141,7 @@ impl VhostAcmeChallengeConfig {
                 ..ProxyConfig::default()
             }),
             web: None,
+            cache: None,
             headers: VhostHeaderPolicyConfig::default(),
         })
     }

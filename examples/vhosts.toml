@@ -155,6 +155,15 @@ connect_timeout_secs = 5
 read_timeout_secs = 600
 send_timeout_secs = 600
 
+[vhosts.routes.cache]
+enabled = true
+methods = ["GET", "HEAD"]
+max_object_bytes = "32MiB"
+
+[vhosts.routes.cache.memory]
+enabled = true
+max_size_bytes = "256MiB"
+
 [[vhosts.routes.proxy.error_pages]]
 status = 502
 path = "/502.html"

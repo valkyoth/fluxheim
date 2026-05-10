@@ -343,6 +343,9 @@ Stable scope:
   equivalents, bounded memory budgets per connection, safe streaming behavior
   when buffering is disabled, and tests proving slow clients cannot exhaust
   worker memory.
+- Route-scoped cache policies for selective production caches, such as
+  repository avatar/assets paths, where only one proxy route should use a cache
+  tier while the rest of the vhost remains uncached.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
