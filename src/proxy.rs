@@ -357,6 +357,8 @@ pub struct CacheRuntimeTotals {
     pub vhosts: u64,
     pub enabled_vhosts: u64,
     pub tiered_vhosts: u64,
+    pub enabled_routes: u64,
+    pub tiered_routes: u64,
     pub memory_entries: u64,
     pub memory_weighted_size_bytes: u64,
     pub memory_max_size_bytes: u64,
@@ -378,6 +380,17 @@ pub struct CacheVhostStats {
     pub tiered: bool,
     pub memory: Option<crate::cache::MemoryCacheStats>,
     pub disk: Option<crate::cache::DiskCacheStats>,
+    pub routes: Vec<CacheRouteStats>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheRouteStats {
+    pub name: String,
+    pub enabled: bool,
+    pub tiered: bool,
+    pub memory: Option<crate::cache::MemoryCacheStats>,
+    pub disk: Option<crate::cache::DiskCacheStats>,
 }
 
 #[cfg(feature = "cache")]
@@ -386,6 +399,7 @@ pub struct CacheActivityResetResult {
     pub memory_tiers: u64,
     pub disk_tiers: u64,
     pub tiered_vhosts: u64,
+    pub tiered_routes: u64,
 }
 
 impl ProxySnapshot {
@@ -446,40 +460,36 @@ impl ProxySnapshot {
             }
 
             let memory = vhost.pingora_memory_storage.map(|storage| storage.stats());
-            if let Some(memory) = memory {
-                totals.memory_entries = totals.memory_entries.saturating_add(memory.entries);
-                totals.memory_weighted_size_bytes = totals
-                    .memory_weighted_size_bytes
-                    .saturating_add(memory.weighted_size_bytes);
-                totals.memory_max_size_bytes = totals
-                    .memory_max_size_bytes
-                    .saturating_add(memory.max_size_bytes.as_u64());
-                totals.hits = totals.hits.saturating_add(memory.activity.hits);
-                totals.misses = totals.misses.saturating_add(memory.activity.misses);
-                totals.stores = totals.stores.saturating_add(memory.activity.stores);
-                totals.store_refusals = totals
-                    .store_refusals
-                    .saturating_add(memory.activity.store_refusals);
-                totals.purges = totals.purges.saturating_add(memory.activity.purges);
-            }
-
             let disk = vhost
                 .pingora_disk_storage
                 .map(|storage| storage.stats())
                 .transpose()?;
-            if let Some(disk) = disk {
-                totals.disk_entries = totals.disk_entries.saturating_add(disk.entries);
-                totals.disk_size_bytes = totals.disk_size_bytes.saturating_add(disk.size_bytes);
-                totals.disk_max_size_bytes = totals
-                    .disk_max_size_bytes
-                    .saturating_add(disk.max_size_bytes.as_u64());
-                totals.hits = totals.hits.saturating_add(disk.activity.hits);
-                totals.misses = totals.misses.saturating_add(disk.activity.misses);
-                totals.stores = totals.stores.saturating_add(disk.activity.stores);
-                totals.store_refusals = totals
-                    .store_refusals
-                    .saturating_add(disk.activity.store_refusals);
-                totals.purges = totals.purges.saturating_add(disk.activity.purges);
+            accumulate_cache_stats(&mut totals, memory.as_ref(), disk.as_ref());
+
+            let mut routes = Vec::new();
+            for route in &vhost.routes {
+                let Some(cache) = &route.cache else {
+                    continue;
+                };
+                if cache.config.enabled {
+                    totals.enabled_routes = totals.enabled_routes.saturating_add(1);
+                }
+                if cache.pingora_tiered_storage.is_some() {
+                    totals.tiered_routes = totals.tiered_routes.saturating_add(1);
+                }
+                let route_memory = cache.pingora_memory_storage.map(|storage| storage.stats());
+                let route_disk = cache
+                    .pingora_disk_storage
+                    .map(|storage| storage.stats())
+                    .transpose()?;
+                accumulate_cache_stats(&mut totals, route_memory.as_ref(), route_disk.as_ref());
+                routes.push(CacheRouteStats {
+                    name: cache.name.clone(),
+                    enabled: cache.config.enabled,
+                    tiered: cache.pingora_tiered_storage.is_some(),
+                    memory: route_memory,
+                    disk: route_disk,
+                });
             }
 
             vhosts.push(CacheVhostStats {
@@ -488,6 +498,7 @@ impl ProxySnapshot {
                 tiered: vhost.pingora_tiered_storage.is_some(),
                 memory,
                 disk,
+                routes,
             });
         }
         Ok(CacheRuntimeStats { totals, vhosts })
@@ -499,6 +510,7 @@ impl ProxySnapshot {
             memory_tiers: 0,
             disk_tiers: 0,
             tiered_vhosts: 0,
+            tiered_routes: 0,
         };
         for vhost in &self.state.vhosts {
             if let Some(storage) = vhost.pingora_memory_storage {
@@ -511,6 +523,22 @@ impl ProxySnapshot {
             }
             if vhost.pingora_tiered_storage.is_some() {
                 result.tiered_vhosts = result.tiered_vhosts.saturating_add(1);
+            }
+            for route in &vhost.routes {
+                let Some(cache) = &route.cache else {
+                    continue;
+                };
+                if let Some(storage) = cache.pingora_memory_storage {
+                    storage.reset_activity();
+                    result.memory_tiers = result.memory_tiers.saturating_add(1);
+                }
+                if let Some(storage) = cache.pingora_disk_storage {
+                    storage.reset_activity();
+                    result.disk_tiers = result.disk_tiers.saturating_add(1);
+                }
+                if cache.pingora_tiered_storage.is_some() {
+                    result.tiered_routes = result.tiered_routes.saturating_add(1);
+                }
             }
         }
         result
@@ -598,6 +626,45 @@ impl ProxySnapshot {
             .map(|result| result.vhost.clone())
             .unwrap_or_default();
         Ok(CacheBulkPurgeResult { vhost, results })
+    }
+}
+
+#[cfg(feature = "cache")]
+fn accumulate_cache_stats(
+    totals: &mut CacheRuntimeTotals,
+    memory: Option<&crate::cache::MemoryCacheStats>,
+    disk: Option<&crate::cache::DiskCacheStats>,
+) {
+    if let Some(memory) = memory {
+        totals.memory_entries = totals.memory_entries.saturating_add(memory.entries);
+        totals.memory_weighted_size_bytes = totals
+            .memory_weighted_size_bytes
+            .saturating_add(memory.weighted_size_bytes);
+        totals.memory_max_size_bytes = totals
+            .memory_max_size_bytes
+            .saturating_add(memory.max_size_bytes.as_u64());
+        totals.hits = totals.hits.saturating_add(memory.activity.hits);
+        totals.misses = totals.misses.saturating_add(memory.activity.misses);
+        totals.stores = totals.stores.saturating_add(memory.activity.stores);
+        totals.store_refusals = totals
+            .store_refusals
+            .saturating_add(memory.activity.store_refusals);
+        totals.purges = totals.purges.saturating_add(memory.activity.purges);
+    }
+
+    if let Some(disk) = disk {
+        totals.disk_entries = totals.disk_entries.saturating_add(disk.entries);
+        totals.disk_size_bytes = totals.disk_size_bytes.saturating_add(disk.size_bytes);
+        totals.disk_max_size_bytes = totals
+            .disk_max_size_bytes
+            .saturating_add(disk.max_size_bytes.as_u64());
+        totals.hits = totals.hits.saturating_add(disk.activity.hits);
+        totals.misses = totals.misses.saturating_add(disk.activity.misses);
+        totals.stores = totals.stores.saturating_add(disk.activity.stores);
+        totals.store_refusals = totals
+            .store_refusals
+            .saturating_add(disk.activity.store_refusals);
+        totals.purges = totals.purges.saturating_add(disk.activity.purges);
     }
 }
 

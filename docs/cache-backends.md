@@ -77,11 +77,11 @@ internal cache implementation.
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and
   purge invalidates both tiers.
-- The protected admin endpoint `GET /_fluxheim/cache/status` reports per-vhost
-  and aggregate cache enablement, tiering, memory counters, disk counters, and
-  cache activity counters for hits, misses, stores, refused stores, and purges.
-  `POST /_fluxheim/cache/activity/reset` resets activity counters without
-  clearing cached objects.
+- The protected admin endpoint `GET /_fluxheim/cache/status` reports aggregate,
+  per-vhost, and per-route cache enablement, tiering, memory counters, disk
+  counters, and cache activity counters for hits, misses, stores, refused
+  stores, and purges. `POST /_fluxheim/cache/activity/reset` resets vhost and
+  route activity counters without clearing cached objects.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost. If the object has negotiated `Vary` variants, memory and disk
   purge remove every stored variant for that primary identity. `POST

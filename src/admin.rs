@@ -359,8 +359,8 @@ impl AdminApp {
     fn cache_activity_reset_response(&self) -> AdminResponse {
         let result = self.proxy.reset_cache_activity();
         let body = format!(
-            r#"{{"status":"ok","memory_tiers":{},"disk_tiers":{},"tiered_vhosts":{}}}"#,
-            result.memory_tiers, result.disk_tiers, result.tiered_vhosts
+            r#"{{"status":"ok","memory_tiers":{},"disk_tiers":{},"tiered_vhosts":{},"tiered_routes":{}}}"#,
+            result.memory_tiers, result.disk_tiers, result.tiered_vhosts, result.tiered_routes
         );
         json_response(StatusCode::OK, body.as_bytes())
     }
@@ -1304,10 +1304,12 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
     format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"tiered_vhosts":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_max_size_bytes":{},"disk_entries":{},"disk_size_bytes":{},"disk_max_size_bytes":{},"activity":{}}}"#,
+        r#"{{"vhosts":{},"enabled_vhosts":{},"tiered_vhosts":{},"enabled_routes":{},"tiered_routes":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_max_size_bytes":{},"disk_entries":{},"disk_size_bytes":{},"disk_max_size_bytes":{},"activity":{}}}"#,
         totals.vhosts,
         totals.enabled_vhosts,
         totals.tiered_vhosts,
+        totals.enabled_routes,
+        totals.tiered_routes,
         totals.memory_entries,
         totals.memory_weighted_size_bytes,
         totals.memory_max_size_bytes,
@@ -1332,12 +1334,32 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"memory":{},"disk":{}}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"memory":{},"disk":{},"routes":[{}]}}"#,
             json_escape(&vhost.name),
             vhost.enabled,
             vhost.tiered,
             memory_cache_stats_json(vhost.memory.as_ref()),
-            disk_cache_stats_json(vhost.disk.as_ref())
+            disk_cache_stats_json(vhost.disk.as_ref()),
+            cache_route_stats_json(&vhost.routes)
+        ));
+    }
+    body
+}
+
+#[cfg(feature = "cache")]
+fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> String {
+    let mut body = String::new();
+    for (index, route) in routes.iter().enumerate() {
+        if index > 0 {
+            body.push(',');
+        }
+        body.push_str(&format!(
+            r#"{{"name":"{}","enabled":{},"tiered":{},"memory":{},"disk":{}}}"#,
+            json_escape(&route.name),
+            route.enabled,
+            route.tiered,
+            memory_cache_stats_json(route.memory.as_ref()),
+            disk_cache_stats_json(route.disk.as_ref())
         ));
     }
     body
@@ -1580,7 +1602,7 @@ mod tests {
         WebConfig,
     };
     #[cfg(feature = "cache")]
-    use crate::config::{ByteSize, CacheConfig};
+    use crate::config::{ByteSize, CacheConfig, RouteConfig};
     use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
     use crate::snapshot::SnapshotStore;
     use crate::test_support::unique_temp_path;
@@ -1817,7 +1839,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
-                routes: Vec::new(),
+                routes: vec![cached_assets_route()],
             }],
             ..Config::default()
         };
@@ -1834,6 +1856,8 @@ mod tests {
         assert!(body.contains(r#""totals":{"vhosts":1"#));
         assert!(body.contains(r#""enabled_vhosts":1"#));
         assert!(body.contains(r#""tiered_vhosts":1"#));
+        assert!(body.contains(r#""enabled_routes":1"#));
+        assert!(body.contains(r#""tiered_routes":0"#));
         assert!(body.contains(r#""memory_entries":0"#));
         assert!(body.contains(r#""disk_entries":0"#));
         assert!(body.contains(r#""activity":{"hits":0,"misses":0,"stores":0"#));
@@ -1842,6 +1866,7 @@ mod tests {
         assert!(body.contains(r#""tiered":true"#));
         assert!(body.contains(r#""memory":{"entries":0"#));
         assert!(body.contains(r#""disk":{"entries":0"#));
+        assert!(body.contains(r#""routes":[{"name":"assets""#));
 
         std::fs::remove_dir_all(cache_path).unwrap();
     }
@@ -1875,7 +1900,7 @@ mod tests {
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 web: WebConfig::default(),
-                routes: Vec::new(),
+                routes: vec![cached_assets_route()],
             }],
             ..Config::default()
         };
@@ -1899,9 +1924,10 @@ mod tests {
         assert_eq!(response.status, StatusCode::OK);
         let body = String::from_utf8(response.body).unwrap();
         assert!(body.contains(r#""status":"ok""#));
-        assert!(body.contains(r#""memory_tiers":1"#));
+        assert!(body.contains(r#""memory_tiers":2"#));
         assert!(body.contains(r#""disk_tiers":1"#));
         assert!(body.contains(r#""tiered_vhosts":1"#));
+        assert!(body.contains(r#""tiered_routes":0"#));
 
         std::fs::remove_dir_all(cache_path).unwrap();
     }
@@ -2848,6 +2874,32 @@ mod tests {
             "Bearer secret-token".parse().unwrap(),
         );
         headers
+    }
+
+    #[cfg(feature = "cache")]
+    fn cached_assets_route() -> RouteConfig {
+        RouteConfig {
+            name: "assets".to_owned(),
+            path_exact: None,
+            path_prefix: Some("/assets/".to_owned()),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            max_request_body_bytes: None,
+            redirect: None,
+            proxy: Some(ProxyConfig::default()),
+            web: None,
+            cache: Some(CacheConfig {
+                enabled: true,
+                memory: crate::config::CacheMemoryConfig {
+                    enabled: true,
+                    max_size_bytes: ByteSize::from_bytes(1024),
+                },
+                max_object_bytes: ByteSize::from_bytes(512),
+                ..CacheConfig::default()
+            }),
+            headers: crate::config::VhostHeaderPolicyConfig::default(),
+        }
     }
 
     struct TestDir {
