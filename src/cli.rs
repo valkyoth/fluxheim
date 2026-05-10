@@ -70,7 +70,7 @@ pub enum CliCommand {
     /// Run ACME issuance/renewal once for all configured ACME vhosts.
     AcmeRenew {
         /// Force renewal for every configured ACME vhost, even when certificates are not due.
-        #[arg(long, alias = "all")]
+        #[arg(long)]
         force_renew: bool,
         /// Deprecated alias for --force-renew.
         #[arg(long, hide = true)]
