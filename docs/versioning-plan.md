@@ -356,7 +356,9 @@ Stable scope:
   repository avatar/assets paths, where only one proxy route should use a cache
   tier while the rest of the vhost remains uncached.
 - Cache completion work promoted into 1.2:
-  - persistent cache index across process restarts;
+  - broader persistent cache index coverage for older disk object formats and
+    future metadata migrations; new v3 disk objects already rebuild the bounded
+    purge index across process restarts;
   - background or incremental disk purge/cleanup for very large purge scopes;
   - cache warmer/preload command or admin workflow for release deploys;
   - surrogate-key/cache-tag purge for application-level invalidation;

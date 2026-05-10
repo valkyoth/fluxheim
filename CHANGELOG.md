@@ -17,6 +17,9 @@ behavior when the change improves security or project direction.
   hits, misses, stores, store refusals, evictions, and purges.
 - The release smoke suite now verifies proxy cache HIT behavior, cached-hit
   `Age`, conditional `304`, and byte-range `206` behavior end to end.
+- Disk cache writes now use a v3 object header that records the combined cache
+  key and user tag, allowing Fluxheim to rebuild the disk purge index after a
+  process restart while retaining read compatibility with older v1/v2 objects.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside

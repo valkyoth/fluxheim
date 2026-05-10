@@ -113,6 +113,12 @@ internal cache implementation.
   `.fhc` cache objects. Shard directories and object files must be symlink-free,
   even when a symlink points back inside the cache root; mount or configure the
   real cache directory path.
+- New disk cache objects use the v3 object header, which stores the combined
+  cache key, primary key, and user tag. On startup Fluxheim scans valid disk
+  cache objects and rebuilds the bounded purge index for v3 entries, so indexed
+  disk purges can survive process restarts. Older v1/v2 disk objects remain
+  readable but cannot fully rebuild indexed purge metadata because they did not
+  store the combined key and user tag.
 - Partial-write streaming is explicitly disabled for the production memory
   and disk adapters until in-progress response buffering can be bounded for
   unknown-size origin responses.
@@ -294,8 +300,8 @@ A production adapter must:
 
 - Enforce byte budgets, not only item counts.
 - Refuse objects larger than `cache.max_object_bytes`.
-- Preserve HTTP cache metadata, including status, headers, validators, and
-  freshness metadata.
+- Preserve HTTP cache metadata, including status, headers, validators, freshness
+  metadata, combined cache keys, primary keys, and user tags for index rebuilds.
 - Implement full cache-header behavior for:
   `Cache-Control`, `Expires`, `ETag`, `Last-Modified`, `Vary`, `Age`,
   `Accept-Ranges`, `If-None-Match`, `If-Modified-Since`, request

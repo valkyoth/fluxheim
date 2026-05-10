@@ -34,11 +34,13 @@ use std::os::unix::fs::OpenOptionsExt;
 const O_NOFOLLOW: i32 = 0o400000;
 
 #[cfg(feature = "proxy")]
-const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 128;
+const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-v1\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V2: &[u8] = b"FLUXHEIM-CACHE-v2\n";
+#[cfg(feature = "proxy")]
+const DISK_CACHE_MAGIC_V3: &[u8] = b"FLUXHEIM-CACHE-v3\n";
 #[cfg(feature = "proxy")]
 const CACHE_PURGE_INDEX_MAX_ENTRIES: usize = 65_536;
 
@@ -775,7 +777,9 @@ impl PingoraMemoryStorage {
         self.inner.insert(
             store_key.combined,
             PingoraStoredObject {
+                combined_key: Some(combined_key.clone()),
                 primary_key: Some(store_key.primary.clone()),
+                user_tag: Some(store_key.user_tag.clone()),
                 internal_meta,
                 response_header,
                 body,
@@ -815,13 +819,15 @@ impl PingoraDiskStorage {
         max_object_bytes: ByteSize,
     ) -> std::io::Result<Self> {
         let root = prepare_disk_cache_root(&root)?;
-        Ok(Self {
+        let storage = Self {
             root,
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
             activity: CacheActivityCounters::new("disk"),
-        })
+        };
+        storage.rebuild_purge_index()?;
+        Ok(storage)
     }
 
     pub fn root(&self) -> &Path {
@@ -846,6 +852,30 @@ impl PingoraDiskStorage {
 
     pub fn reset_activity(&self) {
         self.activity.reset();
+    }
+
+    fn rebuild_purge_index(&self) -> std::io::Result<()> {
+        for entry in disk_cache_entries(&self.root)? {
+            let Some(read_path) = self.safe_existing_object_path(&entry.path)? else {
+                continue;
+            };
+            let Ok(object) = read_disk_cache_object(&self.root, &read_path, self.max_object_bytes)
+                .and_then(|bytes| parse_disk_cache_object(&bytes, self.max_object_bytes))
+            else {
+                continue;
+            };
+            let Some(combined_key) = object.combined_key else {
+                continue;
+            };
+            let Some(primary_key) = object.primary_key else {
+                continue;
+            };
+            let user_tag = object.user_tag.unwrap_or_default();
+            let path = cache_primary_component(&primary_key, "path");
+            self.purge_index
+                .insert_with_path(combined_key, primary_key, user_tag, path);
+        }
+        Ok(())
     }
 
     pub fn purge_cache_key(&self, key: &pingora::cache::CacheKey) -> std::io::Result<bool> {
@@ -1011,8 +1041,11 @@ impl PingoraDiskStorage {
         body: Arc<[u8]>,
     ) -> pingora::Result<Option<usize>> {
         let object_bytes = pingora_object_weight(&internal_meta, &response_header, &body);
+        let header_overhead = disk_cache_header_overhead(&store_key);
+        let encoded_object_bytes = object_bytes.saturating_add(header_overhead);
         if object_bytes > self.max_object_bytes.as_u64()
-            || object_bytes > self.max_size_bytes.as_u64()
+            || header_overhead > DISK_CACHE_HEADER_OVERHEAD_LIMIT
+            || encoded_object_bytes > self.max_size_bytes.as_u64()
         {
             self.activity.store_refusal();
             return Ok(None);
@@ -1021,7 +1054,7 @@ impl PingoraDiskStorage {
         let path = self.path_for_combined_key(&store_key.combined);
         let combined_key = store_key.combined.clone();
         if !self
-            .evict_until_admissible(&path, object_bytes)
+            .evict_until_admissible(&path, encoded_object_bytes)
             .map_err(|error| cache_io_error("evict disk cache objects", error))?
         {
             self.activity.store_refusal();
@@ -1039,17 +1072,11 @@ impl PingoraDiskStorage {
             .map_err(|error| cache_io_error("create disk cache shard", error))?;
         require_disk_cache_write_destination(&path)
             .map_err(|error| cache_io_error("validate disk cache object destination", error))?;
-        self.write_object_atomically(
-            &path,
-            &store_key.primary,
-            &internal_meta,
-            &response_header,
-            &body,
-        )
-        .map_err(|error| {
-            self.activity.store_refusal();
-            cache_io_error("write disk cache object", error)
-        })?;
+        self.write_object_atomically(&path, &store_key, &internal_meta, &response_header, &body)
+            .map_err(|error| {
+                self.activity.store_refusal();
+                cache_io_error("write disk cache object", error)
+            })?;
         self.purge_index.insert_with_path(
             combined_key,
             store_key.primary,
@@ -1120,7 +1147,7 @@ impl PingoraDiskStorage {
     fn write_object_atomically(
         &self,
         path: &Path,
-        primary_key: &str,
+        store_key: &PingoraStoreKey,
         internal_meta: &[u8],
         response_header: &[u8],
         body: &[u8],
@@ -1130,7 +1157,9 @@ impl PingoraDiskStorage {
             let tmp_path = self.tmp_path_for(path)?;
             let write_result = write_disk_cache_object(
                 &tmp_path,
-                primary_key,
+                &store_key.combined,
+                &store_key.primary,
+                &store_key.user_tag,
                 internal_meta,
                 response_header,
                 body,
@@ -1370,7 +1399,9 @@ impl PingoraStoreKey {
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone)]
 struct PingoraStoredObject {
+    combined_key: Option<String>,
     primary_key: Option<String>,
+    user_tag: Option<String>,
     internal_meta: Vec<u8>,
     response_header: Vec<u8>,
     body: Arc<[u8]>,
@@ -1611,6 +1642,25 @@ fn pingora_object_weight(internal_meta: &[u8], response_header: &[u8], body: &[u
     (internal_meta.len() as u64)
         .saturating_add(response_header.len() as u64)
         .saturating_add(body.len() as u64)
+}
+
+#[cfg(feature = "proxy")]
+fn disk_cache_header_overhead(store_key: &PingoraStoreKey) -> u64 {
+    let combined_len = store_key.combined.len() as u64;
+    let primary_len = store_key.primary.len() as u64;
+    let user_tag_len = store_key.user_tag.len() as u64;
+    (DISK_CACHE_MAGIC_V3.len() as u64)
+        .saturating_add(decimal_line_len(combined_len))
+        .saturating_add(decimal_line_len(primary_len))
+        .saturating_add(decimal_line_len(user_tag_len))
+        .saturating_add(combined_len)
+        .saturating_add(primary_len)
+        .saturating_add(user_tag_len)
+}
+
+#[cfg(feature = "proxy")]
+fn decimal_line_len(value: u64) -> u64 {
+    value.to_string().len() as u64 + 1
 }
 
 #[cfg(feature = "proxy")]
@@ -2103,7 +2153,9 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
 #[cfg(feature = "proxy")]
 fn write_disk_cache_object(
     path: &Path,
+    combined_key: &str,
     primary_key: &str,
+    user_tag: &str,
     internal_meta: &[u8],
     response_header: &[u8],
     body: &[u8],
@@ -2116,12 +2168,16 @@ fn write_disk_cache_object(
     options.custom_flags(O_NOFOLLOW);
 
     let mut file = options.open(path)?;
-    file.write_all(DISK_CACHE_MAGIC_V2)?;
+    file.write_all(DISK_CACHE_MAGIC_V3)?;
+    writeln!(file, "{}", combined_key.len())?;
     writeln!(file, "{}", primary_key.len())?;
+    writeln!(file, "{}", user_tag.len())?;
     writeln!(file, "{}", internal_meta.len())?;
     writeln!(file, "{}", response_header.len())?;
     writeln!(file, "{}", body.len())?;
+    file.write_all(combined_key.as_bytes())?;
     file.write_all(primary_key.as_bytes())?;
+    file.write_all(user_tag.as_bytes())?;
     file.write_all(internal_meta)?;
     file.write_all(response_header)?;
     file.write_all(body)?;
@@ -2223,11 +2279,13 @@ fn parse_disk_cache_object(
     bytes: &[u8],
     max_object_bytes: ByteSize,
 ) -> std::io::Result<PingoraStoredObject> {
-    let (mut offset, has_primary_key) =
-        if bytes.get(..DISK_CACHE_MAGIC_V2.len()) == Some(DISK_CACHE_MAGIC_V2) {
-            (DISK_CACHE_MAGIC_V2.len(), true)
+    let (mut offset, format_version) =
+        if bytes.get(..DISK_CACHE_MAGIC_V3.len()) == Some(DISK_CACHE_MAGIC_V3) {
+            (DISK_CACHE_MAGIC_V3.len(), 3_u8)
+        } else if bytes.get(..DISK_CACHE_MAGIC_V2.len()) == Some(DISK_CACHE_MAGIC_V2) {
+            (DISK_CACHE_MAGIC_V2.len(), 2_u8)
         } else if bytes.get(..DISK_CACHE_MAGIC_V1.len()) == Some(DISK_CACHE_MAGIC_V1) {
-            (DISK_CACHE_MAGIC_V1.len(), false)
+            (DISK_CACHE_MAGIC_V1.len(), 1_u8)
         } else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -2235,7 +2293,17 @@ fn parse_disk_cache_object(
             ));
         };
 
-    let primary_key_len = if has_primary_key {
+    let combined_key_len = if format_version >= 3 {
+        parse_disk_cache_len(bytes, &mut offset)?
+    } else {
+        0
+    };
+    let primary_key_len = if format_version >= 2 {
+        parse_disk_cache_len(bytes, &mut offset)?
+    } else {
+        0
+    };
+    let user_tag_len = if format_version >= 3 {
         parse_disk_cache_len(bytes, &mut offset)?
     } else {
         0
@@ -2254,7 +2322,9 @@ fn parse_disk_cache_object(
     }
 
     let total_len = offset
-        .checked_add(primary_key_len)
+        .checked_add(combined_key_len)
+        .and_then(|value| value.checked_add(primary_key_len))
+        .and_then(|value| value.checked_add(user_tag_len))
         .and_then(|value| value.checked_add(internal_meta_len))
         .and_then(|value| value.checked_add(response_header_len))
         .and_then(|value| value.checked_add(body_len))
@@ -2277,27 +2347,53 @@ fn parse_disk_cache_object(
             "cache object weight exceeds u32",
         )
     })?;
-    let primary_key_end = offset + primary_key_len;
-    let internal_meta_end = primary_key_end + internal_meta_len;
+    let combined_key_end = offset + combined_key_len;
+    let primary_key_end = combined_key_end + primary_key_len;
+    let user_tag_end = primary_key_end + user_tag_len;
+    let internal_meta_end = user_tag_end + internal_meta_len;
     let response_header_end = internal_meta_end + response_header_len;
-    let primary_key = if has_primary_key {
-        Some(
-            std::str::from_utf8(&bytes[offset..primary_key_end])
-                .map_err(|error| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{error}"))
-                })?
-                .to_owned(),
-        )
+    let combined_key = if format_version >= 3 {
+        Some(cache_object_utf8(
+            &bytes[offset..combined_key_end],
+            "combined key",
+        )?)
+    } else {
+        None
+    };
+    let primary_key = if format_version >= 2 {
+        Some(cache_object_utf8(
+            &bytes[combined_key_end..primary_key_end],
+            "primary key",
+        )?)
+    } else {
+        None
+    };
+    let user_tag = if format_version >= 3 {
+        Some(cache_object_utf8(
+            &bytes[primary_key_end..user_tag_end],
+            "user tag",
+        )?)
     } else {
         None
     };
     Ok(PingoraStoredObject {
+        combined_key,
         primary_key,
-        internal_meta: bytes[primary_key_end..internal_meta_end].to_vec(),
+        user_tag,
+        internal_meta: bytes[user_tag_end..internal_meta_end].to_vec(),
         response_header: bytes[internal_meta_end..response_header_end].to_vec(),
         body: Arc::from(&bytes[response_header_end..][..]),
         weight,
     })
+}
+
+#[cfg(feature = "proxy")]
+fn cache_object_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
+    std::str::from_utf8(bytes)
+        .map(str::to_owned)
+        .map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{field}: {error}"))
+        })
 }
 
 #[cfg(feature = "proxy")]
@@ -2308,13 +2404,13 @@ fn parse_disk_cache_len(bytes: &[u8], offset: &mut usize) -> std::io::Result<usi
             "cache object header missing newline",
         ));
     };
-    let line_end = *offset + relative_newline;
-    let line = std::str::from_utf8(&bytes[*offset..line_end]).map_err(|error| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{error}"))
-    })?;
-    *offset = line_end + 1;
-    line.parse::<usize>()
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{error}")))
+    let end = *offset + relative_newline;
+    let value = std::str::from_utf8(&bytes[*offset..end])
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid length"))?
+        .parse::<usize>()
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid length"))?;
+    *offset = end + 1;
+    Ok(value)
 }
 
 #[cfg(feature = "proxy")]
@@ -3380,6 +3476,48 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_disk_storage_rebuilds_purge_index_from_v3_objects() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-persistent-index");
+        let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-index-key", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"disk-body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+        assert_eq!(writer.purge_index.len(), 1);
+
+        let rebuilt = super::PingoraDiskStorage::new(
+            root.clone(),
+            ByteSize::from_bytes(4096),
+            ByteSize::from_bytes(1024),
+        )
+        .unwrap();
+        assert_eq!(rebuilt.purge_index.len(), 1);
+        let result = rebuilt.purge_indexed_user_tag("vhost-a", 8).unwrap();
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
+        assert_eq!(rebuilt.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_disk_storage_purges_variants_by_primary_key() {
         use pingora::cache::Storage;
 
@@ -3453,6 +3591,37 @@ mod tests {
         ));
         assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
         assert_eq!(storage.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_refuses_unbounded_key_metadata() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("oversized-key-metadata");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(32 * 1024),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let user_tag = "v".repeat((super::DISK_CACHE_HEADER_OVERHEAD_LIMIT + 1) as usize);
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-key", &user_tag);
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        let finish = block_on(miss.finish()).unwrap();
+
+        assert!(matches!(
+            finish,
+            pingora::cache::storage::MissFinishType::Created(0)
+        ));
+        assert_eq!(storage.stats().unwrap().entries, 0);
+        assert_eq!(storage.stats().unwrap().activity.store_refusals, 1);
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -3722,7 +3891,11 @@ mod tests {
         let root = unique_test_cache_dir("read-oversized");
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("oversized.fhc");
-        std::fs::write(&path, vec![b'x'; 256]).unwrap();
+        std::fs::write(
+            &path,
+            vec![b'x'; (super::DISK_CACHE_HEADER_OVERHEAD_LIMIT + 16) as usize],
+        )
+        .unwrap();
 
         let error =
             super::read_disk_cache_object(&root, &path, ByteSize::from_bytes(8)).unwrap_err();
