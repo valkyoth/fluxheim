@@ -1626,10 +1626,13 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"memory":{},"disk":{},"routes":[{}]}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"routes_total":{},"enabled_routes":{},"tiered_routes":{},"memory":{},"disk":{},"routes":[{}]}}"#,
             json_escape(&vhost.name),
             vhost.enabled,
             vhost.tiered,
+            vhost.routes_total,
+            vhost.enabled_routes,
+            vhost.tiered_routes,
             memory_cache_stats_json(vhost.memory.as_ref()),
             disk_cache_stats_json(vhost.disk.as_ref()),
             cache_route_stats_json(&vhost.routes)
@@ -2502,6 +2505,9 @@ mod tests {
         assert!(body.contains(r#""name":"cached""#));
         assert!(body.contains(r#""enabled":true"#));
         assert!(body.contains(r#""tiered":true"#));
+        assert!(body.contains(r#""routes_total":1"#));
+        assert!(body.contains(r#""enabled_routes":1"#));
+        assert!(body.contains(r#""tiered_routes":0"#));
         assert!(body.contains(r#""memory":{"entries":0"#));
         assert!(body.contains(r#""fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""purge_index_entries":0"#));

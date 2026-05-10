@@ -154,10 +154,12 @@ internal cache implementation.
 - The protected admin endpoint `GET /_fluxheim/cache/status` reports aggregate,
   per-vhost, and per-route cache enablement, tiering, memory counters, disk
   counters, and cache activity counters for hits, misses, stores, refused
-  stores, refused stores, disk evictions, and purges. Activity blocks include
-  derived `requests`, `hit_ratio_per_mille`, `store_attempts`, and
+  stores, disk evictions, and purges. Activity blocks include derived
+  `requests`, `hit_ratio_per_mille`, `store_attempts`, and
   `store_refusal_ratio_per_mille` fields so operators can read hit-rate and
-  admission health without external JSON post-processing. Memory and disk tier
+  admission health without external JSON post-processing. Per-vhost status
+  includes `routes_total`, `enabled_routes`, and `tiered_routes` so route-cache
+  coverage is visible without parsing the route list. Memory and disk tier
   status also reports `fill_ratio_per_mille`, `purge_index_entries`,
   `purge_index_max_entries`, and `purge_index_fill_ratio_per_mille`, and
   totals report the same values split by memory and disk tiers, so operators

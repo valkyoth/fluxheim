@@ -477,6 +477,9 @@ pub struct CacheVhostStats {
     pub name: String,
     pub enabled: bool,
     pub tiered: bool,
+    pub routes_total: u64,
+    pub enabled_routes: u64,
+    pub tiered_routes: u64,
     pub memory: Option<crate::cache::MemoryCacheStats>,
     pub disk: Option<crate::cache::DiskCacheStats>,
     pub routes: Vec<CacheRouteStats>,
@@ -566,15 +569,19 @@ impl ProxySnapshot {
             accumulate_cache_stats(&mut totals, memory.as_ref(), disk.as_ref());
 
             let mut routes = Vec::new();
+            let mut enabled_routes = 0_u64;
+            let mut tiered_routes = 0_u64;
             for route in &vhost.routes {
                 let Some(cache) = &route.cache else {
                     continue;
                 };
                 if cache.config.enabled {
                     totals.enabled_routes = totals.enabled_routes.saturating_add(1);
+                    enabled_routes = enabled_routes.saturating_add(1);
                 }
                 if cache.pingora_tiered_storage.is_some() {
                     totals.tiered_routes = totals.tiered_routes.saturating_add(1);
+                    tiered_routes = tiered_routes.saturating_add(1);
                 }
                 let route_memory = cache.pingora_memory_storage.map(|storage| storage.stats());
                 let route_disk = cache
@@ -595,6 +602,9 @@ impl ProxySnapshot {
                 name: vhost.name.clone(),
                 enabled: vhost.cache.enabled,
                 tiered: vhost.pingora_tiered_storage.is_some(),
+                routes_total: routes.len() as u64,
+                enabled_routes,
+                tiered_routes,
                 memory,
                 disk,
                 routes,
