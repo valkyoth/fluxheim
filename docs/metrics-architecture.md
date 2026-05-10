@@ -81,6 +81,24 @@ Per bucket:
 - atomic cache counters, or snapshot from cache activity counters
 - latency buckets
 
+Current cache baseline:
+
+- `fluxheim_cache_vhosts`
+- `fluxheim_cache_enabled_vhosts`
+- `fluxheim_cache_tiered_vhosts`
+- `fluxheim_cache_configured_routes`
+- `fluxheim_cache_policy_routes`
+- `fluxheim_cache_enabled_routes`
+- `fluxheim_cache_tiered_routes`
+- `fluxheim_cache_memory_tiers`
+- `fluxheim_cache_disk_tiers`
+
+These gauges are aggregate, label-free, and populated from validated
+configuration when the metrics listener starts. They intentionally avoid raw
+hosts, paths, queries, cache keys, and purge identities. Per-vhost and
+per-route cache runtime metrics should only be added with configured-name labels
+and the same bounded concepts used by admin JSON and OpenTelemetry attributes.
+
 Latency plan:
 
 1. Start with fixed histogram buckets implemented as atomics. This is easiest

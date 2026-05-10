@@ -14,6 +14,8 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::Bytes;
 #[cfg(feature = "cache")]
+use pingora::ErrorSource;
+#[cfg(feature = "cache")]
 use pingora::cache::CacheKey as PingoraCacheKey;
 #[cfg(feature = "cache")]
 use pingora::cache::key::{CacheHashKey, HashBinary};
@@ -23,7 +25,7 @@ use pingora::http::RequestHeader;
 use pingora::http::ResponseHeader;
 use pingora::prelude::{HttpPeer, Result};
 use pingora::proxy::{FailToProxy, ProxyHttp, Session};
-use pingora::{Error, ErrorSource, ErrorType};
+use pingora::{Error, ErrorType};
 #[cfg(feature = "cache")]
 use pingora::{
     cache::CacheOptionOverrides, cache::CachePhase, cache::NoCacheReason, cache::RespCacheable,
@@ -1570,6 +1572,7 @@ enum RuntimeRouteMatcher {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 enum RuntimeRouteAction {
     Redirect(RouteRedirectConfig),
     Proxy(RuntimeProxy),

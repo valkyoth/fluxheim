@@ -11,6 +11,8 @@ behavior when the change improves security or project direction.
 
 ### Added
 
+- Metrics builds now publish aggregate cache configuration gauges for vhost,
+  route, policy, and storage-tier coverage.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside

@@ -111,6 +111,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(feature = "metrics")]
     if config.metrics.enabled {
         crate::metrics::init()?;
+        crate::metrics::record_config(&config);
         let mut metrics_service = pingora::services::listening::Service::prometheus_http_service();
         log::info!("metrics listener enabled on {}", config.metrics.listen);
         metrics_service.add_tcp(&config.metrics.listen);
