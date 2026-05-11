@@ -609,7 +609,8 @@ Stable scope for declaring the cache pack complete:
 - Cache warm and metadata/debug commands suitable for release deploys and
   production incident response.
 - Proxy cache HIT `Age`, conditional `304`, byte-range `206`, `If-Range`
-  match/mismatch behavior, `Vary` variant isolation, stale-while-revalidate serving during background refresh,
+  match/mismatch behavior, `Vary` variant isolation, stale-while-revalidate
+  serving during background refresh,
   stale-if-error serving after upstream failure, cache-lock request collapsing
   for concurrent misses, disk HIT after restart, and request-bypass reason
   behavior are covered end to end.

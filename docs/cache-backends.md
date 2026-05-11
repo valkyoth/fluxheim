@@ -503,7 +503,8 @@ layout, `--expect-scope` and `--expect-route` fail when the selected cache
 policy is not the intended vhost or route,
 `--expect-serve-stale-if-error` and `--expect-serve-stale-while-revalidate`
 fail when no matching object is eligible for those stale-serving policies,
-`--expect-purge-indexed` fails when no matching object is reachable through the bounded purge index, and repeated
+`--expect-purge-indexed` fails when no matching object is reachable through the
+bounded purge index, and repeated
 `--expect-cache-tag` flags fail when no matching object has the expected stored
 cache tag. Repeated
 `--expect-header-name` flags fail when no matching object has the expected

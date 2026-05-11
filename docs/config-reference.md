@@ -572,7 +572,8 @@ without contacting the upstream. `cache-key` can fail closed with
 `--expect-storage-tiers` when a deploy requires a specific cache policy layout.
 Use `--expect-scope vhost|route` and `--expect-route NAME` when a deploy must
 prove that a specific vhost or route policy was selected.
-`fluxheim cache-lookup --host example.com --path /assets/app.js` also checks configured cache tiers and prints safe object
+`fluxheim cache-lookup --host example.com --path /assets/app.js` also checks
+configured cache tiers and prints safe object
 metadata without dumping bodies or header values, including a compact
 fresh/stale/expired state and stale-serving eligibility booleans. Both commands
 accept repeated `--header "Name: value"` options for safe negotiated variant
