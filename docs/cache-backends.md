@@ -32,6 +32,11 @@ internal cache implementation.
   upstream response headers before cache admission and downstream delivery.
   This is intended for tightly scoped static-asset routes where operators know
   a header such as `Set-Cookie` is not part of the cache identity.
+- `cache.tag_headers`, `vhosts.cache.tag_headers`, and
+  `vhosts.routes.cache.tag_headers` control which origin response headers are
+  trusted as cache-tag sources for indexed tag purge. Defaults are
+  `Surrogate-Key`, `Cache-Tag`, and `X-Cache-Tags`; set an empty list to
+  disable tag indexing for a cache policy.
 - `cache.bypass_request_headers`, `vhosts.cache.bypass_request_headers`, and
   `vhosts.routes.cache.bypass_request_headers` bypass cache lookup and storage
   when any listed request header is present. Use this for route policies where
@@ -236,7 +241,7 @@ internal cache implementation.
   `x-fluxheim-cache-path-prefix`. Prefix purge requires a non-root prefix such
   as `/assets/`; `/` is rejected so complete cache clears stay explicit through
   scope purge. `POST /_fluxheim/cache/purge-tag` invalidates indexed entries
-  for responses that carried `Surrogate-Key`, `Cache-Tag`, or `X-Cache-Tags`.
+  for responses that carried one of the configured cache `tag_headers`.
   Tags are exact-match, bounded, de-duplicated per object, and may contain
   ASCII letters, digits, `_`, `-`, `.`, `:`, `/`, and `=`. Disk cache objects
   persist tags in the v4 object format and rebuild the purge index across

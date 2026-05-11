@@ -456,6 +456,7 @@ enabled = false
 status_header = "X-Cache-Status"
 status_reason_header = "X-Cache-Reason"
 hide_response_headers = ["set-cookie"]
+tag_headers = ["surrogate-key", "cache-tag", "x-cache-tags"]
 no_store_response_headers = ["x-app-no-store"]
 no_store_response_header_values = { x-app-cache = "private" }
 bypass_request_headers = ["cookie", "authorization"]
@@ -516,6 +517,11 @@ actively debugging cache policy.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.
+`tag_headers` controls which origin response headers are trusted as cache-tag
+sources for indexed tag purge. The default is `surrogate-key`, `cache-tag`, and
+`x-cache-tags`. Set it to a smaller list for application-specific tag headers,
+or to `[]` to disable cache-tag indexing while keeping scope, prefix, stale,
+and wildcard purge available.
 `no_store_response_headers` rejects shared cache admission when any listed
 origin response header is present, while still delivering the response to the
 client. Use it for application-specific no-store signals that are not expressed

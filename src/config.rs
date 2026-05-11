@@ -3176,6 +3176,8 @@ pub struct CacheConfig {
     pub status_reason_header: Option<String>,
     #[serde(default)]
     pub hide_response_headers: Vec<String>,
+    #[serde(default = "default_cache_tag_headers")]
+    pub tag_headers: Vec<String>,
     #[serde(default)]
     pub no_store_response_headers: Vec<String>,
     #[serde(default)]
@@ -3241,6 +3243,7 @@ impl Default for CacheConfig {
             status_header: None,
             status_reason_header: None,
             hide_response_headers: Vec::new(),
+            tag_headers: default_cache_tag_headers(),
             no_store_response_headers: Vec::new(),
             no_store_response_header_values: BTreeMap::new(),
             bypass_request_headers: Vec::new(),
@@ -3291,6 +3294,17 @@ impl CacheConfig {
         }
         for header in &self.hide_response_headers {
             validate_header_name(scope, header)?;
+        }
+        let mut seen_tag_headers = BTreeSet::new();
+        for header in &self.tag_headers {
+            validate_header_name(scope, header)?;
+            let normalized = header.to_ascii_lowercase();
+            if !seen_tag_headers.insert(normalized) {
+                return Err(ConfigError::DuplicateCacheTagHeader {
+                    scope,
+                    header: header.clone(),
+                });
+            }
         }
         for header in &self.no_store_response_headers {
             validate_header_name(scope, header)?;
@@ -3599,6 +3613,13 @@ fn default_cache_key_parts() -> Vec<CacheKeyPart> {
         CacheKeyPart::Path,
         CacheKeyPart::Query,
     ]
+}
+
+fn default_cache_tag_headers() -> Vec<String> {
+    ["surrogate-key", "cache-tag", "x-cache-tags"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
 }
 
 fn validate_cache_key_namespace(scope: &'static str, namespace: &str) -> Result<(), ConfigError> {
@@ -4192,6 +4213,10 @@ pub enum ConfigError {
         scope: &'static str,
         header: String,
     },
+    DuplicateCacheTagHeader {
+        scope: &'static str,
+        header: String,
+    },
     InvalidCacheKeyNamespace {
         scope: &'static str,
         namespace: String,
@@ -4665,6 +4690,10 @@ impl Display for ConfigError {
             Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
                 formatter,
                 "{scope}.vary_request_headers must not include sensitive request header {header:?}; use bypass_request_headers for request-specific responses"
+            ),
+            Self::DuplicateCacheTagHeader { scope, header } => write!(
+                formatter,
+                "{scope}.tag_headers must not contain duplicate response headers, got {header:?}"
             ),
             Self::InvalidCacheKeyNamespace { scope, namespace } => write!(
                 formatter,
@@ -7498,6 +7527,7 @@ mod tests {
             status_header = "X-Cache-Status"
             status_reason_header = "X-Cache-Reason"
             hide_response_headers = ["set-cookie"]
+            tag_headers = ["Surrogate-Key", "X-App-Cache-Tags"]
             no_store_response_headers = ["x-fluxheim-no-store"]
             no_store_response_header_values = { x-app-cache = "private" }
             bypass_request_headers = ["cookie", "authorization"]
@@ -7553,6 +7583,10 @@ mod tests {
         assert_eq!(
             config.cache.hide_response_headers,
             ["set-cookie".to_owned()]
+        );
+        assert_eq!(
+            config.cache.tag_headers,
+            ["Surrogate-Key".to_owned(), "X-App-Cache-Tags".to_owned()]
         );
         assert_eq!(
             config.cache.no_store_response_headers,
@@ -8132,6 +8166,25 @@ mod tests {
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidCacheStaleWhileRevalidateTtl { scope: "cache" })
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_cache_tag_headers() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            tag_headers = ["Surrogate-Key", "surrogate-key"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::DuplicateCacheTagHeader {
+                scope: "cache",
+                header: "surrogate-key".to_owned(),
+            })
         );
     }
 

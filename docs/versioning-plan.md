@@ -368,6 +368,8 @@ Stable scope:
   - cache warmer/preload command or admin workflow for release deploys;
   - richer cache-tag policy controls on top of the initial exact-match
     `Surrogate-Key` / `Cache-Tag` / `X-Cache-Tags` indexed purge support;
+    cache policies can now configure or disable trusted tag headers with
+    `tag_headers`;
   - soft purge, where objects are marked stale and refreshed instead of removed
     immediately;
   - broader hit-for-pass/pass-cache policy coverage; `pass_uncacheable_after`

@@ -46,8 +46,6 @@ const DISK_CACHE_MAGIC_V4: &[u8] = b"FLUXHEIM-CACHE-v4\n";
 #[cfg(feature = "proxy")]
 const CACHE_PURGE_INDEX_MAX_ENTRIES: usize = 65_536;
 #[cfg(feature = "proxy")]
-const CACHE_TAG_HEADER_NAMES: [&str; 3] = ["surrogate-key", "cache-tag", "x-cache-tags"];
-#[cfg(feature = "proxy")]
 const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAG_LEN: usize = 128;
@@ -60,11 +58,12 @@ pub struct CacheStoragePlan {
     pub disk: Option<DiskTierPlan>,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MemoryTierPlan {
     pub max_size_bytes: ByteSize,
     pub max_object_bytes: ByteSize,
     pub object_slots: usize,
+    pub cache_tag_headers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -72,6 +71,7 @@ pub struct DiskTierPlan {
     pub path: PathBuf,
     pub max_size_bytes: ByteSize,
     pub max_object_bytes: ByteSize,
+    pub cache_tag_headers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -678,13 +678,18 @@ pub struct PingoraMemoryStorage {
     purge_index: CachePurgeIndex,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
+    cache_tag_headers: Arc<[String]>,
     activity: CacheActivityCounters,
 }
 
 #[cfg(feature = "proxy")]
 impl PingoraMemoryStorage {
     pub fn from_plan(plan: MemoryTierPlan) -> Self {
-        Self::new(plan.max_size_bytes, plan.max_object_bytes)
+        Self::new_with_cache_tag_headers(
+            plan.max_size_bytes,
+            plan.max_object_bytes,
+            plan.cache_tag_headers,
+        )
     }
 
     pub fn from_plan_with_metric_scope(
@@ -692,13 +697,32 @@ impl PingoraMemoryStorage {
         vhost: &str,
         route: Option<&str>,
     ) -> Self {
-        Self::new_with_metric_scope(plan.max_size_bytes, plan.max_object_bytes, vhost, route)
+        Self::new_with_metric_scope(
+            plan.max_size_bytes,
+            plan.max_object_bytes,
+            plan.cache_tag_headers,
+            vhost,
+            route,
+        )
     }
 
     pub fn new(max_size_bytes: ByteSize, max_object_bytes: ByteSize) -> Self {
+        Self::new_with_cache_tag_headers(
+            max_size_bytes,
+            max_object_bytes,
+            default_cache_tag_headers_for_storage(),
+        )
+    }
+
+    fn new_with_cache_tag_headers(
+        max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+        cache_tag_headers: Vec<String>,
+    ) -> Self {
         Self::new_with_activity(
             max_size_bytes,
             max_object_bytes,
+            cache_tag_headers,
             CacheActivityCounters::new("memory"),
         )
     }
@@ -706,12 +730,14 @@ impl PingoraMemoryStorage {
     fn new_with_metric_scope(
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
+        cache_tag_headers: Vec<String>,
         vhost: &str,
         route: Option<&str>,
     ) -> Self {
         Self::new_with_activity(
             max_size_bytes,
             max_object_bytes,
+            cache_tag_headers,
             CacheActivityCounters::new_with_metric_scope("memory", vhost, route),
         )
     }
@@ -719,6 +745,7 @@ impl PingoraMemoryStorage {
     fn new_with_activity(
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
+        cache_tag_headers: Vec<String>,
         activity: CacheActivityCounters,
     ) -> Self {
         let inner = moka::sync::Cache::builder()
@@ -730,6 +757,7 @@ impl PingoraMemoryStorage {
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
+            cache_tag_headers: Arc::from(cache_tag_headers),
             activity,
         }
     }
@@ -922,7 +950,7 @@ impl PingoraMemoryStorage {
         meta: CacheMeta,
         body: Arc<[u8]>,
     ) -> pingora::Result<usize> {
-        let cache_tags = cache_tags_from_meta(&meta);
+        let cache_tags = cache_tags_from_meta(&meta, &self.cache_tag_headers);
         let (internal_meta, response_header) = meta.serialize()?;
         let mut store_key = store_key;
         store_key.cache_tags = cache_tags;
@@ -986,13 +1014,19 @@ pub struct PingoraDiskStorage {
     purge_index: CachePurgeIndex,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
+    cache_tag_headers: Arc<[String]>,
     activity: CacheActivityCounters,
 }
 
 #[cfg(feature = "proxy")]
 impl PingoraDiskStorage {
     pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
-        Self::new(plan.path, plan.max_size_bytes, plan.max_object_bytes)
+        Self::new_with_cache_tag_headers(
+            plan.path,
+            plan.max_size_bytes,
+            plan.max_object_bytes,
+            plan.cache_tag_headers,
+        )
     }
 
     pub fn from_plan_with_metric_scope(
@@ -1004,6 +1038,7 @@ impl PingoraDiskStorage {
             plan.path,
             plan.max_size_bytes,
             plan.max_object_bytes,
+            plan.cache_tag_headers,
             vhost,
             route,
         )
@@ -1014,10 +1049,25 @@ impl PingoraDiskStorage {
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
     ) -> std::io::Result<Self> {
+        Self::new_with_cache_tag_headers(
+            root,
+            max_size_bytes,
+            max_object_bytes,
+            default_cache_tag_headers_for_storage(),
+        )
+    }
+
+    fn new_with_cache_tag_headers(
+        root: PathBuf,
+        max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+        cache_tag_headers: Vec<String>,
+    ) -> std::io::Result<Self> {
         Self::new_with_activity(
             root,
             max_size_bytes,
             max_object_bytes,
+            cache_tag_headers,
             CacheActivityCounters::new("disk"),
         )
     }
@@ -1026,6 +1076,7 @@ impl PingoraDiskStorage {
         root: PathBuf,
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
+        cache_tag_headers: Vec<String>,
         vhost: &str,
         route: Option<&str>,
     ) -> std::io::Result<Self> {
@@ -1033,6 +1084,7 @@ impl PingoraDiskStorage {
             root,
             max_size_bytes,
             max_object_bytes,
+            cache_tag_headers,
             CacheActivityCounters::new_with_metric_scope("disk", vhost, route),
         )
     }
@@ -1041,6 +1093,7 @@ impl PingoraDiskStorage {
         root: PathBuf,
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
+        cache_tag_headers: Vec<String>,
         activity: CacheActivityCounters,
     ) -> std::io::Result<Self> {
         let root = prepare_disk_cache_root(&root)?;
@@ -1049,6 +1102,7 @@ impl PingoraDiskStorage {
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
+            cache_tag_headers: Arc::from(cache_tag_headers),
             activity,
         };
         storage.rebuild_purge_index()?;
@@ -1328,7 +1382,7 @@ impl PingoraDiskStorage {
         meta: CacheMeta,
         body: Arc<[u8]>,
     ) -> pingora::Result<Option<usize>> {
-        let cache_tags = cache_tags_from_meta(&meta);
+        let cache_tags = cache_tags_from_meta(&meta, &self.cache_tag_headers);
         let (internal_meta, response_header) = meta.serialize()?;
         let mut store_key = store_key;
         store_key.cache_tags = cache_tags;
@@ -1681,7 +1735,11 @@ struct PingoraStoreKey {
 
 #[cfg(feature = "proxy")]
 impl PingoraStoreKey {
-    fn from_cache_key_and_meta(key: &pingora::cache::CacheKey, meta: &CacheMeta) -> Self {
+    fn from_cache_key_and_meta(
+        key: &pingora::cache::CacheKey,
+        meta: &CacheMeta,
+        cache_tag_headers: &[String],
+    ) -> Self {
         Self {
             combined: key.combined(),
             primary: key.primary(),
@@ -1689,7 +1747,7 @@ impl PingoraStoreKey {
             index_path: key
                 .primary_key_str()
                 .and_then(|primary| cache_primary_component(primary, "path")),
-            cache_tags: cache_tags_from_meta(meta),
+            cache_tags: cache_tags_from_meta(meta, cache_tag_headers),
         }
     }
 }
@@ -1938,6 +1996,7 @@ pub fn storage_plan(config: &CacheConfig) -> CacheStoragePlan {
         max_size_bytes: config.memory.max_size_bytes,
         max_object_bytes: config.max_object_bytes,
         object_slots: object_slots(config.memory.max_size_bytes, config.max_object_bytes),
+        cache_tag_headers: config.tag_headers.clone(),
     });
 
     let disk = config
@@ -1948,6 +2007,7 @@ pub fn storage_plan(config: &CacheConfig) -> CacheStoragePlan {
                 path: path.clone(),
                 max_size_bytes: config.disk.max_size_bytes,
                 max_object_bytes: config.max_object_bytes,
+                cache_tag_headers: config.tag_headers.clone(),
             })
         })
         .flatten();
@@ -2023,7 +2083,7 @@ impl Storage for PingoraMemoryStorage {
     ) -> pingora::Result<MissHandler> {
         Ok(Box::new(PingoraMemoryMissHandler {
             storage: self,
-            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta),
+            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -2078,7 +2138,7 @@ impl Storage for PingoraMemoryStorage {
 
         object.internal_meta = internal_meta;
         object.response_header = response_header;
-        object.cache_tags = cache_tags_from_meta(meta);
+        object.cache_tags = cache_tags_from_meta(meta, &self.cache_tag_headers);
         object.weight = weight;
         self.purge_index.insert_with_path_and_tags(
             combined_key.clone(),
@@ -2132,7 +2192,7 @@ impl Storage for PingoraDiskStorage {
     ) -> pingora::Result<MissHandler> {
         Ok(Box::new(PingoraDiskMissHandler {
             storage: self,
-            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta),
+            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -2167,7 +2227,7 @@ impl Storage for PingoraDiskStorage {
         let (internal_meta, response_header) = meta.serialize()?;
         Ok(self
             .put_serialized_object(
-                PingoraStoreKey::from_cache_key_and_meta(key, meta),
+                PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
                 internal_meta,
                 response_header,
                 object.body,
@@ -2241,7 +2301,11 @@ impl Storage for PingoraTieredStorage {
     ) -> pingora::Result<MissHandler> {
         Ok(Box::new(PingoraTieredMissHandler {
             storage: self,
-            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta),
+            store_key: PingoraStoreKey::from_cache_key_and_meta(
+                key,
+                meta,
+                &self.memory.cache_tag_headers,
+            ),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self
@@ -2747,10 +2811,18 @@ fn cache_object_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
 }
 
 #[cfg(feature = "proxy")]
-fn cache_tags_from_meta(meta: &CacheMeta) -> Vec<String> {
+fn default_cache_tag_headers_for_storage() -> Vec<String> {
+    ["surrogate-key", "cache-tag", "x-cache-tags"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[cfg(feature = "proxy")]
+fn cache_tags_from_meta(meta: &CacheMeta, header_names: &[String]) -> Vec<String> {
     let mut tags = Vec::new();
     let mut total_bytes = 0_usize;
-    for name in CACHE_TAG_HEADER_NAMES {
+    for name in header_names {
         for value in meta.headers().get_all(name) {
             let Ok(value) = value.to_str() else {
                 continue;
@@ -3026,7 +3098,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            super::cache_tags_from_meta(&meta),
+            super::cache_tags_from_meta(&meta, &super::default_cache_tag_headers_for_storage()),
             vec![
                 "article:1".to_owned(),
                 "collection/news".to_owned(),
@@ -3338,6 +3410,7 @@ mod tests {
                 path: PathBuf::from("/var/cache/fluxheim/example.test"),
                 max_size_bytes: ByteSize::from_bytes(8 * 1024 * 1024 * 1024),
                 max_object_bytes: ByteSize::from_bytes(64 * 1024 * 1024),
+                cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             }
         );
     }
@@ -3509,6 +3582,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let key = pingora::cache::CacheKey::new("fluxheim-test", "image-key", "vhost");
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -3541,6 +3615,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let key = pingora::cache::CacheKey::new("fluxheim-test", "activity-key", "vhost");
         let missing = pingora::cache::CacheKey::new("fluxheim-test", "missing-key", "vhost");
@@ -3585,6 +3660,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(8),
             object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let key = pingora::cache::CacheKey::new("fluxheim-test", "oversized-key", "vhost");
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -3612,6 +3688,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
 
         assert!(!storage.support_streaming_partial_write());
@@ -3626,6 +3703,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let key = pingora::cache::CacheKey::new("fluxheim-test", "range-key", "vhost");
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -3663,6 +3741,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 4,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let base_key = pingora::cache::CacheKey::new("fluxheim-test", "vary-key", "vhost");
         let mut br_key = base_key.clone();
@@ -3705,6 +3784,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 4,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost-a");
         let second = pingora::cache::CacheKey::new("fluxheim-test", "second", "vhost-a");
@@ -3742,6 +3822,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 4,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost-a");
         let second = pingora::cache::CacheKey::new("fluxheim-test", "second", "vhost-a");
@@ -3784,6 +3865,51 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_memory_storage_uses_configured_cache_tag_headers() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 4,
+            cache_tag_headers: vec!["x-app-cache-tags".to_owned()],
+        });
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "custom-tag", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "ignored")
+            .unwrap();
+        meta.response_header_mut()
+            .insert_header("X-App-Cache-Tags", "custom:1")
+            .unwrap();
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        assert_eq!(
+            storage.purge_indexed_cache_tag("vhost-a", "ignored", 8),
+            super::CacheIndexedPurgeResult {
+                matched: 0,
+                purged: 0,
+                truncated: false,
+            }
+        );
+        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_some());
+        assert_eq!(
+            storage.purge_indexed_cache_tag("vhost-a", "custom:1", 8),
+            super::CacheIndexedPurgeResult {
+                matched: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
+        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_memory_storage_purges_indexed_stale_entries() {
         use pingora::cache::Storage;
 
@@ -3791,6 +3917,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 4,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "stale", "vhost-a");
         let fresh_key = pingora::cache::CacheKey::new("fluxheim-test", "fresh", "vhost-a");
@@ -3838,6 +3965,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 4,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "stale-dry", "vhost-a");
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -3876,6 +4004,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 8,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let config = enabled_cache();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -3951,6 +4080,7 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 8,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let config = enabled_cache();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -4027,6 +4157,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-key", "vhost");
@@ -4064,6 +4195,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-index-key", "vhost-a");
@@ -4111,6 +4243,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale", "vhost-a");
@@ -4162,6 +4295,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale-dry", "vhost-a");
@@ -4204,6 +4338,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let base_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-vary-key", "vhost");
@@ -4252,6 +4387,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(8),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-oversized-key", "vhost");
@@ -4283,6 +4419,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(32 * 1024),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let user_tag = "v".repeat((super::DISK_CACHE_HEADER_OVERHEAD_LIMIT + 1) as usize);
@@ -4314,6 +4451,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new(
@@ -4357,6 +4495,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write", "vhost");
@@ -4390,6 +4529,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-read", "vhost");
@@ -4420,6 +4560,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write-target", "vhost");
@@ -4453,6 +4594,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "inside-symlink", "vhost");
@@ -4487,6 +4629,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap_err();
 
@@ -4508,6 +4651,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap_err();
 
@@ -4592,6 +4736,7 @@ mod tests {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(512),
             max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost");
@@ -4629,11 +4774,13 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let disk = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let storage = super::pingora_tiered_storage_from_parts(memory, disk);
@@ -4670,11 +4817,13 @@ mod tests {
             max_size_bytes: ByteSize::from_bytes(1024),
             max_object_bytes: ByteSize::from_bytes(512),
             object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let disk = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         })
         .unwrap();
         let storage = super::pingora_tiered_storage_from_parts(memory, disk);
