@@ -32,6 +32,14 @@ internal cache implementation.
   collapsing is enabled and how long writer age and reader wait timeouts last.
   Defaults preserve the original 30 second writer age timeout and 30 second
   waiter timeout.
+- `cache.predictor`, `vhosts.cache.predictor`, and
+  `vhosts.routes.cache.predictor` can opt into Pingora's cacheability
+  predictor. The predictor keeps a bounded LRU of primary keys that recently
+  produced origin-level uncacheable outcomes, allowing Fluxheim to bypass cache
+  lookup and cache locking early for those keys. Fluxheim-specific custom
+  policy reasons are skipped so explicit Fluxheim controls such as
+  `min_uses`, configured bypasses, and response-header refusal policies remain
+  observable through the existing policy counters.
 - `cache.status_header`, `vhosts.cache.status_header`, and
   `vhosts.routes.cache.status_header` optionally emit a cache debug header such
   as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or

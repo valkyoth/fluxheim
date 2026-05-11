@@ -34,6 +34,9 @@ behavior when the change improves security or project direction.
 - Stale cache purges now rotate scanned fresh entries on truncated non-dry-run
   batches, allowing bounded background cleanup to reach expired entries behind
   fresh front pages.
+- Cache policies can now opt into Pingora's cacheability predictor with
+  `[cache.predictor]`, `[vhosts.cache.predictor]`, and
+  `[vhosts.routes.cache.predictor]`.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - `fluxheim cache-lookup` can now assert exact stored response header values

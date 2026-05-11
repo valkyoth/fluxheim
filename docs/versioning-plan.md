@@ -617,9 +617,12 @@ Current implementation status:
     `Storage`, `HandleHit`, `HandleMiss`, `CacheLock`, cache phase/reason
     reporting, variance keys for `Vary`, and stale metadata. Remaining 1.2
     candidate work from Pingora's cache surface is to add bounded
-    forced-freshness controls for operator debugging and integrate a cacheable
-    predictor for keys that repeatedly prove
-    uncacheable. Direct `CachePut`-style preload is useful but can land after
+    forced-freshness controls for operator debugging. Pingora's cacheability
+    predictor is now available as an explicit opt-in policy through
+    `[cache.predictor]`, `[vhosts.cache.predictor]`, and
+    `[vhosts.routes.cache.predictor]`, with Fluxheim custom policy reasons
+    skipped so configured bypass/refusal counters remain authoritative.
+    Direct `CachePut`-style preload is useful but can land after
     the loopback `cache-warm` path because it is an operator convenience, not
     a correctness prerequisite. `HttpCacheDigest` lock/lookup timing is now
     exposed as Prometheus histograms, included in OTLP metrics export, and

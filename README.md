@@ -281,10 +281,11 @@ safe ACME storage, and guided `acme-init` bootstrap.
 Active `1.2` work: cache-server completion and operations diagnostics. The
 current development line now includes route/vhost scoped cache policies, memory
 and disk cache tiers, cache locks for request collapsing, protected purge/status
-operations, cache warm/lookup/key tooling, cache policy metrics, OTLP metrics
-export, and end-to-end proxy cache smoke coverage for hit `Age`, conditional
-`304`/`200` validator match and mismatch behavior from `ETag` and
-`Last-Modified`, byte ranges including ETag/date `If-Range`, cache-status
+operations, opt-in cacheability predictors, cache warm/lookup/key tooling,
+cache policy metrics, OTLP metrics export, and end-to-end proxy cache smoke
+coverage for hit `Age`, conditional `304`/`200` validator match and mismatch
+behavior from `ETag` and `Last-Modified`, byte ranges including ETag/date
+`If-Range`, cache-status
 assertions on cached conditional/range responses, intentional HEAD storage
 bypass that does not poison cached GET bodies, validator-based upstream
 revalidation and refresh,

@@ -550,6 +550,10 @@ max_size_bytes = "10GiB"
 enabled = true
 age_timeout_secs = 30
 wait_timeout_secs = 30
+
+[cache.predictor]
+enabled = false
+capacity = 65536
 ```
 
 If `cache.enabled = true`, at least one storage tier must be enabled.
@@ -568,6 +572,16 @@ as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 header such as `OriginNotCache`, `ResponseTooLarge`, or `cache-min-uses` when
 the cache phase has an explicit no-cache reason. Leave it unset unless you are
 actively debugging cache policy.
+
+`[cache.predictor]`, `[vhosts.cache.predictor]`, and
+`[vhosts.routes.cache.predictor]` are opt-in Pingora cacheability predictors.
+When enabled, Fluxheim can remember recent origin-level uncacheable outcomes
+such as `private`/`no-store` cache responses or oversized responses and bypass
+future cache lookup and cache locking for the same primary key until the
+bounded predictor entry ages out of its LRU table. Fluxheim-specific custom
+policy reasons are intentionally skipped so settings such as `min_uses`,
+configured request bypasses, and explicit response-header refusal policies stay
+controlled by Fluxheim's own policy counters.
 For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key
 without contacting the upstream. `cache-key` can fail closed with

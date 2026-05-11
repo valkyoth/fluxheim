@@ -21,6 +21,8 @@ use pingora::cache::CacheKey as PingoraCacheKey;
 use pingora::cache::key::{CacheHashKey, HashBinary};
 #[cfg(feature = "cache")]
 use pingora::cache::lock::CacheKeyLockImpl;
+#[cfg(feature = "cache")]
+use pingora::cache::predictor::{CacheablePredictor, Predictor};
 use pingora::http::RequestHeader;
 use pingora::http::ResponseHeader;
 use pingora::prelude::{HttpPeer, Result};
@@ -57,6 +59,10 @@ const CACHE_MIN_USES_COUNTER_TTL_SECS: u64 = 600;
 const CACHE_PASS_COUNTER_CAPACITY: u64 = 65_536;
 #[cfg(feature = "cache")]
 const CACHE_PASS_COUNTER_TTL_SECS: u64 = 600;
+#[cfg(feature = "cache")]
+const CACHE_PREDICTOR_SHARDS: usize = 16;
+#[cfg(feature = "cache")]
+type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 
 #[derive(Clone)]
 pub struct FluxProxy {
@@ -2210,6 +2216,8 @@ struct RuntimeVhost {
     #[cfg(feature = "cache")]
     pingora_cache_lock: Option<&'static CacheKeyLockImpl>,
     #[cfg(feature = "cache")]
+    pingora_cache_predictor: Option<&'static (dyn CacheablePredictor + Sync)>,
+    #[cfg(feature = "cache")]
     cache_lock_wait_timeout: std::time::Duration,
     #[cfg(feature = "load-balancer")]
     load_balancer: Option<UpstreamLoadBalancer>,
@@ -2243,6 +2251,10 @@ impl std::fmt::Debug for RuntimeVhost {
                 &self.pingora_tiered_storage.is_some(),
             )
             .field("pingora_cache_lock", &self.pingora_cache_lock.is_some())
+            .field(
+                "pingora_cache_predictor",
+                &self.pingora_cache_predictor.is_some(),
+            )
             .field("cache_lock_wait_timeout", &self.cache_lock_wait_timeout);
 
         #[cfg(feature = "load-balancer")]
@@ -2279,6 +2291,7 @@ struct RuntimeRouteCache {
     pingora_disk_storage: Option<&'static crate::cache::PingoraDiskStorage>,
     pingora_tiered_storage: Option<&'static crate::cache::PingoraTieredStorage>,
     pingora_cache_lock: Option<&'static CacheKeyLockImpl>,
+    pingora_cache_predictor: Option<&'static (dyn CacheablePredictor + Sync)>,
     cache_lock_wait_timeout: std::time::Duration,
 }
 
@@ -2300,6 +2313,10 @@ impl std::fmt::Debug for RuntimeRouteCache {
                 &self.pingora_tiered_storage.is_some(),
             )
             .field("pingora_cache_lock", &self.pingora_cache_lock.is_some())
+            .field(
+                "pingora_cache_predictor",
+                &self.pingora_cache_predictor.is_some(),
+            )
             .field("cache_lock_wait_timeout", &self.cache_lock_wait_timeout)
             .finish()
     }
@@ -2331,6 +2348,10 @@ impl RuntimeRouteCache {
             config,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
+        let pingora_cache_predictor = cache_predictor_from_config(
+            config,
+            pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
+        );
 
         Ok(Self {
             name: name.to_owned(),
@@ -2340,6 +2361,7 @@ impl RuntimeRouteCache {
             pingora_disk_storage,
             pingora_tiered_storage,
             pingora_cache_lock,
+            pingora_cache_predictor,
             cache_lock_wait_timeout: cache_lock_wait_timeout(config),
         })
     }
@@ -2371,6 +2393,30 @@ fn cache_lock_from_config(
 #[cfg(feature = "cache")]
 fn cache_lock_wait_timeout(config: &crate::config::CacheConfig) -> std::time::Duration {
     std::time::Duration::from_secs(config.lock.wait_timeout_secs)
+}
+
+#[cfg(feature = "cache")]
+fn cache_predictor_from_config(
+    config: &crate::config::CacheConfig,
+    has_storage: bool,
+) -> Option<&'static (dyn CacheablePredictor + Sync)> {
+    if !has_storage || !config.predictor.enabled {
+        return None;
+    }
+    let shard_capacity = config
+        .predictor
+        .capacity
+        .div_ceil(CACHE_PREDICTOR_SHARDS)
+        .max(1);
+    Some(Box::leak(Box::new(FluxCachePredictor::new(
+        shard_capacity,
+        Some(skip_fluxheim_predictor_custom_reason),
+    ))) as &'static (dyn CacheablePredictor + Sync))
+}
+
+#[cfg(feature = "cache")]
+fn skip_fluxheim_predictor_custom_reason(_reason: &'static str) -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -2657,6 +2703,11 @@ impl RuntimeVhost {
             &cache,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
+        #[cfg(feature = "cache")]
+        let pingora_cache_predictor = cache_predictor_from_config(
+            &cache,
+            pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
+        );
 
         Ok(Self {
             name: "default".to_owned(),
@@ -2677,6 +2728,8 @@ impl RuntimeVhost {
             pingora_tiered_storage,
             #[cfg(feature = "cache")]
             pingora_cache_lock,
+            #[cfg(feature = "cache")]
+            pingora_cache_predictor,
             #[cfg(feature = "cache")]
             cache_lock_wait_timeout: cache_lock_wait_timeout(&cache),
             #[cfg(feature = "cache")]
@@ -2745,6 +2798,11 @@ impl RuntimeVhost {
             &vhost.cache,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
+        #[cfg(feature = "cache")]
+        let pingora_cache_predictor = cache_predictor_from_config(
+            &vhost.cache,
+            pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
+        );
         let proxy_scope = format!("vhost {:?} proxy", vhost.name);
         #[cfg(feature = "web")]
         let web_scope = format!("vhost {:?} web", vhost.name);
@@ -2768,6 +2826,8 @@ impl RuntimeVhost {
             pingora_tiered_storage,
             #[cfg(feature = "cache")]
             pingora_cache_lock,
+            #[cfg(feature = "cache")]
+            pingora_cache_predictor,
             #[cfg(feature = "cache")]
             cache_lock_wait_timeout: cache_lock_wait_timeout(&vhost.cache),
             #[cfg(feature = "cache")]
@@ -3344,6 +3404,9 @@ impl ProxyHttp for FluxProxy {
         let cache_lock = route_cache
             .map(|cache| cache.pingora_cache_lock)
             .unwrap_or(vhost.pingora_cache_lock);
+        let cache_predictor = route_cache
+            .map(|cache| cache.pingora_cache_predictor)
+            .unwrap_or(vhost.pingora_cache_predictor);
         if cache_lock.is_some() {
             cache_option_overrides.wait_timeout = Some(
                 route_cache
@@ -3354,7 +3417,7 @@ impl ProxyHttp for FluxProxy {
         session.cache.enable(
             storage,
             None,
-            None,
+            cache_predictor,
             cache_lock,
             Some(cache_option_overrides),
         );
@@ -6587,6 +6650,62 @@ mod tests {
             vhost.cache_lock_wait_timeout,
             std::time::Duration::from_secs(7)
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_predictor_policy_remembers_origin_uncacheable_keys() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    predictor: crate::config::CachePredictorConfig {
+                        enabled: true,
+                        capacity: 128,
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let predictor = snapshot
+            .state
+            .vhost(vhost_index)
+            .pingora_cache_predictor
+            .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "origin-private", "cached");
+
+        assert!(predictor.cacheable_prediction(&key));
+        predictor.mark_uncacheable(&key, pingora::cache::NoCacheReason::OriginNotCache);
+        assert!(!predictor.cacheable_prediction(&key));
+        predictor.mark_cacheable(&key);
+        assert!(predictor.cacheable_prediction(&key));
+
+        let custom_key =
+            pingora::cache::CacheKey::new("fluxheim-test", "fluxheim-custom-policy", "cached");
+        predictor.mark_uncacheable(
+            &custom_key,
+            pingora::cache::NoCacheReason::Custom("set-cookie"),
+        );
+        assert!(predictor.cacheable_prediction(&custom_key));
     }
 
     #[cfg(feature = "cache")]

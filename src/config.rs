@@ -3521,6 +3521,8 @@ pub struct CacheConfig {
     pub disk: CacheDiskConfig,
     #[serde(default)]
     pub lock: CacheLockConfig,
+    #[serde(default)]
+    pub predictor: CachePredictorConfig,
 }
 
 impl Default for CacheConfig {
@@ -3559,6 +3561,7 @@ impl Default for CacheConfig {
             memory: CacheMemoryConfig::default(),
             disk: CacheDiskConfig::default(),
             lock: CacheLockConfig::default(),
+            predictor: CachePredictorConfig::default(),
         }
     }
 }
@@ -3739,6 +3742,7 @@ impl CacheConfig {
         }
 
         self.lock.validate(scope)?;
+        self.predictor.validate(scope)?;
 
         if self.enabled && !self.has_enabled_tier() {
             return Err(ConfigError::CacheEnabledWithoutStorageTier { scope });
@@ -3987,6 +3991,39 @@ impl CacheLockConfig {
         }
         Ok(())
     }
+}
+
+const CACHE_PREDICTOR_MAX_CAPACITY: usize = 1_048_576;
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CachePredictorConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_cache_predictor_capacity")]
+    pub capacity: usize,
+}
+
+impl Default for CachePredictorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            capacity: default_cache_predictor_capacity(),
+        }
+    }
+}
+
+impl CachePredictorConfig {
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if self.enabled && (self.capacity == 0 || self.capacity > CACHE_PREDICTOR_MAX_CAPACITY) {
+            return Err(ConfigError::InvalidCachePredictorCapacity { scope });
+        }
+        Ok(())
+    }
+}
+
+fn default_cache_predictor_capacity() -> usize {
+    65_536
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -4573,6 +4610,9 @@ pub enum ConfigError {
     InvalidCacheLockTimeout {
         field: String,
     },
+    InvalidCachePredictorCapacity {
+        scope: &'static str,
+    },
     CacheEnabledWithoutStorageTier {
         scope: &'static str,
     },
@@ -5078,6 +5118,10 @@ impl Display for ConfigError {
             Self::InvalidCacheLockTimeout { field } => {
                 write!(formatter, "{field} must be greater than zero")
             }
+            Self::InvalidCachePredictorCapacity { scope } => write!(
+                formatter,
+                "{scope}.predictor.capacity must be between 1 and {CACHE_PREDICTOR_MAX_CAPACITY} when the predictor is enabled"
+            ),
             Self::CacheEnabledWithoutStorageTier { scope } => {
                 write!(
                     formatter,
@@ -8056,6 +8100,10 @@ mod tests {
             enabled = false
             age_timeout_secs = 45
             wait_timeout_secs = 10
+
+            [cache.predictor]
+            enabled = true
+            capacity = 8192
             "#,
         )
         .unwrap();
@@ -8175,6 +8223,8 @@ mod tests {
         assert!(!config.cache.lock.enabled);
         assert_eq!(config.cache.lock.age_timeout_secs, 45);
         assert_eq!(config.cache.lock.wait_timeout_secs, 10);
+        assert!(config.cache.predictor.enabled);
+        assert_eq!(config.cache.predictor.capacity, 8192);
         config.validate().unwrap();
     }
 
@@ -8742,6 +8792,23 @@ mod tests {
             Err(ConfigError::InvalidCacheLockTimeout {
                 field: "cache.lock.wait_timeout_secs".to_owned()
             })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_cache_predictor_capacity() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache.predictor]
+            enabled = true
+            capacity = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCachePredictorCapacity { scope: "cache" })
         );
     }
 
