@@ -294,6 +294,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "route")),
                 header_value(headers, "x-fluxheim-cache-limit")
                     .or_else(|| query_param(query, "limit")),
+                header_value(headers, "x-fluxheim-cache-batches")
+                    .or_else(|| query_param(query, "batches")),
                 truthy_header(headers, "x-fluxheim-cache-dry-run")
                     || truthy_query_param(query, "dry_run")
                     || truthy_query_param(query, "dry-run"),
@@ -945,6 +947,7 @@ impl AdminApp {
         vhost: Option<&str>,
         route: Option<&str>,
         limit: Option<&str>,
+        batches: Option<&str>,
         dry_run: bool,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
@@ -957,19 +960,24 @@ impl AdminApp {
             Ok(limit) => limit,
             Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
         };
+        let batches = match validated_cache_indexed_purge_batches(batches) {
+            Ok(batches) => batches,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
         let route = route.filter(|route| !route.trim().is_empty());
 
-        match self
-            .proxy
-            .purge_stale_image_cache(crate::proxy::CacheStalePurgeRequest {
-                vhost,
-                route,
-                limit,
-                dry_run,
-            }) {
+        match repeat_cache_stale_purge(batches, dry_run, || {
+            self.proxy
+                .purge_stale_image_cache(crate::proxy::CacheStalePurgeRequest {
+                    vhost,
+                    route,
+                    limit,
+                    dry_run,
+                })
+        }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","dry_run":{},"scanned":{},"stale":{},"would_purge":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_scanned":{},"memory_stale":{},"memory_would_purge":{},"memory_purged":{},"memory_not_purged":{},"memory_truncated":{},"disk_scanned":{},"disk_stale":{},"disk_would_purge":{},"disk_purged":{},"disk_not_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","dry_run":{},"scanned":{},"stale":{},"would_purge":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"increase_limit_required":{},"vhost":"{}","route":{},"scope":"{}","memory_scanned":{},"memory_stale":{},"memory_would_purge":{},"memory_purged":{},"memory_not_purged":{},"memory_truncated":{},"disk_scanned":{},"disk_stale":{},"disk_would_purge":{},"disk_purged":{},"disk_not_purged":{},"disk_truncated":{}}}"#,
                     dry_run,
                     result.scanned(),
                     result.stale(),
@@ -979,8 +987,16 @@ impl AdminApp {
                     ratio_per_mille_usize(result.purged(), result.stale()),
                     ratio_per_mille_usize(result.not_purged(), result.stale()),
                     result.truncated(),
-                    result.truncated(),
+                    result.truncated()
+                        && !result.increase_limit_required
+                        && result.batches >= batches,
                     limit,
+                    result.batches,
+                    batches,
+                    result.truncated()
+                        && !result.increase_limit_required
+                        && result.batches >= batches,
+                    result.increase_limit_required,
                     json_escape(&result.vhost),
                     cache_route_json(result.route()),
                     cache_scope(result.route()),
@@ -1158,6 +1174,7 @@ impl AdminApp {
         _vhost: Option<&str>,
         _route: Option<&str>,
         _limit: Option<&str>,
+        _batches: Option<&str>,
         _dry_run: bool,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
@@ -2119,8 +2136,24 @@ struct CacheIndexedPurgeBatchResult {
 }
 
 #[cfg(feature = "cache")]
+struct CacheStalePurgeBatchResult {
+    result: crate::proxy::CacheStalePurgeResult,
+    batches: usize,
+    increase_limit_required: bool,
+}
+
+#[cfg(feature = "cache")]
 impl std::ops::Deref for CacheIndexedPurgeBatchResult {
     type Target = crate::proxy::CacheIndexedPurgeResult;
+
+    fn deref(&self) -> &Self::Target {
+        &self.result
+    }
+}
+
+#[cfg(feature = "cache")]
+impl std::ops::Deref for CacheStalePurgeBatchResult {
+    type Target = crate::proxy::CacheStalePurgeResult;
 
     fn deref(&self) -> &Self::Target {
         &self.result
@@ -2163,6 +2196,58 @@ fn repeat_cache_indexed_purge(
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "cache indexed purge batches must be greater than zero",
+            )
+        })
+}
+
+#[cfg(feature = "cache")]
+fn repeat_cache_stale_purge(
+    batches: usize,
+    dry_run: bool,
+    mut purge: impl FnMut() -> std::io::Result<crate::proxy::CacheStalePurgeResult>,
+) -> std::io::Result<CacheStalePurgeBatchResult> {
+    let mut total: Option<crate::proxy::CacheStalePurgeResult> = None;
+    let mut batches_run = 0;
+    let mut increase_limit_required = false;
+
+    for _ in 0..batches {
+        let result = purge()?;
+        batches_run += 1;
+        let truncated = result.truncated();
+        let purged = result.purged();
+        match &mut total {
+            Some(total) => {
+                total.memory_scanned = total.memory_scanned.saturating_add(result.memory_scanned);
+                total.memory_stale = total.memory_stale.saturating_add(result.memory_stale);
+                total.memory_purged = total.memory_purged.saturating_add(result.memory_purged);
+                total.disk_scanned = total.disk_scanned.saturating_add(result.disk_scanned);
+                total.disk_stale = total.disk_stale.saturating_add(result.disk_stale);
+                total.disk_purged = total.disk_purged.saturating_add(result.disk_purged);
+                total.memory_truncated = result.memory_truncated;
+                total.disk_truncated = result.disk_truncated;
+            }
+            None => total = Some(result),
+        }
+
+        if !truncated {
+            break;
+        }
+        if dry_run || purged == 0 {
+            increase_limit_required = true;
+            break;
+        }
+    }
+
+    total
+        .map(|result| CacheStalePurgeBatchResult {
+            result,
+            batches: batches_run,
+            increase_limit_required,
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cache stale purge batches must be greater than zero",
             )
         })
 }
@@ -2922,6 +3007,10 @@ mod tests {
         assert!(body.contains(r#""purged":0"#));
         assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""batches":1"#));
+        assert!(body.contains(r#""batch_limit":1"#));
+        assert!(body.contains(r#""batches_exhausted":false"#));
+        assert!(body.contains(r#""increase_limit_required":false"#));
         assert!(body.contains(r#""scope":"vhost""#));
     }
 
@@ -3069,6 +3158,66 @@ mod tests {
         assert_eq!(super::ratio_per_mille_usize(512, 2048), 250);
         assert_eq!(super::ratio_per_mille_usize(2048, 2048), 1000);
         assert_eq!(super::ratio_per_mille_usize(4096, 2048), 2000);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn stale_purge_batching_repeats_while_progressing() {
+        let mut calls = 0;
+        let result = super::repeat_cache_stale_purge(4, false, || {
+            calls += 1;
+            Ok(crate::proxy::CacheStalePurgeResult {
+                vhost: "cached".to_owned(),
+                route: None,
+                memory_scanned: 1,
+                memory_stale: 1,
+                memory_purged: 1,
+                memory_truncated: calls == 1,
+                disk_scanned: 0,
+                disk_stale: 0,
+                disk_purged: 0,
+                disk_truncated: false,
+            })
+        })
+        .unwrap();
+
+        assert_eq!(calls, 2);
+        assert_eq!(result.batches, 2);
+        assert_eq!(result.scanned(), 2);
+        assert_eq!(result.stale(), 2);
+        assert_eq!(result.purged(), 2);
+        assert!(!result.truncated());
+        assert!(!result.increase_limit_required);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn stale_purge_batching_does_not_repeat_dry_runs() {
+        let mut calls = 0;
+        let result = super::repeat_cache_stale_purge(4, true, || {
+            calls += 1;
+            Ok(crate::proxy::CacheStalePurgeResult {
+                vhost: "cached".to_owned(),
+                route: None,
+                memory_scanned: 1,
+                memory_stale: 1,
+                memory_purged: 0,
+                memory_truncated: true,
+                disk_scanned: 0,
+                disk_stale: 0,
+                disk_purged: 0,
+                disk_truncated: false,
+            })
+        })
+        .unwrap();
+
+        assert_eq!(calls, 1);
+        assert_eq!(result.batches, 1);
+        assert_eq!(result.scanned(), 1);
+        assert_eq!(result.stale(), 1);
+        assert_eq!(result.purged(), 0);
+        assert!(result.truncated());
+        assert!(result.increase_limit_required);
     }
 
     #[cfg(feature = "cache")]

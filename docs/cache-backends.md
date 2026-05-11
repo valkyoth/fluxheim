@@ -247,7 +247,11 @@ internal cache implementation.
   command until a background disk purger lands. Add `dry_run=true` or
   `x-fluxheim-cache-dry-run: true` to count stale objects without deleting
   them; dry-run responses include `would_purge` plus per-tier
-  `memory_would_purge` and `disk_would_purge`.
+  `memory_would_purge` and `disk_would_purge`. Stale purge also accepts
+  `batches` / `x-fluxheim-cache-batches`. Each batch obeys the same bounded
+  scan limit; dry-runs intentionally execute one scan, and responses set
+  `increase_limit_required = true` when the scan was truncated but another
+  identical batch would not make progress.
   `POST /_fluxheim/cache/purge-wildcard` invalidates indexed
   entries by absolute path pattern using `*`, for example `/assets/*.png`.
   Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
@@ -283,7 +287,7 @@ curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-tag?vhost=repoheim.eu&cache_tag=release:2026-05-11&limit=500"
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
-  "http://127.0.0.1:9090/_fluxheim/cache/purge-stale?vhost=repoheim.eu&limit=500"
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-stale?vhost=repoheim.eu&limit=500&batches=4"
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-stale?vhost=repoheim.eu&limit=500&dry_run=true"
