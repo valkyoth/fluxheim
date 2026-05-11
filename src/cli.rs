@@ -639,16 +639,26 @@ fn print_cache_warm_counts<K: std::fmt::Display>(
     label: &str,
     counts: &std::collections::BTreeMap<K, usize>,
 ) {
+    if let Some(summary) = cache_warm_counts_summary(counts) {
+        println!("{label}: {summary}");
+    }
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_counts_summary<K: std::fmt::Display>(
+    counts: &std::collections::BTreeMap<K, usize>,
+) -> Option<String> {
     if counts.is_empty() {
-        return;
+        return None;
     }
 
-    let summary = counts
-        .iter()
-        .map(|(key, count)| format!("{key}={count}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    println!("{label}: {summary}");
+    Some(
+        counts
+            .iter()
+            .map(|(key, count)| format!("{key}={count}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 #[cfg(not(feature = "cache"))]
@@ -2293,6 +2303,23 @@ mod tests {
         assert_eq!(super::cache_warm_safe_label(Some("HIT")), "HIT");
         assert_eq!(super::cache_warm_safe_label(None), "-");
         assert_eq!(super::cache_warm_safe_label(Some("bad value")), "other");
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_count_summary_is_stable_and_bounded() {
+        let empty = std::collections::BTreeMap::<String, usize>::new();
+        assert_eq!(super::cache_warm_counts_summary(&empty), None);
+
+        let mut counts = std::collections::BTreeMap::new();
+        counts.insert("unexpected_status".to_owned(), 2);
+        counts.insert("request_error".to_owned(), 1);
+        counts.insert("unexpected_cache_status".to_owned(), 3);
+
+        assert_eq!(
+            super::cache_warm_counts_summary(&counts).as_deref(),
+            Some("request_error=1 unexpected_cache_status=3 unexpected_status=2")
+        );
     }
 
     #[cfg(all(feature = "cache", feature = "proxy"))]
