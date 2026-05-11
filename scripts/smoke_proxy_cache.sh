@@ -1149,6 +1149,7 @@ fi
     --expect-body-bytes 16 \
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
+    --expect-header 'etag: "cache-smoke-revalidate"' \
     --expect-freshness-state fresh
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$refresh_first_headers" -o "$refresh_body" \
@@ -1201,6 +1202,7 @@ fi
     --expect-body-bytes 14 \
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
+    --expect-header 'etag: "cache-smoke-refresh-new"' \
     --expect-freshness-state fresh
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$swr_first_headers" -o "$swr_body" \

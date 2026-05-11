@@ -148,6 +148,13 @@ pub struct TieredCacheStats {
 
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheObjectHeaderValue {
+    pub name: String,
+    pub value: String,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheObjectMetadata {
     pub tier: CacheObjectTier,
     pub purge_indexed: bool,
@@ -167,6 +174,7 @@ pub struct CacheObjectMetadata {
     pub stale_if_error_secs: u32,
     pub cache_tags: Vec<String>,
     pub header_names: Vec<String>,
+    pub header_values: Vec<CacheObjectHeaderValue>,
 }
 
 #[cfg(feature = "proxy")]
@@ -3047,6 +3055,7 @@ fn cache_object_metadata(
         .collect::<Vec<_>>();
     header_names.sort();
     header_names.dedup();
+    let header_values = cache_object_header_values_from_meta(&meta, &header_names);
 
     Ok(Some(CacheObjectMetadata {
         tier,
@@ -3071,7 +3080,42 @@ fn cache_object_metadata(
         stale_if_error_secs: meta.stale_if_error_sec(),
         cache_tags: object.cache_tags.clone(),
         header_names,
+        header_values,
     }))
+}
+
+#[cfg(feature = "proxy")]
+fn cache_object_header_values_from_meta(
+    meta: &CacheMeta,
+    header_names: &[String],
+) -> Vec<CacheObjectHeaderValue> {
+    const MAX_CACHE_LOOKUP_HEADER_VALUES: usize = 64;
+    const MAX_CACHE_LOOKUP_HEADER_VALUE_BYTES: usize = 8192;
+
+    let mut values = Vec::new();
+    let mut total_bytes = 0_usize;
+    for name in header_names {
+        for value in meta.headers().get_all(name) {
+            if values.len() >= MAX_CACHE_LOOKUP_HEADER_VALUES {
+                return values;
+            }
+            let Ok(value) = value.to_str() else {
+                continue;
+            };
+            let value_bytes = value.len();
+            if value_bytes > MAX_CACHE_LOOKUP_HEADER_VALUE_BYTES
+                || total_bytes.saturating_add(value_bytes) > MAX_CACHE_LOOKUP_HEADER_VALUE_BYTES
+            {
+                continue;
+            }
+            total_bytes += value_bytes;
+            values.push(CacheObjectHeaderValue {
+                name: name.clone(),
+                value: value.to_owned(),
+            });
+        }
+    }
+    values
 }
 
 #[cfg(feature = "proxy")]

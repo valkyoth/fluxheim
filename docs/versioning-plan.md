@@ -451,7 +451,8 @@ Stable scope:
     `cache-lookup` can fail closed for deploy
     checks with `--require-object`, `--expect-tier`, `--expect-status`,
     `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
-    `--expect-header-name`, `--expect-cache-lock-enabled`,
+    `--expect-header-name`, `--expect-header "Name: value"`,
+    `--expect-cache-lock-enabled`,
     `--expect-cache-lock-wait-timeout-secs`,
     `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
     `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,

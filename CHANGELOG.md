@@ -33,6 +33,9 @@ behavior when the change improves security or project direction.
   `x-fluxheim-cache-batches` for incremental large-scope invalidation.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
+- `fluxheim cache-lookup` can now assert exact stored response header values
+  with `--expect-header "Name: value"`, allowing release smoke tests to prove
+  validator changes after proxy cache revalidation.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside
   `hit_ratio_per_mille`.
 - Cache activity JSON now includes `store_ratio_per_mille` alongside

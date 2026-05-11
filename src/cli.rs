@@ -329,6 +329,10 @@ pub enum CliCommand {
         #[arg(long = "expect-header-name", value_name = "HEADER")]
         expect_header_names: Vec<String>,
 
+        /// Required stored response header value, as "Name: value". May be repeated.
+        #[arg(long = "expect-header", value_name = "HEADER")]
+        expect_headers: Vec<String>,
+
         /// Required stored cache tag. May be repeated.
         #[arg(long = "expect-cache-tag", value_name = "TAG")]
         expect_cache_tags: Vec<String>,
@@ -651,6 +655,7 @@ fn run_command(
             expect_fresh_ttl_secs,
             expect_body_bytes,
             expect_header_names,
+            expect_headers,
             expect_cache_tags,
             expect_purge_indexed,
             expect_cache_lock_enabled,
@@ -683,6 +688,7 @@ fn run_command(
             expect_fresh_ttl_secs: expect_fresh_ttl_secs.clone(),
             expect_body_bytes: expect_body_bytes.clone(),
             expect_header_names: expect_header_names.clone(),
+            expect_headers: expect_headers.clone(),
             expect_cache_tags: expect_cache_tags.clone(),
             expect_purge_indexed: *expect_purge_indexed,
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
@@ -763,6 +769,7 @@ struct CacheLookupOptions<'a> {
     expect_fresh_ttl_secs: Vec<u64>,
     expect_body_bytes: Vec<u64>,
     expect_header_names: Vec<String>,
+    expect_headers: Vec<String>,
     expect_cache_tags: Vec<String>,
     expect_purge_indexed: bool,
     expect_cache_lock_enabled: bool,
@@ -1281,6 +1288,7 @@ fn run_cache_lookup_command(
     let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
     let expected_tiers = parse_cache_lookup_tiers(&options.expect_tiers)?;
     let expected_header_names = parse_cache_lookup_header_names(&options.expect_header_names)?;
+    let expected_headers = parse_cache_lookup_headers(&options.expect_headers)?;
     let expected_cache_tags = parse_cache_lookup_cache_tags(&options.expect_cache_tags)?;
     let expected_scope =
         parse_cache_key_preview_scope("cache-lookup", options.expect_scope.as_ref())?;
@@ -1329,6 +1337,7 @@ fn run_cache_lookup_command(
         expected_fresh_ttl_secs: &options.expect_fresh_ttl_secs,
         expected_body_bytes: &options.expect_body_bytes,
         expected_header_names: &expected_header_names,
+        expected_headers: &expected_headers,
         expected_cache_tags: &expected_cache_tags,
         expected_objects: options.expect_objects,
         expect_purge_indexed: options.expect_purge_indexed,
@@ -1474,6 +1483,43 @@ fn parse_cache_lookup_header_names(
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_lookup_headers(
+    headers: &[String],
+) -> Result<Vec<(String, String)>, Box<dyn Error + Send + Sync>> {
+    if headers.len() > 32 {
+        return Err("cache-lookup accepts at most 32 --expect-header values".into());
+    }
+    headers
+        .iter()
+        .map(|header| parse_cache_lookup_header(header))
+        .collect()
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_lookup_header(
+    header: &str,
+) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+    if header.len() > 8192 {
+        return Err("cache-lookup --expect-header must be at most 8192 bytes".into());
+    }
+    let (name, value) = header
+        .split_once(':')
+        .ok_or("cache-lookup --expect-header must use \"Name: value\" syntax")?;
+    let name = name.trim();
+    if name.is_empty() || name.len() > 64 || !name.bytes().all(is_http_token_byte) {
+        return Err("cache-lookup --expect-header name must be a valid HTTP header name".into());
+    }
+    let value = value.trim();
+    if value.len() > 8192 {
+        return Err("cache-lookup --expect-header value must be at most 8192 bytes".into());
+    }
+    if value.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err("cache-lookup --expect-header value must not contain control bytes".into());
+    }
+    Ok((name.to_ascii_lowercase(), value.to_owned()))
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
 fn parse_cache_lookup_cache_tags(
     tags: &[String],
 ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
@@ -1514,6 +1560,7 @@ struct CacheLookupExpectations<'a> {
     expected_fresh_ttl_secs: &'a [u64],
     expected_body_bytes: &'a [u64],
     expected_header_names: &'a [String],
+    expected_headers: &'a [(String, String)],
     expected_cache_tags: &'a [String],
     expected_objects: Option<usize>,
     expect_purge_indexed: bool,
@@ -1547,6 +1594,7 @@ fn validate_cache_lookup_expectations(
         expected_fresh_ttl_secs,
         expected_body_bytes,
         expected_header_names,
+        expected_headers,
         expected_cache_tags,
         expected_objects,
         expect_purge_indexed,
@@ -1730,6 +1778,20 @@ fn validate_cache_lookup_expectations(
             .into());
         }
     }
+    for (expected_name, expected_value) in *expected_headers {
+        let matched = lookup.objects.iter().any(|object| {
+            object.header_values.iter().any(|header| {
+                header.name.eq_ignore_ascii_case(expected_name) && header.value == *expected_value
+            })
+        });
+        if !matched {
+            let found = cache_lookup_found_header_values(lookup, expected_name);
+            return Err(format!(
+                "cache-lookup expected stored header {expected_name}: {expected_value}, found {found}"
+            )
+            .into());
+        }
+    }
     for expected in *expected_cache_tags {
         let matched = lookup.objects.iter().any(|object| {
             object
@@ -1834,6 +1896,35 @@ fn cache_lookup_found_header_names(lookup: &crate::proxy::CacheObjectLookup) -> 
     names.sort_unstable();
     names.dedup();
     names.join(",")
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn cache_lookup_found_header_values(
+    lookup: &crate::proxy::CacheObjectLookup,
+    expected_name: &str,
+) -> String {
+    let mut values = lookup
+        .objects
+        .iter()
+        .flat_map(|object| {
+            object
+                .header_values
+                .iter()
+                .filter(move |header| header.name.eq_ignore_ascii_case(expected_name))
+                .map(|header| header.value.as_str())
+        })
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    values.dedup();
+    if values.is_empty() {
+        return "<none>".to_owned();
+    }
+    values
+        .into_iter()
+        .take(8)
+        .map(|value| format!("{expected_name}: {value}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
@@ -2058,6 +2149,7 @@ fn run_cache_lookup_command(
         expect_fresh_ttl_secs,
         expect_body_bytes,
         expect_header_names,
+        expect_headers,
         expect_cache_tags,
         expect_purge_indexed,
         expect_cache_lock_enabled,
@@ -2086,6 +2178,7 @@ fn run_cache_lookup_command(
         expect_fresh_ttl_secs,
         expect_body_bytes,
         expect_header_names,
+        expect_headers,
         expect_cache_tags,
         expect_purge_indexed,
         expect_cache_lock_enabled,
@@ -3784,6 +3877,7 @@ mod tests {
         let no_tiers = &[] as &[crate::cache::CacheObjectTier];
         let no_ttls = &[] as &[u64];
         let no_strings = &[] as &[String];
+        let no_headers = &[] as &[(String, String)];
         let default_expectations = super::CacheLookupExpectations {
             require_object: false,
             expected_states: no_states,
@@ -3792,6 +3886,7 @@ mod tests {
             expected_fresh_ttl_secs: no_ttls,
             expected_body_bytes: no_ttls,
             expected_header_names: no_strings,
+            expected_headers: no_headers,
             expected_cache_tags: no_strings,
             expected_objects: None,
             expect_purge_indexed: false,
@@ -4014,6 +4109,38 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expected stored header name last-modified, found cache-control,etag,vary")
+        );
+        assert_eq!(
+            super::parse_cache_lookup_headers(&[" ETag: \"cached\" ".to_owned()]).unwrap(),
+            vec![("etag".to_owned(), "\"cached\"".to_owned())]
+        );
+        assert!(
+            super::parse_cache_lookup_headers(&["Bad Header: value".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("valid HTTP header name")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expected_headers: &[("etag".to_owned(), "\"cached\"".to_owned())],
+                    ..default_expectations
+                }
+            )
+            .is_ok()
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expected_headers: &[("etag".to_owned(), "\"missing\"".to_owned())],
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected stored header etag: \"missing\", found etag: \"cached\"")
         );
         assert_eq!(
             super::parse_cache_lookup_cache_tags(&[" asset:logo ".to_owned()]).unwrap(),
@@ -4648,6 +4775,16 @@ mod tests {
                 "cache-control".to_owned(),
                 "etag".to_owned(),
                 "vary".to_owned(),
+            ],
+            header_values: vec![
+                crate::cache::CacheObjectHeaderValue {
+                    name: "cache-control".to_owned(),
+                    value: "public, max-age=60".to_owned(),
+                },
+                crate::cache::CacheObjectHeaderValue {
+                    name: "etag".to_owned(),
+                    value: "\"cached\"".to_owned(),
+                },
             ],
         });
         lookup

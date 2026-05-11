@@ -552,10 +552,11 @@ checks can distinguish a fresh object, an object still usable under stale
 policy, and a fully expired object. `purge_indexed` tells whether indexed scope,
 prefix, tag, wildcard, and stale purge operations can reach that object without
 a full scan. It does not contact the upstream, read cached object bodies to
-stdout, or dump stored header values. Use repeated `--header "Name: value"`
-options to inspect negotiated cache variants that depend on safe request
-headers such as `Accept-Language` or `Accept-Encoding`; use `--host` for the
-Host header. For release scripts, `cache-lookup --require-object` fails when
+stdout, or dump stored header values by default. Use repeated
+`--header "Name: value"` options to inspect negotiated cache variants that
+depend on safe request headers such as `Accept-Language` or `Accept-Encoding`;
+use `--host` for the Host header. For release scripts,
+`cache-lookup --require-object` fails when
 the selected key has no cached object, repeated `--expect-tier memory|disk`
 flags fail when no matching object is present in an allowed storage tier,
 repeated `--expect-status` flags fail when no matching object has an allowed
@@ -583,7 +584,10 @@ bounded purge index, and repeated
 `--expect-cache-tag` flags fail when no matching object has the expected stored
 cache tag. Repeated
 `--expect-header-name` flags fail when no matching object has the expected
-stored response header name. Repeated
+stored response header name. Repeated `--expect-header "Name: value"` flags
+fail when no matching object has the exact expected stored response header
+value, which lets smoke tests verify revalidation updated validators and
+freshness metadata without printing every stored header. Repeated
 `--expect-freshness-state fresh|stale|expired` flags fail when none of the
 matching objects has an allowed freshness state.
 
