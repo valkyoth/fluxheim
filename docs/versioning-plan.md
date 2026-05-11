@@ -392,8 +392,8 @@ Stable scope:
     now provides opt-in bounded pass decisions for repeated uncacheable cache
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
-    conditional `304`, byte-range `206`, validator-based upstream revalidation
-    from origin `304`, stale-object refresh from origin `200`,
+    conditional `304`, byte-range `206`, `If-Range` match/mismatch behavior,
+    validator-based upstream revalidation from origin `304`, stale-object refresh from origin `200`,
     stale-while-revalidate serving during a background refresh,
     stale-if-error serving after an upstream connection failure, cache-lock
     request collapsing for concurrent misses, `Vary` variant isolation, disk
@@ -606,8 +606,8 @@ Stable scope for declaring the cache pack complete:
   pressure metrics.
 - Cache warm and metadata/debug commands suitable for release deploys and
   production incident response.
-- Proxy cache HIT `Age`, conditional `304`, byte-range `206`, `Vary` variant
-  isolation, stale-while-revalidate serving during background refresh,
+- Proxy cache HIT `Age`, conditional `304`, byte-range `206`, `If-Range`
+  match/mismatch behavior, `Vary` variant isolation, stale-while-revalidate serving during background refresh,
   stale-if-error serving after upstream failure, cache-lock request collapsing
   for concurrent misses, disk HIT after restart, and request-bypass reason
   behavior are covered end to end.
@@ -680,7 +680,8 @@ Exit criteria:
 - Cache hits emit correct validator/freshness behavior, including `Age` where
   Fluxheim serves from cache. Pingora provides the cache-hit `Age`,
   conditional, and range hooks; Fluxheim's smoke suite covers proxy cache HIT
-  `Age`, conditional `304`, byte-range `206`, `Vary` variant isolation,
+  `Age`, conditional `304`, byte-range `206`, `If-Range` match/mismatch
+  behavior, `Vary` variant isolation,
   stale-while-revalidate serving during background refresh, stale-if-error
   serving after upstream failure, cache-lock request collapsing for concurrent
   misses, disk HIT after restart, and request-bypass reason headers.

@@ -197,11 +197,12 @@ internal cache implementation.
   Pingora's cache pipeline injects `Age` on stored-response hits and applies
   downstream conditional/range handling when cache is enabled. The release smoke
   suite verifies proxy cache HIT behavior, cached-hit `Age`, conditional `304`,
-  byte-range `206`, validator-based upstream revalidation from an origin `304`,
-  stale-object refresh from an origin `200`, stale-while-revalidate serving
-  during a background refresh, stale-if-error serving after an upstream
-  connection failure, cache-lock request collapsing for concurrent misses,
-  `Vary` variant isolation, and disk-cache HIT behavior after a
+  byte-range `206`, `If-Range` match/mismatch behavior, validator-based
+  upstream revalidation from an origin `304`, stale-object refresh from an
+  origin `200`, stale-while-revalidate serving during a background refresh,
+  stale-if-error serving after an upstream connection failure, cache-lock
+  request collapsing for concurrent misses, `Vary` variant isolation, and
+  disk-cache HIT behavior after a
   Fluxheim process restart without the origin available. Planned work still
   covers edge cases where origins change `Vary`, validators, or freshness
   headers during revalidation and broader cache-header matrix tests across
@@ -563,8 +564,9 @@ A production adapter must:
   `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, `image/*`
   origin response admission for proxied image cache, and end-to-end smoke
   coverage for cached HIT `Age`, conditional `304`, byte-range `206`,
-  validator-based upstream revalidation from origin `304`, stale-object refresh
-  from origin `200`, stale-while-revalidate serving during a background
+  `If-Range` match/mismatch behavior, validator-based upstream revalidation
+  from origin `304`, stale-object refresh from origin `200`,
+  stale-while-revalidate serving during a background
   refresh, stale-if-error serving after an upstream connection failure,
   cache-lock request collapsing for concurrent misses, `Vary` variant
   isolation, and disk HIT behavior after process restart.

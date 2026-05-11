@@ -433,6 +433,8 @@ second_headers="$TMP_DIR/second.headers"
 bypass_headers="$TMP_DIR/bypass.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
 range_headers="$TMP_DIR/range.headers"
+if_range_match_headers="$TMP_DIR/if-range-match.headers"
+if_range_mismatch_headers="$TMP_DIR/if-range-mismatch.headers"
 revalidate_first_headers="$TMP_DIR/revalidate-first.headers"
 revalidate_second_headers="$TMP_DIR/revalidate-second.headers"
 revalidate_third_headers="$TMP_DIR/revalidate-third.headers"
@@ -447,6 +449,8 @@ stale_error_second_headers="$TMP_DIR/stale-error-second.headers"
 restart_headers="$TMP_DIR/restart.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
+if_range_match_body="$TMP_DIR/if-range-match-body.bin"
+if_range_mismatch_body="$TMP_DIR/if-range-mismatch-body.bin"
 revalidate_body="$TMP_DIR/revalidate-body.bin"
 refresh_body="$TMP_DIR/refresh-body.bin"
 swr_body="$TMP_DIR/swr-body.bin"
@@ -523,6 +527,50 @@ if ! grep -qi '^content-range: bytes 0-3/16' "$range_headers"; then
 fi
 if [ "$(cat "$range_body")" != "0123" ]; then
     echo "proxy cache smoke failed: cached range body mismatch" >&2
+    exit 1
+fi
+
+if_range_match_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$if_range_match_headers" -o "$if_range_match_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=4-7" \
+        -H 'If-Range: "cache-smoke-v1"' \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$if_range_match_status" != "206" ]; then
+    echo "proxy cache smoke failed: cached If-Range match returned $if_range_match_status instead of 206" >&2
+    cat "$if_range_match_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 4-7/16' "$if_range_match_headers"; then
+    echo "proxy cache smoke failed: cached If-Range match missed expected Content-Range" >&2
+    cat "$if_range_match_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$if_range_match_body")" != "4567" ]; then
+    echo "proxy cache smoke failed: cached If-Range match body mismatch" >&2
+    exit 1
+fi
+
+if_range_mismatch_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$if_range_mismatch_headers" -o "$if_range_mismatch_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=4-7" \
+        -H 'If-Range: "cache-smoke-other"' \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$if_range_mismatch_status" != "200" ]; then
+    echo "proxy cache smoke failed: cached If-Range mismatch returned $if_range_mismatch_status instead of 200" >&2
+    cat "$if_range_mismatch_headers" >&2
+    exit 1
+fi
+if grep -qi '^content-range:' "$if_range_mismatch_headers"; then
+    echo "proxy cache smoke failed: cached If-Range mismatch unexpectedly included Content-Range" >&2
+    cat "$if_range_mismatch_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$if_range_mismatch_body")" != "0123456789abcdef" ]; then
+    echo "proxy cache smoke failed: cached If-Range mismatch body was not the full object" >&2
     exit 1
 fi
 
