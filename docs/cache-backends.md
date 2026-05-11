@@ -190,10 +190,12 @@ internal cache implementation.
   referenced cache object before indexing it, then rebuilds both the bounded
   purge index and the runtime disk-object index for v5 entries, so indexed
   scope, prefix, wildcard, tag, stale disk purges, stats, and eviction
-  accounting survive process restarts. Checkpoint writes merge with existing
-  checkpoint or shard-scan entries so separate vhost and route cache policies
-  sharing one disk root do not erase each other's restart index state. Older
-  v1-v4 disk objects remain
+  accounting survive process restarts. Runtime cache mutations mark the
+  checkpoint dirty and coalesce persistence through a debounced background
+  writer instead of rewriting and fsyncing the full index on every disk-cache
+  insert. Checkpoint writes merge with existing checkpoint or shard-scan
+  entries so separate vhost and route cache policies sharing one disk root do
+  not erase each other's restart index state. Older v1-v4 disk objects remain
   readable, but earlier formats cannot fully rebuild every indexed purge
   metadata field because they did not store all of the v5 index fields.
   Startup indexing is capped to a bounded object count to avoid unbounded

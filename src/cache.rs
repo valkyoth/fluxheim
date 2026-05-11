@@ -6,7 +6,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(feature = "proxy")]
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 #[cfg(feature = "proxy")]
 use async_trait::async_trait;
@@ -37,6 +37,11 @@ const O_NOFOLLOW: i32 = 0o400000;
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
 #[cfg(feature = "proxy")]
 const DISK_CACHE_TEMP_FILE_STALE_SECS: u64 = 6 * 60 * 60;
+#[cfg(all(feature = "proxy", not(test)))]
+const DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(2);
+#[cfg(all(feature = "proxy", test))]
+const DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE: std::time::Duration =
+    std::time::Duration::from_millis(10);
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-v1\n";
 #[cfg(feature = "proxy")]
@@ -1239,6 +1244,7 @@ pub struct PingoraDiskStorage {
     root: PathBuf,
     purge_index: CachePurgeIndex,
     disk_index: DiskObjectIndex,
+    checkpoint_state: Arc<Mutex<DiskIndexCheckpointState>>,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
     cache_tag_headers: Arc<[String]>,
@@ -1332,6 +1338,7 @@ impl PingoraDiskStorage {
             root,
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             disk_index: DiskObjectIndex::new(),
+            checkpoint_state: Arc::new(Mutex::new(DiskIndexCheckpointState::default())),
             max_size_bytes,
             max_object_bytes,
             cache_tag_headers: Arc::from(cache_tag_headers),
@@ -1698,7 +1705,7 @@ impl PingoraDiskStorage {
         match remove_disk_cache_object(&self.root, &path) {
             Ok(true) => {
                 self.disk_index.remove(&path);
-                let _ = self.write_disk_index_checkpoint();
+                self.schedule_disk_index_checkpoint();
                 self.activity.purge();
                 Ok(true)
             }
@@ -1765,7 +1772,7 @@ impl PingoraDiskStorage {
             Err(error) => {
                 if remove_disk_cache_object(&self.root, &path).unwrap_or(false) {
                     self.disk_index.remove(&path);
-                    let _ = self.write_disk_index_checkpoint();
+                    self.schedule_disk_index_checkpoint();
                 }
                 Err(cache_io_error("parse disk cache object", error))
             }
@@ -1818,7 +1825,7 @@ impl PingoraDiskStorage {
             })?;
         self.index_existing_object_path(&path)
             .map_err(|error| cache_io_error("index disk cache object", error))?;
-        let _ = self.write_disk_index_checkpoint();
+        self.schedule_disk_index_checkpoint();
         self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
@@ -1884,7 +1891,7 @@ impl PingoraDiskStorage {
         })?;
         self.index_existing_object_path(&path)
             .map_err(|error| cache_io_error("index streamed disk cache object", error))?;
-        let _ = self.write_disk_index_checkpoint();
+        self.schedule_disk_index_checkpoint();
         self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
@@ -1930,7 +1937,7 @@ impl PingoraDiskStorage {
                     self.activity.eviction();
                     bytes_to_free = bytes_to_free.saturating_sub(entry.size);
                     if bytes_to_free == 0 {
-                        let _ = self.write_disk_index_checkpoint();
+                        self.schedule_disk_index_checkpoint();
                         return Ok(true);
                     }
                 }
@@ -1940,7 +1947,7 @@ impl PingoraDiskStorage {
         }
 
         if removed_any {
-            let _ = self.write_disk_index_checkpoint();
+            self.schedule_disk_index_checkpoint();
         }
         Ok(false)
     }
@@ -2190,12 +2197,55 @@ impl PingoraDiskStorage {
     }
 
     fn write_disk_index_checkpoint(&self) -> std::io::Result<()> {
-        let mut entries = self.disk_index.entries();
-        match read_disk_index_checkpoint(&self.root)? {
-            Some(existing) => entries.extend(existing),
-            None => entries.extend(disk_cache_entries(&self.root)?),
+        write_disk_index_checkpoint_from_index(&self.root, &self.disk_index)
+    }
+
+    fn schedule_disk_index_checkpoint(&self) {
+        let mut state = match self.checkpoint_state.lock() {
+            Ok(state) => state,
+            Err(_) => return,
+        };
+        state.dirty = true;
+        if state.scheduled {
+            return;
         }
-        write_disk_index_checkpoint(&self.root, merge_disk_cache_entries(entries))
+        state.scheduled = true;
+
+        let root = self.root.clone();
+        let disk_index = self.disk_index.clone();
+        let checkpoint_state = Arc::clone(&self.checkpoint_state);
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE);
+                {
+                    let mut state = match checkpoint_state.lock() {
+                        Ok(state) => state,
+                        Err(_) => return,
+                    };
+                    if !state.dirty {
+                        state.scheduled = false;
+                        return;
+                    }
+                    state.dirty = false;
+                }
+
+                if let Err(error) = write_disk_index_checkpoint_from_index(&root, &disk_index) {
+                    log::warn!(
+                        "failed to write disk cache checkpoint for {}: {error}",
+                        root.display()
+                    );
+                }
+
+                let mut state = match checkpoint_state.lock() {
+                    Ok(state) => state,
+                    Err(_) => return,
+                };
+                if !state.dirty {
+                    state.scheduled = false;
+                    return;
+                }
+            }
+        });
     }
 
     fn ensure_safe_cache_parent(&self, parent: &Path) -> std::io::Result<()> {
@@ -2217,6 +2267,26 @@ impl PingoraDiskStorage {
             format!("disk cache shard escaped root: {}", canonical.display()),
         ))
     }
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Default)]
+struct DiskIndexCheckpointState {
+    dirty: bool,
+    scheduled: bool,
+}
+
+#[cfg(feature = "proxy")]
+fn write_disk_index_checkpoint_from_index(
+    root: &Path,
+    disk_index: &DiskObjectIndex,
+) -> std::io::Result<()> {
+    let mut entries = disk_index.entries();
+    match read_disk_index_checkpoint(root)? {
+        Some(existing) => entries.extend(existing),
+        None => entries.extend(disk_cache_entries(root)?),
+    }
+    write_disk_index_checkpoint(root, merge_disk_cache_entries(entries))
 }
 
 #[cfg(feature = "proxy")]
@@ -5869,6 +5939,7 @@ mod tests {
         let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"indexed"), true)).unwrap();
         block_on(miss.finish()).unwrap();
+        writer.write_disk_index_checkpoint().unwrap();
         assert!(super::disk_index_checkpoint_path(writer.root()).exists());
 
         let rogue = pingora::cache::CacheKey::new("fluxheim-test", "rogue-key", "vhost-a");
