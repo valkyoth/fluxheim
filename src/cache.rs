@@ -3051,7 +3051,6 @@ fn cache_object_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
         })
 }
 
-#[cfg(feature = "proxy")]
 fn default_cache_tag_headers_for_storage() -> Vec<String> {
     ["surrogate-key", "cache-tag", "x-cache-tags"]
         .into_iter()

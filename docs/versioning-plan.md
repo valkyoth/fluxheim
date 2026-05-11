@@ -401,9 +401,12 @@ Stable scope:
     but keep it declarative, bounded, admin-protected, and non-programmable in
     1.2;
   - cache object inspection and debug tooling for production incidents,
-    including cache-key preview, object metadata lookup, freshness state,
-    stored headers, purge-index membership, and dry-run invalidation output
-    without dumping sensitive request data by default;
+    including object metadata lookup, freshness state, stored headers,
+    purge-index membership, and dry-run invalidation output without dumping
+    sensitive request data by default. `fluxheim cache-key` now provides the
+    first safe cache-key preview by selecting the effective vhost/route policy
+    and printing key hashes without contacting upstreams or reading cached
+    bodies;
   - cache warm/import/export workflows for deploys and repository mirrors,
     including clear failure accounting and no hidden best-effort misses;
   - cache observability through both Prometheus and OpenTelemetry, including

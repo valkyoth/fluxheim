@@ -480,6 +480,39 @@ pub struct CacheIndexedPathPatternPurgeRequest<'a> {
 
 #[cfg(feature = "cache")]
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheKeyPreview {
+    pub vhost: String,
+    pub route: Option<String>,
+    pub scope: CacheKeyPreviewScope,
+    pub eligible: bool,
+    pub reason: Option<String>,
+    pub namespace: Option<String>,
+    pub primary_key: Option<String>,
+    pub primary_hash: Option<String>,
+    pub variance_hash: Option<String>,
+    pub combined_hash: Option<String>,
+    pub user_tag: Option<String>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CacheKeyPreviewScope {
+    Vhost,
+    Route,
+}
+
+#[cfg(feature = "cache")]
+impl CacheKeyPreviewScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Vhost => "vhost",
+            Self::Route => "route",
+        }
+    }
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CachePurgeResult {
     pub vhost: String,
     pub route: Option<String>,
@@ -743,6 +776,60 @@ impl ProxySnapshot {
         let cache = &self.state.vhost(vhost_index).cache;
         let cache_request = cache_request_from_header(request);
         crate::cache::image_cache_key(cache, &cache_request)
+    }
+
+    #[cfg(feature = "cache")]
+    pub fn pingora_image_cache_key_preview_for_request_header(
+        &self,
+        request: &RequestHeader,
+    ) -> CacheKeyPreview {
+        let host = request_host_header(request);
+        let vhost_index = self.state.vhost_index(host);
+        let vhost = self.state.vhost(vhost_index);
+        let route_index = vhost.route_index(request.uri.path());
+        let route_cache = route_index.and_then(|index| vhost.route(index).cache.as_ref());
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
+        let scope = if route_cache.is_some() {
+            CacheKeyPreviewScope::Route
+        } else {
+            CacheKeyPreviewScope::Vhost
+        };
+        let key = self.state.pingora_image_cache_key_for_request_header(
+            request,
+            vhost_index,
+            route_index,
+        );
+
+        match key {
+            Some(key) => CacheKeyPreview {
+                vhost: vhost.name.clone(),
+                route: route_cache.map(|cache| cache.name.clone()),
+                scope,
+                eligible: true,
+                reason: None,
+                namespace: key.namespace_str().map(ToOwned::to_owned),
+                primary_key: key.primary_key_str().map(ToOwned::to_owned),
+                primary_hash: Some(key.primary()),
+                variance_hash: key.variance(),
+                combined_hash: Some(key.combined()),
+                user_tag: Some(key.user_tag().to_owned()),
+            },
+            None => CacheKeyPreview {
+                vhost: vhost.name.clone(),
+                route: route_cache.map(|cache| cache.name.clone()),
+                scope,
+                eligible: false,
+                reason: Some(cache_key_preview_ineligible_reason(cache_config, request)),
+                namespace: None,
+                primary_key: None,
+                primary_hash: None,
+                variance_hash: None,
+                combined_hash: None,
+                user_tag: None,
+            },
+        }
     }
 
     #[cfg(feature = "cache")]
@@ -1563,6 +1650,34 @@ impl ProxySnapshot {
             disk_purged: disk.purged,
             disk_truncated: disk.truncated,
         })
+    }
+}
+
+#[cfg(feature = "cache")]
+fn cache_key_preview_ineligible_reason(
+    cache_config: &crate::config::CacheConfig,
+    request: &RequestHeader,
+) -> String {
+    if !cache_config.enabled {
+        return "selected cache policy is disabled".to_owned();
+    }
+    if !cache_config.has_enabled_tier() {
+        return "selected cache policy has no enabled storage tier".to_owned();
+    }
+    if !cache_config
+        .methods
+        .iter()
+        .any(|method| method == request.method.as_str())
+    {
+        return format!(
+            "method {} is not allowed by selected cache policy",
+            request.method
+        );
+    }
+    if crate::cache::eligible_image_request(cache_config, &cache_request_from_header(request)) {
+        "request is eligible but no cache key was generated".to_owned()
+    } else {
+        "path or query is not admitted by selected image cache policy".to_owned()
     }
 }
 
@@ -5550,6 +5665,118 @@ mod tests {
                 .pingora_image_cache_key_for_request_header(&request, vhost_index, None)
                 .is_none()
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_key_preview_reports_selected_route_key() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "assets".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/assets/".to_owned()),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    max_request_body_bytes: None,
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstream: Some("127.0.0.1:3000".to_owned()),
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    cache: Some(CacheConfig {
+                        enabled: true,
+                        memory: crate::config::CacheMemoryConfig {
+                            enabled: true,
+                            max_size_bytes: ByteSize::from_bytes(2048),
+                        },
+                        max_object_bytes: ByteSize::from_bytes(512),
+                        ..CacheConfig::default()
+                    }),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+
+        let preview = proxy
+            .snapshot()
+            .pingora_image_cache_key_preview_for_request_header(&request);
+
+        assert!(preview.eligible);
+        assert_eq!(preview.vhost, "cached");
+        assert_eq!(preview.route.as_deref(), Some("assets"));
+        assert_eq!(preview.scope, super::CacheKeyPreviewScope::Route);
+        assert_eq!(preview.namespace.as_deref(), Some("fluxheim-image-v1"));
+        assert_eq!(preview.user_tag.as_deref(), Some("cached:route:assets"));
+        assert_eq!(
+            preview.primary_key.as_deref(),
+            Some(
+                "fluxheim-image-v1;method:3:GET;host:14:cached.example;path:16:/assets/logo.png;query:3:v=1;"
+            )
+        );
+        assert!(preview.primary_hash.is_some());
+        assert_eq!(preview.combined_hash, preview.primary_hash);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_key_preview_reports_ineligible_reason() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        ..crate::config::CacheMemoryConfig::default()
+                    },
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let mut request =
+            pingora::http::RequestHeader::build("POST", b"/assets/logo.png", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+
+        let preview = proxy
+            .snapshot()
+            .pingora_image_cache_key_preview_for_request_header(&request);
+
+        assert!(!preview.eligible);
+        assert_eq!(preview.scope, super::CacheKeyPreviewScope::Vhost);
+        assert_eq!(
+            preview.reason.as_deref(),
+            Some("method POST is not allowed by selected cache policy")
+        );
+        assert_eq!(preview.primary_key, None);
     }
 
     #[cfg(feature = "cache")]

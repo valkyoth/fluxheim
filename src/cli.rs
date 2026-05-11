@@ -155,6 +155,25 @@ pub enum CliCommand {
         #[arg(long)]
         fail_fast: bool,
     },
+
+    /// Preview the cache key selected for one request without contacting upstream.
+    CacheKey {
+        /// Host header to route and key with. Defaults to the configured default vhost host.
+        #[arg(long)]
+        host: Option<String>,
+
+        /// HTTP method to preview.
+        #[arg(long, default_value = "GET")]
+        method: String,
+
+        /// Absolute request path to preview. May include a query string.
+        #[arg(long)]
+        path: String,
+
+        /// Query string to preview when --path does not already contain one.
+        #[arg(long)]
+        query: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -340,6 +359,18 @@ fn run_command(
             max_targets: *max_targets,
             fail_fast: *fail_fast,
         }),
+        CliCommand::CacheKey {
+            host,
+            method,
+            path,
+            query,
+        } => run_cache_key_command(CacheKeyOptions {
+            config_path,
+            host: host.clone(),
+            method: method.clone(),
+            path: path.clone(),
+            query: query.clone(),
+        }),
     }
 }
 
@@ -353,6 +384,15 @@ struct CacheWarmOptions<'a> {
     timeout_secs: u64,
     max_targets: usize,
     fail_fast: bool,
+}
+
+#[derive(Debug)]
+struct CacheKeyOptions<'a> {
+    config_path: Option<&'a std::path::Path>,
+    host: Option<String>,
+    method: String,
+    path: String,
+    query: Option<String>,
 }
 
 #[cfg(feature = "cache")]
@@ -453,6 +493,120 @@ fn run_cache_warm_command(
         fail_fast,
     );
     Err("cache-warm requires the cache feature".into())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let config = Config::load(options.config_path)?;
+    config.validate()?;
+
+    let host = match options.host {
+        Some(host) => {
+            validate_cache_warm_host(&host)?;
+            host
+        }
+        None => cache_warm_default_host(&config)
+            .ok_or("cache-key requires --host when no default vhost host is configured")?,
+    };
+    let uri = cache_key_uri(&options.path, options.query.as_deref())?;
+    validate_cache_key_method(&options.method)?;
+
+    let mut request =
+        pingora::http::RequestHeader::build(options.method.as_str(), uri.as_bytes(), None)?;
+    request.insert_header("host", host.as_str())?;
+
+    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
+    let preview = proxy
+        .snapshot()
+        .pingora_image_cache_key_preview_for_request_header(&request);
+
+    println!("cache key preview:");
+    println!("vhost: {}", preview.vhost);
+    println!("scope: {}", preview.scope.as_str());
+    if let Some(route) = preview.route.as_deref() {
+        println!("route: {route}");
+    }
+    println!("eligible: {}", preview.eligible);
+    if let Some(reason) = preview.reason.as_deref() {
+        println!("reason: {reason}");
+    }
+    if let Some(namespace) = preview.namespace.as_deref() {
+        println!("namespace: {namespace}");
+    }
+    if let Some(primary_key) = preview.primary_key.as_deref() {
+        println!("primary_key: {primary_key}");
+    }
+    if let Some(primary_hash) = preview.primary_hash.as_deref() {
+        println!("primary_hash: {primary_hash}");
+    }
+    if let Some(variance_hash) = preview.variance_hash.as_deref() {
+        println!("variance_hash: {variance_hash}");
+    }
+    if let Some(combined_hash) = preview.combined_hash.as_deref() {
+        println!("combined_hash: {combined_hash}");
+    }
+    if let Some(user_tag) = preview.user_tag.as_deref() {
+        println!("user_tag: {user_tag}");
+    }
+
+    Ok(())
+}
+
+#[cfg(not(all(feature = "cache", feature = "proxy")))]
+fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let CacheKeyOptions {
+        config_path,
+        host,
+        method,
+        path,
+        query,
+    } = options;
+    let _ = (config_path, host, method, path, query);
+    Err("cache-key requires the proxy and cache features".into())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn cache_key_uri(path: &str, query: Option<&str>) -> Result<String, Box<dyn Error + Send + Sync>> {
+    validate_cache_warm_path(path)?;
+    if path.contains('?') && query.is_some() {
+        return Err("cache-key accepts query in either --path or --query, not both".into());
+    }
+    let Some(query) = query else {
+        return Ok(path.to_owned());
+    };
+    validate_cache_key_query(query)?;
+    Ok(format!("{path}?{query}"))
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_key_method(method: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if method.is_empty() || method.len() > 32 {
+        return Err("method must be 1-32 bytes".into());
+    }
+    if method
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err("method contains control or whitespace bytes".into());
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_key_query(query: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if query.len() > 8192 {
+        return Err("query must be at most 8192 bytes".into());
+    }
+    if query
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err("query contains control or whitespace bytes".into());
+    }
+    if query.starts_with('?') || query.contains('#') {
+        return Err("query must not start with ? or contain #".into());
+    }
+    Ok(())
 }
 
 #[cfg(feature = "cache")]
@@ -1627,10 +1781,29 @@ mod tests {
         assert!(super::cache_warm_status_from_prefix(b"bad\r\n").is_err());
     }
 
+    #[cfg(all(feature = "cache", feature = "proxy"))]
+    #[test]
+    fn cache_key_uri_accepts_separate_query() {
+        assert_eq!(
+            super::cache_key_uri("/assets/app.js", Some("v=1")).unwrap(),
+            "/assets/app.js?v=1"
+        );
+        assert!(super::cache_key_uri("/assets/app.js?v=1", Some("x=2")).is_err());
+        assert!(super::cache_key_uri("/assets/app.js", Some("?v=1")).is_err());
+    }
+
     #[cfg(not(feature = "cache"))]
     #[test]
     fn cache_warm_requires_cache_feature() {
         let error = run_from_args(["fluxheim", "cache-warm", "--path", "/"]).unwrap_err();
+
+        assert!(error.to_string().contains("cache feature"));
+    }
+
+    #[cfg(not(feature = "cache"))]
+    #[test]
+    fn cache_key_requires_cache_feature() {
+        let error = run_from_args(["fluxheim", "cache-key", "--path", "/"]).unwrap_err();
 
         assert!(error.to_string().contains("cache feature"));
     }

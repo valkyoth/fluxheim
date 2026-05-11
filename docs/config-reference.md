@@ -562,6 +562,9 @@ as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
 header such as `OriginNotCache`, `ResponseTooLarge`, or `cache-min-uses` when
 the cache phase has an explicit no-cache reason. Leave it unset unless you are
 actively debugging cache policy.
+For offline debugging, `fluxheim cache-key --host example.com --path
+/assets/app.js` previews the vhost/route cache policy and generated cache key
+without contacting the upstream.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.

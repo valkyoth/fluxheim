@@ -344,6 +344,21 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
   --input /tmp/fluxheim-warm.txt
 ```
 
+Example cache-key preview during a production incident:
+
+```sh
+fluxheim --config /etc/fluxheim/fluxheim.toml cache-key \
+  --host repoheim.eu \
+  --path /assets/img/logo.png \
+  --query v=1
+```
+
+The preview validates the effective config, selects the same vhost and route
+cache policy as a live request, and prints the selected namespace, primary
+cache-key material, compact hashes, user tag, and ineligibility reason when the
+request is not admitted. It does not contact the upstream, read cached object
+bodies, or dump stored response headers.
+
 Example: `cache.memory.max_size_bytes = "1GiB"` with
 `cache.max_object_bytes = "32MiB"` plans 32 in-memory object slots.
 
