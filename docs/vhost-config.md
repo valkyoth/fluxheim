@@ -146,6 +146,11 @@ Each route must define exactly one action by adding one nested table:
 `[vhosts.routes.redirect]`, `[vhosts.routes.proxy]`, or `[vhosts.routes.web]`.
 Do not add an `action = "proxy"` field.
 
+Do not write `[vhosts.routes.proxy]` before a `[[vhosts.routes]]` block. There
+is no current route yet. Also do not use `[[vhosts.routes.proxy]]`; route
+`proxy`, `web`, `cache`, and `headers` are normal nested tables inside one
+route, not arrays.
+
 ```toml
 [[vhosts]]
 name = "dev.example.test"

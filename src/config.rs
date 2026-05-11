@@ -4252,9 +4252,21 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
             "hint: routes select their action by defining one nested table: [vhosts.routes.proxy], [vhosts.routes.web], or [vhosts.routes.redirect]; do not set action = \"proxy\"",
         );
     }
+    if message.contains("vhosts.routes.proxy")
+        && message.contains("invalid type: map, expected a sequence")
+    {
+        return Some(
+            "hint: start each route with [[vhosts.routes]] before nested route tables such as [vhosts.routes.proxy]",
+        );
+    }
     if message.contains("invalid type: map, expected a sequence") {
         return Some(
             "hint: start each virtual host with [[vhosts]] before nested tables such as [vhosts.proxy]",
+        );
+    }
+    if message.contains("[[vhosts.routes.proxy]]") {
+        return Some(
+            "hint: route proxy config uses [vhosts.routes.proxy], not [[vhosts.routes.proxy]]; proxy is a nested table inside one [[vhosts.routes]] block",
         );
     }
     if message.contains("[[vhosts.proxy]]") {
@@ -10645,6 +10657,64 @@ mod tests {
         assert!(message.contains("failed to parse config"), "{message}");
         assert!(
             message.contains("routes select their action by defining one nested table"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn config_parse_error_hints_route_table_before_array() {
+        let dir = TestDir::new("config-route-table-before-array");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:3000"]
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("start each route with [[vhosts.routes]]"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn config_parse_error_hints_route_proxy_array_table() {
+        let dir = TestDir::new("config-route-proxy-array-table");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [[vhosts.routes]]
+            name = "app"
+            path_prefix = "/"
+
+            [[vhosts.routes.proxy]]
+            upstreams = ["127.0.0.1:3000"]
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("uses [vhosts.routes.proxy], not [[vhosts.routes.proxy]]"),
             "{message}"
         );
     }
