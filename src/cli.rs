@@ -154,6 +154,10 @@ pub enum CliCommand {
         /// Stop on the first failed warm request.
         #[arg(long)]
         fail_fast: bool,
+
+        /// Additional HTTP status code to count as warmed. 2xx and 3xx are accepted by default.
+        #[arg(long = "allow-status", value_name = "STATUS")]
+        allow_statuses: Vec<u16>,
     },
 
     /// Preview the cache key selected for one request without contacting upstream.
@@ -368,6 +372,7 @@ fn run_command(
             timeout_secs,
             max_targets,
             fail_fast,
+            allow_statuses,
         } => run_cache_warm_command(CacheWarmOptions {
             config_path,
             listen: listen.clone(),
@@ -377,6 +382,7 @@ fn run_command(
             timeout_secs: *timeout_secs,
             max_targets: *max_targets,
             fail_fast: *fail_fast,
+            allow_statuses: allow_statuses.clone(),
         }),
         CliCommand::CacheKey {
             host,
@@ -415,6 +421,7 @@ struct CacheWarmOptions<'a> {
     timeout_secs: u64,
     max_targets: usize,
     fail_fast: bool,
+    allow_statuses: Vec<u16>,
 }
 
 #[derive(Debug)]
@@ -446,6 +453,7 @@ fn run_cache_warm_command(
     if options.max_targets == 0 || options.max_targets > 4096 {
         return Err("cache-warm --max-targets must be between 1 and 4096".into());
     }
+    validate_cache_warm_allow_statuses(&options.allow_statuses)?;
 
     let listen = cache_warm_listen_addr(&config, options.listen.as_deref())?;
     let default_host = match options.host {
@@ -471,11 +479,22 @@ fn run_cache_warm_command(
     for target in targets {
         match cache_warm_request(&listen, &target, timeout) {
             Ok(result) => {
-                warmed = warmed.saturating_add(1);
-                println!(
-                    "warmed: host={} path={} status={} bytes={}",
-                    target.host, target.path, result.status, result.bytes_read
-                );
+                if cache_warm_status_is_success(result.status, &options.allow_statuses) {
+                    warmed = warmed.saturating_add(1);
+                    println!(
+                        "warmed: host={} path={} status={} bytes={}",
+                        target.host, target.path, result.status, result.bytes_read
+                    );
+                } else {
+                    failed = failed.saturating_add(1);
+                    eprintln!(
+                        "failed: host={} path={} status={} bytes={} error=unexpected warm response status",
+                        target.host, target.path, result.status, result.bytes_read
+                    );
+                    if options.fail_fast {
+                        break;
+                    }
+                }
             }
             Err(error) => {
                 failed = failed.saturating_add(1);
@@ -512,6 +531,7 @@ fn run_cache_warm_command(
         timeout_secs,
         max_targets,
         fail_fast,
+        allow_statuses,
     } = options;
     let _ = (
         config_path,
@@ -522,6 +542,7 @@ fn run_cache_warm_command(
         timeout_secs,
         max_targets,
         fail_fast,
+        allow_statuses,
     );
     Err("cache-warm requires the cache feature".into())
 }
@@ -874,6 +895,26 @@ fn validate_cache_warm_path(path: &str) -> Result<(), Box<dyn Error + Send + Syn
         return Err("path contains control or whitespace bytes".into());
     }
     Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn validate_cache_warm_allow_statuses(
+    statuses: &[u16],
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for status in statuses {
+        if !(100..=599).contains(status) {
+            return Err(format!(
+                "cache-warm --allow-status must be an HTTP status code, got {status}"
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_status_is_success(status: u16, allowed_extra: &[u16]) -> bool {
+    (200..400).contains(&status) || allowed_extra.contains(&status)
 }
 
 #[cfg(feature = "cache")]
@@ -1892,6 +1933,17 @@ mod tests {
             200
         );
         assert!(super::cache_warm_status_from_prefix(b"bad\r\n").is_err());
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_status_success_requires_success_or_explicit_allow() {
+        assert!(super::cache_warm_status_is_success(200, &[]));
+        assert!(super::cache_warm_status_is_success(302, &[]));
+        assert!(!super::cache_warm_status_is_success(404, &[]));
+        assert!(super::cache_warm_status_is_success(404, &[404]));
+        assert!(super::validate_cache_warm_allow_statuses(&[200, 404]).is_ok());
+        assert!(super::validate_cache_warm_allow_statuses(&[99]).is_err());
     }
 
     #[cfg(all(feature = "cache", feature = "proxy"))]

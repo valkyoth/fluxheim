@@ -278,11 +278,12 @@ rustls TLS-ALPN-01 builds, Actalis and Google Trust Services EAB-capable issuer
 configuration, file-backed secret support for containers/systemd credentials,
 safe ACME storage, and guided `acme-init` bootstrap.
 
-Active `1.2` work: operations diagnostics and runbooks. The planned scope
-includes clearer `conf.d` parse and validation errors, production Podman
-validation/ACME examples, a separate ACME companion service/timer flow,
-admin/metrics operations tooling, rollback/snapshot improvements, and proxy
-buffering/backpressure controls for app migrations.
+Active `1.2` work: cache-server completion and operations diagnostics. The
+planned scope includes stricter cache warm failure accounting, richer cache
+inspection, production Podman validation/ACME examples, a separate ACME
+companion service/timer flow, admin/metrics operations tooling,
+rollback/snapshot improvements, and proxy buffering/backpressure controls for
+app migrations.
 
 Later releases continue with load balancing, cache improvements, advanced
 certificate automation, privacy/security profiles, Cloudflare origin support,

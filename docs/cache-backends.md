@@ -74,7 +74,10 @@ internal cache implementation.
   Fluxheim HTTP listener. It uses normal `GET` requests with the selected Host
   header, so vhost routing, route matching, cache keys, and admission rules are
   identical to real traffic. It accepts repeated `--path` values or an input
-  file containing `/path` or `host.example /path` lines.
+  file containing `/path` or `host.example /path` lines. Warm requests count
+  2xx and 3xx responses as successful by default. Use repeated
+  `--allow-status` values only for deliberate negative-cache workflows, such as
+  warming a configured 404 TTL.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream
@@ -342,6 +345,12 @@ EOF
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
   --listen 127.0.0.1:80 \
   --input /tmp/fluxheim-warm.txt
+
+fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
+  --listen 127.0.0.1:80 \
+  --host repoheim.eu \
+  --path /missing-release-artifact.png \
+  --allow-status 404
 ```
 
 Example cache-key preview during a production incident:

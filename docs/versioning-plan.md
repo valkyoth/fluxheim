@@ -413,7 +413,10 @@ Stable scope:
     whether indexed scope, prefix, tag, wildcard, and stale purges can reach an
     object without a full scan;
   - cache warm/import/export workflows for deploys and repository mirrors,
-    including clear failure accounting and no hidden best-effort misses;
+    including clear failure accounting and no hidden best-effort misses.
+    `cache-warm` now treats only 2xx/3xx responses as successful by default
+    and requires explicit `--allow-status` opt-in for deliberate negative-cache
+    warm targets such as configured 404 TTLs;
   - cache observability through both Prometheus and OpenTelemetry, including
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
