@@ -629,6 +629,10 @@ PY
     --expect-status 200 \
     --expect-body-bytes 11 \
     --expect-header-name etag \
+    --expect-cache-lock-enabled \
+    --expect-memory-tier-enabled \
+    --expect-disk-tier-enabled \
+    --expect-storage-tiers 2 \
     --expect-freshness-state fresh
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_en_first_headers" -o "$vary_en_body" \

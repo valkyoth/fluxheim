@@ -455,6 +455,10 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --expect-cache-tag asset:logo \
   --expect-header-name etag \
   --expect-header-name vary \
+  --expect-cache-lock-enabled \
+  --expect-memory-tier-enabled \
+  --expect-disk-tier-enabled \
+  --expect-storage-tiers 2 \
   --expect-serve-stale-if-error \
   --expect-purge-indexed \
   --expect-freshness-state fresh
@@ -483,6 +487,10 @@ repeated `--expect-status` flags fail when no matching object has an allowed
 cached HTTP status, repeated `--expect-fresh-ttl-secs` flags fail when no
 matching object has an allowed stored fresh TTL, repeated `--expect-body-bytes`
 flags fail when no matching object has an allowed stored body size,
+`--expect-cache-lock-enabled`, `--expect-memory-tier-enabled`,
+`--expect-disk-tier-enabled`, and `--expect-storage-tiers` fail when the
+selected cache policy does not match the required stampede-protection or tier
+layout,
 `--expect-serve-stale-if-error` and `--expect-serve-stale-while-revalidate`
 fail when no matching object is eligible for those stale-serving policies,
 `--expect-purge-indexed` fails when no matching object is reachable through the bounded purge index, and repeated

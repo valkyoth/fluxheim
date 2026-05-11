@@ -269,6 +269,22 @@ pub enum CliCommand {
         #[arg(long)]
         expect_purge_indexed: bool,
 
+        /// Require the selected cache policy to have cache locking enabled.
+        #[arg(long)]
+        expect_cache_lock_enabled: bool,
+
+        /// Require the selected cache policy to have a memory cache tier.
+        #[arg(long)]
+        expect_memory_tier_enabled: bool,
+
+        /// Require the selected cache policy to have a disk cache tier.
+        #[arg(long)]
+        expect_disk_tier_enabled: bool,
+
+        /// Required number of enabled storage tiers for the selected cache policy.
+        #[arg(long = "expect-storage-tiers", value_name = "COUNT")]
+        expect_storage_tiers: Option<u8>,
+
         /// Require at least one matching cached object to be eligible for stale-if-error serving.
         #[arg(long)]
         expect_serve_stale_if_error: bool,
@@ -510,6 +526,10 @@ fn run_command(
             expect_header_names,
             expect_cache_tags,
             expect_purge_indexed,
+            expect_cache_lock_enabled,
+            expect_memory_tier_enabled,
+            expect_disk_tier_enabled,
+            expect_storage_tiers,
             expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate,
         } => run_cache_lookup_command(CacheLookupOptions {
@@ -528,6 +548,10 @@ fn run_command(
             expect_header_names: expect_header_names.clone(),
             expect_cache_tags: expect_cache_tags.clone(),
             expect_purge_indexed: *expect_purge_indexed,
+            expect_cache_lock_enabled: *expect_cache_lock_enabled,
+            expect_memory_tier_enabled: *expect_memory_tier_enabled,
+            expect_disk_tier_enabled: *expect_disk_tier_enabled,
+            expect_storage_tiers: *expect_storage_tiers,
             expect_serve_stale_if_error: *expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate: *expect_serve_stale_while_revalidate,
         }),
@@ -580,6 +604,10 @@ struct CacheLookupOptions<'a> {
     expect_header_names: Vec<String>,
     expect_cache_tags: Vec<String>,
     expect_purge_indexed: bool,
+    expect_cache_lock_enabled: bool,
+    expect_memory_tier_enabled: bool,
+    expect_disk_tier_enabled: bool,
+    expect_storage_tiers: Option<u8>,
     expect_serve_stale_if_error: bool,
     expect_serve_stale_while_revalidate: bool,
 }
@@ -912,6 +940,7 @@ fn run_cache_lookup_command(
     validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
     validate_cache_lookup_expected_fresh_ttls(&options.expect_fresh_ttl_secs)?;
     validate_cache_lookup_expected_body_bytes(&options.expect_body_bytes)?;
+    validate_cache_lookup_expected_storage_tiers(options.expect_storage_tiers)?;
     let (config, request) = cache_key_command_request(&cache_key_options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let lookup = proxy
@@ -927,6 +956,10 @@ fn run_cache_lookup_command(
         expected_header_names: &expected_header_names,
         expected_cache_tags: &expected_cache_tags,
         expect_purge_indexed: options.expect_purge_indexed,
+        expect_cache_lock_enabled: options.expect_cache_lock_enabled,
+        expect_memory_tier_enabled: options.expect_memory_tier_enabled,
+        expect_disk_tier_enabled: options.expect_disk_tier_enabled,
+        expect_storage_tiers: options.expect_storage_tiers,
         expect_serve_stale_if_error: options.expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate: options.expect_serve_stale_while_revalidate,
     };
@@ -1092,6 +1125,10 @@ struct CacheLookupExpectations<'a> {
     expected_header_names: &'a [String],
     expected_cache_tags: &'a [String],
     expect_purge_indexed: bool,
+    expect_cache_lock_enabled: bool,
+    expect_memory_tier_enabled: bool,
+    expect_disk_tier_enabled: bool,
+    expect_storage_tiers: Option<u8>,
     expect_serve_stale_if_error: bool,
     expect_serve_stale_while_revalidate: bool,
 }
@@ -1111,9 +1148,32 @@ fn validate_cache_lookup_expectations(
         expected_header_names,
         expected_cache_tags,
         expect_purge_indexed,
+        expect_cache_lock_enabled,
+        expect_memory_tier_enabled,
+        expect_disk_tier_enabled,
+        expect_storage_tiers,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     } = expectations;
+
+    if *expect_cache_lock_enabled && !lookup.preview.cache_lock_enabled {
+        return Err("cache-lookup expected cache lock enabled, found false".into());
+    }
+    if *expect_memory_tier_enabled && !lookup.preview.memory_tier_enabled {
+        return Err("cache-lookup expected memory tier enabled, found false".into());
+    }
+    if *expect_disk_tier_enabled && !lookup.preview.disk_tier_enabled {
+        return Err("cache-lookup expected disk tier enabled, found false".into());
+    }
+    if let Some(expected_storage_tiers) = expect_storage_tiers
+        && lookup.preview.storage_tiers != *expected_storage_tiers
+    {
+        return Err(format!(
+            "cache-lookup expected storage tiers {expected_storage_tiers}, found {}",
+            lookup.preview.storage_tiers
+        )
+        .into());
+    }
 
     if *require_object && lookup.objects.is_empty() {
         return Err("cache-lookup expected at least one cached object, found none".into());
@@ -1398,6 +1458,21 @@ fn validate_cache_lookup_expected_body_bytes(
     Ok(())
 }
 
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_lookup_expected_storage_tiers(
+    storage_tiers: Option<u8>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Some(storage_tiers) = storage_tiers
+        && storage_tiers > 2
+    {
+        return Err(format!(
+            "cache-lookup --expect-storage-tiers must be 0, 1, or 2; got {storage_tiers}"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 #[cfg(not(all(feature = "cache", feature = "proxy")))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let CacheKeyOptions {
@@ -1432,6 +1507,10 @@ fn run_cache_lookup_command(
         expect_header_names,
         expect_cache_tags,
         expect_purge_indexed,
+        expect_cache_lock_enabled,
+        expect_memory_tier_enabled,
+        expect_disk_tier_enabled,
+        expect_storage_tiers,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     } = options;
@@ -1446,6 +1525,10 @@ fn run_cache_lookup_command(
         expect_header_names,
         expect_cache_tags,
         expect_purge_indexed,
+        expect_cache_lock_enabled,
+        expect_memory_tier_enabled,
+        expect_disk_tier_enabled,
+        expect_storage_tiers,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     );
@@ -3141,6 +3224,10 @@ mod tests {
             expected_header_names: no_strings,
             expected_cache_tags: no_strings,
             expect_purge_indexed: false,
+            expect_cache_lock_enabled: false,
+            expect_memory_tier_enabled: false,
+            expect_disk_tier_enabled: false,
+            expect_storage_tiers: None,
             expect_serve_stale_if_error: false,
             expect_serve_stale_while_revalidate: false,
         };
@@ -3158,6 +3245,9 @@ mod tests {
                     expected_header_names: &["etag".to_owned()],
                     expected_cache_tags: &["asset:logo".to_owned()],
                     expect_purge_indexed: true,
+                    expect_cache_lock_enabled: true,
+                    expect_memory_tier_enabled: true,
+                    expect_storage_tiers: Some(1),
                     expect_serve_stale_while_revalidate: true,
                     ..default_expectations
                 }
@@ -3230,6 +3320,37 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expected body bytes 5, found 4")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expect_disk_tier_enabled: true,
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected disk tier enabled, found false")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expect_storage_tiers: Some(2),
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected storage tiers 2, found 1")
+        );
+        assert!(super::validate_cache_lookup_expected_storage_tiers(Some(2)).is_ok());
+        assert!(
+            super::validate_cache_lookup_expected_storage_tiers(Some(3))
+                .unwrap_err()
+                .to_string()
+                .contains("must be 0, 1, or 2")
         );
         assert!(
             super::validate_cache_lookup_expectations(
