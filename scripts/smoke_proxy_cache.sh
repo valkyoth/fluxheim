@@ -74,7 +74,9 @@ VARY_BODIES = {
     "de": b"vary-de",
     "en": b"vary-en",
 }
+INPUT_WARM_BODY = b"input-warm-body"
 ETAG = '"cache-smoke-v1"'
+INPUT_WARM_ETAG = '"cache-smoke-input-warm"'
 REVALIDATE_ETAG = '"cache-smoke-revalidate"'
 REFRESH_OLD_ETAG = '"cache-smoke-refresh-old"'
 REFRESH_NEW_ETAG = '"cache-smoke-refresh-new"'
@@ -140,6 +142,19 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("etag", '"cache-smoke-vary"')
             self.send_header("last-modified", LAST_MODIFIED)
             self.send_header("surrogate-key", "smoke:vary smoke:warm")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path == "/input-warm.png":
+            body = INPUT_WARM_BODY
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=120")
+            self.send_header("etag", INPUT_WARM_ETAG)
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.send_header("surrogate-key", "smoke:input-warm")
             self.end_headers()
             self.wfile.write(body)
             return
@@ -548,6 +563,9 @@ vary_en_body="$TMP_DIR/vary-en.bin"
 vary_de_body="$TMP_DIR/vary-de.bin"
 warm_vary_headers="$TMP_DIR/warm-vary.headers"
 warm_vary_body="$TMP_DIR/warm-vary.bin"
+warm_input_file="$TMP_DIR/warm-input.txt"
+warm_input_headers="$TMP_DIR/warm-input.headers"
+warm_input_body="$TMP_DIR/warm-input.bin"
 warm_missing_headers="$TMP_DIR/warm-missing.headers"
 warm_missing_body="$TMP_DIR/warm-missing.bin"
 
@@ -1252,6 +1270,43 @@ if ! grep -qi '^x-cache-status: HIT' "$warm_vary_headers"; then
 fi
 if [ "$(cat "$warm_vary_body")" != "vary-de" ]; then
     echo "proxy cache smoke failed: cache-warm negotiated Vary body mismatch" >&2
+    exit 1
+fi
+
+printf 'cache.test /input-warm.png\n' > "$warm_input_file"
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-warm \
+    --listen "127.0.0.1:$FLUXHEIM_PORT" \
+    --input "$warm_input_file" \
+    --dry-run
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-warm \
+    --listen "127.0.0.1:$FLUXHEIM_PORT" \
+    --input "$warm_input_file" \
+    --repeat 2 \
+    --expect-cache-status-sequence MISS,HIT
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /input-warm.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-body-bytes 15 \
+    --expect-cache-tag smoke:input-warm \
+    --expect-header-name etag \
+    --expect-purge-indexed \
+    --expect-freshness-state fresh
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$warm_input_headers" -o "$warm_input_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/input-warm.png"
+if ! grep -qi '^x-cache-status: HIT' "$warm_input_headers"; then
+    echo "proxy cache smoke failed: cache-warm input file did not preload target" >&2
+    cat "$warm_input_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$warm_input_body")" != "input-warm-body" ]; then
+    echo "proxy cache smoke failed: cache-warm input body mismatch" >&2
     exit 1
 fi
 
