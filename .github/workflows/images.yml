@@ -8,9 +8,14 @@ on:
         required: true
         default: linux/amd64
       features:
-        description: Fluxheim Cargo feature set.
+        description: Override all image profile feature sets. Leave empty for profile defaults.
+        required: false
+        default: ""
+      include_load_balancer:
+        description: Build the load-balancer image profile during manual dispatch.
         required: true
-        default: profile-core,acme-client
+        default: false
+        type: boolean
       config:
         description: Config file copied into /etc/fluxheim/fluxheim.toml.
         required: true
@@ -36,37 +41,66 @@ env:
 
 jobs:
   images:
-    name: Build and publish ${{ matrix.variant }}
+    name: Build and publish ${{ matrix.profile.name }} ${{ matrix.variant }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - variant: debian
-            containerfile: containers/Containerfile.debian
-          - variant: alpine
-            containerfile: containers/Containerfile.alpine
-          - variant: wolfi
-            containerfile: containers/Containerfile.wolfi
-          - variant: suse-micro
-            containerfile: containers/Containerfile.suse-micro
+        variant:
+          - debian
+          - alpine
+          - wolfi
+          - suse-micro
+        profile:
+          - name: base
+            tag: ""
+            features: profile-static-site,acme-client
+          - name: cache
+            tag: cache
+            features: profile-cache-server,acme-client
+          - name: load-balancer
+            tag: load-balancer
+            features: profile-load-balancer,acme-client
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      INCLUDE_LOAD_BALANCER: ${{ inputs.include_load_balancer || false }}
 
     steps:
+      - name: Decide image profile
+        id: profile
+        shell: bash
+        env:
+          PROFILE: ${{ matrix.profile.name }}
+        run: |
+          set -euo pipefail
+          build="true"
+          if [[ "${PROFILE}" == "load-balancer" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v1\.3 && "${INCLUDE_LOAD_BALANCER}" != "true" ]]; then
+              build="false"
+            fi
+          fi
+          echo "build=${build}" >> "${GITHUB_OUTPUT}"
+          if [[ "${build}" == "false" ]]; then
+            echo "Skipping ${PROFILE} image profile until a v1.3 tag or manual include_load_balancer=true run."
+          fi
+
       - name: Checkout repository
+        if: ${{ steps.profile.outputs.build == 'true' }}
         uses: actions/checkout@v6
 
       - name: Set up QEMU
+        if: ${{ steps.profile.outputs.build == 'true' }}
         uses: docker/setup-qemu-action@v4
 
       - name: Set up Buildx
+        if: ${{ steps.profile.outputs.build == 'true' }}
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
+        if: ${{ steps.profile.outputs.build == 'true' }}
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -74,7 +108,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        if: ${{ steps.profile.outputs.build == 'true' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v4
         with:
           registry: docker.io
@@ -82,10 +116,13 @@ jobs:
           password: ${{ env.DOCKERHUB_TOKEN }}
 
       - name: Prepare tags
+        if: ${{ steps.profile.outputs.build == 'true' }}
         id: tags
         shell: bash
         env:
           VARIANT: ${{ matrix.variant }}
+          PROFILE: ${{ matrix.profile.name }}
+          PROFILE_TAG: ${{ matrix.profile.tag }}
         run: |
           set -euo pipefail
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -94,22 +131,68 @@ jobs:
             version="dev"
           fi
 
+          if [[ -n "${PROFILE_TAG}" ]]; then
+            variant_suffix="${PROFILE_TAG}-${VARIANT}"
+          else
+            variant_suffix="${VARIANT}"
+          fi
+          sha_suffix="${GITHUB_SHA::12}-${variant_suffix}"
+
           tags=(
-            "ghcr.io/${GITHUB_REPOSITORY}:${version}-${VARIANT}"
-            "ghcr.io/${GITHUB_REPOSITORY}:sha-${GITHUB_SHA::12}-${VARIANT}"
+            "ghcr.io/${GITHUB_REPOSITORY}:${version}-${variant_suffix}"
+            "ghcr.io/${GITHUB_REPOSITORY}:sha-${sha_suffix}"
           )
 
           if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
-            tags+=("ghcr.io/${GITHUB_REPOSITORY}:latest-${VARIANT}")
+            tags+=("ghcr.io/${GITHUB_REPOSITORY}:latest-${variant_suffix}")
+          fi
+
+          if [[ "${VARIANT}" == "wolfi" ]]; then
+            if [[ -n "${PROFILE_TAG}" ]]; then
+              tags+=("ghcr.io/${GITHUB_REPOSITORY}:${version}-${PROFILE_TAG}")
+              if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+                tags+=("ghcr.io/${GITHUB_REPOSITORY}:latest-${PROFILE_TAG}")
+              fi
+            else
+              tags+=(
+                "ghcr.io/${GITHUB_REPOSITORY}:${version}"
+                "ghcr.io/${GITHUB_REPOSITORY}:${version}-base"
+              )
+              if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+                tags+=(
+                  "ghcr.io/${GITHUB_REPOSITORY}:latest"
+                  "ghcr.io/${GITHUB_REPOSITORY}:latest-base"
+                )
+              fi
+            fi
           fi
 
           if [[ -n "${DOCKERHUB_USERNAME}" ]]; then
             tags+=(
-              "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:${version}-${VARIANT}"
-              "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:sha-${GITHUB_SHA::12}-${VARIANT}"
+              "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:${version}-${variant_suffix}"
+              "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:sha-${sha_suffix}"
             )
             if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
-              tags+=("docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest-${VARIANT}")
+              tags+=("docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest-${variant_suffix}")
+            fi
+            if [[ "${VARIANT}" == "wolfi" ]]; then
+              if [[ -n "${PROFILE_TAG}" ]]; then
+                tags+=("docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:${version}-${PROFILE_TAG}")
+                if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+                  tags+=("docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest-${PROFILE_TAG}")
+                fi
+              else
+                tags+=(
+                  "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:${version}"
+                  "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:${version}-base"
+                )
+                if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+                  tags+=(
+                    "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest"
+                    "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest-base"
+                  )
+                fi
+              fi
             fi
           fi
 
@@ -120,14 +203,15 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build and publish image
+        if: ${{ steps.profile.outputs.build == 'true' }}
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ${{ matrix.containerfile }}
+          file: containers/Containerfile.${{ matrix.variant }}
           platforms: ${{ inputs.platforms || 'linux/amd64' }}
           push: true
           build-args: |
-            FLUXHEIM_FEATURES=${{ inputs.features || 'profile-core,acme-client' }}
+            FLUXHEIM_FEATURES=${{ inputs.features || matrix.profile.features }}
             FLUXHEIM_CONFIG=${{ inputs.config || 'packaging/default/fluxheim.toml' }}
             FLUXHEIM_RUNTIME_UID=${{ inputs.runtime_uid || '65532' }}
             FLUXHEIM_RUNTIME_GID=${{ inputs.runtime_gid || '65532' }}

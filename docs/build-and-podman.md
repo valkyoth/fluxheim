@@ -153,9 +153,13 @@ Build the default Debian image:
 podman build -t fluxheim:dev -f Containerfile .
 ```
 
-By default, the bundled Containerfiles compile `profile-core,acme-client`.
-Override `FLUXHEIM_FEATURES` only when you intentionally want a smaller custom
-image.
+By default, the bundled Containerfiles compile the base gateway image profile
+`profile-static-site,acme-client`: static/proxy serving, rustls TLS, ACME, and
+security helpers without the cache module. Published releases also build a
+cache-focused profile with `profile-cache-server,acme-client`; starting with
+the `1.3` line, the image workflow is prepared to publish a load-balancer
+profile with `profile-load-balancer,acme-client`. Override `FLUXHEIM_FEATURES`
+only when you intentionally want a custom image.
 
 Build a specific runtime variant:
 
@@ -164,6 +168,24 @@ podman build -t fluxheim:wolfi -f containers/Containerfile.wolfi .
 podman build -t fluxheim:alpine -f containers/Containerfile.alpine .
 podman build -t fluxheim:suse-micro -f containers/Containerfile.suse-micro .
 podman build -t fluxheim:debian -f containers/Containerfile.debian .
+```
+
+Build the cache-focused profile locally:
+
+```bash
+podman build \
+  --build-arg FLUXHEIM_FEATURES=profile-cache-server,acme-client \
+  -t fluxheim:cache-wolfi \
+  -f containers/Containerfile.wolfi .
+```
+
+Build the future load-balancer profile locally:
+
+```bash
+podman build \
+  --build-arg FLUXHEIM_FEATURES=profile-load-balancer,acme-client \
+  -t fluxheim:load-balancer-wolfi \
+  -f containers/Containerfile.wolfi .
 ```
 
 Build a smaller proxy-only binary:
@@ -257,18 +279,42 @@ Required Docker Hub repository secrets:
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
 
-The workflow publishes variant-suffixed tags:
+The workflow publishes OS-variant tags for the base image profile:
 
-- `v1.1.0-wolfi`, `v1.1.0-alpine`, `v1.1.0-suse-micro`, `v1.1.0-debian`
+- `v1.2.0-wolfi`, `v1.2.0-alpine`, `v1.2.0-suse-micro`, `v1.2.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
+
+For the recommended Wolfi runtime, the base profile also gets short aliases:
+
+- `v1.2.0`
+- `v1.2.0-base`
+- `latest`
+- `latest-base`
+
+The cache image profile publishes tags with a `cache` profile segment:
+
+- `v1.2.0-cache-wolfi`, `v1.2.0-cache-alpine`,
+  `v1.2.0-cache-suse-micro`, `v1.2.0-cache-debian`
+- `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-cache-alpine`, etc.
+- `latest-cache-wolfi`, `latest-cache-alpine`, etc. when run from the default
+  branch
+- Wolfi short aliases: `v1.2.0-cache` and `latest-cache`
+
+The load-balancer image profile is prepared for the `1.3` line. It is skipped
+on normal pre-`1.3` tag pushes, but can be included in manual workflow runs by
+setting `include_load_balancer=true`. Its tags follow the same shape, for
+example `v1.3.0-load-balancer-wolfi` and the Wolfi alias
+`v1.3.0-load-balancer`.
 
 The workflow defaults to `linux/amd64`. Use manual dispatch to test additional
 platforms, for example `linux/amd64,linux/arm64`, once every selected runtime
 base has been verified for those architectures.
 
-Manual workflow inputs also allow `runtime_uid` and `runtime_gid`. Keep both at
-`65532` for normal images. Use `0` only for a deliberate root-runtime image.
+Manual workflow inputs also allow `runtime_uid`, `runtime_gid`, and a temporary
+feature override. Keep both IDs at `65532` for normal images. Use `0` only for
+a deliberate root-runtime image. Leave the feature override empty for normal
+release profile builds.
 
 ## Volume Mapping
 

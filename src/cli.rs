@@ -1,8 +1,10 @@
 use std::error::Error;
+#[cfg(feature = "cache")]
+use std::io::Read;
+#[cfg(all(feature = "cache", not(feature = "acme-client")))]
+use std::io::Write as _;
 #[cfg(feature = "acme-client")]
 use std::io::{self, Write};
-#[cfg(feature = "cache")]
-use std::io::{Read, Write as _};
 #[cfg(feature = "acme-client")]
 use std::path::Path;
 use std::path::PathBuf;

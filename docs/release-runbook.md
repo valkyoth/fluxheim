@@ -173,21 +173,25 @@ For GHCR, the package must be public if anonymous users should pull it:
 Then collect immutable digests:
 
 ```bash
-podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-wolfi"
-podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-wolfi" --format '{{index .RepoDigests 0}}'
-
-podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-alpine"
-podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-alpine" --format '{{index .RepoDigests 0}}'
-
-podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-suse-micro"
-podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-suse-micro" --format '{{index .RepoDigests 0}}'
-
-podman pull "ghcr.io/valkyoth/fluxheim:${TAG}-debian"
-podman inspect "ghcr.io/valkyoth/fluxheim:${TAG}-debian" --format '{{index .RepoDigests 0}}'
+for image in \
+  "${TAG}-wolfi" \
+  "${TAG}-alpine" \
+  "${TAG}-suse-micro" \
+  "${TAG}-debian" \
+  "${TAG}-cache-wolfi" \
+  "${TAG}-cache-alpine" \
+  "${TAG}-cache-suse-micro" \
+  "${TAG}-cache-debian"
+do
+  podman pull "ghcr.io/valkyoth/fluxheim:${image}"
+  podman inspect "ghcr.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'
+done
 ```
 
 If Docker Hub publishing is enabled, repeat the same pull/inspect process for
-the Docker Hub tags.
+the Docker Hub tags. For `v1.3.x` and newer tags, also collect the
+`load-balancer` image profile digests, for example
+`${TAG}-load-balancer-wolfi`.
 
 Edit the GitHub release notes and add one digest per image variant.
 
@@ -209,10 +213,14 @@ The release notes should end with concrete evidence, not placeholders:
 - Reproducible build:
   - `...  target/reproducible-a/release/fluxheim`
 - Container digests:
-  - Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Base Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Base Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Base SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Base Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Cache Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Cache Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Cache SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Cache Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
 - Tag signature:
   - `Good "git" signature for ...`
 ```

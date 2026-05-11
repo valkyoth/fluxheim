@@ -415,9 +415,12 @@ The smoke builds the image, validates the packaged config, and checks that the
 runtime process does not run as root.
 
 Fluxheim publishes variant images from the explicit Containerfiles under
-`containers/`: `wolfi`, `alpine`, `suse-micro`, and `debian`. GitHub Container
-Registry publishing uses the repository `GITHUB_TOKEN`; Docker Hub publishing
-requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets.
+`containers/`: `wolfi`, `alpine`, `suse-micro`, and `debian`. Each OS variant
+is published for the base and cache image profiles. The load-balancer image
+profile is prepared for the `1.3` line and can be included early through manual
+workflow dispatch. GitHub Container Registry publishing uses the repository
+`GITHUB_TOKEN`; Docker Hub publishing requires `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` repository secrets.
 
 The published default images should keep `FLUXHEIM_RUNTIME_UID=65532` and
 `FLUXHEIM_RUNTIME_GID=65532`. Root-runtime images are supported through build
