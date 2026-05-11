@@ -519,6 +519,7 @@ bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
 bypass_query_values = { mode = "private" }
+allow_client_cache_refresh = false
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
@@ -667,6 +668,13 @@ query switches that make a response unsafe to share.
 query parameter has the exact configured value. Matching is performed before
 URL decoding, so keep values simple and encode spaces or separators at the
 application edge.
+`allow_client_cache_refresh` is disabled by default. When disabled, client
+headers such as `Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
+`Pragma: no-cache` do not force upstream revalidation, which keeps unauthenticated
+clients from neutralizing the shared cache. Enable it only on routes where
+browser-style refresh semantics are explicitly desired. `Cache-Control:
+no-store` still bypasses lookup and storage because the client explicitly
+forbids storing the response.
 `vary_request_headers` adds safe request headers to the cache variance key even
 when the origin does not emit a matching `Vary` header. Use this for negotiated
 static assets, for example `Accept-Encoding`. Sensitive request-specific

@@ -3524,17 +3524,23 @@ impl ProxyHttp for FluxProxy {
     where
         Self::CTX: Send + Sync,
     {
-        if !request_cache_revalidation_requested(session.req_header()) {
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let vhost_index = ctx
+            .vhost_index
+            .unwrap_or_else(|| state.vhost_index(request_host(session)));
+        let vhost = state.vhost(vhost_index);
+        let route_cache = ctx
+            .route_index
+            .and_then(|route_index| vhost.route(route_index).cache.as_ref());
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
+        if !request_cache_revalidation_requested(session.req_header(), cache_config) {
             return Ok(None);
         }
 
         #[cfg(feature = "metrics")]
         {
-            let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
-            let vhost_index = ctx
-                .vhost_index
-                .unwrap_or_else(|| state.vhost_index(request_host(session)));
-            let vhost = state.vhost(vhost_index);
             record_cache_policy_activity(vhost, ctx.route_index, "revalidate");
         }
         ctx.cache_status_override = Some(CacheStatusOverride {
@@ -4682,7 +4688,13 @@ fn request_cache_bypass_reason(
 }
 
 #[cfg(feature = "cache")]
-fn request_cache_revalidation_requested(request: &RequestHeader) -> bool {
+fn request_cache_revalidation_requested(
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+) -> bool {
+    if !cache.allow_client_cache_refresh {
+        return false;
+    }
     crate::cache_headers::request_values_force_cache_revalidation(
         request_header_values(request, "cache-control"),
         request_header_values(request, "pragma"),
@@ -7508,12 +7520,15 @@ mod tests {
             request_cache_bypass_reason(&request, &CacheConfig::default()),
             Some("request-no-store")
         );
-        assert!(!request_cache_revalidation_requested(&request));
+        assert!(!request_cache_revalidation_requested(
+            &request,
+            &CacheConfig::default()
+        ));
     }
 
     #[cfg(feature = "cache")]
     #[test]
-    fn request_cache_refresh_headers_force_revalidation_without_bypass() {
+    fn request_cache_refresh_headers_are_ignored_by_default() {
         for (name, value) in [
             ("cache-control", "no-cache"),
             ("cache-control", "max-age = 0"),
@@ -7534,7 +7549,37 @@ mod tests {
                 "{name}: {value}"
             );
             assert!(
-                request_cache_revalidation_requested(&request),
+                !request_cache_revalidation_requested(&request, &CacheConfig::default()),
+                "{name}: {value}"
+            );
+        }
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_refresh_headers_force_revalidation_when_enabled() {
+        let cache = CacheConfig {
+            allow_client_cache_refresh: true,
+            ..CacheConfig::default()
+        };
+        for (name, value) in [
+            ("cache-control", "no-cache"),
+            ("cache-control", "max-age = 0"),
+            ("cache-control", "public, max-age=0"),
+            ("pragma", "no-cache"),
+        ] {
+            let mut request =
+                pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+            request.insert_header(name, value).unwrap();
+
+            assert!(!request_cache_bypass(&request, &cache), "{name}: {value}");
+            assert_eq!(
+                request_cache_bypass_reason(&request, &cache),
+                None,
+                "{name}: {value}"
+            );
+            assert!(
+                request_cache_revalidation_requested(&request, &cache),
                 "{name}: {value}"
             );
         }
@@ -7550,7 +7595,7 @@ mod tests {
             request_cache_bypass_reason(&request, &CacheConfig::default()),
             None
         );
-        assert!(!request_cache_revalidation_requested(&request));
+        assert!(!request_cache_revalidation_requested(&request, &cache));
     }
 
     #[cfg(feature = "cache")]
@@ -7564,7 +7609,10 @@ mod tests {
         request.append_header("cache-control", "no-cache").unwrap();
 
         assert!(!request_cache_bypass(&request, &CacheConfig::default()));
-        assert!(request_cache_revalidation_requested(&request));
+        assert!(!request_cache_revalidation_requested(
+            &request,
+            &CacheConfig::default()
+        ));
 
         let mut request =
             pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
@@ -7572,7 +7620,10 @@ mod tests {
         request.append_header("pragma", "no-cache").unwrap();
 
         assert!(!request_cache_bypass(&request, &CacheConfig::default()));
-        assert!(request_cache_revalidation_requested(&request));
+        assert!(!request_cache_revalidation_requested(
+            &request,
+            &CacheConfig::default()
+        ));
     }
 
     #[cfg(feature = "cache")]

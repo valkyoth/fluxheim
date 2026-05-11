@@ -374,6 +374,7 @@ status_ttls = { "404" = 60 }
 stale_if_error_secs = 60
 stale_if_error_on = ["connect", "http-status"]
 stale_if_error_statuses = [502, 503, 504]
+allow_client_cache_refresh = true
 max_object_bytes = "1MiB"
 
 [vhosts.cache.memory]

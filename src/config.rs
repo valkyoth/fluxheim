@@ -3482,6 +3482,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub bypass_query_values: BTreeMap<String, String>,
     #[serde(default)]
+    pub allow_client_cache_refresh: bool,
+    #[serde(default)]
     pub vary_request_headers: Vec<String>,
     #[serde(default)]
     pub ignore_origin_cache_headers: bool,
@@ -3541,6 +3543,7 @@ impl Default for CacheConfig {
             bypass_cookie_values: BTreeMap::new(),
             bypass_query_params: Vec::new(),
             bypass_query_values: BTreeMap::new(),
+            allow_client_cache_refresh: false,
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
             key_namespace: None,
@@ -8069,6 +8072,7 @@ mod tests {
             bypass_cookie_values = { preview = "1" }
             bypass_query_params = ["preview", "token"]
             bypass_query_values = { mode = "private" }
+            allow_client_cache_refresh = true
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
             key_namespace = "repoheim-assets-v1"
@@ -8163,6 +8167,7 @@ mod tests {
             config.cache.bypass_query_values.get("mode"),
             Some(&"private".to_owned())
         );
+        assert!(config.cache.allow_client_cache_refresh);
         assert_eq!(
             config.cache.vary_request_headers,
             ["accept-encoding".to_owned(), "accept-language".to_owned()]

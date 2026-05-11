@@ -63,6 +63,12 @@ internal cache implementation.
   `bypass_cookie_values`, `bypass_query_params`, and `bypass_query_values`
   provide narrower bypass controls for preview flags, session cookies, and
   private query modes while keeping unrelated public requests cacheable.
+- `allow_client_cache_refresh` is disabled by default so unauthenticated
+  clients cannot force origin revalidation with `Cache-Control: no-cache`,
+  `Cache-Control: max-age=0`, or `Pragma: no-cache`. Enable it only on
+  narrowly scoped routes that intentionally expose browser-style refresh
+  semantics. `Cache-Control: no-store` remains a full request bypass because
+  the client forbids storage.
 - `status_ttls` allows deliberate negative caching for configured statuses,
   such as a bounded 404 TTL for immutable asset paths.
 - `cache.vary_request_headers`, `vhosts.cache.vary_request_headers`, and
@@ -227,8 +233,10 @@ internal cache implementation.
   provider-specific cache controls. Proxied image cache admission bypasses
   Fluxheim's cache when the request sends `Cache-Control: no-store`.
   `Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
-  `Pragma: no-cache` keep cache lookup enabled and force Pingora to revalidate
-  an existing stored object instead of treating the request as a plain bypass.
+  `Pragma: no-cache` are ignored by default for shared-cache protection; when
+  `allow_client_cache_refresh` is enabled they keep cache lookup enabled and
+  force Pingora to revalidate an existing stored object instead of treating the
+  request as a plain bypass.
   Proxied image cache admission also refuses shared-cache
   storage when origin responses send `Cache-Control: no-store`, `private`,
   `no-cache`, `max-age=0`, or `s-maxage=0`, because validator-based
@@ -340,15 +348,15 @@ records successful admin purge commands with bounded operation and mode labels;
   bounded no-cache reasons such as `OriginNotCache`, `ResponseTooLarge`, or
   Fluxheim policy reasons such as `request-refresh`, `request-header`,
   `request-header-value`, `request-cookie`, `request-query`, `cache-min-uses`,
-  and `cache-pass`. `request-refresh` means the client requested revalidation
-  through `Cache-Control: no-cache`, `Cache-Control: max-age=0`, or
-  `Pragma: no-cache`; Fluxheim keeps cache enabled and asks Pingora to
-  revalidate the stored object instead of treating this as a full cache bypass.
+  and `cache-pass`. `request-refresh` means `allow_client_cache_refresh` is
+  enabled and the client requested revalidation through `Cache-Control:
+  no-cache`, `Cache-Control: max-age=0`, or `Pragma: no-cache`; Fluxheim keeps
+  cache enabled and asks Pingora to revalidate the stored object instead of
+  treating this as a full cache bypass.
   `Cache-Control: no-store` remains a bypass with `request-no-store` so the
   response is not admitted into the shared cache. The proxy cache smoke suite
-  verifies `no-cache`, `max-age=0`, `Pragma: no-cache`, and `no-store` reasons
-  end to end. Keep the reason header disabled unless actively debugging a cache
-  policy.
+  verifies opt-in refresh and `no-store` reasons end to end. Keep the reason
+  header disabled unless actively debugging a cache policy.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,

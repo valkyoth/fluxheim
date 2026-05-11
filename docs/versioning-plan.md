@@ -690,10 +690,11 @@ Current implementation status:
   - Pingora cache primitives already used directly or through adapters:
     `Storage`, `HandleHit`, `HandleMiss`, `CacheLock`, cache phase/reason
     reporting, variance keys for `Vary`, stale metadata, and bounded
-    forced-freshness through `ForcedFreshness::ForceExpired` when clients send
-    refresh headers such as `Cache-Control: no-cache`, `max-age=0`, or
-    `Pragma: no-cache`. Pingora's cacheability predictor is now available as
-    an explicit opt-in policy through
+    forced-freshness through `ForcedFreshness::ForceExpired` when operators
+    opt in with `allow_client_cache_refresh` and clients send refresh headers
+    such as `Cache-Control: no-cache`, `max-age=0`, or `Pragma: no-cache`.
+    Pingora's cacheability predictor is now available as an explicit opt-in
+    policy through
     `[cache.predictor]`, `[vhosts.cache.predictor]`, and
     `[vhosts.routes.cache.predictor]`, with Fluxheim custom policy reasons
     skipped so configured bypass/refusal counters remain authoritative.
