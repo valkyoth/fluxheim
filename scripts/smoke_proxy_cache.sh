@@ -455,6 +455,7 @@ stop_origin() {
 admin_status_body="$TMP_DIR/admin-status.json"
 admin_stale_dry_run_body="$TMP_DIR/admin-stale-dry-run.json"
 admin_prefix_purge_body="$TMP_DIR/admin-prefix-purge.json"
+admin_route_purge_body="$TMP_DIR/admin-route-purge.json"
 admin_tag_purge_body="$TMP_DIR/admin-tag-purge.json"
 admin_wildcard_purge_body="$TMP_DIR/admin-wildcard-purge.json"
 
@@ -1602,6 +1603,42 @@ fi
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
     --path /missing.png \
+    --expect-objects 0
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_route_purge_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-index?vhost=cache.test&route=swr&limit=16"; then
+    echo "proxy cache smoke failed: admin route purge request failed" >&2
+    cat "$admin_route_purge_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$admin_route_purge_body"; then
+    echo "proxy cache smoke failed: admin route purge did not return ok" >&2
+    cat "$admin_route_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"route":"swr"' "$admin_route_purge_body"; then
+    echo "proxy cache smoke failed: admin route purge did not echo route scope" >&2
+    cat "$admin_route_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"scope":"route"' "$admin_route_purge_body"; then
+    echo "proxy cache smoke failed: admin route purge did not report route scope" >&2
+    cat "$admin_route_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"purged":1' "$admin_route_purge_body"; then
+    echo "proxy cache smoke failed: admin route purge did not remove route object" >&2
+    cat "$admin_route_purge_body" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /swr.png \
+    --expect-scope route \
+    --expect-vhost cache.test \
+    --expect-route swr \
     --expect-objects 0
 
 echo "proxy cache smoke: ok"
