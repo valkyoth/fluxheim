@@ -526,10 +526,16 @@ fn run_cache_warm_command(
     let timeout = std::time::Duration::from_secs(options.timeout_secs);
     let mut warmed = 0_usize;
     let mut failed = 0_usize;
+    let mut response_statuses = std::collections::BTreeMap::new();
+    let mut cache_statuses = std::collections::BTreeMap::new();
+    let mut failure_reasons = std::collections::BTreeMap::new();
     'targets: for target in targets {
         for attempt in 1..=options.repeat {
             match cache_warm_request(&listen, &target, timeout, &options.cache_status_header) {
                 Ok(result) => {
+                    increment_cache_warm_count(&mut response_statuses, result.status);
+                    let cache_status = cache_warm_safe_label(result.cache_status.as_deref());
+                    increment_cache_warm_count(&mut cache_statuses, cache_status.clone());
                     if cache_warm_status_is_success(result.status, &options.allow_statuses) {
                         let expected = cache_warm_expected_statuses_for_attempt(
                             &options.expect_cache_statuses,
@@ -550,11 +556,15 @@ fn run_cache_warm_command(
                                     options.repeat,
                                     result.status,
                                     result.bytes_read,
-                                    result.cache_status.as_deref().unwrap_or("-")
+                                    cache_status
                                 );
                             }
                             Err(error) => {
                                 failed = failed.saturating_add(1);
+                                increment_cache_warm_count(
+                                    &mut failure_reasons,
+                                    "unexpected_cache_status",
+                                );
                                 eprintln!(
                                     "failed: host={} path={} attempt={}/{} status={} bytes={} cache_status={} error={}",
                                     target.host,
@@ -563,7 +573,7 @@ fn run_cache_warm_command(
                                     options.repeat,
                                     result.status,
                                     result.bytes_read,
-                                    result.cache_status.as_deref().unwrap_or("-"),
+                                    cache_status,
                                     error
                                 );
                                 if options.fail_fast {
@@ -573,6 +583,7 @@ fn run_cache_warm_command(
                         }
                     } else {
                         failed = failed.saturating_add(1);
+                        increment_cache_warm_count(&mut failure_reasons, "unexpected_status");
                         eprintln!(
                             "failed: host={} path={} attempt={}/{} status={} bytes={} cache_status={} error=unexpected warm response status",
                             target.host,
@@ -581,7 +592,7 @@ fn run_cache_warm_command(
                             options.repeat,
                             result.status,
                             result.bytes_read,
-                            result.cache_status.as_deref().unwrap_or("-")
+                            cache_status
                         );
                         if options.fail_fast {
                             break 'targets;
@@ -590,6 +601,7 @@ fn run_cache_warm_command(
                 }
                 Err(error) => {
                     failed = failed.saturating_add(1);
+                    increment_cache_warm_count(&mut failure_reasons, "request_error");
                     eprintln!(
                         "failed: host={} path={} attempt={}/{} error={}",
                         target.host,
@@ -606,11 +618,37 @@ fn run_cache_warm_command(
         }
     }
 
+    print_cache_warm_counts("cache warm response statuses", &response_statuses);
+    print_cache_warm_counts("cache warm cache statuses", &cache_statuses);
+    print_cache_warm_counts("cache warm failure reasons", &failure_reasons);
     println!("cache warm completed: warmed={warmed} failed={failed}");
     if failed > 0 {
         return Err(format!("cache warm failed for {failed} target(s)").into());
     }
     Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn increment_cache_warm_count<K: Ord>(counts: &mut std::collections::BTreeMap<K, usize>, key: K) {
+    let count = counts.entry(key).or_insert(0);
+    *count = count.saturating_add(1);
+}
+
+#[cfg(feature = "cache")]
+fn print_cache_warm_counts<K: std::fmt::Display>(
+    label: &str,
+    counts: &std::collections::BTreeMap<K, usize>,
+) {
+    if counts.is_empty() {
+        return;
+    }
+
+    let summary = counts
+        .iter()
+        .map(|(key, count)| format!("{key}={count}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!("{label}: {summary}");
 }
 
 #[cfg(not(feature = "cache"))]
@@ -1108,6 +1146,23 @@ fn cache_warm_expected_status_matches(
     } else {
         Err(format!("unexpected cache status {actual}"))
     }
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_safe_label(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return "-".to_owned();
+    };
+    if value.is_empty() || value.len() > 64 {
+        return "other".to_owned();
+    }
+    if value
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace() || byte == b'=')
+    {
+        return "other".to_owned();
+    }
+    value.to_owned()
 }
 
 #[cfg(feature = "cache")]
@@ -2235,6 +2290,9 @@ mod tests {
             ),
             &["HIT".to_owned()]
         );
+        assert_eq!(super::cache_warm_safe_label(Some("HIT")), "HIT");
+        assert_eq!(super::cache_warm_safe_label(None), "-");
+        assert_eq!(super::cache_warm_safe_label(Some("bad value")), "other");
     }
 
     #[cfg(all(feature = "cache", feature = "proxy"))]

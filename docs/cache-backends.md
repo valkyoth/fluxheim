@@ -82,6 +82,10 @@ internal cache implementation.
   `REVALIDATED`, so release scripts can fail if a warm request bypassed the
   cache unexpectedly. Use `--repeat` with `--expect-cache-status-sequence` to
   verify an expected transition, such as first-fill `MISS` followed by `HIT`.
+  The command prints bounded summary counts for response statuses, observed
+  cache-status values, and failure reasons so release jobs can distinguish
+  upstream errors, unexpected response statuses, and unexpected cache behavior
+  without parsing every per-target line.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream
