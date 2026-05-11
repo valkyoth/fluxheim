@@ -64,7 +64,10 @@ mkdir -p "$TMP_DIR/run" "$TMP_DIR/cache"
 
 cat > "$TMP_DIR/origin.py" <<'PY'
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 BODY = b"0123456789abcdef"
 VARY_BODIES = {
@@ -76,13 +79,38 @@ REVALIDATE_ETAG = '"cache-smoke-revalidate"'
 REFRESH_OLD_ETAG = '"cache-smoke-refresh-old"'
 REFRESH_NEW_ETAG = '"cache-smoke-refresh-new"'
 STALE_ERROR_ETAG = '"cache-smoke-stale-error"'
+LOCKED_ETAG = '"cache-smoke-locked"'
 LAST_MODIFIED = "Sun, 10 May 2026 00:00:00 GMT"
+COUNTS = {}
+COUNTS_LOCK = threading.Lock()
+
+
+def record_path(path):
+    with COUNTS_LOCK:
+        COUNTS[path] = COUNTS.get(path, 0) + 1
+
+
+def path_count(path):
+    with COUNTS_LOCK:
+        return COUNTS.get(path, 0)
 
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/__count":
+            path = parse_qs(parsed.query).get("path", [""])[0]
+            body = str(path_count(path)).encode("ascii")
+            self.send_response(200)
+            self.send_header("content-type", "text/plain")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if self.path == "/vary.png" or self.path == "/warm-vary.png":
             language = self.headers.get("accept-language", "")
             body = VARY_BODIES["de"] if "de" in language.lower() else VARY_BODIES["en"]
@@ -137,6 +165,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-length", str(len(body)))
             self.send_header("cache-control", "public, max-age=1")
             self.send_header("etag", REFRESH_OLD_ETAG)
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path == "/locked.png":
+            record_path(self.path)
+            time.sleep(0.6)
+            body = b"locked-body"
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=120")
+            self.send_header("etag", LOCKED_ETAG)
             self.send_header("last-modified", LAST_MODIFIED)
             self.end_headers()
             self.wfile.write(body)
@@ -521,6 +563,71 @@ fi
     --expect-status 200 \
     --expect-body-bytes 14 \
     --expect-fresh-ttl-secs 120 \
+    --expect-header-name etag \
+    --expect-freshness-state fresh
+
+python3 - "$FLUXHEIM_PORT" "$ORIGIN_PORT" <<'PY'
+import http.client
+import sys
+import threading
+from urllib.parse import quote
+
+fluxheim_port = int(sys.argv[1])
+origin_port = int(sys.argv[2])
+results = []
+lock = threading.Lock()
+
+
+def fetch():
+    conn = http.client.HTTPConnection("127.0.0.1", fluxheim_port, timeout=5)
+    try:
+        conn.request("GET", "/locked.png", headers={"Host": "cache.test"})
+        response = conn.getresponse()
+        body = response.read()
+        status = response.status
+        cache_status = response.getheader("x-cache-status")
+    finally:
+        conn.close()
+
+    with lock:
+        results.append((status, cache_status, body))
+
+
+threads = [threading.Thread(target=fetch) for _ in range(8)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join()
+
+if len(results) != len(threads):
+    raise SystemExit(f"expected {len(threads)} collapsed responses, got {len(results)}")
+if any(status != 200 for status, _cache_status, _body in results):
+    raise SystemExit(f"cache lock request returned non-200 responses: {results!r}")
+if any(body != b"locked-body" for _status, _cache_status, body in results):
+    raise SystemExit(f"cache lock response body mismatch: {results!r}")
+misses = sum(1 for _status, cache_status, _body in results if cache_status == "MISS")
+hits = sum(1 for _status, cache_status, _body in results if cache_status == "HIT")
+if misses != 1 or hits != len(threads) - 1:
+    raise SystemExit(f"expected one MISS and {len(threads) - 1} HITs, got {results!r}")
+
+conn = http.client.HTTPConnection("127.0.0.1", origin_port, timeout=5)
+try:
+    conn.request("GET", f"/__count?path={quote('/locked.png')}")
+    response = conn.getresponse()
+    count = int(response.read().decode("ascii"))
+finally:
+    conn.close()
+if count != 1:
+    raise SystemExit(f"expected collapsed cache lock to fetch origin once, got {count}")
+PY
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /locked.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-body-bytes 11 \
     --expect-header-name etag \
     --expect-freshness-state fresh
 
