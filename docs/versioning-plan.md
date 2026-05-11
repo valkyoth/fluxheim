@@ -367,7 +367,9 @@ Stable scope:
   - broader persistent cache index coverage for older disk object formats and
     future metadata migrations; new v5 disk objects rebuild the bounded purge
     index across process restarts with combined-key, primary-key, user-tag,
-    cache-tag, and path-index metadata;
+    cache-tag, and path-index metadata. Disk index checkpoint writes now merge
+    existing root entries so separate vhost and route cache policies sharing a
+    disk root cannot erase each other's restart purge index state;
   - background or broader incremental disk purge/cleanup for very large purge
     scopes; indexed purge endpoints now accept bounded `batches` so operators
     can advance large scope, prefix, and wildcard purges without removing
@@ -401,8 +403,9 @@ Stable scope:
     stale-while-revalidate serving during a background refresh,
     stale-if-error serving after an upstream connection failure, cache-lock
     request collapsing for concurrent misses, `Vary` variant isolation, disk
-    HIT after restart, and `Cache-Control`/`Pragma` request-bypass reason
-    release smoke;
+    HIT after restart, client refresh revalidation for `Cache-Control:
+    no-cache`, `Cache-Control: max-age=0`, and `Pragma: no-cache`, and the
+    bounded `Cache-Control: no-store` request-bypass reason in release smoke;
   - full validator-based upstream revalidation edge-case coverage for proxied
     cache responses, including explicit behavior when origins change `Vary`,
     `ETag`, `Last-Modified`, or freshness headers during revalidation;
@@ -648,11 +651,12 @@ Stable scope for declaring the cache pack complete:
   bodies, `Vary` variant isolation,
   stale-while-revalidate serving during background refresh,
   stale-if-error serving after upstream failure, cache-lock request collapsing
-  for concurrent misses, disk HIT after restart, and request-bypass reason
-  behavior are covered end to end. Admin exact/bulk purge, stale dry-run, tag
-  purge, prefix purge, wildcard purge, and route-scoped purge are smoke tested
-  against real cached objects, with bounded Prometheus purge counters asserted
-  for every protected purge shape in that smoke path.
+  for concurrent misses, disk HIT after restart, client refresh revalidation,
+  and no-store request-bypass reason behavior are covered end to end. Admin
+  exact/bulk purge, stale dry-run, tag purge, prefix purge, wildcard purge, and
+  route-scoped purge are smoke tested against real cached objects after
+  restart, with bounded Prometheus purge counters asserted for every protected
+  purge shape in that smoke path.
 - Proxied cache revalidation refreshes metadata safely when origins return
   `304 Not Modified`.
 - Large-object byte-range fill is bounded and does not require buffering an
@@ -738,7 +742,7 @@ Exit criteria:
   misses, disk HIT after restart, admin exact/bulk purge, stale dry-run, vhost
   prefix/tag/wildcard purge, route-scoped purge against real cached objects, and
   Prometheus purge counters for each protected purge shape, plus
-  `Cache-Control`/`Pragma` request-bypass reason headers.
+  `Cache-Control`/`Pragma` refresh and bypass reason headers.
 - HEAD requests intentionally bypass cache storage with the bounded
   `method-head` reason in `1.2`; full HEAD-to-GET cache parity is deferred to
   beta/future compatibility work.

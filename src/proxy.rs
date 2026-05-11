@@ -279,7 +279,7 @@ impl FluxProxy {
             .map(|response| response.status.as_u16());
         let method = session.req_header().method.as_str().to_owned();
         #[cfg(feature = "cache")]
-        let cache_phase = Some(session.cache.phase().as_str().to_owned());
+        let cache_phase = Some(effective_cache_phase(session, ctx).as_str().to_owned());
         #[cfg(not(feature = "cache"))]
         let cache_phase = None;
         #[cfg(feature = "cache")]
@@ -336,7 +336,7 @@ impl FluxProxy {
             .route_index
             .and_then(|index| vhost.route(index).cache.as_ref())
             .map(|cache| cache.name.as_str());
-        let phase = session.cache.phase().as_str();
+        let phase = effective_cache_phase(session, ctx).as_str();
 
         if let Some(duration) = lookup_duration {
             crate::metrics::record_cache_operation_duration(
@@ -2808,6 +2808,8 @@ pub struct RequestContext {
     started_at_unix_nanos: Option<u128>,
     #[cfg(feature = "cache")]
     cache_status_override: Option<CacheStatusOverride>,
+    #[cfg(feature = "cache")]
+    cache_observed_phase: Option<CachePhase>,
 }
 
 #[cfg(feature = "cache")]
@@ -3177,10 +3179,10 @@ impl ProxyHttp for FluxProxy {
         apply_downstream_flow_control(session, &selected_runtime_proxy(vhost, ctx).config);
         #[cfg(feature = "cache")]
         insert_cache_status_headers(
-            session,
             response,
             selected_cache_config(vhost, ctx),
             ctx.cache_status_override,
+            effective_cache_phase(session, ctx),
         )?;
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)
@@ -3363,6 +3365,12 @@ impl ProxyHttp for FluxProxy {
     }
 
     #[cfg(feature = "cache")]
+    fn cache_miss(&self, session: &mut Session, ctx: &mut Self::CTX) {
+        ctx.cache_observed_phase = Some(CachePhase::Miss);
+        session.cache.cache_miss();
+    }
+
+    #[cfg(feature = "cache")]
     fn cache_key_callback(
         &self,
         session: &Session,
@@ -3418,6 +3426,13 @@ impl ProxyHttp for FluxProxy {
         if !decision.is_cacheable() {
             cache_pass_record_uncacheable(cache_pass_counter(), cache, &cache_key);
             return Ok(decision);
+        }
+        if session.cache.maybe_cache_meta().is_none() && ctx.cache_status_override.is_none() {
+            ctx.cache_observed_phase = Some(CachePhase::Miss);
+            ctx.cache_status_override = Some(CacheStatusOverride {
+                status: "MISS",
+                reason: None,
+            });
         }
         cache_pass_record_cacheable(cache_pass_counter(), &cache_key);
         if !cache_min_uses_allows_store(cache_min_uses_counter(), cache, &cache_key) {
@@ -3663,13 +3678,11 @@ fn record_cache_policy_activity(
 
 #[cfg(feature = "cache")]
 fn insert_cache_status_headers(
-    session: &Session,
     response: &mut ResponseHeader,
     cache: &crate::config::CacheConfig,
     override_status: Option<CacheStatusOverride>,
+    phase: CachePhase,
 ) -> Result<()> {
-    let phase = session.cache.phase();
-
     if let Some(header_name) = cache.status_header.as_deref()
         && let Some(status) = cache_status_header_value(phase, override_status)
     {
@@ -3683,6 +3696,12 @@ fn insert_cache_status_headers(
     }
 
     Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn effective_cache_phase(session: &Session, ctx: &RequestContext) -> CachePhase {
+    ctx.cache_observed_phase
+        .unwrap_or_else(|| session.cache.phase())
 }
 
 #[cfg(feature = "cache")]

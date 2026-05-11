@@ -476,7 +476,7 @@ wait_http() {
         status=$(
             curl -sS --max-time "$CURL_MAX_TIME" -o /dev/null -w '%{http_code}' \
                 -H "Host: cache.test" \
-                -H "Cache-Control: no-cache" \
+                -H "Cache-Control: no-store" \
                 "$url" 2>/dev/null || true
         )
         if [ "$status" = "200" ]; then
@@ -565,8 +565,9 @@ second_headers="$TMP_DIR/second.headers"
 head_first_headers="$TMP_DIR/head-first.headers"
 head_second_headers="$TMP_DIR/head-second.headers"
 post_head_get_headers="$TMP_DIR/post-head-get.headers"
-bypass_headers="$TMP_DIR/bypass.headers"
-pragma_bypass_headers="$TMP_DIR/pragma-bypass.headers"
+refresh_headers="$TMP_DIR/refresh.headers"
+pragma_refresh_headers="$TMP_DIR/pragma-refresh.headers"
+no_store_bypass_headers="$TMP_DIR/no-store-bypass.headers"
 header_bypass_headers="$TMP_DIR/header-bypass.headers"
 header_value_bypass_headers="$TMP_DIR/header-value-bypass.headers"
 cookie_name_bypass_headers="$TMP_DIR/cookie-name-bypass.headers"
@@ -702,33 +703,48 @@ if [ "$(cat "$body")" != "0123456789abcdef" ]; then
     exit 1
 fi
 
-curl -sS --max-time "$CURL_MAX_TIME" -D "$bypass_headers" -o "$body" \
+curl -sS --max-time "$CURL_MAX_TIME" -D "$refresh_headers" -o "$body" \
     -H "Host: cache.test" \
     -H "Cache-Control: no-cache" \
     "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
-if ! grep -qi '^x-cache-status: BYPASS' "$bypass_headers"; then
-    echo "proxy cache smoke failed: client refresh bypass did not expose BYPASS status" >&2
-    cat "$bypass_headers" >&2
+if ! grep -qi '^x-cache-status: REVALIDATE' "$refresh_headers"; then
+    echo "proxy cache smoke failed: client refresh did not force cache revalidation" >&2
+    cat "$refresh_headers" >&2
     exit 1
 fi
-if ! grep -qi '^x-cache-reason: request-refresh' "$bypass_headers"; then
-    echo "proxy cache smoke failed: client refresh bypass did not expose bounded reason" >&2
-    cat "$bypass_headers" >&2
+if ! grep -qi '^x-cache-reason: request-refresh' "$refresh_headers"; then
+    echo "proxy cache smoke failed: client refresh did not expose bounded reason" >&2
+    cat "$refresh_headers" >&2
     exit 1
 fi
 
-curl -sS --max-time "$CURL_MAX_TIME" -D "$pragma_bypass_headers" -o "$body" \
+curl -sS --max-time "$CURL_MAX_TIME" -D "$pragma_refresh_headers" -o "$body" \
     -H "Host: cache.test" \
     -H "Pragma: no-cache" \
     "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
-if ! grep -qi '^x-cache-status: BYPASS' "$pragma_bypass_headers"; then
-    echo "proxy cache smoke failed: Pragma refresh bypass did not expose BYPASS status" >&2
-    cat "$pragma_bypass_headers" >&2
+if ! grep -qi '^x-cache-status: REVALIDATE' "$pragma_refresh_headers"; then
+    echo "proxy cache smoke failed: Pragma refresh did not force cache revalidation" >&2
+    cat "$pragma_refresh_headers" >&2
     exit 1
 fi
-if ! grep -qi '^x-cache-reason: request-refresh' "$pragma_bypass_headers"; then
-    echo "proxy cache smoke failed: Pragma refresh bypass did not expose bounded reason" >&2
-    cat "$pragma_bypass_headers" >&2
+if ! grep -qi '^x-cache-reason: request-refresh' "$pragma_refresh_headers"; then
+    echo "proxy cache smoke failed: Pragma refresh did not expose bounded reason" >&2
+    cat "$pragma_refresh_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$no_store_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "Cache-Control: no-store" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: BYPASS' "$no_store_bypass_headers"; then
+    echo "proxy cache smoke failed: no-store request did not expose BYPASS status" >&2
+    cat "$no_store_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-no-store' "$no_store_bypass_headers"; then
+    echo "proxy cache smoke failed: no-store request did not expose bounded reason" >&2
+    cat "$no_store_bypass_headers" >&2
     exit 1
 fi
 
@@ -838,6 +854,16 @@ if ! grep -Eq 'fluxheim_cache_activity_total\{event="bypass",tier="policy"\} [1-
 fi
 if ! grep -Eq 'fluxheim_cache_activity_scope_total\{event="bypass",route="",scope="vhost",tier="policy",vhost="cache\.test"\} [1-9][0-9]*' "$metrics_body"; then
     echo "proxy cache smoke failed: metrics missed scoped policy bypass activity counter" >&2
+    grep 'fluxheim_cache_activity_scope_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_activity_total\{event="revalidate",tier="policy"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed policy revalidate activity counter" >&2
+    grep 'fluxheim_cache_activity' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_activity_scope_total\{event="revalidate",route="",scope="vhost",tier="policy",vhost="cache\.test"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed scoped policy revalidate activity counter" >&2
     grep 'fluxheim_cache_activity_scope_total' "$metrics_body" >&2 || true
     exit 1
 fi

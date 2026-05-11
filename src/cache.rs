@@ -2137,7 +2137,12 @@ impl PingoraDiskStorage {
     }
 
     fn write_disk_index_checkpoint(&self) -> std::io::Result<()> {
-        write_disk_index_checkpoint(&self.root, self.disk_index.entries())
+        let mut entries = self.disk_index.entries();
+        match read_disk_index_checkpoint(&self.root)? {
+            Some(existing) => entries.extend(existing),
+            None => entries.extend(disk_cache_entries(&self.root)?),
+        }
+        write_disk_index_checkpoint(&self.root, merge_disk_cache_entries(entries))
     }
 
     fn ensure_safe_cache_parent(&self, parent: &Path) -> std::io::Result<()> {
@@ -2485,6 +2490,22 @@ fn write_disk_index_checkpoint(
         let _ = std::fs::remove_file(&temp_path);
     }
     write_result
+}
+
+#[cfg(feature = "proxy")]
+fn merge_disk_cache_entries(entries: Vec<DiskCacheEntry>) -> Vec<DiskCacheEntry> {
+    let mut merged = HashMap::<PathBuf, DiskCacheEntry>::new();
+    for entry in entries {
+        merged
+            .entry(entry.path.clone())
+            .and_modify(|current| {
+                current.size = entry.size;
+                current.modified = current.modified.max(entry.modified);
+                current.accessed = current.accessed.max(entry.accessed);
+            })
+            .or_insert(entry);
+    }
+    merged.into_values().collect()
 }
 
 #[cfg(feature = "proxy")]
@@ -5541,6 +5562,62 @@ mod tests {
             }
         );
         assert_eq!(rebuilt.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_checkpoint_preserves_shared_root_entries() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-shared-index");
+        let vhost = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let route = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let route_key =
+            pingora::cache::CacheKey::new("fluxheim-test", "route-key", "vhost-a:route:assets");
+        let vhost_key = pingora::cache::CacheKey::new("fluxheim-test", "vhost-key", "vhost-a");
+        let meta = pingora_meta("max-age=60");
+
+        let mut route_miss = block_on(route.get_miss_handler(&route_key, &meta, &span)).unwrap();
+        block_on(route_miss.write_body(Bytes::from_static(b"route-body"), true)).unwrap();
+        block_on(route_miss.finish()).unwrap();
+
+        let mut vhost_miss = block_on(vhost.get_miss_handler(&vhost_key, &meta, &span)).unwrap();
+        block_on(vhost_miss.write_body(Bytes::from_static(b"vhost-body"), true)).unwrap();
+        block_on(vhost_miss.finish()).unwrap();
+
+        let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        assert_eq!(rebuilt.purge_index.len(), 2);
+        assert_eq!(
+            rebuilt
+                .purge_indexed_user_tag("vhost-a:route:assets", 8)
+                .unwrap(),
+            super::CacheIndexedPurgeResult {
+                matched: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }

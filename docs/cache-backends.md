@@ -182,7 +182,10 @@ internal cache implementation.
   referenced cache object before indexing it, then rebuilds both the bounded
   purge index and the runtime disk-object index for v5 entries, so indexed
   scope, prefix, wildcard, tag, stale disk purges, stats, and eviction
-  accounting survive process restarts. Older v1-v4 disk objects remain
+  accounting survive process restarts. Checkpoint writes merge with existing
+  checkpoint or shard-scan entries so separate vhost and route cache policies
+  sharing one disk root do not erase each other's restart index state. Older
+  v1-v4 disk objects remain
   readable, but earlier formats cannot fully rebuild every indexed purge
   metadata field because they did not store all of the v5 index fields.
 - Disk-only cache admission streams response chunks into a bounded temporary
@@ -198,10 +201,12 @@ internal cache implementation.
   `Cache-Control`, `Pragma`, single `Range`, and `If-Range`. Header policy lets
   operators set, append, and unset
   browser/CDN-facing headers such as `Cache-Control`, `Expires`, `Vary`, and
-  provider-specific cache controls. Proxied image cache admission currently
-  bypasses Fluxheim's cache when the request sends `Cache-Control: no-cache`,
-  `Cache-Control: no-store`, `Cache-Control: max-age=0`, or
-  `Pragma: no-cache`. Proxied image cache admission also refuses shared-cache
+  provider-specific cache controls. Proxied image cache admission bypasses
+  Fluxheim's cache when the request sends `Cache-Control: no-store`.
+  `Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
+  `Pragma: no-cache` keep cache lookup enabled and force Pingora to revalidate
+  an existing stored object instead of treating the request as a plain bypass.
+  Proxied image cache admission also refuses shared-cache
   storage when origin responses send `Cache-Control: no-store`, `private`,
   `no-cache`, `max-age=0`, or `s-maxage=0`, because validator-based
   revalidation for zero-freshness admission is not complete yet. Proxied cache
@@ -225,8 +230,9 @@ internal cache implementation.
   serving after an upstream connection failure, cache-lock request collapsing
   for concurrent misses, `Vary` variant isolation, admin exact/bulk purge,
   stale dry-run, vhost prefix/tag/wildcard purge, and route-scoped purge against
-  real cached objects, and disk-cache HIT behavior after a Fluxheim process
-  restart without the origin available. The same smoke path asserts bounded
+  real cached objects after a Fluxheim process restart, and disk-cache HIT
+  behavior after a restart without the origin available. The same smoke path
+  asserts bounded
   Prometheus purge counters for exact, bulk, stale, prefix, tag, wildcard, and
   route-scoped index purge operations.
   HEAD requests intentionally bypass proxy cache storage with the bounded
@@ -313,7 +319,7 @@ records successful admin purge commands with bounded operation and mode labels;
   revalidate the stored object instead of treating this as a full cache bypass.
   `Cache-Control: no-store` remains a bypass with `request-no-store` so the
   response is not admitted into the shared cache. The proxy cache smoke suite
-  verifies these configured request-bypass reasons end to end. Keep the reason
+  verifies these bounded debug reasons end to end. Keep the reason
   header disabled unless actively debugging a cache policy.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
