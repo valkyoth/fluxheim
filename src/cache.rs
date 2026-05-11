@@ -5158,6 +5158,63 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_disk_storage_rebuilds_tag_index_from_v4_objects() {
+        let root = unique_test_cache_dir("disk-v4-compat-index");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "legacy-v4-key", "vhost-a");
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "article:legacy")
+            .unwrap();
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        let path = storage.path_for_combined_key(&store_key.combined);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write_v4_disk_cache_object(
+            &path,
+            &store_key,
+            &internal_meta,
+            &response_header,
+            b"legacy-body",
+        );
+
+        let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        assert_eq!(rebuilt.purge_index.len(), 1);
+        let result = rebuilt
+            .purge_indexed_cache_tag("vhost-a", "article:legacy", 8)
+            .unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
+        assert_eq!(rebuilt.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_disk_storage_soft_purges_indexed_cache_tag() {
         use pingora::cache::Storage;
 
@@ -5939,6 +5996,41 @@ mod tests {
     #[cfg(feature = "proxy")]
     fn unique_test_cache_dir(label: &str) -> PathBuf {
         unique_temp_path(label)
+    }
+
+    #[cfg(feature = "proxy")]
+    fn write_v4_disk_cache_object(
+        path: &std::path::Path,
+        store_key: &super::PingoraStoreKey,
+        internal_meta: &[u8],
+        response_header: &[u8],
+        body: &[u8],
+    ) {
+        use std::io::Write as _;
+
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        let encoded_cache_tags = super::encode_cache_tags(&store_key.cache_tags);
+
+        file.write_all(super::DISK_CACHE_MAGIC_V4).unwrap();
+        writeln!(file, "{}", store_key.combined.len()).unwrap();
+        writeln!(file, "{}", store_key.primary.len()).unwrap();
+        writeln!(file, "{}", store_key.user_tag.len()).unwrap();
+        writeln!(file, "{}", encoded_cache_tags.len()).unwrap();
+        writeln!(file, "{}", internal_meta.len()).unwrap();
+        writeln!(file, "{}", response_header.len()).unwrap();
+        writeln!(file, "{}", body.len()).unwrap();
+        file.write_all(store_key.combined.as_bytes()).unwrap();
+        file.write_all(store_key.primary.as_bytes()).unwrap();
+        file.write_all(store_key.user_tag.as_bytes()).unwrap();
+        file.write_all(encoded_cache_tags.as_bytes()).unwrap();
+        file.write_all(internal_meta).unwrap();
+        file.write_all(response_header).unwrap();
+        file.write_all(body).unwrap();
+        file.sync_all().unwrap();
     }
 
     fn cached_image(body: &[u8]) -> CachedImageObject {
