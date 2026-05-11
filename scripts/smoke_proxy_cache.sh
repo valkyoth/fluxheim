@@ -401,6 +401,8 @@ fi
     --require-object \
     --expect-tier disk \
     --expect-status 200 \
+    --expect-header-name etag \
+    --expect-header-name vary \
     --expect-purge-indexed \
     --expect-freshness-state fresh
 

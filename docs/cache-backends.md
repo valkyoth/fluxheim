@@ -445,6 +445,8 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --require-object \
   --expect-tier disk \
   --expect-status 200 \
+  --expect-header-name etag \
+  --expect-header-name vary \
   --expect-purge-indexed \
   --expect-freshness-state fresh
 ```
@@ -471,6 +473,8 @@ flags fail when no matching object is present in an allowed storage tier,
 repeated `--expect-status` flags fail when no matching object has an allowed
 cached HTTP status, `--expect-purge-indexed` fails when no matching object is
 reachable through the bounded purge index, and repeated
+`--expect-header-name` flags fail when no matching object has the expected
+stored response header name. Repeated
 `--expect-freshness-state fresh|stale|expired` flags fail when none of the
 matching objects has an allowed freshness state.
 
