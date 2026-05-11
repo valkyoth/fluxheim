@@ -429,7 +429,11 @@ Stable scope:
     exact vhost or route that a request matches. Both commands can include
     bounded safe request headers such as `Accept-Language` and
     `Accept-Encoding`, so operators can debug negotiated `Vary` variants
-    without contacting upstreams;
+    without contacting upstreams. `cache-lookup` can fail closed for deploy
+    checks with `--require-object` and
+    `--expect-freshness-state fresh|stale|expired`, so scripts can assert that
+    warm objects exist and are in an acceptable serving state without
+    contacting upstreams;
   - cache warm/import/export workflows for deploys and repository mirrors,
     including clear failure accounting and no hidden best-effort misses.
     `cache-warm` now treats only 2xx/3xx responses as successful by default

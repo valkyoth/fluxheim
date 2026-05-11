@@ -441,7 +441,9 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --host repoheim.eu \
   --header "Accept-Language: de" \
   --path /assets/img/logo.png \
-  --query v=1
+  --query v=1 \
+  --require-object \
+  --expect-freshness-state fresh
 ```
 
 The preview and lookup commands validate the effective config, select the same
@@ -460,7 +462,10 @@ a full scan. It does not contact the upstream, read cached object bodies to
 stdout, or dump stored header values. Use repeated `--header "Name: value"`
 options to inspect negotiated cache variants that depend on safe request
 headers such as `Accept-Language` or `Accept-Encoding`; use `--host` for the
-Host header.
+Host header. For release scripts, `cache-lookup --require-object` fails when
+the selected key has no cached object, and repeated
+`--expect-freshness-state fresh|stale|expired` flags fail when none of the
+matching objects has an allowed freshness state.
 
 Example: `cache.memory.max_size_bytes = "1GiB"` with
 `cache.max_object_bytes = "32MiB"` plans 32 in-memory object slots.

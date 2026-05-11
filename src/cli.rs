@@ -232,6 +232,14 @@ pub enum CliCommand {
         /// Query string to look up when --path does not already contain one.
         #[arg(long)]
         query: Option<String>,
+
+        /// Fail when no cached object exists for the selected key.
+        #[arg(long)]
+        require_object: bool,
+
+        /// Required cached-object freshness state. May be repeated: fresh, stale, expired.
+        #[arg(long = "expect-freshness-state", value_name = "STATE")]
+        expect_freshness_states: Vec<String>,
     },
 }
 
@@ -457,13 +465,17 @@ fn run_command(
             method,
             path,
             query,
-        } => run_cache_lookup_command(CacheKeyOptions {
+            require_object,
+            expect_freshness_states,
+        } => run_cache_lookup_command(CacheLookupOptions {
             config_path,
             host: host.clone(),
             headers: headers.clone(),
             method: method.clone(),
             path: path.clone(),
             query: query.clone(),
+            require_object: *require_object,
+            expect_freshness_states: expect_freshness_states.clone(),
         }),
     }
 }
@@ -495,6 +507,18 @@ struct CacheKeyOptions<'a> {
     method: String,
     path: String,
     query: Option<String>,
+}
+
+#[derive(Debug)]
+struct CacheLookupOptions<'a> {
+    config_path: Option<&'a std::path::Path>,
+    host: Option<String>,
+    headers: Vec<String>,
+    method: String,
+    path: String,
+    query: Option<String>,
+    require_object: bool,
+    expect_freshness_states: Vec<String>,
 }
 
 #[cfg(feature = "cache")]
@@ -807,13 +831,24 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn run_cache_lookup_command(
-    options: CacheKeyOptions<'_>,
+    options: CacheLookupOptions<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let (config, request) = cache_key_command_request(&options)?;
+    let cache_key_options = CacheKeyOptions {
+        config_path: options.config_path,
+        host: options.host,
+        headers: options.headers,
+        method: options.method,
+        path: options.path,
+        query: options.query,
+    };
+    let require_object = options.require_object;
+    let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
+    let (config, request) = cache_key_command_request(&cache_key_options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let lookup = proxy
         .snapshot()
         .pingora_image_cache_object_lookup_for_request_header(&request)?;
+    validate_cache_lookup_expectations(&lookup, require_object, &expected_states)?;
 
     println!("cache object lookup:");
     println!("vhost: {}", lookup.preview.vhost);
@@ -874,6 +909,62 @@ fn run_cache_lookup_command(
     Ok(())
 }
 
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_lookup_freshness_states(
+    states: &[String],
+) -> Result<Vec<crate::cache::CacheObjectFreshnessState>, Box<dyn Error + Send + Sync>> {
+    states
+        .iter()
+        .map(|state| match state.as_str() {
+            "fresh" => Ok(crate::cache::CacheObjectFreshnessState::Fresh),
+            "stale" => Ok(crate::cache::CacheObjectFreshnessState::Stale),
+            "expired" => Ok(crate::cache::CacheObjectFreshnessState::Expired),
+            other => Err(format!(
+                "cache-lookup --expect-freshness-state must be fresh, stale, or expired; got {other:?}"
+            )
+            .into()),
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_lookup_expectations(
+    lookup: &crate::proxy::CacheObjectLookup,
+    require_object: bool,
+    expected_states: &[crate::cache::CacheObjectFreshnessState],
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if require_object && lookup.objects.is_empty() {
+        return Err("cache-lookup expected at least one cached object, found none".into());
+    }
+    if !expected_states.is_empty() {
+        let matched = lookup
+            .objects
+            .iter()
+            .any(|object| expected_states.contains(&object.freshness_state));
+        if !matched {
+            let expected = expected_states
+                .iter()
+                .map(|state| state.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            let found = if lookup.objects.is_empty() {
+                "none".to_owned()
+            } else {
+                lookup
+                    .objects
+                    .iter()
+                    .map(|object| object.freshness_state.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            return Err(
+                format!("cache-lookup expected freshness state {expected}, found {found}").into(),
+            );
+        }
+    }
+    Ok(())
+}
+
 #[cfg(not(all(feature = "cache", feature = "proxy")))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let CacheKeyOptions {
@@ -890,17 +981,20 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
 
 #[cfg(not(all(feature = "cache", feature = "proxy")))]
 fn run_cache_lookup_command(
-    options: CacheKeyOptions<'_>,
+    options: CacheLookupOptions<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let CacheKeyOptions {
+    let CacheLookupOptions {
         config_path,
         host,
         headers,
         method,
         path,
         query,
+        require_object,
+        expect_freshness_states,
     } = options;
     let _ = (config_path, host, headers, method, path, query);
+    let _ = (require_object, expect_freshness_states);
     Err("cache-lookup requires the proxy and cache features".into())
 }
 
@@ -2574,6 +2668,37 @@ mod tests {
 
     #[cfg(all(feature = "cache", feature = "proxy"))]
     #[test]
+    fn cache_lookup_expectations_validate_object_and_freshness_state() {
+        let lookup = cache_lookup_with_state(crate::cache::CacheObjectFreshnessState::Stale);
+        let states = super::parse_cache_lookup_freshness_states(&["stale".to_owned()]).unwrap();
+
+        assert!(super::validate_cache_lookup_expectations(&lookup, true, &states).is_ok());
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                false,
+                &[crate::cache::CacheObjectFreshnessState::Fresh]
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected freshness state fresh, found stale")
+        );
+        assert!(
+            super::parse_cache_lookup_freshness_states(&["invalid".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("fresh, stale, or expired")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(&cache_lookup_without_objects(), true, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("expected at least one cached object")
+        );
+    }
+
+    #[cfg(all(feature = "cache", feature = "proxy"))]
+    #[test]
     fn cache_key_uri_accepts_separate_query() {
         assert_eq!(
             super::cache_key_uri("/assets/app.js", Some("v=1")).unwrap(),
@@ -2754,6 +2879,59 @@ mod tests {
             )
             .expect("write config");
             path
+        }
+    }
+
+    #[cfg(all(feature = "cache", feature = "proxy"))]
+    fn cache_lookup_with_state(
+        state: crate::cache::CacheObjectFreshnessState,
+    ) -> crate::proxy::CacheObjectLookup {
+        let mut lookup = cache_lookup_without_objects();
+        lookup.objects.push(crate::cache::CacheObjectMetadata {
+            tier: crate::cache::CacheObjectTier::Memory,
+            purge_indexed: true,
+            status: 200,
+            fresh: state == crate::cache::CacheObjectFreshnessState::Fresh,
+            freshness_state: state,
+            serve_stale_while_revalidate: state == crate::cache::CacheObjectFreshnessState::Stale,
+            serve_stale_if_error: false,
+            body_bytes: 4,
+            weight_bytes: 4,
+            created_unix_secs: Some(1),
+            updated_unix_secs: Some(1),
+            fresh_until_unix_secs: Some(2),
+            age_secs: 1,
+            fresh_ttl_secs: 0,
+            stale_while_revalidate_secs: 30,
+            stale_if_error_secs: 0,
+            cache_tags: Vec::new(),
+            header_names: Vec::new(),
+        });
+        lookup
+    }
+
+    #[cfg(all(feature = "cache", feature = "proxy"))]
+    fn cache_lookup_without_objects() -> crate::proxy::CacheObjectLookup {
+        crate::proxy::CacheObjectLookup {
+            preview: crate::proxy::CacheKeyPreview {
+                vhost: "cached".to_owned(),
+                route: Some("assets".to_owned()),
+                scope: crate::proxy::CacheKeyPreviewScope::Route,
+                eligible: true,
+                cache_lock_enabled: true,
+                cache_lock_wait_timeout_secs: 30,
+                memory_tier_enabled: true,
+                disk_tier_enabled: false,
+                storage_tiers: 1,
+                reason: None,
+                namespace: Some("fluxheim-image-v1".to_owned()),
+                primary_key: None,
+                primary_hash: Some("primary".to_owned()),
+                variance_hash: None,
+                combined_hash: Some("primary".to_owned()),
+                user_tag: Some("cached:route:assets".to_owned()),
+            },
+            objects: Vec::new(),
         }
     }
 
