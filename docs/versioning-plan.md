@@ -599,7 +599,9 @@ Current implementation status:
     Prometheus reports the maximum configured cache-lock wait timeout as a
     low-cardinality gauge. The
     policy-level pass/bypass/stale counters show configured scoped cache
-    decisions without exposing request-specific labels.
+    decisions without exposing request-specific labels. The proxy cache smoke
+    suite now asserts bounded Prometheus purge counters and cache activity
+    counters for disk hits plus scoped purge events.
 
 Stable scope for declaring the cache pack complete:
 

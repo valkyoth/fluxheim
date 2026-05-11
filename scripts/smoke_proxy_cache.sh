@@ -1759,5 +1759,25 @@ if ! grep -Eq 'fluxheim_cache_purges_total\{mode="normal",operation="index",rout
     grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
     exit 1
 fi
+if ! grep -Eq 'fluxheim_cache_activity_total\{event="hit",tier="disk"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed disk hit activity counter" >&2
+    grep 'fluxheim_cache_activity' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_activity_total\{event="purge",tier="disk"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed disk purge activity counter" >&2
+    grep 'fluxheim_cache_activity' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_activity_scope_total\{event="hit",route="",scope="vhost",tier="disk",vhost="cache\.test"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed scoped vhost disk hit activity counter" >&2
+    grep 'fluxheim_cache_activity_scope_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_activity_scope_total\{event="purge",route="swr",scope="route",tier="disk",vhost="cache\.test"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed scoped route disk purge activity counter" >&2
+    grep 'fluxheim_cache_activity_scope_total' "$metrics_body" >&2 || true
+    exit 1
+fi
 
 echo "proxy cache smoke: ok"

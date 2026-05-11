@@ -92,7 +92,9 @@ internal cache implementation.
   verify an expected transition, such as first-fill `MISS` followed by `HIT`.
   The proxy cache smoke suite verifies path warming, input-file dry-run
   validation, input-file warming, negotiated variant warming, and a deliberate
-  404 negative-cache warm using `--allow-status 404`.
+  404 negative-cache warm using `--allow-status 404`. The same smoke path
+  asserts Prometheus cache activity counters for disk hits and scoped purge
+  events.
   Use repeated `--header "Name: value"` options to warm negotiated variants for
   safe request headers such as `Accept-Language` or `Accept-Encoding`; use
   `--host` for the Host header. Use `--dry-run` to validate the target list,
