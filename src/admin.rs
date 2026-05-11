@@ -42,6 +42,10 @@ const MAX_CACHE_PURGE_BULK_PATHS: usize = 256;
 const DEFAULT_CACHE_INDEXED_PURGE_LIMIT: usize = 1024;
 #[cfg(feature = "cache")]
 const MAX_CACHE_INDEXED_PURGE_LIMIT: usize = 10_000;
+#[cfg(feature = "cache")]
+const DEFAULT_CACHE_INDEXED_PURGE_BATCHES: usize = 1;
+#[cfg(feature = "cache")]
+const MAX_CACHE_INDEXED_PURGE_BATCHES: usize = 64;
 
 #[derive(Clone)]
 pub struct AdminApp {
@@ -252,6 +256,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "route")),
                 header_value(headers, "x-fluxheim-cache-limit")
                     .or_else(|| query_param(query, "limit")),
+                header_value(headers, "x-fluxheim-cache-batches")
+                    .or_else(|| query_param(query, "batches")),
             ),
             ("POST", "/_fluxheim/cache/purge-prefix") => self.cache_purge_prefix_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
@@ -263,6 +269,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "prefix")),
                 header_value(headers, "x-fluxheim-cache-limit")
                     .or_else(|| query_param(query, "limit")),
+                header_value(headers, "x-fluxheim-cache-batches")
+                    .or_else(|| query_param(query, "batches")),
             ),
             ("POST", "/_fluxheim/cache/purge-wildcard") => self.cache_purge_wildcard_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
@@ -275,6 +283,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "wildcard")),
                 header_value(headers, "x-fluxheim-cache-limit")
                     .or_else(|| query_param(query, "limit")),
+                header_value(headers, "x-fluxheim-cache-batches")
+                    .or_else(|| query_param(query, "batches")),
             ),
             ("POST", "/_fluxheim/snapshot") => {
                 self.create_snapshot_response(header_value(headers, "x-fluxheim-message"))
@@ -673,6 +683,7 @@ impl AdminApp {
         vhost: Option<&str>,
         route: Option<&str>,
         limit: Option<&str>,
+        batches: Option<&str>,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(
@@ -684,17 +695,23 @@ impl AdminApp {
             Ok(limit) => limit,
             Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
         };
+        let batches = match validated_cache_indexed_purge_batches(batches) {
+            Ok(batches) => batches,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+        let route = route.filter(|route| !route.trim().is_empty());
 
-        match self
-            .proxy
-            .purge_indexed_image_cache(crate::proxy::CacheIndexedPurgeRequest {
-                vhost,
-                route: route.filter(|route| !route.trim().is_empty()),
-                limit,
-            }) {
+        match repeat_cache_indexed_purge(batches, || {
+            self.proxy
+                .purge_indexed_image_cache(crate::proxy::CacheIndexedPurgeRequest {
+                    vhost,
+                    route,
+                    limit,
+                })
+        }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
@@ -703,6 +720,9 @@ impl AdminApp {
                     result.truncated(),
                     result.truncated(),
                     limit,
+                    result.batches,
+                    batches,
+                    result.truncated() && result.batches >= batches,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
                     cache_scope(result.route.as_deref()),
@@ -738,6 +758,7 @@ impl AdminApp {
         route: Option<&str>,
         path_prefix: Option<&str>,
         limit: Option<&str>,
+        batches: Option<&str>,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(
@@ -753,18 +774,25 @@ impl AdminApp {
             Ok(limit) => limit,
             Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
         };
+        let batches = match validated_cache_indexed_purge_batches(batches) {
+            Ok(batches) => batches,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+        let route = route.filter(|route| !route.trim().is_empty());
 
-        match self.proxy.purge_indexed_image_cache_path_prefix(
-            crate::proxy::CacheIndexedPathPrefixPurgeRequest {
-                vhost,
-                route: route.filter(|route| !route.trim().is_empty()),
-                path_prefix,
-                limit,
-            },
-        ) {
+        match repeat_cache_indexed_purge(batches, || {
+            self.proxy.purge_indexed_image_cache_path_prefix(
+                crate::proxy::CacheIndexedPathPrefixPurgeRequest {
+                    vhost,
+                    route,
+                    path_prefix,
+                    limit,
+                },
+            )
+        }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
@@ -773,6 +801,9 @@ impl AdminApp {
                     result.truncated(),
                     result.truncated(),
                     limit,
+                    result.batches,
+                    batches,
+                    result.truncated() && result.batches >= batches,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
                     cache_scope(result.route.as_deref()),
@@ -809,6 +840,7 @@ impl AdminApp {
         route: Option<&str>,
         path_pattern: Option<&str>,
         limit: Option<&str>,
+        batches: Option<&str>,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(
@@ -824,18 +856,25 @@ impl AdminApp {
             Ok(limit) => limit,
             Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
         };
+        let batches = match validated_cache_indexed_purge_batches(batches) {
+            Ok(batches) => batches,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+        let route = route.filter(|route| !route.trim().is_empty());
 
-        match self.proxy.purge_indexed_image_cache_path_pattern(
-            crate::proxy::CacheIndexedPathPatternPurgeRequest {
-                vhost,
-                route: route.filter(|route| !route.trim().is_empty()),
-                path_pattern,
-                limit,
-            },
-        ) {
+        match repeat_cache_indexed_purge(batches, || {
+            self.proxy.purge_indexed_image_cache_path_pattern(
+                crate::proxy::CacheIndexedPathPatternPurgeRequest {
+                    vhost,
+                    route,
+                    path_pattern,
+                    limit,
+                },
+            )
+        }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
@@ -844,6 +883,9 @@ impl AdminApp {
                     result.truncated(),
                     result.truncated(),
                     limit,
+                    result.batches,
+                    batches,
+                    result.truncated() && result.batches >= batches,
                     json_escape(&result.vhost),
                     cache_route_json(result.route.as_deref()),
                     cache_scope(result.route.as_deref()),
@@ -905,6 +947,7 @@ impl AdminApp {
         _vhost: Option<&str>,
         _route: Option<&str>,
         _limit: Option<&str>,
+        _batches: Option<&str>,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -916,6 +959,7 @@ impl AdminApp {
         _route: Option<&str>,
         _path_prefix: Option<&str>,
         _limit: Option<&str>,
+        _batches: Option<&str>,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -927,6 +971,7 @@ impl AdminApp {
         _route: Option<&str>,
         _path_pattern: Option<&str>,
         _limit: Option<&str>,
+        _batches: Option<&str>,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -1863,6 +1908,61 @@ fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
     )
 }
 
+#[cfg(feature = "cache")]
+struct CacheIndexedPurgeBatchResult {
+    result: crate::proxy::CacheIndexedPurgeResult,
+    batches: usize,
+}
+
+#[cfg(feature = "cache")]
+impl std::ops::Deref for CacheIndexedPurgeBatchResult {
+    type Target = crate::proxy::CacheIndexedPurgeResult;
+
+    fn deref(&self) -> &Self::Target {
+        &self.result
+    }
+}
+
+#[cfg(feature = "cache")]
+fn repeat_cache_indexed_purge(
+    batches: usize,
+    mut purge: impl FnMut() -> std::io::Result<crate::proxy::CacheIndexedPurgeResult>,
+) -> std::io::Result<CacheIndexedPurgeBatchResult> {
+    let mut total: Option<crate::proxy::CacheIndexedPurgeResult> = None;
+    let mut batches_run = 0;
+    for _ in 0..batches {
+        let result = purge()?;
+        batches_run += 1;
+        let truncated = result.truncated();
+        match &mut total {
+            Some(total) => {
+                total.memory_matched = total.memory_matched.saturating_add(result.memory_matched);
+                total.memory_purged = total.memory_purged.saturating_add(result.memory_purged);
+                total.disk_matched = total.disk_matched.saturating_add(result.disk_matched);
+                total.disk_purged = total.disk_purged.saturating_add(result.disk_purged);
+                total.memory_truncated = result.memory_truncated;
+                total.disk_truncated = result.disk_truncated;
+            }
+            None => total = Some(result),
+        }
+        if !truncated {
+            break;
+        }
+    }
+
+    total
+        .map(|result| CacheIndexedPurgeBatchResult {
+            result,
+            batches: batches_run,
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "cache indexed purge batches must be greater than zero",
+            )
+        })
+}
+
 fn query_param<'a>(query: Option<&'a str>, name: &str) -> Option<&'a str> {
     query_params(query, name).into_iter().next()
 }
@@ -2040,6 +2140,20 @@ fn validated_cache_indexed_purge_limit(limit: Option<&str>) -> Result<usize, &'s
         return Err("cache indexed purge limit is out of range");
     }
     Ok(limit)
+}
+
+#[cfg(feature = "cache")]
+fn validated_cache_indexed_purge_batches(batches: Option<&str>) -> Result<usize, &'static str> {
+    let Some(batches) = batches.map(str::trim).filter(|batches| !batches.is_empty()) else {
+        return Ok(DEFAULT_CACHE_INDEXED_PURGE_BATCHES);
+    };
+    let batches = batches
+        .parse::<usize>()
+        .map_err(|_| "cache indexed purge batches is invalid")?;
+    if batches == 0 || batches > MAX_CACHE_INDEXED_PURGE_BATCHES {
+        return Err("cache indexed purge batches is out of range");
+    }
+    Ok(batches)
 }
 
 fn truthy_header(headers: &HeaderMap, name: &str) -> bool {
@@ -2384,7 +2498,7 @@ mod tests {
         let response = app.handle(
             "POST",
             "/_fluxheim/cache/purge-index",
-            Some("vhost=cached&limit=16"),
+            Some("vhost=cached&limit=16&batches=3"),
             &auth_headers(),
         );
 
@@ -2405,6 +2519,9 @@ mod tests {
         assert!(body.contains(r#""truncated":false"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""batches":1"#));
+        assert!(body.contains(r#""batch_limit":3"#));
+        assert!(body.contains(r#""batches_exhausted":false"#));
         assert!(body.contains(r#""scope":"vhost""#));
     }
 
@@ -2460,6 +2577,9 @@ mod tests {
         assert!(body.contains(r#""disk_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""batches":1"#));
+        assert!(body.contains(r#""batch_limit":1"#));
+        assert!(body.contains(r#""batches_exhausted":false"#));
         assert!(body.contains(r#""scope":"vhost""#));
     }
 
@@ -2528,6 +2648,9 @@ mod tests {
         assert!(body.contains(r#""disk_not_purged_ratio_per_mille":0"#));
         assert!(body.contains(r#""repeat_required":false"#));
         assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""batches":1"#));
+        assert!(body.contains(r#""batch_limit":1"#));
+        assert!(body.contains(r#""batches_exhausted":false"#));
         assert!(body.contains(r#""scope":"vhost""#));
     }
 

@@ -238,22 +238,24 @@ internal cache implementation.
   scope purge. `POST /_fluxheim/cache/purge-wildcard` invalidates indexed
   entries by absolute path pattern using `*`, for example `/assets/*.png`.
   Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
-  endpoints accept `limit` /
-  `x-fluxheim-cache-limit`, default to a bounded batch size, and return
-  the effective `limit`, cache `scope`, and `purged_ratio_per_mille` in their
-  response. The ratio reports how much of the matched batch was actually
-  purged, where `1000` means every matched entry was removed. Indexed purge
-  responses also include `not_purged`, `not_purged_ratio_per_mille`,
+  endpoints accept `limit` / `x-fluxheim-cache-limit` and `batches` /
+  `x-fluxheim-cache-batches`, default to one bounded batch, and return the
+  effective `limit`, executed `batches`, `batch_limit`, cache `scope`, and
+  `purged_ratio_per_mille` in their response. The ratio reports how much of the
+  matched batches was actually purged, where `1000` means every matched entry
+  was removed. Indexed purge responses also include `not_purged`,
+  `not_purged_ratio_per_mille`,
   `memory_not_purged`, `memory_not_purged_ratio_per_mille`,
   `disk_not_purged`, `disk_not_purged_ratio_per_mille`,
   `memory_purged_ratio_per_mille`, and `disk_purged_ratio_per_mille` so
   operators can see which tier needs cleanup.
   They return
   `truncated = true` and `repeat_required = true` when more indexed entries
-  remain for the requested scope and the same purge should be run again. The
-  index is bounded in memory, mirrors disk-tier writes, and is designed for
-  operational invalidation rather than as a complete filesystem scan.
-  A background disk purger remains planned.
+  remain for the requested scope and the same purge should be run again.
+  `batches_exhausted = true` means the configured batch limit was reached while
+  more indexed entries may remain. The index is bounded in memory, mirrors
+  disk-tier writes, and is designed for operational invalidation rather than as
+  a complete filesystem scan. A background disk purger remains planned.
 
 Example admin cache invalidation requests:
 
@@ -262,7 +264,7 @@ curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-index?vhost=repoheim.eu&limit=500"
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
-  "http://127.0.0.1:9090/_fluxheim/cache/purge-prefix?vhost=repoheim.eu&path_prefix=/assets/&limit=500"
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-prefix?vhost=repoheim.eu&path_prefix=/assets/&limit=500&batches=4"
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-wildcard?vhost=repoheim.eu&pattern=/assets/*.png&limit=500"

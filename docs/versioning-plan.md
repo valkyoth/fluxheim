@@ -359,7 +359,10 @@ Stable scope:
   - broader persistent cache index coverage for older disk object formats and
     future metadata migrations; new v3 disk objects already rebuild the bounded
     purge index across process restarts;
-  - background or incremental disk purge/cleanup for very large purge scopes;
+  - background or broader incremental disk purge/cleanup for very large purge
+    scopes; indexed purge endpoints now accept bounded `batches` so operators
+    can advance large scope, prefix, and wildcard purges without removing
+    request limits;
   - cache warmer/preload command or admin workflow for release deploys;
   - surrogate-key/cache-tag purge for application-level invalidation;
   - soft purge, where objects are marked stale and refreshed instead of removed

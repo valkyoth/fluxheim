@@ -28,6 +28,8 @@ behavior when the change improves security or project direction.
   as `fluxheim_cache_activity_total{tier="policy",event="pass"}`.
 - Prometheus now exposes configured vhost and route cache activity through
   `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`.
+- Indexed cache purge endpoints now accept bounded `batches` /
+  `x-fluxheim-cache-batches` for incremental large-scope invalidation.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside
