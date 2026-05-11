@@ -77,7 +77,10 @@ internal cache implementation.
   file containing `/path` or `host.example /path` lines. Warm requests count
   2xx and 3xx responses as successful by default. Use repeated
   `--allow-status` values only for deliberate negative-cache workflows, such as
-  warming a configured 404 TTL.
+  warming a configured 404 TTL. When a cache policy emits a status header,
+  `--expect-cache-status` can require bounded values such as `MISS`, `HIT`, or
+  `REVALIDATED`, so release scripts can fail if a warm request bypassed the
+  cache unexpectedly.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream
@@ -352,8 +355,8 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
   --listen 127.0.0.1:80 \
   --host repoheim.eu \
-  --path /missing-release-artifact.png \
-  --allow-status 404
+  --path /assets/img/logo.png \
+  --expect-cache-status MISS
 ```
 
 Example cache-key preview during a production incident:

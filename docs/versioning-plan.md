@@ -416,7 +416,9 @@ Stable scope:
     including clear failure accounting and no hidden best-effort misses.
     `cache-warm` now treats only 2xx/3xx responses as successful by default
     and requires explicit `--allow-status` opt-in for deliberate negative-cache
-    warm targets such as configured 404 TTLs;
+    warm targets such as configured 404 TTLs. It can also require expected
+    cache-status header values so warm scripts fail when traffic bypasses the
+    selected cache policy unexpectedly;
   - cache observability through both Prometheus and OpenTelemetry, including
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
@@ -529,7 +531,8 @@ Current implementation status:
   - process-wide opt-in background stale disk purger;
   - `fluxheim cache-warm` path warming through the normal local listener with
     2xx/3xx success accounting and explicit `--allow-status` overrides for
-    deliberate negative-cache warming;
+    deliberate negative-cache warming, plus optional cache-status header
+    expectations;
   - Prometheus cache activity metrics and initial OTLP metrics export.
     Prometheus also reports cache-lock-enabled policy count so request
     collapsing coverage is visible without high-cardinality labels.
