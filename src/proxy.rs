@@ -99,6 +99,8 @@ struct ProxyRuntimeState {
     trusted_proxies: Vec<TrustedProxy>,
     limits: ServerLimitsConfig,
     https_redirect: HttpsRedirectConfig,
+    #[cfg(feature = "otel-tracing")]
+    tracing: crate::config::TracingConfig,
     #[cfg(not(feature = "privacy-mode"))]
     access_log: AccessLoggingConfig,
 }
@@ -234,6 +236,10 @@ impl FluxProxy {
                 status_class: status.map(status_class),
                 error: error.is_some(),
                 request_id: ctx.request_id.as_deref(),
+                #[cfg(feature = "otel-tracing")]
+                trace_id: (state.tracing.enabled && state.tracing.log_trace_id)
+                    .then(|| ctx.trace_context.map(|context| context.trace_id_hex()))
+                    .flatten(),
                 request_body_bytes: ctx.request_body_bytes_seen,
                 response_body_bytes: ctx.response_body_bytes_seen,
                 latency_ms,
@@ -1601,6 +1607,8 @@ impl ProxyRuntimeState {
             trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
+            #[cfg(feature = "otel-tracing")]
+            tracing: config.tracing.clone(),
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -1654,6 +1662,8 @@ impl ProxyRuntimeState {
             trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
+            #[cfg(feature = "otel-tracing")]
+            tracing: config.tracing.clone(),
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -2317,6 +2327,8 @@ pub struct RequestContext {
     started_at: Option<Instant>,
     #[cfg(not(feature = "privacy-mode"))]
     request_id: Option<String>,
+    #[cfg(feature = "otel-tracing")]
+    trace_context: Option<crate::trace_context::TraceContext>,
     #[cfg(feature = "cache")]
     cache_status_override: Option<CacheStatusOverride>,
 }
@@ -2359,6 +2371,17 @@ impl ProxyHttp for FluxProxy {
             .or(vhost.max_request_body_bytes)
             .map(|bytes| bytes.as_u64())
             .or(Some(state.limits.max_request_body_bytes.as_u64()));
+        #[cfg(feature = "otel-tracing")]
+        if state.tracing.enabled && state.tracing.traceparent {
+            let client_addr = session.client_addr().and_then(|addr| addr.as_inet());
+            let trusted_peer = client_addr
+                .map(|addr| state.trusted_proxy(addr.ip()))
+                .unwrap_or(false);
+            ctx.trace_context = Some(crate::trace_context::context_from_traceparent(
+                request_header_value(session.req_header(), "traceparent"),
+                trusted_peer,
+            ));
+        }
         if let Some(status) = request_limit_status(
             &state.limits,
             ctx.request_body_limit_bytes,
@@ -2567,6 +2590,13 @@ impl ProxyHttp for FluxProxy {
         if let Some(request_id) = ctx.request_id.as_deref() {
             upstream_request
                 .insert_header(state.access_log.request_id_header.clone(), request_id)?;
+        }
+        #[cfg(feature = "otel-tracing")]
+        if state.tracing.enabled
+            && state.tracing.traceparent
+            && let Some(trace_context) = ctx.trace_context
+        {
+            upstream_request.insert_header("traceparent", trace_context.to_traceparent())?;
         }
         #[cfg(not(feature = "privacy-mode"))]
         let request_id = ctx.request_id.as_deref();
@@ -3732,6 +3762,8 @@ struct AccessLogEvent<'a> {
     status_class: Option<&'static str>,
     error: bool,
     request_id: Option<&'a str>,
+    #[cfg(feature = "otel-tracing")]
+    trace_id: Option<String>,
     request_body_bytes: u64,
     response_body_bytes: u64,
     latency_ms: u128,
@@ -3747,7 +3779,7 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
     let host = event.host.unwrap_or("");
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
-    format!(
+    let body = format!(
         "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
@@ -3760,7 +3792,23 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
         event.request_body_bytes,
         event.response_body_bytes,
         event.latency_ms,
-    )
+    );
+    #[cfg(feature = "otel-tracing")]
+    {
+        let mut body = body;
+        if let Some(trace_id) = event.trace_id.as_deref() {
+            let insert_at = body.len().saturating_sub(1);
+            body.insert_str(
+                insert_at,
+                &format!(r#","trace_id":"{}""#, json_escape(trace_id)),
+            );
+        }
+        body
+    }
+    #[cfg(not(feature = "otel-tracing"))]
+    {
+        body
+    }
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -4241,6 +4289,14 @@ fn request_header_values<'a>(
         .get_all(name)
         .iter()
         .filter_map(|value| value.to_str().ok())
+}
+
+#[cfg(feature = "otel-tracing")]
+fn request_header_value<'a>(request: &'a RequestHeader, name: &str) -> Option<&'a str> {
+    request
+        .headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
 }
 
 #[cfg(feature = "cache")]
@@ -7162,6 +7218,8 @@ mod tests {
             status_class: Some(super::status_class(200)),
             error: false,
             request_id: Some("req-123"),
+            #[cfg(feature = "otel-tracing")]
+            trace_id: None,
             request_body_bytes: 42,
             response_body_bytes: 2048,
             latency_ms: 7,
@@ -7189,6 +7247,8 @@ mod tests {
             status_class: Some(super::status_class(204)),
             error: false,
             request_id: None,
+            #[cfg(feature = "otel-tracing")]
+            trace_id: None,
             request_body_bytes: 0,
             response_body_bytes: 0,
             latency_ms: 1,
@@ -7210,6 +7270,8 @@ mod tests {
             status_class: Some(super::status_class(204)),
             error: false,
             request_id: None,
+            #[cfg(feature = "otel-tracing")]
+            trace_id: None,
             request_body_bytes: 0,
             response_body_bytes: 0,
             latency_ms: 1,
@@ -7217,6 +7279,27 @@ mod tests {
 
         assert!(log.contains("\"host\":\"\""));
         assert!(!log.contains("tenant.example"));
+    }
+
+    #[cfg(all(not(feature = "privacy-mode"), feature = "otel-tracing"))]
+    #[test]
+    fn access_log_json_can_include_trace_id() {
+        let log = super::access_log_json(super::AccessLogEvent {
+            method: "GET",
+            host: Some("example.test"),
+            vhost: "main",
+            path: Some("/"),
+            status: Some(200),
+            status_class: Some(super::status_class(200)),
+            error: false,
+            request_id: None,
+            trace_id: Some("4bf92f3577b34da6a3ce929d0e0e4736".to_owned()),
+            request_body_bytes: 0,
+            response_body_bytes: 0,
+            latency_ms: 1,
+        });
+
+        assert!(log.contains(r#""trace_id":"4bf92f3577b34da6a3ce929d0e0e4736""#));
     }
 
     #[cfg(not(feature = "privacy-mode"))]

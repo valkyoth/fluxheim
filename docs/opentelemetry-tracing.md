@@ -1,11 +1,12 @@
 # OpenTelemetry Tracing
 
-Status: future optional observability module.
+Status: stage 1 trace context propagation is implemented behind the optional
+`otel-tracing` Cargo feature. Internal spans and OTLP export remain planned.
 
-Planned Cargo features:
+Cargo features:
 
-- `otel-tracing`
-- `otel-otlp`
+- `otel-tracing`: implemented propagation and access-log correlation.
+- `otel-otlp`: planned exporter feature.
 
 Latest crate candidates checked on 2026-05-05:
 
@@ -34,7 +35,9 @@ Fluxheim and its upstream services.
 
 ## Stage 1: Trace Context Propagation
 
-The first useful milestone is propagation without exporting spans.
+The first useful milestone is propagation without exporting spans. This stage is
+implemented when Fluxheim is built with `otel-tracing` and `[tracing]` is
+enabled at runtime.
 
 Behavior:
 
@@ -43,7 +46,7 @@ Behavior:
 - generate a new trace ID when no valid context exists;
 - inject the selected context into upstream proxy requests;
 - include the trace ID in structured access logs when logging is enabled;
-- strip or normalize unsupported tracing headers according to policy.
+- trust inbound sampled flags only when the direct peer is trusted.
 
 This gives operators log/backend correlation even before Fluxheim exports full
 traces.
@@ -139,6 +142,16 @@ enabled = true
 mode = "propagate_only"
 traceparent = true
 log_trace_id = true
+```
+
+`mode = "propagate_only"` is the only implemented mode in stage 1. It validates
+incoming W3C `traceparent`, generates a fresh context when the inbound header is
+missing or invalid, forwards a normalized `traceparent` to upstreams, and can
+add `trace_id` to structured access logs.
+
+Future exporter configuration is expected to look like this:
+
+```toml
 
 [tracing.sampling]
 success_ratio = 0.01

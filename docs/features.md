@@ -32,6 +32,7 @@ before Cargo starts compiling Pingora.
 | --- | --- | --- |
 | `load-balancer` | No | Pingora load-balancing support and health-check setup. |
 | `metrics` | No | Prometheus metrics listener. |
+| `otel-tracing` | No | W3C `traceparent` propagation and access-log trace ID correlation. |
 | `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 and rustls TLS-ALPN-01 challenge serving, and the renewal executor contract. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
@@ -76,7 +77,7 @@ feature aliases for common deployment shapes.
 | `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
 | `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
-| `profile-observability` | `profile-core`, `metrics` | Core server with Prometheus metrics. |
+| `profile-observability` | `profile-core`, `metrics`, `otel-tracing` | Core server with Prometheus metrics and trace context propagation. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
 
 Examples:
@@ -93,6 +94,7 @@ cargo build --no-default-features --features profile-privacy
 | Multiple `tls-*` backends | Pingora exposes one TLS backend at a time. |
 | `privacy-mode` + `cache` | Zero-retention builds must not compile request/response cache code. |
 | `privacy-mode` + `metrics` | Zero-retention builds must not compile request metrics. |
+| `privacy-mode` + `otel-tracing` | Zero-retention builds must not compile trace context propagation. |
 
 Because `cache` is part of the default build, privacy builds must use
 `--no-default-features`.
@@ -106,7 +108,7 @@ These are documented architecture tracks, not enabled Cargo features yet:
 | Compression | [Compression](compression.md) |
 | Image filter | [Image Filter](image-filter.md) |
 | Programmable media edge | [Programmable Media Edge](programmable-media-edge.md) |
-| OpenTelemetry tracing | [OpenTelemetry Tracing](opentelemetry-tracing.md) |
+| OpenTelemetry OTLP export | [OpenTelemetry Tracing](opentelemetry-tracing.md) |
 | WASM extensibility | [WASM Extensibility](wasm-extensibility.md) |
 | WAF | [WAF Architecture](waf-architecture.md) |
 | Cloudflare origin support | [Cloudflare Origin Support](cloudflare-origin-support.md) |

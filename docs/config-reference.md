@@ -184,6 +184,31 @@ require_loopback = true
 
 The `metrics` compile-time feature is not part of `profile-privacy`.
 
+## Tracing
+
+`[tracing]` is disabled by default and requires a build with the
+`otel-tracing` feature, or a profile that includes it such as
+`profile-observability`.
+
+```toml
+[tracing]
+enabled = false
+mode = "propagate_only"
+traceparent = true
+log_trace_id = true
+```
+
+Implemented values:
+
+- `mode = "propagate_only"` validates W3C `traceparent`, generates a trace
+  context when needed, and forwards a normalized `traceparent` to upstreams.
+- `traceparent = true` enables inbound/outbound W3C Trace Context propagation.
+- `log_trace_id = true` adds `trace_id` to structured access logs when tracing
+  is enabled.
+
+`tracing.enabled = true` is rejected when Fluxheim is built without
+`otel-tracing`. `otel-tracing` is incompatible with `privacy-mode`.
+
 ## Logging
 
 ```toml

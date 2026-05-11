@@ -33,6 +33,8 @@ pub mod snapshot;
     feature = "tls-s2n"
 ))]
 pub mod tls;
+#[cfg(feature = "otel-tracing")]
+pub mod trace_context;
 #[cfg(feature = "web")]
 pub mod web;
 
@@ -61,6 +63,11 @@ compile_error!(
 #[cfg(all(feature = "privacy-mode", feature = "metrics"))]
 compile_error!(
     "privacy-mode cannot be combined with metrics; zero-retention builds must not compile request metrics"
+);
+
+#[cfg(all(feature = "privacy-mode", feature = "otel-tracing"))]
+compile_error!(
+    "privacy-mode cannot be combined with otel-tracing; zero-retention builds must not compile trace context propagation"
 );
 
 pub fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

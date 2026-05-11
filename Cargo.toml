@@ -58,6 +58,7 @@ acme-client = [
     "instant-acme/hyper-rustls",
 ]
 metrics = ["dep:prometheus"]
+otel-tracing = ["proxy", "dep:getrandom"]
 privacy-mode = ["proxy", "web"]
 security = []
 
@@ -75,7 +76,7 @@ profile-load-balancer = [
     "tls-rustls",
     "security",
 ]
-profile-observability = ["profile-core", "metrics"]
+profile-observability = ["profile-core", "metrics", "otel-tracing"]
 profile-privacy = ["proxy", "web", "tls-rustls", "privacy-mode", "security"]
 
 [dependencies]

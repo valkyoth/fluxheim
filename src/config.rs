@@ -35,6 +35,8 @@ pub struct Config {
     #[serde(default)]
     pub metrics: MetricsConfig,
     #[serde(default)]
+    pub tracing: TracingConfig,
+    #[serde(default)]
     pub logging: LoggingConfig,
     #[serde(default)]
     pub headers: HeaderPolicyConfig,
@@ -133,6 +135,9 @@ impl Config {
         if let Some(metrics) = fragment.metrics {
             self.metrics = metrics;
         }
+        if let Some(tracing) = fragment.tracing {
+            self.tracing = tracing;
+        }
         if let Some(logging) = fragment.logging {
             self.logging = logging;
         }
@@ -158,6 +163,7 @@ impl Config {
         self.server.validate()?;
         self.admin.validate()?;
         self.metrics.validate()?;
+        self.tracing.validate()?;
         self.logging.validate()?;
         self.headers.validate()?;
         self.tls.validate()?;
@@ -287,6 +293,8 @@ struct ConfigFragment {
     admin: Option<AdminConfig>,
     #[serde(default)]
     metrics: Option<MetricsConfig>,
+    #[serde(default)]
+    tracing: Option<TracingConfig>,
     #[serde(default)]
     logging: Option<LoggingConfig>,
     #[serde(default)]
@@ -790,6 +798,69 @@ impl MetricsConfig {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TracingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: TracingMode,
+    #[serde(default = "default_true")]
+    pub traceparent: bool,
+    #[serde(default = "default_true")]
+    pub log_trace_id: bool,
+}
+
+impl Default for TracingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: TracingMode::default(),
+            traceparent: true,
+            log_trace_id: true,
+        }
+    }
+}
+
+impl TracingConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        #[cfg(not(feature = "otel-tracing"))]
+        if self.enabled {
+            return Err(ConfigError::TracingNotCompiled);
+        }
+
+        #[cfg(feature = "privacy-mode")]
+        if self.enabled {
+            return Err(ConfigError::PrivacyModeTracing);
+        }
+
+        if self.enabled && self.mode == TracingMode::Off {
+            return Err(ConfigError::InvalidTracingPolicy {
+                field: "tracing.mode",
+                reason: "tracing.enabled requires tracing.mode other than off",
+            });
+        }
+        if !self.enabled {
+            return Ok(());
+        }
+        if !self.traceparent && self.mode == TracingMode::PropagateOnly {
+            return Err(ConfigError::InvalidTracingPolicy {
+                field: "tracing.traceparent",
+                reason: "propagate_only mode requires traceparent propagation",
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TracingMode {
+    Off,
+    #[default]
+    PropagateOnly,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -4013,6 +4084,12 @@ pub enum ConfigError {
     MetricsListenNotLoopback {
         address: String,
     },
+    TracingNotCompiled,
+    InvalidTracingPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
+    PrivacyModeTracing,
     PrivacyModeAccessLogging,
     PrivacyModeFileLogging,
     MissingLoggingFilePath,
@@ -4406,6 +4483,17 @@ impl Display for ConfigError {
             Self::MetricsListenNotLoopback { address } => write!(
                 formatter,
                 "metrics.listen must be loopback when metrics.require_loopback = true, got {address:?}"
+            ),
+            Self::TracingNotCompiled => write!(
+                formatter,
+                "tracing.enabled requires building Fluxheim with the otel-tracing feature"
+            ),
+            Self::InvalidTracingPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
+            Self::PrivacyModeTracing => write!(
+                formatter,
+                "privacy-mode builds do not allow tracing.enabled = true"
             ),
             Self::PrivacyModeAccessLogging => write!(
                 formatter,
@@ -5928,9 +6016,9 @@ mod tests {
         CacheStaleErrorKind, Config, ConfigError, ConfigLoadError, HeaderPolicyConfig,
         LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig, ServerLimitsConfig,
         StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsCurvePreference,
-        TlsPolicyProfile, TlsProtocolVersion, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig,
-        WebConfig, normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
-        validate_dynamic_header_template,
+        TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig, VhostHeaderPolicyConfig,
+        VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+        valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     #[cfg(unix)]
     use crate::test_support::unique_world_writable_child;
@@ -8402,6 +8490,7 @@ mod tests {
             },
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            tracing: TracingConfig::default(),
             logging: LoggingConfig::default(),
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
@@ -8560,6 +8649,39 @@ mod tests {
         config.validate().unwrap();
         assert!(config.metrics.enabled);
         assert_eq!(config.metrics.listen, "127.0.0.1:9091");
+    }
+
+    #[cfg(feature = "otel-tracing")]
+    #[test]
+    fn parses_trace_context_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [tracing]
+            enabled = true
+            mode = "propagate_only"
+            traceparent = true
+            log_trace_id = true
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert!(config.tracing.enabled);
+        assert_eq!(config.tracing.mode, super::TracingMode::PropagateOnly);
+    }
+
+    #[cfg(not(feature = "otel-tracing"))]
+    #[test]
+    fn rejects_enabled_tracing_without_feature() {
+        let config: Config = toml::from_str(
+            r#"
+            [tracing]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.validate(), Err(ConfigError::TracingNotCompiled));
     }
 
     #[test]
@@ -9026,6 +9148,7 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            tracing: TracingConfig::default(),
             logging: LoggingConfig::default(),
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
@@ -9122,6 +9245,7 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            tracing: TracingConfig::default(),
             logging: LoggingConfig::default(),
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
@@ -9145,6 +9269,7 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            tracing: TracingConfig::default(),
             logging: LoggingConfig::default(),
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
@@ -9553,6 +9678,7 @@ mod tests {
             server: ServerConfig::default(),
             admin: AdminConfig::default(),
             metrics: MetricsConfig::default(),
+            tracing: TracingConfig::default(),
             logging: LoggingConfig::default(),
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
