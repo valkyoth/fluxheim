@@ -416,8 +416,9 @@ Stable scope:
     cache-key preview by selecting the effective vhost/route policy and
     printing key hashes without contacting upstreams. `fluxheim cache-lookup`
     now adds the first object metadata lookup by checking selected memory/disk
-    tiers and reporting status, size, freshness, cache tags, and stored header
-    names without reading cached bodies to stdout or dumping header values.
+    tiers and reporting status, size, freshness state, stale-serving
+    eligibility, cache tags, and stored header names without reading cached
+    bodies to stdout or dumping header values.
     Lookup output also reports purge-index membership so operators can tell
     whether indexed scope, prefix, tag, wildcard, and stale purges can reach an
     object without a full scan. `cache-key` and `cache-lookup` can include

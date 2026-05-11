@@ -568,9 +568,11 @@ For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key
 without contacting the upstream. `fluxheim cache-lookup --host example.com
 --path /assets/app.js` also checks configured cache tiers and prints safe object
-metadata without dumping bodies or header values. Both commands accept repeated
-`--header "Name: value"` options for safe negotiated variant inspection, such
-as `Accept-Language` or `Accept-Encoding`; use `--host` for the Host header.
+metadata without dumping bodies or header values, including a compact
+fresh/stale/expired state and stale-serving eligibility booleans. Both commands
+accept repeated `--header "Name: value"` options for safe negotiated variant
+inspection, such as `Accept-Language` or `Accept-Encoding`; use `--host` for
+the Host header.
 `fluxheim cache-warm --header "Name: value"` warms negotiated variants with
 the same safe request-header syntax, and `fluxheim cache-warm --dry-run`
 validates bounded warm target input files, repeat counts, cache-status

@@ -149,6 +149,9 @@ pub struct CacheObjectMetadata {
     pub purge_indexed: bool,
     pub status: u16,
     pub fresh: bool,
+    pub freshness_state: CacheObjectFreshnessState,
+    pub serve_stale_while_revalidate: bool,
+    pub serve_stale_if_error: bool,
     pub body_bytes: u64,
     pub weight_bytes: u64,
     pub created_unix_secs: Option<u64>,
@@ -160,6 +163,25 @@ pub struct CacheObjectMetadata {
     pub stale_if_error_secs: u32,
     pub cache_tags: Vec<String>,
     pub header_names: Vec<String>,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CacheObjectFreshnessState {
+    Fresh,
+    Stale,
+    Expired,
+}
+
+#[cfg(feature = "proxy")]
+impl CacheObjectFreshnessState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Stale => "stale",
+            Self::Expired => "expired",
+        }
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2608,6 +2630,16 @@ fn cache_object_metadata(
 ) -> pingora::Result<Option<CacheObjectMetadata>> {
     let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
     let now = std::time::SystemTime::now();
+    let fresh = meta.is_fresh(now);
+    let serve_stale_while_revalidate = !fresh && meta.serve_stale_while_revalidate(now);
+    let serve_stale_if_error = !fresh && meta.serve_stale_if_error(now);
+    let freshness_state = if fresh {
+        CacheObjectFreshnessState::Fresh
+    } else if serve_stale_while_revalidate || serve_stale_if_error {
+        CacheObjectFreshnessState::Stale
+    } else {
+        CacheObjectFreshnessState::Expired
+    };
     let mut header_names = meta
         .headers()
         .keys()
@@ -2620,7 +2652,10 @@ fn cache_object_metadata(
         tier,
         purge_indexed,
         status: meta.response_header().status.as_u16(),
-        fresh: meta.is_fresh(now),
+        fresh,
+        freshness_state,
+        serve_stale_while_revalidate,
+        serve_stale_if_error,
         body_bytes: object.body.len() as u64,
         weight_bytes: pingora_object_weight(
             &object.internal_meta,
@@ -5943,6 +5978,50 @@ mod tests {
         if let Locked::Write(permit) = next_writer {
             lock.release(&key, permit, LockStatus::Done);
         }
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn cache_object_metadata_reports_stale_serving_state() {
+        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        header
+            .insert_header(
+                "cache-control",
+                "public, max-age=60, stale-while-revalidate=120",
+            )
+            .unwrap();
+        let now = std::time::SystemTime::now();
+        let meta = pingora::cache::CacheMeta::new(
+            now.checked_sub(std::time::Duration::from_secs(30)).unwrap(),
+            now.checked_sub(std::time::Duration::from_secs(90)).unwrap(),
+            120,
+            0,
+            header,
+        );
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        let object = super::PingoraStoredObject {
+            combined_key: None,
+            primary_key: None,
+            user_tag: Some("vhost".to_owned()),
+            index_path: Some("/asset.png".to_owned()),
+            cache_tags: Vec::new(),
+            internal_meta,
+            response_header,
+            body: std::sync::Arc::from(&b"body"[..]),
+            weight: 0,
+        };
+
+        let metadata = super::cache_object_metadata(super::CacheObjectTier::Disk, true, &object)
+            .unwrap()
+            .unwrap();
+
+        assert!(!metadata.fresh);
+        assert_eq!(
+            metadata.freshness_state,
+            super::CacheObjectFreshnessState::Stale
+        );
+        assert!(metadata.serve_stale_while_revalidate);
+        assert!(!metadata.serve_stale_if_error);
     }
 
     #[cfg(feature = "proxy")]

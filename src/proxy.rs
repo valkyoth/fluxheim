@@ -5953,6 +5953,12 @@ mod tests {
         assert!(object.purge_indexed);
         assert_eq!(object.status, 200);
         assert!(object.fresh);
+        assert_eq!(
+            object.freshness_state,
+            crate::cache::CacheObjectFreshnessState::Fresh
+        );
+        assert!(!object.serve_stale_while_revalidate);
+        assert!(!object.serve_stale_if_error);
         assert_eq!(object.body_bytes, 4);
         assert!(object.weight_bytes >= 4);
         assert_eq!(object.cache_tags, vec!["asset:logo"]);
@@ -6030,6 +6036,12 @@ mod tests {
         assert!(object.purge_indexed);
         assert_eq!(object.status, 200);
         assert!(object.fresh);
+        assert_eq!(
+            object.freshness_state,
+            crate::cache::CacheObjectFreshnessState::Fresh
+        );
+        assert!(!object.serve_stale_while_revalidate);
+        assert!(!object.serve_stale_if_error);
         assert_eq!(object.body_bytes, 9);
         assert!(object.weight_bytes >= 9);
         assert_eq!(object.cache_tags, vec!["asset:logo"]);

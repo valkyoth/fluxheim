@@ -825,6 +825,12 @@ fn run_cache_lookup_command(
         println!("  purge_indexed: {}", object.purge_indexed);
         println!("  status: {}", object.status);
         println!("  fresh: {}", object.fresh);
+        println!("  freshness_state: {}", object.freshness_state.as_str());
+        println!(
+            "  serve_stale_while_revalidate: {}",
+            object.serve_stale_while_revalidate
+        );
+        println!("  serve_stale_if_error: {}", object.serve_stale_if_error);
         println!("  body_bytes: {}", object.body_bytes);
         println!("  weight_bytes: {}", object.weight_bytes);
         print_optional_unix("  created_unix_secs", object.created_unix_secs);
