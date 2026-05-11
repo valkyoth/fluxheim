@@ -82,9 +82,11 @@ internal cache implementation.
   `REVALIDATED`, so release scripts can fail if a warm request bypassed the
   cache unexpectedly. Use `--repeat` with `--expect-cache-status-sequence` to
   verify an expected transition, such as first-fill `MISS` followed by `HIT`.
-  Use `--dry-run` to validate the target list, repeat count, listener
-  selection, and expected cache-status sequence without sending requests to the
-  running server.
+  Use repeated `--header "Name: value"` options to warm negotiated variants for
+  safe request headers such as `Accept-Language` or `Accept-Encoding`; use
+  `--host` for the Host header. Use `--dry-run` to validate the target list,
+  repeat count, listener selection, request headers, and expected cache-status
+  sequence without sending requests to the running server.
   The command prints bounded summary counts for response statuses, observed
   cache-status values, and failure reasons so release jobs can distinguish
   upstream errors, unexpected response statuses, and unexpected cache behavior
@@ -402,6 +404,7 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
   --listen 127.0.0.1:80 \
   --host repoheim.eu \
+  --header "Accept-Language: de" \
   --path /assets/img/logo.png \
   --repeat 2 \
   --expect-cache-status-sequence MISS,HIT
@@ -409,6 +412,7 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
   --listen 127.0.0.1:80 \
   --input /tmp/fluxheim-warm.txt \
+  --header "Accept-Language: de" \
   --repeat 2 \
   --expect-cache-status-sequence MISS,HIT \
   --dry-run

@@ -135,6 +135,10 @@ pub enum CliCommand {
         #[arg(long)]
         host: Option<String>,
 
+        /// Additional request header for warming negotiated variants, as "Name: value". May be repeated.
+        #[arg(long = "header", value_name = "HEADER")]
+        headers: Vec<String>,
+
         /// Absolute request path to warm. May be repeated.
         #[arg(long = "path", value_name = "PATH")]
         paths: Vec<String>,
@@ -399,6 +403,7 @@ fn run_command(
         CliCommand::CacheWarm {
             listen,
             host,
+            headers,
             paths,
             input,
             timeout_secs,
@@ -414,6 +419,7 @@ fn run_command(
             config_path,
             listen: listen.clone(),
             host: host.clone(),
+            headers: headers.clone(),
             paths: paths.clone(),
             input: input.clone(),
             timeout_secs: *timeout_secs,
@@ -462,6 +468,7 @@ struct CacheWarmOptions<'a> {
     config_path: Option<&'a std::path::Path>,
     listen: Option<String>,
     host: Option<String>,
+    headers: Vec<String>,
     paths: Vec<String>,
     input: Option<PathBuf>,
     timeout_secs: u64,
@@ -516,6 +523,7 @@ fn run_cache_warm_command(
         &options.expect_cache_status_sequence,
         options.repeat,
     )?;
+    let request_headers = parse_cache_cli_headers("cache-warm", &options.headers)?;
 
     let listen = cache_warm_listen_addr(&config, options.listen.as_deref())?;
     let default_host = match options.host {
@@ -542,6 +550,9 @@ fn run_cache_warm_command(
     println!("cache warm targets: {}", targets.len());
     println!("cache warm requests: {total_requests}");
     println!("cache warm listener: {listen}");
+    if !request_headers.is_empty() {
+        println!("cache warm headers: {}", request_headers.len());
+    }
     if options.dry_run {
         for target in targets {
             println!(
@@ -561,7 +572,13 @@ fn run_cache_warm_command(
     let mut failure_reasons = std::collections::BTreeMap::new();
     'targets: for target in targets {
         for attempt in 1..=options.repeat {
-            match cache_warm_request(&listen, &target, timeout, &options.cache_status_header) {
+            match cache_warm_request(
+                &listen,
+                &target,
+                timeout,
+                &options.cache_status_header,
+                &request_headers,
+            ) {
                 Ok(result) => {
                     increment_cache_warm_count(&mut response_statuses, result.status);
                     let cache_status = cache_warm_safe_label(result.cache_status.as_deref());
@@ -699,6 +716,7 @@ fn run_cache_warm_command(
         config_path,
         listen,
         host,
+        headers,
         paths,
         input,
         timeout_secs,
@@ -715,6 +733,7 @@ fn run_cache_warm_command(
         config_path,
         listen,
         host,
+        headers,
         paths,
         input,
         timeout_secs,
@@ -876,8 +895,7 @@ fn cache_key_command_request(
     if options.headers.len() > 32 {
         return Err("cache-key accepts at most 32 --header values".into());
     }
-    for header in &options.headers {
-        let (name, value) = parse_cache_key_header(header)?;
+    for (name, value) in parse_cache_cli_headers("cache-key", &options.headers)? {
         request.insert_header(name, value)?;
     }
     Ok((config, request))
@@ -935,29 +953,53 @@ fn validate_cache_key_query(query: &str) -> Result<(), Box<dyn Error + Send + Sy
     Ok(())
 }
 
-#[cfg(all(feature = "cache", feature = "proxy"))]
-fn parse_cache_key_header(header: &str) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+#[cfg(feature = "cache")]
+fn parse_cache_cli_headers(
+    command: &str,
+    headers: &[String],
+) -> Result<Vec<(String, String)>, Box<dyn Error + Send + Sync>> {
+    if headers.len() > 32 {
+        return Err(format!("{command} accepts at most 32 --header values").into());
+    }
+    headers
+        .iter()
+        .map(|header| parse_cache_cli_header(command, header))
+        .collect()
+}
+
+#[cfg(feature = "cache")]
+fn parse_cache_cli_header(
+    command: &str,
+    header: &str,
+) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
     if header.len() > 8192 {
-        return Err("cache-key --header must be at most 8192 bytes".into());
+        return Err(format!("{command} --header must be at most 8192 bytes").into());
     }
     let (name, value) = header
         .split_once(':')
-        .ok_or("cache-key --header must use \"Name: value\" syntax")?;
+        .ok_or_else(|| format!("{command} --header must use \"Name: value\" syntax"))?;
     let name = name.trim();
     if name.is_empty() || name.len() > 64 || !name.bytes().all(is_http_token_byte) {
-        return Err("cache-key --header name must be a valid HTTP header name".into());
+        return Err(format!("{command} --header name must be a valid HTTP header name").into());
     }
-    if name.eq_ignore_ascii_case("host") {
-        return Err("cache-key --header cannot set Host; use --host".into());
+    let normalized_name = name.to_ascii_lowercase();
+    if matches!(
+        normalized_name.as_str(),
+        "host" | "connection" | "content-length" | "transfer-encoding"
+    ) {
+        return Err(format!(
+            "{command} --header cannot set {name}; use explicit options or built-in request framing"
+        )
+        .into());
     }
     let value = value.trim();
     if value.len() > 8192 {
-        return Err("cache-key --header value must be at most 8192 bytes".into());
+        return Err(format!("{command} --header value must be at most 8192 bytes").into());
     }
     if value.bytes().any(|byte| byte.is_ascii_control()) {
-        return Err("cache-key --header value must not contain control bytes".into());
+        return Err(format!("{command} --header value must not contain control bytes").into());
     }
-    Ok((name.to_ascii_lowercase(), value.to_owned()))
+    Ok((normalized_name, value.to_owned()))
 }
 
 #[cfg(feature = "cache")]
@@ -1269,17 +1311,22 @@ fn cache_warm_request(
     target: &CacheWarmTarget,
     timeout: std::time::Duration,
     cache_status_header: &str,
+    headers: &[(String, String)],
 ) -> Result<CacheWarmResult, Box<dyn Error + Send + Sync>> {
     let mut stream = std::net::TcpStream::connect_timeout(listen, timeout)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
     write!(
         stream,
-        "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: fluxheim-cache-warm/{}\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+        "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: fluxheim-cache-warm/{}\r\nAccept: */*\r\n",
         target.path,
         target.host,
         env!("CARGO_PKG_VERSION")
     )?;
+    for (name, value) in headers {
+        write!(stream, "{name}: {value}\r\n")?;
+    }
+    write!(stream, "Connection: close\r\n\r\n")?;
     stream.flush()?;
 
     let mut bytes_read = 0_u64;
@@ -2284,6 +2331,8 @@ mod tests {
             "cache-warm",
             "--path",
             "/assets/app.css",
+            "--header",
+            "Accept-Language: de",
             "--repeat",
             "2",
             "--expect-cache-status-sequence",
@@ -2425,12 +2474,13 @@ mod tests {
     #[test]
     fn cache_key_headers_accept_safe_variance_inputs() {
         assert_eq!(
-            super::parse_cache_key_header("Accept-Language: de, en;q=0.8").unwrap(),
+            super::parse_cache_cli_header("cache-key", "Accept-Language: de, en;q=0.8").unwrap(),
             ("accept-language".to_owned(), "de, en;q=0.8".to_owned())
         );
-        assert!(super::parse_cache_key_header("Host: example.test").is_err());
-        assert!(super::parse_cache_key_header("Bad Header: value").is_err());
-        assert!(super::parse_cache_key_header("X-Test: bad\r\nvalue").is_err());
+        assert!(super::parse_cache_cli_header("cache-key", "Host: example.test").is_err());
+        assert!(super::parse_cache_cli_header("cache-key", "Connection: close").is_err());
+        assert!(super::parse_cache_cli_header("cache-key", "Bad Header: value").is_err());
+        assert!(super::parse_cache_cli_header("cache-key", "X-Test: bad\r\nvalue").is_err());
     }
 
     #[cfg(not(feature = "cache"))]
