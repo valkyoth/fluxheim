@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
   reason `cache-pass` when `status_reason_header` is enabled.
 - Prometheus cache activity metrics now include bounded policy pass decisions
   as `fluxheim_cache_activity_total{tier="policy",event="pass"}`.
+- Prometheus now exposes configured vhost and route cache activity through
+  `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside

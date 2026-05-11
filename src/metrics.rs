@@ -13,6 +13,7 @@ static CACHE_TIERED_ROUTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
 pub fn enabled() -> bool {
     true
@@ -30,6 +31,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_memory_tiers()?;
     cache_disk_tiers()?;
     cache_activity_total()?;
+    cache_activity_scope_total()?;
     Ok(())
 }
 
@@ -66,6 +68,21 @@ pub fn record_cache_activity(tier: &str, event: &str) {
             .with_label_values(&[cache_tier_label(tier), cache_event_label(event)])
             .inc(),
         Err(error) => log::debug!("metrics counter unavailable: {error}"),
+    }
+}
+
+pub fn record_cache_activity_scope(vhost: &str, route: Option<&str>, tier: &str, event: &str) {
+    match cache_activity_scope_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                cache_scope_label(route),
+                vhost,
+                route.unwrap_or(""),
+                cache_tier_label(tier),
+                cache_event_label(event),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics scoped cache counter unavailable: {error}"),
     }
 }
 
@@ -262,6 +279,32 @@ fn cache_activity_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     })
 }
 
+fn cache_activity_scope_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = CACHE_ACTIVITY_SCOPE_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_cache_activity_scope_total",
+            "Fluxheim cache activity events by configured vhost, optional route, storage tier, and bounded event name.",
+        ),
+        &["scope", "vhost", "route", "tier", "event"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = CACHE_ACTIVITY_SCOPE_TOTAL.set(counter);
+    CACHE_ACTIVITY_SCOPE_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_cache_activity_scope_total failed to initialize".to_owned(),
+        )
+    })
+}
+
 fn int_gauge(
     cell: &'static OnceLock<IntGauge>,
     name: &'static str,
@@ -335,6 +378,10 @@ fn cache_tier_label(tier: &str) -> &'static str {
     }
 }
 
+fn cache_scope_label(route: Option<&str>) -> &'static str {
+    if route.is_some() { "route" } else { "vhost" }
+}
+
 fn cache_event_label(event: &str) -> &'static str {
     match event {
         "hit" => "hit",
@@ -359,8 +406,8 @@ mod tests {
     };
 
     use super::{
-        cache_config_stats, init, method_bucket, record_cache_activity, record_config,
-        record_proxy_outcome, status_class,
+        cache_config_stats, init, method_bucket, record_cache_activity,
+        record_cache_activity_scope, record_config, record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -432,6 +479,29 @@ mod tests {
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="other",tier="other"}"#));
         assert!(!output.contains("attacker-tier"));
         assert!(!output.contains("attacker-event"));
+    }
+
+    #[test]
+    fn records_cache_activity_scope_counter_with_configured_labels() {
+        init().unwrap();
+
+        record_cache_activity_scope("cached", None, "memory", "hit");
+        record_cache_activity_scope("cached", Some("assets"), "disk", "purge");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(
+            r#"fluxheim_cache_activity_scope_total{event="hit",route="",scope="vhost",tier="memory",vhost="cached"}"#
+        ));
+        assert!(output.contains(
+            r#"fluxheim_cache_activity_scope_total{event="purge",route="assets",scope="route",tier="disk",vhost="cached"}"#
+        ));
+        assert!(!output.contains("cache_key"));
+        assert!(!output.contains("path="));
     }
 
     #[test]

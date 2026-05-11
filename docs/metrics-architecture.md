@@ -93,6 +93,7 @@ Current cache baseline:
 - `fluxheim_cache_memory_tiers`
 - `fluxheim_cache_disk_tiers`
 - `fluxheim_cache_activity_total{tier,event}`
+- `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`
 
 The configuration gauges are aggregate, label-free, and populated from
 validated configuration when the metrics listener starts.
@@ -100,9 +101,13 @@ validated configuration when the metrics listener starts.
 `disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
 `store_refusal`, `eviction`, `purge`, `pass`, or `other`. These metrics
 intentionally avoid raw hosts, paths, queries, cache keys, and purge identities.
-Per-vhost and per-route cache runtime metrics should only be added with
-configured-name labels and the same bounded concepts used by admin JSON and
-OpenTelemetry attributes.
+`fluxheim_cache_activity_scope_total` uses the same bounded `tier` and `event`
+labels plus configured-name labels: `scope` is `vhost` or `route`, `vhost` is
+the configured vhost name, and `route` is empty for vhost cache or the
+configured route name for route cache. It intentionally avoids raw `Host`,
+paths, queries, cache keys, and purge identities. Future OpenTelemetry
+attributes should mirror the same low-cardinality concepts used by admin JSON
+and Prometheus.
 
 Latency plan:
 

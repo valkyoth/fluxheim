@@ -1516,9 +1516,23 @@ impl std::fmt::Debug for RuntimeRouteCache {
 
 #[cfg(feature = "cache")]
 impl RuntimeRouteCache {
-    fn from_config(name: &str, config: &crate::config::CacheConfig) -> io::Result<Self> {
-        let pingora_memory_storage = crate::cache::pingora_memory_storage_from_config(config);
-        let pingora_disk_storage = crate::cache::pingora_disk_storage_from_config(config)?;
+    fn from_config(
+        vhost_name: &str,
+        name: &str,
+        config: &crate::config::CacheConfig,
+    ) -> io::Result<Self> {
+        let pingora_memory_storage =
+            crate::cache::pingora_memory_storage_from_config_with_metric_scope(
+                config,
+                vhost_name,
+                Some(name),
+            );
+        let pingora_disk_storage =
+            crate::cache::pingora_disk_storage_from_config_with_metric_scope(
+                config,
+                vhost_name,
+                Some(name),
+            )?;
         let pingora_tiered_storage = pingora_memory_storage
             .zip(pingora_disk_storage)
             .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
@@ -1659,6 +1673,7 @@ impl RuntimeErrorPage {
 
 impl RuntimeRoute {
     fn from_config(
+        vhost_name: &str,
         route: &crate::config::RouteConfig,
         base_headers: &crate::config::HeaderPolicyConfig,
     ) -> io::Result<Self> {
@@ -1710,7 +1725,7 @@ impl RuntimeRoute {
             cache: route
                 .cache
                 .as_ref()
-                .map(|cache| RuntimeRouteCache::from_config(&route.name, cache))
+                .map(|cache| RuntimeRouteCache::from_config(vhost_name, &route.name, cache))
                 .transpose()?,
             request_headers: headers.request,
             response_headers: headers.response,
@@ -1817,9 +1832,15 @@ impl RuntimeVhost {
         #[cfg(feature = "load-balancer")] load_balancer: Option<UpstreamLoadBalancer>,
     ) -> io::Result<Self> {
         #[cfg(feature = "cache")]
-        let pingora_memory_storage = crate::cache::pingora_memory_storage_from_config(&cache);
+        let pingora_memory_storage =
+            crate::cache::pingora_memory_storage_from_config_with_metric_scope(
+                &cache, "default", None,
+            );
         #[cfg(feature = "cache")]
-        let pingora_disk_storage = crate::cache::pingora_disk_storage_from_config(&cache)?;
+        let pingora_disk_storage =
+            crate::cache::pingora_disk_storage_from_config_with_metric_scope(
+                &cache, "default", None,
+            )?;
         #[cfg(feature = "cache")]
         let pingora_tiered_storage = pingora_memory_storage
             .zip(pingora_disk_storage)
@@ -1891,13 +1912,23 @@ impl RuntimeVhost {
                 .into_iter()
                 .chain(vhost.routes.iter().cloned())
                 .chain(vhost.redirect.route_config())
-                .map(|route| RuntimeRoute::from_config(&route, &route_base_headers))
+                .map(|route| RuntimeRoute::from_config(&vhost.name, &route, &route_base_headers))
                 .collect::<io::Result<Vec<_>>>()?,
         );
         #[cfg(feature = "cache")]
-        let pingora_memory_storage = crate::cache::pingora_memory_storage_from_config(&vhost.cache);
+        let pingora_memory_storage =
+            crate::cache::pingora_memory_storage_from_config_with_metric_scope(
+                &vhost.cache,
+                &vhost.name,
+                None,
+            );
         #[cfg(feature = "cache")]
-        let pingora_disk_storage = crate::cache::pingora_disk_storage_from_config(&vhost.cache)?;
+        let pingora_disk_storage =
+            crate::cache::pingora_disk_storage_from_config_with_metric_scope(
+                &vhost.cache,
+                &vhost.name,
+                None,
+            )?;
         #[cfg(feature = "cache")]
         let pingora_tiered_storage = pingora_memory_storage
             .zip(pingora_disk_storage)

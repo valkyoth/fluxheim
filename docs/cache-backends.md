@@ -192,7 +192,10 @@ internal cache implementation.
   bounded index cap.
   Prometheus `fluxheim_cache_activity_total{tier="policy",event="pass"}`
   records opt-in pass-cache bypass decisions without cache keys, hosts, or
-  paths.
+  paths. Prometheus also exposes
+  `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}` for
+  configured vhost and route cache activity using only configured names and
+  bounded tier/event labels.
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as

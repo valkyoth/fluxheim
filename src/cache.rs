@@ -143,6 +143,8 @@ pub struct CacheActivityStats {
 #[derive(Debug)]
 struct CacheActivityCounters {
     tier: &'static str,
+    #[cfg(feature = "metrics")]
+    scope: Option<CacheActivityScope>,
     hits: std::sync::atomic::AtomicU64,
     misses: std::sync::atomic::AtomicU64,
     stores: std::sync::atomic::AtomicU64,
@@ -151,11 +153,20 @@ struct CacheActivityCounters {
     purges: std::sync::atomic::AtomicU64,
 }
 
+#[cfg(all(feature = "proxy", feature = "metrics"))]
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CacheActivityScope {
+    vhost: String,
+    route: Option<String>,
+}
+
 #[cfg(feature = "proxy")]
 impl CacheActivityCounters {
     fn new(tier: &'static str) -> Self {
         Self {
             tier,
+            #[cfg(feature = "metrics")]
+            scope: None,
             hits: std::sync::atomic::AtomicU64::new(0),
             misses: std::sync::atomic::AtomicU64::new(0),
             stores: std::sync::atomic::AtomicU64::new(0),
@@ -163,6 +174,21 @@ impl CacheActivityCounters {
             evictions: std::sync::atomic::AtomicU64::new(0),
             purges: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    fn new_with_metric_scope(tier: &'static str, vhost: &str, route: Option<&str>) -> Self {
+        let counters = Self::new(tier);
+        #[cfg(feature = "metrics")]
+        let counters = Self {
+            scope: Some(CacheActivityScope {
+                vhost: vhost.to_owned(),
+                route: route.map(str::to_owned),
+            }),
+            ..counters
+        };
+        #[cfg(not(feature = "metrics"))]
+        let _ = (vhost, route);
+        counters
     }
 
     fn snapshot(&self) -> CacheActivityStats {
@@ -226,7 +252,17 @@ impl CacheActivityCounters {
 
     fn record(&self, _event: &'static str) {
         #[cfg(feature = "metrics")]
-        crate::metrics::record_cache_activity(self.tier, _event);
+        {
+            crate::metrics::record_cache_activity(self.tier, _event);
+            if let Some(scope) = &self.scope {
+                crate::metrics::record_cache_activity_scope(
+                    scope.vhost.as_str(),
+                    scope.route.as_deref(),
+                    self.tier,
+                    _event,
+                );
+            }
+        }
         #[cfg(not(feature = "metrics"))]
         let _ = self.tier;
     }
@@ -604,7 +640,40 @@ impl PingoraMemoryStorage {
         Self::new(plan.max_size_bytes, plan.max_object_bytes)
     }
 
+    pub fn from_plan_with_metric_scope(
+        plan: MemoryTierPlan,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> Self {
+        Self::new_with_metric_scope(plan.max_size_bytes, plan.max_object_bytes, vhost, route)
+    }
+
     pub fn new(max_size_bytes: ByteSize, max_object_bytes: ByteSize) -> Self {
+        Self::new_with_activity(
+            max_size_bytes,
+            max_object_bytes,
+            CacheActivityCounters::new("memory"),
+        )
+    }
+
+    fn new_with_metric_scope(
+        max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> Self {
+        Self::new_with_activity(
+            max_size_bytes,
+            max_object_bytes,
+            CacheActivityCounters::new_with_metric_scope("memory", vhost, route),
+        )
+    }
+
+    fn new_with_activity(
+        max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+        activity: CacheActivityCounters,
+    ) -> Self {
         let inner = moka::sync::Cache::builder()
             .max_capacity(max_size_bytes.as_u64())
             .weigher(|_key: &String, value: &PingoraStoredObject| value.weight)
@@ -614,7 +683,7 @@ impl PingoraMemoryStorage {
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
-            activity: CacheActivityCounters::new("memory"),
+            activity,
         }
     }
 
@@ -813,10 +882,53 @@ impl PingoraDiskStorage {
         Self::new(plan.path, plan.max_size_bytes, plan.max_object_bytes)
     }
 
+    pub fn from_plan_with_metric_scope(
+        plan: DiskTierPlan,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> std::io::Result<Self> {
+        Self::new_with_metric_scope(
+            plan.path,
+            plan.max_size_bytes,
+            plan.max_object_bytes,
+            vhost,
+            route,
+        )
+    }
+
     pub fn new(
         root: PathBuf,
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
+    ) -> std::io::Result<Self> {
+        Self::new_with_activity(
+            root,
+            max_size_bytes,
+            max_object_bytes,
+            CacheActivityCounters::new("disk"),
+        )
+    }
+
+    fn new_with_metric_scope(
+        root: PathBuf,
+        max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> std::io::Result<Self> {
+        Self::new_with_activity(
+            root,
+            max_size_bytes,
+            max_object_bytes,
+            CacheActivityCounters::new_with_metric_scope("disk", vhost, route),
+        )
+    }
+
+    fn new_with_activity(
+        root: PathBuf,
+        max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+        activity: CacheActivityCounters,
     ) -> std::io::Result<Self> {
         let root = prepare_disk_cache_root(&root)?;
         let storage = Self {
@@ -824,7 +936,7 @@ impl PingoraDiskStorage {
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
             max_size_bytes,
             max_object_bytes,
-            activity: CacheActivityCounters::new("disk"),
+            activity,
         };
         storage.rebuild_purge_index()?;
         Ok(storage)
@@ -1568,6 +1680,19 @@ pub fn pingora_memory_storage_from_config(
 }
 
 #[cfg(feature = "proxy")]
+pub fn pingora_memory_storage_from_config_with_metric_scope(
+    config: &CacheConfig,
+    vhost: &str,
+    route: Option<&str>,
+) -> Option<&'static PingoraMemoryStorage> {
+    storage_plan(config).memory.map(|plan| {
+        Box::leak(Box::new(PingoraMemoryStorage::from_plan_with_metric_scope(
+            plan, vhost, route,
+        ))) as &'static PingoraMemoryStorage
+    })
+}
+
+#[cfg(feature = "proxy")]
 pub fn pingora_memory_storage_from_plan(plan: MemoryTierPlan) -> &'static PingoraMemoryStorage {
     Box::leak(Box::new(PingoraMemoryStorage::from_plan(plan)))
 }
@@ -1580,6 +1705,21 @@ pub fn pingora_disk_storage_from_config(
         .disk
         .map(|plan| {
             PingoraDiskStorage::from_plan(plan)
+                .map(|storage| Box::leak(Box::new(storage)) as &'static PingoraDiskStorage)
+        })
+        .transpose()
+}
+
+#[cfg(feature = "proxy")]
+pub fn pingora_disk_storage_from_config_with_metric_scope(
+    config: &CacheConfig,
+    vhost: &str,
+    route: Option<&str>,
+) -> std::io::Result<Option<&'static PingoraDiskStorage>> {
+    storage_plan(config)
+        .disk
+        .map(|plan| {
+            PingoraDiskStorage::from_plan_with_metric_scope(plan, vhost, route)
                 .map(|storage| Box::leak(Box::new(storage)) as &'static PingoraDiskStorage)
         })
         .transpose()
