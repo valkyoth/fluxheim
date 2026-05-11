@@ -158,15 +158,17 @@ internal cache implementation.
   still resolve under the canonical cache root before opening a no-follow
   same-directory temp file and renaming it into place. Symlinked cache roots,
   cache roots below symlinked parent directories, object files, write
-  destinations, and shard escapes are refused. Eviction scans also use
-  non-following metadata, ignore symlinked shards or objects, and fail closed
-  when a scan exceeds 100000 cache objects so cache stats or eviction cannot
+  destinations, and shard escapes are refused. Eviction scans walk the
+  deterministic `00` through `ff` shard set instead of enumerating arbitrary
+  cache-root children, ignore symlinked shards or objects, and fail closed when
+  a scan exceeds 100000 cache objects so cache stats or eviction cannot
   allocate an unbounded entry list. Purge, invalid-object cleanup, and eviction
   re-check the target immediately before deletion and only remove regular
   `.fhc` cache objects. Shard directories and object files must be symlink-free,
   even when a symlink points back inside the cache root; mount or configure the
   real cache directory path. Startup removes stale Fluxheim-owned disk-cache
-  temp files after a conservative age threshold, while ignoring unrelated files
+  temp files from the root temp directory and deterministic shard temp
+  locations after a conservative age threshold, while ignoring unrelated files
   and fresh temp files so snapshot reloads do not race active cache writers.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On

@@ -2159,18 +2159,102 @@ fn cache_path_contains_symlink(root: &Path, path: &Path) -> std::io::Result<bool
         return Ok(true);
     };
 
-    let mut current = root.to_path_buf();
     for component in relative.components() {
-        current.push(component);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Ok(true);
         }
     }
 
-    Ok(false)
+    let expected = root.join(relative);
+    let mut current = expected.as_path();
+    loop {
+        match current.canonicalize() {
+            Ok(canonical) => return Ok(canonical != current),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let Some(parent) = current.parent() else {
+                    return Ok(false);
+                };
+                current = parent;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone)]
+struct SafeCacheScanDir {
+    path: PathBuf,
+}
+
+#[cfg(feature = "proxy")]
+impl SafeCacheScanDir {
+    fn as_path(&self) -> &Path {
+        &self.path
+    }
+
+    fn read_entries(&self) -> std::io::Result<std::fs::ReadDir> {
+        std::fs::read_dir(&self.path)
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn safe_existing_cache_scan_dir(
+    root: &Path,
+    path: &Path,
+) -> std::io::Result<Option<SafeCacheScanDir>> {
+    if cache_path_contains_symlink(root, path)? {
+        return Ok(None);
+    }
+    let canonical = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if canonical.starts_with(root) && canonical.is_dir() {
+        Ok(Some(SafeCacheScanDir { path: canonical }))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn disk_cache_shard_dirs(root: &Path) -> std::io::Result<Vec<SafeCacheScanDir>> {
+    let mut dirs = Vec::new();
+    for high in b"0123456789abcdef" {
+        for low in b"0123456789abcdef" {
+            let shard = [*high as char, *low as char].iter().collect::<String>();
+            if let Some(dir) = safe_existing_cache_scan_dir(root, &root.join(shard))? {
+                dirs.push(dir);
+            }
+        }
+    }
+    Ok(dirs)
+}
+
+#[cfg(feature = "proxy")]
+fn disk_cache_temp_dir(root: &Path) -> std::io::Result<Option<SafeCacheScanDir>> {
+    safe_existing_cache_scan_dir(root, &root.join("tmp"))
+}
+
+#[cfg(feature = "proxy")]
+fn symlink_free_regular_metadata(
+    root: &Path,
+    path: &Path,
+) -> std::io::Result<Option<std::fs::Metadata>> {
+    if cache_path_contains_symlink(root, path)? {
+        return Ok(None);
+    }
+    let metadata = match path.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if metadata.is_file() {
+        Ok(Some(metadata))
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2269,14 +2353,11 @@ const MAX_DISK_CACHE_SCAN_ENTRIES: usize = 8;
 #[cfg(feature = "proxy")]
 fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
     let mut entries = Vec::new();
-    for shard in std::fs::read_dir(root)? {
-        let shard = shard?;
-        let Some(shard_path) = safe_cache_shard_entry_path(root, &shard)? else {
-            continue;
-        };
-        for entry in std::fs::read_dir(&shard_path)? {
+    for shard in disk_cache_shard_dirs(root)? {
+        for entry in shard.read_entries()? {
             let entry = entry?;
-            let Some((path, metadata)) = safe_cache_object_entry(root, &shard_path, &entry)? else {
+            let Some((path, metadata)) = safe_cache_object_entry(root, shard.as_path(), &entry)?
+            else {
                 continue;
             };
             if entries.len() >= MAX_DISK_CACHE_SCAN_ENTRIES {
@@ -2296,37 +2377,6 @@ fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
         }
     }
     Ok(entries)
-}
-
-#[cfg(feature = "proxy")]
-fn safe_cache_shard_entry_path(
-    root: &Path,
-    entry: &std::fs::DirEntry,
-) -> std::io::Result<Option<PathBuf>> {
-    let file_type = entry.file_type()?;
-    if file_type.is_symlink() || !file_type.is_dir() {
-        return Ok(None);
-    }
-
-    let file_name = entry.file_name();
-    let Some(name) = file_name.to_str() else {
-        return Ok(None);
-    };
-    if name.len() != 2 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Ok(None);
-    }
-
-    let path = root.join(name);
-    if cache_path_contains_symlink(root, &path)? {
-        return Ok(None);
-    }
-
-    let canonical = path.canonicalize()?;
-    if canonical.starts_with(root) && canonical.is_dir() {
-        Ok(Some(canonical))
-    } else {
-        Ok(None)
-    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2376,17 +2426,12 @@ fn cleanup_stale_disk_cache_temp_files(
 ) -> std::io::Result<usize> {
     let mut removed = 0_usize;
 
-    let temp_dir = root.join("tmp");
-    if let Some(temp_dir) = safe_cache_temp_dir(root, &temp_dir)? {
+    if let Some(temp_dir) = disk_cache_temp_dir(root)? {
         removed =
             removed.saturating_add(cleanup_stale_disk_cache_temp_dir(root, &temp_dir, min_age)?);
     }
 
-    for shard in std::fs::read_dir(root)? {
-        let shard = shard?;
-        let Some(shard_path) = safe_cache_shard_entry_path(root, &shard)? else {
-            continue;
-        };
+    for shard_path in disk_cache_shard_dirs(root)? {
         removed = removed.saturating_add(cleanup_stale_disk_cache_temp_dir(
             root,
             &shard_path,
@@ -2398,35 +2443,14 @@ fn cleanup_stale_disk_cache_temp_files(
 }
 
 #[cfg(feature = "proxy")]
-fn safe_cache_temp_dir(root: &Path, path: &Path) -> std::io::Result<Option<PathBuf>> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Ok(None);
-    }
-    if cache_path_contains_symlink(root, path)? {
-        return Ok(None);
-    }
-    let canonical = path.canonicalize()?;
-    if canonical.starts_with(root) && canonical.is_dir() {
-        Ok(Some(canonical))
-    } else {
-        Ok(None)
-    }
-}
-
-#[cfg(feature = "proxy")]
 fn cleanup_stale_disk_cache_temp_dir(
     root: &Path,
-    dir: &Path,
+    dir: &SafeCacheScanDir,
     min_age: std::time::Duration,
 ) -> std::io::Result<usize> {
     let mut removed = 0_usize;
     let now = std::time::SystemTime::now();
-    for entry in std::fs::read_dir(dir)? {
+    for entry in dir.read_entries()? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         if file_type.is_symlink() || !file_type.is_file() {
@@ -2439,7 +2463,7 @@ fn cleanup_stale_disk_cache_temp_dir(
         if !is_fluxheim_disk_cache_temp_name(name) {
             continue;
         }
-        let path = dir.join(name);
+        let path = dir.as_path().join(name);
         if cache_path_contains_symlink(root, &path)? {
             continue;
         }
@@ -2447,10 +2471,9 @@ fn cleanup_stale_disk_cache_temp_dir(
         if !canonical.starts_with(root) {
             continue;
         }
-        let metadata = std::fs::symlink_metadata(&canonical)?;
-        if !metadata.is_file() {
+        let Some(metadata) = symlink_free_regular_metadata(root, &canonical)? else {
             continue;
-        }
+        };
         let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
         let age = now
             .duration_since(modified)
