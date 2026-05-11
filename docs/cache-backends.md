@@ -14,6 +14,11 @@ internal cache implementation.
   runtime vhost policy.
 - `cache.disk.path` and `cache.disk.max_size_bytes` are retained in the storage
   plan after config-path resolution.
+- The disk tier currently stores one object per filesystem-managed cache file.
+  This keeps the implementation portable, inspectable, and easy to recover. A
+  future advanced backend may add slab/bin storage with pre-allocated data
+  files to reduce filesystem overhead and fragmentation on very large,
+  high-churn caches.
 - Enabled tier budgets must be at least as large as `cache.max_object_bytes`.
 - `cache.enabled = true` requires at least one storage tier.
 - The proxy emits vhost-aware Pingora cache keys and enables Pingora `HttpCache`

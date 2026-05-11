@@ -557,6 +557,12 @@ Beta scope:
   metadata, TTL, headers, and purge-index entries.
 - Varnish-style ban predicates for metadata-based invalidation, if they can be
   made bounded, auditable, and admin-protected.
+- Optional slab/bin disk storage backend for large, high-churn caches:
+  pre-allocate large data files, store objects in fixed-size or classed extents,
+  maintain a durable free map and object index, support crash recovery and
+  compaction, and expose fragmentation/space-amplification metrics. This should
+  remain an advanced backend; the filesystem object backend stays the portable
+  default until slab storage proves safer and faster in production tests.
 - Programmable cache policy hooks remain a later Wasm design problem; the
   default cache model should stay declarative and safe.
 
