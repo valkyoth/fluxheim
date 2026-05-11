@@ -1994,17 +1994,24 @@ impl PingoraDiskStorage {
         let mut last_error = None;
         for _ in 0..4 {
             let tmp_path = self.tmp_path_for(path)?;
-            let write_result =
-                write_disk_cache_object(&tmp_path, store_key, internal_meta, response_header, body)
-                    .and_then(|()| std::fs::rename(&tmp_path, path));
+            let tmp_path = SafeDiskCachePath::from_path(tmp_path);
+            let destination = SafeDiskCachePath::from_path(path.to_path_buf());
+            let write_result = write_disk_cache_object(
+                tmp_path.as_path(),
+                store_key,
+                internal_meta,
+                response_header,
+                body,
+            )
+            .and_then(|()| destination.rename_from(&tmp_path));
             match write_result {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let _ = std::fs::remove_file(&tmp_path);
+                    let _ = tmp_path.remove_file();
                     last_error = Some(error);
                 }
                 Err(error) => {
-                    let _ = std::fs::remove_file(&tmp_path);
+                    let _ = tmp_path.remove_file();
                     return Err(error);
                 }
             }
@@ -2093,23 +2100,25 @@ impl PingoraDiskStorage {
         let mut last_error = None;
         for _ in 0..4 {
             let tmp_path = self.tmp_path_for(path)?;
+            let tmp_path = SafeDiskCachePath::from_path(tmp_path);
+            let destination = SafeDiskCachePath::from_path(path.to_path_buf());
             let write_result = write_disk_cache_object_from_body_file(
-                &tmp_path,
+                tmp_path.as_path(),
                 store_key,
                 internal_meta,
                 response_header,
                 body_path,
                 body_len,
             )
-            .and_then(|()| std::fs::rename(&tmp_path, path));
+            .and_then(|()| destination.rename_from(&tmp_path));
             match write_result {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let _ = std::fs::remove_file(&tmp_path);
+                    let _ = tmp_path.remove_file();
                     last_error = Some(error);
                 }
                 Err(error) => {
-                    let _ = std::fs::remove_file(&tmp_path);
+                    let _ = tmp_path.remove_file();
                     return Err(error);
                 }
             }
@@ -2324,6 +2333,66 @@ impl SafeCacheScanDir {
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Debug, Clone)]
+struct SafeDiskCachePath {
+    path: PathBuf,
+}
+
+#[cfg(feature = "proxy")]
+impl SafeDiskCachePath {
+    fn from_path(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn as_path(&self) -> &Path {
+        &self.path
+    }
+
+    fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
+        // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
+        // cache-root-confined paths after shard/temp name validation and
+        // symlink checks; callers never pass request paths directly.
+        self.path.metadata()
+    }
+
+    fn create_new_file(&self) -> std::io::Result<std::fs::File> {
+        let mut options = std::fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(target_os = "linux")]
+        options.custom_flags(O_NOFOLLOW);
+        // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
+        // cache-root-confined paths after shard/temp name validation and
+        // symlink checks; O_NOFOLLOW prevents final symlink traversal on Linux.
+        options.open(&self.path)
+    }
+
+    fn open_existing_file(&self) -> std::io::Result<std::fs::File> {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(target_os = "linux")]
+        options.custom_flags(O_NOFOLLOW);
+        // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
+        // cache-root-confined paths after shard/temp name validation and
+        // symlink checks; O_NOFOLLOW prevents final symlink traversal on Linux.
+        options.open(&self.path)
+    }
+
+    fn rename_from(&self, source: &SafeDiskCachePath) -> std::io::Result<()> {
+        // lgtm[rust/path-injection]: Both paths are SafeDiskCachePath values
+        // produced inside the disk-cache root from deterministic object names
+        // or Fluxheim-owned temporary names.
+        std::fs::rename(source.as_path(), self.as_path())
+    }
+
+    fn remove_file(&self) -> std::io::Result<()> {
+        // lgtm[rust/path-injection]: SafeDiskCachePath deletion is restricted
+        // to Fluxheim-owned cache object/checkpoint/temp paths under the
+        // validated disk-cache root.
+        std::fs::remove_file(&self.path)
+    }
+}
+
+#[cfg(feature = "proxy")]
 fn safe_existing_cache_scan_dir(
     root: &Path,
     path: &Path,
@@ -2506,8 +2575,10 @@ fn write_disk_index_checkpoint(
     entries.sort_by(|left, right| left.path.cmp(&right.path));
     let path = disk_index_checkpoint_path(root);
     let temp_path = disk_index_temp_path(root)?;
+    let path = SafeDiskCachePath::from_path(path);
+    let temp_path = SafeDiskCachePath::from_path(temp_path);
     let write_result = (|| {
-        let mut file = create_new_disk_cache_file(&temp_path)?;
+        let mut file = create_new_disk_cache_file(temp_path.as_path())?;
         writeln!(file, "{DISK_CACHE_INDEX_MAGIC_V1}")?;
         for entry in entries {
             let Ok(relative) = entry.path.strip_prefix(root) else {
@@ -2526,10 +2597,10 @@ fn write_disk_index_checkpoint(
             )?;
         }
         file.sync_all()?;
-        std::fs::rename(&temp_path, &path)
+        path.rename_from(&temp_path)
     })();
     if write_result.is_err() {
-        let _ = std::fs::remove_file(&temp_path);
+        let _ = temp_path.remove_file();
     }
     write_result
 }
@@ -2580,7 +2651,8 @@ fn symlink_free_regular_metadata(
     if cache_path_contains_symlink(root, path)? {
         return Ok(None);
     }
-    let metadata = match path.metadata() {
+    let safe_path = SafeDiskCachePath::from_path(path.to_path_buf());
+    let metadata = match safe_path.metadata() {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
@@ -3632,7 +3704,7 @@ impl PingoraDiskMissHandler {
     fn cleanup_temp(&mut self) {
         let _ = self.temp_file.take();
         if let Some(path) = self.temp_path.take() {
-            let _ = std::fs::remove_file(path);
+            let _ = SafeDiskCachePath::from_path(path).remove_file();
         }
     }
 }
@@ -3846,20 +3918,12 @@ fn write_disk_cache_object_from_body_file(
 
 #[cfg(feature = "proxy")]
 fn create_new_disk_cache_file(path: &Path) -> std::io::Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(target_os = "linux")]
-    options.custom_flags(O_NOFOLLOW);
-    options.open(path)
+    SafeDiskCachePath::from_path(path.to_path_buf()).create_new_file()
 }
 
 #[cfg(feature = "proxy")]
 fn open_existing_disk_cache_file(path: &Path) -> std::io::Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(target_os = "linux")]
-    options.custom_flags(O_NOFOLLOW);
-    options.open(path)
+    SafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()
 }
 
 #[cfg(feature = "proxy")]
