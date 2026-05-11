@@ -435,6 +435,7 @@ Stable scope:
     so operators can verify stampede-protection and storage policy for the
     exact vhost or route that a request matches. `cache-key` can also fail
     closed with `--expect-eligible`, `--expect-cache-lock-enabled`,
+    `--expect-cache-lock-wait-timeout-secs`,
     `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
     `--expect-storage-tiers`, plus `--expect-scope`, `--expect-vhost`,
     `--expect-route`, `--expect-namespace`, `--expect-key-namespace`, and
@@ -447,6 +448,7 @@ Stable scope:
     checks with `--require-object`, `--expect-tier`, `--expect-status`,
     `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
     `--expect-header-name`, `--expect-cache-lock-enabled`,
+    `--expect-cache-lock-wait-timeout-secs`,
     `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
     `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,
     `--expect-route`, `--expect-namespace`, `--expect-key-namespace`,

@@ -292,7 +292,7 @@ stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
 cache tags, stored header names, exact object count, cache-lock/tier layout, stale-serving
 eligibility, selected cache scope/vhost/route, internal namespace,
-operator key namespace, user tag, negative policy reasons,
+operator key namespace, user tag, cache-lock wait timeout, negative policy reasons,
 purge-index reachability, and fresh/stale/expired state. Remaining `1.2`
 hardening focuses on proxy revalidation edge cases, large-object
 range/slice fill, very large disk-cache loader/purger behavior,

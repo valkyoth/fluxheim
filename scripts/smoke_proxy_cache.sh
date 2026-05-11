@@ -442,6 +442,7 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
     --path /asset.png \
     --expect-eligible \
     --expect-cache-lock-enabled \
+    --expect-cache-lock-wait-timeout-secs 30 \
     --expect-memory-tier-enabled \
     --expect-disk-tier-enabled \
     --expect-scope vhost \
@@ -465,6 +466,7 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
     --path /swr.png \
     --expect-eligible \
     --expect-cache-lock-enabled \
+    --expect-cache-lock-wait-timeout-secs 30 \
     --expect-scope route \
     --expect-vhost cache.test \
     --expect-route swr \
@@ -852,6 +854,7 @@ fi
     --path /revalidate.png \
     --require-object \
     --expect-tier disk \
+    --expect-cache-lock-wait-timeout-secs 30 \
     --expect-namespace fluxheim-image-v1 \
     --expect-key-namespace cache-vhost-v1 \
     --expect-user-tag cache.test \

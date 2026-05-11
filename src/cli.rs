@@ -226,6 +226,10 @@ pub enum CliCommand {
         #[arg(long)]
         expect_cache_lock_enabled: bool,
 
+        /// Required cache-lock wait timeout in seconds for the selected cache policy.
+        #[arg(long = "expect-cache-lock-wait-timeout-secs", value_name = "SECONDS")]
+        expect_cache_lock_wait_timeout_secs: Option<u64>,
+
         /// Require the selected cache policy to have a memory cache tier.
         #[arg(long)]
         expect_memory_tier_enabled: bool,
@@ -336,6 +340,10 @@ pub enum CliCommand {
         /// Require the selected cache policy to have cache locking enabled.
         #[arg(long)]
         expect_cache_lock_enabled: bool,
+
+        /// Required cache-lock wait timeout in seconds for the selected cache policy.
+        #[arg(long = "expect-cache-lock-wait-timeout-secs", value_name = "SECONDS")]
+        expect_cache_lock_wait_timeout_secs: Option<u64>,
 
         /// Require the selected cache policy to have a memory cache tier.
         #[arg(long)]
@@ -595,6 +603,7 @@ fn run_command(
             expect_ineligible,
             expect_reason,
             expect_cache_lock_enabled,
+            expect_cache_lock_wait_timeout_secs,
             expect_memory_tier_enabled,
             expect_disk_tier_enabled,
             expect_storage_tiers,
@@ -615,6 +624,7 @@ fn run_command(
             expect_ineligible: *expect_ineligible,
             expect_reason: expect_reason.clone(),
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
+            expect_cache_lock_wait_timeout_secs: *expect_cache_lock_wait_timeout_secs,
             expect_memory_tier_enabled: *expect_memory_tier_enabled,
             expect_disk_tier_enabled: *expect_disk_tier_enabled,
             expect_storage_tiers: *expect_storage_tiers,
@@ -644,6 +654,7 @@ fn run_command(
             expect_cache_tags,
             expect_purge_indexed,
             expect_cache_lock_enabled,
+            expect_cache_lock_wait_timeout_secs,
             expect_memory_tier_enabled,
             expect_disk_tier_enabled,
             expect_storage_tiers,
@@ -675,6 +686,7 @@ fn run_command(
             expect_cache_tags: expect_cache_tags.clone(),
             expect_purge_indexed: *expect_purge_indexed,
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
+            expect_cache_lock_wait_timeout_secs: *expect_cache_lock_wait_timeout_secs,
             expect_memory_tier_enabled: *expect_memory_tier_enabled,
             expect_disk_tier_enabled: *expect_disk_tier_enabled,
             expect_storage_tiers: *expect_storage_tiers,
@@ -721,6 +733,7 @@ struct CacheKeyOptions<'a> {
     expect_ineligible: bool,
     expect_reason: Option<String>,
     expect_cache_lock_enabled: bool,
+    expect_cache_lock_wait_timeout_secs: Option<u64>,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
@@ -753,6 +766,7 @@ struct CacheLookupOptions<'a> {
     expect_cache_tags: Vec<String>,
     expect_purge_indexed: bool,
     expect_cache_lock_enabled: bool,
+    expect_cache_lock_wait_timeout_secs: Option<u64>,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
@@ -1065,6 +1079,7 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
             expect_ineligible: options.expect_ineligible,
             expected_reason: expected_reason.as_deref(),
             expect_cache_lock_enabled: options.expect_cache_lock_enabled,
+            expected_cache_lock_wait_timeout_secs: options.expect_cache_lock_wait_timeout_secs,
             expect_memory_tier_enabled: options.expect_memory_tier_enabled,
             expect_disk_tier_enabled: options.expect_disk_tier_enabled,
             expect_storage_tiers: options.expect_storage_tiers,
@@ -1127,6 +1142,7 @@ struct CacheKeyPreviewExpectations<'a> {
     expect_ineligible: bool,
     expected_reason: Option<&'a str>,
     expect_cache_lock_enabled: bool,
+    expected_cache_lock_wait_timeout_secs: Option<u64>,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
@@ -1158,6 +1174,15 @@ fn validate_cache_key_preview_expectations(
     }
     if expectations.expect_cache_lock_enabled && !preview.cache_lock_enabled {
         return Err("cache-key expected cache lock enabled, found false".into());
+    }
+    if let Some(expected_timeout) = expectations.expected_cache_lock_wait_timeout_secs
+        && preview.cache_lock_wait_timeout_secs != expected_timeout
+    {
+        return Err(format!(
+            "cache-key expected cache lock wait timeout seconds {expected_timeout}, found {}",
+            preview.cache_lock_wait_timeout_secs
+        )
+        .into());
     }
     if expectations.expect_memory_tier_enabled && !preview.memory_tier_enabled {
         return Err("cache-key expected memory tier enabled, found false".into());
@@ -1241,6 +1266,7 @@ fn run_cache_lookup_command(
         expect_ineligible: false,
         expect_reason: None,
         expect_cache_lock_enabled: false,
+        expect_cache_lock_wait_timeout_secs: None,
         expect_memory_tier_enabled: false,
         expect_disk_tier_enabled: false,
         expect_storage_tiers: None,
@@ -1309,6 +1335,7 @@ fn run_cache_lookup_command(
         expect_ineligible: options.expect_ineligible,
         expected_reason: expected_reason.as_deref(),
         expect_cache_lock_enabled: options.expect_cache_lock_enabled,
+        expected_cache_lock_wait_timeout_secs: options.expect_cache_lock_wait_timeout_secs,
         expect_memory_tier_enabled: options.expect_memory_tier_enabled,
         expect_disk_tier_enabled: options.expect_disk_tier_enabled,
         expect_storage_tiers: options.expect_storage_tiers,
@@ -1493,6 +1520,7 @@ struct CacheLookupExpectations<'a> {
     expect_ineligible: bool,
     expected_reason: Option<&'a str>,
     expect_cache_lock_enabled: bool,
+    expected_cache_lock_wait_timeout_secs: Option<u64>,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
@@ -1525,6 +1553,7 @@ fn validate_cache_lookup_expectations(
         expect_ineligible,
         expected_reason,
         expect_cache_lock_enabled,
+        expected_cache_lock_wait_timeout_secs,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -1545,6 +1574,7 @@ fn validate_cache_lookup_expectations(
             expect_ineligible: *expect_ineligible,
             expected_reason: *expected_reason,
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
+            expected_cache_lock_wait_timeout_secs: *expected_cache_lock_wait_timeout_secs,
             expect_memory_tier_enabled: *expect_memory_tier_enabled,
             expect_disk_tier_enabled: *expect_disk_tier_enabled,
             expect_storage_tiers: *expect_storage_tiers,
@@ -1971,6 +2001,7 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_ineligible,
         expect_reason,
         expect_cache_lock_enabled,
+        expect_cache_lock_wait_timeout_secs,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -1992,6 +2023,7 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_ineligible,
         expect_reason,
         expect_cache_lock_enabled,
+        expect_cache_lock_wait_timeout_secs,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -2029,6 +2061,7 @@ fn run_cache_lookup_command(
         expect_cache_tags,
         expect_purge_indexed,
         expect_cache_lock_enabled,
+        expect_cache_lock_wait_timeout_secs,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -2056,6 +2089,7 @@ fn run_cache_lookup_command(
         expect_cache_tags,
         expect_purge_indexed,
         expect_cache_lock_enabled,
+        expect_cache_lock_wait_timeout_secs,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
@@ -3764,6 +3798,7 @@ mod tests {
             expect_ineligible: false,
             expected_reason: None,
             expect_cache_lock_enabled: false,
+            expected_cache_lock_wait_timeout_secs: None,
             expect_memory_tier_enabled: false,
             expect_disk_tier_enabled: false,
             expect_storage_tiers: None,
@@ -3791,6 +3826,7 @@ mod tests {
                     expected_cache_tags: &["asset:logo".to_owned()],
                     expect_purge_indexed: true,
                     expect_cache_lock_enabled: true,
+                    expected_cache_lock_wait_timeout_secs: Some(30),
                     expect_memory_tier_enabled: true,
                     expect_storage_tiers: Some(1),
                     expect_serve_stale_while_revalidate: true,
@@ -4077,6 +4113,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: true,
+                    expected_cache_lock_wait_timeout_secs: Some(30),
                     expect_memory_tier_enabled: true,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: Some(1),
@@ -4098,6 +4135,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: true,
                     expect_storage_tiers: None,
@@ -4121,6 +4159,31 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: Some(5),
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected cache lock wait timeout seconds 5, found 30")
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
+                    expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: Some(2),
@@ -4144,6 +4207,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4167,6 +4231,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4190,6 +4255,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4213,6 +4279,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4236,6 +4303,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4259,6 +4327,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4282,6 +4351,7 @@ mod tests {
                     expect_ineligible: true,
                     expected_reason: None,
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4308,6 +4378,7 @@ mod tests {
                     expect_ineligible: true,
                     expected_reason: Some("method HEAD currently bypasses proxy cache storage"),
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
@@ -4329,6 +4400,7 @@ mod tests {
                     expect_ineligible: false,
                     expected_reason: Some("other"),
                     expect_cache_lock_enabled: false,
+                    expected_cache_lock_wait_timeout_secs: None,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: None,
