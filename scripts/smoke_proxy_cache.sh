@@ -454,7 +454,9 @@ stop_origin() {
 
 admin_status_body="$TMP_DIR/admin-status.json"
 admin_stale_dry_run_body="$TMP_DIR/admin-stale-dry-run.json"
+admin_prefix_purge_body="$TMP_DIR/admin-prefix-purge.json"
 admin_tag_purge_body="$TMP_DIR/admin-tag-purge.json"
+admin_wildcard_purge_body="$TMP_DIR/admin-wildcard-purge.json"
 
 start_fluxheim
 
@@ -1517,6 +1519,35 @@ if ! grep -q '"purged":0' "$admin_stale_dry_run_body"; then
     exit 1
 fi
 
+if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_prefix_purge_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-prefix?vhost=cache.test&path_prefix=/warm-&limit=16"; then
+    echo "proxy cache smoke failed: admin prefix purge request failed" >&2
+    cat "$admin_prefix_purge_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$admin_prefix_purge_body"; then
+    echo "proxy cache smoke failed: admin prefix purge did not return ok" >&2
+    cat "$admin_prefix_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"path_prefix":"/warm-"' "$admin_prefix_purge_body"; then
+    echo "proxy cache smoke failed: admin prefix purge did not echo bounded prefix" >&2
+    cat "$admin_prefix_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"purged":1' "$admin_prefix_purge_body"; then
+    echo "proxy cache smoke failed: admin prefix purge did not remove warmed Vary object" >&2
+    cat "$admin_prefix_purge_body" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --header "Accept-Language: de" \
+    --path /warm-vary.png \
+    --expect-objects 0
+
 if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_tag_purge_body" \
     -H "Authorization: Bearer secret-token" \
     "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-tag?vhost=cache.test&cache_tag=smoke:input-warm&limit=16"; then
@@ -1543,6 +1574,34 @@ fi
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
     --path /input-warm.png \
+    --expect-objects 0
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_wildcard_purge_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-wildcard?vhost=cache.test&pattern=/missing*.png&limit=16"; then
+    echo "proxy cache smoke failed: admin wildcard purge request failed" >&2
+    cat "$admin_wildcard_purge_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$admin_wildcard_purge_body"; then
+    echo "proxy cache smoke failed: admin wildcard purge did not return ok" >&2
+    cat "$admin_wildcard_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"path_pattern":"/missing\*.png"' "$admin_wildcard_purge_body"; then
+    echo "proxy cache smoke failed: admin wildcard purge did not echo bounded pattern" >&2
+    cat "$admin_wildcard_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"purged":1' "$admin_wildcard_purge_body"; then
+    echo "proxy cache smoke failed: admin wildcard purge did not remove warmed 404 object" >&2
+    cat "$admin_wildcard_purge_body" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /missing.png \
     --expect-objects 0
 
 echo "proxy cache smoke: ok"

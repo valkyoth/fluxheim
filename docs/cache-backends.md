@@ -211,12 +211,12 @@ internal cache implementation.
   revalidation from an origin `304`, stale-object refresh from an origin `200`,
   stale-while-revalidate serving during a background refresh, stale-if-error
   serving after an upstream connection failure, cache-lock request collapsing
-  for concurrent misses, `Vary` variant isolation, admin stale dry-run and tag
-  purge against real cached objects, and disk-cache HIT behavior after a
-  Fluxheim process restart without the origin available. Planned work still
-  covers edge cases where origins change `Vary`, validators, or freshness
-  headers during revalidation and broader cache-header matrix tests across
-  static and proxied responses.
+  for concurrent misses, `Vary` variant isolation, admin stale dry-run and
+  prefix/tag/wildcard purge against real cached objects, and disk-cache HIT
+  behavior after a Fluxheim process restart without the origin available.
+  Planned work still covers edge cases where origins change `Vary`, validators,
+  or freshness headers during revalidation and broader cache-header matrix
+  tests across static and proxied responses.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and
