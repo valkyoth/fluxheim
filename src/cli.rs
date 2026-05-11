@@ -945,7 +945,7 @@ fn parse_cache_lookup_freshness_states(
 ) -> Result<Vec<crate::cache::CacheObjectFreshnessState>, Box<dyn Error + Send + Sync>> {
     states
         .iter()
-        .map(|state| match state.as_str() {
+        .map(|state| match state.trim().to_ascii_lowercase().as_str() {
             "fresh" => Ok(crate::cache::CacheObjectFreshnessState::Fresh),
             "stale" => Ok(crate::cache::CacheObjectFreshnessState::Stale),
             "expired" => Ok(crate::cache::CacheObjectFreshnessState::Expired),
@@ -963,7 +963,7 @@ fn parse_cache_lookup_tiers(
 ) -> Result<Vec<crate::cache::CacheObjectTier>, Box<dyn Error + Send + Sync>> {
     tiers
         .iter()
-        .map(|tier| match tier.as_str() {
+        .map(|tier| match tier.trim().to_ascii_lowercase().as_str() {
             "memory" => Ok(crate::cache::CacheObjectTier::Memory),
             "disk" => Ok(crate::cache::CacheObjectTier::Disk),
             other => Err(format!(
@@ -2795,8 +2795,8 @@ mod tests {
     #[test]
     fn cache_lookup_expectations_validate_object_and_freshness_state() {
         let lookup = cache_lookup_with_state(crate::cache::CacheObjectFreshnessState::Stale);
-        let states = super::parse_cache_lookup_freshness_states(&["stale".to_owned()]).unwrap();
-        let tiers = super::parse_cache_lookup_tiers(&["memory".to_owned()]).unwrap();
+        let states = super::parse_cache_lookup_freshness_states(&[" Stale ".to_owned()]).unwrap();
+        let tiers = super::parse_cache_lookup_tiers(&[" Memory ".to_owned()]).unwrap();
 
         assert!(
             super::validate_cache_lookup_expectations(&lookup, true, &states, &[200], &tiers, true)
