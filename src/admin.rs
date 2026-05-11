@@ -3594,6 +3594,53 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_status_endpoint_reports_route_tiered_cache() {
+        let cache_path = unique_temp_path("admin-cache-status-route-tiered");
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![cached_tiered_route(&cache_path)],
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle("GET", "/_fluxheim/cache/status", None, &auth_headers());
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""totals":{"vhosts":1"#));
+        assert!(body.contains(r#""enabled_vhosts":0"#));
+        assert!(body.contains(r#""tiered_vhosts":0"#));
+        assert!(body.contains(r#""configured_routes":1"#));
+        assert!(body.contains(r#""routes_total":1"#));
+        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""enabled_routes":1"#));
+        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""tiered_routes":1"#));
+        assert!(body.contains(r#""tiered_route_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""memory_tiers":1"#));
+        assert!(body.contains(r#""disk_tiers":1"#));
+        assert!(body.contains(r#""name":"cached","enabled":false"#));
+        assert!(body.contains(r#""routes":[{"name":"media","enabled":true,"tiered":true"#));
+        assert!(body.contains(r#""storage_tiers":2"#));
+        assert!(body.contains(r#""memory":{"entries":0"#));
+        assert!(body.contains(r#""disk":{"entries":0"#));
+
+        std::fs::remove_dir_all(cache_path).unwrap();
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_activity_reset_endpoint_requires_auth_and_reports_tiers() {
         let cache_path = unique_temp_path("admin-cache-reset");
         let config = Config {
@@ -4684,6 +4731,37 @@ mod tests {
                 memory: crate::config::CacheMemoryConfig {
                     enabled: true,
                     max_size_bytes: ByteSize::from_bytes(1024),
+                },
+                max_object_bytes: ByteSize::from_bytes(512),
+                ..CacheConfig::default()
+            }),
+            headers: crate::config::VhostHeaderPolicyConfig::default(),
+        }
+    }
+
+    #[cfg(feature = "cache")]
+    fn cached_tiered_route(cache_path: &std::path::Path) -> RouteConfig {
+        RouteConfig {
+            name: "media".to_owned(),
+            path_exact: None,
+            path_prefix: Some("/media/".to_owned()),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            max_request_body_bytes: None,
+            redirect: None,
+            proxy: Some(ProxyConfig::default()),
+            web: None,
+            cache: Some(CacheConfig {
+                enabled: true,
+                memory: crate::config::CacheMemoryConfig {
+                    enabled: true,
+                    max_size_bytes: ByteSize::from_bytes(2048),
+                },
+                disk: crate::config::CacheDiskConfig {
+                    enabled: true,
+                    path: Some(cache_path.to_path_buf()),
+                    max_size_bytes: ByteSize::from_bytes(4096),
                 },
                 max_object_bytes: ByteSize::from_bytes(512),
                 ..CacheConfig::default()
