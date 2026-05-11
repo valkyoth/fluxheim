@@ -662,14 +662,14 @@ Stable scope for declaring the cache pack complete:
   `304 Not Modified`. Freshness metadata and `ETag` are covered in the current
   smoke suite; changed `Last-Modified` or `Vary` fields on 304 remain a Pingora
   cache merge limitation to fix upstream or behind a narrow local patch.
-- Large-object byte-range fill is bounded and does not require buffering an
-  entire object before useful ranges can be cached.
 - `scripts/stable_release_gate.sh` runs the promoted proxy-cache and local
   observability smoke suites before a `1.2` stable release.
 
 Beta scope:
 
-- Partial streaming admission and/or slice-based range fill for large objects.
+- Partial streaming admission and/or slice-based range fill for large objects,
+  implemented in the proper Pingora cache path rather than as an unsafe
+  one-off buffering shortcut.
 - Optional HEAD-to-GET cache-key conversion with safe body handling. The `1.2`
   stable behavior intentionally bypasses HEAD cache storage and exposes the
   bounded `method-head` cache-status reason so HEAD probes cannot poison cached
