@@ -747,6 +747,7 @@ pub struct CacheVhostStats {
     pub enabled: bool,
     pub tiered: bool,
     pub lock_enabled: bool,
+    pub lock_wait_timeout_secs: u64,
     pub configured_routes: u64,
     pub routes_total: u64,
     pub enabled_routes: u64,
@@ -763,6 +764,7 @@ pub struct CacheRouteStats {
     pub enabled: bool,
     pub tiered: bool,
     pub lock_enabled: bool,
+    pub lock_wait_timeout_secs: u64,
     pub memory: Option<crate::cache::MemoryCacheStats>,
     pub disk: Option<crate::cache::DiskCacheStats>,
 }
@@ -1002,6 +1004,7 @@ impl ProxySnapshot {
                     enabled: cache.config.enabled,
                     tiered: cache.pingora_tiered_storage.is_some(),
                     lock_enabled: cache.pingora_cache_lock.is_some(),
+                    lock_wait_timeout_secs: cache.cache_lock_wait_timeout.as_secs(),
                     memory: route_memory,
                     disk: route_disk,
                 });
@@ -1012,6 +1015,7 @@ impl ProxySnapshot {
                 enabled: vhost.cache.enabled,
                 tiered: vhost.pingora_tiered_storage.is_some(),
                 lock_enabled: vhost.pingora_cache_lock.is_some(),
+                lock_wait_timeout_secs: vhost.cache_lock_wait_timeout.as_secs(),
                 configured_routes,
                 routes_total: routes.len() as u64,
                 enabled_routes,

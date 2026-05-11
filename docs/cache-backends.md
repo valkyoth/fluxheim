@@ -221,9 +221,10 @@ internal cache implementation.
   coverage are visible without parsing the route list. `routes_total` counts
   routes with explicit cache policy, while `configured_routes` counts all
   configured routes on the vhost.
-  Per-vhost and per-route status also include `storage_tiers` so dashboards can
-  distinguish memory-only, disk-only, and tiered caches without inspecting
-  nested tier objects. Totals also include enabled and tiered vhost ratios.
+  Per-vhost and per-route status also include `storage_tiers` and
+  `lock_wait_timeout_secs` so dashboards can distinguish memory-only,
+  disk-only, and tiered caches while also showing the configured request
+  collapsing wait budget. Totals also include enabled and tiered vhost ratios.
   `POST /_fluxheim/cache/activity/reset` returns the same vhost and route
   coverage counters alongside the reset tier counts, so operational scripts can
   log cache coverage at the same time they clear activity counters.

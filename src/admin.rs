@@ -2057,11 +2057,12 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"storage_tiers":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"storage_tiers":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
             json_escape(&vhost.name),
             vhost.enabled,
             vhost.tiered,
             vhost.lock_enabled,
+            vhost.lock_wait_timeout_secs,
             cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
             vhost.configured_routes,
             vhost.routes_total,
@@ -2086,11 +2087,12 @@ fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"storage_tiers":{},"memory":{},"disk":{}}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"storage_tiers":{},"memory":{},"disk":{}}}"#,
             json_escape(&route.name),
             route.enabled,
             route.tiered,
             route.lock_enabled,
+            route.lock_wait_timeout_secs,
             cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
             memory_cache_stats_json(route.memory.as_ref()),
             disk_cache_stats_json(route.disk.as_ref())
@@ -3904,6 +3906,7 @@ mod tests {
         assert!(body.contains(r#""enabled":true"#));
         assert!(body.contains(r#""tiered":true"#));
         assert!(body.contains(r#""lock_enabled":true"#));
+        assert!(body.contains(r#""lock_wait_timeout_secs":30"#));
         assert!(body.contains(r#""storage_tiers":2"#));
         assert!(body.contains(r#""configured_routes":2"#));
         assert!(body.contains(r#""routes_total":1"#));
@@ -3922,7 +3925,7 @@ mod tests {
         assert!(body.contains(r#""average_object_size_bytes":0"#));
         assert!(body.contains(r#""routes":[{"name":"assets""#));
         assert!(body.contains(
-            r#""routes":[{"name":"assets","enabled":true,"tiered":false,"lock_enabled":true,"storage_tiers":1"#
+            r#""routes":[{"name":"assets","enabled":true,"tiered":false,"lock_enabled":true,"lock_wait_timeout_secs":30,"storage_tiers":1"#
         ));
 
         std::fs::remove_dir_all(cache_path).unwrap();
@@ -3969,10 +3972,10 @@ mod tests {
         assert!(body.contains(r#""memory_tiers":1"#));
         assert!(body.contains(r#""disk_tiers":1"#));
         assert!(
-            body.contains(r#""name":"cached","enabled":false,"tiered":false,"lock_enabled":false"#)
+            body.contains(r#""name":"cached","enabled":false,"tiered":false,"lock_enabled":false,"lock_wait_timeout_secs":30"#)
         );
         assert!(body.contains(
-            r#""routes":[{"name":"media","enabled":true,"tiered":true,"lock_enabled":true"#
+            r#""routes":[{"name":"media","enabled":true,"tiered":true,"lock_enabled":true,"lock_wait_timeout_secs":30"#
         ));
         assert!(body.contains(r#""storage_tiers":2"#));
         assert!(body.contains(r#""memory":{"entries":0"#));
