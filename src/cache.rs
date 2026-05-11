@@ -1486,6 +1486,8 @@ impl PingoraDiskStorage {
             let path = object
                 .index_path
                 .or_else(|| cache_primary_component(&primary_key, "path"));
+            let mut entry = entry;
+            entry.combined_key = Some(combined_key.clone());
             valid_entries.push(entry);
             self.purge_index.insert_with_path_and_tags(
                 combined_key,
@@ -1905,7 +1907,7 @@ impl PingoraDiskStorage {
     fn purge_object_path(&self, path: PathBuf) -> std::io::Result<bool> {
         match remove_disk_cache_object(&self.root, &path) {
             Ok(true) => {
-                self.disk_index.remove(&path);
+                self.remove_disk_index_entry(&path);
                 self.schedule_disk_index_checkpoint();
                 self.activity.purge();
                 Ok(true)
@@ -1951,7 +1953,10 @@ impl PingoraDiskStorage {
         };
         match parse_disk_cache_object(&bytes, self.max_object_bytes) {
             Ok(object) => {
-                let _ = self.index_existing_object_path(&read_path);
+                let _ = self.index_existing_object_path_with_combined_key(
+                    &read_path,
+                    object.combined_key.clone(),
+                );
                 if let (Some(combined_key), Some(primary_key)) =
                     (object.combined_key.clone(), object.primary_key.clone())
                 {
@@ -1972,7 +1977,8 @@ impl PingoraDiskStorage {
             }
             Err(error) => {
                 if remove_disk_cache_object(&self.root, &path).unwrap_or(false) {
-                    self.disk_index.remove(&path);
+                    self.remove_disk_index_entry(&path);
+                    self.purge_index.remove_combined(combined_key);
                     self.schedule_disk_index_checkpoint();
                 }
                 Err(cache_io_error("parse disk cache object", error))
@@ -2024,7 +2030,7 @@ impl PingoraDiskStorage {
                 self.activity.store_refusal();
                 cache_io_error("write disk cache object", error)
             })?;
-        self.index_existing_object_path(&path)
+        self.index_existing_object_path_with_combined_key(&path, Some(combined_key.clone()))
             .map_err(|error| cache_io_error("index disk cache object", error))?;
         self.schedule_disk_index_checkpoint();
         self.purge_index.insert_with_path_and_tags(
@@ -2090,7 +2096,7 @@ impl PingoraDiskStorage {
             self.activity.store_refusal();
             cache_io_error("write streamed disk cache object", error)
         })?;
-        self.index_existing_object_path(&path)
+        self.index_existing_object_path_with_combined_key(&path, Some(combined_key.clone()))
             .map_err(|error| cache_io_error("index streamed disk cache object", error))?;
         self.schedule_disk_index_checkpoint();
         self.purge_index.insert_with_path_and_tags(
@@ -2130,7 +2136,7 @@ impl PingoraDiskStorage {
             for entry in candidates {
                 match remove_disk_cache_object(&self.root, &entry.path) {
                     Ok(true) => {
-                        self.disk_index.remove(&entry.path);
+                        self.remove_disk_index_entry(&entry.path);
                         index_changed = true;
                         self.activity.eviction();
                         bytes_to_free = bytes_to_free.saturating_sub(entry.size);
@@ -2140,7 +2146,7 @@ impl PingoraDiskStorage {
                         }
                     }
                     Ok(false) => {
-                        if self.disk_index.remove(&entry.path) {
+                        if self.remove_disk_index_entry(&entry.path) {
                             index_changed = true;
                             bytes_to_free = bytes_to_free.saturating_sub(entry.size);
                         }
@@ -2156,7 +2162,11 @@ impl PingoraDiskStorage {
         Ok(true)
     }
 
-    fn index_existing_object_path(&self, path: &Path) -> std::io::Result<()> {
+    fn index_existing_object_path_with_combined_key(
+        &self,
+        path: &Path,
+        combined_key: Option<String>,
+    ) -> std::io::Result<()> {
         if cache_path_contains_symlink(&self.root, path)? {
             return Ok(());
         }
@@ -2172,12 +2182,36 @@ impl PingoraDiskStorage {
             return Ok(());
         };
         self.disk_index.upsert(DiskCacheEntry {
+            combined_key: combined_key.or_else(|| {
+                self.combined_key_for_existing_object_path(path)
+                    .ok()
+                    .flatten()
+            }),
             path: canonical,
             size: metadata.len(),
             modified: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
             accessed: std::time::SystemTime::now(),
         });
         Ok(())
+    }
+
+    fn combined_key_for_existing_object_path(
+        &self,
+        path: &Path,
+    ) -> std::io::Result<Option<String>> {
+        let bytes = read_disk_cache_object(&self.root, path, self.max_object_bytes)?;
+        let object = parse_disk_cache_object(&bytes, self.max_object_bytes)?;
+        Ok(object.combined_key)
+    }
+
+    fn remove_disk_index_entry(&self, path: &Path) -> bool {
+        let Some(entry) = self.disk_index.remove(path) else {
+            return false;
+        };
+        if let Some(combined_key) = entry.combined_key {
+            self.purge_index.remove_combined(&combined_key);
+        }
+        true
     }
 
     fn path_for_key(&self, key: &pingora::cache::CacheKey) -> PathBuf {
@@ -2812,6 +2846,7 @@ fn parse_disk_index_checkpoint_line(
     }
 
     Ok(Some(DiskCacheEntry {
+        combined_key: None,
         path,
         size,
         modified,
@@ -3047,6 +3082,7 @@ fn cache_purge_entry_from_stored_object(
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct DiskCacheEntry {
+    combined_key: Option<String>,
     path: PathBuf,
     size: u64,
     modified: std::time::SystemTime,
@@ -3120,16 +3156,14 @@ impl DiskObjectIndex {
         inner.lru.insert(DiskObjectLruKey::from_entry(&entry));
     }
 
-    fn remove(&self, path: &Path) -> bool {
+    fn remove(&self, path: &Path) -> Option<DiskCacheEntry> {
         let Ok(mut inner) = self.inner.write() else {
-            return false;
+            return None;
         };
-        let Some(previous) = inner.entries.remove(path) else {
-            return false;
-        };
+        let previous = inner.entries.remove(path)?;
         inner.total_size = inner.total_size.saturating_sub(previous.size);
         inner.lru.remove(&DiskObjectLruKey::from_entry(&previous));
-        true
+        Some(previous)
     }
 
     fn touch(&self, path: &Path, accessed: std::time::SystemTime) {
@@ -3218,6 +3252,7 @@ fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
                 continue;
             };
             entries.push(DiskCacheEntry {
+                combined_key: None,
                 path,
                 size: metadata.len(),
                 modified: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
@@ -4712,6 +4747,8 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     use bytes::Bytes;
+    #[cfg(feature = "proxy")]
+    use pingora::cache::key::CacheHashKey;
 
     use super::{
         CacheRequest, CacheStoreError, CachedHeader, CachedImageObject, MemoryImageCache,
@@ -4808,18 +4845,21 @@ mod tests {
         let path_c = PathBuf::from("/cache/c.fhc");
 
         index.upsert(super::DiskCacheEntry {
+            combined_key: None,
             path: path_a.clone(),
             size: 10,
             modified: base + std::time::Duration::from_secs(1),
             accessed: base + std::time::Duration::from_secs(30),
         });
         index.upsert(super::DiskCacheEntry {
+            combined_key: None,
             path: path_b.clone(),
             size: 20,
             modified: base + std::time::Duration::from_secs(1),
             accessed: base + std::time::Duration::from_secs(10),
         });
         index.upsert(super::DiskCacheEntry {
+            combined_key: None,
             path: path_c.clone(),
             size: 30,
             modified: base + std::time::Duration::from_secs(1),
@@ -4844,7 +4884,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![path_a.as_path()]
         );
-        assert!(index.remove(&path_a));
+        assert!(index.remove(&path_a).is_some());
         assert_eq!(index.total_size(), 50);
     }
 
@@ -7475,10 +7515,41 @@ mod tests {
 
         assert!(block_on(storage.lookup(&first, &span)).unwrap().is_none());
         assert!(block_on(storage.lookup(&second, &span)).unwrap().is_some());
+        assert!(!storage.purge_index.contains_combined(&first.combined()));
+        assert!(storage.purge_index.contains_combined(&second.combined()));
         let stats = storage.stats().unwrap();
         assert!(stats.size_bytes <= 512);
         assert_eq!(stats.activity.evictions, 1);
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_purge_object_path_prunes_purge_index() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("purge-index-prune");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "object", "vhost");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"cached"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+        assert!(storage.purge_index.contains_combined(&key.combined()));
+
+        let path = storage.path_for_key(&key);
+        assert!(storage.purge_object_path(path).unwrap());
+
+        assert!(!storage.purge_index.contains_combined(&key.combined()));
         std::fs::remove_dir_all(root).unwrap();
     }
 
