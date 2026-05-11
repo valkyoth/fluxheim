@@ -440,7 +440,12 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-key \
   --host repoheim.eu \
   --header "Accept-Language: de" \
   --path /assets/img/logo.png \
-  --query v=1
+  --query v=1 \
+  --expect-eligible \
+  --expect-cache-lock-enabled \
+  --expect-memory-tier-enabled \
+  --expect-disk-tier-enabled \
+  --expect-storage-tiers 2
 
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --host repoheim.eu \

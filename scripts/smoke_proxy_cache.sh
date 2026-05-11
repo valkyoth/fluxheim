@@ -367,6 +367,15 @@ wait_http() {
 
 wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
 
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-key \
+    --host cache.test \
+    --path /asset.png \
+    --expect-eligible \
+    --expect-cache-lock-enabled \
+    --expect-memory-tier-enabled \
+    --expect-disk-tier-enabled \
+    --expect-storage-tiers 2
+
 first_headers="$TMP_DIR/first.headers"
 second_headers="$TMP_DIR/second.headers"
 bypass_headers="$TMP_DIR/bypass.headers"

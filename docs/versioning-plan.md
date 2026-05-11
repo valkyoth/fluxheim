@@ -428,10 +428,14 @@ Stable scope:
     object without a full scan. `cache-key` and `cache-lookup` report the
     selected cache-lock state, wait timeout, and memory/disk tier availability
     so operators can verify stampede-protection and storage policy for the
-    exact vhost or route that a request matches. Both commands can include
-    bounded safe request headers such as `Accept-Language` and
-    `Accept-Encoding`, so operators can debug negotiated `Vary` variants
-    without contacting upstreams. `cache-lookup` can fail closed for deploy
+    exact vhost or route that a request matches. `cache-key` can also fail
+    closed with `--expect-eligible`, `--expect-cache-lock-enabled`,
+    `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
+    `--expect-storage-tiers`, so deploy scripts can assert cache policy layout
+    before warming objects. Both commands can include bounded safe request
+    headers such as `Accept-Language` and `Accept-Encoding`, so operators can
+    debug negotiated `Vary` variants without contacting upstreams.
+    `cache-lookup` can fail closed for deploy
     checks with `--require-object`, `--expect-tier`, `--expect-status`,
     `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
     `--expect-header-name`, `--expect-cache-lock-enabled`,

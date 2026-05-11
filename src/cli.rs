@@ -209,6 +209,26 @@ pub enum CliCommand {
         /// Query string to preview when --path does not already contain one.
         #[arg(long)]
         query: Option<String>,
+
+        /// Require the selected request to be eligible for caching.
+        #[arg(long)]
+        expect_eligible: bool,
+
+        /// Require the selected cache policy to have cache locking enabled.
+        #[arg(long)]
+        expect_cache_lock_enabled: bool,
+
+        /// Require the selected cache policy to have a memory cache tier.
+        #[arg(long)]
+        expect_memory_tier_enabled: bool,
+
+        /// Require the selected cache policy to have a disk cache tier.
+        #[arg(long)]
+        expect_disk_tier_enabled: bool,
+
+        /// Required number of enabled storage tiers for the selected cache policy.
+        #[arg(long = "expect-storage-tiers", value_name = "COUNT")]
+        expect_storage_tiers: Option<u8>,
     },
 
     /// Inspect cached object metadata for one request without dumping response bodies.
@@ -503,6 +523,11 @@ fn run_command(
             method,
             path,
             query,
+            expect_eligible,
+            expect_cache_lock_enabled,
+            expect_memory_tier_enabled,
+            expect_disk_tier_enabled,
+            expect_storage_tiers,
         } => run_cache_key_command(CacheKeyOptions {
             config_path,
             host: host.clone(),
@@ -510,6 +535,11 @@ fn run_command(
             method: method.clone(),
             path: path.clone(),
             query: query.clone(),
+            expect_eligible: *expect_eligible,
+            expect_cache_lock_enabled: *expect_cache_lock_enabled,
+            expect_memory_tier_enabled: *expect_memory_tier_enabled,
+            expect_disk_tier_enabled: *expect_disk_tier_enabled,
+            expect_storage_tiers: *expect_storage_tiers,
         }),
         CliCommand::CacheLookup {
             host,
@@ -585,6 +615,11 @@ struct CacheKeyOptions<'a> {
     method: String,
     path: String,
     query: Option<String>,
+    expect_eligible: bool,
+    expect_cache_lock_enabled: bool,
+    expect_memory_tier_enabled: bool,
+    expect_disk_tier_enabled: bool,
+    expect_storage_tiers: Option<u8>,
 }
 
 #[derive(Debug)]
@@ -874,11 +909,22 @@ fn run_cache_warm_command(
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    validate_cache_lookup_expected_storage_tiers(options.expect_storage_tiers)?;
     let (config, request) = cache_key_command_request(&options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let preview = proxy
         .snapshot()
         .pingora_image_cache_key_preview_for_request_header(&request);
+    validate_cache_key_preview_expectations(
+        &preview,
+        CacheKeyPreviewExpectations {
+            expect_eligible: options.expect_eligible,
+            expect_cache_lock_enabled: options.expect_cache_lock_enabled,
+            expect_memory_tier_enabled: options.expect_memory_tier_enabled,
+            expect_disk_tier_enabled: options.expect_disk_tier_enabled,
+            expect_storage_tiers: options.expect_storage_tiers,
+        },
+    )?;
 
     println!("cache key preview:");
     println!("vhost: {}", preview.vhost);
@@ -921,6 +967,46 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
+#[derive(Clone, Copy)]
+struct CacheKeyPreviewExpectations {
+    expect_eligible: bool,
+    expect_cache_lock_enabled: bool,
+    expect_memory_tier_enabled: bool,
+    expect_disk_tier_enabled: bool,
+    expect_storage_tiers: Option<u8>,
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_key_preview_expectations(
+    preview: &crate::proxy::CacheKeyPreview,
+    expectations: CacheKeyPreviewExpectations,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if expectations.expect_eligible && !preview.eligible {
+        let reason = preview.reason.as_deref().unwrap_or("unknown");
+        return Err(format!("cache-key expected eligible request, found false: {reason}").into());
+    }
+    if expectations.expect_cache_lock_enabled && !preview.cache_lock_enabled {
+        return Err("cache-key expected cache lock enabled, found false".into());
+    }
+    if expectations.expect_memory_tier_enabled && !preview.memory_tier_enabled {
+        return Err("cache-key expected memory tier enabled, found false".into());
+    }
+    if expectations.expect_disk_tier_enabled && !preview.disk_tier_enabled {
+        return Err("cache-key expected disk tier enabled, found false".into());
+    }
+    if let Some(expected_storage_tiers) = expectations.expect_storage_tiers
+        && preview.storage_tiers != expected_storage_tiers
+    {
+        return Err(format!(
+            "cache-key expected storage tiers {expected_storage_tiers}, found {}",
+            preview.storage_tiers
+        )
+        .into());
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
 fn run_cache_lookup_command(
     options: CacheLookupOptions<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -931,6 +1017,11 @@ fn run_cache_lookup_command(
         method: options.method,
         path: options.path,
         query: options.query,
+        expect_eligible: false,
+        expect_cache_lock_enabled: false,
+        expect_memory_tier_enabled: false,
+        expect_disk_tier_enabled: false,
+        expect_storage_tiers: None,
     };
     let require_object = options.require_object;
     let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
@@ -1482,8 +1573,25 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         method,
         path,
         query,
+        expect_eligible,
+        expect_cache_lock_enabled,
+        expect_memory_tier_enabled,
+        expect_disk_tier_enabled,
+        expect_storage_tiers,
     } = options;
-    let _ = (config_path, host, headers, method, path, query);
+    let _ = (
+        config_path,
+        host,
+        headers,
+        method,
+        path,
+        query,
+        expect_eligible,
+        expect_cache_lock_enabled,
+        expect_memory_tier_enabled,
+        expect_disk_tier_enabled,
+        expect_storage_tiers,
+    );
     Err("cache-key requires the proxy and cache features".into())
 }
 
@@ -3488,6 +3596,56 @@ mod tests {
         assert!(super::parse_cache_cli_header("cache-key", "Connection: close").is_err());
         assert!(super::parse_cache_cli_header("cache-key", "Bad Header: value").is_err());
         assert!(super::parse_cache_cli_header("cache-key", "X-Test: bad\r\nvalue").is_err());
+    }
+
+    #[cfg(all(feature = "cache", feature = "proxy"))]
+    #[test]
+    fn cache_key_preview_expectations_validate_policy_layout() {
+        let preview = cache_lookup_without_objects().preview;
+
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: true,
+                    expect_cache_lock_enabled: true,
+                    expect_memory_tier_enabled: true,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: Some(1),
+                }
+            )
+            .is_ok()
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: true,
+                    expect_storage_tiers: None,
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected disk tier enabled, found false")
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: Some(2),
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected storage tiers 2, found 1")
+        );
     }
 
     #[cfg(not(feature = "cache"))]

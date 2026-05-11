@@ -566,8 +566,11 @@ the cache phase has an explicit no-cache reason. Leave it unset unless you are
 actively debugging cache policy.
 For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key
-without contacting the upstream. `fluxheim cache-lookup --host example.com
---path /assets/app.js` also checks configured cache tiers and prints safe object
+without contacting the upstream. `cache-key` can fail closed with
+`--expect-eligible`, `--expect-cache-lock-enabled`,
+`--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
+`--expect-storage-tiers` when a deploy requires a specific cache policy layout.
+`fluxheim cache-lookup --host example.com --path /assets/app.js` also checks configured cache tiers and prints safe object
 metadata without dumping bodies or header values, including a compact
 fresh/stale/expired state and stale-serving eligibility booleans. Both commands
 accept repeated `--header "Name: value"` options for safe negotiated variant
