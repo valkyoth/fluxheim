@@ -383,6 +383,29 @@ Stable scope:
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
     conditional `304`, and byte-range `206` release smoke;
+  - full validator-based upstream revalidation for proxied cache responses,
+    including safe `If-None-Match` / `If-Modified-Since` forwarding, `304`
+    metadata refresh, validator preservation, and explicit behavior when
+    origins change `Vary`, `ETag`, `Last-Modified`, or freshness headers;
+  - byte-range cache-fill strategy for large objects. The stable target is a
+    safe equivalent to slice/range caching: bounded slice size, range-aware
+    cache keys, 200/206 admission rules, `If-Range` handling, and tests proving
+    large initial fills do not block unrelated cache hits or exceed configured
+    memory budgets;
+  - cache manager/loader hardening beyond the current startup purge-index
+    rebuild and stale purger: configurable incremental loader/purger pacing,
+    storage-pressure cleanup based on LRU/last-access metadata where Pingora
+    exposes it, and operator-facing logs/metrics when cleanup falls behind;
+  - invalidation maturity beyond exact purge and wildcard/prefix/tag purge:
+    evaluate a safe Varnish-style ban concept for stored metadata predicates,
+    but keep it declarative, bounded, admin-protected, and non-programmable in
+    1.2;
+  - cache object inspection and debug tooling for production incidents,
+    including cache-key preview, object metadata lookup, freshness state,
+    stored headers, purge-index membership, and dry-run invalidation output
+    without dumping sensitive request data by default;
+  - cache warm/import/export workflows for deploys and repository mirrors,
+    including clear failure accounting and no hidden best-effort misses;
   - cache observability through both Prometheus and OpenTelemetry, including
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
@@ -484,12 +507,16 @@ Current implementation status:
     request-header keys, and unsafe/sensitive `Vary` rejection;
   - optional cache-status and cache-status-reason response headers;
   - protected admin cache status, activity reset, single purge, bulk purge,
-    indexed scope purge, prefix purge, and wildcard purge endpoints;
+    indexed scope purge, prefix purge, tag purge, wildcard purge, stale purge,
+    soft purge, and bounded purge batching endpoints;
   - per-vhost and per-route admin status for storage tiers, storage pressure,
     purge-index fill, activity counters, hit/miss/store/refusal/eviction
     ratios, configured route count, cache-policy route count, and cache-route
     coverage ratio;
-  - bounded in-memory purge indexes for memory and disk tiers.
+  - bounded in-memory purge indexes for memory and disk tiers;
+  - process-wide opt-in background stale disk purger;
+  - `fluxheim cache-warm` path warming through the normal local listener;
+  - Prometheus cache activity metrics and initial OTLP metrics export.
 
 Stable scope for declaring the cache pack complete:
 
@@ -510,16 +537,28 @@ Stable scope for declaring the cache pack complete:
   headers.
 - Protected purge/status endpoints if admin module is enabled.
 - Cache activity counters.
+- Background/incremental cache cleanup with bounded work per tick and clear
+  pressure metrics.
+- Cache warm and metadata/debug commands suitable for release deploys and
+  production incident response.
+- Proxy cache HIT `Age`, conditional `304`, and byte-range `206` behavior are
+  covered end to end.
+- Proxied cache revalidation refreshes metadata safely when origins return
+  `304 Not Modified`.
+- Large-object byte-range fill is bounded and does not require buffering an
+  entire object before useful ranges can be cached.
 
 Beta scope:
 
-- Partial streaming admission.
+- Partial streaming admission and/or slice-based range fill for large objects.
 - Distributed cache metadata or peer-fill support, if production deployments
   need multi-node cache coherence.
 - Cache import/export/debug tooling for inspecting individual cached objects,
   metadata, TTL, headers, and purge-index entries.
-- Programmable cache policy hooks remain a later design problem; the default
-  cache model should stay declarative and safe.
+- Varnish-style ban predicates for metadata-based invalidation, if they can be
+  made bounded, auditable, and admin-protected.
+- Programmable cache policy hooks remain a later Wasm design problem; the
+  default cache model should stay declarative and safe.
 
 Exit criteria:
 
@@ -564,8 +603,8 @@ Exit criteria:
   `status_ttls`.
 - Cache hits emit correct validator/freshness behavior, including `Age` where
   Fluxheim serves from cache. Pingora provides the cache-hit `Age`,
-  conditional, and range hooks; Fluxheim still needs an end-to-end regression
-  around them.
+  conditional, and range hooks; Fluxheim's smoke suite covers proxy cache HIT
+  `Age`, conditional `304`, and byte-range `206`.
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 
@@ -1053,6 +1092,17 @@ Stable scope:
 - Request header hook.
 - Response header hook.
 - Access-control hook returning allow, deny, or continue.
+- Cache-policy hooks inspired by VCL, but designed as a constrained Rust/Wasm
+  ABI rather than an embedded language:
+  - lookup/admission hook for bypass, pass, continue, or deny decisions;
+  - safe cache-key component hook with typed inputs and explicit
+    low-cardinality output limits;
+  - `put_object`/store-admission hook for response-header inspection,
+    TTL override, tag assignment, and header mutation;
+  - invalidation hook for metadata predicates after the declarative 1.2 ban
+    model is proven;
+  - all cache hooks must be bounded by fuel, wall time, memory, output size,
+    and deterministic failure behavior.
 - Strict module, memory, fuel, wall-time, log, mutation, synthetic response,
   and concurrency limits.
 - Plugin hashing and admin/metrics visibility when those modules are enabled.
@@ -1076,8 +1126,10 @@ Exit criteria:
 - Fuel exhaustion, timeout, trap, and plugin panic behavior is tested.
 - Plugins cannot access bodies, filesystem, network, env, admin APIs, cache
   internals, or secrets without explicit capability grants.
-- Plugins cannot directly control routing destinations, cache keys, or upstream
-  TLS verification.
+- Plugins cannot directly control routing destinations or upstream TLS
+  verification. Cache-key influence is allowed only through the constrained
+  cache hook ABI with typed inputs, configured output limits, and explicit
+  operator opt-in per vhost or route.
 
 ### Experimental-Only Tracks
 
