@@ -659,7 +659,9 @@ Stable scope for declaring the cache pack complete:
   restart, with bounded Prometheus purge counters asserted for every protected
   purge shape in that smoke path.
 - Proxied cache revalidation refreshes metadata safely when origins return
-  `304 Not Modified`.
+  `304 Not Modified`. Freshness metadata and `ETag` are covered in the current
+  smoke suite; changed `Last-Modified` or `Vary` fields on 304 remain a Pingora
+  cache merge limitation to fix upstream or behind a narrow local patch.
 - Large-object byte-range fill is bounded and does not require buffering an
   entire object before useful ranges can be cached.
 - `scripts/stable_release_gate.sh` runs the promoted proxy-cache and local
