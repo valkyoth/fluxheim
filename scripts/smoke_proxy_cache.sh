@@ -753,6 +753,7 @@ fi
     --expect-status 200 \
     --expect-body-bytes 16 \
     --expect-header-name etag \
+    --expect-serve-stale-if-error \
     --expect-freshness-state stale
 
 stop_fluxheim

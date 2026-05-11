@@ -434,7 +434,8 @@ Stable scope:
     without contacting upstreams. `cache-lookup` can fail closed for deploy
     checks with `--require-object`, `--expect-tier`, `--expect-status`,
     `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
-    `--expect-header-name`, `--expect-purge-indexed`, and
+    `--expect-header-name`, `--expect-serve-stale-if-error`,
+    `--expect-serve-stale-while-revalidate`, `--expect-purge-indexed`, and
     `--expect-freshness-state fresh|stale|expired`, so scripts can assert that
     warm objects exist, preserved expected response metadata and freshness
     policy, are purge-index reachable, and are in an acceptable serving state

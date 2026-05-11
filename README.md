@@ -287,7 +287,8 @@ export, and end-to-end proxy cache smoke coverage for hit `Age`, conditional
 stale-if-error serving, cache-lock request collapsing, `Vary` variants, disk
 hits after restart, and debug bypass reasons. `cache-lookup` also supports deploy-script assertions for object
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
-cache tags, stored header names, purge-index reachability, and fresh/stale/expired state. Remaining `1.2`
+cache tags, stored header names, stale-serving eligibility, purge-index
+reachability, and fresh/stale/expired state. Remaining `1.2`
 hardening focuses on proxy revalidation edge cases, large-object
 range/slice fill, very large disk-cache loader/purger behavior,
 production Podman/ACME examples, a separate ACME companion service/timer flow,

@@ -268,6 +268,14 @@ pub enum CliCommand {
         /// Require at least one matching cached object to be present in the purge index.
         #[arg(long)]
         expect_purge_indexed: bool,
+
+        /// Require at least one matching cached object to be eligible for stale-if-error serving.
+        #[arg(long)]
+        expect_serve_stale_if_error: bool,
+
+        /// Require at least one matching cached object to be eligible for stale-while-revalidate serving.
+        #[arg(long)]
+        expect_serve_stale_while_revalidate: bool,
     },
 }
 
@@ -502,6 +510,8 @@ fn run_command(
             expect_header_names,
             expect_cache_tags,
             expect_purge_indexed,
+            expect_serve_stale_if_error,
+            expect_serve_stale_while_revalidate,
         } => run_cache_lookup_command(CacheLookupOptions {
             config_path,
             host: host.clone(),
@@ -518,6 +528,8 @@ fn run_command(
             expect_header_names: expect_header_names.clone(),
             expect_cache_tags: expect_cache_tags.clone(),
             expect_purge_indexed: *expect_purge_indexed,
+            expect_serve_stale_if_error: *expect_serve_stale_if_error,
+            expect_serve_stale_while_revalidate: *expect_serve_stale_while_revalidate,
         }),
     }
 }
@@ -568,6 +580,8 @@ struct CacheLookupOptions<'a> {
     expect_header_names: Vec<String>,
     expect_cache_tags: Vec<String>,
     expect_purge_indexed: bool,
+    expect_serve_stale_if_error: bool,
+    expect_serve_stale_while_revalidate: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -913,6 +927,8 @@ fn run_cache_lookup_command(
         expected_header_names: &expected_header_names,
         expected_cache_tags: &expected_cache_tags,
         expect_purge_indexed: options.expect_purge_indexed,
+        expect_serve_stale_if_error: options.expect_serve_stale_if_error,
+        expect_serve_stale_while_revalidate: options.expect_serve_stale_while_revalidate,
     };
     validate_cache_lookup_expectations(&lookup, &expectations)?;
 
@@ -1076,6 +1092,8 @@ struct CacheLookupExpectations<'a> {
     expected_header_names: &'a [String],
     expected_cache_tags: &'a [String],
     expect_purge_indexed: bool,
+    expect_serve_stale_if_error: bool,
+    expect_serve_stale_while_revalidate: bool,
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
@@ -1093,6 +1111,8 @@ fn validate_cache_lookup_expectations(
         expected_header_names,
         expected_cache_tags,
         expect_purge_indexed,
+        expect_serve_stale_if_error,
+        expect_serve_stale_while_revalidate,
     } = expectations;
 
     if *require_object && lookup.objects.is_empty() {
@@ -1239,7 +1259,48 @@ fn validate_cache_lookup_expectations(
     if *expect_purge_indexed && !lookup.objects.iter().any(|object| object.purge_indexed) {
         return Err("cache-lookup expected at least one purge-indexed object, found none".into());
     }
+    if *expect_serve_stale_if_error
+        && !lookup
+            .objects
+            .iter()
+            .any(|object| object.serve_stale_if_error)
+    {
+        let found = cache_lookup_found_bool(lookup, |object| object.serve_stale_if_error);
+        return Err(
+            format!("cache-lookup expected stale-if-error eligible object, found {found}").into(),
+        );
+    }
+    if *expect_serve_stale_while_revalidate
+        && !lookup
+            .objects
+            .iter()
+            .any(|object| object.serve_stale_while_revalidate)
+    {
+        let found = cache_lookup_found_bool(lookup, |object| object.serve_stale_while_revalidate);
+        return Err(format!(
+            "cache-lookup expected stale-while-revalidate eligible object, found {found}"
+        )
+        .into());
+    }
     Ok(())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn cache_lookup_found_bool(
+    lookup: &crate::proxy::CacheObjectLookup,
+    value: impl Fn(&crate::cache::CacheObjectMetadata) -> bool,
+) -> String {
+    let mut values = lookup
+        .objects
+        .iter()
+        .map(|object| value(object).to_string())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return "none".to_owned();
+    }
+    values.sort_unstable();
+    values.dedup();
+    values.join(",")
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
@@ -1371,6 +1432,8 @@ fn run_cache_lookup_command(
         expect_header_names,
         expect_cache_tags,
         expect_purge_indexed,
+        expect_serve_stale_if_error,
+        expect_serve_stale_while_revalidate,
     } = options;
     let _ = (config_path, host, headers, method, path, query);
     let _ = (
@@ -1383,6 +1446,8 @@ fn run_cache_lookup_command(
         expect_header_names,
         expect_cache_tags,
         expect_purge_indexed,
+        expect_serve_stale_if_error,
+        expect_serve_stale_while_revalidate,
     );
     Err("cache-lookup requires the proxy and cache features".into())
 }
@@ -3076,6 +3141,8 @@ mod tests {
             expected_header_names: no_strings,
             expected_cache_tags: no_strings,
             expect_purge_indexed: false,
+            expect_serve_stale_if_error: false,
+            expect_serve_stale_while_revalidate: false,
         };
 
         assert!(
@@ -3091,6 +3158,8 @@ mod tests {
                     expected_header_names: &["etag".to_owned()],
                     expected_cache_tags: &["asset:logo".to_owned()],
                     expect_purge_indexed: true,
+                    expect_serve_stale_while_revalidate: true,
+                    ..default_expectations
                 }
             )
             .is_ok()
@@ -3161,6 +3230,30 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expected body bytes 5, found 4")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expect_serve_stale_if_error: true,
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected stale-if-error eligible object, found false")
+        );
+        let mut stale_if_error_lookup = lookup.clone();
+        stale_if_error_lookup.objects[0].serve_stale_if_error = true;
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &stale_if_error_lookup,
+                &super::CacheLookupExpectations {
+                    expect_serve_stale_if_error: true,
+                    ..default_expectations
+                }
+            )
+            .is_ok()
         );
         assert!(super::validate_cache_lookup_expected_body_bytes(&[4]).is_ok());
         assert!(

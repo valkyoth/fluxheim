@@ -575,7 +575,8 @@ inspection, such as `Accept-Language` or `Accept-Encoding`; use `--host` for
 the Host header. `cache-lookup` can fail closed for deploy scripts with
 `--require-object`, `--expect-tier memory|disk`, `--expect-status`,
 `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
-`--expect-header-name`, `--expect-purge-indexed`, and
+`--expect-header-name`, `--expect-serve-stale-if-error`,
+`--expect-serve-stale-while-revalidate`, `--expect-purge-indexed`, and
 `--expect-freshness-state fresh|stale|expired`.
 `fluxheim cache-warm --header "Name: value"` warms negotiated variants with
 the same safe request-header syntax, and `fluxheim cache-warm --dry-run`
