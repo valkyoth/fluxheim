@@ -570,6 +570,8 @@ without contacting the upstream. `cache-key` can fail closed with
 `--expect-eligible`, `--expect-cache-lock-enabled`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
 `--expect-storage-tiers` when a deploy requires a specific cache policy layout.
+Use `--expect-scope vhost|route` and `--expect-route NAME` when a deploy must
+prove that a specific vhost or route policy was selected.
 `fluxheim cache-lookup --host example.com --path /assets/app.js` also checks configured cache tiers and prints safe object
 metadata without dumping bodies or header values, including a compact
 fresh/stale/expired state and stale-serving eligibility booleans. Both commands
@@ -580,7 +582,8 @@ the Host header. `cache-lookup` can fail closed for deploy scripts with
 `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
 `--expect-header-name`, `--expect-cache-lock-enabled`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
-`--expect-storage-tiers`, `--expect-serve-stale-if-error`,
+`--expect-storage-tiers`, `--expect-scope`, `--expect-route`,
+`--expect-serve-stale-if-error`,
 `--expect-serve-stale-while-revalidate`, `--expect-purge-indexed`, and
 `--expect-freshness-state fresh|stale|expired`.
 `fluxheim cache-warm --header "Name: value"` warms negotiated variants with

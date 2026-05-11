@@ -447,6 +447,7 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-key \
   --expect-cache-lock-enabled \
   --expect-memory-tier-enabled \
   --expect-disk-tier-enabled \
+  --expect-scope vhost \
   --expect-storage-tiers 2
 
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
@@ -465,6 +466,7 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --expect-cache-lock-enabled \
   --expect-memory-tier-enabled \
   --expect-disk-tier-enabled \
+  --expect-scope vhost \
   --expect-storage-tiers 2 \
   --expect-serve-stale-if-error \
   --expect-purge-indexed \
@@ -497,7 +499,8 @@ flags fail when no matching object has an allowed stored body size,
 `--expect-cache-lock-enabled`, `--expect-memory-tier-enabled`,
 `--expect-disk-tier-enabled`, and `--expect-storage-tiers` fail when the
 selected cache policy does not match the required stampede-protection or tier
-layout,
+layout, `--expect-scope` and `--expect-route` fail when the selected cache
+policy is not the intended vhost or route,
 `--expect-serve-stale-if-error` and `--expect-serve-stale-while-revalidate`
 fail when no matching object is eligible for those stale-serving policies,
 `--expect-purge-indexed` fails when no matching object is reachable through the bounded purge index, and repeated

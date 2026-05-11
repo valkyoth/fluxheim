@@ -229,6 +229,14 @@ pub enum CliCommand {
         /// Required number of enabled storage tiers for the selected cache policy.
         #[arg(long = "expect-storage-tiers", value_name = "COUNT")]
         expect_storage_tiers: Option<u8>,
+
+        /// Required selected cache policy scope: vhost or route.
+        #[arg(long = "expect-scope", value_name = "SCOPE")]
+        expect_scope: Option<String>,
+
+        /// Required selected route name for route-scoped cache policies.
+        #[arg(long = "expect-route", value_name = "ROUTE")]
+        expect_route: Option<String>,
     },
 
     /// Inspect cached object metadata for one request without dumping response bodies.
@@ -304,6 +312,14 @@ pub enum CliCommand {
         /// Required number of enabled storage tiers for the selected cache policy.
         #[arg(long = "expect-storage-tiers", value_name = "COUNT")]
         expect_storage_tiers: Option<u8>,
+
+        /// Required selected cache policy scope: vhost or route.
+        #[arg(long = "expect-scope", value_name = "SCOPE")]
+        expect_scope: Option<String>,
+
+        /// Required selected route name for route-scoped cache policies.
+        #[arg(long = "expect-route", value_name = "ROUTE")]
+        expect_route: Option<String>,
 
         /// Require at least one matching cached object to be eligible for stale-if-error serving.
         #[arg(long)]
@@ -528,6 +544,8 @@ fn run_command(
             expect_memory_tier_enabled,
             expect_disk_tier_enabled,
             expect_storage_tiers,
+            expect_scope,
+            expect_route,
         } => run_cache_key_command(CacheKeyOptions {
             config_path,
             host: host.clone(),
@@ -540,6 +558,8 @@ fn run_command(
             expect_memory_tier_enabled: *expect_memory_tier_enabled,
             expect_disk_tier_enabled: *expect_disk_tier_enabled,
             expect_storage_tiers: *expect_storage_tiers,
+            expect_scope: expect_scope.clone(),
+            expect_route: expect_route.clone(),
         }),
         CliCommand::CacheLookup {
             host,
@@ -560,6 +580,8 @@ fn run_command(
             expect_memory_tier_enabled,
             expect_disk_tier_enabled,
             expect_storage_tiers,
+            expect_scope,
+            expect_route,
             expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate,
         } => run_cache_lookup_command(CacheLookupOptions {
@@ -582,6 +604,8 @@ fn run_command(
             expect_memory_tier_enabled: *expect_memory_tier_enabled,
             expect_disk_tier_enabled: *expect_disk_tier_enabled,
             expect_storage_tiers: *expect_storage_tiers,
+            expect_scope: expect_scope.clone(),
+            expect_route: expect_route.clone(),
             expect_serve_stale_if_error: *expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate: *expect_serve_stale_while_revalidate,
         }),
@@ -620,6 +644,8 @@ struct CacheKeyOptions<'a> {
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
+    expect_scope: Option<String>,
+    expect_route: Option<String>,
 }
 
 #[derive(Debug)]
@@ -643,6 +669,8 @@ struct CacheLookupOptions<'a> {
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
+    expect_scope: Option<String>,
+    expect_route: Option<String>,
     expect_serve_stale_if_error: bool,
     expect_serve_stale_while_revalidate: bool,
 }
@@ -910,6 +938,8 @@ fn run_cache_warm_command(
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_cache_lookup_expected_storage_tiers(options.expect_storage_tiers)?;
+    let expected_scope = parse_cache_key_preview_scope("cache-key", options.expect_scope.as_ref())?;
+    let expected_route = parse_cache_key_preview_route("cache-key", options.expect_route.as_ref())?;
     let (config, request) = cache_key_command_request(&options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let preview = proxy
@@ -923,6 +953,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
             expect_memory_tier_enabled: options.expect_memory_tier_enabled,
             expect_disk_tier_enabled: options.expect_disk_tier_enabled,
             expect_storage_tiers: options.expect_storage_tiers,
+            expected_scope: expected_scope.as_deref(),
+            expected_route: expected_route.as_deref(),
         },
     )?;
 
@@ -968,18 +1000,20 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 #[derive(Clone, Copy)]
-struct CacheKeyPreviewExpectations {
+struct CacheKeyPreviewExpectations<'a> {
     expect_eligible: bool,
     expect_cache_lock_enabled: bool,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
+    expected_scope: Option<&'a str>,
+    expected_route: Option<&'a str>,
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_key_preview_expectations(
     preview: &crate::proxy::CacheKeyPreview,
-    expectations: CacheKeyPreviewExpectations,
+    expectations: CacheKeyPreviewExpectations<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if expectations.expect_eligible && !preview.eligible {
         let reason = preview.reason.as_deref().unwrap_or("unknown");
@@ -1003,6 +1037,21 @@ fn validate_cache_key_preview_expectations(
         )
         .into());
     }
+    if let Some(expected_scope) = expectations.expected_scope
+        && preview.scope.as_str() != expected_scope
+    {
+        return Err(format!(
+            "cache-key expected scope {expected_scope}, found {}",
+            preview.scope.as_str()
+        )
+        .into());
+    }
+    if let Some(expected_route) = expectations.expected_route
+        && preview.route.as_deref() != Some(expected_route)
+    {
+        let found = preview.route.as_deref().unwrap_or("none");
+        return Err(format!("cache-key expected route {expected_route}, found {found}").into());
+    }
     Ok(())
 }
 
@@ -1022,12 +1071,18 @@ fn run_cache_lookup_command(
         expect_memory_tier_enabled: false,
         expect_disk_tier_enabled: false,
         expect_storage_tiers: None,
+        expect_scope: None,
+        expect_route: None,
     };
     let require_object = options.require_object;
     let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
     let expected_tiers = parse_cache_lookup_tiers(&options.expect_tiers)?;
     let expected_header_names = parse_cache_lookup_header_names(&options.expect_header_names)?;
     let expected_cache_tags = parse_cache_lookup_cache_tags(&options.expect_cache_tags)?;
+    let expected_scope =
+        parse_cache_key_preview_scope("cache-lookup", options.expect_scope.as_ref())?;
+    let expected_route =
+        parse_cache_key_preview_route("cache-lookup", options.expect_route.as_ref())?;
     validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
     validate_cache_lookup_expected_fresh_ttls(&options.expect_fresh_ttl_secs)?;
     validate_cache_lookup_expected_body_bytes(&options.expect_body_bytes)?;
@@ -1051,6 +1106,8 @@ fn run_cache_lookup_command(
         expect_memory_tier_enabled: options.expect_memory_tier_enabled,
         expect_disk_tier_enabled: options.expect_disk_tier_enabled,
         expect_storage_tiers: options.expect_storage_tiers,
+        expected_scope: expected_scope.as_deref(),
+        expected_route: expected_route.as_deref(),
         expect_serve_stale_if_error: options.expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate: options.expect_serve_stale_while_revalidate,
     };
@@ -1220,6 +1277,8 @@ struct CacheLookupExpectations<'a> {
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
     expect_storage_tiers: Option<u8>,
+    expected_scope: Option<&'a str>,
+    expected_route: Option<&'a str>,
     expect_serve_stale_if_error: bool,
     expect_serve_stale_while_revalidate: bool,
 }
@@ -1243,28 +1302,31 @@ fn validate_cache_lookup_expectations(
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
+        expected_scope,
+        expected_route,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     } = expectations;
 
-    if *expect_cache_lock_enabled && !lookup.preview.cache_lock_enabled {
-        return Err("cache-lookup expected cache lock enabled, found false".into());
-    }
-    if *expect_memory_tier_enabled && !lookup.preview.memory_tier_enabled {
-        return Err("cache-lookup expected memory tier enabled, found false".into());
-    }
-    if *expect_disk_tier_enabled && !lookup.preview.disk_tier_enabled {
-        return Err("cache-lookup expected disk tier enabled, found false".into());
-    }
-    if let Some(expected_storage_tiers) = expect_storage_tiers
-        && lookup.preview.storage_tiers != *expected_storage_tiers
-    {
-        return Err(format!(
-            "cache-lookup expected storage tiers {expected_storage_tiers}, found {}",
-            lookup.preview.storage_tiers
-        )
-        .into());
-    }
+    validate_cache_key_preview_expectations(
+        &lookup.preview,
+        CacheKeyPreviewExpectations {
+            expect_eligible: false,
+            expect_cache_lock_enabled: *expect_cache_lock_enabled,
+            expect_memory_tier_enabled: *expect_memory_tier_enabled,
+            expect_disk_tier_enabled: *expect_disk_tier_enabled,
+            expect_storage_tiers: *expect_storage_tiers,
+            expected_scope: *expected_scope,
+            expected_route: *expected_route,
+        },
+    )
+    .map_err(|error| {
+        Box::<dyn Error + Send + Sync>::from(error.to_string().replacen(
+            "cache-key expected",
+            "cache-lookup expected",
+            1,
+        ))
+    })?;
 
     if *require_object && lookup.objects.is_empty() {
         return Err("cache-lookup expected at least one cached object, found none".into());
@@ -1564,6 +1626,38 @@ fn validate_cache_lookup_expected_storage_tiers(
     Ok(())
 }
 
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_key_preview_scope(
+    command: &str,
+    scope: Option<&String>,
+) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+    let Some(scope) = scope else {
+        return Ok(None);
+    };
+    match scope.trim().to_ascii_lowercase().as_str() {
+        "vhost" => Ok(Some("vhost".to_owned())),
+        "route" => Ok(Some("route".to_owned())),
+        other => {
+            Err(format!("{command} --expect-scope must be vhost or route; got {other:?}").into())
+        }
+    }
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_key_preview_route(
+    command: &str,
+    route: Option<&String>,
+) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+    let Some(route) = route else {
+        return Ok(None);
+    };
+    let route = route.trim();
+    if route.is_empty() || route.len() > 128 || route.chars().any(char::is_control) {
+        return Err(format!("{command} --expect-route must be a non-empty route name").into());
+    }
+    Ok(Some(route.to_owned()))
+}
+
 #[cfg(not(all(feature = "cache", feature = "proxy")))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let CacheKeyOptions {
@@ -1578,6 +1672,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
+        expect_scope,
+        expect_route,
     } = options;
     let _ = (
         config_path,
@@ -1591,6 +1687,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
+        expect_scope,
+        expect_route,
     );
     Err("cache-key requires the proxy and cache features".into())
 }
@@ -1619,6 +1717,8 @@ fn run_cache_lookup_command(
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
+        expect_scope,
+        expect_route,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     } = options;
@@ -1637,6 +1737,8 @@ fn run_cache_lookup_command(
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
         expect_storage_tiers,
+        expect_scope,
+        expect_route,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     );
@@ -3336,6 +3438,8 @@ mod tests {
             expect_memory_tier_enabled: false,
             expect_disk_tier_enabled: false,
             expect_storage_tiers: None,
+            expected_scope: None,
+            expected_route: None,
             expect_serve_stale_if_error: false,
             expect_serve_stale_while_revalidate: false,
         };
@@ -3612,6 +3716,8 @@ mod tests {
                     expect_memory_tier_enabled: true,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: Some(1),
+                    expected_scope: Some("route"),
+                    expected_route: Some("assets"),
                 }
             )
             .is_ok()
@@ -3625,6 +3731,8 @@ mod tests {
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: true,
                     expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_route: None,
                 }
             )
             .unwrap_err()
@@ -3640,11 +3748,59 @@ mod tests {
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
                     expect_storage_tiers: Some(2),
+                    expected_scope: None,
+                    expected_route: None,
                 }
             )
             .unwrap_err()
             .to_string()
             .contains("expected storage tiers 2, found 1")
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: Some("vhost"),
+                    expected_route: None,
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected scope vhost, found route")
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_route: Some("other"),
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected route other, found assets")
+        );
+        assert_eq!(
+            super::parse_cache_key_preview_scope("cache-key", Some(&" Route ".to_owned()))
+                .unwrap()
+                .as_deref(),
+            Some("route")
+        );
+        assert!(
+            super::parse_cache_key_preview_scope("cache-key", Some(&"bad".to_owned()))
+                .unwrap_err()
+                .to_string()
+                .contains("vhost or route")
         );
     }
 

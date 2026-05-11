@@ -426,6 +426,7 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
     --expect-cache-lock-enabled \
     --expect-memory-tier-enabled \
     --expect-disk-tier-enabled \
+    --expect-scope vhost \
     --expect-storage-tiers 2
 
 first_headers="$TMP_DIR/first.headers"
@@ -703,6 +704,8 @@ sleep 1.2
     --expect-body-bytes 12 \
     --expect-header-name etag \
     --expect-serve-stale-while-revalidate \
+    --expect-scope route \
+    --expect-route swr \
     --expect-freshness-state stale
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$swr_second_headers" -o "$swr_body" \
@@ -742,6 +745,8 @@ fi
     --expect-body-bytes 12 \
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
+    --expect-scope route \
+    --expect-route swr \
     --expect-freshness-state fresh
 
 python3 - "$FLUXHEIM_PORT" "$ORIGIN_PORT" <<'PY'
