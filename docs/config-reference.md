@@ -228,8 +228,12 @@ Implemented values:
 `tracing.enabled = true` is rejected when Fluxheim is built without
 `otel-tracing`. `tracing.otlp.enabled = true` requires the `otel-otlp` feature.
 The initial exporter supports OTLP/HTTP JSON over `http://` only, intended for a
-local collector or local Jaeger during development. `otel-tracing` and
-`otel-otlp` are incompatible with `privacy-mode`.
+local collector or local Jaeger during development. When Fluxheim is built with
+the `cache` feature, exported request spans include bounded cache attributes
+for the cache phase plus cache lookup and request-collapsing wait durations.
+They do not include cache keys, paths beyond the normal HTTP span name, query
+strings, cookies, or request header values. `otel-tracing` and `otel-otlp` are
+incompatible with `privacy-mode`.
 
 ## Logging
 

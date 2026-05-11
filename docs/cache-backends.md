@@ -282,9 +282,15 @@ configured vhost and route cache activity using only configured names and
 bounded tier/event labels. `fluxheim_cache_lock_enabled_policies` reports
 how many configured cache policies have request-collapsing locks enabled on a
 real storage tier, so stampede-protection coverage is visible without cache
-key or path labels. `fluxheim_cache_lock_wait_timeout_max_seconds` reports the
+  key or path labels. `fluxheim_cache_lock_wait_timeout_max_seconds` reports the
 largest configured request-collapsing wait timeout across lock-enabled cache
 policies, giving dashboards a low-cardinality timeout budget signal.
+`fluxheim_cache_operation_duration_seconds{scope,vhost,route,phase,operation}`
+records Pingora cache lookup and cache-lock wait durations as bounded
+histograms, so operators can distinguish slow storage reads from stampede wait
+time without labeling cache keys, paths, queries, cookies, or request headers.
+The OTLP metrics exporter includes histogram payloads, so the same timing
+series is available to Prometheus-compatible scraping and OTLP collectors.
 `fluxheim_cache_purges_total{operation,scope,vhost,route,mode}`
 records successful admin purge commands with bounded operation and mode labels;
   it does not label cache keys, paths, tags, wildcard patterns, hosts, or query

@@ -95,6 +95,7 @@ Current cache baseline:
 - `fluxheim_cache_lock_wait_timeout_max_seconds`
 - `fluxheim_cache_activity_total{tier,event}`
 - `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`
+- `fluxheim_cache_operation_duration_seconds{scope,vhost,route,phase,operation}`
 
 The configuration gauges are aggregate, label-free, and populated from
 validated configuration when the metrics listener starts. The local
@@ -108,6 +109,11 @@ intentionally avoid raw hosts, paths, queries, cache keys, and purge identities.
 labels plus configured-name labels: `scope` is `vhost` or `route`, `vhost` is
 the configured vhost name, and `route` is empty for vhost cache or the
 configured route name for route cache. It intentionally avoids raw `Host`,
+path, query, cache key, and purge identity labels. Cache operation duration
+histograms use the same configured-name labels plus bounded `phase` and
+`operation` labels. `operation` is `lookup` or `lock_wait`, so dashboards can
+separate storage lookup cost from request-collapsing wait time without
+high-cardinality request labels.
 paths, queries, cache keys, and purge identities. Future OpenTelemetry
 attributes should mirror the same low-cardinality concepts used by admin JSON
 and Prometheus.
@@ -198,8 +204,8 @@ Optional OTLP:
   `--web.enable-otlp-receiver`.
 - covers metrics only; traces still need an OpenTelemetry Collector or tracing
   backend.
-- implemented now for counters and gauges gathered from the existing
-  Prometheus registry. Histograms/summaries remain a future exporter extension.
+- implemented now for counters, gauges, and histograms gathered from the
+  existing Prometheus registry. Summaries remain a future exporter extension.
 
 Exporter health metrics:
 

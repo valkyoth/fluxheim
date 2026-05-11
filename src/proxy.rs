@@ -278,6 +278,24 @@ impl FluxProxy {
             .response_written()
             .map(|response| response.status.as_u16());
         let method = session.req_header().method.as_str().to_owned();
+        #[cfg(feature = "cache")]
+        let cache_phase = Some(session.cache.phase().as_str().to_owned());
+        #[cfg(not(feature = "cache"))]
+        let cache_phase = None;
+        #[cfg(feature = "cache")]
+        let cache_lookup_duration_ms = session
+            .cache
+            .lookup_duration()
+            .map(|duration| duration.as_secs_f64() * 1000.0);
+        #[cfg(not(feature = "cache"))]
+        let cache_lookup_duration_ms = None;
+        #[cfg(feature = "cache")]
+        let cache_lock_wait_duration_ms = session
+            .cache
+            .lock_duration()
+            .map(|duration| duration.as_secs_f64() * 1000.0);
+        #[cfg(not(feature = "cache"))]
+        let cache_lock_wait_duration_ms = None;
         exporter.try_export(crate::otel_otlp::TraceSpan {
             trace_id: trace_context.trace_id_hex(),
             span_id: trace_context.span_id_hex(),
@@ -292,7 +310,52 @@ impl FluxProxy {
             end_time_unix_nanos: unix_time_nanos(),
             request_body_bytes: ctx.request_body_bytes_seen,
             response_body_bytes: ctx.response_body_bytes_seen,
+            cache_phase,
+            cache_lookup_duration_ms,
+            cache_lock_wait_duration_ms,
         });
+    }
+
+    #[cfg(all(feature = "cache", feature = "metrics"))]
+    fn record_cache_operation_duration_metrics(&self, session: &Session, ctx: &RequestContext) {
+        let lookup_duration = session.cache.lookup_duration();
+        let lock_duration = session.cache.lock_duration();
+        if lookup_duration.is_none() && lock_duration.is_none() {
+            return;
+        }
+
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let vhost = ctx
+            .vhost_index
+            .and_then(|index| state.vhosts.get(index))
+            .or_else(|| state.vhosts.get(state.vhost_index(request_host(session))));
+        let Some(vhost) = vhost else {
+            return;
+        };
+        let route = ctx
+            .route_index
+            .and_then(|index| vhost.route(index).cache.as_ref())
+            .map(|cache| cache.name.as_str());
+        let phase = session.cache.phase().as_str();
+
+        if let Some(duration) = lookup_duration {
+            crate::metrics::record_cache_operation_duration(
+                vhost.name.as_str(),
+                route,
+                phase,
+                "lookup",
+                duration,
+            );
+        }
+        if let Some(duration) = lock_duration {
+            crate::metrics::record_cache_operation_duration(
+                vhost.name.as_str(),
+                route,
+                phase,
+                "lock_wait",
+                duration,
+            );
+        }
     }
 
     #[cfg(feature = "cache")]
@@ -3194,6 +3257,8 @@ impl ProxyHttp for FluxProxy {
                 .map(|response| response.status.as_u16()),
             error.is_some(),
         );
+        #[cfg(all(feature = "cache", feature = "metrics"))]
+        self.record_cache_operation_duration_metrics(session, ctx);
 
         #[cfg(not(feature = "privacy-mode"))]
         self.emit_access_log(session, error, ctx);

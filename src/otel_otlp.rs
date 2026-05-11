@@ -58,7 +58,7 @@ impl TraceExporter {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TraceSpan {
     pub trace_id: String,
     pub span_id: String,
@@ -73,6 +73,9 @@ pub struct TraceSpan {
     pub end_time_unix_nanos: u128,
     pub request_body_bytes: u64,
     pub response_body_bytes: u64,
+    pub cache_phase: Option<String>,
+    pub cache_lookup_duration_ms: Option<f64>,
+    pub cache_lock_wait_duration_ms: Option<f64>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -165,6 +168,36 @@ fn build_trace_payload(span: TraceSpan, service_name: &str) -> String {
     {
         attributes.push(string_attr("fluxheim.route", route));
     }
+    if let Some(cache_phase) = span.cache_phase
+        && let Some(attributes) = span_json
+            .as_object_mut()
+            .and_then(|object| object.get_mut("attributes"))
+            .and_then(|attributes| attributes.as_array_mut())
+    {
+        attributes.push(string_attr("fluxheim.cache.phase", cache_phase));
+    }
+    if let Some(duration_ms) = span.cache_lookup_duration_ms
+        && let Some(attributes) = span_json
+            .as_object_mut()
+            .and_then(|object| object.get_mut("attributes"))
+            .and_then(|attributes| attributes.as_array_mut())
+    {
+        attributes.push(double_attr(
+            "fluxheim.cache.lookup.duration_ms",
+            duration_ms,
+        ));
+    }
+    if let Some(duration_ms) = span.cache_lock_wait_duration_ms
+        && let Some(attributes) = span_json
+            .as_object_mut()
+            .and_then(|object| object.get_mut("attributes"))
+            .and_then(|attributes| attributes.as_array_mut())
+    {
+        attributes.push(double_attr(
+            "fluxheim.cache.lock_wait.duration_ms",
+            duration_ms,
+        ));
+    }
 
     json!({
         "resourceSpans": [{
@@ -209,6 +242,15 @@ fn bool_attr(key: &str, value: bool) -> serde_json::Value {
         "key": key,
         "value": {
             "boolValue": value
+        }
+    })
+}
+
+fn double_attr(key: &str, value: f64) -> serde_json::Value {
+    json!({
+        "key": key,
+        "value": {
+            "doubleValue": value
         }
     })
 }
@@ -278,6 +320,9 @@ mod tests {
                 end_time_unix_nanos: 2,
                 request_body_bytes: 0,
                 response_body_bytes: 42,
+                cache_phase: Some("hit".to_owned()),
+                cache_lookup_duration_ms: Some(1.5),
+                cache_lock_wait_duration_ms: Some(0.25),
             },
             "fluxheim",
         );
@@ -286,6 +331,9 @@ mod tests {
         assert!(payload.contains(r#""traceId":"4bf92f3577b34da6a3ce929d0e0e4736""#));
         assert!(payload.contains(r#""name":"HTTP GET""#));
         assert!(payload.contains(r#""key":"fluxheim.vhost""#));
+        assert!(payload.contains(r#""key":"fluxheim.cache.phase""#));
+        assert!(payload.contains(r#""key":"fluxheim.cache.lookup.duration_ms""#));
+        assert!(payload.contains(r#""key":"fluxheim.cache.lock_wait.duration_ms""#));
         assert!(payload.contains(r#""intValue":"200""#));
     }
 }

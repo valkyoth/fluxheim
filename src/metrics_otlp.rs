@@ -142,6 +142,21 @@ fn build_metrics_payload(
                     }
                 }));
             }
+            MetricType::HISTOGRAM => {
+                let mut data_points = Vec::new();
+                for metric in family.get_metric() {
+                    data_points.push(histogram_data_point(metric, &time_unix_nanos));
+                }
+                metrics.push(json!({
+                    "name": family.get_name(),
+                    "description": family.get_help(),
+                    "unit": "s",
+                    "histogram": {
+                        "aggregationTemporality": "AGGREGATION_TEMPORALITY_CUMULATIVE",
+                        "dataPoints": data_points,
+                    }
+                }));
+            }
             _ => {}
         }
     }
@@ -179,6 +194,37 @@ fn number_data_point(
             .collect::<Vec<_>>(),
         "timeUnixNano": time_unix_nanos,
         "asDouble": value,
+    })
+}
+
+fn histogram_data_point(
+    metric: &prometheus::proto::Metric,
+    time_unix_nanos: &str,
+) -> serde_json::Value {
+    let histogram = metric.get_histogram();
+    let mut previous_count = 0_u64;
+    let mut bucket_counts = Vec::new();
+    let mut explicit_bounds = Vec::new();
+
+    for bucket in histogram.get_bucket() {
+        let cumulative_count = bucket.get_cumulative_count();
+        bucket_counts.push(cumulative_count.saturating_sub(previous_count));
+        previous_count = cumulative_count;
+        explicit_bounds.push(bucket.get_upper_bound());
+    }
+    bucket_counts.push(histogram.get_sample_count().saturating_sub(previous_count));
+
+    json!({
+        "attributes": metric
+            .get_label()
+            .iter()
+            .map(|label| string_attr(label.get_name(), label.get_value()))
+            .collect::<Vec<_>>(),
+        "timeUnixNano": time_unix_nanos,
+        "count": histogram.get_sample_count(),
+        "sum": histogram.get_sample_sum(),
+        "bucketCounts": bucket_counts,
+        "explicitBounds": explicit_bounds,
     })
 }
 
@@ -235,7 +281,7 @@ fn unix_time_nanos() -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use prometheus::{CounterVec, Encoder, Gauge, Opts};
+    use prometheus::{CounterVec, Encoder, Gauge, HistogramOpts, HistogramVec, Opts};
 
     use super::*;
 
@@ -249,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn payload_contains_counter_and_gauge_metrics() {
+    fn payload_contains_counter_gauge_and_histogram_metrics() {
         let registry = prometheus::Registry::new();
         let counter = CounterVec::new(
             Opts::new("fluxheim_test_counter_total", "test counter"),
@@ -263,6 +309,15 @@ mod tests {
         gauge.set(7.0);
         registry.register(Box::new(gauge)).unwrap();
 
+        let histogram = HistogramVec::new(
+            HistogramOpts::new("fluxheim_test_duration_seconds", "test duration")
+                .buckets(vec![0.01, 0.1, 1.0]),
+            &["operation"],
+        )
+        .unwrap();
+        histogram.with_label_values(&["lookup"]).observe(0.05);
+        registry.register(Box::new(histogram)).unwrap();
+
         let payload = build_metrics_payload(registry.gather(), "fluxheim-test");
 
         assert!(payload.contains(r#""resourceMetrics""#));
@@ -272,6 +327,10 @@ mod tests {
         assert!(payload.contains(r#""sum""#));
         assert!(payload.contains(r#""name":"fluxheim_test_gauge""#));
         assert!(payload.contains(r#""gauge""#));
+        assert!(payload.contains(r#""name":"fluxheim_test_duration_seconds""#));
+        assert!(payload.contains(r#""histogram""#));
+        assert!(payload.contains(r#""bucketCounts""#));
+        assert!(payload.contains(r#""explicitBounds""#));
         assert!(!payload.contains("query"));
         assert!(!payload.contains("path"));
 

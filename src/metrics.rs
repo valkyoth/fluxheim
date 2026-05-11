@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
+use std::time::Duration;
 
-use prometheus::{IntCounterVec, IntGauge, Opts};
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, Opts};
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
@@ -16,6 +17,7 @@ static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static CACHE_OPERATION_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
 static CACHE_PURGES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGER_RUNS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGER_ENTRIES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -40,6 +42,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_lock_wait_timeout_max_seconds()?;
     cache_activity_total()?;
     cache_activity_scope_total()?;
+    cache_operation_duration_seconds()?;
     cache_purges_total()?;
     cache_purger_runs_total()?;
     cache_purger_entries_total()?;
@@ -100,6 +103,27 @@ pub fn record_cache_activity_scope(vhost: &str, route: Option<&str>, tier: &str,
             ])
             .inc(),
         Err(error) => log::debug!("metrics scoped cache counter unavailable: {error}"),
+    }
+}
+
+pub fn record_cache_operation_duration(
+    vhost: &str,
+    route: Option<&str>,
+    phase: &str,
+    operation: &str,
+    duration: Duration,
+) {
+    match cache_operation_duration_seconds() {
+        Ok(histogram) => histogram
+            .with_label_values(&[
+                cache_scope_label(route),
+                vhost,
+                route.unwrap_or(""),
+                cache_phase_label(phase),
+                cache_operation_label(operation),
+            ])
+            .observe(duration.as_secs_f64()),
+        Err(error) => log::debug!("metrics cache duration histogram unavailable: {error}"),
     }
 }
 
@@ -391,6 +415,35 @@ fn cache_activity_scope_total() -> Result<&'static IntCounterVec, prometheus::Er
     })
 }
 
+fn cache_operation_duration_seconds() -> Result<&'static HistogramVec, prometheus::Error> {
+    if let Some(histogram) = CACHE_OPERATION_DURATION_SECONDS.get() {
+        return Ok(histogram);
+    }
+
+    let histogram = HistogramVec::new(
+        HistogramOpts::new(
+            "fluxheim_cache_operation_duration_seconds",
+            "Fluxheim cache lookup and request-collapsing wait durations with bounded labels.",
+        )
+        .buckets(vec![
+            0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+        ]),
+        &["scope", "vhost", "route", "phase", "operation"],
+    )?;
+    match prometheus::default_registry().register(Box::new(histogram.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = CACHE_OPERATION_DURATION_SECONDS.set(histogram);
+    CACHE_OPERATION_DURATION_SECONDS.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_cache_operation_duration_seconds failed to initialize".to_owned(),
+        )
+    })
+}
+
 fn cache_purges_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     if let Some(counter) = CACHE_PURGES_TOTAL.get() {
         return Ok(counter);
@@ -583,6 +636,31 @@ fn cache_event_label(event: &str) -> &'static str {
     }
 }
 
+fn cache_phase_label(phase: &str) -> &'static str {
+    match phase {
+        "disabled" => "disabled",
+        "uninitialized" => "uninitialized",
+        "bypass" => "bypass",
+        "key" => "key",
+        "hit" => "hit",
+        "miss" => "miss",
+        "stale" => "stale",
+        "stale-updating" => "stale-updating",
+        "expired" => "expired",
+        "revalidated" => "revalidated",
+        "revalidated-nocache" => "revalidated-nocache",
+        _ => "other",
+    }
+}
+
+fn cache_operation_label(operation: &str) -> &'static str {
+    match operation {
+        "lookup" => "lookup",
+        "lock_wait" => "lock_wait",
+        _ => "other",
+    }
+}
+
 fn cache_purge_operation_label(operation: &str) -> &'static str {
     match operation {
         "exact" => "exact",
@@ -647,9 +725,9 @@ mod tests {
 
     use super::{
         cache_config_stats, init, method_bucket, record_cache_activity,
-        record_cache_activity_scope, record_cache_purge, record_cache_purger_entries,
-        record_cache_purger_run, record_config, record_metrics_otlp_export, record_proxy_outcome,
-        status_class,
+        record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
+        record_cache_purger_entries, record_cache_purger_run, record_config,
+        record_metrics_otlp_export, record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -758,6 +836,45 @@ mod tests {
         ));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
+    }
+
+    #[test]
+    fn records_cache_operation_duration_histogram_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_cache_operation_duration(
+            "cached",
+            Some("assets"),
+            "hit",
+            "lookup",
+            std::time::Duration::from_millis(12),
+        );
+        record_cache_operation_duration(
+            "cached",
+            None,
+            "attacker-phase",
+            "attacker-operation",
+            std::time::Duration::from_millis(30),
+        );
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_cache_operation_duration_seconds_bucket"));
+        assert!(output.contains(r#"phase="hit""#));
+        assert!(output.contains(r#"route="assets""#));
+        assert!(output.contains(r#"scope="route""#));
+        assert!(output.contains(r#"vhost="cached""#));
+        assert!(output.contains(r#"operation="lookup""#));
+        assert!(output.contains(r#"operation="other""#));
+        assert!(output.contains(r#"phase="other""#));
+        assert!(!output.contains("attacker-phase"));
+        assert!(!output.contains("attacker-operation"));
+        assert!(!output.contains("cache_key"));
     }
 
     #[test]
