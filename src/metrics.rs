@@ -16,6 +16,8 @@ static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static CACHE_PURGER_RUNS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static CACHE_PURGER_ENTRIES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
 pub fn enabled() -> bool {
     true
@@ -36,6 +38,8 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_activity_total()?;
     cache_activity_scope_total()?;
     cache_purges_total()?;
+    cache_purger_runs_total()?;
+    cache_purger_entries_total()?;
     Ok(())
 }
 
@@ -103,6 +107,27 @@ pub fn record_cache_purge(operation: &str, vhost: &str, route: Option<&str>, mod
             ])
             .inc(),
         Err(error) => log::debug!("metrics cache purge counter unavailable: {error}"),
+    }
+}
+
+pub fn record_cache_purger_run(outcome: &str) {
+    match cache_purger_runs_total() {
+        Ok(counter) => counter
+            .with_label_values(&[cache_purger_outcome_label(outcome)])
+            .inc(),
+        Err(error) => log::debug!("metrics cache purger run counter unavailable: {error}"),
+    }
+}
+
+pub fn record_cache_purger_entries(result: &str, amount: u64) {
+    if amount == 0 {
+        return;
+    }
+    match cache_purger_entries_total() {
+        Ok(counter) => counter
+            .with_label_values(&[cache_purger_entry_result_label(result)])
+            .inc_by(amount),
+        Err(error) => log::debug!("metrics cache purger entry counter unavailable: {error}"),
     }
 }
 
@@ -361,6 +386,56 @@ fn cache_purges_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     })
 }
 
+fn cache_purger_runs_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = CACHE_PURGER_RUNS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_cache_purger_runs_total",
+            "Fluxheim background stale disk cache purger runs by bounded outcome.",
+        ),
+        &["outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = CACHE_PURGER_RUNS_TOTAL.set(counter);
+    CACHE_PURGER_RUNS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_cache_purger_runs_total failed to initialize".to_owned())
+    })
+}
+
+fn cache_purger_entries_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = CACHE_PURGER_ENTRIES_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_cache_purger_entries_total",
+            "Fluxheim background stale disk cache purger entry counts by bounded result.",
+        ),
+        &["result"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = CACHE_PURGER_ENTRIES_TOTAL.set(counter);
+    CACHE_PURGER_ENTRIES_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_cache_purger_entries_total failed to initialize".to_owned(),
+        )
+    })
+}
+
 fn int_gauge(
     cell: &'static OnceLock<IntGauge>,
     name: &'static str,
@@ -475,6 +550,27 @@ fn cache_purge_mode_label(mode: &str) -> &'static str {
     }
 }
 
+fn cache_purger_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "skipped" => "skipped",
+        "clean" => "clean",
+        "purged" => "purged",
+        "truncated" => "truncated",
+        "error" => "error",
+        _ => "other",
+    }
+}
+
+fn cache_purger_entry_result_label(result: &str) -> &'static str {
+    match result {
+        "scanned" => "scanned",
+        "stale" => "stale",
+        "purged" => "purged",
+        "truncated" => "truncated",
+        _ => "other",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -489,8 +585,8 @@ mod tests {
 
     use super::{
         cache_config_stats, init, method_bucket, record_cache_activity,
-        record_cache_activity_scope, record_cache_purge, record_config, record_proxy_outcome,
-        status_class,
+        record_cache_activity_scope, record_cache_purge, record_cache_purger_entries,
+        record_cache_purger_run, record_config, record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -622,6 +718,34 @@ mod tests {
         ));
         assert!(!output.contains("attacker-operation"));
         assert!(!output.contains("attacker-mode"));
+        assert!(!output.contains("cache_key"));
+        assert!(!output.contains("path="));
+    }
+
+    #[test]
+    fn records_cache_purger_counters_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_cache_purger_run("truncated");
+        record_cache_purger_run("attacker-outcome");
+        record_cache_purger_entries("scanned", 7);
+        record_cache_purger_entries("purged", 2);
+        record_cache_purger_entries("attacker-result", 3);
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(r#"fluxheim_cache_purger_runs_total{outcome="truncated"}"#));
+        assert!(output.contains(r#"fluxheim_cache_purger_runs_total{outcome="other"}"#));
+        assert!(output.contains(r#"fluxheim_cache_purger_entries_total{result="scanned"} 7"#));
+        assert!(output.contains(r#"fluxheim_cache_purger_entries_total{result="purged"} 2"#));
+        assert!(output.contains(r#"fluxheim_cache_purger_entries_total{result="other"} 3"#));
+        assert!(!output.contains("attacker-outcome"));
+        assert!(!output.contains("attacker-result"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
     }

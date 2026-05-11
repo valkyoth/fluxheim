@@ -248,7 +248,11 @@ internal cache implementation.
   key or path labels. `fluxheim_cache_purges_total{operation,scope,vhost,route,mode}`
   records successful admin purge commands with bounded operation and mode labels;
   it does not label cache keys, paths, tags, wildcard patterns, hosts, or query
-  strings.
+  strings. When `[cache_purger]` is enabled,
+  `fluxheim_cache_purger_runs_total{outcome}` and
+  `fluxheim_cache_purger_entries_total{result}` expose bounded background stale
+  disk cleanup progress, including `truncated` runs that need larger or more
+  frequent cleanup windows.
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as

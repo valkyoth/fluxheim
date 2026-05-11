@@ -706,7 +706,10 @@ expired, and stops after the configured bounded `limit` and `batches` per
 target. It does not walk arbitrary cache directories. Keep `limit` and
 `batches` modest on large production caches; the admin
 `/_fluxheim/cache/purge-stale` endpoint remains available for explicit
-dry-runs or larger operator-controlled cleanup windows.
+dry-runs or larger operator-controlled cleanup windows. With metrics enabled,
+`fluxheim_cache_purger_runs_total{outcome}` and
+`fluxheim_cache_purger_entries_total{result}` show whether the background
+purger is cleanly keeping up or returning `truncated` runs.
 
 ## TLS
 

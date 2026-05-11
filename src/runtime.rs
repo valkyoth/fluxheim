@@ -203,9 +203,20 @@ impl pingora::services::background::BackgroundService for CacheStalePurgerBackgr
 fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::FluxProxy) {
     match proxy.purge_stale_disk_cache_once(config.limit, config.batches) {
         Ok(result) if result.targets == 0 => {
+            #[cfg(feature = "metrics")]
+            record_cache_stale_purge_metrics("skipped", &result);
             log::debug!("cache stale disk purge skipped; no disk cache targets");
         }
         Ok(result) if result.purged == 0 => {
+            #[cfg(feature = "metrics")]
+            record_cache_stale_purge_metrics(
+                if result.truncated {
+                    "truncated"
+                } else {
+                    "clean"
+                },
+                &result,
+            );
             log::debug!(
                 "cache stale disk purge complete; targets={} scanned={} stale={} purged=0 truncated={}",
                 result.targets,
@@ -215,6 +226,15 @@ fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::
             );
         }
         Ok(result) => {
+            #[cfg(feature = "metrics")]
+            record_cache_stale_purge_metrics(
+                if result.truncated {
+                    "truncated"
+                } else {
+                    "purged"
+                },
+                &result,
+            );
             log::info!(
                 "cache stale disk purge complete; targets={} scanned={} stale={} purged={} truncated={}",
                 result.targets,
@@ -225,9 +245,27 @@ fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::
             );
         }
         Err(error) => {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_cache_purger_run("error");
             log::error!("cache stale disk purge failed: {error}");
         }
     }
+}
+
+#[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
+fn record_cache_stale_purge_metrics(
+    outcome: &str,
+    result: &crate::proxy::CacheBackgroundPurgeResult,
+) {
+    crate::metrics::record_cache_purger_run(outcome);
+    crate::metrics::record_cache_purger_entries("scanned", usize_to_u64_saturating(result.scanned));
+    crate::metrics::record_cache_purger_entries("stale", usize_to_u64_saturating(result.stale));
+    crate::metrics::record_cache_purger_entries("purged", usize_to_u64_saturating(result.purged));
+}
+
+#[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
+fn usize_to_u64_saturating(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client"))]

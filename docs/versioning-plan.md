@@ -372,7 +372,9 @@ Stable scope:
     cleanup for expired indexed entries with dry-run mode and conservative
     batching for production safety checks. `[cache_purger]` now adds an
     opt-in process-wide background stale disk cleanup loop that uses the same
-    bounded indexed primitive per vhost and route cache;
+    bounded indexed primitive per vhost and route cache. Prometheus counters
+    report background purger outcomes and scanned/stale/purged entry counts so
+    operators can see when cleanup is truncated and falling behind;
   - cache warmer/preload command or admin workflow for release deploys;
     `fluxheim cache-warm` now warms explicit paths through a running local HTTP
     listener so vhost, route, cache-key, and admission policy stay identical to
