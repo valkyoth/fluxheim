@@ -4247,6 +4247,16 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
     if message.contains("unknown field `vhost`") {
         return Some("hint: virtual hosts are configured with [[vhosts]], not [[vhost]]");
     }
+    if message.contains("invalid type: map, expected a sequence") {
+        return Some(
+            "hint: start each virtual host with [[vhosts]] before nested tables such as [vhosts.proxy]",
+        );
+    }
+    if message.contains("[[vhosts.proxy]]") {
+        return Some(
+            "hint: vhost proxy config uses [vhosts.proxy], not [[vhosts.proxy]]; proxy is a nested table inside one [[vhosts]] block",
+        );
+    }
     if message.contains("unknown field `certificates`") {
         return Some(
             "hint: vhost TLS uses [vhosts.tls.certificate] for one certificate pair; use global [[tls.certificates]] for additional listener certificates",
@@ -10553,6 +10563,56 @@ mod tests {
 
         assert!(message.contains("failed to parse config"));
         assert!(message.contains("hint: virtual hosts are configured with [[vhosts]]"));
+    }
+
+    #[test]
+    fn config_parse_error_hints_vhost_table_before_array() {
+        let dir = TestDir::new("config-vhost-table-before-array");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [vhosts.proxy]
+            upstreams = ["127.0.0.1:3000"]
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("start each virtual host with [[vhosts]]"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn config_parse_error_hints_proxy_array_table() {
+        let dir = TestDir::new("config-vhost-proxy-array-table");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [[vhosts.proxy]]
+            upstreams = ["127.0.0.1:3000"]
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("uses [vhosts.proxy], not [[vhosts.proxy]]"),
+            "{message}"
+        );
     }
 
     #[test]
