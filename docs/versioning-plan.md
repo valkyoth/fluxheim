@@ -359,7 +359,9 @@ Stable scope:
   - disk-only cache admission now streams body chunks into a bounded temp file
     under the cache root before atomically committing the final object, so the
     disk tier no longer buffers the full response body in memory during
-    admission. Reader-visible partial writes remain planned;
+    admission. Startup also cleans stale Fluxheim-owned temp files after a
+    conservative age threshold while preserving fresh active-writer temps.
+    Reader-visible partial writes remain planned;
   - broader persistent cache index coverage for older disk object formats and
     future metadata migrations; new v3 disk objects already rebuild the bounded
     purge index across process restarts;

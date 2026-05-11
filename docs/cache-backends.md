@@ -143,7 +143,9 @@ internal cache implementation.
   re-check the target immediately before deletion and only remove regular
   `.fhc` cache objects. Shard directories and object files must be symlink-free,
   even when a symlink points back inside the cache root; mount or configure the
-  real cache directory path.
+  real cache directory path. Startup removes stale Fluxheim-owned disk-cache
+  temp files after a conservative age threshold, while ignoring unrelated files
+  and fresh temp files so snapshot reloads do not race active cache writers.
 - New disk cache objects use the v3 object header, which stores the combined
   cache key, primary key, and user tag. On startup Fluxheim scans valid disk
   cache objects and rebuilds the bounded purge index for v3 entries, so indexed

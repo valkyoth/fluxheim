@@ -36,6 +36,8 @@ const O_NOFOLLOW: i32 = 0o400000;
 #[cfg(feature = "proxy")]
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
 #[cfg(feature = "proxy")]
+const DISK_CACHE_TEMP_FILE_STALE_SECS: u64 = 6 * 60 * 60;
+#[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-v1\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V2: &[u8] = b"FLUXHEIM-CACHE-v2\n";
@@ -1256,6 +1258,10 @@ impl PingoraDiskStorage {
         activity: CacheActivityCounters,
     ) -> std::io::Result<Self> {
         let root = prepare_disk_cache_root(&root)?;
+        cleanup_stale_disk_cache_temp_files(
+            &root,
+            std::time::Duration::from_secs(DISK_CACHE_TEMP_FILE_STALE_SECS),
+        )?;
         let storage = Self {
             root,
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
@@ -2333,6 +2339,107 @@ fn safe_cache_object_entry(
     } else {
         Ok(None)
     }
+}
+
+#[cfg(feature = "proxy")]
+fn cleanup_stale_disk_cache_temp_files(
+    root: &Path,
+    min_age: std::time::Duration,
+) -> std::io::Result<usize> {
+    let mut removed = 0_usize;
+
+    let temp_dir = root.join("tmp");
+    if let Some(temp_dir) = safe_cache_temp_dir(root, &temp_dir)? {
+        removed =
+            removed.saturating_add(cleanup_stale_disk_cache_temp_dir(root, &temp_dir, min_age)?);
+    }
+
+    for shard in std::fs::read_dir(root)? {
+        let shard = shard?;
+        let Some(shard_path) = safe_cache_shard_entry_path(root, &shard)? else {
+            continue;
+        };
+        removed = removed.saturating_add(cleanup_stale_disk_cache_temp_dir(
+            root,
+            &shard_path,
+            min_age,
+        )?);
+    }
+
+    Ok(removed)
+}
+
+#[cfg(feature = "proxy")]
+fn safe_cache_temp_dir(root: &Path, path: &Path) -> std::io::Result<Option<PathBuf>> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Ok(None);
+    }
+    if cache_path_contains_symlink(root, path)? {
+        return Ok(None);
+    }
+    let canonical = path.canonicalize()?;
+    if canonical.starts_with(root) && canonical.is_dir() {
+        Ok(Some(canonical))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn cleanup_stale_disk_cache_temp_dir(
+    root: &Path,
+    dir: &Path,
+    min_age: std::time::Duration,
+) -> std::io::Result<usize> {
+    let mut removed = 0_usize;
+    let now = std::time::SystemTime::now();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() || !file_type.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if !is_fluxheim_disk_cache_temp_name(name) {
+            continue;
+        }
+        let path = dir.join(name);
+        if cache_path_contains_symlink(root, &path)? {
+            continue;
+        }
+        let canonical = path.canonicalize()?;
+        if !canonical.starts_with(root) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&canonical)?;
+        if !metadata.is_file() {
+            continue;
+        }
+        let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+        let age = now
+            .duration_since(modified)
+            .unwrap_or(std::time::Duration::ZERO);
+        if age < min_age {
+            continue;
+        }
+        std::fs::remove_file(&canonical)?;
+        removed = removed.saturating_add(1);
+    }
+    Ok(removed)
+}
+
+#[cfg(feature = "proxy")]
+fn is_fluxheim_disk_cache_temp_name(name: &str) -> bool {
+    (name.starts_with(".fluxheim-body-") || name.starts_with(".fluxheim-object-"))
+        && name.ends_with(".tmp")
 }
 
 #[cfg(feature = "proxy")]
@@ -5179,6 +5286,45 @@ mod tests {
         ));
         assert_eq!(storage.stats().unwrap().entries, 0);
         assert_eq!(storage.stats().unwrap().activity.store_refusals, 1);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn disk_cache_temp_cleanup_removes_only_stale_fluxheim_temps() {
+        let root = unique_test_cache_dir("temp-cleanup");
+        let temp_dir = root.join("tmp");
+        let shard_dir = root.join("ab");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::create_dir_all(&shard_dir).unwrap();
+
+        let body_temp = temp_dir.join(".fluxheim-body-test.tmp");
+        let object_temp = shard_dir.join(".fluxheim-object-test.tmp");
+        let fresh_temp = temp_dir.join(".fluxheim-body-fresh.tmp");
+        let unrelated = temp_dir.join("other.tmp");
+        for path in [&body_temp, &object_temp, &fresh_temp, &unrelated] {
+            std::fs::write(path, b"temp").unwrap();
+        }
+
+        assert_eq!(
+            super::cleanup_stale_disk_cache_temp_files(
+                &root,
+                std::time::Duration::from_secs(24 * 60 * 60)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(fresh_temp.exists());
+
+        assert_eq!(
+            super::cleanup_stale_disk_cache_temp_files(&root, std::time::Duration::ZERO).unwrap(),
+            3
+        );
+        assert!(!body_temp.exists());
+        assert!(!object_temp.exists());
+        assert!(!fresh_temp.exists());
+        assert!(unrelated.exists());
 
         std::fs::remove_dir_all(root).unwrap();
     }
