@@ -203,6 +203,10 @@ internal cache implementation.
   checkpoint or shard scan exceeds that cap, Fluxheim logs a warning, indexes
   the first bounded set, and continues starting instead of failing the process.
   A later storage-bin backend should replace this with an incremental index.
+  Indexed admin purges use the bounded purge index as a fast path but also
+  scan live memory or disk object metadata to supplement missing mappings, so
+  FIFO eviction from the fast index cannot make live cached objects immune to
+  user-tag, path-prefix, wildcard, cache-tag, or stale purges.
 - Disk-only cache admission streams response chunks into a bounded temporary
   file under the cache root before the final atomic object write. Partial-write
   streaming remains disabled for the production memory and tiered adapters
