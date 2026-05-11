@@ -3,7 +3,7 @@ set -eu
 
 IMAGE="${FLUXHEIM_IMAGE:-fluxheim:dev}"
 CONTAINERFILE="${FLUXHEIM_CONTAINERFILE:-Containerfile}"
-FEATURES="${FLUXHEIM_FEATURES:-profile-static-site,acme-client}"
+FEATURES="${FLUXHEIM_FEATURES:-profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp}"
 CONFIG="${FLUXHEIM_CONFIG:-}"
 RUNTIME_UID="${FLUXHEIM_RUNTIME_UID:-65532}"
 RUNTIME_GID="${FLUXHEIM_RUNTIME_GID:-65532}"

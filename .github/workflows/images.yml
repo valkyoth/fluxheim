@@ -53,15 +53,15 @@ jobs:
           - wolfi
           - suse-micro
         profile:
-          - name: base
+          - name: full
             tag: ""
-            features: profile-static-site,acme-client
+            features: profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
           - name: cache
             tag: cache
             features: profile-cache-server,acme-client
           - name: load-balancer
             tag: load-balancer
-            features: profile-load-balancer,acme-client
+            features: proxy,web,load-balancer,tls-rustls,security,acme-client
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}

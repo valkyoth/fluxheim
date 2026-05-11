@@ -416,7 +416,7 @@ runtime process does not run as root.
 
 Fluxheim publishes variant images from the explicit Containerfiles under
 `containers/`: `wolfi`, `alpine`, `suse-micro`, and `debian`. Each OS variant
-is published for the base and cache image profiles. The load-balancer image
+is published for the full/default and cache image profiles. The load-balancer image
 profile is prepared for the `1.3` line and can be included early through manual
 workflow dispatch. GitHub Container Registry publishing uses the repository
 `GITHUB_TOKEN`; Docker Hub publishing requires `DOCKERHUB_USERNAME` and

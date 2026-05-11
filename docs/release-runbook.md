@@ -213,10 +213,10 @@ The release notes should end with concrete evidence, not placeholders:
 - Reproducible build:
   - `...  target/reproducible-a/release/fluxheim`
 - Container digests:
-  - Base Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Base Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Base SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Base Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Full/default Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Full/default Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Full/default SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Full/default Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
   - Cache Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
   - Cache Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
   - Cache SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`

@@ -153,13 +153,24 @@ Build the default Debian image:
 podman build -t fluxheim:dev -f Containerfile .
 ```
 
-By default, the bundled Containerfiles compile the base gateway image profile
-`profile-static-site,acme-client`: static/proxy serving, rustls TLS, ACME, and
-security helpers without the cache module. Published releases also build a
-cache-focused profile with `profile-cache-server,acme-client`; starting with
-the `1.3` line, the image workflow is prepared to publish a load-balancer
-profile with `profile-load-balancer,acme-client`. Override `FLUXHEIM_FEATURES`
-only when you intentionally want a custom image.
+By default, the bundled Containerfiles compile the full production image
+profile:
+
+```text
+profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+```
+
+That default image includes proxying, static serving, cache, load balancing,
+rustls TLS, managed ACME, Prometheus metrics, and OpenTelemetry export support.
+Published releases also build smaller focused profiles:
+
+- `cache`: `profile-cache-server,acme-client`
+- `load-balancer`: `proxy,web,load-balancer,tls-rustls,security,acme-client`
+
+The load-balancer image does not need the cache module. It does include `web`
+so the packaged default site, static fallback/error-page support, and common
+HTTP-01 deployment shapes keep working. Override `FLUXHEIM_FEATURES` only when
+you intentionally want a custom image.
 
 Build a specific runtime variant:
 
@@ -183,7 +194,7 @@ Build the future load-balancer profile locally:
 
 ```bash
 podman build \
-  --build-arg FLUXHEIM_FEATURES=profile-load-balancer,acme-client \
+  --build-arg FLUXHEIM_FEATURES=proxy,web,load-balancer,tls-rustls,security,acme-client \
   -t fluxheim:load-balancer-wolfi \
   -f containers/Containerfile.wolfi .
 ```
@@ -279,18 +290,22 @@ Required Docker Hub repository secrets:
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
 
-The workflow publishes OS-variant tags for the base image profile:
+The workflow publishes OS-variant tags for the full/default image profile:
 
 - `v1.2.0-wolfi`, `v1.2.0-alpine`, `v1.2.0-suse-micro`, `v1.2.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
-For the recommended Wolfi runtime, the base profile also gets short aliases:
+For the recommended Wolfi runtime, the full/default profile also gets short
+aliases:
 
 - `v1.2.0`
 - `v1.2.0-base`
 - `latest`
 - `latest-base`
+
+The `-base` aliases are kept for compatibility with earlier release notes and
+automation. They point at the full/default image profile.
 
 The cache image profile publishes tags with a `cache` profile segment:
 
