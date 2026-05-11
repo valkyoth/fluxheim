@@ -194,18 +194,21 @@ internal cache implementation.
   purge invalidates both tiers.
 - The protected admin endpoint `GET /_fluxheim/cache/status` reports aggregate,
   per-vhost, and per-route cache enablement, tiering, memory counters, disk
-  counters, and cache activity counters for hits, misses, stores, refused
-  stores, disk evictions, and purges. Activity blocks include derived
+  counters, request-collapsing lock coverage, and cache activity counters for
+  hits, misses, stores, refused stores, disk evictions, and purges. Activity
+  blocks include derived
   `requests`, `hit_ratio_per_mille`, `miss_ratio_per_mille`,
   `store_attempts`, `store_ratio_per_mille`, `store_refusal_ratio_per_mille`,
   and `eviction_ratio_per_mille` fields so operators can read hit-rate,
   miss-rate, admission health, and eviction pressure without external JSON
   post-processing. Totals and per-vhost status include `configured_routes`,
   `routes_total`, `cache_route_coverage_ratio_per_mille`, `enabled_routes`,
-  `enabled_route_ratio_per_mille`, `tiered_routes`, and
-  `tiered_route_ratio_per_mille` so route-cache coverage is visible without
-  parsing the route list. `routes_total` counts routes with explicit cache
-  policy, while `configured_routes` counts all configured routes on the vhost.
+  `enabled_route_ratio_per_mille`, `tiered_routes`,
+  `tiered_route_ratio_per_mille`, `lock_enabled_policies`, and
+  `lock_enabled_policy_ratio_per_mille` so route-cache and stampede-protection
+  coverage are visible without parsing the route list. `routes_total` counts
+  routes with explicit cache policy, while `configured_routes` counts all
+  configured routes on the vhost.
   Per-vhost and per-route status also include `storage_tiers` so dashboards can
   distinguish memory-only, disk-only, and tiered caches without inspecting
   nested tier objects. Totals also include enabled and tiered vhost ratios.

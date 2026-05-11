@@ -710,6 +710,7 @@ pub struct CacheRuntimeTotals {
     pub routes_total: u64,
     pub enabled_routes: u64,
     pub tiered_routes: u64,
+    pub lock_enabled_policies: u64,
     pub memory_tiers: u64,
     pub memory_entries: u64,
     pub memory_weighted_size_bytes: u64,
@@ -731,11 +732,19 @@ pub struct CacheRuntimeTotals {
 }
 
 #[cfg(feature = "cache")]
+impl CacheRuntimeTotals {
+    pub fn enabled_cache_policies(&self) -> u64 {
+        self.enabled_vhosts.saturating_add(self.enabled_routes)
+    }
+}
+
+#[cfg(feature = "cache")]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheVhostStats {
     pub name: String,
     pub enabled: bool,
     pub tiered: bool,
+    pub lock_enabled: bool,
     pub configured_routes: u64,
     pub routes_total: u64,
     pub enabled_routes: u64,
@@ -751,6 +760,7 @@ pub struct CacheRouteStats {
     pub name: String,
     pub enabled: bool,
     pub tiered: bool,
+    pub lock_enabled: bool,
     pub memory: Option<crate::cache::MemoryCacheStats>,
     pub disk: Option<crate::cache::DiskCacheStats>,
 }
@@ -932,6 +942,9 @@ impl ProxySnapshot {
             if vhost.pingora_tiered_storage.is_some() {
                 totals.tiered_vhosts = totals.tiered_vhosts.saturating_add(1);
             }
+            if vhost.pingora_cache_lock.is_some() {
+                totals.lock_enabled_policies = totals.lock_enabled_policies.saturating_add(1);
+            }
             let configured_routes = vhost.routes.len() as u64;
             totals.configured_routes = totals.configured_routes.saturating_add(configured_routes);
 
@@ -958,6 +971,9 @@ impl ProxySnapshot {
                     totals.tiered_routes = totals.tiered_routes.saturating_add(1);
                     tiered_routes = tiered_routes.saturating_add(1);
                 }
+                if cache.pingora_cache_lock.is_some() {
+                    totals.lock_enabled_policies = totals.lock_enabled_policies.saturating_add(1);
+                }
                 let route_memory = cache.pingora_memory_storage.map(|storage| storage.stats());
                 let route_disk = cache
                     .pingora_disk_storage
@@ -968,6 +984,7 @@ impl ProxySnapshot {
                     name: cache.name.clone(),
                     enabled: cache.config.enabled,
                     tiered: cache.pingora_tiered_storage.is_some(),
+                    lock_enabled: cache.pingora_cache_lock.is_some(),
                     memory: route_memory,
                     disk: route_disk,
                 });
@@ -977,6 +994,7 @@ impl ProxySnapshot {
                 name: vhost.name.clone(),
                 enabled: vhost.cache.enabled,
                 tiered: vhost.pingora_tiered_storage.is_some(),
+                lock_enabled: vhost.pingora_cache_lock.is_some(),
                 configured_routes,
                 routes_total: routes.len() as u64,
                 enabled_routes,
