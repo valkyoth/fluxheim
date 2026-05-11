@@ -43,6 +43,10 @@ For stable or release-candidate builds, prefer the stable gate:
 scripts/stable_release_gate.sh release
 ```
 
+For the `1.2` line this stable gate includes the proxy cache and local
+observability smoke suites, so cache and Prometheus/OpenTelemetry basics are
+checked by the same command used for release evidence.
+
 If `cargo audit` reports a known upstream advisory that cannot be fixed in this
 repository yet, record it explicitly in the release notes with the package,
 advisory ID, impact, and removal condition.

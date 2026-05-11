@@ -149,6 +149,11 @@ For faster iteration before release week, run the same local gate in check mode:
 scripts/stable_release_gate.sh check
 ```
 
+The stable gate includes the promoted cache and observability smoke tests for
+the `1.2` line. Optional gates below still cover slower or environment-specific
+checks such as TLS backend matrices, load testing, fuzz target compilation, and
+Podman image smoke tests.
+
 For release-candidate validation, run the deeper local gate. It enables the TLS
 backend matrix, local TLS scan, local load smoke, raw request-framing smoke, and
 fuzz target compile check:

@@ -644,6 +644,8 @@ Stable scope for declaring the cache pack complete:
   `304 Not Modified`.
 - Large-object byte-range fill is bounded and does not require buffering an
   entire object before useful ranges can be cached.
+- `scripts/stable_release_gate.sh` runs the promoted proxy-cache and local
+  observability smoke suites before a `1.2` stable release.
 
 Beta scope:
 
