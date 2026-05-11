@@ -7,9 +7,11 @@ upstream_port="${FLUXHEIM_OBSERVABILITY_UPSTREAM_PORT:-18181}"
 prometheus_url="${FLUXHEIM_PROMETHEUS_URL:-http://127.0.0.1:9090}"
 jaeger_url="${FLUXHEIM_JAEGER_URL:-http://127.0.0.1:16686}"
 otlp_trace_endpoint="${FLUXHEIM_OTLP_TRACE_ENDPOINT:-http://127.0.0.1:4318/v1/traces}"
+otlp_metrics_endpoint="${FLUXHEIM_OTLP_METRICS_ENDPOINT:-http://127.0.0.1:9090/api/v1/otlp/v1/metrics}"
 require_prometheus="${FLUXHEIM_PROMETHEUS_REQUIRED:-0}"
 require_fluxheim_scrape="${FLUXHEIM_PROMETHEUS_REQUIRE_FLUXHEIM:-0}"
 require_prometheus_otlp="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP:-0}"
+require_prometheus_otlp_fluxheim="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP_FLUXHEIM:-0}"
 require_jaeger_trace="${FLUXHEIM_JAEGER_REQUIRE_TRACE:-0}"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-observability-smoke.XXXXXX")"
 config="$tmp/fluxheim.toml"
@@ -93,6 +95,13 @@ request_id = true
 enabled = true
 listen = "127.0.0.1:$metrics_port"
 require_loopback = true
+
+[metrics.otlp]
+enabled = true
+endpoint = "$otlp_metrics_endpoint"
+service_name = "fluxheim-smoke"
+interval_secs = 1
+timeout_secs = 2
 
 [tracing]
 enabled = true
@@ -216,13 +225,31 @@ if curl -fsS "$prometheus_url/-/ready" >/dev/null 2>&1; then
     curl -fsS "$prometheus_url/api/v1/query?query=$encoded_query" >"$prometheus_body"
     if grep -q '"status":"success"' "$prometheus_body" \
         && grep -q 'fluxheim_proxy_requests_total' "$prometheus_body"; then
-        echo "observability smoke: prometheus api ok and fluxheim metrics are scraped"
+        echo "observability smoke: prometheus api ok and fluxheim metrics are present"
     elif [ "$require_fluxheim_scrape" = "1" ]; then
         echo "observability smoke failed: Prometheus API is reachable but has no Fluxheim scrape result" >&2
         cat "$prometheus_body" >&2
         exit 1
     else
         echo "observability smoke: prometheus api ok; Fluxheim scrape not present yet"
+    fi
+
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        curl -fsS "$prometheus_url/api/v1/query?query=$encoded_query" >"$prometheus_body"
+        if grep -q '"status":"success"' "$prometheus_body" \
+            && grep -q 'fluxheim_proxy_requests_total' "$prometheus_body"; then
+            echo "observability smoke: prometheus OTLP metrics receiver has Fluxheim series"
+            break
+        fi
+        sleep 1
+    done
+    if ! grep -q 'fluxheim_proxy_requests_total' "$prometheus_body"; then
+        if [ "$require_prometheus_otlp_fluxheim" = "1" ]; then
+            echo "observability smoke failed: Prometheus OTLP receiver did not ingest Fluxheim metrics" >&2
+            cat "$prometheus_body" >&2
+            exit 1
+        fi
+        echo "observability smoke: Prometheus OTLP metrics ingestion not observed yet"
     fi
 elif [ "$require_prometheus" = "1" ]; then
     echo "observability smoke failed: Prometheus is required but $prometheus_url is not ready" >&2

@@ -90,11 +90,17 @@ Use `examples/privacy.toml` as the baseline runtime config for this profile.
 It disables Fluxheim access logging, request ID generation, metrics, cache, and
 client-IP forwarding headers.
 
+Implemented incompatible features:
+
+- `metrics`
+- `metrics-otlp`
+- `otel-tracing`
+- `otel-otlp`
+
 Planned incompatible features:
 
 - `metrics-advanced`
 - `metrics-push`
-- `metrics-otlp`
 - `logging-remote`
 - `logging-spool`
 - `waf`

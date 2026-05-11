@@ -21,9 +21,8 @@ Planned feature split:
 
 ```toml
 metrics = ["dep:prometheus"]
+metrics-otlp = ["metrics", "dep:serde_json"]
 metrics-advanced = ["metrics"]
-metrics-push = ["metrics-advanced"]
-metrics-otlp = ["metrics-advanced", "dep:opentelemetry-otlp"]
 ```
 
 Reviewed optional crate candidates:
@@ -177,7 +176,10 @@ Baseline:
 
 Optional push:
 
-- background Pingora service aggregates and pushes every `10-60s`.
+- initial implementation spawns a background exporter thread when
+  `[metrics.otlp]` is enabled.
+- future Pingora service integration can add richer lifecycle and health
+  reporting.
 - push failure must never block request workers.
 - failed push keeps metrics locally available.
 - do not buffer infinite historical metrics in memory.
@@ -186,12 +188,14 @@ Optional OTLP:
 
 - behind `metrics-otlp`.
 - default off.
-- use explicit remote endpoint and timeout config.
+- use explicit endpoint, interval, service name, and timeout config.
 - can target a Prometheus HTTP OTLP metrics receiver at
   `/api/v1/otlp/v1/metrics` when Prometheus is started with
   `--web.enable-otlp-receiver`.
 - covers metrics only; traces still need an OpenTelemetry Collector or tracing
   backend.
+- implemented now for counters and gauges gathered from the existing
+  Prometheus registry. Histograms/summaries remain a future exporter extension.
 
 Exporter health metrics:
 
@@ -219,6 +223,13 @@ enabled = true
 listen = "127.0.0.1:9091"
 require_loopback = true
 
+[metrics.otlp]
+enabled = false
+endpoint = "http://127.0.0.1:9090/api/v1/otlp/v1/metrics"
+service_name = "fluxheim"
+interval_secs = 15
+timeout_secs = 2
+
 [metrics.advanced]
 enabled = false
 max_metric_vhosts = 10000
@@ -226,14 +237,6 @@ latency_buckets_ms = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
 unknown_vhost_bucket = "unknown"
 overflow_bucket = "overflow"
 
-[metrics.push]
-enabled = false
-protocol = "otlp_http"
-endpoint = "https://collector.example.test/v1/metrics"
-interval_secs = 30
-timeout_secs = 2
-retry_initial_secs = 5
-retry_max_secs = 300
 ```
 
 ## Implementation Stages
@@ -246,9 +249,11 @@ retry_max_secs = 300
 2. Add vhost-indexed atomic counters.
 3. Add fixed atomic latency histograms.
 4. Add cache/load-balancer/admin/security counters.
-5. Add exporter health metrics.
-6. Add optional push exporter.
-7. Add optional OTLP exporter.
+5. Add optional OTLP exporter. Implemented initially for counters/gauges over
+   local OTLP/HTTP JSON.
+6. Add exporter health metrics.
+7. Add production-grade push/exporter lifecycle, retry, circuit breaker, and
+   histogram support.
 
 ## Tests
 

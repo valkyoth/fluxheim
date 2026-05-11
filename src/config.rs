@@ -770,6 +770,8 @@ pub struct MetricsConfig {
     pub listen: String,
     #[serde(default = "default_metrics_require_loopback")]
     pub require_loopback: bool,
+    #[serde(default)]
+    pub otlp: MetricsOtlpExportConfig,
 }
 
 impl Default for MetricsConfig {
@@ -778,6 +780,7 @@ impl Default for MetricsConfig {
             enabled: false,
             listen: default_metrics_listen(),
             require_loopback: default_metrics_require_loopback(),
+            otlp: MetricsOtlpExportConfig::default(),
         }
     }
 }
@@ -795,8 +798,82 @@ impl MetricsConfig {
                 address: self.listen.clone(),
             });
         }
+        if !self.enabled && self.otlp.enabled {
+            return Err(ConfigError::InvalidMetricsPolicy {
+                field: "metrics.otlp.enabled",
+                reason: "OTLP metrics export requires metrics.enabled = true",
+            });
+        }
+        self.otlp.validate()?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsOtlpExportConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_metrics_otlp_endpoint")]
+    pub endpoint: String,
+    #[serde(default = "default_metrics_otlp_service_name")]
+    pub service_name: String,
+    #[serde(default = "default_metrics_otlp_interval_secs")]
+    pub interval_secs: u64,
+    #[serde(default = "default_metrics_otlp_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for MetricsOtlpExportConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: default_metrics_otlp_endpoint(),
+            service_name: default_metrics_otlp_service_name(),
+            interval_secs: default_metrics_otlp_interval_secs(),
+            timeout_secs: default_metrics_otlp_timeout_secs(),
+        }
+    }
+}
+
+impl MetricsOtlpExportConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "metrics-otlp"))]
+        return Err(ConfigError::MetricsOtlpExportNotCompiled);
+
+        #[cfg(feature = "metrics-otlp")]
+        {
+            if !valid_http_otlp_endpoint(&self.endpoint) {
+                return Err(ConfigError::InvalidMetricsPolicy {
+                    field: "metrics.otlp.endpoint",
+                    reason: "OTLP metrics export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
+                });
+            }
+            if !valid_service_name(&self.service_name) {
+                return Err(ConfigError::InvalidMetricsPolicy {
+                    field: "metrics.otlp.service_name",
+                    reason: "service name must be 1..=128 visible ASCII bytes without control characters",
+                });
+            }
+            if self.interval_secs == 0 || self.interval_secs > 3600 {
+                return Err(ConfigError::InvalidMetricsPolicy {
+                    field: "metrics.otlp.interval_secs",
+                    reason: "interval must be between 1 and 3600 seconds",
+                });
+            }
+            if self.timeout_secs == 0 || self.timeout_secs > 60 {
+                return Err(ConfigError::InvalidMetricsPolicy {
+                    field: "metrics.otlp.timeout_secs",
+                    reason: "timeout must be between 1 and 60 seconds",
+                });
+            }
+            Ok(())
+        }
     }
 }
 
@@ -4161,6 +4238,11 @@ pub enum ConfigError {
     MetricsListenNotLoopback {
         address: String,
     },
+    MetricsOtlpExportNotCompiled,
+    InvalidMetricsPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
     TracingNotCompiled,
     OtlpTraceExportNotCompiled,
     InvalidTracingPolicy {
@@ -4562,6 +4644,13 @@ impl Display for ConfigError {
                 formatter,
                 "metrics.listen must be loopback when metrics.require_loopback = true, got {address:?}"
             ),
+            Self::MetricsOtlpExportNotCompiled => write!(
+                formatter,
+                "metrics.otlp.enabled requires building Fluxheim with the metrics-otlp feature"
+            ),
+            Self::InvalidMetricsPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
             Self::TracingNotCompiled => write!(
                 formatter,
                 "tracing.enabled requires building Fluxheim with the otel-tracing feature"
@@ -5040,6 +5129,22 @@ fn default_metrics_require_loopback() -> bool {
     true
 }
 
+fn default_metrics_otlp_endpoint() -> String {
+    "http://127.0.0.1:9090/api/v1/otlp/v1/metrics".to_owned()
+}
+
+fn default_metrics_otlp_service_name() -> String {
+    "fluxheim".to_owned()
+}
+
+fn default_metrics_otlp_interval_secs() -> u64 {
+    15
+}
+
+fn default_metrics_otlp_timeout_secs() -> u64 {
+    2
+}
+
 fn default_otlp_trace_endpoint() -> String {
     "http://127.0.0.1:4318/v1/traces".to_owned()
 }
@@ -5056,7 +5161,7 @@ fn default_otlp_timeout_secs() -> u64 {
     2
 }
 
-#[cfg(feature = "otel-otlp")]
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
         return false;
@@ -5080,7 +5185,7 @@ fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
     valid_http_authority(authority)
 }
 
-#[cfg(feature = "otel-otlp")]
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_authority(authority: &str) -> bool {
     if authority.starts_with('[') {
         let Some(end) = authority.find(']') else {
@@ -5099,17 +5204,17 @@ fn valid_http_authority(authority: &str) -> bool {
     valid_http_host(host) && valid_port(port)
 }
 
-#[cfg(feature = "otel-otlp")]
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_port_tail(tail: &str) -> bool {
     tail.strip_prefix(':').is_some_and(valid_port)
 }
 
-#[cfg(feature = "otel-otlp")]
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_port(port: &str) -> bool {
     port.parse::<u16>().is_ok_and(|port| port != 0)
 }
 
-#[cfg(feature = "otel-otlp")]
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_host(host: &str) -> bool {
     !host.is_empty()
         && !host.starts_with('-')
@@ -5119,7 +5224,7 @@ fn valid_http_host(host: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
-#[cfg(feature = "otel-otlp")]
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_service_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
@@ -8819,6 +8924,78 @@ mod tests {
         config.validate().unwrap();
         assert!(config.metrics.enabled);
         assert_eq!(config.metrics.listen, "127.0.0.1:9091");
+    }
+
+    #[cfg(feature = "metrics-otlp")]
+    #[test]
+    fn parses_otlp_metrics_export_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [metrics]
+            enabled = true
+
+            [metrics.otlp]
+            enabled = true
+            endpoint = "http://127.0.0.1:9090/api/v1/otlp/v1/metrics"
+            service_name = "fluxheim-smoke"
+            interval_secs = 1
+            timeout_secs = 1
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert!(config.metrics.otlp.enabled);
+        assert_eq!(
+            config.metrics.otlp.endpoint,
+            "http://127.0.0.1:9090/api/v1/otlp/v1/metrics"
+        );
+        assert_eq!(config.metrics.otlp.service_name, "fluxheim-smoke");
+        assert_eq!(config.metrics.otlp.interval_secs, 1);
+    }
+
+    #[cfg(feature = "metrics-otlp")]
+    #[test]
+    fn rejects_invalid_otlp_metrics_endpoint() {
+        let config: Config = toml::from_str(
+            r#"
+            [metrics]
+            enabled = true
+
+            [metrics.otlp]
+            enabled = true
+            endpoint = "https://collector.example.test/v1/metrics"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidMetricsPolicy {
+                field: "metrics.otlp.endpoint",
+                reason: "OTLP metrics export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
+            })
+        );
+    }
+
+    #[cfg(not(feature = "metrics-otlp"))]
+    #[test]
+    fn rejects_otlp_metrics_export_without_feature() {
+        let config: Config = toml::from_str(
+            r#"
+            [metrics]
+            enabled = true
+
+            [metrics.otlp]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::MetricsOtlpExportNotCompiled)
+        );
     }
 
     #[cfg(feature = "otel-tracing")]

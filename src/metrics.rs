@@ -397,6 +397,8 @@ fn cache_event_label(event: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
     use prometheus::Encoder;
 
     use crate::config::{
@@ -412,6 +414,7 @@ mod tests {
 
     #[test]
     fn records_proxy_outcome_counter() {
+        let _guard = metrics_test_lock();
         init().unwrap();
 
         record_proxy_outcome("metrics-test", "GET", Some(502), false);
@@ -432,6 +435,7 @@ mod tests {
 
     #[test]
     fn records_cache_configuration_gauges() {
+        let _guard = metrics_test_lock();
         init().unwrap();
 
         let config = cache_metrics_config();
@@ -458,6 +462,7 @@ mod tests {
 
     #[test]
     fn records_cache_activity_counter_with_bounded_labels() {
+        let _guard = metrics_test_lock();
         init().unwrap();
 
         record_cache_activity("memory", "hit");
@@ -483,6 +488,7 @@ mod tests {
 
     #[test]
     fn records_cache_activity_scope_counter_with_configured_labels() {
+        let _guard = metrics_test_lock();
         init().unwrap();
 
         record_cache_activity_scope("cached", None, "memory", "hit");
@@ -606,5 +612,10 @@ mod tests {
             cache: None,
             headers: VhostHeaderPolicyConfig::default(),
         }
+    }
+
+    fn metrics_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
     }
 }

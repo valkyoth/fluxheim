@@ -180,9 +180,19 @@ fronted by a trusted local monitoring agent.
 enabled = false
 listen = "127.0.0.1:9091"
 require_loopback = true
+
+[metrics.otlp]
+enabled = false
+endpoint = "http://127.0.0.1:9090/api/v1/otlp/v1/metrics"
+service_name = "fluxheim"
+interval_secs = 15
+timeout_secs = 2
 ```
 
 The `metrics` compile-time feature is not part of `profile-privacy`.
+`metrics.otlp.enabled = true` requires the `metrics-otlp` feature. The initial
+exporter sends OTLP/HTTP JSON over `http://` only and is intended for a local
+Prometheus OTLP receiver or local collector.
 
 ## Tracing
 

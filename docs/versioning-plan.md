@@ -387,8 +387,10 @@ Stable scope:
     vhost/route scoped cache activity counters; `otel-tracing` now provides
     W3C `traceparent` propagation and access-log trace ID correlation, and
     `otel-otlp` now provides initial local OTLP/HTTP trace export. Richer
-    OpenTelemetry internal spans, sampling, exporter health, and trace/event
-    coverage remain planned.
+    `metrics-otlp` now provides initial local OTLP/HTTP metrics export for
+    Prometheus/collector receivers. Richer OpenTelemetry internal spans,
+    sampling, exporter health, histogram export, and trace/event coverage remain
+    planned.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
@@ -749,9 +751,9 @@ Stable scope:
 Beta scope:
 
 - Remote logging sink with circuit breaker.
-- OTLP metrics export.
-- Production-grade `otel-otlp` exporter health, TLS/gRPC transport, and
-  collector failure metrics on top of the initial local HTTP exporter.
+- Production-grade `metrics-otlp` and `otel-otlp` exporter health, TLS/gRPC
+  transport, histogram export, and collector failure metrics on top of the
+  initial local HTTP exporters.
 - Latency-aware and status-aware trace sampling.
 
 Exit criteria:

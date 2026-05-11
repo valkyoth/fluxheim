@@ -88,11 +88,13 @@ cargo check --no-default-features --features profile-privacy
 expect_cargo_check_failure "privacy-mode" "privacy-mode cannot be combined with the cache feature"
 expect_cargo_check_failure_no_defaults "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
 expect_feature_validation_failure "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
+expect_feature_validation_failure "profile-privacy,metrics-otlp" "privacy-mode cannot be combined with metrics-otlp"
 expect_feature_validation_failure "profile-privacy,otel-tracing" "privacy-mode cannot be combined with otel-tracing"
 expect_feature_validation_failure "profile-privacy,otel-otlp" "privacy-mode cannot be combined with otel-otlp"
 expect_feature_validation_failure "profile-core,tls-openssl" "select only one Fluxheim TLS backend feature"
 expect_feature_validation_failure "tls-rustls,tls-openssl" "select only one Fluxheim TLS backend feature"
 cargo test --no-default-features --features proxy,metrics
+cargo test --no-default-features --features proxy,metrics-otlp
 cargo test --no-default-features --features proxy,otel-tracing
 cargo test --no-default-features --features proxy,otel-otlp
 cargo test --no-default-features --features proxy,tls-rustls,acme

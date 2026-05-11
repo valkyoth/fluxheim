@@ -116,6 +116,15 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         log::info!("metrics listener enabled on {}", config.metrics.listen);
         metrics_service.add_tcp(&config.metrics.listen);
         server.add_service(metrics_service);
+
+        #[cfg(feature = "metrics-otlp")]
+        if config.metrics.otlp.enabled {
+            crate::metrics_otlp::spawn_from_config(&config.metrics.otlp)?;
+            log::info!(
+                "OTLP metrics export enabled to {}",
+                config.metrics.otlp.endpoint
+            );
+        }
     }
 
     #[cfg(feature = "acme-client")]

@@ -19,6 +19,8 @@ pub mod headers;
 pub mod load_balancer;
 #[cfg(feature = "metrics")]
 pub mod metrics;
+#[cfg(feature = "metrics-otlp")]
+pub mod metrics_otlp;
 #[cfg(feature = "otel-otlp")]
 pub mod otel_otlp;
 #[cfg(feature = "proxy")]
@@ -65,6 +67,11 @@ compile_error!(
 #[cfg(all(feature = "privacy-mode", feature = "metrics"))]
 compile_error!(
     "privacy-mode cannot be combined with metrics; zero-retention builds must not compile request metrics"
+);
+
+#[cfg(all(feature = "privacy-mode", feature = "metrics-otlp"))]
+compile_error!(
+    "privacy-mode cannot be combined with metrics-otlp; zero-retention builds must not compile metrics export"
 );
 
 #[cfg(all(feature = "privacy-mode", feature = "otel-tracing"))]
