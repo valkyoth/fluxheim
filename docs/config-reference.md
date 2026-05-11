@@ -566,7 +566,9 @@ For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key
 without contacting the upstream. `fluxheim cache-lookup --host example.com
 --path /assets/app.js` also checks configured cache tiers and prints safe object
-metadata without dumping bodies or header values.
+metadata without dumping bodies or header values. `fluxheim cache-warm --dry-run`
+validates warm targets, repeat counts, cache-status expectations, and listener
+selection without sending requests, which is useful before release deploy jobs.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.

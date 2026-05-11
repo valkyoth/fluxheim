@@ -155,6 +155,10 @@ pub enum CliCommand {
         #[arg(long)]
         fail_fast: bool,
 
+        /// Validate and print the warm plan without sending requests.
+        #[arg(long)]
+        dry_run: bool,
+
         /// Number of times to request each warm target.
         #[arg(long, default_value_t = 1)]
         repeat: usize,
@@ -392,6 +396,7 @@ fn run_command(
             timeout_secs,
             max_targets,
             fail_fast,
+            dry_run,
             repeat,
             allow_statuses,
             cache_status_header,
@@ -406,6 +411,7 @@ fn run_command(
             timeout_secs: *timeout_secs,
             max_targets: *max_targets,
             fail_fast: *fail_fast,
+            dry_run: *dry_run,
             repeat: *repeat,
             allow_statuses: allow_statuses.clone(),
             cache_status_header: cache_status_header.clone(),
@@ -449,6 +455,7 @@ struct CacheWarmOptions<'a> {
     timeout_secs: u64,
     max_targets: usize,
     fail_fast: bool,
+    dry_run: bool,
     repeat: usize,
     allow_statuses: Vec<u16>,
     cache_status_header: String,
@@ -522,6 +529,16 @@ fn run_cache_warm_command(
     println!("cache warm targets: {}", targets.len());
     println!("cache warm requests: {total_requests}");
     println!("cache warm listener: {listen}");
+    if options.dry_run {
+        for target in targets {
+            println!(
+                "would warm: host={} path={} repeat={}",
+                target.host, target.path, options.repeat
+            );
+        }
+        println!("cache warm dry run completed");
+        return Ok(());
+    }
 
     let timeout = std::time::Duration::from_secs(options.timeout_secs);
     let mut warmed = 0_usize;
@@ -674,6 +691,7 @@ fn run_cache_warm_command(
         timeout_secs,
         max_targets,
         fail_fast,
+        dry_run,
         repeat,
         allow_statuses,
         cache_status_header,
@@ -689,6 +707,7 @@ fn run_cache_warm_command(
         timeout_secs,
         max_targets,
         fail_fast,
+        dry_run,
         repeat,
         allow_statuses,
         cache_status_header,
@@ -2203,6 +2222,28 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_dry_run_validates_targets_without_listener() {
+        let dir = TestDir::new("cli-cache-warm-dry-run");
+        let config = dir.simple_config("fluxheim.toml", "example", "example.test");
+
+        run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "cache-warm",
+            "--path",
+            "/assets/app.css",
+            "--repeat",
+            "2",
+            "--expect-cache-status-sequence",
+            "MISS,HIT",
+            "--dry-run",
+        ])
+        .unwrap();
     }
 
     #[cfg(feature = "cache")]
