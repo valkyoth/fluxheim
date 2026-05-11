@@ -31,6 +31,9 @@ behavior when the change improves security or project direction.
   `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`.
 - Indexed cache purge endpoints now accept bounded `batches` /
   `x-fluxheim-cache-batches` for incremental large-scope invalidation.
+- Stale cache purges now rotate scanned fresh entries on truncated non-dry-run
+  batches, allowing bounded background cleanup to reach expired entries behind
+  fresh front pages.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - `fluxheim cache-lookup` can now assert exact stored response header values

@@ -380,7 +380,11 @@ records successful admin purge commands with bounded operation and mode labels;
   `batches` / `x-fluxheim-cache-batches`. Each batch obeys the same bounded
   scan limit; dry-runs intentionally execute one scan, and responses set
   `increase_limit_required = true` when the scan was truncated but another
-  identical batch would not make progress.
+  identical batch would not make progress. Non-dry-run stale purges rotate
+  scanned fresh entries to the back of the bounded purge index when the scan is
+  truncated, so repeated batches can advance through fresh front pages and
+  still reach stale objects later in the same vhost or route bucket without a
+  full filesystem walk.
   `POST /_fluxheim/cache/purge-wildcard` invalidates indexed
   entries by absolute path pattern using `*`, for example `/assets/*.png`.
   Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
@@ -404,8 +408,10 @@ records successful admin purge commands with bounded operation and mode labels;
   a complete filesystem scan.
   `[cache_purger]` can periodically run stale disk cleanup for every indexed
   vhost and route cache with conservative per-target `limit` and `batches`
-  controls, while the admin endpoint remains available for explicit dry-runs
-  and larger maintenance windows.
+  controls. The background purger uses the same fresh-entry rotation as the
+  admin stale purge, so a bounded run can keep making progress even when fresh
+  entries sit before expired entries in the index. The admin endpoint remains
+  available for explicit dry-runs and larger maintenance windows.
 
 Example admin cache invalidation requests:
 

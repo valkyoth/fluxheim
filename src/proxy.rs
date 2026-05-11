@@ -1887,7 +1887,7 @@ fn purge_stale_disk_storage_batches(
         result.purged = result.purged.saturating_add(batch.purged);
         result.truncated |= batch.truncated;
 
-        if !batch.truncated || batch.purged == 0 {
+        if !batch.truncated {
             break;
         }
     }
@@ -7012,6 +7012,91 @@ mod tests {
 
         std::fs::remove_dir_all(vhost_cache_path).unwrap();
         std::fs::remove_dir_all(route_cache_path).unwrap();
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn background_stale_disk_purge_advances_past_fresh_entries() {
+        use pingora::cache::Storage;
+
+        let cache_path = unique_test_cache_dir("proxy-background-disk-purge-advance");
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    disk: crate::config::CacheDiskConfig {
+                        enabled: true,
+                        path: Some(cache_path.clone()),
+                        max_size_bytes: ByteSize::from_bytes(4096),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let storage = snapshot
+            .state
+            .vhost(vhost_index)
+            .pingora_disk_storage
+            .unwrap();
+        let fresh_first =
+            pingora::cache::CacheKey::new("fluxheim-test", "background-fresh-first", "cached");
+        let fresh_second =
+            pingora::cache::CacheKey::new("fluxheim-test", "background-fresh-second", "cached");
+        let stale_key =
+            pingora::cache::CacheKey::new("fluxheim-test", "background-stale-third", "cached");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let fresh = pingora_meta("max-age=60");
+        let stale = stale_pingora_meta("max-age=60");
+
+        for (key, meta) in [
+            (&fresh_first, &fresh),
+            (&fresh_second, &fresh),
+            (&stale_key, &stale),
+        ] {
+            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let result = proxy.purge_stale_disk_cache_once(1, 3).unwrap();
+
+        assert_eq!(result.targets, 1);
+        assert_eq!(result.scanned, 3);
+        assert_eq!(result.stale, 1);
+        assert_eq!(result.purged, 1);
+        assert!(result.truncated);
+        assert!(
+            block_on(storage.lookup(&stale_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_first, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_second, &span))
+                .unwrap()
+                .is_some()
+        );
+
+        std::fs::remove_dir_all(cache_path).unwrap();
     }
 
     #[cfg(feature = "cache")]

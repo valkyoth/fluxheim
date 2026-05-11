@@ -739,10 +739,12 @@ batches = 1
 When enabled, Fluxheim periodically scans indexed disk-cache entries for each
 vhost and route cache, removes entries whose stored freshness window has
 expired, and stops after the configured bounded `limit` and `batches` per
-target. It does not walk arbitrary cache directories. Keep `limit` and
-`batches` modest on large production caches; the admin
-`/_fluxheim/cache/purge-stale` endpoint remains available for explicit
-dry-runs or larger operator-controlled cleanup windows. With metrics enabled,
+target. It does not walk arbitrary cache directories. Truncated non-dry-run
+stale purges rotate scanned fresh entries to the back of the bounded index, so
+later batches can reach expired entries that are behind a fresh front page.
+Keep `limit` and `batches` modest on large production caches; the admin
+`/_fluxheim/cache/purge-stale` endpoint remains available for explicit dry-runs
+or larger operator-controlled cleanup windows. With metrics enabled,
 `fluxheim_cache_purger_runs_total{outcome}` and
 `fluxheim_cache_purger_entries_total{result}` show whether the background
 purger is cleanly keeping up or returning `truncated` runs.

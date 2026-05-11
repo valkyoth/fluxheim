@@ -588,6 +588,26 @@ impl CachePurgeIndex {
         inner.entries.contains_key(combined_key)
     }
 
+    fn move_combined_keys_to_back(&self, combined_keys: &[String]) {
+        if combined_keys.is_empty() {
+            return;
+        }
+        let Ok(mut inner) = self.inner.write() else {
+            return;
+        };
+        let candidates = combined_keys
+            .iter()
+            .filter(|key| inner.entries.contains_key(key.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return;
+        }
+        let candidate_set = candidates.iter().cloned().collect::<HashSet<_>>();
+        inner.order.retain(|key| !candidate_set.contains(key));
+        inner.order.extend(candidates);
+    }
+
     pub fn combined_keys_for_primary(&self, primary_key: &str) -> Vec<String> {
         let Ok(inner) = self.inner.read() else {
             return Vec::new();
@@ -1016,6 +1036,7 @@ impl PingoraMemoryStorage {
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
+        let mut deferred_fresh_keys = Vec::new();
 
         for entry in &entries {
             let Some(object) = self.inner.get(&entry.combined_key) else {
@@ -1024,6 +1045,9 @@ impl PingoraMemoryStorage {
             };
             let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
             if meta.is_fresh(now) {
+                if truncated && !dry_run {
+                    deferred_fresh_keys.push(entry.combined_key.clone());
+                }
                 continue;
             }
             stale += 1;
@@ -1033,6 +1057,10 @@ impl PingoraMemoryStorage {
             self.inner.invalidate(&entry.combined_key);
             self.purge_index.remove_combined(&entry.combined_key);
             purged += 1;
+        }
+        if truncated && !dry_run {
+            self.purge_index
+                .move_combined_keys_to_back(&deferred_fresh_keys);
         }
         self.inner.run_pending_tasks();
         if purged > 0 {
@@ -1541,6 +1569,7 @@ impl PingoraDiskStorage {
         let scanned = entries.len();
         let mut stale = 0;
         let mut purged = 0;
+        let mut deferred_fresh_keys = Vec::new();
 
         for entry in &entries {
             let Some(object) = self.lookup_object_by_combined(&entry.combined_key)? else {
@@ -1549,6 +1578,9 @@ impl PingoraDiskStorage {
             };
             let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
             if meta.is_fresh(now) {
+                if truncated && !dry_run {
+                    deferred_fresh_keys.push(entry.combined_key.clone());
+                }
                 continue;
             }
             stale += 1;
@@ -1563,6 +1595,10 @@ impl PingoraDiskStorage {
                 purged += 1;
             }
             self.purge_index.remove_combined(&entry.combined_key);
+        }
+        if truncated && !dry_run {
+            self.purge_index
+                .move_combined_keys_to_back(&deferred_fresh_keys);
         }
 
         Ok(CacheStalePurgeResult {
@@ -5266,6 +5302,89 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_memory_storage_stale_purge_advances_past_fresh_page() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 8,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        });
+        let fresh_first = pingora::cache::CacheKey::new("fluxheim-test", "fresh-first", "vhost-a");
+        let fresh_second =
+            pingora::cache::CacheKey::new("fluxheim-test", "fresh-second", "vhost-a");
+        let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "stale-third", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let fresh = pingora_meta("max-age=60");
+        let stale = stale_pingora_meta("max-age=60");
+
+        for (key, meta) in [
+            (&fresh_first, &fresh),
+            (&fresh_second, &fresh),
+            (&stale_key, &stale),
+        ] {
+            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let first = storage
+            .purge_indexed_stale_user_tag("vhost-a", 1, false)
+            .unwrap();
+        let second = storage
+            .purge_indexed_stale_user_tag("vhost-a", 1, false)
+            .unwrap();
+        let third = storage
+            .purge_indexed_stale_user_tag("vhost-a", 1, false)
+            .unwrap();
+
+        assert_eq!(
+            first,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 0,
+                purged: 0,
+                truncated: true,
+            }
+        );
+        assert_eq!(
+            second,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 0,
+                purged: 0,
+                truncated: true,
+            }
+        );
+        assert_eq!(
+            third,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 1,
+                purged: 1,
+                truncated: true,
+            }
+        );
+        assert!(
+            block_on(storage.lookup(&stale_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_first, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_second, &span))
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_memory_storage_dry_runs_indexed_stale_entries() {
         use pingora::cache::Storage;
 
@@ -5996,6 +6115,95 @@ mod tests {
         );
         assert!(
             block_on(storage.lookup(&fresh_key, &span))
+                .unwrap()
+                .is_some()
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_stale_purge_advances_past_fresh_page() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-stale-purge-advance");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let fresh_first =
+            pingora::cache::CacheKey::new("fluxheim-test", "disk-fresh-first", "vhost-a");
+        let fresh_second =
+            pingora::cache::CacheKey::new("fluxheim-test", "disk-fresh-second", "vhost-a");
+        let stale_key =
+            pingora::cache::CacheKey::new("fluxheim-test", "disk-stale-third", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let fresh = pingora_meta("max-age=60");
+        let stale = stale_pingora_meta("max-age=60");
+
+        for (key, meta) in [
+            (&fresh_first, &fresh),
+            (&fresh_second, &fresh),
+            (&stale_key, &stale),
+        ] {
+            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let first = storage
+            .purge_indexed_stale_user_tag("vhost-a", 1, false)
+            .unwrap();
+        let second = storage
+            .purge_indexed_stale_user_tag("vhost-a", 1, false)
+            .unwrap();
+        let third = storage
+            .purge_indexed_stale_user_tag("vhost-a", 1, false)
+            .unwrap();
+
+        assert_eq!(
+            first,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 0,
+                purged: 0,
+                truncated: true,
+            }
+        );
+        assert_eq!(
+            second,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 0,
+                purged: 0,
+                truncated: true,
+            }
+        );
+        assert_eq!(
+            third,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 1,
+                purged: 1,
+                truncated: true,
+            }
+        );
+        assert!(
+            block_on(storage.lookup(&stale_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_first, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_second, &span))
                 .unwrap()
                 .is_some()
         );
