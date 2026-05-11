@@ -291,6 +291,8 @@ stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
 `Vary` variants, disk hits after restart, configured request bypass policies,
 input-file and negative-cache warming, admin exact/bulk purge, stale dry-run,
 vhost prefix/tag/wildcard purges, route-scoped purge, and debug bypass reasons.
+The same smoke path now asserts bounded Prometheus purge counters for each
+admin purge shape.
 `cache-lookup` also supports deploy-script assertions for object
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
 cache tags, stored header names, exact object count, cache-lock/tier layout, stale-serving

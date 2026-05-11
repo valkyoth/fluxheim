@@ -634,7 +634,8 @@ Stable scope for declaring the cache pack complete:
   for concurrent misses, disk HIT after restart, and request-bypass reason
   behavior are covered end to end. Admin exact/bulk purge, stale dry-run, tag
   purge, prefix purge, wildcard purge, and route-scoped purge are smoke tested
-  against real cached objects.
+  against real cached objects, with bounded Prometheus purge counters asserted
+  for every protected purge shape in that smoke path.
 - Proxied cache revalidation refreshes metadata safely when origins return
   `304 Not Modified`.
 - Large-object byte-range fill is bounded and does not require buffering an
@@ -713,6 +714,7 @@ Exit criteria:
   serving after upstream failure, cache-lock request collapsing for concurrent
   misses, disk HIT after restart, admin exact/bulk purge, stale dry-run, vhost
   prefix/tag/wildcard purge, route-scoped purge against real cached objects, and
+  Prometheus purge counters for each protected purge shape, plus
   `Cache-Control`/`Pragma` request-bypass reason headers.
 - Full HEAD cache parity remains a 1.2 cache-completion item: decide whether
   Fluxheim should intentionally bypass HEAD storage or implement explicit

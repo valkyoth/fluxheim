@@ -11,7 +11,7 @@ import socket
 
 sockets = []
 try:
-    for _ in range(3):
+    for _ in range(4):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -26,6 +26,7 @@ set -- $ports
 FLUXHEIM_PORT=$1
 ORIGIN_PORT=$2
 ADMIN_PORT=$3
+METRICS_PORT=$4
 
 ORIGIN_PID=
 FLUXHEIM_PID=
@@ -317,6 +318,11 @@ require_loopback = true
 token_env = "FLUXHEIM_ADMIN_TOKEN"
 snapshot_store = "$TMP_DIR/snapshots"
 
+[metrics]
+enabled = true
+listen = "127.0.0.1:$METRICS_PORT"
+require_loopback = true
+
 [headers.response]
 enabled = true
 unset = ["server", "x-powered-by"]
@@ -412,7 +418,7 @@ EOF
 python3 "$TMP_DIR/origin.py" "$ORIGIN_PORT" &
 ORIGIN_PID=$!
 
-(cd "$ROOT_DIR" && cargo build --quiet)
+(cd "$ROOT_DIR" && cargo build --quiet --features metrics)
 
 stop_pid() {
     pid=$1
@@ -460,6 +466,7 @@ admin_prefix_purge_body="$TMP_DIR/admin-prefix-purge.json"
 admin_route_purge_body="$TMP_DIR/admin-route-purge.json"
 admin_tag_purge_body="$TMP_DIR/admin-tag-purge.json"
 admin_wildcard_purge_body="$TMP_DIR/admin-wildcard-purge.json"
+metrics_body="$TMP_DIR/metrics.txt"
 
 start_fluxheim
 
@@ -493,6 +500,18 @@ fi
 if ! grep -q '"status":"ok"' "$admin_status_body"; then
     echo "proxy cache smoke failed: admin status endpoint did not return ok" >&2
     cat "$admin_status_body" >&2
+    exit 1
+fi
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -o "$metrics_body" \
+    "http://127.0.0.1:$METRICS_PORT/metrics"; then
+    echo "proxy cache smoke failed: metrics endpoint did not become reachable" >&2
+    cat "$TMP_DIR/fluxheim.log" >&2 || true
+    exit 1
+fi
+if ! grep -q 'fluxheim_proxy_requests_total' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics endpoint did not expose Fluxheim metrics" >&2
+    head -n 40 "$metrics_body" >&2 || true
     exit 1
 fi
 
@@ -1702,5 +1721,43 @@ fi
     --expect-vhost cache.test \
     --expect-route swr \
     --expect-objects 0
+
+curl -sS --max-time "$CURL_MAX_TIME" -o "$metrics_body" \
+    "http://127.0.0.1:$METRICS_PORT/metrics"
+if ! grep -Eq 'fluxheim_cache_purges_total\{mode="normal",operation="exact",route="",scope="vhost",vhost="cache\.test"\} 1' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed exact purge counter" >&2
+    grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_purges_total\{mode="normal",operation="bulk",route="",scope="vhost",vhost="cache\.test"\} 1' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed bulk purge counter" >&2
+    grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_purges_total\{mode="dry_run",operation="stale",route="",scope="vhost",vhost="cache\.test"\} 1' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed stale dry-run purge counter" >&2
+    grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_purges_total\{mode="normal",operation="prefix",route="",scope="vhost",vhost="cache\.test"\} 1' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed prefix purge counter" >&2
+    grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_purges_total\{mode="normal",operation="tag",route="",scope="vhost",vhost="cache\.test"\} 1' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed tag purge counter" >&2
+    grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_purges_total\{mode="normal",operation="wildcard",route="",scope="vhost",vhost="cache\.test"\} 1' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed wildcard purge counter" >&2
+    grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_purges_total\{mode="normal",operation="index",route="swr",scope="route",vhost="cache\.test"\} 1' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed route index purge counter" >&2
+    grep 'fluxheim_cache_purges_total' "$metrics_body" >&2 || true
+    exit 1
+fi
 
 echo "proxy cache smoke: ok"

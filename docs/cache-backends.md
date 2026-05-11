@@ -214,7 +214,9 @@ internal cache implementation.
   for concurrent misses, `Vary` variant isolation, admin exact/bulk purge,
   stale dry-run, vhost prefix/tag/wildcard purge, and route-scoped purge against
   real cached objects, and disk-cache HIT behavior after a Fluxheim process
-  restart without the origin available.
+  restart without the origin available. The same smoke path asserts bounded
+  Prometheus purge counters for exact, bulk, stale, prefix, tag, wildcard, and
+  route-scoped index purge operations.
   Planned work still covers edge cases where origins change `Vary`, validators,
   or freshness headers during revalidation and broader cache-header matrix
   tests across static and proxied responses.
