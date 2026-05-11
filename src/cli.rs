@@ -190,6 +190,10 @@ pub enum CliCommand {
         #[arg(long)]
         host: Option<String>,
 
+        /// Additional request header for cache variance preview, as "Name: value". May be repeated.
+        #[arg(long = "header", value_name = "HEADER")]
+        headers: Vec<String>,
+
         /// HTTP method to preview.
         #[arg(long, default_value = "GET")]
         method: String,
@@ -208,6 +212,10 @@ pub enum CliCommand {
         /// Host header to route and key with. Defaults to the configured default vhost host.
         #[arg(long)]
         host: Option<String>,
+
+        /// Additional request header for cache variance lookup, as "Name: value". May be repeated.
+        #[arg(long = "header", value_name = "HEADER")]
+        headers: Vec<String>,
 
         /// HTTP method to look up.
         #[arg(long, default_value = "GET")]
@@ -420,24 +428,28 @@ fn run_command(
         }),
         CliCommand::CacheKey {
             host,
+            headers,
             method,
             path,
             query,
         } => run_cache_key_command(CacheKeyOptions {
             config_path,
             host: host.clone(),
+            headers: headers.clone(),
             method: method.clone(),
             path: path.clone(),
             query: query.clone(),
         }),
         CliCommand::CacheLookup {
             host,
+            headers,
             method,
             path,
             query,
         } => run_cache_lookup_command(CacheKeyOptions {
             config_path,
             host: host.clone(),
+            headers: headers.clone(),
             method: method.clone(),
             path: path.clone(),
             query: query.clone(),
@@ -467,6 +479,7 @@ struct CacheWarmOptions<'a> {
 struct CacheKeyOptions<'a> {
     config_path: Option<&'a std::path::Path>,
     host: Option<String>,
+    headers: Vec<String>,
     method: String,
     path: String,
     query: Option<String>,
@@ -814,11 +827,12 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     let CacheKeyOptions {
         config_path,
         host,
+        headers,
         method,
         path,
         query,
     } = options;
-    let _ = (config_path, host, method, path, query);
+    let _ = (config_path, host, headers, method, path, query);
     Err("cache-key requires the proxy and cache features".into())
 }
 
@@ -829,11 +843,12 @@ fn run_cache_lookup_command(
     let CacheKeyOptions {
         config_path,
         host,
+        headers,
         method,
         path,
         query,
     } = options;
-    let _ = (config_path, host, method, path, query);
+    let _ = (config_path, host, headers, method, path, query);
     Err("cache-lookup requires the proxy and cache features".into())
 }
 
@@ -858,6 +873,13 @@ fn cache_key_command_request(
     let mut request =
         pingora::http::RequestHeader::build(options.method.as_str(), uri.as_bytes(), None)?;
     request.insert_header("host", host.as_str())?;
+    if options.headers.len() > 32 {
+        return Err("cache-key accepts at most 32 --header values".into());
+    }
+    for header in &options.headers {
+        let (name, value) = parse_cache_key_header(header)?;
+        request.insert_header(name, value)?;
+    }
     Ok((config, request))
 }
 
@@ -911,6 +933,31 @@ fn validate_cache_key_query(query: &str) -> Result<(), Box<dyn Error + Send + Sy
         return Err("query must not start with ? or contain #".into());
     }
     Ok(())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_key_header(header: &str) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+    if header.len() > 8192 {
+        return Err("cache-key --header must be at most 8192 bytes".into());
+    }
+    let (name, value) = header
+        .split_once(':')
+        .ok_or("cache-key --header must use \"Name: value\" syntax")?;
+    let name = name.trim();
+    if name.is_empty() || name.len() > 64 || !name.bytes().all(is_http_token_byte) {
+        return Err("cache-key --header name must be a valid HTTP header name".into());
+    }
+    if name.eq_ignore_ascii_case("host") {
+        return Err("cache-key --header cannot set Host; use --host".into());
+    }
+    let value = value.trim();
+    if value.len() > 8192 {
+        return Err("cache-key --header value must be at most 8192 bytes".into());
+    }
+    if value.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err("cache-key --header value must not contain control bytes".into());
+    }
+    Ok((name.to_ascii_lowercase(), value.to_owned()))
 }
 
 #[cfg(feature = "cache")]
@@ -2372,6 +2419,18 @@ mod tests {
         );
         assert!(super::cache_key_uri("/assets/app.js?v=1", Some("x=2")).is_err());
         assert!(super::cache_key_uri("/assets/app.js", Some("?v=1")).is_err());
+    }
+
+    #[cfg(all(feature = "cache", feature = "proxy"))]
+    #[test]
+    fn cache_key_headers_accept_safe_variance_inputs() {
+        assert_eq!(
+            super::parse_cache_key_header("Accept-Language: de, en;q=0.8").unwrap(),
+            ("accept-language".to_owned(), "de, en;q=0.8".to_owned())
+        );
+        assert!(super::parse_cache_key_header("Host: example.test").is_err());
+        assert!(super::parse_cache_key_header("Bad Header: value").is_err());
+        assert!(super::parse_cache_key_header("X-Test: bad\r\nvalue").is_err());
     }
 
     #[cfg(not(feature = "cache"))]

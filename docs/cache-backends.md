@@ -419,11 +419,13 @@ Example cache-key preview during a production incident:
 ```sh
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-key \
   --host repoheim.eu \
+  --header "Accept-Language: de" \
   --path /assets/img/logo.png \
   --query v=1
 
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --host repoheim.eu \
+  --header "Accept-Language: de" \
   --path /assets/img/logo.png \
   --query v=1
 ```
@@ -437,7 +439,10 @@ metadata such as status, body size, freshness timestamps, cache tags, and stored
 header names. It also reports `purge_indexed`, which tells whether indexed
 scope, prefix, tag, wildcard, and stale purge operations can reach that object
 without a full scan. It does not contact the upstream, read cached object bodies
-to stdout, or dump stored header values.
+to stdout, or dump stored header values. Use repeated `--header "Name: value"`
+options to inspect negotiated cache variants that depend on safe request
+headers such as `Accept-Language` or `Accept-Encoding`; use `--host` for the
+Host header.
 
 Example: `cache.memory.max_size_bytes = "1GiB"` with
 `cache.max_object_bytes = "32MiB"` plans 32 in-memory object slots.

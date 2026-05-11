@@ -418,7 +418,10 @@ Stable scope:
     names without reading cached bodies to stdout or dumping header values.
     Lookup output also reports purge-index membership so operators can tell
     whether indexed scope, prefix, tag, wildcard, and stale purges can reach an
-    object without a full scan;
+    object without a full scan. `cache-key` and `cache-lookup` can include
+    bounded safe request headers such as `Accept-Language` and
+    `Accept-Encoding`, so operators can debug negotiated `Vary` variants
+    without contacting upstreams;
   - cache warm/import/export workflows for deploys and repository mirrors,
     including clear failure accounting and no hidden best-effort misses.
     `cache-warm` now treats only 2xx/3xx responses as successful by default
