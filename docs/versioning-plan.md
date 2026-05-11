@@ -393,11 +393,13 @@ Stable scope:
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
     conditional `304`, byte-range `206`, `If-Range` match/mismatch behavior,
-    validator-based upstream revalidation from origin `304`, stale-object refresh from origin `200`,
+    validator-based upstream revalidation from origin `304`, stale-object
+    refresh from origin `200`,
     stale-while-revalidate serving during a background refresh,
     stale-if-error serving after an upstream connection failure, cache-lock
     request collapsing for concurrent misses, `Vary` variant isolation, disk
-    HIT after restart, and request-bypass reason release smoke;
+    HIT after restart, and `Cache-Control`/`Pragma` request-bypass reason
+    release smoke;
   - full validator-based upstream revalidation edge-case coverage for proxied
     cache responses, including explicit behavior when origins change `Vary`,
     `ETag`, `Last-Modified`, or freshness headers during revalidation;
@@ -687,7 +689,8 @@ Exit criteria:
   behavior, `Vary` variant isolation,
   stale-while-revalidate serving during background refresh, stale-if-error
   serving after upstream failure, cache-lock request collapsing for concurrent
-  misses, disk HIT after restart, and request-bypass reason headers.
+  misses, disk HIT after restart, and `Cache-Control`/`Pragma`
+  request-bypass reason headers.
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 

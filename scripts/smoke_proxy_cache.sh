@@ -432,6 +432,7 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
 first_headers="$TMP_DIR/first.headers"
 second_headers="$TMP_DIR/second.headers"
 bypass_headers="$TMP_DIR/bypass.headers"
+pragma_bypass_headers="$TMP_DIR/pragma-bypass.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
 range_headers="$TMP_DIR/range.headers"
 if_range_match_headers="$TMP_DIR/if-range-match.headers"
@@ -495,6 +496,21 @@ fi
 if ! grep -qi '^x-cache-reason: request-refresh' "$bypass_headers"; then
     echo "proxy cache smoke failed: client refresh bypass did not expose bounded reason" >&2
     cat "$bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$pragma_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "Pragma: no-cache" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: BYPASS' "$pragma_bypass_headers"; then
+    echo "proxy cache smoke failed: Pragma refresh bypass did not expose BYPASS status" >&2
+    cat "$pragma_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-refresh' "$pragma_bypass_headers"; then
+    echo "proxy cache smoke failed: Pragma refresh bypass did not expose bounded reason" >&2
+    cat "$pragma_bypass_headers" >&2
     exit 1
 fi
 
