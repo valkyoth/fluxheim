@@ -1198,6 +1198,7 @@ impl PingoraMemoryStorage {
 pub struct PingoraDiskStorage {
     root: PathBuf,
     purge_index: CachePurgeIndex,
+    disk_index: DiskObjectIndex,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
     cache_tag_headers: Arc<[String]>,
@@ -1290,12 +1291,13 @@ impl PingoraDiskStorage {
         let storage = Self {
             root,
             purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
+            disk_index: DiskObjectIndex::new(),
             max_size_bytes,
             max_object_bytes,
             cache_tag_headers: Arc::from(cache_tag_headers),
             activity,
         };
-        storage.rebuild_purge_index()?;
+        storage.rebuild_disk_indexes()?;
         Ok(storage)
     }
 
@@ -1304,12 +1306,9 @@ impl PingoraDiskStorage {
     }
 
     pub fn stats(&self) -> std::io::Result<DiskCacheStats> {
-        let entries = disk_cache_entries(&self.root)?;
-        let size_bytes = entries
-            .iter()
-            .fold(0_u64, |total, entry| total.saturating_add(entry.size));
+        let (entries, size_bytes) = self.disk_index.stats();
         Ok(DiskCacheStats {
-            entries: entries.len() as u64,
+            entries: entries as u64,
             size_bytes,
             max_size_bytes: self.max_size_bytes,
             max_object_bytes: self.max_object_bytes,
@@ -1323,8 +1322,10 @@ impl PingoraDiskStorage {
         self.activity.reset();
     }
 
-    fn rebuild_purge_index(&self) -> std::io::Result<()> {
-        for entry in disk_cache_entries(&self.root)? {
+    fn rebuild_disk_indexes(&self) -> std::io::Result<()> {
+        let entries = disk_cache_entries(&self.root)?;
+        self.disk_index.replace_all(entries.clone());
+        for entry in entries {
             let Some(read_path) = self.safe_existing_object_path(&entry.path)? else {
                 continue;
             };
@@ -1378,7 +1379,7 @@ impl PingoraDiskStorage {
             self.purge_index.remove_combined(&indexed_key);
         }
 
-        for entry in disk_cache_entries(&self.root)? {
+        for entry in self.disk_index.entries() {
             if entry.path == exact_path {
                 continue;
             }
@@ -1642,6 +1643,7 @@ impl PingoraDiskStorage {
     fn purge_object_path(&self, path: PathBuf) -> std::io::Result<bool> {
         match remove_disk_cache_object(&self.root, &path) {
             Ok(true) => {
+                self.disk_index.remove(&path);
                 self.activity.purge();
                 Ok(true)
             }
@@ -1687,7 +1689,9 @@ impl PingoraDiskStorage {
         match parse_disk_cache_object(&bytes, self.max_object_bytes) {
             Ok(object) => Ok(Some(object)),
             Err(error) => {
-                let _ = remove_disk_cache_object(&self.root, &path);
+                if remove_disk_cache_object(&self.root, &path).unwrap_or(false) {
+                    self.disk_index.remove(&path);
+                }
                 Err(cache_io_error("parse disk cache object", error))
             }
         }
@@ -1737,6 +1741,8 @@ impl PingoraDiskStorage {
                 self.activity.store_refusal();
                 cache_io_error("write disk cache object", error)
             })?;
+        self.index_existing_object_path(&path)
+            .map_err(|error| cache_io_error("index disk cache object", error))?;
         self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
@@ -1800,6 +1806,8 @@ impl PingoraDiskStorage {
             self.activity.store_refusal();
             cache_io_error("write streamed disk cache object", error)
         })?;
+        self.index_existing_object_path(&path)
+            .map_err(|error| cache_io_error("index streamed disk cache object", error))?;
         self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
@@ -1813,10 +1821,7 @@ impl PingoraDiskStorage {
     }
 
     fn evict_until_admissible(&self, path: &Path, object_bytes: u64) -> std::io::Result<bool> {
-        let mut entries = disk_cache_entries(&self.root)?;
-        let current_size = entries
-            .iter()
-            .fold(0_u64, |total, entry| total.saturating_add(entry.size));
+        let (mut entries, current_size) = self.disk_index.snapshot();
         let existing_size = entries
             .iter()
             .find(|entry| entry.path == path)
@@ -1833,14 +1838,16 @@ impl PingoraDiskStorage {
         let mut bytes_to_free = projected_size.saturating_sub(max_size);
         entries.retain(|entry| entry.path != path);
         entries.sort_by(|left, right| {
-            left.modified
-                .cmp(&right.modified)
+            left.accessed
+                .cmp(&right.accessed)
+                .then_with(|| left.modified.cmp(&right.modified))
                 .then_with(|| left.path.cmp(&right.path))
         });
 
         for entry in entries {
             match remove_disk_cache_object(&self.root, &entry.path) {
                 Ok(true) => {
+                    self.disk_index.remove(&entry.path);
                     self.activity.eviction();
                     bytes_to_free = bytes_to_free.saturating_sub(entry.size);
                     if bytes_to_free == 0 {
@@ -1853,6 +1860,30 @@ impl PingoraDiskStorage {
         }
 
         Ok(false)
+    }
+
+    fn index_existing_object_path(&self, path: &Path) -> std::io::Result<()> {
+        if cache_path_contains_symlink(&self.root, path)? {
+            return Ok(());
+        }
+        let canonical = match path.canonicalize() {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if !canonical.starts_with(&self.root) {
+            return Ok(());
+        }
+        let Some(metadata) = symlink_free_regular_metadata(&self.root, path)? else {
+            return Ok(());
+        };
+        self.disk_index.upsert(DiskCacheEntry {
+            path: canonical,
+            size: metadata.len(),
+            modified: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
+            accessed: std::time::SystemTime::now(),
+        });
+        Ok(())
     }
 
     fn path_for_key(&self, key: &pingora::cache::CacheKey) -> PathBuf {
@@ -2061,6 +2092,8 @@ impl PingoraDiskStorage {
             return Ok(None);
         }
 
+        self.disk_index
+            .touch(&canonical, std::time::SystemTime::now());
         Ok(Some(canonical))
     }
 
@@ -2340,6 +2373,89 @@ struct DiskCacheEntry {
     path: PathBuf,
     size: u64,
     modified: std::time::SystemTime,
+    accessed: std::time::SystemTime,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone)]
+struct DiskObjectIndex {
+    inner: Arc<RwLock<DiskObjectIndexInner>>,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Default)]
+struct DiskObjectIndexInner {
+    entries: HashMap<PathBuf, DiskCacheEntry>,
+    total_size: u64,
+}
+
+#[cfg(feature = "proxy")]
+impl DiskObjectIndex {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(DiskObjectIndexInner::default())),
+        }
+    }
+
+    fn replace_all(&self, entries: Vec<DiskCacheEntry>) {
+        let Ok(mut inner) = self.inner.write() else {
+            return;
+        };
+        inner.entries.clear();
+        inner.total_size = 0;
+        for entry in entries {
+            inner.total_size = inner.total_size.saturating_add(entry.size);
+            inner.entries.insert(entry.path.clone(), entry);
+        }
+    }
+
+    fn upsert(&self, entry: DiskCacheEntry) {
+        let Ok(mut inner) = self.inner.write() else {
+            return;
+        };
+        if let Some(previous) = inner.entries.insert(entry.path.clone(), entry.clone()) {
+            inner.total_size = inner.total_size.saturating_sub(previous.size);
+        }
+        inner.total_size = inner.total_size.saturating_add(entry.size);
+    }
+
+    fn remove(&self, path: &Path) -> bool {
+        let Ok(mut inner) = self.inner.write() else {
+            return false;
+        };
+        let Some(previous) = inner.entries.remove(path) else {
+            return false;
+        };
+        inner.total_size = inner.total_size.saturating_sub(previous.size);
+        true
+    }
+
+    fn touch(&self, path: &Path, accessed: std::time::SystemTime) {
+        let Ok(mut inner) = self.inner.write() else {
+            return;
+        };
+        if let Some(entry) = inner.entries.get_mut(path) {
+            entry.accessed = accessed;
+        }
+    }
+
+    fn snapshot(&self) -> (Vec<DiskCacheEntry>, u64) {
+        let Ok(inner) = self.inner.read() else {
+            return (Vec::new(), 0);
+        };
+        (inner.entries.values().cloned().collect(), inner.total_size)
+    }
+
+    fn entries(&self) -> Vec<DiskCacheEntry> {
+        self.snapshot().0
+    }
+
+    fn stats(&self) -> (usize, u64) {
+        let Ok(inner) = self.inner.read() else {
+            return (0, 0);
+        };
+        (inner.entries.len(), inner.total_size)
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2373,6 +2489,7 @@ fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
                 path,
                 size: metadata.len(),
                 modified: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
+                accessed: metadata.accessed().unwrap_or(std::time::UNIX_EPOCH),
             });
         }
     }
@@ -5957,6 +6074,47 @@ mod tests {
         let stats = storage.stats().unwrap();
         assert!(stats.size_bytes <= 512);
         assert_eq!(stats.activity.evictions, 1);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_evicts_least_recently_used_index_entry() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("lru-eviction");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(720),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost");
+        let second = pingora::cache::CacheKey::new("fluxheim-test", "second", "vhost");
+        let third = pingora::cache::CacheKey::new("fluxheim-test", "third", "vhost");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        for (key, byte) in [(&first, b'a'), (&second, b'b')] {
+            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from(vec![byte; 120]), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(storage.stats().unwrap().entries, 2);
+
+        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_some());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        let mut miss = block_on(storage.get_miss_handler(&third, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from(vec![b'c'; 120]), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_some());
+        assert!(block_on(storage.lookup(&second, &span)).unwrap().is_none());
+        assert!(block_on(storage.lookup(&third, &span)).unwrap().is_some());
 
         std::fs::remove_dir_all(root).unwrap();
     }

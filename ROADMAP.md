@@ -637,10 +637,11 @@ without parsing text fixtures for every module.
      `cache.max_object_bytes` are not stored.
    - Disk storage. Implemented as a complete-object Pingora `Storage` adapter
      with SHA-256 shard paths, atomic same-directory renames, per-object limits,
-     purge, oldest-file eviction, and on-write total-size enforcement.
-   - Disk eviction policy. Implemented as scan-based oldest-file eviction.
-     Planned: replace scan-based ordering with a persistent LRU/TTL eviction
-     index.
+     purge, runtime LRU eviction, and on-write total-size enforcement.
+   - Disk eviction policy. Runtime-maintained least-recently-used disk-object
+     index implemented for stats and eviction after startup. Planned:
+     persist the index journal/checkpoint to disk so very large caches do not
+     need a full shard scan at startup.
    - Multi-tier cache promotion/fallback. Implemented with a tiered Pingora
      storage adapter: memory is L1, disk is L2, misses write to both tiers,
      disk hits promote to memory when they fit, and purge invalidates both.
@@ -686,9 +687,10 @@ without parsing text fixtures for every module.
        purge, path-prefix purge, tag purge, wildcard path-pattern purge, and
        stale purge are implemented through the admin API. A background stale
        disk purger is implemented through `[cache_purger]`;
-     - startup cache-index loading rebuilds the bounded purge index from stored
-       v5 disk object metadata. Planned: make this rebuild incremental so very
-       large disk caches do not block gateway startup;
+     - startup cache-index loading rebuilds the bounded purge index and
+       runtime disk-object index from stored v5 disk object metadata. Planned:
+       add a persistent index journal/checkpoint and incremental verification
+       so very large disk caches do not block gateway startup;
      - byte-range/slice caching for large immutable files, with explicit
        warnings that the source object must not change during slice fill.
    - Dedicated cache-server feature track inspired by Varnish/Vinyl-style

@@ -148,9 +148,10 @@ internal cache implementation.
   `cache.max_object_bytes` and refuses anything larger.
 - The first Pingora disk adapter stores complete objects below `cache.disk.path`
   using SHA-256-derived shard paths, same-directory temporary files, and atomic
-  rename. It refuses objects above `cache.max_object_bytes`, evicts the oldest
-  `.fhc` files when needed to enforce `cache.disk.max_size_bytes`, and refuses
-  admission only when the incoming object still cannot fit after eviction.
+  rename. It refuses objects above `cache.max_object_bytes`, maintains a
+  runtime disk-object index for stats and least-recently-used eviction, and
+  refuses admission only when the incoming object still cannot fit after
+  eviction.
 - Disk-cache reads canonicalize existing object paths, open cache objects
   without following symlinks on Linux, verify the opened handle is a regular
   file, and refuse encoded files larger than the configured object budget plus
@@ -158,24 +159,27 @@ internal cache implementation.
   still resolve under the canonical cache root before opening a no-follow
   same-directory temp file and renaming it into place. Symlinked cache roots,
   cache roots below symlinked parent directories, object files, write
-  destinations, and shard escapes are refused. Eviction scans walk the
+  destinations, and shard escapes are refused. Startup scans walk the
   deterministic `00` through `ff` shard set instead of enumerating arbitrary
   cache-root children, ignore symlinked shards or objects, and fail closed when
-  a scan exceeds 100000 cache objects so cache stats or eviction cannot
-  allocate an unbounded entry list. Purge, invalid-object cleanup, and eviction
-  re-check the target immediately before deletion and only remove regular
-  `.fhc` cache objects. Shard directories and object files must be symlink-free,
-  even when a symlink points back inside the cache root; mount or configure the
-  real cache directory path. Startup removes stale Fluxheim-owned disk-cache
-  temp files from the root temp directory and deterministic shard temp
-  locations after a conservative age threshold, while ignoring unrelated files
-  and fresh temp files so snapshot reloads do not race active cache writers.
+  a scan exceeds 100000 cache objects so index rebuild cannot allocate an
+  unbounded entry list. Runtime stats and eviction use the maintained
+  disk-object index instead of repeated filesystem scans. Purge, invalid-object
+  cleanup, and eviction re-check the target immediately before deletion and
+  only remove regular `.fhc` cache objects. Shard directories and object files
+  must be symlink-free, even when a symlink points back inside the cache root;
+  mount or configure the real cache directory path. Startup removes stale
+  Fluxheim-owned disk-cache temp files from the root temp directory and
+  deterministic shard temp locations after a conservative age threshold, while
+  ignoring unrelated files and fresh temp files so snapshot reloads do not race
+  active cache writers.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
-  startup Fluxheim scans valid disk cache objects and rebuilds the bounded
-  purge index for v5 entries, so indexed scope, prefix, wildcard, tag, and
-  stale disk purges can survive process restarts. Older v1-v4 disk objects
-  remain readable, but earlier formats cannot fully rebuild every indexed purge
+  startup Fluxheim scans valid disk cache objects once and rebuilds both the
+  bounded purge index and the runtime disk-object index for v5 entries, so
+  indexed scope, prefix, wildcard, tag, stale disk purges, stats, and eviction
+  accounting survive process restarts. Older v1-v4 disk objects remain
+  readable, but earlier formats cannot fully rebuild every indexed purge
   metadata field because they did not store all of the v5 index fields.
 - Disk-only cache admission streams response chunks into a bounded temporary
   file under the cache root before the final atomic object write. Partial-write
