@@ -48,6 +48,10 @@ const DISK_CACHE_MAGIC_V4: &[u8] = b"FLUXHEIM-CACHE-v4\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V5: &[u8] = b"FLUXHEIM-CACHE-v5\n";
 #[cfg(feature = "proxy")]
+const DISK_CACHE_INDEX_MAGIC_V1: &str = "FLUXHEIM-DISK-INDEX-v1";
+#[cfg(feature = "proxy")]
+const DISK_CACHE_INDEX_FILENAME: &str = ".fluxheim-disk-index-v1";
+#[cfg(feature = "proxy")]
 const CACHE_PURGE_INDEX_MAX_ENTRIES: usize = 65_536;
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
@@ -1323,9 +1327,12 @@ impl PingoraDiskStorage {
     }
 
     fn rebuild_disk_indexes(&self) -> std::io::Result<()> {
-        let entries = disk_cache_entries(&self.root)?;
-        self.disk_index.replace_all(entries.clone());
-        for entry in entries {
+        let candidates = match read_disk_index_checkpoint(&self.root)? {
+            Some(entries) => entries,
+            None => disk_cache_entries(&self.root)?,
+        };
+        let mut valid_entries = Vec::new();
+        for entry in candidates {
             let Some(read_path) = self.safe_existing_object_path(&entry.path)? else {
                 continue;
             };
@@ -1344,6 +1351,7 @@ impl PingoraDiskStorage {
             let path = object
                 .index_path
                 .or_else(|| cache_primary_component(&primary_key, "path"));
+            valid_entries.push(entry);
             self.purge_index.insert_with_path_and_tags(
                 combined_key,
                 primary_key,
@@ -1352,6 +1360,8 @@ impl PingoraDiskStorage {
                 object.cache_tags,
             );
         }
+        self.disk_index.replace_all(valid_entries);
+        let _ = self.write_disk_index_checkpoint();
         Ok(())
     }
 
@@ -1644,6 +1654,7 @@ impl PingoraDiskStorage {
         match remove_disk_cache_object(&self.root, &path) {
             Ok(true) => {
                 self.disk_index.remove(&path);
+                let _ = self.write_disk_index_checkpoint();
                 self.activity.purge();
                 Ok(true)
             }
@@ -1687,10 +1698,30 @@ impl PingoraDiskStorage {
             Err(error) => return Err(cache_io_error("read disk cache object", error)),
         };
         match parse_disk_cache_object(&bytes, self.max_object_bytes) {
-            Ok(object) => Ok(Some(object)),
+            Ok(object) => {
+                let _ = self.index_existing_object_path(&read_path);
+                if let (Some(combined_key), Some(primary_key)) =
+                    (object.combined_key.clone(), object.primary_key.clone())
+                {
+                    let user_tag = object.user_tag.clone().unwrap_or_default();
+                    let path = object
+                        .index_path
+                        .clone()
+                        .or_else(|| cache_primary_component(&primary_key, "path"));
+                    self.purge_index.insert_with_path_and_tags(
+                        combined_key,
+                        primary_key,
+                        user_tag,
+                        path,
+                        object.cache_tags.clone(),
+                    );
+                }
+                Ok(Some(object))
+            }
             Err(error) => {
                 if remove_disk_cache_object(&self.root, &path).unwrap_or(false) {
                     self.disk_index.remove(&path);
+                    let _ = self.write_disk_index_checkpoint();
                 }
                 Err(cache_io_error("parse disk cache object", error))
             }
@@ -1743,6 +1774,7 @@ impl PingoraDiskStorage {
             })?;
         self.index_existing_object_path(&path)
             .map_err(|error| cache_io_error("index disk cache object", error))?;
+        let _ = self.write_disk_index_checkpoint();
         self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
@@ -1808,6 +1840,7 @@ impl PingoraDiskStorage {
         })?;
         self.index_existing_object_path(&path)
             .map_err(|error| cache_io_error("index streamed disk cache object", error))?;
+        let _ = self.write_disk_index_checkpoint();
         self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
@@ -1836,6 +1869,7 @@ impl PingoraDiskStorage {
         }
 
         let mut bytes_to_free = projected_size.saturating_sub(max_size);
+        let mut removed_any = false;
         entries.retain(|entry| entry.path != path);
         entries.sort_by(|left, right| {
             left.accessed
@@ -1848,9 +1882,11 @@ impl PingoraDiskStorage {
             match remove_disk_cache_object(&self.root, &entry.path) {
                 Ok(true) => {
                     self.disk_index.remove(&entry.path);
+                    removed_any = true;
                     self.activity.eviction();
                     bytes_to_free = bytes_to_free.saturating_sub(entry.size);
                     if bytes_to_free == 0 {
+                        let _ = self.write_disk_index_checkpoint();
                         return Ok(true);
                     }
                 }
@@ -1859,6 +1895,9 @@ impl PingoraDiskStorage {
             }
         }
 
+        if removed_any {
+            let _ = self.write_disk_index_checkpoint();
+        }
         Ok(false)
     }
 
@@ -2097,6 +2136,10 @@ impl PingoraDiskStorage {
         Ok(Some(canonical))
     }
 
+    fn write_disk_index_checkpoint(&self) -> std::io::Result<()> {
+        write_disk_index_checkpoint(&self.root, self.disk_index.entries())
+    }
+
     fn ensure_safe_cache_parent(&self, parent: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
         if cache_path_contains_symlink(&self.root, parent)? {
@@ -2268,6 +2311,202 @@ fn disk_cache_shard_dirs(root: &Path) -> std::io::Result<Vec<SafeCacheScanDir>> 
 #[cfg(feature = "proxy")]
 fn disk_cache_temp_dir(root: &Path) -> std::io::Result<Option<SafeCacheScanDir>> {
     safe_existing_cache_scan_dir(root, &root.join("tmp"))
+}
+
+#[cfg(feature = "proxy")]
+fn disk_index_checkpoint_path(root: &Path) -> PathBuf {
+    root.join(DISK_CACHE_INDEX_FILENAME)
+}
+
+#[cfg(feature = "proxy")]
+fn read_disk_index_checkpoint(root: &Path) -> std::io::Result<Option<Vec<DiskCacheEntry>>> {
+    use std::io::Read as _;
+
+    let path = disk_index_checkpoint_path(root);
+    if cache_path_contains_symlink(root, &path)? {
+        return Ok(None);
+    }
+    let mut file = match open_existing_disk_cache_file(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let checkpoint_modified = file.metadata()?.modified().unwrap_or(std::time::UNIX_EPOCH);
+    if disk_index_checkpoint_is_stale(root, checkpoint_modified)? {
+        return Ok(None);
+    }
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    let mut lines = contents.lines();
+    if lines.next() != Some(DISK_CACHE_INDEX_MAGIC_V1) {
+        return Ok(None);
+    }
+
+    let mut entries = Vec::new();
+    for line in lines {
+        if entries.len() >= MAX_DISK_CACHE_SCAN_ENTRIES {
+            return Ok(None);
+        }
+        let Some(entry) = parse_disk_index_checkpoint_line(root, line)? else {
+            return Ok(None);
+        };
+        entries.push(entry);
+    }
+
+    Ok(Some(entries))
+}
+
+#[cfg(feature = "proxy")]
+fn disk_index_checkpoint_is_stale(
+    root: &Path,
+    checkpoint_modified: std::time::SystemTime,
+) -> std::io::Result<bool> {
+    for shard in disk_cache_shard_dirs(root)? {
+        let modified = shard
+            .as_path()
+            .metadata()?
+            .modified()
+            .unwrap_or(std::time::UNIX_EPOCH);
+        if modified > checkpoint_modified {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(feature = "proxy")]
+fn parse_disk_index_checkpoint_line(
+    root: &Path,
+    line: &str,
+) -> std::io::Result<Option<DiskCacheEntry>> {
+    let mut fields = line.split('\t');
+    let Some(relative_path) = fields.next() else {
+        return Ok(None);
+    };
+    let Some(size) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+        return Ok(None);
+    };
+    let Some(modified) = fields
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(unix_secs_system_time)
+    else {
+        return Ok(None);
+    };
+    let Some(accessed) = fields
+        .next()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(unix_secs_system_time)
+    else {
+        return Ok(None);
+    };
+    if fields.next().is_some() {
+        return Ok(None);
+    }
+
+    let Some(path) = safe_disk_index_relative_path(root, relative_path) else {
+        return Ok(None);
+    };
+    let Some(metadata) = symlink_free_regular_metadata(root, &path)? else {
+        return Ok(None);
+    };
+    if metadata.len() != size {
+        return Ok(None);
+    }
+
+    Ok(Some(DiskCacheEntry {
+        path,
+        size,
+        modified,
+        accessed,
+    }))
+}
+
+#[cfg(feature = "proxy")]
+fn safe_disk_index_relative_path(root: &Path, relative_path: &str) -> Option<PathBuf> {
+    let relative = Path::new(relative_path);
+    let components = relative.components().collect::<Vec<_>>();
+    if components.len() != 2 {
+        return None;
+    }
+    let std::path::Component::Normal(shard) = components[0] else {
+        return None;
+    };
+    let std::path::Component::Normal(file_name) = components[1] else {
+        return None;
+    };
+    let shard = shard.to_str()?;
+    let file_name = file_name.to_str()?;
+    if shard.len() != 2 || !shard.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let Some(encoded) = file_name.strip_suffix(".fhc") else {
+        return None;
+    };
+    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(root.join(shard).join(file_name))
+}
+
+#[cfg(feature = "proxy")]
+fn write_disk_index_checkpoint(
+    root: &Path,
+    mut entries: Vec<DiskCacheEntry>,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    let path = disk_index_checkpoint_path(root);
+    let temp_path = disk_index_temp_path(root)?;
+    let write_result = (|| {
+        let mut file = create_new_disk_cache_file(&temp_path)?;
+        writeln!(file, "{DISK_CACHE_INDEX_MAGIC_V1}")?;
+        for entry in entries {
+            let Ok(relative) = entry.path.strip_prefix(root) else {
+                continue;
+            };
+            let Some(relative) = relative.to_str() else {
+                continue;
+            };
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}",
+                relative,
+                entry.size,
+                system_time_unix_secs(entry.modified).unwrap_or(0),
+                system_time_unix_secs(entry.accessed).unwrap_or(0)
+            )?;
+        }
+        file.sync_all()?;
+        std::fs::rename(&temp_path, &path)
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+#[cfg(feature = "proxy")]
+fn disk_index_temp_path(root: &Path) -> std::io::Result<PathBuf> {
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|error| {
+        std::io::Error::other(format!("generate disk index temp nonce: {error}"))
+    })?;
+    let mut encoded = String::with_capacity(nonce.len() * 2);
+    for byte in nonce {
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    Ok(root.join(format!(
+        ".fluxheim-disk-index-{}.{}.tmp",
+        std::process::id(),
+        encoded
+    )))
+}
+
+#[cfg(feature = "proxy")]
+fn unix_secs_system_time(secs: u64) -> std::time::SystemTime {
+    std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs)
 }
 
 #[cfg(feature = "proxy")]
@@ -5308,6 +5547,89 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_disk_storage_prefers_valid_disk_index_checkpoint() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-index-checkpoint");
+        let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "checkpoint-key", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"indexed"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+        assert!(super::disk_index_checkpoint_path(writer.root()).exists());
+
+        let rogue = pingora::cache::CacheKey::new("fluxheim-test", "rogue-key", "vhost-a");
+        write_rogue_disk_cache_object(writer, &rogue, &meta, b"rogue");
+        super::write_disk_index_checkpoint(writer.root(), writer.disk_index.entries()).unwrap();
+
+        let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+
+        assert_eq!(rebuilt.stats().unwrap().entries, 1);
+        assert!(block_on(rebuilt.lookup(&key, &span)).unwrap().is_some());
+        assert!(block_on(rebuilt.lookup(&rogue, &span)).unwrap().is_some());
+        assert_eq!(rebuilt.stats().unwrap().entries, 2);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_falls_back_when_disk_index_checkpoint_is_corrupt() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-index-corrupt");
+        let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "checkpoint-key", "vhost-a");
+        let rogue = pingora::cache::CacheKey::new("fluxheim-test", "rogue-key", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"indexed"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+        write_rogue_disk_cache_object(writer, &rogue, &meta, b"rogue");
+        std::fs::write(
+            super::disk_index_checkpoint_path(writer.root()),
+            b"not-an-index\n",
+        )
+        .unwrap();
+
+        let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+
+        assert_eq!(rebuilt.stats().unwrap().entries, 2);
+        assert!(block_on(rebuilt.lookup(&key, &span)).unwrap().is_some());
+        assert!(block_on(rebuilt.lookup(&rogue, &span)).unwrap().is_some());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_disk_storage_rebuilds_path_prefix_index_metadata() {
         use pingora::cache::Storage;
 
@@ -6322,6 +6644,25 @@ mod tests {
     #[cfg(feature = "proxy")]
     fn unique_test_cache_dir(label: &str) -> PathBuf {
         unique_temp_path(label)
+    }
+
+    #[cfg(feature = "proxy")]
+    fn write_rogue_disk_cache_object(
+        storage: &super::PingoraDiskStorage,
+        key: &pingora::cache::CacheKey,
+        meta: &pingora::cache::CacheMeta,
+        body: &[u8],
+    ) {
+        let path = storage.path_for_key(key);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            key,
+            meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        super::write_disk_cache_object(&path, &store_key, &internal_meta, &response_header, body)
+            .unwrap();
     }
 
     #[cfg(feature = "proxy")]

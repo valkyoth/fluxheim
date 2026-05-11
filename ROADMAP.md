@@ -639,9 +639,11 @@ without parsing text fixtures for every module.
      with SHA-256 shard paths, atomic same-directory renames, per-object limits,
      purge, runtime LRU eviction, and on-write total-size enforcement.
    - Disk eviction policy. Runtime-maintained least-recently-used disk-object
-     index implemented for stats and eviction after startup. Planned:
-     persist the index journal/checkpoint to disk so very large caches do not
-     need a full shard scan at startup.
+     index implemented for stats and eviction after startup. A root-local
+     `.fluxheim-disk-index-v1` checkpoint is implemented so clean restarts can
+     seed the disk-object index without a full shard scan. Planned: add a
+     compact append-only journal or periodic checkpoint throttling if very
+     high-churn cache workloads make full checkpoint rewrites too expensive.
    - Multi-tier cache promotion/fallback. Implemented with a tiered Pingora
      storage adapter: memory is L1, disk is L2, misses write to both tiers,
      disk hits promote to memory when they fit, and purge invalidates both.
@@ -688,9 +690,10 @@ without parsing text fixtures for every module.
        stale purge are implemented through the admin API. A background stale
        disk purger is implemented through `[cache_purger]`;
      - startup cache-index loading rebuilds the bounded purge index and
-       runtime disk-object index from stored v5 disk object metadata. Planned:
-       add a persistent index journal/checkpoint and incremental verification
-       so very large disk caches do not block gateway startup;
+       runtime disk-object index from stored v5 disk object metadata or, when
+       present and valid, from the root-local disk-index checkpoint. Planned:
+       add a compact append-only journal or checkpoint throttling for very
+       high-churn cache workloads;
      - byte-range/slice caching for large immutable files, with explicit
        warnings that the source object must not change during slice fill.
    - Dedicated cache-server feature track inspired by Varnish/Vinyl-style

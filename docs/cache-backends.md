@@ -175,9 +175,13 @@ internal cache implementation.
   active cache writers.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
-  startup Fluxheim scans valid disk cache objects once and rebuilds both the
-  bounded purge index and the runtime disk-object index for v5 entries, so
-  indexed scope, prefix, wildcard, tag, stale disk purges, stats, and eviction
+  startup Fluxheim first tries the root-local `.fluxheim-disk-index-v1`
+  checkpoint. A valid checkpoint seeds the runtime disk-object index without a
+  shard scan; a missing, corrupt, or stale checkpoint falls back to the
+  deterministic shard scan and is rewritten. The rebuild path verifies each
+  referenced cache object before indexing it, then rebuilds both the bounded
+  purge index and the runtime disk-object index for v5 entries, so indexed
+  scope, prefix, wildcard, tag, stale disk purges, stats, and eviction
   accounting survive process restarts. Older v1-v4 disk objects remain
   readable, but earlier formats cannot fully rebuild every indexed purge
   metadata field because they did not store all of the v5 index fields.
