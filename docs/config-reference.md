@@ -604,8 +604,8 @@ which is useful
 before release deploy jobs.
 Proxy cache storage currently bypasses `HEAD` requests with
 `X-Cache-Reason: method-head` to avoid unsafe body handling; this keeps HEAD
-probes from corrupting `GET` cache entries while explicit HEAD cache parity is
-completed.
+probes from corrupting `GET` cache entries. Full HEAD-to-GET cache parity is a
+future compatibility feature, not the `1.2` stable behavior.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.

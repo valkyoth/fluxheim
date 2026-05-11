@@ -285,8 +285,9 @@ operations, cache warm/lookup/key tooling, cache policy metrics, OTLP metrics
 export, and end-to-end proxy cache smoke coverage for hit `Age`, conditional
 `304`/`200` validator match and mismatch behavior from `ETag` and
 `Last-Modified`, byte ranges including ETag/date `If-Range`, cache-status
-assertions on cached conditional/range responses, HEAD probes that do not poison
-cached GET bodies, validator-based upstream revalidation and refresh,
+assertions on cached conditional/range responses, intentional HEAD storage
+bypass that does not poison cached GET bodies, validator-based upstream
+revalidation and refresh,
 stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
 `Vary` variants, disk hits after restart, configured request bypass policies,
 input-file and negative-cache warming, admin exact/bulk purge, stale dry-run,

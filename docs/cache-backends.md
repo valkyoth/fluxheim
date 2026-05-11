@@ -219,6 +219,10 @@ internal cache implementation.
   restart without the origin available. The same smoke path asserts bounded
   Prometheus purge counters for exact, bulk, stale, prefix, tag, wildcard, and
   route-scoped index purge operations.
+  HEAD requests intentionally bypass proxy cache storage with the bounded
+  `method-head` reason; the smoke suite verifies those probes do not poison
+  cached GET entries. Full HEAD-to-GET cache parity remains future
+  compatibility work.
   Planned work still covers edge cases where origins change `Vary`, validators,
   or freshness headers during revalidation and broader cache-header matrix
   tests across static and proxied responses.
@@ -615,7 +619,8 @@ A production adapter must:
   stale-while-revalidate serving during a background
   refresh, stale-if-error serving after an upstream connection failure,
   cache-lock request collapsing for concurrent misses, `Vary` variant
-  isolation, and disk HIT behavior after process restart.
+  isolation, HEAD storage bypass that does not poison cached GET bodies, and
+  disk HIT behavior after process restart.
 - Keep CDN/browser cache headers configurable through header policy and
   examples instead of hardcoded provider-specific defaults.
 - Avoid unbounded buffering for large responses. Implemented for memory by

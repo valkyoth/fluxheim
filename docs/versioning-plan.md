@@ -648,6 +648,10 @@ Stable scope for declaring the cache pack complete:
 Beta scope:
 
 - Partial streaming admission and/or slice-based range fill for large objects.
+- Optional HEAD-to-GET cache-key conversion with safe body handling. The `1.2`
+  stable behavior intentionally bypasses HEAD cache storage and exposes the
+  bounded `method-head` cache-status reason so HEAD probes cannot poison cached
+  GET bodies.
 - Distributed cache metadata or peer-fill support, if production deployments
   need multi-node cache coherence.
 - Cache import/export/debug tooling for inspecting individual cached objects,
@@ -720,9 +724,9 @@ Exit criteria:
   prefix/tag/wildcard purge, route-scoped purge against real cached objects, and
   Prometheus purge counters for each protected purge shape, plus
   `Cache-Control`/`Pragma` request-bypass reason headers.
-- Full HEAD cache parity remains a 1.2 cache-completion item: decide whether
-  Fluxheim should intentionally bypass HEAD storage or implement explicit
-  HEAD-to-GET cache-key conversion with safe body handling.
+- HEAD requests intentionally bypass cache storage with the bounded
+  `method-head` reason in `1.2`; full HEAD-to-GET cache parity is deferred to
+  beta/future compatibility work.
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 
