@@ -327,6 +327,12 @@ enabled = true
 status_header = "X-Cache-Status"
 status_reason_header = "X-Cache-Reason"
 key_namespace = "cache-vhost-v1"
+bypass_request_headers = ["authorization"]
+bypass_request_header_values = { x-preview-mode = "1" }
+bypass_cookie_names = ["sessionid"]
+bypass_cookie_values = { preview = "1" }
+bypass_query_params = ["preview"]
+bypass_query_values = { mode = "private" }
 stale_if_error_secs = 60
 stale_if_error_on = ["connect", "http-status"]
 stale_if_error_statuses = [502, 503, 504]
@@ -489,6 +495,13 @@ head_second_headers="$TMP_DIR/head-second.headers"
 post_head_get_headers="$TMP_DIR/post-head-get.headers"
 bypass_headers="$TMP_DIR/bypass.headers"
 pragma_bypass_headers="$TMP_DIR/pragma-bypass.headers"
+header_bypass_headers="$TMP_DIR/header-bypass.headers"
+header_value_bypass_headers="$TMP_DIR/header-value-bypass.headers"
+cookie_name_bypass_headers="$TMP_DIR/cookie-name-bypass.headers"
+cookie_value_bypass_headers="$TMP_DIR/cookie-value-bypass.headers"
+query_param_bypass_headers="$TMP_DIR/query-param-bypass.headers"
+query_value_bypass_headers="$TMP_DIR/query-value-bypass.headers"
+post_configured_bypass_get_headers="$TMP_DIR/post-configured-bypass-get.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
 conditional_mismatch_headers="$TMP_DIR/conditional-mismatch.headers"
 modified_since_headers="$TMP_DIR/modified-since.headers"
@@ -639,6 +652,103 @@ fi
 if ! grep -qi '^x-cache-reason: request-refresh' "$pragma_bypass_headers"; then
     echo "proxy cache smoke failed: Pragma refresh bypass did not expose bounded reason" >&2
     cat "$pragma_bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$header_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "Authorization: Bearer smoke" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: BYPASS' "$header_bypass_headers"; then
+    echo "proxy cache smoke failed: configured request-header bypass did not expose BYPASS status" >&2
+    cat "$header_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-header' "$header_bypass_headers"; then
+    echo "proxy cache smoke failed: configured request-header bypass did not expose bounded reason" >&2
+    cat "$header_bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$header_value_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "X-Preview-Mode: 1" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: BYPASS' "$header_value_bypass_headers"; then
+    echo "proxy cache smoke failed: configured request-header-value bypass did not expose BYPASS status" >&2
+    cat "$header_value_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-header-value' "$header_value_bypass_headers"; then
+    echo "proxy cache smoke failed: configured request-header-value bypass did not expose bounded reason" >&2
+    cat "$header_value_bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$cookie_name_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "Cookie: theme=dark; sessionid=abc" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: BYPASS' "$cookie_name_bypass_headers"; then
+    echo "proxy cache smoke failed: configured cookie-name bypass did not expose BYPASS status" >&2
+    cat "$cookie_name_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-cookie' "$cookie_name_bypass_headers"; then
+    echo "proxy cache smoke failed: configured cookie-name bypass did not expose bounded reason" >&2
+    cat "$cookie_name_bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$cookie_value_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "Cookie: theme=dark; preview=1" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: BYPASS' "$cookie_value_bypass_headers"; then
+    echo "proxy cache smoke failed: configured cookie-value bypass did not expose BYPASS status" >&2
+    cat "$cookie_value_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-cookie' "$cookie_value_bypass_headers"; then
+    echo "proxy cache smoke failed: configured cookie-value bypass did not expose bounded reason" >&2
+    cat "$cookie_value_bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$query_param_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png?preview=1"
+if ! grep -qi '^x-cache-status: BYPASS' "$query_param_bypass_headers"; then
+    echo "proxy cache smoke failed: configured query-param bypass did not expose BYPASS status" >&2
+    cat "$query_param_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-query' "$query_param_bypass_headers"; then
+    echo "proxy cache smoke failed: configured query-param bypass did not expose bounded reason" >&2
+    cat "$query_param_bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$query_value_bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png?mode=private"
+if ! grep -qi '^x-cache-status: BYPASS' "$query_value_bypass_headers"; then
+    echo "proxy cache smoke failed: configured query-value bypass did not expose BYPASS status" >&2
+    cat "$query_value_bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-query' "$query_value_bypass_headers"; then
+    echo "proxy cache smoke failed: configured query-value bypass did not expose bounded reason" >&2
+    cat "$query_value_bypass_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$post_configured_bypass_get_headers" -o "$body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: HIT' "$post_configured_bypass_get_headers"; then
+    echo "proxy cache smoke failed: configured bypass requests poisoned the cached GET entry" >&2
+    cat "$post_configured_bypass_get_headers" >&2
     exit 1
 fi
 

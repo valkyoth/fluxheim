@@ -569,7 +569,11 @@ Current implementation status:
   - shared-cache safety controls for `Set-Cookie`, request bypass headers,
     request bypass cookies, request bypass query parameters, response-header
     hiding, origin `Cache-Control`/`Expires` override, explicit `Vary`
-    request-header keys, and unsafe/sensitive `Vary` rejection;
+    request-header keys, and unsafe/sensitive `Vary` rejection. Full proxy
+    smoke coverage now verifies configured request-header, header-value,
+    cookie-name, cookie-value, query-param, and query-value bypasses expose the
+    expected bounded `BYPASS` reasons and do not poison an existing public GET
+    object;
   - optional cache-status and cache-status-reason response headers;
   - protected admin cache status, activity reset, single purge, bulk purge,
     indexed scope purge, prefix purge, tag purge, wildcard purge, stale purge,

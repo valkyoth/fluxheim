@@ -51,6 +51,10 @@ internal cache implementation.
   when any listed request header is present. Use this for route policies where
   headers such as `Cookie` or `Authorization` make the upstream response
   request-specific.
+- `bypass_request_header_values`, `bypass_cookie_names`,
+  `bypass_cookie_values`, `bypass_query_params`, and `bypass_query_values`
+  provide narrower bypass controls for preview flags, session cookies, and
+  private query modes while keeping unrelated public requests cacheable.
 - `cache.vary_request_headers`, `vhosts.cache.vary_request_headers`, and
   `vhosts.routes.cache.vary_request_headers` add safe request headers to the
   Pingora cache variance key even when the origin does not emit a matching
@@ -271,8 +275,9 @@ records successful admin purge commands with bounded operation and mode labels;
   bounded no-cache reasons such as `OriginNotCache`, `ResponseTooLarge`, or
   Fluxheim policy reasons such as `request-refresh`, `request-header`,
   `request-header-value`, `request-cookie`, `request-query`, `cache-min-uses`,
-  and `cache-pass`. Keep the reason header disabled unless actively debugging
-  a cache policy.
+  and `cache-pass`. The proxy cache smoke suite verifies these configured
+  request-bypass reasons end to end. Keep the reason header disabled unless
+  actively debugging a cache policy.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,
