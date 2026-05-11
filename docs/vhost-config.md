@@ -90,6 +90,45 @@ headers are definitions, not append operations.
 Do not use `[[vhosts.proxy]]`. `proxy`, `web`, `cache`, `tls`, and `headers` are
 normal nested tables inside one vhost, not arrays.
 
+Do not use `[[vhosts.tls.certificates]]` for a vhost certificate. A vhost has
+one direct certificate pair under `[vhosts.tls.certificate]`:
+
+```toml
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/example/fullchain.pem"
+key_path = "/etc/fluxheim/tls/example/privkey.pem"
+```
+
+Use global `[[tls.certificates]]` entries when you need to configure additional
+listener certificates outside a specific vhost block. Use `[vhosts.tls.acme]`
+when Fluxheim should manage the vhost certificate.
+
+Proxy error pages are arrays because one proxy can define multiple fallback
+statuses. Define the array entry first, then its nested web root:
+
+```toml
+[[vhosts.proxy.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.proxy.error_pages.web]
+root = "/srv/fluxheim/errors"
+```
+
+The same rule applies inside route proxy blocks:
+
+```toml
+[[vhosts.routes.proxy.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.routes.proxy.error_pages.web]
+root = "/srv/fluxheim/errors"
+```
+
 When a vhost has both static files and a proxy, Fluxheim can use both policies:
 static files are served from `[vhosts.web]` when they match, and other requests
 can continue through `[vhosts.proxy]`.
