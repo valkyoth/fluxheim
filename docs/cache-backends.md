@@ -175,28 +175,28 @@ internal cache implementation.
   cache roots below symlinked parent directories, object files, write
   destinations, and shard escapes are refused. Startup scans walk the
   deterministic `00` through `ff` shard set instead of enumerating arbitrary
-  cache-root children, ignore symlinked shards or objects, and fail closed when
-  a scan exceeds 100000 cache objects so index rebuild cannot allocate an
-  unbounded entry list. Runtime stats and eviction use the maintained
-  disk-object index instead of repeated filesystem scans. Purge, invalid-object
-  cleanup, and eviction re-check the target immediately before deletion and
-  only remove regular `.fhc` cache objects. Shard directories and object files
-  must be symlink-free, even when a symlink points back inside the cache root;
-  mount or configure the real cache directory path. Startup removes stale
-  Fluxheim-owned disk-cache temp files from the root temp directory and
-  deterministic shard temp locations after a conservative age threshold, while
-  ignoring unrelated files and fresh temp files so snapshot reloads do not race
-  active cache writers.
+  cache-root children, ignore symlinked shards or objects, and scan every safe
+  `.fhc` object so excess files cannot become untracked eviction orphans.
+  Runtime stats and eviction use the maintained disk-object index instead of
+  repeated filesystem scans. Purge, invalid-object cleanup, and eviction
+  re-check the target immediately before deletion and only remove regular
+  `.fhc` cache objects. Shard directories and object files must be
+  symlink-free, even when a symlink points back inside the cache root; mount or
+  configure the real cache directory path. Startup removes stale Fluxheim-owned
+  disk-cache temp files from the root temp directory and deterministic shard
+  temp locations after a conservative age threshold, while ignoring unrelated
+  files and fresh temp files so snapshot reloads do not race active cache
+  writers.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
-  startup Fluxheim first tries the root-local `.fluxheim-disk-index-v1`
-  checkpoint. A valid checkpoint seeds the runtime disk-object index without a
-  shard scan; a missing, corrupt, or stale checkpoint falls back to the
-  deterministic shard scan and is rewritten. The rebuild path verifies each
-  referenced cache object before indexing it, then rebuilds both the bounded
-  purge index and the runtime disk-object index for v5 entries, so indexed
-  scope, prefix, wildcard, tag, stale disk purges, stats, and eviction
-  accounting survive process restarts. Runtime cache mutations mark the
+  startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint
+  with a deterministic shard scan, then verifies every referenced cache object
+  before indexing it. Corrupt or unindexable `.fhc` objects are removed instead
+  of left as untracked disk usage. The rebuild path then enforces the
+  configured disk-size budget before serving traffic, so indexed scope, prefix,
+  wildcard, tag, stale disk purges, stats, and eviction accounting survive
+  process restarts without ignoring files outside the checkpoint. Runtime cache
+  mutations mark the
   checkpoint dirty and coalesce persistence through a debounced background
   writer instead of rewriting and fsyncing the full index on every disk-cache
   insert. Checkpoint writes merge with existing checkpoint or shard-scan
@@ -204,11 +204,8 @@ internal cache implementation.
   not erase each other's restart index state. Older v1-v4 disk objects remain
   readable, but earlier formats cannot fully rebuild every indexed purge
   metadata field because they did not store all of the v5 index fields.
-  Startup indexing is capped to a bounded object count to avoid unbounded
-  memory use while reading attacker-influenced cache directories. If a
-  checkpoint or shard scan exceeds that cap, Fluxheim logs a warning, indexes
-  the first bounded set, and continues starting instead of failing the process.
-  A later storage-bin backend should replace this with an incremental index.
+  A later storage-bin backend should replace the full startup shard scan with
+  an incremental durable index.
   Indexed admin purges use the bounded purge index as a fast path but also
   scan live memory or disk object metadata to supplement missing mappings, so
   FIFO eviction from the fast index cannot make live cached objects immune to

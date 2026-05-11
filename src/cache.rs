@@ -1459,24 +1459,29 @@ impl PingoraDiskStorage {
     }
 
     fn rebuild_disk_indexes(&self) -> std::io::Result<()> {
-        let candidates = match read_disk_index_checkpoint(&self.root)? {
-            Some(entries) => entries,
-            None => disk_cache_entries(&self.root)?,
-        };
+        let mut candidates = read_disk_index_checkpoint(&self.root)?.unwrap_or_default();
+        candidates.extend(disk_cache_entries(&self.root)?);
+        let candidates = merge_disk_cache_entries(candidates);
         let mut valid_entries = Vec::new();
         for entry in candidates {
             let Some(read_path) = self.safe_existing_object_path(&entry.path)? else {
                 continue;
             };
-            let Ok(object) = read_disk_cache_object(&self.root, &read_path, self.max_object_bytes)
+            let object = match read_disk_cache_object(&self.root, &read_path, self.max_object_bytes)
                 .and_then(|bytes| parse_disk_cache_object(&bytes, self.max_object_bytes))
-            else {
+            {
+                Ok(object) => object,
+                Err(_) => {
+                    let _ = remove_disk_cache_object(&self.root, &read_path);
+                    continue;
+                }
+            };
+            let Some(combined_key) = object.combined_key.clone() else {
+                let _ = remove_disk_cache_object(&self.root, &read_path);
                 continue;
             };
-            let Some(combined_key) = object.combined_key else {
-                continue;
-            };
-            let Some(primary_key) = object.primary_key else {
+            let Some(primary_key) = object.primary_key.clone() else {
+                let _ = remove_disk_cache_object(&self.root, &read_path);
                 continue;
             };
             let user_tag = object.user_tag.unwrap_or_default();
@@ -1493,6 +1498,8 @@ impl PingoraDiskStorage {
             );
         }
         self.disk_index.replace_all(valid_entries);
+        let startup_sentinel = self.root.join(".fluxheim-startup-budget-sentinel");
+        let _ = self.evict_until_admissible(&startup_sentinel, 0)?;
         let _ = self.write_disk_index_checkpoint();
         Ok(())
     }
@@ -2731,13 +2738,6 @@ fn read_disk_index_checkpoint(root: &Path) -> std::io::Result<Option<Vec<DiskCac
 
     let mut entries = Vec::new();
     for line in lines {
-        if entries.len() >= MAX_DISK_CACHE_SCAN_ENTRIES {
-            log::warn!(
-                "disk cache checkpoint contains more than {MAX_DISK_CACHE_SCAN_ENTRIES} objects below {}; indexing the first {MAX_DISK_CACHE_SCAN_ENTRIES} entries",
-                root.display()
-            );
-            return Ok(Some(entries));
-        }
         let Some(entry) = parse_disk_index_checkpoint_line(root, line)? else {
             return Ok(None);
         };
@@ -3202,14 +3202,6 @@ impl DiskObjectIndex {
 }
 
 #[cfg(feature = "proxy")]
-#[cfg(not(test))]
-const MAX_DISK_CACHE_SCAN_ENTRIES: usize = 100_000;
-
-#[cfg(feature = "proxy")]
-#[cfg(test)]
-const MAX_DISK_CACHE_SCAN_ENTRIES: usize = 8;
-
-#[cfg(feature = "proxy")]
 fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
     let mut entries = Vec::new();
     for shard in disk_cache_shard_dirs(root)? {
@@ -3219,13 +3211,6 @@ fn disk_cache_entries(root: &Path) -> std::io::Result<Vec<DiskCacheEntry>> {
             else {
                 continue;
             };
-            if entries.len() >= MAX_DISK_CACHE_SCAN_ENTRIES {
-                log::warn!(
-                    "disk cache scan found more than {MAX_DISK_CACHE_SCAN_ENTRIES} objects below {}; indexing the first {MAX_DISK_CACHE_SCAN_ENTRIES} entries",
-                    root.display()
-                );
-                return Ok(entries);
-            }
             entries.push(DiskCacheEntry {
                 path,
                 size: metadata.len(),
@@ -6304,7 +6289,7 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
-    fn pingora_disk_storage_prefers_valid_disk_index_checkpoint() {
+    fn pingora_disk_storage_merges_valid_checkpoint_with_live_shard_scan() {
         use pingora::cache::Storage;
 
         let root = unique_test_cache_dir("disk-index-checkpoint");
@@ -6336,7 +6321,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(rebuilt.stats().unwrap().entries, 1);
+        assert_eq!(rebuilt.stats().unwrap().entries, 2);
         assert!(block_on(rebuilt.lookup(&key, &span)).unwrap().is_some());
         assert!(block_on(rebuilt.lookup(&rogue, &span)).unwrap().is_some());
         assert_eq!(rebuilt.stats().unwrap().entries, 2);
@@ -6346,10 +6331,11 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
-    fn pingora_disk_storage_starts_when_cache_exceeds_scan_cap() {
+    fn pingora_disk_storage_indexes_objects_beyond_previous_scan_cap() {
         use pingora::cache::Storage;
 
-        let root = unique_test_cache_dir("disk-start-over-entry-cap");
+        let previous_scan_cap = 8_usize;
+        let root = unique_test_cache_dir("disk-start-over-previous-entry-cap");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(65536),
@@ -6359,7 +6345,7 @@ mod tests {
         .unwrap();
         let span = pingora::cache::trace::Span::inactive().handle();
         let meta = pingora_meta("max-age=60");
-        for index in 0..=super::MAX_DISK_CACHE_SCAN_ENTRIES {
+        for index in 0..=previous_scan_cap {
             let key = pingora::cache::CacheKey::new(
                 "fluxheim-test",
                 format!("over-cap-key-{index}"),
@@ -6369,6 +6355,13 @@ mod tests {
             block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
             block_on(miss.finish()).unwrap();
         }
+        let truncated_checkpoint = writer
+            .disk_index
+            .entries()
+            .into_iter()
+            .take(previous_scan_cap)
+            .collect();
+        super::write_disk_index_checkpoint(writer.root(), truncated_checkpoint).unwrap();
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
             path: root.clone(),
@@ -6380,8 +6373,46 @@ mod tests {
 
         assert_eq!(
             rebuilt.stats().unwrap().entries,
-            super::MAX_DISK_CACHE_SCAN_ENTRIES as u64
+            u64::try_from(previous_scan_cap + 1).unwrap()
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_enforces_size_budget_after_full_startup_scan() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-start-budget-reconcile");
+        let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(65536),
+            max_object_bytes: ByteSize::from_bytes(4096),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        for index in 0..12 {
+            let key = pingora::cache::CacheKey::new(
+                "fluxheim-test",
+                format!("budget-key-{index}"),
+                "vhost-a",
+            );
+            let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from(vec![b'x'; 512]), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(4096),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+
+        assert!(rebuilt.stats().unwrap().size_bytes <= 2048);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -7269,29 +7300,31 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
-    fn disk_cache_entries_truncates_scan_over_entry_cap() {
-        let root = unique_test_cache_dir("scan-entry-cap");
+    fn disk_cache_entries_returns_all_safe_objects_over_previous_entry_cap() {
+        let previous_scan_cap = 8_usize;
+        let root = unique_test_cache_dir("scan-previous-entry-cap");
         let shard = root.join("ab");
         std::fs::create_dir_all(&shard).unwrap();
-        for index in 0..=super::MAX_DISK_CACHE_SCAN_ENTRIES {
+        for index in 0..=previous_scan_cap {
             std::fs::write(shard.join(format!("{index:064x}.fhc")), b"cached").unwrap();
         }
 
         let entries = super::disk_cache_entries(&root).unwrap();
 
-        assert_eq!(entries.len(), super::MAX_DISK_CACHE_SCAN_ENTRIES);
+        assert_eq!(entries.len(), previous_scan_cap + 1);
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(feature = "proxy")]
     #[test]
-    fn disk_index_checkpoint_truncates_over_entry_cap() {
-        let root = unique_test_cache_dir("checkpoint-entry-cap");
+    fn disk_index_checkpoint_returns_all_safe_entries_over_previous_entry_cap() {
+        let previous_scan_cap = 8_usize;
+        let root = unique_test_cache_dir("checkpoint-previous-entry-cap");
         let shard = root.join("ab");
         std::fs::create_dir_all(&shard).unwrap();
         let mut checkpoint = String::from(super::DISK_CACHE_INDEX_MAGIC_V1);
         checkpoint.push('\n');
-        for index in 0..=super::MAX_DISK_CACHE_SCAN_ENTRIES {
+        for index in 0..=previous_scan_cap {
             let file_name = format!("{index:064x}.fhc");
             let path = shard.join(&file_name);
             std::fs::write(&path, b"cached").unwrap();
@@ -7301,7 +7334,7 @@ mod tests {
 
         let entries = super::read_disk_index_checkpoint(&root).unwrap().unwrap();
 
-        assert_eq!(entries.len(), super::MAX_DISK_CACHE_SCAN_ENTRIES);
+        assert_eq!(entries.len(), previous_scan_cap + 1);
         std::fs::remove_dir_all(root).unwrap();
     }
 

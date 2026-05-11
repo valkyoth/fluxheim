@@ -375,9 +375,13 @@ Stable scope:
   - broader persistent cache index coverage for older disk object formats and
     future metadata migrations; new v5 disk objects rebuild the bounded purge
     index across process restarts with combined-key, primary-key, user-tag,
-    cache-tag, and path-index metadata. Disk index checkpoint writes now merge
-    existing root entries so separate vhost and route cache policies sharing a
-    disk root cannot erase each other's restart purge index state;
+    cache-tag, and path-index metadata. Startup now merges the disk index
+    checkpoint with a full deterministic shard scan so files outside a stale or
+    truncated checkpoint cannot become eviction orphans, removes corrupt or
+    unindexable `.fhc` objects, and enforces the disk-size budget before
+    serving traffic. Disk index checkpoint writes now merge existing root
+    entries so separate vhost and route cache policies sharing a disk root
+    cannot erase each other's restart purge index state;
   - background or broader incremental disk purge/cleanup for very large purge
     scopes; indexed purge endpoints now accept bounded `batches` so operators
     can advance large scope, prefix, and wildcard purges without removing
