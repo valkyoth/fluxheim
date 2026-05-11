@@ -399,6 +399,7 @@ pub struct CacheStalePurgeRequest<'a> {
     pub vhost: &'a str,
     pub route: Option<&'a str>,
     pub limit: usize,
+    pub dry_run: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -1232,14 +1233,18 @@ impl ProxySnapshot {
             .or(vhost
                 .pingora_memory_storage
                 .filter(|_| route_cache.is_none()))
-            .map(|storage| storage.purge_indexed_stale_user_tag(&user_tag, request.limit))
+            .map(|storage| {
+                storage.purge_indexed_stale_user_tag(&user_tag, request.limit, request.dry_run)
+            })
             .transpose()
             .map_err(|error| io::Error::other(error.to_string()))?
             .unwrap_or_default();
         let disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
-            .map(|storage| storage.purge_indexed_stale_user_tag(&user_tag, request.limit))
+            .map(|storage| {
+                storage.purge_indexed_stale_user_tag(&user_tag, request.limit, request.dry_run)
+            })
             .transpose()
             .map_err(|error| io::Error::other(error.to_string()))?
             .unwrap_or_default();

@@ -294,6 +294,9 @@ impl AdminApp {
                     .or_else(|| query_param(query, "route")),
                 header_value(headers, "x-fluxheim-cache-limit")
                     .or_else(|| query_param(query, "limit")),
+                truthy_header(headers, "x-fluxheim-cache-dry-run")
+                    || truthy_query_param(query, "dry_run")
+                    || truthy_query_param(query, "dry-run"),
             ),
             ("POST", "/_fluxheim/cache/purge-wildcard") => self.cache_purge_wildcard_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
@@ -942,6 +945,7 @@ impl AdminApp {
         vhost: Option<&str>,
         route: Option<&str>,
         limit: Option<&str>,
+        dry_run: bool,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(
@@ -961,12 +965,15 @@ impl AdminApp {
                 vhost,
                 route,
                 limit,
+                dry_run,
             }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","scanned":{},"stale":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_scanned":{},"memory_stale":{},"memory_purged":{},"memory_not_purged":{},"memory_truncated":{},"disk_scanned":{},"disk_stale":{},"disk_purged":{},"disk_not_purged":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","dry_run":{},"scanned":{},"stale":{},"would_purge":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_scanned":{},"memory_stale":{},"memory_would_purge":{},"memory_purged":{},"memory_not_purged":{},"memory_truncated":{},"disk_scanned":{},"disk_stale":{},"disk_would_purge":{},"disk_purged":{},"disk_not_purged":{},"disk_truncated":{}}}"#,
+                    dry_run,
                     result.scanned(),
                     result.stale(),
+                    stale_would_purge(dry_run, result.stale()),
                     result.purged(),
                     result.not_purged(),
                     ratio_per_mille_usize(result.purged(), result.stale()),
@@ -979,11 +986,13 @@ impl AdminApp {
                     cache_scope(result.route()),
                     result.memory_scanned,
                     result.memory_stale,
+                    stale_would_purge(dry_run, result.memory_stale),
                     result.memory_purged,
                     result.memory_stale.saturating_sub(result.memory_purged),
                     result.memory_truncated,
                     result.disk_scanned,
                     result.disk_stale,
+                    stale_would_purge(dry_run, result.disk_stale),
                     result.disk_purged,
                     result.disk_stale.saturating_sub(result.disk_purged),
                     result.disk_truncated
@@ -1149,6 +1158,7 @@ impl AdminApp {
         _vhost: Option<&str>,
         _route: Option<&str>,
         _limit: Option<&str>,
+        _dry_run: bool,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -2050,6 +2060,11 @@ fn ratio_per_mille_usize(numerator: usize, denominator: usize) -> u64 {
 }
 
 #[cfg(feature = "cache")]
+fn stale_would_purge(dry_run: bool, stale: usize) -> usize {
+    if dry_run { stale } else { 0 }
+}
+
+#[cfg(feature = "cache")]
 fn average_bytes(total_bytes: u64, entries: u64) -> u64 {
     total_bytes.checked_div(entries).unwrap_or(0)
 }
@@ -2893,15 +2908,17 @@ mod tests {
         let response = app.handle(
             "POST",
             "/_fluxheim/cache/purge-stale",
-            Some("vhost=cached&limit=16"),
+            Some("vhost=cached&limit=16&dry_run=true"),
             &auth_headers(),
         );
 
         assert_eq!(response.status, StatusCode::OK);
         let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""dry_run":true"#));
         assert!(body.contains(r#""vhost":"cached""#));
         assert!(body.contains(r#""scanned":0"#));
         assert!(body.contains(r#""stale":0"#));
+        assert!(body.contains(r#""would_purge":0"#));
         assert!(body.contains(r#""purged":0"#));
         assert!(body.contains(r#""not_purged":0"#));
         assert!(body.contains(r#""limit":16"#));

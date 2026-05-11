@@ -363,7 +363,8 @@ Stable scope:
     scopes; indexed purge endpoints now accept bounded `batches` so operators
     can advance large scope, prefix, and wildcard purges without removing
     request limits, and `purge-stale` now provides bounded operator-triggered
-    cleanup for expired indexed entries;
+    cleanup for expired indexed entries with a dry-run mode for production
+    safety checks;
   - cache warmer/preload command or admin workflow for release deploys;
   - richer cache-tag policy controls on top of the initial exact-match
     `Surrogate-Key` / `Cache-Tag` / `X-Cache-Tags` indexed purge support;

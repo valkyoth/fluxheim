@@ -841,6 +841,7 @@ impl PingoraMemoryStorage {
         &self,
         user_tag: &str,
         limit: usize,
+        dry_run: bool,
     ) -> pingora::Result<CacheStalePurgeResult> {
         let mut entries = self
             .purge_index
@@ -863,6 +864,9 @@ impl PingoraMemoryStorage {
                 continue;
             }
             stale += 1;
+            if dry_run {
+                continue;
+            }
             self.inner.invalidate(&entry.combined_key);
             self.purge_index.remove_combined(&entry.combined_key);
             purged += 1;
@@ -1207,6 +1211,7 @@ impl PingoraDiskStorage {
         &self,
         user_tag: &str,
         limit: usize,
+        dry_run: bool,
     ) -> pingora::Result<CacheStalePurgeResult> {
         let mut entries = self
             .purge_index
@@ -1229,6 +1234,9 @@ impl PingoraDiskStorage {
                 continue;
             }
             stale += 1;
+            if dry_run {
+                continue;
+            }
             let path = self.path_for_combined_key(&entry.combined_key);
             if self
                 .purge_object_path(path)
@@ -3796,7 +3804,9 @@ mod tests {
             block_on(miss.finish()).unwrap();
         }
 
-        let result = storage.purge_indexed_stale_user_tag("vhost-a", 8).unwrap();
+        let result = storage
+            .purge_indexed_stale_user_tag("vhost-a", 8, false)
+            .unwrap();
 
         assert_eq!(
             result,
@@ -3814,6 +3824,44 @@ mod tests {
         );
         assert!(
             block_on(storage.lookup(&fresh_key, &span))
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_memory_storage_dry_runs_indexed_stale_entries() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 4,
+        });
+        let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "stale-dry", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let stale = stale_pingora_meta("max-age=60");
+
+        let mut miss = block_on(storage.get_miss_handler(&stale_key, &stale, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let result = storage
+            .purge_indexed_stale_user_tag("vhost-a", 8, true)
+            .unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 1,
+                purged: 0,
+                truncated: false,
+            }
+        );
+        assert!(
+            block_on(storage.lookup(&stale_key, &span))
                 .unwrap()
                 .is_some()
         );
@@ -4077,7 +4125,9 @@ mod tests {
             block_on(miss.finish()).unwrap();
         }
 
-        let result = storage.purge_indexed_stale_user_tag("vhost-a", 8).unwrap();
+        let result = storage
+            .purge_indexed_stale_user_tag("vhost-a", 8, false)
+            .unwrap();
 
         assert_eq!(
             result,
@@ -4095,6 +4145,48 @@ mod tests {
         );
         assert!(
             block_on(storage.lookup(&fresh_key, &span))
+                .unwrap()
+                .is_some()
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_dry_runs_indexed_stale_entries() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-stale-purge-dry-run");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale-dry", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let stale = stale_pingora_meta("max-age=60");
+
+        let mut miss = block_on(storage.get_miss_handler(&stale_key, &stale, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let result = storage
+            .purge_indexed_stale_user_tag("vhost-a", 8, true)
+            .unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheStalePurgeResult {
+                scanned: 1,
+                stale: 1,
+                purged: 0,
+                truncated: false,
+            }
+        );
+        assert!(
+            block_on(storage.lookup(&stale_key, &span))
                 .unwrap()
                 .is_some()
         );
