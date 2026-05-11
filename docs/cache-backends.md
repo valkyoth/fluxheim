@@ -230,17 +230,18 @@ internal cache implementation.
   cache admission.
   Pingora's cache pipeline injects `Age` on stored-response hits and applies
   downstream conditional/range handling when cache is enabled. The release smoke
-  suite verifies proxy cache HIT behavior, cached-hit `Age`, conditional `304`,
-  byte-range `206`, `If-Range` match/mismatch behavior, cache-status HIT
-  headers on cached conditional/range responses, validator-based upstream
-  revalidation from an origin `304`, stale-object refresh from an origin `200`,
-  stale-while-revalidate serving during a background refresh, stale-if-error
-  serving after an upstream connection failure, cache-lock request collapsing
-  for concurrent misses, `Vary` variant isolation, admin exact/bulk purge,
-  stale dry-run, vhost prefix/tag/wildcard purge, and route-scoped purge against
-  real cached objects after a Fluxheim process restart, and disk-cache HIT
-  behavior after a restart without the origin available. The same smoke path
-  asserts bounded
+  suite verifies proxy cache HIT behavior, cached-hit `Age`, cached
+  `Last-Modified` preservation, conditional `304`, byte-range `206`,
+  `If-Range` match/mismatch behavior, cache-status HIT headers on cached
+  conditional/range responses, validator-based upstream revalidation from an
+  origin `304`, persisted validator metadata after that revalidation,
+  stale-object refresh from an origin `200`, stale-while-revalidate serving
+  during a background refresh, stale-if-error serving after an upstream
+  connection failure, cache-lock request collapsing for concurrent misses,
+  `Vary` variant isolation, admin exact/bulk purge, stale dry-run, vhost
+  prefix/tag/wildcard purge, and route-scoped purge against real cached objects
+  after a Fluxheim process restart, and disk-cache HIT behavior after a restart
+  without the origin available. The same smoke path asserts bounded
   Prometheus purge counters for exact, bulk, stale, prefix, tag, wildcard, and
   route-scoped index purge operations.
   HEAD requests intentionally bypass proxy cache storage with the bounded

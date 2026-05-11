@@ -5,6 +5,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-proxy-cache-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 CURL_MAX_TIME=${FLUXHEIM_SMOKE_CURL_MAX_TIME:-5}
+LAST_MODIFIED="Sun, 10 May 2026 00:00:00 GMT"
 
 ports=$(python3 - <<'PY'
 import socket
@@ -647,6 +648,11 @@ if ! grep -qi '^age:' "$second_headers"; then
     cat "$second_headers" >&2
     exit 1
 fi
+if ! grep -qi "^last-modified: $LAST_MODIFIED" "$second_headers"; then
+    echo "proxy cache smoke failed: cache HIT did not preserve Last-Modified header" >&2
+    cat "$second_headers" >&2
+    exit 1
+fi
 
 head_first_status=$(
     curl -sS --max-time "$CURL_MAX_TIME" -I -D "$head_first_headers" -o /dev/null -w '%{http_code}' \
@@ -909,6 +915,11 @@ if ! grep -qi '^x-cache-status: HIT' "$conditional_headers"; then
     cat "$conditional_headers" >&2
     exit 1
 fi
+if ! grep -qi "^last-modified: $LAST_MODIFIED" "$conditional_headers"; then
+    echo "proxy cache smoke failed: cached conditional 304 did not preserve Last-Modified header" >&2
+    cat "$conditional_headers" >&2
+    exit 1
+fi
 
 conditional_mismatch_status=$(
     curl -sS --max-time "$CURL_MAX_TIME" -D "$conditional_mismatch_headers" -o "$body" -w '%{http_code}' \
@@ -987,6 +998,11 @@ if ! grep -qi '^x-cache-status: HIT' "$range_headers"; then
 fi
 if ! grep -qi '^content-range: bytes 0-3/16' "$range_headers"; then
     echo "proxy cache smoke failed: cached range response missed expected Content-Range" >&2
+    cat "$range_headers" >&2
+    exit 1
+fi
+if ! grep -qi "^last-modified: $LAST_MODIFIED" "$range_headers"; then
+    echo "proxy cache smoke failed: cached range response did not preserve Last-Modified header" >&2
     cat "$range_headers" >&2
     exit 1
 fi
@@ -1144,6 +1160,11 @@ if ! grep -qi '^age:' "$revalidate_third_headers"; then
     cat "$revalidate_third_headers" >&2
     exit 1
 fi
+if ! grep -qi "^last-modified: $LAST_MODIFIED" "$revalidate_third_headers"; then
+    echo "proxy cache smoke failed: revalidated cache HIT did not preserve Last-Modified header" >&2
+    cat "$revalidate_third_headers" >&2
+    exit 1
+fi
 
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
@@ -1160,6 +1181,8 @@ fi
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
     --expect-header 'etag: "cache-smoke-revalidate"' \
+    --expect-header-name last-modified \
+    --expect-header "last-modified: $LAST_MODIFIED" \
     --expect-freshness-state fresh
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$refresh_first_headers" -o "$refresh_body" \
