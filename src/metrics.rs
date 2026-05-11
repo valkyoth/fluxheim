@@ -15,6 +15,7 @@ static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static CACHE_PURGES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
 pub fn enabled() -> bool {
     true
@@ -34,6 +35,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_lock_enabled_policies()?;
     cache_activity_total()?;
     cache_activity_scope_total()?;
+    cache_purges_total()?;
     Ok(())
 }
 
@@ -86,6 +88,21 @@ pub fn record_cache_activity_scope(vhost: &str, route: Option<&str>, tier: &str,
             ])
             .inc(),
         Err(error) => log::debug!("metrics scoped cache counter unavailable: {error}"),
+    }
+}
+
+pub fn record_cache_purge(operation: &str, vhost: &str, route: Option<&str>, mode: &str) {
+    match cache_purges_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                cache_purge_operation_label(operation),
+                cache_scope_label(route),
+                vhost,
+                route.unwrap_or(""),
+                cache_purge_mode_label(mode),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics cache purge counter unavailable: {error}"),
     }
 }
 
@@ -320,6 +337,30 @@ fn cache_activity_scope_total() -> Result<&'static IntCounterVec, prometheus::Er
     })
 }
 
+fn cache_purges_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = CACHE_PURGES_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_cache_purges_total",
+            "Fluxheim cache purge admin commands by bounded operation, configured cache scope, and purge mode.",
+        ),
+        &["operation", "scope", "vhost", "route", "mode"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = CACHE_PURGES_TOTAL.set(counter);
+    CACHE_PURGES_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_cache_purges_total failed to initialize".to_owned())
+    })
+}
+
 fn int_gauge(
     cell: &'static OnceLock<IntGauge>,
     name: &'static str,
@@ -410,6 +451,28 @@ fn cache_event_label(event: &str) -> &'static str {
     }
 }
 
+fn cache_purge_operation_label(operation: &str) -> &'static str {
+    match operation {
+        "exact" => "exact",
+        "bulk" => "bulk",
+        "index" => "index",
+        "prefix" => "prefix",
+        "tag" => "tag",
+        "stale" => "stale",
+        "wildcard" => "wildcard",
+        _ => "other",
+    }
+}
+
+fn cache_purge_mode_label(mode: &str) -> &'static str {
+    match mode {
+        "normal" => "normal",
+        "soft" => "soft",
+        "dry_run" => "dry_run",
+        _ => "other",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -424,7 +487,8 @@ mod tests {
 
     use super::{
         cache_config_stats, init, method_bucket, record_cache_activity,
-        record_cache_activity_scope, record_config, record_proxy_outcome, status_class,
+        record_cache_activity_scope, record_cache_purge, record_config, record_proxy_outcome,
+        status_class,
     };
 
     #[test]
@@ -522,6 +586,32 @@ mod tests {
         assert!(output.contains(
             r#"fluxheim_cache_activity_scope_total{event="purge",route="assets",scope="route",tier="disk",vhost="cached"}"#
         ));
+        assert!(!output.contains("cache_key"));
+        assert!(!output.contains("path="));
+    }
+
+    #[test]
+    fn records_cache_purge_counter_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_cache_purge("prefix", "cached", Some("assets"), "soft");
+        record_cache_purge("attacker-operation", "cached", None, "attacker-mode");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(
+            r#"fluxheim_cache_purges_total{mode="soft",operation="prefix",route="assets",scope="route",vhost="cached"}"#
+        ));
+        assert!(output.contains(
+            r#"fluxheim_cache_purges_total{mode="other",operation="other",route="",scope="vhost",vhost="cached"}"#
+        ));
+        assert!(!output.contains("attacker-operation"));
+        assert!(!output.contains("attacker-mode"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
     }

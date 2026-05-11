@@ -598,6 +598,12 @@ impl AdminApp {
                 query,
             }) {
             Ok(result) => {
+                record_cache_purge_metric(
+                    "exact",
+                    &result.vhost,
+                    result.route.as_deref(),
+                    "normal",
+                );
                 let body = format!(
                     r#"{{"status":"ok","purged":{},"not_purged":{},"vhost":"{}","route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"memory_not_purged":{},"disk_purged":{},"disk_not_purged":{}}}"#,
                     result.purged(),
@@ -683,6 +689,7 @@ impl AdminApp {
                 query,
             }) {
             Ok(result) => {
+                record_cache_purge_metric("bulk", &result.vhost, result.route(), "normal");
                 let body = format!(
                     r#"{{"status":"ok","requested":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"results":[{}]}}"#,
                     result.requested(),
@@ -750,6 +757,12 @@ impl AdminApp {
                 })
         }) {
             Ok(result) => {
+                record_cache_purge_metric(
+                    "index",
+                    &result.vhost,
+                    result.route.as_deref(),
+                    cache_indexed_purge_mode(soft),
+                );
                 let body = format!(
                     r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     soft,
@@ -834,6 +847,12 @@ impl AdminApp {
             )
         }) {
             Ok(result) => {
+                record_cache_purge_metric(
+                    "prefix",
+                    &result.vhost,
+                    result.route.as_deref(),
+                    cache_indexed_purge_mode(soft),
+                );
                 let body = format!(
                     r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     soft,
@@ -915,6 +934,12 @@ impl AdminApp {
                 })
         }) {
             Ok(result) => {
+                record_cache_purge_metric(
+                    "tag",
+                    &result.vhost,
+                    result.route.as_deref(),
+                    cache_indexed_purge_mode(soft),
+                );
                 let body = format!(
                     r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","cache_tag":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     soft,
@@ -993,6 +1018,12 @@ impl AdminApp {
                 })
         }) {
             Ok(result) => {
+                record_cache_purge_metric(
+                    "stale",
+                    &result.vhost,
+                    result.route(),
+                    cache_stale_purge_mode(dry_run),
+                );
                 let body = format!(
                     r#"{{"status":"ok","dry_run":{},"scanned":{},"stale":{},"would_purge":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"increase_limit_required":{},"vhost":"{}","route":{},"scope":"{}","memory_scanned":{},"memory_stale":{},"memory_would_purge":{},"memory_purged":{},"memory_not_purged":{},"memory_truncated":{},"disk_scanned":{},"disk_stale":{},"disk_would_purge":{},"disk_purged":{},"disk_not_purged":{},"disk_truncated":{}}}"#,
                     dry_run,
@@ -1084,6 +1115,12 @@ impl AdminApp {
             )
         }) {
             Ok(result) => {
+                record_cache_purge_metric(
+                    "wildcard",
+                    &result.vhost,
+                    result.route.as_deref(),
+                    cache_indexed_purge_mode(soft),
+                );
                 let body = format!(
                     r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
                     soft,
@@ -1899,6 +1936,24 @@ fn cache_route_json(route: Option<&str>) -> String {
 #[cfg(feature = "cache")]
 fn cache_scope(route: Option<&str>) -> &'static str {
     if route.is_some() { "route" } else { "vhost" }
+}
+
+#[cfg(all(feature = "cache", feature = "metrics"))]
+fn record_cache_purge_metric(operation: &str, vhost: &str, route: Option<&str>, mode: &str) {
+    crate::metrics::record_cache_purge(operation, vhost, route, mode);
+}
+
+#[cfg(all(feature = "cache", not(feature = "metrics")))]
+fn record_cache_purge_metric(_operation: &str, _vhost: &str, _route: Option<&str>, _mode: &str) {}
+
+#[cfg(feature = "cache")]
+fn cache_indexed_purge_mode(soft: bool) -> &'static str {
+    if soft { "soft" } else { "normal" }
+}
+
+#[cfg(feature = "cache")]
+fn cache_stale_purge_mode(dry_run: bool) -> &'static str {
+    if dry_run { "dry_run" } else { "normal" }
 }
 
 #[cfg(feature = "cache")]

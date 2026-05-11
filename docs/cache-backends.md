@@ -228,7 +228,10 @@ internal cache implementation.
   bounded tier/event labels. `fluxheim_cache_lock_enabled_policies` reports
   how many configured cache policies have request-collapsing locks enabled on a
   real storage tier, so stampede-protection coverage is visible without cache
-  key or path labels.
+  key or path labels. `fluxheim_cache_purges_total{operation,scope,vhost,route,mode}`
+  records successful admin purge commands with bounded operation and mode labels;
+  it does not label cache keys, paths, tags, wildcard patterns, hosts, or query
+  strings.
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as
