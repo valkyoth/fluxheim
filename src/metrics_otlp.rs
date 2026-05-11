@@ -28,8 +28,12 @@ pub fn spawn_from_config(config: &MetricsOtlpExportConfig) -> std::io::Result<()
             loop {
                 std::thread::sleep(interval);
                 let payload = build_metrics_payload(prometheus::gather(), &service_name);
-                if let Err(error) = post_otlp_metrics(&endpoint, timeout, payload) {
-                    log::debug!("OTLP metrics export failed: {error}");
+                match post_otlp_metrics(&endpoint, timeout, payload) {
+                    Ok(()) => crate::metrics::record_metrics_otlp_export("success"),
+                    Err(error) => {
+                        crate::metrics::record_metrics_otlp_export("failure");
+                        log::debug!("OTLP metrics export failed: {error}");
+                    }
                 }
             }
         })

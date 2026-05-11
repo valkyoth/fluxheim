@@ -442,9 +442,9 @@ Stable scope:
     hosts, or paths. `otel-tracing` now provides W3C `traceparent` propagation
     and access-log trace ID correlation, `otel-otlp` now provides initial local
     OTLP/HTTP trace export, and `metrics-otlp` now provides initial local
-    OTLP/HTTP metrics export for Prometheus/collector receivers. Richer
-    OpenTelemetry internal spans, sampling, exporter health, histogram export,
-    and trace/event coverage remain planned.
+    OTLP/HTTP metrics export for Prometheus/collector receivers with bounded
+    exporter success/failure counters. Richer OpenTelemetry internal spans,
+    sampling, histogram export, and trace/event coverage remain planned.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.

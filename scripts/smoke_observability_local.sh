@@ -228,6 +228,19 @@ if ! grep -q 'fluxheim_cache_purger_runs_total{outcome="skipped"}' "$metrics_bod
     exit 1
 fi
 
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS "http://127.0.0.1:$metrics_port/metrics" >"$metrics_body"
+    if grep -q 'fluxheim_metrics_otlp_exports_total{outcome=' "$metrics_body"; then
+        break
+    fi
+    sleep 0.5
+done
+if ! grep -q 'fluxheim_metrics_otlp_exports_total{outcome=' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed OTLP exporter health metric" >&2
+    head -n 100 "$metrics_body" >&2 || true
+    exit 1
+fi
+
 if curl -fsS "$prometheus_url/-/ready" >/dev/null 2>&1; then
     curl -fsS "$prometheus_url/api/v1/status/flags" >"$prometheus_flags"
     if grep -q '"web.enable-otlp-receiver":"true"' "$prometheus_flags"; then

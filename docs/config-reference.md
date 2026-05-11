@@ -192,7 +192,9 @@ timeout_secs = 2
 The `metrics` compile-time feature is not part of `profile-privacy`.
 `metrics.otlp.enabled = true` requires the `metrics-otlp` feature. The initial
 exporter sends OTLP/HTTP JSON over `http://` only and is intended for a local
-Prometheus OTLP receiver or local collector.
+Prometheus OTLP receiver or local collector. When enabled,
+`fluxheim_metrics_otlp_exports_total{outcome}` records bounded exporter
+success and failure attempts through the local Prometheus metrics surface.
 
 ## Tracing
 

@@ -199,6 +199,9 @@ Optional OTLP:
 
 Exporter health metrics:
 
+- implemented now for OTLP metrics exporter attempts:
+  `fluxheim_metrics_otlp_exports_total{outcome}` with bounded `success`,
+  `failure`, or `other` outcomes.
 - last successful push timestamp
 - consecutive failures
 - dropped export batches

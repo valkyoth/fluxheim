@@ -18,6 +18,7 @@ static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGER_RUNS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGER_ENTRIES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static METRICS_OTLP_EXPORTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
 pub fn enabled() -> bool {
     true
@@ -40,6 +41,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_purges_total()?;
     cache_purger_runs_total()?;
     cache_purger_entries_total()?;
+    metrics_otlp_exports_total()?;
     Ok(())
 }
 
@@ -128,6 +130,15 @@ pub fn record_cache_purger_entries(result: &str, amount: u64) {
             .with_label_values(&[cache_purger_entry_result_label(result)])
             .inc_by(amount),
         Err(error) => log::debug!("metrics cache purger entry counter unavailable: {error}"),
+    }
+}
+
+pub fn record_metrics_otlp_export(outcome: &str) {
+    match metrics_otlp_exports_total() {
+        Ok(counter) => counter
+            .with_label_values(&[metrics_otlp_export_outcome_label(outcome)])
+            .inc(),
+        Err(error) => log::debug!("metrics OTLP exporter counter unavailable: {error}"),
     }
 }
 
@@ -436,6 +447,32 @@ fn cache_purger_entries_total() -> Result<&'static IntCounterVec, prometheus::Er
     })
 }
 
+fn metrics_otlp_exports_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = METRICS_OTLP_EXPORTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_metrics_otlp_exports_total",
+            "Fluxheim OTLP metrics exporter attempts by bounded outcome.",
+        ),
+        &["outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = METRICS_OTLP_EXPORTS_TOTAL.set(counter);
+    METRICS_OTLP_EXPORTS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_metrics_otlp_exports_total failed to initialize".to_owned(),
+        )
+    })
+}
+
 fn int_gauge(
     cell: &'static OnceLock<IntGauge>,
     name: &'static str,
@@ -570,6 +607,14 @@ fn cache_purger_entry_result_label(result: &str) -> &'static str {
     }
 }
 
+fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "success" => "success",
+        "failure" => "failure",
+        _ => "other",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -585,7 +630,8 @@ mod tests {
     use super::{
         cache_config_stats, init, method_bucket, record_cache_activity,
         record_cache_activity_scope, record_cache_purge, record_cache_purger_entries,
-        record_cache_purger_run, record_config, record_proxy_outcome, status_class,
+        record_cache_purger_run, record_config, record_metrics_otlp_export, record_proxy_outcome,
+        status_class,
     };
 
     #[test]
@@ -747,6 +793,27 @@ mod tests {
         assert!(!output.contains("attacker-result"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
+    }
+
+    #[test]
+    fn records_metrics_otlp_exporter_health_counter() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_metrics_otlp_export("success");
+        record_metrics_otlp_export("failure");
+        record_metrics_otlp_export("attacker-outcome");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(r#"fluxheim_metrics_otlp_exports_total{outcome="success"}"#));
+        assert!(output.contains(r#"fluxheim_metrics_otlp_exports_total{outcome="failure"}"#));
+        assert!(output.contains(r#"fluxheim_metrics_otlp_exports_total{outcome="other"}"#));
+        assert!(!output.contains("attacker-outcome"));
     }
 
     #[test]
