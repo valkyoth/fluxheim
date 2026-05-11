@@ -453,6 +453,8 @@ stop_origin() {
 }
 
 admin_status_body="$TMP_DIR/admin-status.json"
+admin_bulk_purge_body="$TMP_DIR/admin-bulk-purge.json"
+admin_exact_purge_body="$TMP_DIR/admin-exact-purge.json"
 admin_stale_dry_run_body="$TMP_DIR/admin-stale-dry-run.json"
 admin_prefix_purge_body="$TMP_DIR/admin-prefix-purge.json"
 admin_route_purge_body="$TMP_DIR/admin-route-purge.json"
@@ -1603,6 +1605,66 @@ fi
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
     --path /missing.png \
+    --expect-objects 0
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_bulk_purge_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-bulk?host=cache.test&method=GET&path=/revalidate.png&path=/refresh.png"; then
+    echo "proxy cache smoke failed: admin bulk purge request failed" >&2
+    cat "$admin_bulk_purge_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$admin_bulk_purge_body"; then
+    echo "proxy cache smoke failed: admin bulk purge did not return ok" >&2
+    cat "$admin_bulk_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"requested":2' "$admin_bulk_purge_body"; then
+    echo "proxy cache smoke failed: admin bulk purge did not report two requested paths" >&2
+    cat "$admin_bulk_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"purged":2' "$admin_bulk_purge_body"; then
+    echo "proxy cache smoke failed: admin bulk purge did not remove both objects" >&2
+    cat "$admin_bulk_purge_body" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /revalidate.png \
+    --expect-objects 0
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /refresh.png \
+    --expect-objects 0
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_exact_purge_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge?host=cache.test&method=GET&path=/asset.png"; then
+    echo "proxy cache smoke failed: admin exact purge request failed" >&2
+    cat "$admin_exact_purge_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$admin_exact_purge_body"; then
+    echo "proxy cache smoke failed: admin exact purge did not return ok" >&2
+    cat "$admin_exact_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"path":"/asset.png"' "$admin_exact_purge_body"; then
+    echo "proxy cache smoke failed: admin exact purge did not echo requested path" >&2
+    cat "$admin_exact_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"purged":true' "$admin_exact_purge_body"; then
+    echo "proxy cache smoke failed: admin exact purge did not remove asset object" >&2
+    cat "$admin_exact_purge_body" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /asset.png \
     --expect-objects 0
 
 if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_route_purge_body" \

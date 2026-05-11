@@ -211,10 +211,10 @@ internal cache implementation.
   revalidation from an origin `304`, stale-object refresh from an origin `200`,
   stale-while-revalidate serving during a background refresh, stale-if-error
   serving after an upstream connection failure, cache-lock request collapsing
-  for concurrent misses, `Vary` variant isolation, admin stale dry-run and
-  vhost prefix/tag/wildcard purge plus route-scoped purge against real cached
-  objects, and disk-cache HIT behavior after a Fluxheim process restart without
-  the origin available.
+  for concurrent misses, `Vary` variant isolation, admin exact/bulk purge,
+  stale dry-run, vhost prefix/tag/wildcard purge, and route-scoped purge against
+  real cached objects, and disk-cache HIT behavior after a Fluxheim process
+  restart without the origin available.
   Planned work still covers edge cases where origins change `Vary`, validators,
   or freshness headers during revalidation and broader cache-header matrix
   tests across static and proxied responses.
