@@ -772,6 +772,11 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         println!("route: {route}");
     }
     println!("eligible: {}", preview.eligible);
+    println!("cache_lock_enabled: {}", preview.cache_lock_enabled);
+    println!(
+        "cache_lock_wait_timeout_secs: {}",
+        preview.cache_lock_wait_timeout_secs
+    );
     if let Some(reason) = preview.reason.as_deref() {
         println!("reason: {reason}");
     }
@@ -814,6 +819,11 @@ fn run_cache_lookup_command(
         println!("route: {route}");
     }
     println!("eligible: {}", lookup.preview.eligible);
+    println!("cache_lock_enabled: {}", lookup.preview.cache_lock_enabled);
+    println!(
+        "cache_lock_wait_timeout_secs: {}",
+        lookup.preview.cache_lock_wait_timeout_secs
+    );
     if let Some(reason) = lookup.preview.reason.as_deref() {
         println!("reason: {reason}");
     }

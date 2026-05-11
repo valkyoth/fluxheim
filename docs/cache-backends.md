@@ -442,11 +442,12 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
 
 The preview and lookup commands validate the effective config, select the same
 vhost and route cache policy as a live request, and print the selected
-namespace, primary cache-key material, compact hashes, user tag, and
-ineligibility reason when the request is not admitted. `cache-lookup` also
-checks the selected memory and disk tiers for matching objects and prints safe
-metadata such as status, body size, freshness timestamps, cache tags, and stored
-header names. It also reports a compact `freshness_state` plus
+namespace, primary cache-key material, compact hashes, user tag, cache-lock
+state, cache-lock wait timeout, and ineligibility reason when the request is
+not admitted. `cache-lookup` also checks the selected memory and disk tiers for
+matching objects and prints safe metadata such as status, body size, freshness
+timestamps, cache tags, and stored header names. It also reports a compact
+`freshness_state` plus
 `serve_stale_while_revalidate` and `serve_stale_if_error` booleans, so incident
 checks can distinguish a fresh object, an object still usable under stale
 policy, and a fully expired object. `purge_indexed` tells whether indexed scope,
