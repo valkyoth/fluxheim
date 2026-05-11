@@ -384,6 +384,9 @@ enabled = true
 path = "$TMP_DIR/cache"
 max_size_bytes = "32MiB"
 
+[vhosts.cache.predictor]
+enabled = true
+
 [vhosts.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
@@ -413,6 +416,9 @@ max_size_bytes = "16MiB"
 enabled = true
 path = "$TMP_DIR/cache"
 max_size_bytes = "32MiB"
+
+[vhosts.routes.cache.predictor]
+enabled = true
 EOF
 
 python3 "$TMP_DIR/origin.py" "$ORIGIN_PORT" &
@@ -521,6 +527,7 @@ fi
     --expect-eligible \
     --expect-cache-lock-enabled \
     --expect-cache-lock-wait-timeout-secs 30 \
+    --expect-cache-predictor-enabled \
     --expect-memory-tier-enabled \
     --expect-disk-tier-enabled \
     --expect-scope vhost \
@@ -536,6 +543,7 @@ fi
     --path /asset.png \
     --expect-ineligible \
     --expect-reason "method HEAD currently bypasses proxy cache storage" \
+    --expect-cache-predictor-enabled \
     --expect-scope vhost \
     --expect-vhost cache.test
 
@@ -545,6 +553,7 @@ fi
     --expect-eligible \
     --expect-cache-lock-enabled \
     --expect-cache-lock-wait-timeout-secs 30 \
+    --expect-cache-predictor-enabled \
     --expect-scope route \
     --expect-vhost cache.test \
     --expect-route swr \
@@ -1142,6 +1151,7 @@ fi
     --require-object \
     --expect-tier disk \
     --expect-cache-lock-wait-timeout-secs 30 \
+    --expect-cache-predictor-enabled \
     --expect-namespace fluxheim-image-v1 \
     --expect-key-namespace cache-vhost-v1 \
     --expect-user-tag cache.test \
@@ -1228,6 +1238,7 @@ sleep 1.2
     --expect-status 200 \
     --expect-body-bytes 12 \
     --expect-header-name etag \
+    --expect-cache-predictor-enabled \
     --expect-serve-stale-while-revalidate \
     --expect-scope route \
     --expect-vhost cache.test \
@@ -1340,6 +1351,7 @@ PY
     --expect-body-bytes 11 \
     --expect-header-name etag \
     --expect-cache-lock-enabled \
+    --expect-cache-predictor-enabled \
     --expect-memory-tier-enabled \
     --expect-disk-tier-enabled \
     --expect-storage-tiers 2 \

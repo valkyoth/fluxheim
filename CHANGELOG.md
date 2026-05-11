@@ -40,6 +40,8 @@ behavior when the change improves security or project direction.
 - `fluxheim cache-key` and `fluxheim cache-lookup` now report selected
   cacheability predictor state and can assert it with
   `--expect-cache-predictor-enabled`.
+- The proxy cache smoke now enables and asserts vhost/route cacheability
+  predictor policy.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - `fluxheim cache-lookup` can now assert exact stored response header values
