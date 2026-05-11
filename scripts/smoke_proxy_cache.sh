@@ -73,6 +73,8 @@ VARY_BODIES = {
 }
 ETAG = '"cache-smoke-v1"'
 REVALIDATE_ETAG = '"cache-smoke-revalidate"'
+REFRESH_OLD_ETAG = '"cache-smoke-refresh-old"'
+REFRESH_NEW_ETAG = '"cache-smoke-refresh-new"'
 LAST_MODIFIED = "Sun, 10 May 2026 00:00:00 GMT"
 
 
@@ -110,6 +112,30 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-length", str(len(body)))
             self.send_header("cache-control", "public, max-age=1")
             self.send_header("etag", REVALIDATE_ETAG)
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path == "/refresh.png":
+            if self.headers.get("if-none-match") == REFRESH_OLD_ETAG:
+                body = b"refreshed-body"
+                self.send_response(200)
+                self.send_header("content-type", "image/png")
+                self.send_header("content-length", str(len(body)))
+                self.send_header("cache-control", "public, max-age=120")
+                self.send_header("etag", REFRESH_NEW_ETAG)
+                self.send_header("last-modified", LAST_MODIFIED)
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            body = b"refresh-old-body"
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=1")
+            self.send_header("etag", REFRESH_OLD_ETAG)
             self.send_header("last-modified", LAST_MODIFIED)
             self.end_headers()
             self.wfile.write(body)
@@ -291,10 +317,14 @@ range_headers="$TMP_DIR/range.headers"
 revalidate_first_headers="$TMP_DIR/revalidate-first.headers"
 revalidate_second_headers="$TMP_DIR/revalidate-second.headers"
 revalidate_third_headers="$TMP_DIR/revalidate-third.headers"
+refresh_first_headers="$TMP_DIR/refresh-first.headers"
+refresh_second_headers="$TMP_DIR/refresh-second.headers"
+refresh_third_headers="$TMP_DIR/refresh-third.headers"
 restart_headers="$TMP_DIR/restart.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
 revalidate_body="$TMP_DIR/revalidate-body.bin"
+refresh_body="$TMP_DIR/refresh-body.bin"
 vary_en_first_headers="$TMP_DIR/vary-en-first.headers"
 vary_en_second_headers="$TMP_DIR/vary-en-second.headers"
 vary_de_headers="$TMP_DIR/vary-de.headers"
@@ -415,6 +445,57 @@ fi
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
     --path /revalidate.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-fresh-ttl-secs 120 \
+    --expect-header-name etag \
+    --expect-freshness-state fresh
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$refresh_first_headers" -o "$refresh_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/refresh.png"
+if ! grep -qi '^x-cache-status: MISS' "$refresh_first_headers"; then
+    echo "proxy cache smoke failed: initial refresh asset request was not a cache MISS" >&2
+    cat "$refresh_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$refresh_body")" != "refresh-old-body" ]; then
+    echo "proxy cache smoke failed: initial refresh asset body mismatch" >&2
+    exit 1
+fi
+
+sleep 1.2
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$refresh_second_headers" -o "$refresh_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/refresh.png"
+if ! grep -qi '^x-cache-status: EXPIRED' "$refresh_second_headers"; then
+    echo "proxy cache smoke failed: stale asset did not refresh from upstream 200" >&2
+    cat "$refresh_second_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$refresh_body")" != "refreshed-body" ]; then
+    echo "proxy cache smoke failed: refreshed asset body mismatch" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$refresh_third_headers" -o "$refresh_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/refresh.png"
+if ! grep -qi '^x-cache-status: HIT' "$refresh_third_headers"; then
+    echo "proxy cache smoke failed: refreshed metadata did not make asset fresh" >&2
+    cat "$refresh_third_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$refresh_body")" != "refreshed-body" ]; then
+    echo "proxy cache smoke failed: refreshed cache HIT body mismatch" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /refresh.png \
     --require-object \
     --expect-tier disk \
     --expect-status 200 \

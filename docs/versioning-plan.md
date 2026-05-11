@@ -393,8 +393,8 @@ Stable scope:
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
     conditional `304`, byte-range `206`, validator-based upstream revalidation
-    from origin `304`, `Vary` variant isolation, disk HIT after restart, and
-    request-bypass reason release smoke;
+    from origin `304`, stale-object refresh from origin `200`, `Vary` variant
+    isolation, disk HIT after restart, and request-bypass reason release smoke;
   - full validator-based upstream revalidation edge-case coverage for proxied
     cache responses, including explicit behavior when origins change `Vary`,
     `ETag`, `Last-Modified`, or freshness headers during revalidation;
