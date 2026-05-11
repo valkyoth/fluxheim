@@ -12,6 +12,7 @@ static CACHE_ENABLED_ROUTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_ROUTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
@@ -30,6 +31,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_tiered_routes()?;
     cache_memory_tiers()?;
     cache_disk_tiers()?;
+    cache_lock_enabled_policies()?;
     cache_activity_total()?;
     cache_activity_scope_total()?;
     Ok(())
@@ -46,6 +48,7 @@ pub fn record_config(config: &crate::config::Config) {
     set_gauge(cache_tiered_routes(), stats.tiered_routes);
     set_gauge(cache_memory_tiers(), stats.memory_tiers);
     set_gauge(cache_disk_tiers(), stats.disk_tiers);
+    set_gauge(cache_lock_enabled_policies(), stats.lock_enabled_policies);
 }
 
 pub fn record_proxy_outcome(vhost: &str, method: &str, status: Option<u16>, error: bool) {
@@ -97,6 +100,7 @@ struct CacheConfigStats {
     tiered_routes: u64,
     memory_tiers: u64,
     disk_tiers: u64,
+    lock_enabled_policies: u64,
 }
 
 fn cache_config_stats(config: &crate::config::Config) -> CacheConfigStats {
@@ -138,6 +142,9 @@ fn accumulate_cache_policy(
     }
     if cache.disk.enabled {
         stats.disk_tiers = stats.disk_tiers.saturating_add(1);
+    }
+    if (cache.memory.enabled || cache.disk.enabled) && cache.lock.enabled {
+        stats.lock_enabled_policies = stats.lock_enabled_policies.saturating_add(1);
     }
     if cache.memory.enabled && cache.disk.enabled {
         if vhost_scope {
@@ -252,6 +259,14 @@ fn cache_disk_tiers() -> Result<&'static IntGauge, prometheus::Error> {
         &CACHE_DISK_TIERS,
         "fluxheim_cache_disk_tiers",
         "Configured Fluxheim cache disk tiers across vhosts and routes.",
+    )
+}
+
+fn cache_lock_enabled_policies() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_LOCK_ENABLED_POLICIES,
+        "fluxheim_cache_lock_enabled_policies",
+        "Configured Fluxheim cache policies with request-collapsing locks enabled and at least one storage tier.",
     )
 }
 
@@ -456,6 +471,7 @@ mod tests {
         assert!(output.contains("fluxheim_cache_tiered_routes 0"));
         assert!(output.contains("fluxheim_cache_memory_tiers 2"));
         assert!(output.contains("fluxheim_cache_disk_tiers 1"));
+        assert!(output.contains("fluxheim_cache_lock_enabled_policies 2"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
     }
@@ -522,6 +538,7 @@ mod tests {
         assert_eq!(stats.tiered_routes, 0);
         assert_eq!(stats.memory_tiers, 2);
         assert_eq!(stats.disk_tiers, 1);
+        assert_eq!(stats.lock_enabled_policies, 2);
     }
 
     #[test]

@@ -531,6 +531,8 @@ Current implementation status:
     2xx/3xx success accounting and explicit `--allow-status` overrides for
     deliberate negative-cache warming;
   - Prometheus cache activity metrics and initial OTLP metrics export.
+    Prometheus also reports cache-lock-enabled policy count so request
+    collapsing coverage is visible without high-cardinality labels.
 
 Stable scope for declaring the cache pack complete:
 

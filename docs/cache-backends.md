@@ -217,7 +217,10 @@ internal cache implementation.
   paths. Prometheus also exposes
   `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}` for
   configured vhost and route cache activity using only configured names and
-  bounded tier/event labels.
+  bounded tier/event labels. `fluxheim_cache_lock_enabled_policies` reports
+  how many configured cache policies have request-collapsing locks enabled on a
+  real storage tier, so stampede-protection coverage is visible without cache
+  key or path labels.
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as
