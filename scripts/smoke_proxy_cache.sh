@@ -239,6 +239,13 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if self.path == "/missing.png":
+            self.send_response(404)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", "0")
+            self.end_headers()
+            return
+
         if self.path != "/asset.png":
             self.send_response(404)
             self.send_header("content-length", "0")
@@ -333,6 +340,7 @@ bypass_cookie_names = ["sessionid"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview"]
 bypass_query_values = { mode = "private" }
+status_ttls = { "404" = 60 }
 stale_if_error_secs = 60
 stale_if_error_on = ["connect", "http-status"]
 stale_if_error_statuses = [502, 503, 504]
@@ -540,6 +548,8 @@ vary_en_body="$TMP_DIR/vary-en.bin"
 vary_de_body="$TMP_DIR/vary-de.bin"
 warm_vary_headers="$TMP_DIR/warm-vary.headers"
 warm_vary_body="$TMP_DIR/warm-vary.bin"
+warm_missing_headers="$TMP_DIR/warm-missing.headers"
+warm_missing_body="$TMP_DIR/warm-missing.bin"
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$first_headers" -o "$body" -H "Host: cache.test" "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
 if ! grep -qi '^x-cache-status: MISS' "$first_headers"; then
@@ -1242,6 +1252,42 @@ if ! grep -qi '^x-cache-status: HIT' "$warm_vary_headers"; then
 fi
 if [ "$(cat "$warm_vary_body")" != "vary-de" ]; then
     echo "proxy cache smoke failed: cache-warm negotiated Vary body mismatch" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-warm \
+    --listen "127.0.0.1:$FLUXHEIM_PORT" \
+    --host cache.test \
+    --path /missing.png \
+    --allow-status 404 \
+    --repeat 2 \
+    --expect-cache-status-sequence MISS,HIT
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /missing.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 404 \
+    --expect-body-bytes 0 \
+    --expect-fresh-ttl-secs 60 \
+    --expect-header-name content-type \
+    --expect-purge-indexed \
+    --expect-freshness-state fresh
+
+warm_missing_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$warm_missing_headers" -o "$warm_missing_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/missing.png"
+)
+if [ "$warm_missing_status" != "404" ]; then
+    echo "proxy cache smoke failed: warmed negative-cache request returned $warm_missing_status instead of 404" >&2
+    cat "$warm_missing_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$warm_missing_headers"; then
+    echo "proxy cache smoke failed: cache-warm did not preload configured 404 TTL" >&2
+    cat "$warm_missing_headers" >&2
     exit 1
 fi
 

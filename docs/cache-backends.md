@@ -55,6 +55,8 @@ internal cache implementation.
   `bypass_cookie_values`, `bypass_query_params`, and `bypass_query_values`
   provide narrower bypass controls for preview flags, session cookies, and
   private query modes while keeping unrelated public requests cacheable.
+- `status_ttls` allows deliberate negative caching for configured statuses,
+  such as a bounded 404 TTL for immutable asset paths.
 - `cache.vary_request_headers`, `vhosts.cache.vary_request_headers`, and
   `vhosts.routes.cache.vary_request_headers` add safe request headers to the
   Pingora cache variance key even when the origin does not emit a matching
@@ -88,6 +90,8 @@ internal cache implementation.
   `REVALIDATED`, so release scripts can fail if a warm request bypassed the
   cache unexpectedly. Use `--repeat` with `--expect-cache-status-sequence` to
   verify an expected transition, such as first-fill `MISS` followed by `HIT`.
+  The proxy cache smoke suite verifies both negotiated variant warming and a
+  deliberate 404 negative-cache warm using `--allow-status 404`.
   Use repeated `--header "Name: value"` options to warm negotiated variants for
   safe request headers such as `Accept-Language` or `Accept-Encoding`; use
   `--host` for the Host header. Use `--dry-run` to validate the target list,

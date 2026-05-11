@@ -288,7 +288,7 @@ export, and end-to-end proxy cache smoke coverage for hit `Age`, conditional
 do not poison cached GET bodies, validator-based upstream revalidation and refresh,
 stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
 `Vary` variants, disk hits after restart, configured request bypass policies,
-and debug bypass reasons.
+negative-cache warming, and debug bypass reasons.
 `cache-lookup` also supports deploy-script assertions for object
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
 cache tags, stored header names, exact object count, cache-lock/tier layout, stale-serving
