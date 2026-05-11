@@ -595,6 +595,10 @@ validates bounded warm target input files, repeat counts, cache-status
 expectations, request headers, and listener selection without sending requests,
 which is useful
 before release deploy jobs.
+Proxy cache storage currently bypasses `HEAD` requests with
+`X-Cache-Reason: method-head` to avoid unsafe body handling; this keeps HEAD
+probes from corrupting `GET` cache entries while explicit HEAD cache parity is
+completed.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.

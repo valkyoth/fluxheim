@@ -100,6 +100,22 @@ def path_count(path):
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def do_HEAD(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/asset.png":
+            self.send_response(404)
+            self.send_header("content-length", "0")
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("content-type", "image/png")
+        self.send_header("content-length", str(len(BODY)))
+        self.send_header("cache-control", "public, max-age=120")
+        self.send_header("etag", ETAG)
+        self.send_header("last-modified", LAST_MODIFIED)
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/__count":
@@ -432,6 +448,9 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
 
 first_headers="$TMP_DIR/first.headers"
 second_headers="$TMP_DIR/second.headers"
+head_first_headers="$TMP_DIR/head-first.headers"
+head_second_headers="$TMP_DIR/head-second.headers"
+post_head_get_headers="$TMP_DIR/post-head-get.headers"
 bypass_headers="$TMP_DIR/bypass.headers"
 pragma_bypass_headers="$TMP_DIR/pragma-bypass.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
@@ -487,6 +506,71 @@ fi
 if ! grep -qi '^age:' "$second_headers"; then
     echo "proxy cache smoke failed: cache HIT did not include Age header" >&2
     cat "$second_headers" >&2
+    exit 1
+fi
+
+head_first_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -I -D "$head_first_headers" -o /dev/null -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$head_first_status" != "200" ]; then
+    echo "proxy cache smoke failed: first HEAD request returned $head_first_status instead of 200" >&2
+    cat "$head_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: BYPASS' "$head_first_headers"; then
+    echo "proxy cache smoke failed: first HEAD request was not a safe cache BYPASS" >&2
+    cat "$head_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: method-head' "$head_first_headers"; then
+    echo "proxy cache smoke failed: first HEAD request missed bounded bypass reason" >&2
+    cat "$head_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-length: 16' "$head_first_headers"; then
+    echo "proxy cache smoke failed: first HEAD request missed expected Content-Length" >&2
+    cat "$head_first_headers" >&2
+    exit 1
+fi
+
+head_second_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -I -D "$head_second_headers" -o /dev/null -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$head_second_status" != "200" ]; then
+    echo "proxy cache smoke failed: second HEAD request returned $head_second_status instead of 200" >&2
+    cat "$head_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: BYPASS' "$head_second_headers"; then
+    echo "proxy cache smoke failed: second HEAD request was not a safe cache BYPASS" >&2
+    cat "$head_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: method-head' "$head_second_headers"; then
+    echo "proxy cache smoke failed: second HEAD request missed bounded bypass reason" >&2
+    cat "$head_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-length: 16' "$head_second_headers"; then
+    echo "proxy cache smoke failed: cached HEAD request missed expected Content-Length" >&2
+    cat "$head_second_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$post_head_get_headers" -o "$body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: HIT' "$post_head_get_headers"; then
+    echo "proxy cache smoke failed: HEAD requests poisoned the cached GET entry" >&2
+    cat "$post_head_get_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$body")" != "0123456789abcdef" ]; then
+    echo "proxy cache smoke failed: GET body changed after HEAD requests" >&2
     exit 1
 fi
 

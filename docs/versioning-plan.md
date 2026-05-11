@@ -393,7 +393,8 @@ Stable scope:
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
     conditional `304` from `ETag` and `Last-Modified`, byte-range `206`,
-    ETag/date `If-Range` match/mismatch behavior,
+    ETag/date `If-Range` match/mismatch behavior, HEAD probes that do not poison
+    cached GET bodies,
     validator-based upstream revalidation from origin `304`, stale-object
     refresh from origin `200`,
     stale-while-revalidate serving during a background refresh,
@@ -612,8 +613,9 @@ Stable scope for declaring the cache pack complete:
 - Cache warm and metadata/debug commands suitable for release deploys and
   production incident response.
 - Proxy cache HIT `Age`, conditional `304` from `ETag` and `Last-Modified`,
-  byte-range `206`, ETag/date `If-Range` match/mismatch behavior, `Vary`
-  variant isolation, stale-while-revalidate serving during background refresh,
+  byte-range `206`, ETag/date `If-Range` match/mismatch behavior, HEAD probes
+  that do not poison cached GET bodies, `Vary` variant isolation,
+  stale-while-revalidate serving during background refresh,
   stale-if-error serving after upstream failure, cache-lock request collapsing
   for concurrent misses, disk HIT after restart, and request-bypass reason
   behavior are covered end to end.
@@ -687,11 +689,15 @@ Exit criteria:
   Fluxheim serves from cache. Pingora provides the cache-hit `Age`,
   conditional, and range hooks; Fluxheim's smoke suite covers proxy cache HIT
   `Age`, conditional `304` from `ETag` and `Last-Modified`, byte-range `206`,
-  ETag/date `If-Range` match/mismatch behavior, `Vary` variant isolation,
+  ETag/date `If-Range` match/mismatch behavior, HEAD probes that do not poison
+  cached GET bodies, `Vary` variant isolation,
   stale-while-revalidate serving during background refresh, stale-if-error
   serving after upstream failure, cache-lock request collapsing for concurrent
   misses, disk HIT after restart, and `Cache-Control`/`Pragma`
   request-bypass reason headers.
+- Full HEAD cache parity remains a 1.2 cache-completion item: decide whether
+  Fluxheim should intentionally bypass HEAD storage or implement explicit
+  HEAD-to-GET cache-key conversion with safe body handling.
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 

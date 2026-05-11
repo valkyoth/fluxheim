@@ -1779,6 +1779,12 @@ fn cache_key_preview_ineligible_reason(
     if !cache_config.has_enabled_tier() {
         return "selected cache policy has no enabled storage tier".to_owned();
     }
+    if proxy_cache_method_temporarily_bypassed(request.method.as_str()) {
+        return format!(
+            "method {} currently bypasses proxy cache storage",
+            request.method
+        );
+    }
     if !cache_config
         .methods
         .iter()
@@ -2081,6 +2087,9 @@ impl ProxyRuntimeState {
         let cache_config = route_cache
             .map(|cache| &cache.config)
             .unwrap_or(&vhost.cache);
+        if proxy_cache_method_temporarily_bypassed(request.method.as_str()) {
+            return None;
+        }
         let cache_request = cache_request_from_header(request);
         let route_user_tag;
         let user_tag = if let Some(route_cache) = route_cache {
@@ -3222,6 +3231,16 @@ impl ProxyHttp for FluxProxy {
             return Ok(());
         }
 
+        if proxy_cache_method_temporarily_bypassed(session.req_header().method.as_str()) {
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "bypass");
+            ctx.cache_status_override = Some(CacheStatusOverride {
+                status: "BYPASS",
+                reason: Some(CACHE_HEAD_BYPASS_REASON),
+            });
+            return Ok(());
+        }
+
         let storage = route_cache
             .and_then(RuntimeRouteCache::storage)
             .or_else(|| {
@@ -3781,6 +3800,14 @@ fn cache_pass_record_cacheable(counter: &moka::sync::Cache<String, u32>, cache_k
 
 #[cfg(feature = "cache")]
 const CACHE_PASS_REASON: &str = "cache-pass";
+
+#[cfg(feature = "cache")]
+const CACHE_HEAD_BYPASS_REASON: &str = "method-head";
+
+#[cfg(feature = "cache")]
+fn proxy_cache_method_temporarily_bypassed(method: &str) -> bool {
+    method == "HEAD"
+}
 
 #[cfg(feature = "cache")]
 fn cache_should_serve_stale(cache: &crate::config::CacheConfig, event: CacheStaleEvent) -> bool {
@@ -5960,6 +5987,21 @@ mod tests {
         assert_eq!(
             preview.reason.as_deref(),
             Some("method POST is not allowed by selected cache policy")
+        );
+        assert_eq!(preview.primary_key, None);
+
+        let mut request =
+            pingora::http::RequestHeader::build("HEAD", b"/assets/logo.png", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+
+        let preview = proxy
+            .snapshot()
+            .pingora_image_cache_key_preview_for_request_header(&request);
+
+        assert!(!preview.eligible);
+        assert_eq!(
+            preview.reason.as_deref(),
+            Some("method HEAD currently bypasses proxy cache storage")
         );
         assert_eq!(preview.primary_key, None);
     }
