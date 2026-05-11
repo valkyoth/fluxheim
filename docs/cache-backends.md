@@ -80,7 +80,8 @@ internal cache implementation.
   warming a configured 404 TTL. When a cache policy emits a status header,
   `--expect-cache-status` can require bounded values such as `MISS`, `HIT`, or
   `REVALIDATED`, so release scripts can fail if a warm request bypassed the
-  cache unexpectedly.
+  cache unexpectedly. Use `--repeat` with `--expect-cache-status-sequence` to
+  verify an expected transition, such as first-fill `MISS` followed by `HIT`.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream
@@ -356,7 +357,8 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
   --listen 127.0.0.1:80 \
   --host repoheim.eu \
   --path /assets/img/logo.png \
-  --expect-cache-status MISS
+  --repeat 2 \
+  --expect-cache-status-sequence MISS,HIT
 ```
 
 Example cache-key preview during a production incident:

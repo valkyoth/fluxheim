@@ -155,6 +155,10 @@ pub enum CliCommand {
         #[arg(long)]
         fail_fast: bool,
 
+        /// Number of times to request each warm target.
+        #[arg(long, default_value_t = 1)]
+        repeat: usize,
+
         /// Additional HTTP status code to count as warmed. 2xx and 3xx are accepted by default.
         #[arg(long = "allow-status", value_name = "STATUS")]
         allow_statuses: Vec<u16>,
@@ -166,6 +170,14 @@ pub enum CliCommand {
         /// Required cache status header value. May be repeated, for example MISS and HIT.
         #[arg(long = "expect-cache-status", value_name = "VALUE")]
         expect_cache_statuses: Vec<String>,
+
+        /// Per-repeat cache status sequence, for example MISS,HIT.
+        #[arg(
+            long = "expect-cache-status-sequence",
+            value_name = "VALUES",
+            value_delimiter = ','
+        )]
+        expect_cache_status_sequence: Vec<String>,
     },
 
     /// Preview the cache key selected for one request without contacting upstream.
@@ -380,9 +392,11 @@ fn run_command(
             timeout_secs,
             max_targets,
             fail_fast,
+            repeat,
             allow_statuses,
             cache_status_header,
             expect_cache_statuses,
+            expect_cache_status_sequence,
         } => run_cache_warm_command(CacheWarmOptions {
             config_path,
             listen: listen.clone(),
@@ -392,9 +406,11 @@ fn run_command(
             timeout_secs: *timeout_secs,
             max_targets: *max_targets,
             fail_fast: *fail_fast,
+            repeat: *repeat,
             allow_statuses: allow_statuses.clone(),
             cache_status_header: cache_status_header.clone(),
             expect_cache_statuses: expect_cache_statuses.clone(),
+            expect_cache_status_sequence: expect_cache_status_sequence.clone(),
         }),
         CliCommand::CacheKey {
             host,
@@ -433,9 +449,11 @@ struct CacheWarmOptions<'a> {
     timeout_secs: u64,
     max_targets: usize,
     fail_fast: bool,
+    repeat: usize,
     allow_statuses: Vec<u16>,
     cache_status_header: String,
     expect_cache_statuses: Vec<String>,
+    expect_cache_status_sequence: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -467,9 +485,17 @@ fn run_cache_warm_command(
     if options.max_targets == 0 || options.max_targets > 4096 {
         return Err("cache-warm --max-targets must be between 1 and 4096".into());
     }
+    if options.repeat == 0 || options.repeat > 16 {
+        return Err("cache-warm --repeat must be between 1 and 16".into());
+    }
     validate_cache_warm_allow_statuses(&options.allow_statuses)?;
     validate_cache_warm_header_name(&options.cache_status_header)?;
     validate_cache_warm_expected_statuses(&options.expect_cache_statuses)?;
+    validate_cache_warm_expected_sequence(
+        &options.expect_cache_statuses,
+        &options.expect_cache_status_sequence,
+        options.repeat,
+    )?;
 
     let listen = cache_warm_listen_addr(&config, options.listen.as_deref())?;
     let default_host = match options.host {
@@ -485,73 +511,96 @@ fn run_cache_warm_command(
         options.input.as_deref(),
         options.max_targets,
     )?;
+    let total_requests = targets
+        .len()
+        .checked_mul(options.repeat)
+        .ok_or("cache-warm request count overflow")?;
+    if total_requests > 4096 {
+        return Err("cache-warm total request count must be at most 4096".into());
+    }
 
     println!("cache warm targets: {}", targets.len());
+    println!("cache warm requests: {total_requests}");
     println!("cache warm listener: {listen}");
 
     let timeout = std::time::Duration::from_secs(options.timeout_secs);
     let mut warmed = 0_usize;
     let mut failed = 0_usize;
-    for target in targets {
-        match cache_warm_request(&listen, &target, timeout, &options.cache_status_header) {
-            Ok(result) => {
-                if cache_warm_status_is_success(result.status, &options.allow_statuses) {
-                    match cache_warm_expected_status_matches(
-                        result.cache_status.as_deref(),
-                        &options.expect_cache_statuses,
-                    ) {
-                        Ok(()) => {
-                            warmed = warmed.saturating_add(1);
-                            println!(
-                                "warmed: host={} path={} status={} bytes={} cache_status={}",
-                                target.host,
-                                target.path,
-                                result.status,
-                                result.bytes_read,
-                                result.cache_status.as_deref().unwrap_or("-")
-                            );
-                        }
-                        Err(error) => {
-                            failed = failed.saturating_add(1);
-                            eprintln!(
-                                "failed: host={} path={} status={} bytes={} cache_status={} error={}",
-                                target.host,
-                                target.path,
-                                result.status,
-                                result.bytes_read,
-                                result.cache_status.as_deref().unwrap_or("-"),
-                                error
-                            );
-                            if options.fail_fast {
-                                break;
+    'targets: for target in targets {
+        for attempt in 1..=options.repeat {
+            match cache_warm_request(&listen, &target, timeout, &options.cache_status_header) {
+                Ok(result) => {
+                    if cache_warm_status_is_success(result.status, &options.allow_statuses) {
+                        let expected = cache_warm_expected_statuses_for_attempt(
+                            &options.expect_cache_statuses,
+                            &options.expect_cache_status_sequence,
+                            attempt,
+                        );
+                        match cache_warm_expected_status_matches(
+                            result.cache_status.as_deref(),
+                            expected,
+                        ) {
+                            Ok(()) => {
+                                warmed = warmed.saturating_add(1);
+                                println!(
+                                    "warmed: host={} path={} attempt={}/{} status={} bytes={} cache_status={}",
+                                    target.host,
+                                    target.path,
+                                    attempt,
+                                    options.repeat,
+                                    result.status,
+                                    result.bytes_read,
+                                    result.cache_status.as_deref().unwrap_or("-")
+                                );
+                            }
+                            Err(error) => {
+                                failed = failed.saturating_add(1);
+                                eprintln!(
+                                    "failed: host={} path={} attempt={}/{} status={} bytes={} cache_status={} error={}",
+                                    target.host,
+                                    target.path,
+                                    attempt,
+                                    options.repeat,
+                                    result.status,
+                                    result.bytes_read,
+                                    result.cache_status.as_deref().unwrap_or("-"),
+                                    error
+                                );
+                                if options.fail_fast {
+                                    break 'targets;
+                                }
                             }
                         }
-                    }
-                } else {
-                    failed = failed.saturating_add(1);
-                    eprintln!(
-                        "failed: host={} path={} status={} bytes={} cache_status={} error=unexpected warm response status",
-                        target.host,
-                        target.path,
-                        result.status,
-                        result.bytes_read,
-                        result.cache_status.as_deref().unwrap_or("-")
-                    );
-                    if options.fail_fast {
-                        break;
+                    } else {
+                        failed = failed.saturating_add(1);
+                        eprintln!(
+                            "failed: host={} path={} attempt={}/{} status={} bytes={} cache_status={} error=unexpected warm response status",
+                            target.host,
+                            target.path,
+                            attempt,
+                            options.repeat,
+                            result.status,
+                            result.bytes_read,
+                            result.cache_status.as_deref().unwrap_or("-")
+                        );
+                        if options.fail_fast {
+                            break 'targets;
+                        }
                     }
                 }
-            }
-            Err(error) => {
-                failed = failed.saturating_add(1);
-                eprintln!(
-                    "failed: host={} path={} error={}",
-                    target.host,
-                    target.path,
-                    error.to_string().replace('\n', " ")
-                );
-                if options.fail_fast {
-                    break;
+                Err(error) => {
+                    failed = failed.saturating_add(1);
+                    eprintln!(
+                        "failed: host={} path={} attempt={}/{} error={}",
+                        target.host,
+                        target.path,
+                        attempt,
+                        options.repeat,
+                        error.to_string().replace('\n', " ")
+                    );
+                    if options.fail_fast {
+                        break 'targets;
+                    }
                 }
             }
         }
@@ -577,9 +626,11 @@ fn run_cache_warm_command(
         timeout_secs,
         max_targets,
         fail_fast,
+        repeat,
         allow_statuses,
         cache_status_header,
         expect_cache_statuses,
+        expect_cache_status_sequence,
     } = options;
     let _ = (
         config_path,
@@ -590,9 +641,11 @@ fn run_cache_warm_command(
         timeout_secs,
         max_targets,
         fail_fast,
+        repeat,
         allow_statuses,
         cache_status_header,
         expect_cache_statuses,
+        expect_cache_status_sequence,
     );
     Err("cache-warm requires the cache feature".into())
 }
@@ -999,8 +1052,41 @@ fn validate_cache_warm_expected_statuses(
 }
 
 #[cfg(feature = "cache")]
+fn validate_cache_warm_expected_sequence(
+    allowed_statuses: &[String],
+    sequence: &[String],
+    repeat: usize,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !allowed_statuses.is_empty() && !sequence.is_empty() {
+        return Err(
+            "cache-warm cannot combine --expect-cache-status and --expect-cache-status-sequence"
+                .into(),
+        );
+    }
+    validate_cache_warm_expected_statuses(sequence)?;
+    if !sequence.is_empty() && sequence.len() != repeat {
+        return Err("cache-warm --expect-cache-status-sequence length must match --repeat".into());
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
 fn cache_warm_status_is_success(status: u16, allowed_extra: &[u16]) -> bool {
     (200..400).contains(&status) || allowed_extra.contains(&status)
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_expected_statuses_for_attempt<'a>(
+    allowed_statuses: &'a [String],
+    sequence: &'a [String],
+    attempt: usize,
+) -> &'a [String] {
+    if sequence.is_empty() {
+        allowed_statuses
+    } else {
+        let index = attempt.saturating_sub(1);
+        &sequence[index..=index]
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -2122,6 +2208,33 @@ mod tests {
             super::cache_warm_expected_status_matches(Some("BYPASS"), &["HIT".to_owned()]).is_err()
         );
         assert!(super::cache_warm_expected_status_matches(None, &["HIT".to_owned()]).is_err());
+        assert!(
+            super::validate_cache_warm_expected_sequence(
+                &[],
+                &["MISS".to_owned(), "HIT".to_owned()],
+                2
+            )
+            .is_ok()
+        );
+        assert!(
+            super::validate_cache_warm_expected_sequence(&[], &["MISS".to_owned()], 2).is_err()
+        );
+        assert!(
+            super::validate_cache_warm_expected_sequence(
+                &["HIT".to_owned()],
+                &["MISS".to_owned()],
+                1
+            )
+            .is_err()
+        );
+        assert_eq!(
+            super::cache_warm_expected_statuses_for_attempt(
+                &[],
+                &["MISS".to_owned(), "HIT".to_owned()],
+                2
+            ),
+            &["HIT".to_owned()]
+        );
     }
 
     #[cfg(all(feature = "cache", feature = "proxy"))]
