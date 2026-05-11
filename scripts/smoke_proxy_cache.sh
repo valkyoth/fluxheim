@@ -67,6 +67,10 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BODY = b"0123456789abcdef"
+VARY_BODIES = {
+    "de": b"vary-de",
+    "en": b"vary-en",
+}
 ETAG = '"cache-smoke-v1"'
 LAST_MODIFIED = "Sun, 10 May 2026 00:00:00 GMT"
 
@@ -75,6 +79,20 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
+        if self.path == "/vary.png":
+            language = self.headers.get("accept-language", "")
+            body = VARY_BODIES["de"] if "de" in language.lower() else VARY_BODIES["en"]
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=120")
+            self.send_header("vary", "Accept-Language")
+            self.send_header("etag", '"cache-smoke-vary"')
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if self.path != "/asset.png":
             self.send_response(404)
             self.send_header("content-length", "0")
@@ -248,6 +266,11 @@ range_headers="$TMP_DIR/range.headers"
 restart_headers="$TMP_DIR/restart.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
+vary_en_first_headers="$TMP_DIR/vary-en-first.headers"
+vary_en_second_headers="$TMP_DIR/vary-en-second.headers"
+vary_de_headers="$TMP_DIR/vary-de.headers"
+vary_en_body="$TMP_DIR/vary-en.bin"
+vary_de_body="$TMP_DIR/vary-de.bin"
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$first_headers" -o "$body" -H "Host: cache.test" "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
 if ! grep -qi '^x-cache-status: MISS' "$first_headers"; then
@@ -298,6 +321,48 @@ if ! grep -qi '^content-range: bytes 0-3/16' "$range_headers"; then
 fi
 if [ "$(cat "$range_body")" != "0123" ]; then
     echo "proxy cache smoke failed: cached range body mismatch" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_en_first_headers" -o "$vary_en_body" \
+    -H "Host: cache.test" \
+    -H "Accept-Language: en" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/vary.png"
+if ! grep -qi '^x-cache-status: MISS' "$vary_en_first_headers"; then
+    echo "proxy cache smoke failed: first Vary request was not a cache MISS" >&2
+    cat "$vary_en_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$vary_en_body")" != "vary-en" ]; then
+    echo "proxy cache smoke failed: first Vary body mismatch" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_en_second_headers" -o "$vary_en_body" \
+    -H "Host: cache.test" \
+    -H "Accept-Language: en" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/vary.png"
+if ! grep -qi '^x-cache-status: HIT' "$vary_en_second_headers"; then
+    echo "proxy cache smoke failed: repeated Vary request was not a cache HIT" >&2
+    cat "$vary_en_second_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$vary_en_body")" != "vary-en" ]; then
+    echo "proxy cache smoke failed: repeated Vary body mismatch" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_de_headers" -o "$vary_de_body" \
+    -H "Host: cache.test" \
+    -H "Accept-Language: de" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/vary.png"
+if ! grep -qi '^x-cache-status: MISS' "$vary_de_headers"; then
+    echo "proxy cache smoke failed: distinct Vary request was not a cache MISS" >&2
+    cat "$vary_de_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$vary_de_body")" != "vary-de" ]; then
+    echo "proxy cache smoke failed: distinct Vary body mismatch" >&2
     exit 1
 fi
 

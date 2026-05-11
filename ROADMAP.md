@@ -606,8 +606,10 @@ without parsing text fixtures for every module.
        `s-maxage=0` by refusing shared image-cache admission until full proxy
        revalidation is implemented. Pingora's cache pipeline already
        injects `Age` for stored-response hits and applies downstream
-       conditional/range handling when cache is enabled; Fluxheim tests still
-       need an end-to-end cached-hit assertion around those Pingora behaviors;
+       conditional/range handling when cache is enabled. Implemented
+       end-to-end release smoke coverage now asserts cached-hit `Age`,
+       conditional `304`, byte-range `206`, `Vary` variant isolation, and disk
+       HIT behavior after process restart;
      - `Vary` must be part of the cache-key strategy before content
        negotiation, compression, image filtering, or media variants are marked
        stable. Implemented for Pingora cache variance: repeated `Vary` headers
