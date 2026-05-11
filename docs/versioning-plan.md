@@ -626,7 +626,8 @@ Stable scope for declaring the cache pack complete:
   production incident response.
 - Proxy cache HIT `Age`, conditional `304`/`200` validator match and mismatch
   behavior from `ETag` and `Last-Modified`, byte-range `206`, ETag/date
-  `If-Range` match/mismatch behavior, HEAD probes that do not poison cached GET
+  `If-Range` match/mismatch behavior, cache-status HIT headers on cached
+  conditional/range responses, HEAD probes that do not poison cached GET
   bodies, `Vary` variant isolation,
   stale-while-revalidate serving during background refresh,
   stale-if-error serving after upstream failure, cache-lock request collapsing
@@ -703,8 +704,9 @@ Exit criteria:
   conditional, and range hooks; Fluxheim's smoke suite covers proxy cache HIT
   `Age`, conditional `304`/`200` validator match and mismatch behavior from
   `ETag` and `Last-Modified`, byte-range `206`, ETag/date `If-Range`
-  match/mismatch behavior, HEAD probes that do not poison cached GET bodies,
-  `Vary` variant isolation,
+  match/mismatch behavior, cache-status HIT headers on cached conditional/range
+  responses, HEAD probes that do not poison cached GET bodies, `Vary` variant
+  isolation,
   stale-while-revalidate serving during background refresh, stale-if-error
   serving after upstream failure, cache-lock request collapsing for concurrent
   misses, disk HIT after restart, and `Cache-Control`/`Pragma`

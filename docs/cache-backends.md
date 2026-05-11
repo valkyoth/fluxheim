@@ -206,11 +206,12 @@ internal cache implementation.
   Pingora's cache pipeline injects `Age` on stored-response hits and applies
   downstream conditional/range handling when cache is enabled. The release smoke
   suite verifies proxy cache HIT behavior, cached-hit `Age`, conditional `304`,
-  byte-range `206`, `If-Range` match/mismatch behavior, validator-based
-  upstream revalidation from an origin `304`, stale-object refresh from an
-  origin `200`, stale-while-revalidate serving during a background refresh,
-  stale-if-error serving after an upstream connection failure, cache-lock
-  request collapsing for concurrent misses, `Vary` variant isolation, and
+  byte-range `206`, `If-Range` match/mismatch behavior, cache-status HIT
+  headers on cached conditional/range responses, validator-based upstream
+  revalidation from an origin `304`, stale-object refresh from an origin `200`,
+  stale-while-revalidate serving during a background refresh, stale-if-error
+  serving after an upstream connection failure, cache-lock request collapsing
+  for concurrent misses, `Vary` variant isolation, and
   disk-cache HIT behavior after a
   Fluxheim process restart without the origin available. Planned work still
   covers edge cases where origins change `Vary`, validators, or freshness

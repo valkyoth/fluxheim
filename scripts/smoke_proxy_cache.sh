@@ -791,6 +791,11 @@ if [ "$conditional_status" != "304" ]; then
     cat "$conditional_headers" >&2
     exit 1
 fi
+if ! grep -qi '^x-cache-status: HIT' "$conditional_headers"; then
+    echo "proxy cache smoke failed: cached conditional 304 was not served as a cache HIT" >&2
+    cat "$conditional_headers" >&2
+    exit 1
+fi
 
 conditional_mismatch_status=$(
     curl -sS --max-time "$CURL_MAX_TIME" -D "$conditional_mismatch_headers" -o "$body" -w '%{http_code}' \
@@ -800,6 +805,11 @@ conditional_mismatch_status=$(
 )
 if [ "$conditional_mismatch_status" != "200" ]; then
     echo "proxy cache smoke failed: cached conditional mismatch returned $conditional_mismatch_status instead of 200" >&2
+    cat "$conditional_mismatch_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$conditional_mismatch_headers"; then
+    echo "proxy cache smoke failed: cached conditional mismatch was not served as a cache HIT" >&2
     cat "$conditional_mismatch_headers" >&2
     exit 1
 fi
@@ -819,6 +829,11 @@ if [ "$modified_since_status" != "304" ]; then
     cat "$modified_since_headers" >&2
     exit 1
 fi
+if ! grep -qi '^x-cache-status: HIT' "$modified_since_headers"; then
+    echo "proxy cache smoke failed: cached If-Modified-Since 304 was not served as a cache HIT" >&2
+    cat "$modified_since_headers" >&2
+    exit 1
+fi
 
 modified_since_mismatch_status=$(
     curl -sS --max-time "$CURL_MAX_TIME" -D "$modified_since_mismatch_headers" -o "$body" -w '%{http_code}' \
@@ -828,6 +843,11 @@ modified_since_mismatch_status=$(
 )
 if [ "$modified_since_mismatch_status" != "200" ]; then
     echo "proxy cache smoke failed: cached If-Modified-Since mismatch returned $modified_since_mismatch_status instead of 200" >&2
+    cat "$modified_since_mismatch_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$modified_since_mismatch_headers"; then
+    echo "proxy cache smoke failed: cached If-Modified-Since mismatch was not served as a cache HIT" >&2
     cat "$modified_since_mismatch_headers" >&2
     exit 1
 fi
@@ -844,6 +864,11 @@ range_status=$(
 )
 if [ "$range_status" != "206" ]; then
     echo "proxy cache smoke failed: cached range returned $range_status instead of 206" >&2
+    cat "$range_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$range_headers"; then
+    echo "proxy cache smoke failed: cached range was not served as a cache HIT" >&2
     cat "$range_headers" >&2
     exit 1
 fi
@@ -869,6 +894,11 @@ if [ "$if_range_match_status" != "206" ]; then
     cat "$if_range_match_headers" >&2
     exit 1
 fi
+if ! grep -qi '^x-cache-status: HIT' "$if_range_match_headers"; then
+    echo "proxy cache smoke failed: cached If-Range match was not served as a cache HIT" >&2
+    cat "$if_range_match_headers" >&2
+    exit 1
+fi
 if ! grep -qi '^content-range: bytes 4-7/16' "$if_range_match_headers"; then
     echo "proxy cache smoke failed: cached If-Range match missed expected Content-Range" >&2
     cat "$if_range_match_headers" >&2
@@ -888,6 +918,11 @@ if_range_mismatch_status=$(
 )
 if [ "$if_range_mismatch_status" != "200" ]; then
     echo "proxy cache smoke failed: cached If-Range mismatch returned $if_range_mismatch_status instead of 200" >&2
+    cat "$if_range_mismatch_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$if_range_mismatch_headers"; then
+    echo "proxy cache smoke failed: cached If-Range mismatch was not served as a cache HIT" >&2
     cat "$if_range_mismatch_headers" >&2
     exit 1
 fi
@@ -913,6 +948,11 @@ if [ "$if_range_date_match_status" != "206" ]; then
     cat "$if_range_date_match_headers" >&2
     exit 1
 fi
+if ! grep -qi '^x-cache-status: HIT' "$if_range_date_match_headers"; then
+    echo "proxy cache smoke failed: cached date If-Range match was not served as a cache HIT" >&2
+    cat "$if_range_date_match_headers" >&2
+    exit 1
+fi
 if ! grep -qi '^content-range: bytes 8-11/16' "$if_range_date_match_headers"; then
     echo "proxy cache smoke failed: cached date If-Range match missed expected Content-Range" >&2
     cat "$if_range_date_match_headers" >&2
@@ -932,6 +972,11 @@ if_range_date_mismatch_status=$(
 )
 if [ "$if_range_date_mismatch_status" != "200" ]; then
     echo "proxy cache smoke failed: cached date If-Range mismatch returned $if_range_date_mismatch_status instead of 200" >&2
+    cat "$if_range_date_mismatch_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$if_range_date_mismatch_headers"; then
+    echo "proxy cache smoke failed: cached date If-Range mismatch was not served as a cache HIT" >&2
     cat "$if_range_date_mismatch_headers" >&2
     exit 1
 fi
