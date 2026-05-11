@@ -445,6 +445,7 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --require-object \
   --expect-tier disk \
   --expect-status 200 \
+  --expect-purge-indexed \
   --expect-freshness-state fresh
 ```
 
@@ -468,7 +469,8 @@ Host header. For release scripts, `cache-lookup --require-object` fails when
 the selected key has no cached object, repeated `--expect-tier memory|disk`
 flags fail when no matching object is present in an allowed storage tier,
 repeated `--expect-status` flags fail when no matching object has an allowed
-cached HTTP status, and repeated
+cached HTTP status, `--expect-purge-indexed` fails when no matching object is
+reachable through the bounded purge index, and repeated
 `--expect-freshness-state fresh|stale|expired` flags fail when none of the
 matching objects has an allowed freshness state.
 

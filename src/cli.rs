@@ -248,6 +248,10 @@ pub enum CliCommand {
         /// Required cached-object storage tier. May be repeated: memory, disk.
         #[arg(long = "expect-tier", value_name = "TIER")]
         expect_tiers: Vec<String>,
+
+        /// Require at least one matching cached object to be present in the purge index.
+        #[arg(long)]
+        expect_purge_indexed: bool,
     },
 }
 
@@ -477,6 +481,7 @@ fn run_command(
             expect_freshness_states,
             expect_statuses,
             expect_tiers,
+            expect_purge_indexed,
         } => run_cache_lookup_command(CacheLookupOptions {
             config_path,
             host: host.clone(),
@@ -488,6 +493,7 @@ fn run_command(
             expect_freshness_states: expect_freshness_states.clone(),
             expect_statuses: expect_statuses.clone(),
             expect_tiers: expect_tiers.clone(),
+            expect_purge_indexed: *expect_purge_indexed,
         }),
     }
 }
@@ -533,6 +539,7 @@ struct CacheLookupOptions<'a> {
     expect_freshness_states: Vec<String>,
     expect_statuses: Vec<u16>,
     expect_tiers: Vec<String>,
+    expect_purge_indexed: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -870,6 +877,7 @@ fn run_cache_lookup_command(
         &expected_states,
         &options.expect_statuses,
         &expected_tiers,
+        options.expect_purge_indexed,
     )?;
 
     println!("cache object lookup:");
@@ -973,6 +981,7 @@ fn validate_cache_lookup_expectations(
     expected_states: &[crate::cache::CacheObjectFreshnessState],
     expected_statuses: &[u16],
     expected_tiers: &[crate::cache::CacheObjectTier],
+    expect_purge_indexed: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if require_object && lookup.objects.is_empty() {
         return Err("cache-lookup expected at least one cached object, found none".into());
@@ -1051,6 +1060,9 @@ fn validate_cache_lookup_expectations(
             return Err(format!("cache-lookup expected tier {expected}, found {found}").into());
         }
     }
+    if expect_purge_indexed && !lookup.objects.iter().any(|object| object.purge_indexed) {
+        return Err("cache-lookup expected at least one purge-indexed object, found none".into());
+    }
     Ok(())
 }
 
@@ -1098,6 +1110,7 @@ fn run_cache_lookup_command(
         expect_freshness_states,
         expect_statuses,
         expect_tiers,
+        expect_purge_indexed,
     } = options;
     let _ = (config_path, host, headers, method, path, query);
     let _ = (
@@ -1105,6 +1118,7 @@ fn run_cache_lookup_command(
         expect_freshness_states,
         expect_statuses,
         expect_tiers,
+        expect_purge_indexed,
     );
     Err("cache-lookup requires the proxy and cache features".into())
 }
@@ -2785,7 +2799,7 @@ mod tests {
         let tiers = super::parse_cache_lookup_tiers(&["memory".to_owned()]).unwrap();
 
         assert!(
-            super::validate_cache_lookup_expectations(&lookup, true, &states, &[200], &tiers)
+            super::validate_cache_lookup_expectations(&lookup, true, &states, &[200], &tiers, true)
                 .is_ok()
         );
         assert!(
@@ -2794,14 +2808,15 @@ mod tests {
                 false,
                 &[crate::cache::CacheObjectFreshnessState::Fresh],
                 &[],
-                &[]
+                &[],
+                false
             )
             .unwrap_err()
             .to_string()
             .contains("expected freshness state fresh, found stale")
         );
         assert!(
-            super::validate_cache_lookup_expectations(&lookup, false, &[], &[404], &[])
+            super::validate_cache_lookup_expectations(&lookup, false, &[], &[404], &[], false)
                 .unwrap_err()
                 .to_string()
                 .contains("expected status 404, found 200")
@@ -2812,7 +2827,8 @@ mod tests {
                 false,
                 &[],
                 &[],
-                &[crate::cache::CacheObjectTier::Disk]
+                &[crate::cache::CacheObjectTier::Disk],
+                false
             )
             .unwrap_err()
             .to_string()
@@ -2837,11 +2853,25 @@ mod tests {
                 true,
                 &[],
                 &[],
-                &[]
+                &[],
+                false
             )
             .unwrap_err()
             .to_string()
             .contains("expected at least one cached object")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &cache_lookup_without_objects(),
+                false,
+                &[],
+                &[],
+                &[],
+                true
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected at least one purge-indexed object")
         );
     }
 
