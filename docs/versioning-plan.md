@@ -388,7 +388,8 @@ Stable scope:
     now provides opt-in bounded pass decisions for repeated uncacheable cache
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
-    conditional `304`, and byte-range `206` release smoke;
+    conditional `304`, byte-range `206`, `Vary` variant isolation, disk HIT
+    after restart, and request-bypass reason release smoke;
   - full validator-based upstream revalidation for proxied cache responses,
     including safe `If-None-Match` / `If-Modified-Since` forwarding, `304`
     metadata refresh, validator preservation, and explicit behavior when
@@ -429,13 +430,14 @@ Stable scope:
   - cache observability through both Prometheus and OpenTelemetry, including
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
-    vhost/route scoped cache activity counters; `otel-tracing` now provides
-    W3C `traceparent` propagation and access-log trace ID correlation,
-    `otel-otlp` now provides initial local OTLP/HTTP trace export, and
-    `metrics-otlp` now provides initial local OTLP/HTTP metrics export for
-    Prometheus/collector receivers. Richer OpenTelemetry internal spans,
-    sampling, exporter health, histogram export, and trace/event coverage remain
-    planned.
+    vhost/route scoped cache activity counters, purge counters, cache-lock
+    coverage, and policy-level pass/bypass/stale decisions without cache keys,
+    hosts, or paths. `otel-tracing` now provides W3C `traceparent` propagation
+    and access-log trace ID correlation, `otel-otlp` now provides initial local
+    OTLP/HTTP trace export, and `metrics-otlp` now provides initial local
+    OTLP/HTTP metrics export for Prometheus/collector receivers. Richer
+    OpenTelemetry internal spans, sampling, exporter health, histogram export,
+    and trace/event coverage remain planned.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
@@ -539,10 +541,13 @@ Current implementation status:
   - `fluxheim cache-warm` path warming through the normal local listener with
     2xx/3xx success accounting and explicit `--allow-status` overrides for
     deliberate negative-cache warming, plus optional cache-status header
-    expectations and per-target repeat sequences;
+    expectations, per-target repeat sequences, and bounded summary counts for
+    response statuses, cache-status values, and failure reasons;
   - Prometheus cache activity metrics and initial OTLP metrics export.
     Prometheus also reports cache-lock-enabled policy count so request
-    collapsing coverage is visible without high-cardinality labels.
+    collapsing coverage is visible without high-cardinality labels, and
+    policy-level pass/bypass/stale counters show configured scoped cache
+    decisions without exposing request-specific labels.
 
 Stable scope for declaring the cache pack complete:
 
@@ -567,7 +572,8 @@ Stable scope for declaring the cache pack complete:
   pressure metrics.
 - Cache warm and metadata/debug commands suitable for release deploys and
   production incident response.
-- Proxy cache HIT `Age`, conditional `304`, and byte-range `206` behavior are
+- Proxy cache HIT `Age`, conditional `304`, byte-range `206`, `Vary` variant
+  isolation, disk HIT after restart, and request-bypass reason behavior are
   covered end to end.
 - Proxied cache revalidation refreshes metadata safely when origins return
   `304 Not Modified`.
@@ -638,7 +644,8 @@ Exit criteria:
 - Cache hits emit correct validator/freshness behavior, including `Age` where
   Fluxheim serves from cache. Pingora provides the cache-hit `Age`,
   conditional, and range hooks; Fluxheim's smoke suite covers proxy cache HIT
-  `Age`, conditional `304`, and byte-range `206`.
+  `Age`, conditional `304`, byte-range `206`, `Vary` variant isolation, disk
+  HIT after restart, and request-bypass reason headers.
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 

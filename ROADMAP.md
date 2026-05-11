@@ -15,16 +15,20 @@ TLS vhosts, route redirects, location-style proxying, websocket-safe proxy
 headers, directory listing, static aliases, cleartext ACME challenge
 exceptions, default HTTP service packaging, and native systemd deployment.
 
-The active `1.1.0` focus is TLS policy hardening plus ACME runtime issuance and
+Fluxheim `1.1.0` added TLS policy hardening plus ACME runtime issuance and
 renewal for Let's Encrypt and Actalis, so deployments do not depend on manual
-certificate copy scripts. The target surface is explicit safe TLS profiles,
-minimum protocol version controls, ALPN controls, backend validation, scanner
-gates, HTTP-01 issuance, Actalis EAB support, renewal scheduling, safe storage,
-and failure behavior that keeps the last valid certificate serving.
+certificate copy scripts.
 
-Advanced load balancing, admin snapshots, metrics, Sentinel Mesh/WireGuard,
-stale-while-revalidate, persistent cache indexing, and advanced certificate
-automation remain important, but they should graduate in later minor releases
+The active `1.2.0` focus is cache-server completion and operations diagnostics:
+route/vhost scoped cache policies, memory/disk/tiered storage, request
+collapsing, protected purge/status operations, cache warm and inspection
+commands, Prometheus/OpenTelemetry visibility, production Podman/ACME
+migration notes, and the remaining hardening needed before Fluxheim cache can
+be considered complete.
+
+Advanced load balancing, Sentinel Mesh/WireGuard, advanced certificate
+automation, WASM cache policy hooks, slab/bin cache storage, and distributed
+cache state remain important, but they should graduate in later minor releases
 according to the versioning plan.
 In-process Linux seccomp/Landlock sandboxing is also post-`1.0` work: the
 stable `1.0` boundary is hardened systemd/container deployment, while
