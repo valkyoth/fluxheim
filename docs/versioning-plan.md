@@ -424,11 +424,12 @@ Stable scope:
     Lookup output also reports purge-index membership so operators can tell
     whether indexed scope, prefix, tag, wildcard, and stale purges can reach an
     object without a full scan. `cache-key` and `cache-lookup` report the
-    selected cache-lock state and wait timeout so operators can verify
-    stampede-protection policy for the exact vhost or route that a request
-    matches. Both commands can include bounded safe request headers such as
-    `Accept-Language` and `Accept-Encoding`, so operators can debug negotiated
-    `Vary` variants without contacting upstreams;
+    selected cache-lock state, wait timeout, and memory/disk tier availability
+    so operators can verify stampede-protection and storage policy for the
+    exact vhost or route that a request matches. Both commands can include
+    bounded safe request headers such as `Accept-Language` and
+    `Accept-Encoding`, so operators can debug negotiated `Vary` variants
+    without contacting upstreams;
   - cache warm/import/export workflows for deploys and repository mirrors,
     including clear failure accounting and no hidden best-effort misses.
     `cache-warm` now treats only 2xx/3xx responses as successful by default

@@ -777,6 +777,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         "cache_lock_wait_timeout_secs: {}",
         preview.cache_lock_wait_timeout_secs
     );
+    println!("memory_tier_enabled: {}", preview.memory_tier_enabled);
+    println!("disk_tier_enabled: {}", preview.disk_tier_enabled);
+    println!("storage_tiers: {}", preview.storage_tiers);
     if let Some(reason) = preview.reason.as_deref() {
         println!("reason: {reason}");
     }
@@ -824,6 +827,12 @@ fn run_cache_lookup_command(
         "cache_lock_wait_timeout_secs: {}",
         lookup.preview.cache_lock_wait_timeout_secs
     );
+    println!(
+        "memory_tier_enabled: {}",
+        lookup.preview.memory_tier_enabled
+    );
+    println!("disk_tier_enabled: {}", lookup.preview.disk_tier_enabled);
+    println!("storage_tiers: {}", lookup.preview.storage_tiers);
     if let Some(reason) = lookup.preview.reason.as_deref() {
         println!("reason: {reason}");
     }

@@ -487,6 +487,9 @@ pub struct CacheKeyPreview {
     pub eligible: bool,
     pub cache_lock_enabled: bool,
     pub cache_lock_wait_timeout_secs: u64,
+    pub memory_tier_enabled: bool,
+    pub disk_tier_enabled: bool,
+    pub storage_tiers: u8,
     pub reason: Option<String>,
     pub namespace: Option<String>,
     pub primary_key: Option<String>,
@@ -828,6 +831,13 @@ impl ProxySnapshot {
                 vhost.pingora_cache_lock.is_some(),
                 vhost.cache_lock_wait_timeout.as_secs(),
             ));
+        let memory_tier_enabled = route_cache
+            .map(|cache| cache.pingora_memory_storage.is_some())
+            .unwrap_or(vhost.pingora_memory_storage.is_some());
+        let disk_tier_enabled = route_cache
+            .map(|cache| cache.pingora_disk_storage.is_some())
+            .unwrap_or(vhost.pingora_disk_storage.is_some());
+        let storage_tiers = u8::from(memory_tier_enabled) + u8::from(disk_tier_enabled);
         let key = self.state.pingora_image_cache_key_for_request_header(
             request,
             vhost_index,
@@ -842,6 +852,9 @@ impl ProxySnapshot {
                 eligible: true,
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
+                memory_tier_enabled,
+                disk_tier_enabled,
+                storage_tiers,
                 reason: None,
                 namespace: key.namespace_str().map(ToOwned::to_owned),
                 primary_key: key.primary_key_str().map(ToOwned::to_owned),
@@ -857,6 +870,9 @@ impl ProxySnapshot {
                 eligible: false,
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
+                memory_tier_enabled,
+                disk_tier_enabled,
+                storage_tiers,
                 reason: Some(cache_key_preview_ineligible_reason(cache_config, request)),
                 namespace: None,
                 primary_key: None,
@@ -5884,6 +5900,9 @@ mod tests {
         assert_eq!(preview.scope, super::CacheKeyPreviewScope::Route);
         assert!(preview.cache_lock_enabled);
         assert_eq!(preview.cache_lock_wait_timeout_secs, 30);
+        assert!(preview.memory_tier_enabled);
+        assert!(!preview.disk_tier_enabled);
+        assert_eq!(preview.storage_tiers, 1);
         assert_eq!(preview.namespace.as_deref(), Some("fluxheim-image-v1"));
         assert_eq!(preview.user_tag.as_deref(), Some("cached:route:assets"));
         assert_eq!(
@@ -5935,6 +5954,9 @@ mod tests {
         assert_eq!(preview.scope, super::CacheKeyPreviewScope::Vhost);
         assert!(preview.cache_lock_enabled);
         assert_eq!(preview.cache_lock_wait_timeout_secs, 30);
+        assert!(preview.memory_tier_enabled);
+        assert!(!preview.disk_tier_enabled);
+        assert_eq!(preview.storage_tiers, 1);
         assert_eq!(
             preview.reason.as_deref(),
             Some("method POST is not allowed by selected cache policy")
