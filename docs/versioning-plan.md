@@ -381,10 +381,12 @@ Stable scope:
     unindexable `.fhc` objects, and enforces the disk-size budget before
     serving traffic. Disk index checkpoint writes now merge existing root
     entries so separate vhost and route cache policies sharing a disk root
-    cannot erase each other's restart purge metadata state. The memory and disk
-    fast purge indexes no longer use an unrelated FIFO cap; memory eviction
-    notifications remove evicted objects from the fast index, and purges still
-    scan live object metadata as the source of truth;
+    cannot erase each other's restart purge metadata state, and regression
+    coverage asserts insert bursts are checkpointed by the debounced background
+    writer instead of synchronously per object. The memory and disk fast purge
+    indexes no longer use an unrelated FIFO cap; memory eviction notifications
+    remove evicted objects from the fast index, and purges still scan live
+    object metadata as the source of truth;
   - background or broader incremental disk purge/cleanup for very large purge
     scopes; indexed purge endpoints now accept bounded `batches` so operators
     can advance large scope, prefix, and wildcard purges without removing

@@ -41,7 +41,7 @@ const DISK_CACHE_TEMP_FILE_STALE_SECS: u64 = 6 * 60 * 60;
 const DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE: std::time::Duration = std::time::Duration::from_secs(2);
 #[cfg(all(feature = "proxy", test))]
 const DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE: std::time::Duration =
-    std::time::Duration::from_millis(10);
+    std::time::Duration::from_millis(200);
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-v1\n";
 #[cfg(feature = "proxy")]
@@ -2402,6 +2402,14 @@ impl PingoraDiskStorage {
 
     fn write_disk_index_checkpoint(&self) -> std::io::Result<()> {
         write_disk_index_checkpoint_from_index(&self.root, &self.disk_index)
+    }
+
+    #[cfg(test)]
+    fn disk_index_checkpoint_flags(&self) -> (bool, bool) {
+        match self.checkpoint_state.lock() {
+            Ok(state) => (state.dirty, state.scheduled),
+            Err(_) => (false, false),
+        }
     }
 
     fn schedule_disk_index_checkpoint(&self) {
@@ -6357,6 +6365,53 @@ mod tests {
         assert!(block_on(rebuilt.lookup(&key, &span)).unwrap().is_some());
         assert!(block_on(rebuilt.lookup(&rogue, &span)).unwrap().is_some());
         assert_eq!(rebuilt.stats().unwrap().entries, 2);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_debounces_checkpoint_after_insert_burst() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-index-checkpoint-debounce");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(8192),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let checkpoint = super::disk_index_checkpoint_path(storage.root());
+        std::fs::remove_file(&checkpoint).unwrap();
+
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        for index in 0..3 {
+            let key =
+                pingora::cache::CacheKey::new("fluxheim-test", format!("burst-key-{index}"), "v");
+            let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        assert!(!checkpoint.exists());
+        assert_eq!(storage.disk_index_checkpoint_flags(), (true, true));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            if checkpoint.exists() && storage.disk_index_checkpoint_flags() == (false, false) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
+        assert!(checkpoint.exists());
+        assert_eq!(storage.disk_index_checkpoint_flags(), (false, false));
+        let entries = super::read_disk_index_checkpoint(storage.root())
+            .unwrap()
+            .unwrap();
+        assert_eq!(entries.len(), 3);
 
         std::fs::remove_dir_all(root).unwrap();
     }
