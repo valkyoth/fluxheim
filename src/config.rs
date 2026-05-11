@@ -4239,6 +4239,11 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
             "hint: proxy error pages are arrays; define [[vhosts.proxy.error_pages]] before [vhosts.proxy.error_pages.web]",
         );
     }
+    if message.contains("vhosts.routes.proxy.error_pages.web") {
+        return Some(
+            "hint: route proxy error pages are arrays; define [[vhosts.routes.proxy.error_pages]] before [vhosts.routes.proxy.error_pages.web]",
+        );
+    }
     if message.contains("unknown field `vhost`") {
         return Some("hint: virtual hosts are configured with [[vhosts]], not [[vhost]]");
     }
@@ -10496,6 +10501,37 @@ mod tests {
         assert!(message.contains(&bad_config.display().to_string()));
         assert!(message.contains("failed to parse config"));
         assert!(message.contains("define [[vhosts.proxy.error_pages]]"));
+    }
+
+    #[test]
+    fn config_parse_error_hints_route_proxy_error_page_array() {
+        let dir = TestDir::new("config-route-proxy-error-page-table");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [[vhosts.routes]]
+            name = "app"
+            path_prefix = "/"
+
+            [vhosts.routes.proxy.error_pages.web]
+            root = "/srv/fluxheim/errors"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("define [[vhosts.routes.proxy.error_pages]]"),
+            "{message}"
+        );
     }
 
     #[test]
