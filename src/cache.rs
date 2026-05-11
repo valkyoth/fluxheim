@@ -42,7 +42,17 @@ const DISK_CACHE_MAGIC_V2: &[u8] = b"FLUXHEIM-CACHE-v2\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V3: &[u8] = b"FLUXHEIM-CACHE-v3\n";
 #[cfg(feature = "proxy")]
+const DISK_CACHE_MAGIC_V4: &[u8] = b"FLUXHEIM-CACHE-v4\n";
+#[cfg(feature = "proxy")]
 const CACHE_PURGE_INDEX_MAX_ENTRIES: usize = 65_536;
+#[cfg(feature = "proxy")]
+const CACHE_TAG_HEADER_NAMES: [&str; 3] = ["surrogate-key", "cache-tag", "x-cache-tags"];
+#[cfg(feature = "proxy")]
+const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
+#[cfg(feature = "proxy")]
+const MAX_CACHE_TAG_LEN: usize = 128;
+#[cfg(feature = "proxy")]
+const MAX_CACHE_TAG_BYTES_PER_OBJECT: usize = 4096;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheStoragePlan {
@@ -392,6 +402,7 @@ pub struct CachePurgeIndexEntry {
     pub primary_key: String,
     pub user_tag: String,
     pub path: Option<String>,
+    pub cache_tags: Vec<String>,
 }
 
 #[cfg(feature = "proxy")]
@@ -413,7 +424,7 @@ impl CachePurgeIndex {
 
     pub fn insert(&self, combined_key: String, primary_key: String, user_tag: String) {
         let path = cache_primary_component(&primary_key, "path");
-        self.insert_with_path(combined_key, primary_key, user_tag, path);
+        self.insert_with_path_and_tags(combined_key, primary_key, user_tag, path, Vec::new());
     }
 
     pub fn insert_with_path(
@@ -422,6 +433,17 @@ impl CachePurgeIndex {
         primary_key: String,
         user_tag: String,
         path: Option<String>,
+    ) {
+        self.insert_with_path_and_tags(combined_key, primary_key, user_tag, path, Vec::new());
+    }
+
+    pub fn insert_with_path_and_tags(
+        &self,
+        combined_key: String,
+        primary_key: String,
+        user_tag: String,
+        path: Option<String>,
+        cache_tags: Vec<String>,
     ) {
         if self.max_entries == 0 {
             return;
@@ -438,6 +460,7 @@ impl CachePurgeIndex {
                     primary_key,
                     user_tag,
                     path,
+                    cache_tags,
                 },
             );
             return;
@@ -451,6 +474,7 @@ impl CachePurgeIndex {
                 primary_key,
                 user_tag,
                 path,
+                cache_tags,
             },
         );
 
@@ -532,6 +556,20 @@ impl CachePurgeIndex {
                     .path
                     .as_deref()
                     .is_some_and(|path| cache_path_wildcard_matches(path_pattern, path))
+        })
+    }
+
+    pub fn entries_for_user_tag_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> Vec<CachePurgeIndexEntry> {
+        if user_tag.is_empty() || cache_tag.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        self.entries_matching(limit, |entry| {
+            entry.user_tag == user_tag && entry.cache_tags.iter().any(|tag| tag == cache_tag)
         })
     }
 
@@ -776,6 +814,20 @@ impl PingoraMemoryStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> CacheIndexedPurgeResult {
+        let entries = self.purge_index.entries_for_user_tag_cache_tag(
+            user_tag,
+            cache_tag,
+            limit.saturating_add(1),
+        );
+        self.purge_indexed_entries(entries, limit)
+    }
+
     fn purge_indexed_entries(
         &self,
         mut entries: Vec<CachePurgeIndexEntry>,
@@ -814,7 +866,10 @@ impl PingoraMemoryStorage {
         meta: CacheMeta,
         body: Arc<[u8]>,
     ) -> pingora::Result<usize> {
+        let cache_tags = cache_tags_from_meta(&meta);
         let (internal_meta, response_header) = meta.serialize()?;
+        let mut store_key = store_key;
+        store_key.cache_tags = cache_tags;
         Ok(self
             .put_serialized_object(store_key, internal_meta, response_header, body)?
             .unwrap_or(0))
@@ -849,17 +904,19 @@ impl PingoraMemoryStorage {
                 combined_key: Some(combined_key.clone()),
                 primary_key: Some(store_key.primary.clone()),
                 user_tag: Some(store_key.user_tag.clone()),
+                cache_tags: store_key.cache_tags.clone(),
                 internal_meta,
                 response_header,
                 body,
                 weight,
             },
         );
-        self.purge_index.insert_with_path(
+        self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
             store_key.user_tag,
             store_key.index_path,
+            store_key.cache_tags,
         );
         self.activity.store();
         Ok(Some(body_len))
@@ -984,8 +1041,13 @@ impl PingoraDiskStorage {
             };
             let user_tag = object.user_tag.unwrap_or_default();
             let path = cache_primary_component(&primary_key, "path");
-            self.purge_index
-                .insert_with_path(combined_key, primary_key, user_tag, path);
+            self.purge_index.insert_with_path_and_tags(
+                combined_key,
+                primary_key,
+                user_tag,
+                path,
+                object.cache_tags,
+            );
         }
         Ok(())
     }
@@ -1075,6 +1137,20 @@ impl PingoraDiskStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let entries = self.purge_index.entries_for_user_tag_cache_tag(
+            user_tag,
+            cache_tag,
+            limit.saturating_add(1),
+        );
+        self.purge_indexed_entries(entries, limit)
+    }
+
     fn purge_indexed_entries(
         &self,
         mut entries: Vec<CachePurgeIndexEntry>,
@@ -1141,7 +1217,10 @@ impl PingoraDiskStorage {
         meta: CacheMeta,
         body: Arc<[u8]>,
     ) -> pingora::Result<Option<usize>> {
+        let cache_tags = cache_tags_from_meta(&meta);
         let (internal_meta, response_header) = meta.serialize()?;
+        let mut store_key = store_key;
+        store_key.cache_tags = cache_tags;
         self.put_serialized_object(store_key, internal_meta, response_header, body)
     }
 
@@ -1189,11 +1268,12 @@ impl PingoraDiskStorage {
                 self.activity.store_refusal();
                 cache_io_error("write disk cache object", error)
             })?;
-        self.purge_index.insert_with_path(
+        self.purge_index.insert_with_path_and_tags(
             combined_key,
             store_key.primary,
             store_key.user_tag,
             store_key.index_path,
+            store_key.cache_tags,
         );
         self.activity.store();
         Ok(Some(body.len()))
@@ -1267,16 +1347,9 @@ impl PingoraDiskStorage {
         let mut last_error = None;
         for _ in 0..4 {
             let tmp_path = self.tmp_path_for(path)?;
-            let write_result = write_disk_cache_object(
-                &tmp_path,
-                &store_key.combined,
-                &store_key.primary,
-                &store_key.user_tag,
-                internal_meta,
-                response_header,
-                body,
-            )
-            .and_then(|()| std::fs::rename(&tmp_path, path));
+            let write_result =
+                write_disk_cache_object(&tmp_path, store_key, internal_meta, response_header, body)
+                    .and_then(|()| std::fs::rename(&tmp_path, path));
             match write_result {
                 Ok(()) => return Ok(()),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -1492,11 +1565,12 @@ struct PingoraStoreKey {
     primary: String,
     user_tag: String,
     index_path: Option<String>,
+    cache_tags: Vec<String>,
 }
 
 #[cfg(feature = "proxy")]
 impl PingoraStoreKey {
-    fn from_cache_key(key: &pingora::cache::CacheKey) -> Self {
+    fn from_cache_key_and_meta(key: &pingora::cache::CacheKey, meta: &CacheMeta) -> Self {
         Self {
             combined: key.combined(),
             primary: key.primary(),
@@ -1504,6 +1578,7 @@ impl PingoraStoreKey {
             index_path: key
                 .primary_key_str()
                 .and_then(|primary| cache_primary_component(primary, "path")),
+            cache_tags: cache_tags_from_meta(meta),
         }
     }
 }
@@ -1514,6 +1589,7 @@ struct PingoraStoredObject {
     combined_key: Option<String>,
     primary_key: Option<String>,
     user_tag: Option<String>,
+    cache_tags: Vec<String>,
     internal_meta: Vec<u8>,
     response_header: Vec<u8>,
     body: Arc<[u8]>,
@@ -1789,13 +1865,16 @@ fn disk_cache_header_overhead(store_key: &PingoraStoreKey) -> u64 {
     let combined_len = store_key.combined.len() as u64;
     let primary_len = store_key.primary.len() as u64;
     let user_tag_len = store_key.user_tag.len() as u64;
-    (DISK_CACHE_MAGIC_V3.len() as u64)
+    let cache_tags_len = encoded_cache_tags_len(&store_key.cache_tags) as u64;
+    (DISK_CACHE_MAGIC_V4.len() as u64)
         .saturating_add(decimal_line_len(combined_len))
         .saturating_add(decimal_line_len(primary_len))
         .saturating_add(decimal_line_len(user_tag_len))
+        .saturating_add(decimal_line_len(cache_tags_len))
         .saturating_add(combined_len)
         .saturating_add(primary_len)
         .saturating_add(user_tag_len)
+        .saturating_add(cache_tags_len)
 }
 
 #[cfg(feature = "proxy")]
@@ -1833,7 +1912,7 @@ impl Storage for PingoraMemoryStorage {
     ) -> pingora::Result<MissHandler> {
         Ok(Box::new(PingoraMemoryMissHandler {
             storage: self,
-            store_key: PingoraStoreKey::from_cache_key(key),
+            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -1888,13 +1967,15 @@ impl Storage for PingoraMemoryStorage {
 
         object.internal_meta = internal_meta;
         object.response_header = response_header;
+        object.cache_tags = cache_tags_from_meta(meta);
         object.weight = weight;
-        self.purge_index.insert_with_path(
+        self.purge_index.insert_with_path_and_tags(
             combined_key.clone(),
             object.primary_key.clone().unwrap_or_else(|| key.primary()),
             key.user_tag.clone(),
             key.primary_key_str()
                 .and_then(|primary| cache_primary_component(primary, "path")),
+            object.cache_tags.clone(),
         );
         self.inner.insert(combined_key, object);
         self.activity.store();
@@ -1940,7 +2021,7 @@ impl Storage for PingoraDiskStorage {
     ) -> pingora::Result<MissHandler> {
         Ok(Box::new(PingoraDiskMissHandler {
             storage: self,
-            store_key: PingoraStoreKey::from_cache_key(key),
+            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self.max_object_bytes.as_u64(),
@@ -1975,7 +2056,7 @@ impl Storage for PingoraDiskStorage {
         let (internal_meta, response_header) = meta.serialize()?;
         Ok(self
             .put_serialized_object(
-                PingoraStoreKey::from_cache_key(key),
+                PingoraStoreKey::from_cache_key_and_meta(key, meta),
                 internal_meta,
                 response_header,
                 object.body,
@@ -2027,6 +2108,7 @@ impl Storage for PingoraTieredStorage {
                 index_path: key
                     .primary_key_str()
                     .and_then(|primary| cache_primary_component(primary, "path")),
+                cache_tags: object.cache_tags.clone(),
             },
             object.internal_meta.clone(),
             object.response_header.clone(),
@@ -2048,7 +2130,7 @@ impl Storage for PingoraTieredStorage {
     ) -> pingora::Result<MissHandler> {
         Ok(Box::new(PingoraTieredMissHandler {
             storage: self,
-            store_key: PingoraStoreKey::from_cache_key(key),
+            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta),
             serialized_meta: meta.serialize()?,
             body: Vec::new(),
             max_object_bytes: self
@@ -2293,9 +2375,7 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
 #[cfg(feature = "proxy")]
 fn write_disk_cache_object(
     path: &Path,
-    combined_key: &str,
-    primary_key: &str,
-    user_tag: &str,
+    store_key: &PingoraStoreKey,
     internal_meta: &[u8],
     response_header: &[u8],
     body: &[u8],
@@ -2308,16 +2388,20 @@ fn write_disk_cache_object(
     options.custom_flags(O_NOFOLLOW);
 
     let mut file = options.open(path)?;
-    file.write_all(DISK_CACHE_MAGIC_V3)?;
-    writeln!(file, "{}", combined_key.len())?;
-    writeln!(file, "{}", primary_key.len())?;
-    writeln!(file, "{}", user_tag.len())?;
+    let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
+
+    file.write_all(DISK_CACHE_MAGIC_V4)?;
+    writeln!(file, "{}", store_key.combined.len())?;
+    writeln!(file, "{}", store_key.primary.len())?;
+    writeln!(file, "{}", store_key.user_tag.len())?;
+    writeln!(file, "{}", encoded_cache_tags.len())?;
     writeln!(file, "{}", internal_meta.len())?;
     writeln!(file, "{}", response_header.len())?;
     writeln!(file, "{}", body.len())?;
-    file.write_all(combined_key.as_bytes())?;
-    file.write_all(primary_key.as_bytes())?;
-    file.write_all(user_tag.as_bytes())?;
+    file.write_all(store_key.combined.as_bytes())?;
+    file.write_all(store_key.primary.as_bytes())?;
+    file.write_all(store_key.user_tag.as_bytes())?;
+    file.write_all(encoded_cache_tags.as_bytes())?;
     file.write_all(internal_meta)?;
     file.write_all(response_header)?;
     file.write_all(body)?;
@@ -2420,7 +2504,9 @@ fn parse_disk_cache_object(
     max_object_bytes: ByteSize,
 ) -> std::io::Result<PingoraStoredObject> {
     let (mut offset, format_version) =
-        if bytes.get(..DISK_CACHE_MAGIC_V3.len()) == Some(DISK_CACHE_MAGIC_V3) {
+        if bytes.get(..DISK_CACHE_MAGIC_V4.len()) == Some(DISK_CACHE_MAGIC_V4) {
+            (DISK_CACHE_MAGIC_V4.len(), 4_u8)
+        } else if bytes.get(..DISK_CACHE_MAGIC_V3.len()) == Some(DISK_CACHE_MAGIC_V3) {
             (DISK_CACHE_MAGIC_V3.len(), 3_u8)
         } else if bytes.get(..DISK_CACHE_MAGIC_V2.len()) == Some(DISK_CACHE_MAGIC_V2) {
             (DISK_CACHE_MAGIC_V2.len(), 2_u8)
@@ -2448,6 +2534,11 @@ fn parse_disk_cache_object(
     } else {
         0
     };
+    let cache_tags_len = if format_version >= 4 {
+        parse_disk_cache_len(bytes, &mut offset)?
+    } else {
+        0
+    };
     let internal_meta_len = parse_disk_cache_len(bytes, &mut offset)?;
     let response_header_len = parse_disk_cache_len(bytes, &mut offset)?;
     let body_len = parse_disk_cache_len(bytes, &mut offset)?;
@@ -2465,6 +2556,7 @@ fn parse_disk_cache_object(
         .checked_add(combined_key_len)
         .and_then(|value| value.checked_add(primary_key_len))
         .and_then(|value| value.checked_add(user_tag_len))
+        .and_then(|value| value.checked_add(cache_tags_len))
         .and_then(|value| value.checked_add(internal_meta_len))
         .and_then(|value| value.checked_add(response_header_len))
         .and_then(|value| value.checked_add(body_len))
@@ -2490,7 +2582,8 @@ fn parse_disk_cache_object(
     let combined_key_end = offset + combined_key_len;
     let primary_key_end = combined_key_end + primary_key_len;
     let user_tag_end = primary_key_end + user_tag_len;
-    let internal_meta_end = user_tag_end + internal_meta_len;
+    let cache_tags_end = user_tag_end + cache_tags_len;
+    let internal_meta_end = cache_tags_end + internal_meta_len;
     let response_header_end = internal_meta_end + response_header_len;
     let combined_key = if format_version >= 3 {
         Some(cache_object_utf8(
@@ -2516,11 +2609,17 @@ fn parse_disk_cache_object(
     } else {
         None
     };
+    let cache_tags = if format_version >= 4 {
+        decode_cache_tags(&bytes[user_tag_end..cache_tags_end])?
+    } else {
+        Vec::new()
+    };
     Ok(PingoraStoredObject {
         combined_key,
         primary_key,
         user_tag,
-        internal_meta: bytes[user_tag_end..internal_meta_end].to_vec(),
+        cache_tags,
+        internal_meta: bytes[cache_tags_end..internal_meta_end].to_vec(),
         response_header: bytes[internal_meta_end..response_header_end].to_vec(),
         body: Arc::from(&bytes[response_header_end..][..]),
         weight,
@@ -2534,6 +2633,75 @@ fn cache_object_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
         .map_err(|error| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{field}: {error}"))
         })
+}
+
+#[cfg(feature = "proxy")]
+fn cache_tags_from_meta(meta: &CacheMeta) -> Vec<String> {
+    let mut tags = Vec::new();
+    let mut total_bytes = 0_usize;
+    for name in CACHE_TAG_HEADER_NAMES {
+        for value in meta.headers().get_all(name) {
+            let Ok(value) = value.to_str() else {
+                continue;
+            };
+            collect_cache_tags(value, &mut tags, &mut total_bytes);
+            if tags.len() >= MAX_CACHE_TAGS_PER_OBJECT {
+                return tags;
+            }
+        }
+    }
+    tags
+}
+
+#[cfg(feature = "proxy")]
+fn collect_cache_tags(value: &str, tags: &mut Vec<String>, total_bytes: &mut usize) {
+    for candidate in value.split(|character: char| character == ',' || character.is_whitespace()) {
+        if tags.len() >= MAX_CACHE_TAGS_PER_OBJECT || *total_bytes >= MAX_CACHE_TAG_BYTES_PER_OBJECT
+        {
+            return;
+        }
+        let candidate = candidate.trim();
+        if !is_valid_cache_tag(candidate) || tags.iter().any(|tag| tag == candidate) {
+            continue;
+        }
+        let next_bytes = total_bytes.saturating_add(candidate.len());
+        if next_bytes > MAX_CACHE_TAG_BYTES_PER_OBJECT {
+            return;
+        }
+        tags.push(candidate.to_owned());
+        *total_bytes = next_bytes;
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn is_valid_cache_tag(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.len() <= MAX_CACHE_TAG_LEN
+        && tag.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/' | b'=')
+        })
+}
+
+#[cfg(feature = "proxy")]
+fn encode_cache_tags(tags: &[String]) -> String {
+    tags.join("\n")
+}
+
+#[cfg(feature = "proxy")]
+fn encoded_cache_tags_len(tags: &[String]) -> usize {
+    encode_cache_tags(tags).len()
+}
+
+#[cfg(feature = "proxy")]
+fn decode_cache_tags(bytes: &[u8]) -> std::io::Result<Vec<String>> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tags = cache_object_utf8(bytes, "cache tags")?;
+    let mut decoded = Vec::new();
+    let mut total_bytes = 0_usize;
+    collect_cache_tags(&tags, &mut decoded, &mut total_bytes);
+    Ok(decoded)
 }
 
 #[cfg(feature = "proxy")]
@@ -2730,6 +2898,33 @@ mod tests {
         );
         assert!(index.remove_combined("combined:b"));
         assert_eq!(index.len(), 1);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn cache_tags_from_meta_collects_bounded_deduplicated_tags() {
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "article:1 collection/news article:1")
+            .unwrap();
+        meta.response_header_mut()
+            .append_header("Cache-Tag", "tenant/main,asset/logo invalid tag")
+            .unwrap();
+        meta.response_header_mut()
+            .append_header("X-Cache-Tags", "bad@tag")
+            .unwrap();
+
+        assert_eq!(
+            super::cache_tags_from_meta(&meta),
+            vec![
+                "article:1".to_owned(),
+                "collection/news".to_owned(),
+                "tenant/main".to_owned(),
+                "asset/logo".to_owned(),
+                "invalid".to_owned(),
+                "tag".to_owned(),
+            ]
+        );
     }
 
     #[cfg(feature = "proxy")]
@@ -3429,6 +3624,55 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_memory_storage_purges_indexed_cache_tag() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 4,
+        });
+        let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost-a");
+        let second = pingora::cache::CacheKey::new("fluxheim-test", "second", "vhost-a");
+        let other = pingora::cache::CacheKey::new("fluxheim-test", "other", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let mut tagged = pingora_meta("max-age=60");
+        tagged
+            .response_header_mut()
+            .insert_header("Surrogate-Key", "article:1 listing")
+            .unwrap();
+        let mut untagged = pingora_meta("max-age=60");
+        untagged
+            .response_header_mut()
+            .insert_header("Surrogate-Key", "article:2")
+            .unwrap();
+
+        for key in [&first, &second] {
+            let mut miss = block_on(storage.get_miss_handler(key, &tagged, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+        let mut miss = block_on(storage.get_miss_handler(&other, &untagged, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let result = storage.purge_indexed_cache_tag("vhost-a", "article:1", 8);
+
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 2,
+                purged: 2,
+                truncated: false,
+            }
+        );
+        assert!(block_on(storage.lookup(&first, &span)).unwrap().is_none());
+        assert!(block_on(storage.lookup(&second, &span)).unwrap().is_none());
+        assert!(block_on(storage.lookup(&other, &span)).unwrap().is_some());
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_memory_storage_purges_indexed_path_prefix() {
         use pingora::cache::Storage;
 
@@ -3616,7 +3860,7 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
-    fn pingora_disk_storage_rebuilds_purge_index_from_v3_objects() {
+    fn pingora_disk_storage_rebuilds_purge_index_from_v4_objects() {
         use pingora::cache::Storage;
 
         let root = unique_test_cache_dir("disk-persistent-index");
@@ -3628,7 +3872,10 @@ mod tests {
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-index-key", "vhost-a");
         let span = pingora::cache::trace::Span::inactive().handle();
-        let meta = pingora_meta("max-age=60");
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "article:1 listing")
+            .unwrap();
 
         let mut miss = block_on(writer.get_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"disk-body"), true)).unwrap();
@@ -3642,7 +3889,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 1);
-        let result = rebuilt.purge_indexed_user_tag("vhost-a", 8).unwrap();
+        let result = rebuilt
+            .purge_indexed_cache_tag("vhost-a", "article:1", 8)
+            .unwrap();
         assert_eq!(
             result,
             super::CacheIndexedPurgeResult {

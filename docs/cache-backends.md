@@ -235,7 +235,13 @@ internal cache implementation.
   or route whose normalized request path starts with `path_prefix` / `prefix` /
   `x-fluxheim-cache-path-prefix`. Prefix purge requires a non-root prefix such
   as `/assets/`; `/` is rejected so complete cache clears stay explicit through
-  scope purge. `POST /_fluxheim/cache/purge-wildcard` invalidates indexed
+  scope purge. `POST /_fluxheim/cache/purge-tag` invalidates indexed entries
+  for responses that carried `Surrogate-Key`, `Cache-Tag`, or `X-Cache-Tags`.
+  Tags are exact-match, bounded, de-duplicated per object, and may contain
+  ASCII letters, digits, `_`, `-`, `.`, `:`, `/`, and `=`. Disk cache objects
+  persist tags in the v4 object format and rebuild the purge index across
+  process restarts while continuing to read older object formats.
+  `POST /_fluxheim/cache/purge-wildcard` invalidates indexed
   entries by absolute path pattern using `*`, for example `/assets/*.png`.
   Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
   endpoints accept `limit` / `x-fluxheim-cache-limit` and `batches` /
@@ -265,6 +271,9 @@ curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-prefix?vhost=repoheim.eu&path_prefix=/assets/&limit=500&batches=4"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-tag?vhost=repoheim.eu&cache_tag=release:2026-05-11&limit=500"
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-wildcard?vhost=repoheim.eu&pattern=/assets/*.png&limit=500"

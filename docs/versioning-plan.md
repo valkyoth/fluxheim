@@ -364,7 +364,8 @@ Stable scope:
     can advance large scope, prefix, and wildcard purges without removing
     request limits;
   - cache warmer/preload command or admin workflow for release deploys;
-  - surrogate-key/cache-tag purge for application-level invalidation;
+  - richer cache-tag policy controls on top of the initial exact-match
+    `Surrogate-Key` / `Cache-Tag` / `X-Cache-Tags` indexed purge support;
   - soft purge, where objects are marked stale and refreshed instead of removed
     immediately;
   - broader hit-for-pass/pass-cache policy coverage; `pass_uncacheable_after`
