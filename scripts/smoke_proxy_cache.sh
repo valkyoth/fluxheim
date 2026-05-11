@@ -448,6 +448,7 @@ fi
     --require-object \
     --expect-tier disk \
     --expect-status 200 \
+    --expect-body-bytes 16 \
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
     --expect-freshness-state fresh
@@ -499,6 +500,7 @@ fi
     --require-object \
     --expect-tier disk \
     --expect-status 200 \
+    --expect-body-bytes 14 \
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
     --expect-freshness-state fresh
@@ -560,6 +562,7 @@ fi
     --require-object \
     --expect-tier disk \
     --expect-status 200 \
+    --expect-body-bytes 7 \
     --expect-cache-tag smoke:warm \
     --expect-header-name etag \
     --expect-header-name vary \

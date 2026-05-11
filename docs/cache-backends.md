@@ -448,6 +448,7 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --require-object \
   --expect-tier disk \
   --expect-status 200 \
+  --expect-body-bytes 12345 \
   --expect-fresh-ttl-secs 120 \
   --expect-cache-tag asset:logo \
   --expect-header-name etag \
@@ -477,8 +478,9 @@ the selected key has no cached object, repeated `--expect-tier memory|disk`
 flags fail when no matching object is present in an allowed storage tier,
 repeated `--expect-status` flags fail when no matching object has an allowed
 cached HTTP status, repeated `--expect-fresh-ttl-secs` flags fail when no
-matching object has an allowed stored fresh TTL, `--expect-purge-indexed` fails
-when no matching object is reachable through the bounded purge index, and repeated
+matching object has an allowed stored fresh TTL, repeated `--expect-body-bytes`
+flags fail when no matching object has an allowed stored body size,
+`--expect-purge-indexed` fails when no matching object is reachable through the bounded purge index, and repeated
 `--expect-cache-tag` flags fail when no matching object has the expected stored
 cache tag. Repeated
 `--expect-header-name` flags fail when no matching object has the expected
