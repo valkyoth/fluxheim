@@ -123,6 +123,12 @@ backend = "rustls"
 [cache]
 enabled = false
 
+[cache_purger]
+enabled = true
+interval_secs = 1
+limit = 8
+batches = 1
+
 [proxy]
 upstreams = ["127.0.0.1:$upstream_port"]
 upstream_tls = false
@@ -206,6 +212,19 @@ fi
 
 if ! grep -q 'vhost="observability.test"' "$metrics_body"; then
     echo "observability smoke failed: metrics endpoint missed observability.test vhost label" >&2
+    exit 1
+fi
+
+for _ in 1 2 3 4 5; do
+    curl -fsS "http://127.0.0.1:$metrics_port/metrics" >"$metrics_body"
+    if grep -q 'fluxheim_cache_purger_runs_total{outcome="skipped"}' "$metrics_body"; then
+        break
+    fi
+    sleep 0.2
+done
+if ! grep -q 'fluxheim_cache_purger_runs_total{outcome="skipped"}' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed cache purger outcome metric" >&2
+    head -n 80 "$metrics_body" >&2 || true
     exit 1
 fi
 
