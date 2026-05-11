@@ -94,7 +94,7 @@ internal cache implementation.
   validation, input-file warming, negotiated variant warming, and a deliberate
   404 negative-cache warm using `--allow-status 404`. The same smoke path
   asserts Prometheus cache activity counters for disk hits and scoped purge
-  events.
+  events, policy bypasses, and allowed stale serving.
   Use repeated `--header "Name: value"` options to warm negotiated variants for
   safe request headers such as `Accept-Language` or `Accept-Encoding`; use
   `--host` for the Host header. Use `--dry-run` to validate the target list,

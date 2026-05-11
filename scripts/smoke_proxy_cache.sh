@@ -829,6 +829,19 @@ if ! grep -qi '^x-cache-status: HIT' "$post_configured_bypass_get_headers"; then
     exit 1
 fi
 
+curl -sS --max-time "$CURL_MAX_TIME" -o "$metrics_body" \
+    "http://127.0.0.1:$METRICS_PORT/metrics"
+if ! grep -Eq 'fluxheim_cache_activity_total\{event="bypass",tier="policy"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed policy bypass activity counter" >&2
+    grep 'fluxheim_cache_activity' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_activity_scope_total\{event="bypass",route="",scope="vhost",tier="policy",vhost="cache\.test"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed scoped policy bypass activity counter" >&2
+    grep 'fluxheim_cache_activity_scope_total' "$metrics_body" >&2 || true
+    exit 1
+fi
+
 conditional_status=$(
     curl -sS --max-time "$CURL_MAX_TIME" -D "$conditional_headers" -o /dev/null -w '%{http_code}' \
         -H "Host: cache.test" \
@@ -1486,6 +1499,19 @@ fi
     --expect-header-name etag \
     --expect-serve-stale-if-error \
     --expect-freshness-state stale
+
+curl -sS --max-time "$CURL_MAX_TIME" -o "$metrics_body" \
+    "http://127.0.0.1:$METRICS_PORT/metrics"
+if ! grep -Eq 'fluxheim_cache_activity_total\{event="stale",tier="policy"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed policy stale activity counter" >&2
+    grep 'fluxheim_cache_activity' "$metrics_body" >&2 || true
+    exit 1
+fi
+if ! grep -Eq 'fluxheim_cache_activity_scope_total\{event="stale",route="",scope="vhost",tier="policy",vhost="cache\.test"\} [1-9][0-9]*' "$metrics_body"; then
+    echo "proxy cache smoke failed: metrics missed scoped policy stale activity counter" >&2
+    grep 'fluxheim_cache_activity_scope_total' "$metrics_body" >&2 || true
+    exit 1
+fi
 
 stop_fluxheim
 start_fluxheim

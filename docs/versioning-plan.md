@@ -601,9 +601,9 @@ Current implementation status:
     policy-level pass/bypass/stale counters show configured scoped cache
     decisions without exposing request-specific labels. The proxy cache smoke
     suite now asserts bounded Prometheus purge counters and cache activity
-    counters for disk hits plus scoped purge events, while the local
-    observability smoke asserts cache policy gauges and request-collapsing
-    lock timeout gauges.
+    counters for disk hits, scoped purge events, policy bypasses, and allowed
+    stale serving, while the local observability smoke asserts cache policy
+    gauges and request-collapsing lock timeout gauges.
 
 Stable scope for declaring the cache pack complete:
 
