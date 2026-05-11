@@ -365,8 +365,9 @@ Stable scope:
     conservative age threshold while preserving fresh active-writer temps.
     Reader-visible partial writes remain planned;
   - broader persistent cache index coverage for older disk object formats and
-    future metadata migrations; new v3 disk objects already rebuild the bounded
-    purge index across process restarts;
+    future metadata migrations; new v5 disk objects rebuild the bounded purge
+    index across process restarts with combined-key, primary-key, user-tag,
+    cache-tag, and path-index metadata;
   - background or broader incremental disk purge/cleanup for very large purge
     scopes; indexed purge endpoints now accept bounded `batches` so operators
     can advance large scope, prefix, and wildcard purges without removing
