@@ -79,7 +79,7 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
-        if self.path == "/vary.png":
+        if self.path == "/vary.png" or self.path == "/warm-vary.png":
             language = self.headers.get("accept-language", "")
             body = VARY_BODIES["de"] if "de" in language.lower() else VARY_BODIES["en"]
             self.send_response(200)
@@ -274,6 +274,8 @@ vary_en_second_headers="$TMP_DIR/vary-en-second.headers"
 vary_de_headers="$TMP_DIR/vary-de.headers"
 vary_en_body="$TMP_DIR/vary-en.bin"
 vary_de_body="$TMP_DIR/vary-de.bin"
+warm_vary_headers="$TMP_DIR/warm-vary.headers"
+warm_vary_body="$TMP_DIR/warm-vary.bin"
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$first_headers" -o "$body" -H "Host: cache.test" "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
 if ! grep -qi '^x-cache-status: MISS' "$first_headers"; then
@@ -381,6 +383,28 @@ if ! grep -qi '^x-cache-status: MISS' "$vary_de_headers"; then
 fi
 if [ "$(cat "$vary_de_body")" != "vary-de" ]; then
     echo "proxy cache smoke failed: distinct Vary body mismatch" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-warm \
+    --listen "127.0.0.1:$FLUXHEIM_PORT" \
+    --host cache.test \
+    --header "Accept-Language: de" \
+    --path /warm-vary.png \
+    --repeat 2 \
+    --expect-cache-status-sequence MISS,HIT
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$warm_vary_headers" -o "$warm_vary_body" \
+    -H "Host: cache.test" \
+    -H "Accept-Language: de" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/warm-vary.png"
+if ! grep -qi '^x-cache-status: HIT' "$warm_vary_headers"; then
+    echo "proxy cache smoke failed: cache-warm did not preload negotiated Vary variant" >&2
+    cat "$warm_vary_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$warm_vary_body")" != "vary-de" ]; then
+    echo "proxy cache smoke failed: cache-warm negotiated Vary body mismatch" >&2
     exit 1
 fi
 
