@@ -57,8 +57,6 @@ const DISK_CACHE_INDEX_MAGIC_V1: &str = "FLUXHEIM-DISK-INDEX-v1";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_INDEX_FILENAME: &str = ".fluxheim-disk-index-v1";
 #[cfg(feature = "proxy")]
-const CACHE_PURGE_INDEX_MAX_ENTRIES: usize = 65_536;
-#[cfg(feature = "proxy")]
 const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAG_LEN: usize = 128;
@@ -465,7 +463,6 @@ pub fn memory_image_cache_from_config(config: &CacheConfig) -> Option<MemoryImag
 #[derive(Debug, Clone)]
 pub struct CachePurgeIndex {
     inner: Arc<RwLock<CachePurgeIndexInner>>,
-    max_entries: usize,
 }
 
 #[cfg(feature = "proxy")]
@@ -504,10 +501,9 @@ pub struct CacheStalePurgeResult {
 
 #[cfg(feature = "proxy")]
 impl CachePurgeIndex {
-    pub fn new(max_entries: usize) -> Self {
+    pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(CachePurgeIndexInner::default())),
-            max_entries,
         }
     }
 
@@ -534,9 +530,6 @@ impl CachePurgeIndex {
         path: Option<String>,
         cache_tags: Vec<String>,
     ) {
-        if self.max_entries == 0 {
-            return;
-        }
         let Ok(mut inner) = self.inner.write() else {
             return;
         };
@@ -566,13 +559,6 @@ impl CachePurgeIndex {
                 cache_tags,
             },
         );
-
-        while inner.entries.len() > self.max_entries {
-            let Some(oldest) = inner.order.pop_front() else {
-                break;
-            };
-            inner.entries.remove(&oldest);
-        }
     }
 
     pub fn remove_combined(&self, combined_key: &str) -> bool {
@@ -718,11 +704,18 @@ impl CachePurgeIndex {
     }
 
     pub fn max_entries(&self) -> usize {
-        self.max_entries
+        usize::MAX
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[cfg(feature = "proxy")]
+impl Default for CachePurgeIndex {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -855,13 +848,18 @@ impl PingoraMemoryStorage {
         cache_tag_headers: Vec<String>,
         activity: CacheActivityCounters,
     ) -> Self {
+        let purge_index = CachePurgeIndex::new();
+        let eviction_purge_index = purge_index.clone();
         let inner = moka::sync::Cache::builder()
             .max_capacity(max_size_bytes.as_u64())
             .weigher(|_key: &String, value: &PingoraStoredObject| value.weight)
+            .eviction_listener(move |key, _value, _cause| {
+                eviction_purge_index.remove_combined(key.as_str());
+            })
             .build();
         Self {
             inner,
-            purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
+            purge_index,
             max_size_bytes,
             max_object_bytes,
             cache_tag_headers: Arc::from(cache_tag_headers),
@@ -1425,7 +1423,7 @@ impl PingoraDiskStorage {
         )?;
         let storage = Self {
             root,
-            purge_index: CachePurgeIndex::new(CACHE_PURGE_INDEX_MAX_ENTRIES),
+            purge_index: CachePurgeIndex::new(),
             disk_index: DiskObjectIndex::new(),
             checkpoint_state: Arc::new(Mutex::new(DiskIndexCheckpointState::default())),
             max_size_bytes,
@@ -4728,8 +4726,8 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
-    fn cache_purge_index_bounds_and_matches_entries() {
-        let index = super::CachePurgeIndex::new(2);
+    fn cache_purge_index_retains_all_live_mappings() {
+        let index = super::CachePurgeIndex::new();
 
         index.insert(
             "combined:a".to_owned(),
@@ -4747,11 +4745,10 @@ mod tests {
             "vhost-b".to_owned(),
         );
 
-        assert_eq!(index.len(), 2);
-        assert!(
-            index
-                .combined_keys_for_primary("fluxheim-image-v1;path:9:/old/a.js;")
-                .is_empty()
+        assert_eq!(index.len(), 3);
+        assert_eq!(
+            index.combined_keys_for_primary("fluxheim-image-v1;path:9:/old/a.js;"),
+            vec!["combined:a".to_owned()]
         );
         assert_eq!(
             index.combined_keys_for_primary("fluxheim-image-v1;path:12:/assets/b.js;"),
@@ -4771,7 +4768,7 @@ mod tests {
                 .into_iter()
                 .map(|entry| entry.combined_key)
                 .collect::<Vec<_>>(),
-            vec!["combined:b".to_owned()]
+            vec!["combined:a".to_owned()]
         );
         assert_eq!(
             index
@@ -4790,7 +4787,7 @@ mod tests {
             vec!["combined:b".to_owned(), "combined:c".to_owned()]
         );
         assert!(index.remove_combined("combined:b"));
-        assert_eq!(index.len(), 1);
+        assert_eq!(index.len(), 2);
     }
 
     #[cfg(feature = "proxy")]
@@ -5658,6 +5655,41 @@ mod tests {
             }
         );
         assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_memory_storage_removes_purge_entries_for_evicted_objects() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(768),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 2,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        });
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        for index in 0..8 {
+            let key = pingora::cache::CacheKey::new(
+                "fluxheim-test",
+                format!("evict-key-{index}"),
+                "vhost-a",
+            );
+            let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from(vec![b'x'; 128]), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+        storage.inner.run_pending_tasks();
+
+        assert_eq!(
+            storage.purge_index.len(),
+            usize::try_from(storage.inner.entry_count()).unwrap()
+        );
+        for (combined_key, _) in storage.inner.iter() {
+            assert!(storage.purge_index.contains_combined(combined_key.as_ref()));
+        }
     }
 
     #[cfg(feature = "proxy")]

@@ -206,10 +206,13 @@ internal cache implementation.
   metadata field because they did not store all of the v5 index fields.
   A later storage-bin backend should replace the full startup shard scan with
   an incremental durable index.
-  Indexed admin purges use the bounded purge index as a fast path but also
-  scan live memory or disk object metadata to supplement missing mappings, so
-  FIFO eviction from the fast index cannot make live cached objects immune to
-  user-tag, path-prefix, wildcard, cache-tag, or stale purges.
+  Indexed admin purges use a live-object purge metadata index as a fast path
+  and also scan live memory or disk object metadata to supplement missing
+  mappings, so fast-index drift cannot make live cached objects immune to
+  user-tag, path-prefix, wildcard, cache-tag, or stale purges. The fast index is
+  not FIFO-capped; memory-cache eviction notifications remove entries for
+  evicted objects, and disk-cache rebuilds reconstruct entries from live v5
+  objects.
 - Disk eviction maintains an ordered LRU view inside the runtime disk-object
   index. Admissions that need space walk only the oldest entries needed to free
   the target byte count instead of cloning and sorting the full disk inventory
@@ -308,8 +311,7 @@ internal cache implementation.
   `purge_index_fill_ratio_per_mille`, and totals report the same values split
   by memory and disk tiers, so operators can tell whether storage is under
   pressure, whether object-size budgets are realistic, and whether indexed
-  scope, prefix, and wildcard purges have useful coverage or are near the
-  bounded index cap.
+  scope, prefix, and wildcard purges have useful live metadata coverage.
   Prometheus `fluxheim_cache_activity_total{tier="policy",event="pass"}` and
   matching scoped counters record opt-in pass-cache bypass decisions without
   cache keys, hosts, or paths. Policy-level `bypass` records request-side
@@ -401,7 +403,7 @@ records successful admin purge commands with bounded operation and mode labels;
   disk or in memory for revalidation and stale-serving policy. Hard purge is
   still the default.
   `POST /_fluxheim/cache/purge-stale` scans a bounded number of indexed
-  entries for a vhost or route and removes objects whose stored freshness window
+  live metadata entries for a vhost or route and removes objects whose stored freshness window
   has expired. It is intended as an operator-controlled incremental cleanup
   command and as the same bounded primitive used by the optional
   `[cache_purger]` background disk cleanup loop. Add `dry_run=true` or
@@ -412,7 +414,7 @@ records successful admin purge commands with bounded operation and mode labels;
   scan limit; dry-runs intentionally execute one scan, and responses set
   `increase_limit_required = true` when the scan was truncated but another
   identical batch would not make progress. Non-dry-run stale purges rotate
-  scanned fresh entries to the back of the bounded purge index when the scan is
+  scanned fresh entries to the back of the purge index when the scan is
   truncated, so repeated batches can advance through fresh front pages and
   still reach stale objects later in the same vhost or route bucket without a
   full filesystem walk.
@@ -624,7 +626,7 @@ decision is not the expected bounded reason,
 `--expect-serve-stale-if-error` and `--expect-serve-stale-while-revalidate`
 fail when no matching object is eligible for those stale-serving policies,
 `--expect-purge-indexed` fails when no matching object is reachable through the
-bounded purge index, and repeated
+live purge metadata index, and repeated
 `--expect-cache-tag` flags fail when no matching object has the expected stored
 cache tag. Repeated
 `--expect-header-name` flags fail when no matching object has the expected

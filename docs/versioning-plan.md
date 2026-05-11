@@ -373,15 +373,18 @@ Stable scope:
     Reader-visible partial writes are not a 1.2 stable blocker unless
     production testing promotes them into the optional `1.2.4` cache follow-up;
   - broader persistent cache index coverage for older disk object formats and
-    future metadata migrations; new v5 disk objects rebuild the bounded purge
-    index across process restarts with combined-key, primary-key, user-tag,
+    future metadata migrations; new v5 disk objects rebuild purge metadata
+    across process restarts with combined-key, primary-key, user-tag,
     cache-tag, and path-index metadata. Startup now merges the disk index
     checkpoint with a full deterministic shard scan so files outside a stale or
     truncated checkpoint cannot become eviction orphans, removes corrupt or
     unindexable `.fhc` objects, and enforces the disk-size budget before
     serving traffic. Disk index checkpoint writes now merge existing root
     entries so separate vhost and route cache policies sharing a disk root
-    cannot erase each other's restart purge index state;
+    cannot erase each other's restart purge metadata state. The memory and disk
+    fast purge indexes no longer use an unrelated FIFO cap; memory eviction
+    notifications remove evicted objects from the fast index, and purges still
+    scan live object metadata as the source of truth;
   - background or broader incremental disk purge/cleanup for very large purge
     scopes; indexed purge endpoints now accept bounded `batches` so operators
     can advance large scope, prefix, and wildcard purges without removing
@@ -389,8 +392,8 @@ Stable scope:
     cleanup for expired indexed entries with dry-run mode and conservative
     batching for production safety checks. `[cache_purger]` now adds an
     opt-in process-wide background stale disk cleanup loop that uses the same
-    bounded indexed primitive per vhost and route cache. Truncated non-dry-run
-    stale purges rotate scanned fresh entries to the back of the bounded index,
+    indexed primitive per vhost and route cache. Truncated non-dry-run
+    stale purges rotate scanned fresh entries to the back of the purge index,
     so batched stale cleanup can advance through fresh front pages and reach
     expired entries later in the same vhost or route bucket. Prometheus
     counters report background purger outcomes and scanned/stale/purged entry
@@ -669,10 +672,10 @@ Current implementation status:
     indexed scope purge, prefix purge, tag purge, wildcard purge, stale purge,
     soft purge, and bounded purge batching endpoints;
   - per-vhost and per-route admin status for storage tiers, storage pressure,
-    purge-index fill, activity counters, hit/miss/store/refusal/eviction
+    purge metadata coverage, activity counters, hit/miss/store/refusal/eviction
     ratios, configured route count, cache-policy route count, and cache-route
     coverage ratio;
-  - bounded in-memory purge indexes for memory and disk tiers;
+  - live-object purge metadata indexes for memory and disk tiers;
   - process-wide opt-in background stale disk purger;
   - `fluxheim cache-warm` path warming through the normal local listener with
     2xx/3xx success accounting and explicit `--allow-status` overrides for

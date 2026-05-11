@@ -3890,14 +3890,14 @@ mod tests {
         assert!(body.contains(r#""memory_average_weighted_size_bytes":0"#));
         assert!(body.contains(r#""memory_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_purge_index_entries":0"#));
-        assert!(body.contains(r#""memory_purge_index_max_entries":131072"#));
+        assert!(body.contains(r#""memory_purge_index_max_entries":18446744073709551615"#));
         assert!(body.contains(r#""memory_purge_index_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_tiers":1"#));
         assert!(body.contains(r#""disk_entries":0"#));
         assert!(body.contains(r#""disk_average_object_size_bytes":0"#));
         assert!(body.contains(r#""disk_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk_purge_index_entries":0"#));
-        assert!(body.contains(r#""disk_purge_index_max_entries":65536"#));
+        assert!(body.contains(r#""disk_purge_index_max_entries":18446744073709551615"#));
         assert!(body.contains(r#""disk_purge_index_fill_ratio_per_mille":0"#));
         assert!(body.contains(
             r#""activity":{"hits":0,"misses":0,"requests":0,"hit_ratio_per_mille":0,"miss_ratio_per_mille":0,"stores":0,"store_refusals":0,"store_attempts":0,"store_ratio_per_mille":0,"store_refusal_ratio_per_mille":0,"evictions":0,"eviction_ratio_per_mille":0,"purges":0"#
@@ -3919,7 +3919,7 @@ mod tests {
         assert!(body.contains(r#""average_weighted_size_bytes":0"#));
         assert!(body.contains(r#""fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""purge_index_entries":0"#));
-        assert!(body.contains(r#""purge_index_max_entries":65536"#));
+        assert!(body.contains(r#""purge_index_max_entries":18446744073709551615"#));
         assert!(body.contains(r#""purge_index_fill_ratio_per_mille":0"#));
         assert!(body.contains(r#""disk":{"entries":0"#));
         assert!(body.contains(r#""average_object_size_bytes":0"#));
