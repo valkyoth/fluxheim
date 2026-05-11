@@ -244,6 +244,10 @@ pub enum CliCommand {
         /// Required cached-object HTTP status. May be repeated.
         #[arg(long = "expect-status", value_name = "STATUS")]
         expect_statuses: Vec<u16>,
+
+        /// Required cached-object storage tier. May be repeated: memory, disk.
+        #[arg(long = "expect-tier", value_name = "TIER")]
+        expect_tiers: Vec<String>,
     },
 }
 
@@ -472,6 +476,7 @@ fn run_command(
             require_object,
             expect_freshness_states,
             expect_statuses,
+            expect_tiers,
         } => run_cache_lookup_command(CacheLookupOptions {
             config_path,
             host: host.clone(),
@@ -482,6 +487,7 @@ fn run_command(
             require_object: *require_object,
             expect_freshness_states: expect_freshness_states.clone(),
             expect_statuses: expect_statuses.clone(),
+            expect_tiers: expect_tiers.clone(),
         }),
     }
 }
@@ -526,6 +532,7 @@ struct CacheLookupOptions<'a> {
     require_object: bool,
     expect_freshness_states: Vec<String>,
     expect_statuses: Vec<u16>,
+    expect_tiers: Vec<String>,
 }
 
 #[cfg(feature = "cache")]
@@ -850,6 +857,7 @@ fn run_cache_lookup_command(
     };
     let require_object = options.require_object;
     let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
+    let expected_tiers = parse_cache_lookup_tiers(&options.expect_tiers)?;
     validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
     let (config, request) = cache_key_command_request(&cache_key_options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
@@ -861,6 +869,7 @@ fn run_cache_lookup_command(
         require_object,
         &expected_states,
         &options.expect_statuses,
+        &expected_tiers,
     )?;
 
     println!("cache object lookup:");
@@ -941,11 +950,29 @@ fn parse_cache_lookup_freshness_states(
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_lookup_tiers(
+    tiers: &[String],
+) -> Result<Vec<crate::cache::CacheObjectTier>, Box<dyn Error + Send + Sync>> {
+    tiers
+        .iter()
+        .map(|tier| match tier.as_str() {
+            "memory" => Ok(crate::cache::CacheObjectTier::Memory),
+            "disk" => Ok(crate::cache::CacheObjectTier::Disk),
+            other => Err(format!(
+                "cache-lookup --expect-tier must be memory or disk; got {other:?}"
+            )
+            .into()),
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_lookup_expectations(
     lookup: &crate::proxy::CacheObjectLookup,
     require_object: bool,
     expected_states: &[crate::cache::CacheObjectFreshnessState],
     expected_statuses: &[u16],
+    expected_tiers: &[crate::cache::CacheObjectTier],
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if require_object && lookup.objects.is_empty() {
         return Err("cache-lookup expected at least one cached object, found none".into());
@@ -1000,6 +1027,30 @@ fn validate_cache_lookup_expectations(
             return Err(format!("cache-lookup expected status {expected}, found {found}").into());
         }
     }
+    if !expected_tiers.is_empty() {
+        let matched = lookup
+            .objects
+            .iter()
+            .any(|object| expected_tiers.contains(&object.tier));
+        if !matched {
+            let expected = expected_tiers
+                .iter()
+                .map(|tier| tier.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            let found = if lookup.objects.is_empty() {
+                "none".to_owned()
+            } else {
+                lookup
+                    .objects
+                    .iter()
+                    .map(|object| object.tier.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            return Err(format!("cache-lookup expected tier {expected}, found {found}").into());
+        }
+    }
     Ok(())
 }
 
@@ -1046,9 +1097,15 @@ fn run_cache_lookup_command(
         require_object,
         expect_freshness_states,
         expect_statuses,
+        expect_tiers,
     } = options;
     let _ = (config_path, host, headers, method, path, query);
-    let _ = (require_object, expect_freshness_states, expect_statuses);
+    let _ = (
+        require_object,
+        expect_freshness_states,
+        expect_statuses,
+        expect_tiers,
+    );
     Err("cache-lookup requires the proxy and cache features".into())
 }
 
@@ -2725,13 +2782,18 @@ mod tests {
     fn cache_lookup_expectations_validate_object_and_freshness_state() {
         let lookup = cache_lookup_with_state(crate::cache::CacheObjectFreshnessState::Stale);
         let states = super::parse_cache_lookup_freshness_states(&["stale".to_owned()]).unwrap();
+        let tiers = super::parse_cache_lookup_tiers(&["memory".to_owned()]).unwrap();
 
-        assert!(super::validate_cache_lookup_expectations(&lookup, true, &states, &[200]).is_ok());
+        assert!(
+            super::validate_cache_lookup_expectations(&lookup, true, &states, &[200], &tiers)
+                .is_ok()
+        );
         assert!(
             super::validate_cache_lookup_expectations(
                 &lookup,
                 false,
                 &[crate::cache::CacheObjectFreshnessState::Fresh],
+                &[],
                 &[]
             )
             .unwrap_err()
@@ -2739,10 +2801,22 @@ mod tests {
             .contains("expected freshness state fresh, found stale")
         );
         assert!(
-            super::validate_cache_lookup_expectations(&lookup, false, &[], &[404])
+            super::validate_cache_lookup_expectations(&lookup, false, &[], &[404], &[])
                 .unwrap_err()
                 .to_string()
                 .contains("expected status 404, found 200")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                false,
+                &[],
+                &[],
+                &[crate::cache::CacheObjectTier::Disk]
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected tier disk, found memory")
         );
         assert!(
             super::parse_cache_lookup_freshness_states(&["invalid".to_owned()])
@@ -2750,11 +2824,18 @@ mod tests {
                 .to_string()
                 .contains("fresh, stale, or expired")
         );
+        assert!(
+            super::parse_cache_lookup_tiers(&["invalid".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("memory or disk")
+        );
         assert!(super::validate_cache_lookup_expected_statuses(&[99]).is_err());
         assert!(
             super::validate_cache_lookup_expectations(
                 &cache_lookup_without_objects(),
                 true,
+                &[],
                 &[],
                 &[]
             )

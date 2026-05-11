@@ -443,6 +443,7 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --path /assets/img/logo.png \
   --query v=1 \
   --require-object \
+  --expect-tier disk \
   --expect-status 200 \
   --expect-freshness-state fresh
 ```
@@ -464,8 +465,10 @@ stdout, or dump stored header values. Use repeated `--header "Name: value"`
 options to inspect negotiated cache variants that depend on safe request
 headers such as `Accept-Language` or `Accept-Encoding`; use `--host` for the
 Host header. For release scripts, `cache-lookup --require-object` fails when
-the selected key has no cached object, repeated `--expect-status` flags fail
-when no matching object has an allowed cached HTTP status, and repeated
+the selected key has no cached object, repeated `--expect-tier memory|disk`
+flags fail when no matching object is present in an allowed storage tier,
+repeated `--expect-status` flags fail when no matching object has an allowed
+cached HTTP status, and repeated
 `--expect-freshness-state fresh|stale|expired` flags fail when none of the
 matching objects has an allowed freshness state.
 
