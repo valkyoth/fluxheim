@@ -122,6 +122,11 @@ backend = "rustls"
 
 [cache]
 enabled = false
+max_object_bytes = "256KiB"
+
+[cache.memory]
+enabled = false
+max_size_bytes = "1MiB"
 
 [cache_purger]
 enabled = true
@@ -137,7 +142,39 @@ upstream_tls = false
 name = "observability.test"
 hosts = ["observability.test"]
 
+[vhosts.cache]
+enabled = true
+max_object_bytes = "256KiB"
+
+[vhosts.cache.memory]
+enabled = true
+max_size_bytes = "1MiB"
+
+[vhosts.cache.lock]
+enabled = true
+wait_timeout_secs = 11
+
 [vhosts.proxy]
+upstreams = ["127.0.0.1:$upstream_port"]
+upstream_tls = false
+
+[[vhosts.routes]]
+name = "observability-cache"
+path_exact = "/cached"
+
+[vhosts.routes.cache]
+enabled = true
+max_object_bytes = "256KiB"
+
+[vhosts.routes.cache.memory]
+enabled = true
+max_size_bytes = "1MiB"
+
+[vhosts.routes.cache.lock]
+enabled = true
+wait_timeout_secs = 17
+
+[vhosts.routes.proxy]
 upstreams = ["127.0.0.1:$upstream_port"]
 upstream_tls = false
 EOF
@@ -212,6 +249,36 @@ fi
 
 if ! grep -q 'vhost="observability.test"' "$metrics_body"; then
     echo "observability smoke failed: metrics endpoint missed observability.test vhost label" >&2
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_configured_routes 1' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed configured cache route gauge" >&2
+    grep 'fluxheim_cache_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_enabled_vhosts 1' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed enabled cache vhost gauge" >&2
+    grep 'fluxheim_cache_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_enabled_routes 1' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed enabled cache route gauge" >&2
+    grep 'fluxheim_cache_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_lock_enabled_policies 2' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed cache lock policy gauge" >&2
+    grep 'fluxheim_cache_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_lock_wait_timeout_max_seconds 17' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed cache lock timeout gauge" >&2
+    grep 'fluxheim_cache_' "$metrics_body" >&2 || true
     exit 1
 fi
 

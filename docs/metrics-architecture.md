@@ -91,11 +91,15 @@ Current cache baseline:
 - `fluxheim_cache_tiered_routes`
 - `fluxheim_cache_memory_tiers`
 - `fluxheim_cache_disk_tiers`
+- `fluxheim_cache_lock_enabled_policies`
+- `fluxheim_cache_lock_wait_timeout_max_seconds`
 - `fluxheim_cache_activity_total{tier,event}`
 - `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`
 
 The configuration gauges are aggregate, label-free, and populated from
-validated configuration when the metrics listener starts.
+validated configuration when the metrics listener starts. The local
+observability smoke verifies the route/vhost cache policy gauges, the
+request-collapsing policy count, and the maximum configured lock wait timeout.
 `fluxheim_cache_activity_total` uses only bounded labels: `tier` is `memory`,
 `disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
 `store_refusal`, `eviction`, `purge`, `pass`, or `other`. These metrics
