@@ -566,7 +566,6 @@ fn cache_purger_entry_result_label(result: &str) -> &'static str {
         "scanned" => "scanned",
         "stale" => "stale",
         "purged" => "purged",
-        "truncated" => "truncated",
         _ => "other",
     }
 }

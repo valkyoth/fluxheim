@@ -4239,6 +4239,9 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
             "hint: proxy error pages are arrays; define [[vhosts.proxy.error_pages]] before [vhosts.proxy.error_pages.web]",
         );
     }
+    if message.contains("unknown field `vhost`") {
+        return Some("hint: virtual hosts are configured with [[vhosts]], not [[vhost]]");
+    }
     None
 }
 
@@ -10488,6 +10491,27 @@ mod tests {
         assert!(message.contains(&bad_config.display().to_string()));
         assert!(message.contains("failed to parse config"));
         assert!(message.contains("define [[vhosts.proxy.error_pages]]"));
+    }
+
+    #[test]
+    fn config_parse_error_hints_singular_vhost_typo() {
+        let dir = TestDir::new("config-singular-vhost-typo");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhost]]
+            name = "bad"
+            hosts = ["bad.example"]
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"));
+        assert!(message.contains("hint: virtual hosts are configured with [[vhosts]]"));
     }
 
     #[test]
