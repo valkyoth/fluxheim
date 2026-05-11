@@ -5076,6 +5076,72 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn disk_cache_scan_uses_deterministic_hex_shards() {
+        let root = unique_test_cache_dir("deterministic-shards");
+        std::fs::create_dir_all(root.join("ab")).unwrap();
+        std::fs::create_dir_all(root.join("zz")).unwrap();
+        let object_name = format!("{}.fhc", "a".repeat(64));
+        std::fs::write(root.join("ab").join(&object_name), b"cached").unwrap();
+        std::fs::write(root.join("zz").join(&object_name), b"ignored").unwrap();
+
+        let canonical_root = root.canonicalize().unwrap();
+        let entries = super::disk_cache_entries(&canonical_root).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].path.starts_with(canonical_root.join("ab")));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(feature = "proxy", unix))]
+    #[test]
+    fn disk_cache_scan_ignores_symlinked_shards() {
+        let root = unique_test_cache_dir("symlink-scan-shard");
+        let outside = unique_test_cache_dir("symlink-scan-outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("ab")).unwrap();
+        let object_name = format!("{}.fhc", "a".repeat(64));
+        std::fs::write(outside.join(object_name), b"outside").unwrap();
+
+        let canonical_root = root.canonicalize().unwrap();
+        let entries = super::disk_cache_entries(&canonical_root).unwrap();
+
+        assert!(entries.is_empty());
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn disk_cache_temp_cleanup_uses_expected_locations() {
+        let root = unique_test_cache_dir("temp-cleanup-locations");
+        std::fs::create_dir_all(root.join("tmp")).unwrap();
+        std::fs::create_dir_all(root.join("ab")).unwrap();
+        std::fs::create_dir_all(root.join("unexpected")).unwrap();
+        let root_temp = root.join("tmp/.fluxheim-body-root.tmp");
+        let shard_temp = root.join("ab/.fluxheim-object-shard.tmp");
+        let unexpected_temp = root.join("unexpected/.fluxheim-body-unexpected.tmp");
+        std::fs::write(&root_temp, b"root").unwrap();
+        std::fs::write(&shard_temp, b"shard").unwrap();
+        std::fs::write(&unexpected_temp, b"unexpected").unwrap();
+
+        let canonical_root = root.canonicalize().unwrap();
+        let removed =
+            super::cleanup_stale_disk_cache_temp_files(&canonical_root, std::time::Duration::ZERO)
+                .unwrap();
+
+        assert_eq!(removed, 2);
+        assert!(!root_temp.exists());
+        assert!(!shard_temp.exists());
+        assert!(unexpected_temp.exists());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_disk_storage_rebuilds_purge_index_from_persistent_objects() {
         use pingora::cache::Storage;
 
