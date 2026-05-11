@@ -561,6 +561,8 @@ Current implementation status:
     Prometheus also reports cache-lock-enabled policy count so request
     collapsing coverage is visible without high-cardinality labels. Cache admin
     status responses expose per-policy cache-lock wait timeouts, and
+    Prometheus reports the maximum configured cache-lock wait timeout as a
+    low-cardinality gauge. The
     policy-level pass/bypass/stale counters show configured scoped cache
     decisions without exposing request-specific labels.
 

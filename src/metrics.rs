@@ -13,6 +13,7 @@ static CACHE_TIERED_ROUTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -36,6 +37,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_memory_tiers()?;
     cache_disk_tiers()?;
     cache_lock_enabled_policies()?;
+    cache_lock_wait_timeout_max_seconds()?;
     cache_activity_total()?;
     cache_activity_scope_total()?;
     cache_purges_total()?;
@@ -57,6 +59,10 @@ pub fn record_config(config: &crate::config::Config) {
     set_gauge(cache_memory_tiers(), stats.memory_tiers);
     set_gauge(cache_disk_tiers(), stats.disk_tiers);
     set_gauge(cache_lock_enabled_policies(), stats.lock_enabled_policies);
+    set_gauge(
+        cache_lock_wait_timeout_max_seconds(),
+        stats.lock_wait_timeout_max_secs,
+    );
 }
 
 pub fn record_proxy_outcome(vhost: &str, method: &str, status: Option<u16>, error: bool) {
@@ -154,6 +160,7 @@ struct CacheConfigStats {
     memory_tiers: u64,
     disk_tiers: u64,
     lock_enabled_policies: u64,
+    lock_wait_timeout_max_secs: u64,
 }
 
 fn cache_config_stats(config: &crate::config::Config) -> CacheConfigStats {
@@ -198,6 +205,9 @@ fn accumulate_cache_policy(
     }
     if (cache.memory.enabled || cache.disk.enabled) && cache.lock.enabled {
         stats.lock_enabled_policies = stats.lock_enabled_policies.saturating_add(1);
+        stats.lock_wait_timeout_max_secs = stats
+            .lock_wait_timeout_max_secs
+            .max(cache.lock.wait_timeout_secs);
     }
     if cache.memory.enabled && cache.disk.enabled {
         if vhost_scope {
@@ -320,6 +330,14 @@ fn cache_lock_enabled_policies() -> Result<&'static IntGauge, prometheus::Error>
         &CACHE_LOCK_ENABLED_POLICIES,
         "fluxheim_cache_lock_enabled_policies",
         "Configured Fluxheim cache policies with request-collapsing locks enabled and at least one storage tier.",
+    )
+}
+
+fn cache_lock_wait_timeout_max_seconds() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS,
+        "fluxheim_cache_lock_wait_timeout_max_seconds",
+        "Maximum configured Fluxheim cache request-collapsing wait timeout across lock-enabled cache policies.",
     )
 }
 
@@ -679,6 +697,7 @@ mod tests {
         assert!(output.contains("fluxheim_cache_memory_tiers 2"));
         assert!(output.contains("fluxheim_cache_disk_tiers 1"));
         assert!(output.contains("fluxheim_cache_lock_enabled_policies 2"));
+        assert!(output.contains("fluxheim_cache_lock_wait_timeout_max_seconds 30"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
     }
@@ -829,6 +848,7 @@ mod tests {
         assert_eq!(stats.memory_tiers, 2);
         assert_eq!(stats.disk_tiers, 1);
         assert_eq!(stats.lock_enabled_policies, 2);
+        assert_eq!(stats.lock_wait_timeout_max_secs, 30);
     }
 
     #[test]
