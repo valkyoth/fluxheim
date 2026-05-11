@@ -495,6 +495,13 @@ pub struct CacheKeyPreview {
 }
 
 #[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheObjectLookup {
+    pub preview: CacheKeyPreview,
+    pub objects: Vec<crate::cache::CacheObjectMetadata>,
+}
+
+#[cfg(feature = "cache")]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum CacheKeyPreviewScope {
     Vhost,
@@ -830,6 +837,59 @@ impl ProxySnapshot {
                 user_tag: None,
             },
         }
+    }
+
+    #[cfg(feature = "cache")]
+    pub fn pingora_image_cache_object_lookup_for_request_header(
+        &self,
+        request: &RequestHeader,
+    ) -> pingora::Result<CacheObjectLookup> {
+        let preview = self.pingora_image_cache_key_preview_for_request_header(request);
+        if !preview.eligible {
+            return Ok(CacheObjectLookup {
+                preview,
+                objects: Vec::new(),
+            });
+        }
+
+        let host = request_host_header(request);
+        let vhost_index = self.state.vhost_index(host);
+        let vhost = self.state.vhost(vhost_index);
+        let route_index = vhost.route_index(request.uri.path());
+        let route_cache = route_index.and_then(|index| vhost.route(index).cache.as_ref());
+        let Some(key) = self.state.pingora_image_cache_key_for_request_header(
+            request,
+            vhost_index,
+            route_index,
+        ) else {
+            return Ok(CacheObjectLookup {
+                preview,
+                objects: Vec::new(),
+            });
+        };
+
+        let memory_storage = route_cache
+            .and_then(|cache| cache.pingora_memory_storage)
+            .or(vhost
+                .pingora_memory_storage
+                .filter(|_| route_cache.is_none()));
+        let disk_storage = route_cache
+            .and_then(|cache| cache.pingora_disk_storage)
+            .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()));
+
+        let mut objects = Vec::new();
+        if let Some(storage) = memory_storage
+            && let Some(metadata) = storage.inspect_cache_key(&key)?
+        {
+            objects.push(metadata);
+        }
+        if let Some(storage) = disk_storage
+            && let Some(metadata) = storage.inspect_cache_key(&key)?
+        {
+            objects.push(metadata);
+        }
+
+        Ok(CacheObjectLookup { preview, objects })
     }
 
     #[cfg(feature = "cache")]
@@ -5777,6 +5837,80 @@ mod tests {
             Some("method POST is not allowed by selected cache policy")
         );
         assert_eq!(preview.primary_key, None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_object_lookup_reports_memory_metadata() {
+        use pingora::cache::Storage;
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let storage = vhost.pingora_memory_storage.unwrap();
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+        let key = snapshot
+            .state
+            .pingora_image_cache_key_for_request_header(&request, vhost_index, None)
+            .unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "asset:logo")
+            .unwrap();
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let lookup = snapshot
+            .pingora_image_cache_object_lookup_for_request_header(&request)
+            .unwrap();
+
+        assert!(lookup.preview.eligible);
+        assert_eq!(lookup.objects.len(), 1);
+        let object = &lookup.objects[0];
+        assert_eq!(object.tier, crate::cache::CacheObjectTier::Memory);
+        assert_eq!(object.status, 200);
+        assert!(object.fresh);
+        assert_eq!(object.body_bytes, 4);
+        assert!(object.weight_bytes >= 4);
+        assert_eq!(object.cache_tags, vec!["asset:logo"]);
+        assert!(
+            object
+                .header_names
+                .iter()
+                .any(|name| name == "cache-control")
+        );
+        assert!(object.created_unix_secs.is_some());
+        assert!(object.fresh_until_unix_secs.is_some());
     }
 
     #[cfg(feature = "cache")]

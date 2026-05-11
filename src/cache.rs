@@ -139,6 +139,42 @@ pub struct TieredCacheStats {
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheObjectMetadata {
+    pub tier: CacheObjectTier,
+    pub status: u16,
+    pub fresh: bool,
+    pub body_bytes: u64,
+    pub weight_bytes: u64,
+    pub created_unix_secs: Option<u64>,
+    pub updated_unix_secs: Option<u64>,
+    pub fresh_until_unix_secs: Option<u64>,
+    pub age_secs: u64,
+    pub fresh_ttl_secs: u64,
+    pub stale_while_revalidate_secs: u32,
+    pub stale_if_error_secs: u32,
+    pub cache_tags: Vec<String>,
+    pub header_names: Vec<String>,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CacheObjectTier {
+    Memory,
+    Disk,
+}
+
+#[cfg(feature = "proxy")]
+impl CacheObjectTier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Memory => "memory",
+            Self::Disk => "disk",
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct CacheActivityStats {
     pub hits: u64,
@@ -1048,6 +1084,16 @@ impl PingoraMemoryStorage {
         self.inner.get(&key.combined())
     }
 
+    pub fn inspect_cache_key(
+        &self,
+        key: &pingora::cache::CacheKey,
+    ) -> pingora::Result<Option<CacheObjectMetadata>> {
+        let Some(object) = self.lookup_object(key) else {
+            return Ok(None);
+        };
+        cache_object_metadata(CacheObjectTier::Memory, &object)
+    }
+
     fn put_object(
         &self,
         store_key: PingoraStoreKey,
@@ -1567,6 +1613,16 @@ impl PingoraDiskStorage {
         key: &pingora::cache::CacheKey,
     ) -> pingora::Result<Option<PingoraStoredObject>> {
         self.lookup_object_by_combined(&key.combined())
+    }
+
+    pub fn inspect_cache_key(
+        &self,
+        key: &pingora::cache::CacheKey,
+    ) -> pingora::Result<Option<CacheObjectMetadata>> {
+        let Some(object) = self.lookup_object(key)? else {
+            return Ok(None);
+        };
+        cache_object_metadata(CacheObjectTier::Disk, &object)
     }
 
     fn lookup_object_by_combined(
@@ -2247,6 +2303,50 @@ fn pingora_object_weight(internal_meta: &[u8], response_header: &[u8], body: &[u
     (internal_meta.len() as u64)
         .saturating_add(response_header.len() as u64)
         .saturating_add(body.len() as u64)
+}
+
+#[cfg(feature = "proxy")]
+fn cache_object_metadata(
+    tier: CacheObjectTier,
+    object: &PingoraStoredObject,
+) -> pingora::Result<Option<CacheObjectMetadata>> {
+    let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
+    let now = std::time::SystemTime::now();
+    let mut header_names = meta
+        .headers()
+        .keys()
+        .map(|name| name.as_str().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    header_names.sort();
+    header_names.dedup();
+
+    Ok(Some(CacheObjectMetadata {
+        tier,
+        status: meta.response_header().status.as_u16(),
+        fresh: meta.is_fresh(now),
+        body_bytes: object.body.len() as u64,
+        weight_bytes: pingora_object_weight(
+            &object.internal_meta,
+            &object.response_header,
+            &object.body,
+        ),
+        created_unix_secs: system_time_unix_secs(meta.created()),
+        updated_unix_secs: system_time_unix_secs(meta.updated()),
+        fresh_until_unix_secs: system_time_unix_secs(meta.fresh_until()),
+        age_secs: meta.age().as_secs(),
+        fresh_ttl_secs: meta.fresh_sec(),
+        stale_while_revalidate_secs: meta.stale_while_revalidate_sec(),
+        stale_if_error_secs: meta.stale_if_error_sec(),
+        cache_tags: object.cache_tags.clone(),
+        header_names,
+    }))
+}
+
+#[cfg(feature = "proxy")]
+fn system_time_unix_secs(time: std::time::SystemTime) -> Option<u64> {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
 }
 
 #[cfg(feature = "proxy")]

@@ -564,7 +564,9 @@ the cache phase has an explicit no-cache reason. Leave it unset unless you are
 actively debugging cache policy.
 For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key
-without contacting the upstream.
+without contacting the upstream. `fluxheim cache-lookup --host example.com
+--path /assets/app.js` also checks configured cache tiers and prints safe object
+metadata without dumping bodies or header values.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,
 for example to strip `Set-Cookie` from known static asset responses.

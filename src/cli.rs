@@ -174,6 +174,25 @@ pub enum CliCommand {
         #[arg(long)]
         query: Option<String>,
     },
+
+    /// Inspect cached object metadata for one request without dumping response bodies.
+    CacheLookup {
+        /// Host header to route and key with. Defaults to the configured default vhost host.
+        #[arg(long)]
+        host: Option<String>,
+
+        /// HTTP method to look up.
+        #[arg(long, default_value = "GET")]
+        method: String,
+
+        /// Absolute request path to look up. May include a query string.
+        #[arg(long)]
+        path: String,
+
+        /// Query string to look up when --path does not already contain one.
+        #[arg(long)]
+        query: Option<String>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -371,6 +390,18 @@ fn run_command(
             path: path.clone(),
             query: query.clone(),
         }),
+        CliCommand::CacheLookup {
+            host,
+            method,
+            path,
+            query,
+        } => run_cache_lookup_command(CacheKeyOptions {
+            config_path,
+            host: host.clone(),
+            method: method.clone(),
+            path: path.clone(),
+            query: query.clone(),
+        }),
     }
 }
 
@@ -497,24 +528,7 @@ fn run_cache_warm_command(
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = Config::load(options.config_path)?;
-    config.validate()?;
-
-    let host = match options.host {
-        Some(host) => {
-            validate_cache_warm_host(&host)?;
-            host
-        }
-        None => cache_warm_default_host(&config)
-            .ok_or("cache-key requires --host when no default vhost host is configured")?,
-    };
-    let uri = cache_key_uri(&options.path, options.query.as_deref())?;
-    validate_cache_key_method(&options.method)?;
-
-    let mut request =
-        pingora::http::RequestHeader::build(options.method.as_str(), uri.as_bytes(), None)?;
-    request.insert_header("host", host.as_str())?;
-
+    let (config, request) = cache_key_command_request(&options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let preview = proxy
         .snapshot()
@@ -552,6 +566,57 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     Ok(())
 }
 
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn run_cache_lookup_command(
+    options: CacheKeyOptions<'_>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let (config, request) = cache_key_command_request(&options)?;
+    let proxy = crate::proxy::FluxProxy::from_config(&config)?;
+    let lookup = proxy
+        .snapshot()
+        .pingora_image_cache_object_lookup_for_request_header(&request)?;
+
+    println!("cache object lookup:");
+    println!("vhost: {}", lookup.preview.vhost);
+    println!("scope: {}", lookup.preview.scope.as_str());
+    if let Some(route) = lookup.preview.route.as_deref() {
+        println!("route: {route}");
+    }
+    println!("eligible: {}", lookup.preview.eligible);
+    if let Some(reason) = lookup.preview.reason.as_deref() {
+        println!("reason: {reason}");
+    }
+    if let Some(combined_hash) = lookup.preview.combined_hash.as_deref() {
+        println!("combined_hash: {combined_hash}");
+    }
+    if let Some(user_tag) = lookup.preview.user_tag.as_deref() {
+        println!("user_tag: {user_tag}");
+    }
+    println!("objects: {}", lookup.objects.len());
+    for object in lookup.objects {
+        println!("object:");
+        println!("  tier: {}", object.tier.as_str());
+        println!("  status: {}", object.status);
+        println!("  fresh: {}", object.fresh);
+        println!("  body_bytes: {}", object.body_bytes);
+        println!("  weight_bytes: {}", object.weight_bytes);
+        print_optional_unix("  created_unix_secs", object.created_unix_secs);
+        print_optional_unix("  updated_unix_secs", object.updated_unix_secs);
+        print_optional_unix("  fresh_until_unix_secs", object.fresh_until_unix_secs);
+        println!("  age_secs: {}", object.age_secs);
+        println!("  fresh_ttl_secs: {}", object.fresh_ttl_secs);
+        println!(
+            "  stale_while_revalidate_secs: {}",
+            object.stale_while_revalidate_secs
+        );
+        println!("  stale_if_error_secs: {}", object.stale_if_error_secs);
+        println!("  cache_tags: {}", object.cache_tags.join(","));
+        println!("  header_names: {}", object.header_names.join(","));
+    }
+
+    Ok(())
+}
+
 #[cfg(not(all(feature = "cache", feature = "proxy")))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let CacheKeyOptions {
@@ -563,6 +628,53 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     } = options;
     let _ = (config_path, host, method, path, query);
     Err("cache-key requires the proxy and cache features".into())
+}
+
+#[cfg(not(all(feature = "cache", feature = "proxy")))]
+fn run_cache_lookup_command(
+    options: CacheKeyOptions<'_>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let CacheKeyOptions {
+        config_path,
+        host,
+        method,
+        path,
+        query,
+    } = options;
+    let _ = (config_path, host, method, path, query);
+    Err("cache-lookup requires the proxy and cache features".into())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn cache_key_command_request(
+    options: &CacheKeyOptions<'_>,
+) -> Result<(Config, pingora::http::RequestHeader), Box<dyn Error + Send + Sync>> {
+    let config = Config::load(options.config_path)?;
+    config.validate()?;
+
+    let host = match options.host.as_deref() {
+        Some(host) => {
+            validate_cache_warm_host(host)?;
+            host.to_owned()
+        }
+        None => cache_warm_default_host(&config)
+            .ok_or("cache-key requires --host when no default vhost host is configured")?,
+    };
+    let uri = cache_key_uri(&options.path, options.query.as_deref())?;
+    validate_cache_key_method(&options.method)?;
+
+    let mut request =
+        pingora::http::RequestHeader::build(options.method.as_str(), uri.as_bytes(), None)?;
+    request.insert_header("host", host.as_str())?;
+    Ok((config, request))
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn print_optional_unix(label: &str, value: Option<u64>) {
+    match value {
+        Some(value) => println!("{label}: {value}"),
+        None => println!("{label}: unavailable"),
+    }
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
@@ -1804,6 +1916,14 @@ mod tests {
     #[test]
     fn cache_key_requires_cache_feature() {
         let error = run_from_args(["fluxheim", "cache-key", "--path", "/"]).unwrap_err();
+
+        assert!(error.to_string().contains("cache feature"));
+    }
+
+    #[cfg(not(feature = "cache"))]
+    #[test]
+    fn cache_lookup_requires_cache_feature() {
+        let error = run_from_args(["fluxheim", "cache-lookup", "--path", "/"]).unwrap_err();
 
         assert!(error.to_string().contains("cache feature"));
     }
