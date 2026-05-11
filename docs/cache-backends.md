@@ -460,6 +460,14 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-key \
 
 fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
   --host repoheim.eu \
+  --method HEAD \
+  --path /assets/img/logo.png \
+  --expect-ineligible \
+  --expect-reason "method HEAD currently bypasses proxy cache storage" \
+  --expect-objects 0
+
+fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
+  --host repoheim.eu \
   --header "Accept-Language: de" \
   --path /assets/img/logo.png \
   --query v=1 \
@@ -510,6 +518,8 @@ flags fail when no matching object has an allowed stored body size,
 selected cache policy does not match the required stampede-protection or tier
 layout, `--expect-scope`, `--expect-vhost`, and `--expect-route` fail when the
 selected cache policy is not the intended scope, vhost, or route,
+`--expect-objects` fails when the lookup does not find exactly the requested
+number of matching objects across enabled tiers,
 `--expect-ineligible` and `--expect-reason` fail when a negative cache-policy
 decision is not the expected bounded reason,
 `--expect-serve-stale-if-error` and `--expect-serve-stale-while-revalidate`

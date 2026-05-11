@@ -583,7 +583,7 @@ inspection, such as `Accept-Language` or `Accept-Encoding`; use `--host` for
 the Host header. `cache-lookup` can fail closed for deploy scripts with
 `--require-object`, `--expect-tier memory|disk`, `--expect-status`,
 `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
-`--expect-header-name`, `--expect-cache-lock-enabled`,
+`--expect-header-name`, `--expect-objects`, `--expect-cache-lock-enabled`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
 `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,
 `--expect-route`, `--expect-ineligible`, `--expect-reason`,

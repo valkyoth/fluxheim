@@ -290,7 +290,7 @@ stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
 `Vary` variants, disk hits after restart, and debug bypass reasons.
 `cache-lookup` also supports deploy-script assertions for object
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
-cache tags, stored header names, cache-lock/tier layout, stale-serving
+cache tags, stored header names, exact object count, cache-lock/tier layout, stale-serving
 eligibility, selected cache scope/vhost/route, negative policy reasons,
 purge-index reachability, and fresh/stale/expired state. Remaining `1.2`
 hardening focuses on proxy revalidation edge cases, large-object

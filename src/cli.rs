@@ -277,6 +277,10 @@ pub enum CliCommand {
         #[arg(long)]
         require_object: bool,
 
+        /// Required number of matching cached objects across enabled tiers.
+        #[arg(long = "expect-objects", value_name = "COUNT")]
+        expect_objects: Option<usize>,
+
         /// Require the selected request to be ineligible for caching.
         #[arg(long)]
         expect_ineligible: bool,
@@ -598,6 +602,7 @@ fn run_command(
             path,
             query,
             require_object,
+            expect_objects,
             expect_ineligible,
             expect_reason,
             expect_freshness_states,
@@ -625,6 +630,7 @@ fn run_command(
             path: path.clone(),
             query: query.clone(),
             require_object: *require_object,
+            expect_objects: *expect_objects,
             expect_ineligible: *expect_ineligible,
             expect_reason: expect_reason.clone(),
             expect_freshness_states: expect_freshness_states.clone(),
@@ -696,6 +702,7 @@ struct CacheLookupOptions<'a> {
     path: String,
     query: Option<String>,
     require_object: bool,
+    expect_objects: Option<usize>,
     expect_ineligible: bool,
     expect_reason: Option<String>,
     expect_freshness_states: Vec<String>,
@@ -1172,6 +1179,7 @@ fn run_cache_lookup_command(
     validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
     validate_cache_lookup_expected_fresh_ttls(&options.expect_fresh_ttl_secs)?;
     validate_cache_lookup_expected_body_bytes(&options.expect_body_bytes)?;
+    validate_cache_lookup_expected_objects(options.expect_objects)?;
     validate_cache_lookup_expected_storage_tiers(options.expect_storage_tiers)?;
     let (config, request) = cache_key_command_request(&cache_key_options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
@@ -1187,6 +1195,7 @@ fn run_cache_lookup_command(
         expected_body_bytes: &options.expect_body_bytes,
         expected_header_names: &expected_header_names,
         expected_cache_tags: &expected_cache_tags,
+        expected_objects: options.expect_objects,
         expect_purge_indexed: options.expect_purge_indexed,
         expect_ineligible: options.expect_ineligible,
         expected_reason: expected_reason.as_deref(),
@@ -1361,6 +1370,7 @@ struct CacheLookupExpectations<'a> {
     expected_body_bytes: &'a [u64],
     expected_header_names: &'a [String],
     expected_cache_tags: &'a [String],
+    expected_objects: Option<usize>,
     expect_purge_indexed: bool,
     expect_ineligible: bool,
     expected_reason: Option<&'a str>,
@@ -1389,6 +1399,7 @@ fn validate_cache_lookup_expectations(
         expected_body_bytes,
         expected_header_names,
         expected_cache_tags,
+        expected_objects,
         expect_purge_indexed,
         expect_ineligible,
         expected_reason,
@@ -1428,6 +1439,15 @@ fn validate_cache_lookup_expectations(
 
     if *require_object && lookup.objects.is_empty() {
         return Err("cache-lookup expected at least one cached object, found none".into());
+    }
+    if let Some(expected_objects) = expected_objects
+        && lookup.objects.len() != *expected_objects
+    {
+        return Err(format!(
+            "cache-lookup expected {expected_objects} cached objects, found {}",
+            lookup.objects.len()
+        )
+        .into());
     }
     if !expected_states.is_empty() {
         let matched = lookup
@@ -1710,6 +1730,20 @@ fn validate_cache_lookup_expected_body_bytes(
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_lookup_expected_objects(
+    objects: Option<usize>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Some(objects) = objects
+        && objects > 2
+    {
+        return Err(
+            format!("cache-lookup --expect-objects must be 0, 1, or 2; got {objects}").into(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_lookup_expected_storage_tiers(
     storage_tiers: Option<u8>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1834,6 +1868,7 @@ fn run_cache_lookup_command(
         path,
         query,
         require_object,
+        expect_objects,
         expect_ineligible,
         expect_reason,
         expect_freshness_states,
@@ -1857,6 +1892,7 @@ fn run_cache_lookup_command(
     let _ = (config_path, host, headers, method, path, query);
     let _ = (
         require_object,
+        expect_objects,
         expect_ineligible,
         expect_reason,
         expect_freshness_states,
@@ -3568,6 +3604,7 @@ mod tests {
             expected_body_bytes: no_ttls,
             expected_header_names: no_strings,
             expected_cache_tags: no_strings,
+            expected_objects: None,
             expect_purge_indexed: false,
             expect_ineligible: false,
             expected_reason: None,
@@ -3732,6 +3769,35 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("at most 32")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expected_objects: Some(1),
+                    ..default_expectations
+                }
+            )
+            .is_ok()
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expected_objects: Some(0),
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected 0 cached objects, found 1")
+        );
+        assert!(super::validate_cache_lookup_expected_objects(Some(2)).is_ok());
+        assert!(
+            super::validate_cache_lookup_expected_objects(Some(3))
+                .unwrap_err()
+                .to_string()
+                .contains("must be 0, 1, or 2")
         );
         assert_eq!(
             super::parse_cache_lookup_header_names(&[" ETag ".to_owned()]).unwrap(),
