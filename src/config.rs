@@ -4252,11 +4252,11 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
             "hint: routes select their action by defining one nested table: [vhosts.routes.proxy], [vhosts.routes.web], or [vhosts.routes.redirect]; do not set action = \"proxy\"",
         );
     }
-    if message.contains("vhosts.routes.proxy")
+    if message.contains("vhosts.routes.")
         && message.contains("invalid type: map, expected a sequence")
     {
         return Some(
-            "hint: start each route with [[vhosts.routes]] before nested route tables such as [vhosts.routes.proxy]",
+            "hint: start each route with [[vhosts.routes]] before nested route tables such as [vhosts.routes.proxy] or [vhosts.routes.web]",
         );
     }
     if message.contains("invalid type: map, expected a sequence") {
@@ -4264,9 +4264,9 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
             "hint: start each virtual host with [[vhosts]] before nested tables such as [vhosts.proxy]",
         );
     }
-    if message.contains("[[vhosts.routes.proxy]]") {
+    if message.contains("[[vhosts.routes.") {
         return Some(
-            "hint: route proxy config uses [vhosts.routes.proxy], not [[vhosts.routes.proxy]]; proxy is a nested table inside one [[vhosts.routes]] block",
+            "hint: route action/config tables use single-bracket tables such as [vhosts.routes.proxy], not arrays such as [[vhosts.routes.proxy]]",
         );
     }
     if message.contains("[[vhosts.proxy]]") {
@@ -10689,6 +10689,33 @@ mod tests {
     }
 
     #[test]
+    fn config_parse_error_hints_route_web_table_before_array() {
+        let dir = TestDir::new("config-route-web-table-before-array");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [vhosts.routes.web]
+            root = "/srv/sites/site"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("start each route with [[vhosts.routes]]"),
+            "{message}"
+        );
+    }
+
+    #[test]
     fn config_parse_error_hints_route_proxy_array_table() {
         let dir = TestDir::new("config-route-proxy-array-table");
         let config = dir.child("fluxheim.toml");
@@ -10714,7 +10741,38 @@ mod tests {
 
         assert!(message.contains("failed to parse config"), "{message}");
         assert!(
-            message.contains("uses [vhosts.routes.proxy], not [[vhosts.routes.proxy]]"),
+            message.contains("route action/config tables use single-bracket tables"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn config_parse_error_hints_route_web_array_table() {
+        let dir = TestDir::new("config-route-web-array-table");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [[vhosts.routes]]
+            name = "assets"
+            path_prefix = "/assets/"
+
+            [[vhosts.routes.web]]
+            root = "/srv/sites/site/assets"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("route action/config tables use single-bracket tables"),
             "{message}"
         );
     }
