@@ -330,6 +330,7 @@ fn cache_tier_label(tier: &str) -> &'static str {
     match tier {
         "memory" => "memory",
         "disk" => "disk",
+        "policy" => "policy",
         _ => "other",
     }
 }
@@ -342,6 +343,7 @@ fn cache_event_label(event: &str) -> &'static str {
         "store_refusal" => "store_refusal",
         "eviction" => "eviction",
         "purge" => "purge",
+        "pass" => "pass",
         _ => "other",
     }
 }
@@ -413,6 +415,7 @@ mod tests {
 
         record_cache_activity("memory", "hit");
         record_cache_activity("disk", "store_refusal");
+        record_cache_activity("policy", "pass");
         record_cache_activity("attacker-tier", "attacker-event");
 
         let metric_families = prometheus::gather();
@@ -425,6 +428,7 @@ mod tests {
         assert!(
             output.contains(r#"fluxheim_cache_activity_total{event="store_refusal",tier="disk"}"#)
         );
+        assert!(output.contains(r#"fluxheim_cache_activity_total{event="pass",tier="policy"}"#));
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="other",tier="other"}"#));
         assert!(!output.contains("attacker-tier"));
         assert!(!output.contains("attacker-event"));

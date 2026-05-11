@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
   cache path for repeated uncacheable responses with the same cache key.
 - Cache debug headers now report pass-cache policy bypasses as `BYPASS` with
   reason `cache-pass` when `status_reason_header` is enabled.
+- Prometheus cache activity metrics now include bounded policy pass decisions
+  as `fluxheim_cache_activity_total{tier="policy",event="pass"}`.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside

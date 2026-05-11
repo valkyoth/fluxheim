@@ -190,6 +190,9 @@ internal cache implementation.
   pressure, whether object-size budgets are realistic, and whether indexed
   scope, prefix, and wildcard purges have useful coverage or are near the
   bounded index cap.
+  Prometheus `fluxheim_cache_activity_total{tier="policy",event="pass"}`
+  records opt-in pass-cache bypass decisions without cache keys, hosts, or
+  paths.
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as

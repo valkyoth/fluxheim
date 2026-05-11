@@ -97,11 +97,12 @@ Current cache baseline:
 The configuration gauges are aggregate, label-free, and populated from
 validated configuration when the metrics listener starts.
 `fluxheim_cache_activity_total` uses only bounded labels: `tier` is `memory`,
-`disk`, or `other`, and `event` is `hit`, `miss`, `store`, `store_refusal`,
-`eviction`, `purge`, or `other`. These metrics intentionally avoid raw hosts,
-paths, queries, cache keys, and purge identities. Per-vhost and per-route cache
-runtime metrics should only be added with configured-name labels and the same
-bounded concepts used by admin JSON and OpenTelemetry attributes.
+`disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
+`store_refusal`, `eviction`, `purge`, `pass`, or `other`. These metrics
+intentionally avoid raw hosts, paths, queries, cache keys, and purge identities.
+Per-vhost and per-route cache runtime metrics should only be added with
+configured-name labels and the same bounded concepts used by admin JSON and
+OpenTelemetry attributes.
 
 Latency plan:
 

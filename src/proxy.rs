@@ -2429,6 +2429,8 @@ impl ProxyHttp for FluxProxy {
             return Ok(());
         };
         if cache_pass_should_bypass(cache_pass_counter(), cache_config, &cache_key.combined()) {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_cache_activity("policy", "pass");
             ctx.cache_status_override = Some(CacheStatusOverride {
                 status: "BYPASS",
                 reason: Some(CACHE_PASS_REASON),
