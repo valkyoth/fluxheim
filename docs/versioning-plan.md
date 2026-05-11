@@ -358,12 +358,20 @@ Stable scope:
   repository avatar/assets paths, where only one proxy route should use a cache
   tier while the rest of the vhost remains uncached.
 - Cache completion work promoted into 1.2:
+  - `1.2` is the stable cache-completion release. Finish the remaining cache
+    safety and operations concerns here before moving to the next feature line:
+    the documented proxied `304 Not Modified` metadata merge edge, very large
+    disk-cache loader/purger pacing and visibility, cache-debug/release-gate
+    coverage, and production validation for stampede protection. Larger cache
+    architecture extensions are split into focused `1.2.x` releases below so
+    each follow-up has one clear job;
   - disk-only cache admission now streams body chunks into a bounded temp file
     under the cache root before atomically committing the final object, so the
     disk tier no longer buffers the full response body in memory during
     admission. Startup also cleans stale Fluxheim-owned temp files after a
     conservative age threshold while preserving fresh active-writer temps.
-    Reader-visible partial writes remain planned;
+    Reader-visible partial writes are not a 1.2 stable blocker unless
+    production testing promotes them into the optional `1.2.4` cache follow-up;
   - broader persistent cache index coverage for older disk object formats and
     future metadata migrations; new v5 disk objects rebuild the bounded purge
     index across process restarts with combined-key, primary-key, user-tag,
@@ -412,19 +420,20 @@ Stable scope:
   - full validator-based upstream revalidation edge-case coverage for proxied
     cache responses, including explicit behavior when origins change `Vary`,
     `ETag`, `Last-Modified`, or freshness headers during revalidation;
-  - byte-range cache-fill strategy for large objects. The stable target is a
-    safe equivalent to slice/range caching: bounded slice size, range-aware
-    cache keys, 200/206 admission rules, `If-Range` handling, and tests proving
-    large initial fills do not block unrelated cache hits or exceed configured
-    memory budgets;
+  - large-object range and slice behavior stays in the stable-cache review for
+    1.2 only as a safety concern: current behavior must be explicit, bounded,
+    and tested. A larger reader-visible partial write or slice-fill design
+    should use the proper Pingora cache path and move to the optional cache
+    follow-up slot if production testing proves it is required before 1.3;
   - cache manager/loader hardening beyond the current startup purge-index
     rebuild and stale purger: configurable incremental loader/purger pacing,
     storage-pressure cleanup based on LRU/last-access metadata where Pingora
     exposes it, and operator-facing logs/metrics when cleanup falls behind;
   - invalidation maturity beyond exact purge and wildcard/prefix/tag purge:
-    evaluate a safe Varnish-style ban concept for stored metadata predicates,
-    but keep it declarative, bounded, admin-protected, and non-programmable in
-    1.2;
+    evaluate whether stored metadata predicates are needed for the 1.2 stable
+    baseline. If they are not required for production safety, keep them out of
+    1.2 and reserve any Varnish-style policy expressiveness for the later Wasm
+    cache hook release;
   - cache object inspection and debug tooling for production incidents,
     including object metadata lookup, freshness state, stored headers,
     purge-index membership, and dry-run invalidation output without dumping
@@ -674,29 +683,30 @@ Stable scope for declaring the cache pack complete:
 - `scripts/stable_release_gate.sh` runs the promoted proxy-cache and local
   observability smoke suites before a `1.2` stable release.
 
-Beta scope:
+Focused cache-only follow-up releases after 1.2:
 
-- Partial streaming admission and/or slice-based range fill for large objects,
-  implemented in the proper Pingora cache path rather than as an unsafe
-  one-off buffering shortcut.
-- Optional HEAD-to-GET cache-key conversion with safe body handling. The `1.2`
-  stable behavior intentionally bypasses HEAD cache storage and exposes the
-  bounded `method-head` cache-status reason so HEAD probes cannot poison cached
-  GET bodies.
-- Distributed cache metadata or peer-fill support, if production deployments
-  need multi-node cache coherence.
-- Cache import/export/debug tooling for inspecting individual cached objects,
-  metadata, TTL, headers, and purge-index entries.
-- Varnish-style ban predicates for metadata-based invalidation, if they can be
-  made bounded, auditable, and admin-protected.
-- Optional slab/bin disk storage backend for large, high-churn caches:
-  pre-allocate large data files, store objects in fixed-size or classed extents,
-  maintain a durable free map and object index, support crash recovery and
-  compaction, and expose fragmentation/space-amplification metrics. This should
-  remain an advanced backend; the filesystem object backend stays the portable
-  default until slab storage proves safer and faster in production tests.
-- Programmable cache policy hooks remain a later Wasm design problem; the
-  default cache model should stay declarative and safe.
+- `1.2.1`: optional slab/bin disk storage backend for large, high-churn caches.
+  This release has one job: evaluate and, if safe, add a storage-bin backend
+  that pre-allocates large data files, stores objects in fixed-size or classed
+  extents, maintains a durable free map and object index, supports crash
+  recovery and compaction, and exposes fragmentation/space-amplification
+  metrics. The filesystem object backend stays the portable default until slab
+  storage proves safer and faster in production tests.
+- `1.2.2`: Wasm cache policy hooks. Keep the default cache model declarative,
+  but add constrained Rust/Wasm hooks inspired by VCL for lookup/admission,
+  bounded cache-key components, response `put_object` policy, safe header
+  mutation, TTL override, tag assignment, and later metadata invalidation
+  decisions.
+- `1.2.3`: distributed cache metadata and peer-fill. This release has one job:
+  decide and implement the first safe multi-node cache coherence model for
+  clustered deployments, including peer-fill limits, failure behavior, metrics,
+  and clear isolation between vhosts/routes.
+- `1.2.4`: reserved only if production 1.2 testing exposes one more
+  cache-specific gap that should close before the 1.3 line starts. Candidate
+  work includes proper Pingora-path partial streaming/slice range fill,
+  HEAD-to-GET cache-key conversion with safe body handling, cache
+  import/export workflows for mirrors, or bounded metadata ban predicates. If
+  no such blocker appears, skip `1.2.4` and move to `1.3`.
 
 Exit criteria:
 
@@ -1337,12 +1347,18 @@ git tag -a v1.0.0 -m "Fluxheim 1.0.0"
 git push origin v1.0.0
 ```
 
-Patch releases should contain fixes only:
+Patch releases should normally contain fixes only. The `1.2.x` cache line is
+the exception while the cache server is being completed as a focused sequence:
 
 - `v0.5.1`: security or bug fixes for the basic-sites preview.
 - `v1.0.1`: security or bug fixes for stable core.
 - `v1.1.1`: fixes for TLS policy hardening.
-- `v1.2.1`: fixes for operations pack.
+- `v1.2.1`: focused slab/bin cache storage backend, if it proves safe enough
+  after `1.2`.
+- `v1.2.2`: focused Wasm cache policy hook release.
+- `v1.2.3`: focused distributed cache metadata and peer-fill release.
+- `v1.2.4`: optional cache-only follow-up if production testing finds one more
+  cache blocker before `1.3`.
 - `v1.3.1`: fixes for load balancer.
 
 ## Changelog Shape
