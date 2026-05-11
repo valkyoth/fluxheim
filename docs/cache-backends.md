@@ -340,6 +340,29 @@ curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-wildcard?vhost=repoheim.eu&pattern=/assets/*.png&limit=500"
 ```
 
+Add `route=<route-name>` when the cache policy lives on a route instead of the
+whole vhost:
+
+```sh
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-index?vhost=repoheim.eu&route=assets&limit=500"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-prefix?vhost=repoheim.eu&route=assets&path_prefix=/assets/&limit=500"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-tag?vhost=repoheim.eu&route=assets&cache_tag=release:2026-05-11&limit=500"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-stale?vhost=repoheim.eu&route=assets&limit=500&dry_run=true"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-wildcard?vhost=repoheim.eu&route=assets&pattern=/assets/*.png&limit=500"
+```
+
+The same route can be supplied through `x-fluxheim-cache-route` for automation
+that keeps control parameters in headers instead of URLs.
+
 Example cache warm after a release deploy:
 
 ```sh
