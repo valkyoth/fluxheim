@@ -183,7 +183,8 @@ internal cache implementation.
   `Pragma: no-cache`. Proxied image cache admission also refuses shared-cache
   storage when origin responses send `Cache-Control: no-store`, `private`,
   `no-cache`, `max-age=0`, or `s-maxage=0`, because validator-based
-  revalidation is not complete yet. Proxied cache variants use Pingora's
+  revalidation for zero-freshness admission is not complete yet. Proxied cache
+  variants use Pingora's
   variance hook for `Vary`; repeated `Vary` headers are normalized, request variant headers are
   hashed into the variant key, and unsafe or identity-sensitive `Vary` headers
   are rejected from cache admission. Responses carrying `Set-Cookie` are not
@@ -196,10 +197,12 @@ internal cache implementation.
   Pingora's cache pipeline injects `Age` on stored-response hits and applies
   downstream conditional/range handling when cache is enabled. The release smoke
   suite verifies proxy cache HIT behavior, cached-hit `Age`, conditional `304`,
-  byte-range `206`, `Vary` variant isolation, and disk-cache HIT behavior after
-  a Fluxheim process restart without the origin available. Planned work still
-  covers full validator-based revalidation for proxied cache responses and
-  broader cache-header matrix tests across static and proxied responses.
+  byte-range `206`, validator-based upstream revalidation from an origin `304`,
+  `Vary` variant isolation, and disk-cache HIT behavior after a Fluxheim process
+  restart without the origin available. Planned work still covers edge cases
+  where origins change `Vary`, validators, or freshness headers during
+  revalidation and broader cache-header matrix tests across static and proxied
+  responses.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and
@@ -537,7 +540,8 @@ A production adapter must:
   `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, `image/*`
   origin response admission for proxied image cache, and end-to-end smoke
   coverage for cached HIT `Age`, conditional `304`, byte-range `206`,
-  `Vary` variant isolation, and disk HIT behavior after process restart.
+  validator-based upstream revalidation from origin `304`, `Vary` variant
+  isolation, and disk HIT behavior after process restart.
 - Keep CDN/browser cache headers configurable through header policy and
   examples instead of hardcoded provider-specific defaults.
 - Avoid unbounded buffering for large responses. Implemented for memory by

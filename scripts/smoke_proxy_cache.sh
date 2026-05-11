@@ -72,6 +72,7 @@ VARY_BODIES = {
     "en": b"vary-en",
 }
 ETAG = '"cache-smoke-v1"'
+REVALIDATE_ETAG = '"cache-smoke-revalidate"'
 LAST_MODIFIED = "Sun, 10 May 2026 00:00:00 GMT"
 
 
@@ -90,6 +91,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("etag", '"cache-smoke-vary"')
             self.send_header("last-modified", LAST_MODIFIED)
             self.send_header("surrogate-key", "smoke:vary smoke:warm")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path == "/revalidate.png":
+            if self.headers.get("if-none-match") == REVALIDATE_ETAG:
+                self.send_response(304)
+                self.send_header("cache-control", "public, max-age=120")
+                self.send_header("etag", REVALIDATE_ETAG)
+                self.send_header("last-modified", LAST_MODIFIED)
+                self.end_headers()
+                return
+
+            body = b"revalidated-body"
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=1")
+            self.send_header("etag", REVALIDATE_ETAG)
+            self.send_header("last-modified", LAST_MODIFIED)
             self.end_headers()
             self.wfile.write(body)
             return
@@ -267,9 +288,13 @@ second_headers="$TMP_DIR/second.headers"
 bypass_headers="$TMP_DIR/bypass.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
 range_headers="$TMP_DIR/range.headers"
+revalidate_first_headers="$TMP_DIR/revalidate-first.headers"
+revalidate_second_headers="$TMP_DIR/revalidate-second.headers"
+revalidate_third_headers="$TMP_DIR/revalidate-third.headers"
 restart_headers="$TMP_DIR/restart.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
+revalidate_body="$TMP_DIR/revalidate-body.bin"
 vary_en_first_headers="$TMP_DIR/vary-en-first.headers"
 vary_en_second_headers="$TMP_DIR/vary-en-second.headers"
 vary_de_headers="$TMP_DIR/vary-de.headers"
@@ -342,6 +367,48 @@ if ! grep -qi '^content-range: bytes 0-3/16' "$range_headers"; then
 fi
 if [ "$(cat "$range_body")" != "0123" ]; then
     echo "proxy cache smoke failed: cached range body mismatch" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$revalidate_first_headers" -o "$revalidate_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/revalidate.png"
+if ! grep -qi '^x-cache-status: MISS' "$revalidate_first_headers"; then
+    echo "proxy cache smoke failed: initial revalidation asset request was not a cache MISS" >&2
+    cat "$revalidate_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$revalidate_body")" != "revalidated-body" ]; then
+    echo "proxy cache smoke failed: initial revalidation asset body mismatch" >&2
+    exit 1
+fi
+
+sleep 1.2
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$revalidate_second_headers" -o "$revalidate_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/revalidate.png"
+if ! grep -qi '^x-cache-status: REVALIDATED' "$revalidate_second_headers"; then
+    echo "proxy cache smoke failed: stale asset did not revalidate from upstream 304" >&2
+    cat "$revalidate_second_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$revalidate_body")" != "revalidated-body" ]; then
+    echo "proxy cache smoke failed: revalidated asset body mismatch" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$revalidate_third_headers" -o "$revalidate_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/revalidate.png"
+if ! grep -qi '^x-cache-status: HIT' "$revalidate_third_headers"; then
+    echo "proxy cache smoke failed: revalidated metadata did not make asset fresh" >&2
+    cat "$revalidate_third_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^age:' "$revalidate_third_headers"; then
+    echo "proxy cache smoke failed: revalidated cache HIT did not include Age header" >&2
+    cat "$revalidate_third_headers" >&2
     exit 1
 fi
 

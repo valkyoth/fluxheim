@@ -392,12 +392,12 @@ Stable scope:
     now provides opt-in bounded pass decisions for repeated uncacheable cache
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
-    conditional `304`, byte-range `206`, `Vary` variant isolation, disk HIT
-    after restart, and request-bypass reason release smoke;
-  - full validator-based upstream revalidation for proxied cache responses,
-    including safe `If-None-Match` / `If-Modified-Since` forwarding, `304`
-    metadata refresh, validator preservation, and explicit behavior when
-    origins change `Vary`, `ETag`, `Last-Modified`, or freshness headers;
+    conditional `304`, byte-range `206`, validator-based upstream revalidation
+    from origin `304`, `Vary` variant isolation, disk HIT after restart, and
+    request-bypass reason release smoke;
+  - full validator-based upstream revalidation edge-case coverage for proxied
+    cache responses, including explicit behavior when origins change `Vary`,
+    `ETag`, `Last-Modified`, or freshness headers during revalidation;
   - byte-range cache-fill strategy for large objects. The stable target is a
     safe equivalent to slice/range caching: bounded slice size, range-aware
     cache keys, 200/206 admission rules, `If-Range` handling, and tests proving
