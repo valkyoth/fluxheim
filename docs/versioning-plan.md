@@ -393,7 +393,8 @@ Stable scope:
     keys;
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
     conditional `304`, byte-range `206`, validator-based upstream revalidation
-    from origin `304`, stale-object refresh from origin `200`, `Vary` variant
+    from origin `304`, stale-object refresh from origin `200`,
+    stale-if-error serving after an upstream connection failure, `Vary` variant
     isolation, disk HIT after restart, and request-bypass reason release smoke;
   - full validator-based upstream revalidation edge-case coverage for proxied
     cache responses, including explicit behavior when origins change `Vary`,
@@ -597,8 +598,8 @@ Stable scope for declaring the cache pack complete:
 - Cache warm and metadata/debug commands suitable for release deploys and
   production incident response.
 - Proxy cache HIT `Age`, conditional `304`, byte-range `206`, `Vary` variant
-  isolation, disk HIT after restart, and request-bypass reason behavior are
-  covered end to end.
+  isolation, stale-if-error serving after upstream failure, disk HIT after
+  restart, and request-bypass reason behavior are covered end to end.
 - Proxied cache revalidation refreshes metadata safely when origins return
   `304 Not Modified`.
 - Large-object byte-range fill is bounded and does not require buffering an
@@ -668,8 +669,9 @@ Exit criteria:
 - Cache hits emit correct validator/freshness behavior, including `Age` where
   Fluxheim serves from cache. Pingora provides the cache-hit `Age`,
   conditional, and range hooks; Fluxheim's smoke suite covers proxy cache HIT
-  `Age`, conditional `304`, byte-range `206`, `Vary` variant isolation, disk
-  HIT after restart, and request-bypass reason headers.
+  `Age`, conditional `304`, byte-range `206`, `Vary` variant isolation,
+  stale-if-error serving after upstream failure, disk HIT after restart, and
+  request-bypass reason headers.
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 

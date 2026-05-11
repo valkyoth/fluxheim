@@ -75,6 +75,7 @@ ETAG = '"cache-smoke-v1"'
 REVALIDATE_ETAG = '"cache-smoke-revalidate"'
 REFRESH_OLD_ETAG = '"cache-smoke-refresh-old"'
 REFRESH_NEW_ETAG = '"cache-smoke-refresh-new"'
+STALE_ERROR_ETAG = '"cache-smoke-stale-error"'
 LAST_MODIFIED = "Sun, 10 May 2026 00:00:00 GMT"
 
 
@@ -136,6 +137,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-length", str(len(body)))
             self.send_header("cache-control", "public, max-age=1")
             self.send_header("etag", REFRESH_OLD_ETAG)
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path == "/stale-error.png":
+            body = b"stale-error-body"
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=1")
+            self.send_header("etag", STALE_ERROR_ETAG)
             self.send_header("last-modified", LAST_MODIFIED)
             self.end_headers()
             self.wfile.write(body)
@@ -228,6 +241,9 @@ hosts = ["cache.test"]
 enabled = true
 status_header = "X-Cache-Status"
 status_reason_header = "X-Cache-Reason"
+stale_if_error_secs = 60
+stale_if_error_on = ["connect", "http-status"]
+stale_if_error_statuses = [502, 503, 504]
 max_object_bytes = "1MiB"
 
 [vhosts.cache.memory]
@@ -320,11 +336,14 @@ revalidate_third_headers="$TMP_DIR/revalidate-third.headers"
 refresh_first_headers="$TMP_DIR/refresh-first.headers"
 refresh_second_headers="$TMP_DIR/refresh-second.headers"
 refresh_third_headers="$TMP_DIR/refresh-third.headers"
+stale_error_first_headers="$TMP_DIR/stale-error-first.headers"
+stale_error_second_headers="$TMP_DIR/stale-error-second.headers"
 restart_headers="$TMP_DIR/restart.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
 revalidate_body="$TMP_DIR/revalidate-body.bin"
 refresh_body="$TMP_DIR/refresh-body.bin"
+stale_error_body="$TMP_DIR/stale-error-body.bin"
 vary_en_first_headers="$TMP_DIR/vary-en-first.headers"
 vary_en_second_headers="$TMP_DIR/vary-en-second.headers"
 vary_de_headers="$TMP_DIR/vary-de.headers"
@@ -583,8 +602,53 @@ if [ "$(cat "$warm_vary_body")" != "vary-de" ]; then
     exit 1
 fi
 
-stop_fluxheim
+curl -sS --max-time "$CURL_MAX_TIME" -D "$stale_error_first_headers" -o "$stale_error_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/stale-error.png"
+if ! grep -qi '^x-cache-status: MISS' "$stale_error_first_headers"; then
+    echo "proxy cache smoke failed: initial stale-if-error request was not a cache MISS" >&2
+    cat "$stale_error_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$stale_error_body")" != "stale-error-body" ]; then
+    echo "proxy cache smoke failed: initial stale-if-error body mismatch" >&2
+    exit 1
+fi
+
+sleep 1.2
 stop_origin
+
+stale_error_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$stale_error_second_headers" -o "$stale_error_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/stale-error.png"
+)
+if [ "$stale_error_status" != "200" ]; then
+    echo "proxy cache smoke failed: stale-if-error returned $stale_error_status instead of 200" >&2
+    cat "$stale_error_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: STALE' "$stale_error_second_headers"; then
+    echo "proxy cache smoke failed: stale-if-error did not serve a stale cache response" >&2
+    cat "$stale_error_second_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$stale_error_body")" != "stale-error-body" ]; then
+    echo "proxy cache smoke failed: stale-if-error body mismatch" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /stale-error.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-body-bytes 16 \
+    --expect-header-name etag \
+    --expect-freshness-state stale
+
+stop_fluxheim
 start_fluxheim
 
 restart_status=

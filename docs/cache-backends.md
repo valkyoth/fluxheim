@@ -198,11 +198,12 @@ internal cache implementation.
   downstream conditional/range handling when cache is enabled. The release smoke
   suite verifies proxy cache HIT behavior, cached-hit `Age`, conditional `304`,
   byte-range `206`, validator-based upstream revalidation from an origin `304`,
-  stale-object refresh from an origin `200`, `Vary` variant isolation, and
-  disk-cache HIT behavior after a Fluxheim process restart without the origin
-  available. Planned work still covers edge cases where origins change `Vary`,
-  validators, or freshness headers during revalidation and broader cache-header
-  matrix tests across static and proxied responses.
+  stale-object refresh from an origin `200`, stale-if-error serving after an
+  upstream connection failure, `Vary` variant isolation, and disk-cache HIT
+  behavior after a Fluxheim process restart without the origin available.
+  Planned work still covers edge cases where origins change `Vary`, validators,
+  or freshness headers during revalidation and broader cache-header matrix
+  tests across static and proxied responses.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and
@@ -545,8 +546,9 @@ A production adapter must:
   origin response admission for proxied image cache, and end-to-end smoke
   coverage for cached HIT `Age`, conditional `304`, byte-range `206`,
   validator-based upstream revalidation from origin `304`, stale-object refresh
-  from origin `200`, `Vary` variant isolation, and disk HIT behavior after
-  process restart.
+  from origin `200`, stale-if-error serving after an upstream connection
+  failure, `Vary` variant isolation, and disk HIT behavior after process
+  restart.
 - Keep CDN/browser cache headers configurable through header policy and
   examples instead of hardcoded provider-specific defaults.
 - Avoid unbounded buffering for large responses. Implemented for memory by
