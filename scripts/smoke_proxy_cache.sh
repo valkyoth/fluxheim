@@ -89,6 +89,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("vary", "Accept-Language")
             self.send_header("etag", '"cache-smoke-vary"')
             self.send_header("last-modified", LAST_MODIFIED)
+            self.send_header("surrogate-key", "smoke:vary smoke:warm")
             self.end_headers()
             self.wfile.write(body)
             return
@@ -401,6 +402,7 @@ fi
     --require-object \
     --expect-tier disk \
     --expect-status 200 \
+    --expect-cache-tag smoke:warm \
     --expect-header-name etag \
     --expect-header-name vary \
     --expect-purge-indexed \

@@ -431,7 +431,7 @@ Stable scope:
     `Accept-Encoding`, so operators can debug negotiated `Vary` variants
     without contacting upstreams. `cache-lookup` can fail closed for deploy
     checks with `--require-object`, `--expect-tier`, `--expect-status`,
-    `--expect-header-name`, `--expect-purge-indexed`, and
+    `--expect-cache-tag`, `--expect-header-name`, `--expect-purge-indexed`, and
     `--expect-freshness-state fresh|stale|expired`, so scripts can assert that
     warm objects exist, preserved expected response metadata, are purge-index
     reachable, and are in an acceptable serving state without contacting

@@ -285,10 +285,10 @@ operations, cache warm/lookup/key tooling, cache policy metrics, OTLP metrics
 export, and end-to-end proxy cache smoke coverage for hit `Age`, conditional
 `304`, byte ranges, `Vary` variants, disk hits after restart, and debug bypass
 reasons. `cache-lookup` also supports deploy-script assertions for object
-presence, storage tier, HTTP status, stored header names, purge-index
-reachability, and fresh/stale/expired state. Remaining `1.2` hardening focuses
-on full proxy revalidation, large-object range/slice fill, very large
-disk-cache loader/purger behavior,
+presence, storage tier, HTTP status, stored cache tags, stored header names,
+purge-index reachability, and fresh/stale/expired state. Remaining `1.2`
+hardening focuses on full proxy revalidation, large-object range/slice fill,
+very large disk-cache loader/purger behavior,
 production Podman/ACME examples, a separate ACME companion service/timer flow,
 admin/metrics operations tooling, rollback/snapshot improvements, and proxy
 buffering/backpressure controls for app migrations.

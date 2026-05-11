@@ -253,6 +253,10 @@ pub enum CliCommand {
         #[arg(long = "expect-header-name", value_name = "HEADER")]
         expect_header_names: Vec<String>,
 
+        /// Required stored cache tag. May be repeated.
+        #[arg(long = "expect-cache-tag", value_name = "TAG")]
+        expect_cache_tags: Vec<String>,
+
         /// Require at least one matching cached object to be present in the purge index.
         #[arg(long)]
         expect_purge_indexed: bool,
@@ -486,6 +490,7 @@ fn run_command(
             expect_statuses,
             expect_tiers,
             expect_header_names,
+            expect_cache_tags,
             expect_purge_indexed,
         } => run_cache_lookup_command(CacheLookupOptions {
             config_path,
@@ -499,6 +504,7 @@ fn run_command(
             expect_statuses: expect_statuses.clone(),
             expect_tiers: expect_tiers.clone(),
             expect_header_names: expect_header_names.clone(),
+            expect_cache_tags: expect_cache_tags.clone(),
             expect_purge_indexed: *expect_purge_indexed,
         }),
     }
@@ -546,6 +552,7 @@ struct CacheLookupOptions<'a> {
     expect_statuses: Vec<u16>,
     expect_tiers: Vec<String>,
     expect_header_names: Vec<String>,
+    expect_cache_tags: Vec<String>,
     expect_purge_indexed: bool,
 }
 
@@ -873,21 +880,23 @@ fn run_cache_lookup_command(
     let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
     let expected_tiers = parse_cache_lookup_tiers(&options.expect_tiers)?;
     let expected_header_names = parse_cache_lookup_header_names(&options.expect_header_names)?;
+    let expected_cache_tags = parse_cache_lookup_cache_tags(&options.expect_cache_tags)?;
     validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
     let (config, request) = cache_key_command_request(&cache_key_options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let lookup = proxy
         .snapshot()
         .pingora_image_cache_object_lookup_for_request_header(&request)?;
-    validate_cache_lookup_expectations(
-        &lookup,
+    let expectations = CacheLookupExpectations {
         require_object,
-        &expected_states,
-        &options.expect_statuses,
-        &expected_tiers,
-        &expected_header_names,
-        options.expect_purge_indexed,
-    )?;
+        expected_states: &expected_states,
+        expected_statuses: &options.expect_statuses,
+        expected_tiers: &expected_tiers,
+        expected_header_names: &expected_header_names,
+        expected_cache_tags: &expected_cache_tags,
+        expect_purge_indexed: options.expect_purge_indexed,
+    };
+    validate_cache_lookup_expectations(&lookup, &expectations)?;
 
     println!("cache object lookup:");
     println!("vhost: {}", lookup.preview.vhost);
@@ -1007,16 +1016,64 @@ fn parse_cache_lookup_header_names(
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_lookup_cache_tags(
+    tags: &[String],
+) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    if tags.len() > 32 {
+        return Err("cache-lookup accepts at most 32 --expect-cache-tag values".into());
+    }
+
+    tags.iter()
+        .map(|tag| {
+            let tag = tag.trim();
+            if !is_cache_lookup_tag(tag) {
+                return Err(format!(
+                    "cache-lookup --expect-cache-tag must be a valid cache tag, got {tag:?}"
+                )
+                .into());
+            }
+            Ok(tag.to_owned())
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn is_cache_lookup_tag(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.len() <= 128
+        && tag.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':' | b'/' | b'=')
+        })
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+#[derive(Clone, Copy)]
+struct CacheLookupExpectations<'a> {
+    require_object: bool,
+    expected_states: &'a [crate::cache::CacheObjectFreshnessState],
+    expected_statuses: &'a [u16],
+    expected_tiers: &'a [crate::cache::CacheObjectTier],
+    expected_header_names: &'a [String],
+    expected_cache_tags: &'a [String],
+    expect_purge_indexed: bool,
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
 fn validate_cache_lookup_expectations(
     lookup: &crate::proxy::CacheObjectLookup,
-    require_object: bool,
-    expected_states: &[crate::cache::CacheObjectFreshnessState],
-    expected_statuses: &[u16],
-    expected_tiers: &[crate::cache::CacheObjectTier],
-    expected_header_names: &[String],
-    expect_purge_indexed: bool,
+    expectations: &CacheLookupExpectations<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if require_object && lookup.objects.is_empty() {
+    let CacheLookupExpectations {
+        require_object,
+        expected_states,
+        expected_statuses,
+        expected_tiers,
+        expected_header_names,
+        expected_cache_tags,
+        expect_purge_indexed,
+    } = expectations;
+
+    if *require_object && lookup.objects.is_empty() {
         return Err("cache-lookup expected at least one cached object, found none".into());
     }
     if !expected_states.is_empty() {
@@ -1093,7 +1150,7 @@ fn validate_cache_lookup_expectations(
             return Err(format!("cache-lookup expected tier {expected}, found {found}").into());
         }
     }
-    for expected in expected_header_names {
+    for expected in *expected_header_names {
         let matched = lookup.objects.iter().any(|object| {
             object
                 .header_names
@@ -1108,7 +1165,21 @@ fn validate_cache_lookup_expectations(
             .into());
         }
     }
-    if expect_purge_indexed && !lookup.objects.iter().any(|object| object.purge_indexed) {
+    for expected in *expected_cache_tags {
+        let matched = lookup.objects.iter().any(|object| {
+            object
+                .cache_tags
+                .iter()
+                .any(|cache_tag| cache_tag == expected)
+        });
+        if !matched {
+            let found = cache_lookup_found_cache_tags(lookup);
+            return Err(
+                format!("cache-lookup expected cache tag {expected}, found {found}").into(),
+            );
+        }
+    }
+    if *expect_purge_indexed && !lookup.objects.iter().any(|object| object.purge_indexed) {
         return Err("cache-lookup expected at least one purge-indexed object, found none".into());
     }
     Ok(())
@@ -1127,6 +1198,21 @@ fn cache_lookup_found_header_names(lookup: &crate::proxy::CacheObjectLookup) -> 
     names.sort_unstable();
     names.dedup();
     names.join(",")
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn cache_lookup_found_cache_tags(lookup: &crate::proxy::CacheObjectLookup) -> String {
+    let mut tags = lookup
+        .objects
+        .iter()
+        .flat_map(|object| object.cache_tags.iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    if tags.is_empty() {
+        return "none".to_owned();
+    }
+    tags.sort_unstable();
+    tags.dedup();
+    tags.join(",")
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
@@ -1174,6 +1260,7 @@ fn run_cache_lookup_command(
         expect_statuses,
         expect_tiers,
         expect_header_names,
+        expect_cache_tags,
         expect_purge_indexed,
     } = options;
     let _ = (config_path, host, headers, method, path, query);
@@ -1183,6 +1270,7 @@ fn run_cache_lookup_command(
         expect_statuses,
         expect_tiers,
         expect_header_names,
+        expect_cache_tags,
         expect_purge_indexed,
     );
     Err("cache-lookup requires the proxy and cache features".into())
@@ -2862,48 +2950,66 @@ mod tests {
         let lookup = cache_lookup_with_state(crate::cache::CacheObjectFreshnessState::Stale);
         let states = super::parse_cache_lookup_freshness_states(&[" Stale ".to_owned()]).unwrap();
         let tiers = super::parse_cache_lookup_tiers(&[" Memory ".to_owned()]).unwrap();
+        let no_states = &[] as &[crate::cache::CacheObjectFreshnessState];
+        let no_statuses = &[] as &[u16];
+        let no_tiers = &[] as &[crate::cache::CacheObjectTier];
+        let no_strings = &[] as &[String];
+        let default_expectations = super::CacheLookupExpectations {
+            require_object: false,
+            expected_states: no_states,
+            expected_statuses: no_statuses,
+            expected_tiers: no_tiers,
+            expected_header_names: no_strings,
+            expected_cache_tags: no_strings,
+            expect_purge_indexed: false,
+        };
 
         assert!(
             super::validate_cache_lookup_expectations(
                 &lookup,
-                true,
-                &states,
-                &[200],
-                &tiers,
-                &["etag".to_owned()],
-                true
+                &super::CacheLookupExpectations {
+                    require_object: true,
+                    expected_states: &states,
+                    expected_statuses: &[200],
+                    expected_tiers: &tiers,
+                    expected_header_names: &["etag".to_owned()],
+                    expected_cache_tags: &["asset:logo".to_owned()],
+                    expect_purge_indexed: true,
+                }
             )
             .is_ok()
         );
         assert!(
             super::validate_cache_lookup_expectations(
                 &lookup,
-                false,
-                &[crate::cache::CacheObjectFreshnessState::Fresh],
-                &[],
-                &[],
-                &[],
-                false
+                &super::CacheLookupExpectations {
+                    expected_states: &[crate::cache::CacheObjectFreshnessState::Fresh],
+                    ..default_expectations
+                }
             )
             .unwrap_err()
             .to_string()
             .contains("expected freshness state fresh, found stale")
         );
         assert!(
-            super::validate_cache_lookup_expectations(&lookup, false, &[], &[404], &[], &[], false)
-                .unwrap_err()
-                .to_string()
-                .contains("expected status 404, found 200")
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expected_statuses: &[404],
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected status 404, found 200")
         );
         assert!(
             super::validate_cache_lookup_expectations(
                 &lookup,
-                false,
-                &[],
-                &[],
-                &[crate::cache::CacheObjectTier::Disk],
-                &[],
-                false
+                &super::CacheLookupExpectations {
+                    expected_tiers: &[crate::cache::CacheObjectTier::Disk],
+                    ..default_expectations
+                }
             )
             .unwrap_err()
             .to_string()
@@ -2922,16 +3028,36 @@ mod tests {
         assert!(
             super::validate_cache_lookup_expectations(
                 &lookup,
-                false,
-                &[],
-                &[],
-                &[],
-                &["last-modified".to_owned()],
-                false
+                &super::CacheLookupExpectations {
+                    expected_header_names: &["last-modified".to_owned()],
+                    ..default_expectations
+                }
             )
             .unwrap_err()
             .to_string()
             .contains("expected stored header name last-modified, found cache-control,etag,vary")
+        );
+        assert_eq!(
+            super::parse_cache_lookup_cache_tags(&[" asset:logo ".to_owned()]).unwrap(),
+            vec!["asset:logo"]
+        );
+        assert!(
+            super::parse_cache_lookup_cache_tags(&["bad tag".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("valid cache tag")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expected_cache_tags: &["article:missing".to_owned()],
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected cache tag article:missing, found asset:logo")
         );
         assert!(
             super::parse_cache_lookup_freshness_states(&["invalid".to_owned()])
@@ -2949,12 +3075,10 @@ mod tests {
         assert!(
             super::validate_cache_lookup_expectations(
                 &cache_lookup_without_objects(),
-                true,
-                &[],
-                &[],
-                &[],
-                &[],
-                false
+                &super::CacheLookupExpectations {
+                    require_object: true,
+                    ..default_expectations
+                }
             )
             .unwrap_err()
             .to_string()
@@ -2963,12 +3087,10 @@ mod tests {
         assert!(
             super::validate_cache_lookup_expectations(
                 &cache_lookup_without_objects(),
-                false,
-                &[],
-                &[],
-                &[],
-                &[],
-                true
+                &super::CacheLookupExpectations {
+                    expect_purge_indexed: true,
+                    ..default_expectations
+                }
             )
             .unwrap_err()
             .to_string()
@@ -3183,7 +3305,7 @@ mod tests {
             fresh_ttl_secs: 0,
             stale_while_revalidate_secs: 30,
             stale_if_error_secs: 0,
-            cache_tags: Vec::new(),
+            cache_tags: vec!["asset:logo".to_owned()],
             header_names: vec![
                 "cache-control".to_owned(),
                 "etag".to_owned(),
