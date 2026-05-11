@@ -408,7 +408,10 @@ Stable scope:
     printing key hashes without contacting upstreams. `fluxheim cache-lookup`
     now adds the first object metadata lookup by checking selected memory/disk
     tiers and reporting status, size, freshness, cache tags, and stored header
-    names without reading cached bodies to stdout or dumping header values;
+    names without reading cached bodies to stdout or dumping header values.
+    Lookup output also reports purge-index membership so operators can tell
+    whether indexed scope, prefix, tag, wildcard, and stale purges can reach an
+    object without a full scan;
   - cache warm/import/export workflows for deploys and repository mirrors,
     including clear failure accounting and no hidden best-effort misses;
   - cache observability through both Prometheus and OpenTelemetry, including

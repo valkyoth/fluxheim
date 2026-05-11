@@ -5898,6 +5898,7 @@ mod tests {
         assert_eq!(lookup.objects.len(), 1);
         let object = &lookup.objects[0];
         assert_eq!(object.tier, crate::cache::CacheObjectTier::Memory);
+        assert!(object.purge_indexed);
         assert_eq!(object.status, 200);
         assert!(object.fresh);
         assert_eq!(object.body_bytes, 4);

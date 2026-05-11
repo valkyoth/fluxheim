@@ -596,6 +596,7 @@ fn run_cache_lookup_command(
     for object in lookup.objects {
         println!("object:");
         println!("  tier: {}", object.tier.as_str());
+        println!("  purge_indexed: {}", object.purge_indexed);
         println!("  status: {}", object.status);
         println!("  fresh: {}", object.fresh);
         println!("  body_bytes: {}", object.body_bytes);

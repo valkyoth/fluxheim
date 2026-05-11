@@ -142,6 +142,7 @@ pub struct TieredCacheStats {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheObjectMetadata {
     pub tier: CacheObjectTier,
+    pub purge_indexed: bool,
     pub status: u16,
     pub fresh: bool,
     pub body_bytes: u64,
@@ -540,6 +541,13 @@ impl CachePurgeIndex {
             inner.order.retain(|candidate| candidate != combined_key);
         }
         removed
+    }
+
+    pub fn contains_combined(&self, combined_key: &str) -> bool {
+        let Ok(inner) = self.inner.read() else {
+            return false;
+        };
+        inner.entries.contains_key(combined_key)
     }
 
     pub fn combined_keys_for_primary(&self, primary_key: &str) -> Vec<String> {
@@ -1091,7 +1099,8 @@ impl PingoraMemoryStorage {
         let Some(object) = self.lookup_object(key) else {
             return Ok(None);
         };
-        cache_object_metadata(CacheObjectTier::Memory, &object)
+        let purge_indexed = self.purge_index.contains_combined(&key.combined());
+        cache_object_metadata(CacheObjectTier::Memory, purge_indexed, &object)
     }
 
     fn put_object(
@@ -1622,7 +1631,8 @@ impl PingoraDiskStorage {
         let Some(object) = self.lookup_object(key)? else {
             return Ok(None);
         };
-        cache_object_metadata(CacheObjectTier::Disk, &object)
+        let purge_indexed = self.purge_index.contains_combined(&key.combined());
+        cache_object_metadata(CacheObjectTier::Disk, purge_indexed, &object)
     }
 
     fn lookup_object_by_combined(
@@ -2308,6 +2318,7 @@ fn pingora_object_weight(internal_meta: &[u8], response_header: &[u8], body: &[u
 #[cfg(feature = "proxy")]
 fn cache_object_metadata(
     tier: CacheObjectTier,
+    purge_indexed: bool,
     object: &PingoraStoredObject,
 ) -> pingora::Result<Option<CacheObjectMetadata>> {
     let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
@@ -2322,6 +2333,7 @@ fn cache_object_metadata(
 
     Ok(Some(CacheObjectMetadata {
         tier,
+        purge_indexed,
         status: meta.response_header().status.as_u16(),
         fresh: meta.is_fresh(now),
         body_bytes: object.body.len() as u64,
