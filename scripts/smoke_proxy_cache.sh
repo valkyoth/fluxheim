@@ -435,9 +435,12 @@ second_headers="$TMP_DIR/second.headers"
 bypass_headers="$TMP_DIR/bypass.headers"
 pragma_bypass_headers="$TMP_DIR/pragma-bypass.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
+modified_since_headers="$TMP_DIR/modified-since.headers"
 range_headers="$TMP_DIR/range.headers"
 if_range_match_headers="$TMP_DIR/if-range-match.headers"
 if_range_mismatch_headers="$TMP_DIR/if-range-mismatch.headers"
+if_range_date_match_headers="$TMP_DIR/if-range-date-match.headers"
+if_range_date_mismatch_headers="$TMP_DIR/if-range-date-mismatch.headers"
 revalidate_first_headers="$TMP_DIR/revalidate-first.headers"
 revalidate_second_headers="$TMP_DIR/revalidate-second.headers"
 revalidate_third_headers="$TMP_DIR/revalidate-third.headers"
@@ -454,6 +457,8 @@ body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
 if_range_match_body="$TMP_DIR/if-range-match-body.bin"
 if_range_mismatch_body="$TMP_DIR/if-range-mismatch-body.bin"
+if_range_date_match_body="$TMP_DIR/if-range-date-match-body.bin"
+if_range_date_mismatch_body="$TMP_DIR/if-range-date-mismatch-body.bin"
 revalidate_body="$TMP_DIR/revalidate-body.bin"
 refresh_body="$TMP_DIR/refresh-body.bin"
 swr_body="$TMP_DIR/swr-body.bin"
@@ -527,6 +532,18 @@ if [ "$conditional_status" != "304" ]; then
     exit 1
 fi
 
+modified_since_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$modified_since_headers" -o /dev/null -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "If-Modified-Since: Sun, 10 May 2026 00:00:00 GMT" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$modified_since_status" != "304" ]; then
+    echo "proxy cache smoke failed: cached If-Modified-Since returned $modified_since_status instead of 304" >&2
+    cat "$modified_since_headers" >&2
+    exit 1
+fi
+
 range_status=$(
     curl -sS --max-time "$CURL_MAX_TIME" -D "$range_headers" -o "$range_body" -w '%{http_code}' \
         -H "Host: cache.test" \
@@ -589,6 +606,50 @@ if grep -qi '^content-range:' "$if_range_mismatch_headers"; then
 fi
 if [ "$(cat "$if_range_mismatch_body")" != "0123456789abcdef" ]; then
     echo "proxy cache smoke failed: cached If-Range mismatch body was not the full object" >&2
+    exit 1
+fi
+
+if_range_date_match_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$if_range_date_match_headers" -o "$if_range_date_match_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=8-11" \
+        -H "If-Range: Sun, 10 May 2026 00:00:00 GMT" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$if_range_date_match_status" != "206" ]; then
+    echo "proxy cache smoke failed: cached date If-Range match returned $if_range_date_match_status instead of 206" >&2
+    cat "$if_range_date_match_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 8-11/16' "$if_range_date_match_headers"; then
+    echo "proxy cache smoke failed: cached date If-Range match missed expected Content-Range" >&2
+    cat "$if_range_date_match_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$if_range_date_match_body")" != "89ab" ]; then
+    echo "proxy cache smoke failed: cached date If-Range match body mismatch" >&2
+    exit 1
+fi
+
+if_range_date_mismatch_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$if_range_date_mismatch_headers" -o "$if_range_date_mismatch_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=8-11" \
+        -H "If-Range: Sat, 09 May 2026 00:00:00 GMT" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$if_range_date_mismatch_status" != "200" ]; then
+    echo "proxy cache smoke failed: cached date If-Range mismatch returned $if_range_date_mismatch_status instead of 200" >&2
+    cat "$if_range_date_mismatch_headers" >&2
+    exit 1
+fi
+if grep -qi '^content-range:' "$if_range_date_mismatch_headers"; then
+    echo "proxy cache smoke failed: cached date If-Range mismatch unexpectedly included Content-Range" >&2
+    cat "$if_range_date_mismatch_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$if_range_date_mismatch_body")" != "0123456789abcdef" ]; then
+    echo "proxy cache smoke failed: cached date If-Range mismatch body was not the full object" >&2
     exit 1
 fi
 
