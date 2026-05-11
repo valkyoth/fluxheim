@@ -323,6 +323,14 @@ impl FluxProxy {
     }
 
     #[cfg(feature = "cache")]
+    pub fn purge_stale_image_cache(
+        &self,
+        request: CacheStalePurgeRequest<'_>,
+    ) -> io::Result<CacheStalePurgeResult> {
+        self.snapshot().purge_stale_image_cache(request)
+    }
+
+    #[cfg(feature = "cache")]
     pub fn purge_indexed_image_cache_path_pattern(
         &self,
         request: CacheIndexedPathPatternPurgeRequest<'_>,
@@ -387,6 +395,14 @@ pub struct CacheIndexedTagPurgeRequest<'a> {
 
 #[cfg(feature = "cache")]
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheStalePurgeRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub limit: usize,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CacheIndexedPathPatternPurgeRequest<'a> {
     pub vhost: &'a str,
     pub route: Option<&'a str>,
@@ -445,6 +461,48 @@ pub struct CacheIndexedPurgeResult {
     pub disk_matched: usize,
     pub disk_purged: usize,
     pub disk_truncated: bool,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct CacheStalePurgeResult {
+    pub vhost: String,
+    pub route: Option<String>,
+    pub memory_scanned: usize,
+    pub memory_stale: usize,
+    pub memory_purged: usize,
+    pub memory_truncated: bool,
+    pub disk_scanned: usize,
+    pub disk_stale: usize,
+    pub disk_purged: usize,
+    pub disk_truncated: bool,
+}
+
+#[cfg(feature = "cache")]
+impl CacheStalePurgeResult {
+    pub fn scanned(&self) -> usize {
+        self.memory_scanned.saturating_add(self.disk_scanned)
+    }
+
+    pub fn stale(&self) -> usize {
+        self.memory_stale.saturating_add(self.disk_stale)
+    }
+
+    pub fn purged(&self) -> usize {
+        self.memory_purged.saturating_add(self.disk_purged)
+    }
+
+    pub fn not_purged(&self) -> usize {
+        self.stale().saturating_sub(self.purged())
+    }
+
+    pub fn truncated(&self) -> bool {
+        self.memory_truncated || self.disk_truncated
+    }
+
+    pub fn route(&self) -> Option<&str> {
+        self.route.as_deref()
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -1118,6 +1176,83 @@ impl ProxySnapshot {
             memory_purged: memory.purged,
             memory_truncated: memory.truncated,
             disk_matched: disk.matched,
+            disk_purged: disk.purged,
+            disk_truncated: disk.truncated,
+        })
+    }
+
+    #[cfg(feature = "cache")]
+    pub fn purge_stale_image_cache(
+        &self,
+        request: CacheStalePurgeRequest<'_>,
+    ) -> io::Result<CacheStalePurgeResult> {
+        if request.limit == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache stale purge limit must be greater than zero",
+            ));
+        }
+
+        let vhost = self
+            .state
+            .vhosts
+            .iter()
+            .find(|vhost| vhost.name == request.vhost)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("vhost not found: {}", request.vhost),
+                )
+            })?;
+
+        let route_cache = if let Some(route_name) = request.route {
+            Some(
+                vhost
+                    .routes
+                    .iter()
+                    .filter_map(|route| route.cache.as_ref())
+                    .find(|cache| cache.name == route_name)
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("route cache not found: {}/{}", vhost.name, route_name),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let user_tag = route_cache
+            .map(|cache| format!("{}:route:{}", vhost.name, cache.name))
+            .unwrap_or_else(|| vhost.name.clone());
+
+        let memory = route_cache
+            .and_then(|cache| cache.pingora_memory_storage)
+            .or(vhost
+                .pingora_memory_storage
+                .filter(|_| route_cache.is_none()))
+            .map(|storage| storage.purge_indexed_stale_user_tag(&user_tag, request.limit))
+            .transpose()
+            .map_err(|error| io::Error::other(error.to_string()))?
+            .unwrap_or_default();
+        let disk = route_cache
+            .and_then(|cache| cache.pingora_disk_storage)
+            .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
+            .map(|storage| storage.purge_indexed_stale_user_tag(&user_tag, request.limit))
+            .transpose()
+            .map_err(|error| io::Error::other(error.to_string()))?
+            .unwrap_or_default();
+
+        Ok(CacheStalePurgeResult {
+            vhost: vhost.name.clone(),
+            route: route_cache.map(|cache| cache.name.clone()),
+            memory_scanned: memory.scanned,
+            memory_stale: memory.stale,
+            memory_purged: memory.purged,
+            memory_truncated: memory.truncated,
+            disk_scanned: disk.scanned,
+            disk_stale: disk.stale,
             disk_purged: disk.purged,
             disk_truncated: disk.truncated,
         })

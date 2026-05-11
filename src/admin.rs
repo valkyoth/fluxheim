@@ -287,6 +287,14 @@ impl AdminApp {
                 header_value(headers, "x-fluxheim-cache-batches")
                     .or_else(|| query_param(query, "batches")),
             ),
+            ("POST", "/_fluxheim/cache/purge-stale") => self.cache_purge_stale_response(
+                header_value(headers, "x-fluxheim-cache-vhost")
+                    .or_else(|| query_param(query, "vhost")),
+                header_value(headers, "x-fluxheim-cache-route")
+                    .or_else(|| query_param(query, "route")),
+                header_value(headers, "x-fluxheim-cache-limit")
+                    .or_else(|| query_param(query, "limit")),
+            ),
             ("POST", "/_fluxheim/cache/purge-wildcard") => self.cache_purge_wildcard_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
                     .or_else(|| query_param(query, "vhost")),
@@ -326,6 +334,7 @@ impl AdminApp {
                 | "/_fluxheim/cache/purge-index"
                 | "/_fluxheim/cache/purge-prefix"
                 | "/_fluxheim/cache/purge-tag"
+                | "/_fluxheim/cache/purge-stale"
                 | "/_fluxheim/cache/purge-wildcard"
                 | "/_fluxheim/snapshot"
                 | "/_fluxheim/rollback"
@@ -928,6 +937,70 @@ impl AdminApp {
     }
 
     #[cfg(feature = "cache")]
+    fn cache_purge_stale_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        limit: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "cache stale purge vhost is required",
+            );
+        };
+        let limit = match validated_cache_indexed_purge_limit(limit) {
+            Ok(limit) => limit,
+            Err(message) => return error_response(StatusCode::BAD_REQUEST, message),
+        };
+        let route = route.filter(|route| !route.trim().is_empty());
+
+        match self
+            .proxy
+            .purge_stale_image_cache(crate::proxy::CacheStalePurgeRequest {
+                vhost,
+                route,
+                limit,
+            }) {
+            Ok(result) => {
+                let body = format!(
+                    r#"{{"status":"ok","scanned":{},"stale":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"vhost":"{}","route":{},"scope":"{}","memory_scanned":{},"memory_stale":{},"memory_purged":{},"memory_not_purged":{},"memory_truncated":{},"disk_scanned":{},"disk_stale":{},"disk_purged":{},"disk_not_purged":{},"disk_truncated":{}}}"#,
+                    result.scanned(),
+                    result.stale(),
+                    result.purged(),
+                    result.not_purged(),
+                    ratio_per_mille_usize(result.purged(), result.stale()),
+                    ratio_per_mille_usize(result.not_purged(), result.stale()),
+                    result.truncated(),
+                    result.truncated(),
+                    limit,
+                    json_escape(&result.vhost),
+                    cache_route_json(result.route()),
+                    cache_scope(result.route()),
+                    result.memory_scanned,
+                    result.memory_stale,
+                    result.memory_purged,
+                    result.memory_stale.saturating_sub(result.memory_purged),
+                    result.memory_truncated,
+                    result.disk_scanned,
+                    result.disk_stale,
+                    result.disk_purged,
+                    result.disk_stale.saturating_sub(result.disk_purged),
+                    result.disk_truncated
+                );
+                json_response(StatusCode::OK, body.as_bytes())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                error_response(StatusCode::NOT_FOUND, &error.to_string())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
+            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+        }
+    }
+
+    #[cfg(feature = "cache")]
     fn cache_purge_wildcard_response(
         &self,
         vhost: Option<&str>,
@@ -1066,6 +1139,16 @@ impl AdminApp {
         _cache_tag: Option<&str>,
         _limit: Option<&str>,
         _batches: Option<&str>,
+    ) -> AdminResponse {
+        error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
+    }
+
+    #[cfg(not(feature = "cache"))]
+    fn cache_purge_stale_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _limit: Option<&str>,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -2776,6 +2859,53 @@ mod tests {
         );
 
         assert_eq!(response.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_stale_endpoint_accepts_vhost_scope() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge-stale",
+            Some("vhost=cached&limit=16"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""scanned":0"#));
+        assert!(body.contains(r#""stale":0"#));
+        assert!(body.contains(r#""purged":0"#));
+        assert!(body.contains(r#""not_purged":0"#));
+        assert!(body.contains(r#""limit":16"#));
+        assert!(body.contains(r#""scope":"vhost""#));
     }
 
     #[cfg(feature = "cache")]

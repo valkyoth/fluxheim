@@ -414,6 +414,15 @@ pub struct CacheIndexedPurgeResult {
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct CacheStalePurgeResult {
+    pub scanned: usize,
+    pub stale: usize,
+    pub purged: usize,
+    pub truncated: bool,
+}
+
+#[cfg(feature = "proxy")]
 impl CachePurgeIndex {
     pub fn new(max_entries: usize) -> Self {
         Self {
@@ -828,6 +837,49 @@ impl PingoraMemoryStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn purge_indexed_stale_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheStalePurgeResult> {
+        let mut entries = self
+            .purge_index
+            .entries_for_user_tag(user_tag, limit.saturating_add(1));
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let now = std::time::SystemTime::now();
+        let scanned = entries.len();
+        let mut stale = 0;
+        let mut purged = 0;
+
+        for entry in &entries {
+            let Some(object) = self.inner.get(&entry.combined_key) else {
+                self.purge_index.remove_combined(&entry.combined_key);
+                continue;
+            };
+            let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
+            if meta.is_fresh(now) {
+                continue;
+            }
+            stale += 1;
+            self.inner.invalidate(&entry.combined_key);
+            self.purge_index.remove_combined(&entry.combined_key);
+            purged += 1;
+        }
+        self.inner.run_pending_tasks();
+        if purged > 0 {
+            self.activity.purge();
+        }
+
+        Ok(CacheStalePurgeResult {
+            scanned,
+            stale,
+            purged,
+            truncated,
+        })
+    }
+
     fn purge_indexed_entries(
         &self,
         mut entries: Vec<CachePurgeIndexEntry>,
@@ -1151,6 +1203,50 @@ impl PingoraDiskStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn purge_indexed_stale_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheStalePurgeResult> {
+        let mut entries = self
+            .purge_index
+            .entries_for_user_tag(user_tag, limit.saturating_add(1));
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let now = std::time::SystemTime::now();
+        let scanned = entries.len();
+        let mut stale = 0;
+        let mut purged = 0;
+
+        for entry in &entries {
+            let Some(object) = self.lookup_object_by_combined(&entry.combined_key)? else {
+                self.purge_index.remove_combined(&entry.combined_key);
+                continue;
+            };
+            let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
+            if meta.is_fresh(now) {
+                continue;
+            }
+            stale += 1;
+            let path = self.path_for_combined_key(&entry.combined_key);
+            if self
+                .purge_object_path(path)
+                .map_err(|error| cache_io_error("purge stale disk cache object", error))?
+            {
+                purged += 1;
+            }
+            self.purge_index.remove_combined(&entry.combined_key);
+        }
+
+        Ok(CacheStalePurgeResult {
+            scanned,
+            stale,
+            purged,
+            truncated,
+        })
+    }
+
     fn purge_indexed_entries(
         &self,
         mut entries: Vec<CachePurgeIndexEntry>,
@@ -1190,7 +1286,14 @@ impl PingoraDiskStorage {
         &self,
         key: &pingora::cache::CacheKey,
     ) -> pingora::Result<Option<PingoraStoredObject>> {
-        let path = self.path_for_key(key);
+        self.lookup_object_by_combined(&key.combined())
+    }
+
+    fn lookup_object_by_combined(
+        &self,
+        combined_key: &str,
+    ) -> pingora::Result<Option<PingoraStoredObject>> {
+        let path = self.path_for_combined_key(combined_key);
         let Some(read_path) = self
             .safe_existing_object_path(&path)
             .map_err(|error| cache_io_error("validate disk cache object path", error))?
@@ -3673,6 +3776,51 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_memory_storage_purges_indexed_stale_entries() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 4,
+        });
+        let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "stale", "vhost-a");
+        let fresh_key = pingora::cache::CacheKey::new("fluxheim-test", "fresh", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let stale = stale_pingora_meta("max-age=60");
+        let fresh = pingora_meta("max-age=60");
+
+        for (key, meta) in [(&stale_key, &stale), (&fresh_key, &fresh)] {
+            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let result = storage.purge_indexed_stale_user_tag("vhost-a", 8).unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheStalePurgeResult {
+                scanned: 2,
+                stale: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
+        assert!(
+            block_on(storage.lookup(&stale_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_key, &span))
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_memory_storage_purges_indexed_path_prefix() {
         use pingora::cache::Storage;
 
@@ -3901,6 +4049,55 @@ mod tests {
             }
         );
         assert_eq!(rebuilt.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_purges_indexed_stale_entries() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-stale-purge");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+        })
+        .unwrap();
+        let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale", "vhost-a");
+        let fresh_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-fresh", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let stale = stale_pingora_meta("max-age=60");
+        let fresh = pingora_meta("max-age=60");
+
+        for (key, meta) in [(&stale_key, &stale), (&fresh_key, &fresh)] {
+            let mut miss = block_on(storage.get_miss_handler(key, meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let result = storage.purge_indexed_stale_user_tag("vhost-a", 8).unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheStalePurgeResult {
+                scanned: 2,
+                stale: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
+        assert!(
+            block_on(storage.lookup(&stale_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup(&fresh_key, &span))
+                .unwrap()
+                .is_some()
+        );
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -4444,6 +4641,22 @@ mod tests {
         pingora::cache::CacheMeta::new(
             now.checked_add(std::time::Duration::from_secs(60)).unwrap(),
             now,
+            0,
+            0,
+            header,
+        )
+    }
+
+    #[cfg(feature = "proxy")]
+    fn stale_pingora_meta(cache_control: &str) -> pingora::cache::CacheMeta {
+        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        header
+            .insert_header("cache-control", cache_control)
+            .unwrap();
+        let now = std::time::SystemTime::now();
+        pingora::cache::CacheMeta::new(
+            now.checked_sub(std::time::Duration::from_secs(30)).unwrap(),
+            now.checked_sub(std::time::Duration::from_secs(90)).unwrap(),
             0,
             0,
             header,

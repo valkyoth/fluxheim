@@ -241,6 +241,10 @@ internal cache implementation.
   ASCII letters, digits, `_`, `-`, `.`, `:`, `/`, and `=`. Disk cache objects
   persist tags in the v4 object format and rebuild the purge index across
   process restarts while continuing to read older object formats.
+  `POST /_fluxheim/cache/purge-stale` scans a bounded number of indexed
+  entries for a vhost or route and removes objects whose stored freshness window
+  has expired. It is intended as an operator-controlled incremental cleanup
+  command until a background disk purger lands.
   `POST /_fluxheim/cache/purge-wildcard` invalidates indexed
   entries by absolute path pattern using `*`, for example `/assets/*.png`.
   Whole-cache patterns such as `/*` are rejected for the same reason. Indexed
@@ -274,6 +278,9 @@ curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-tag?vhost=repoheim.eu&cache_tag=release:2026-05-11&limit=500"
+
+curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:9090/_fluxheim/cache/purge-stale?vhost=repoheim.eu&limit=500"
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-wildcard?vhost=repoheim.eu&pattern=/assets/*.png&limit=500"
