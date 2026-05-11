@@ -5995,6 +5995,97 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_object_lookup_reports_route_disk_metadata() {
+        use pingora::cache::Storage;
+
+        let cache_path = unique_test_cache_dir("proxy-route-disk-lookup");
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "assets".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/assets/".to_owned()),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    max_request_body_bytes: None,
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstream: Some("127.0.0.1:3000".to_owned()),
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    cache: Some(CacheConfig {
+                        enabled: true,
+                        disk: crate::config::CacheDiskConfig {
+                            enabled: true,
+                            path: Some(cache_path.clone()),
+                            max_size_bytes: ByteSize::from_bytes(4096),
+                        },
+                        max_object_bytes: ByteSize::from_bytes(512),
+                        ..CacheConfig::default()
+                    }),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let route_index = vhost.route_index("/assets/logo.png").unwrap();
+        let route = vhost.route(route_index);
+        let route_cache = route.cache.as_ref().unwrap();
+        let storage = route_cache.pingora_disk_storage.unwrap();
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+        let key = snapshot
+            .state
+            .pingora_image_cache_key_for_request_header(&request, vhost_index, Some(route_index))
+            .unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "asset:route-logo")
+            .unwrap();
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"route-disk-body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let lookup = snapshot
+            .pingora_image_cache_object_lookup_for_request_header(&request)
+            .unwrap();
+
+        assert!(lookup.preview.eligible);
+        assert_eq!(lookup.preview.route.as_deref(), Some("assets"));
+        assert_eq!(lookup.preview.scope, super::CacheKeyPreviewScope::Route);
+        assert_eq!(lookup.objects.len(), 1);
+        let object = &lookup.objects[0];
+        assert_eq!(object.tier, crate::cache::CacheObjectTier::Disk);
+        assert!(object.purge_indexed);
+        assert_eq!(object.status, 200);
+        assert!(object.fresh);
+        assert_eq!(object.body_bytes, 15);
+        assert_eq!(object.cache_tags, vec!["asset:route-logo"]);
+
+        std::fs::remove_dir_all(cache_path).unwrap();
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn builds_memory_cache_from_routed_vhost_policy() {
         let config = Config {
             vhosts: vec![VhostConfig {
