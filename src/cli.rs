@@ -249,6 +249,18 @@ pub enum CliCommand {
         /// Required selected route name for route-scoped cache policies.
         #[arg(long = "expect-route", value_name = "ROUTE")]
         expect_route: Option<String>,
+
+        /// Required cache key namespace for the selected cache policy.
+        #[arg(long = "expect-namespace", value_name = "NAMESPACE")]
+        expect_namespace: Option<String>,
+
+        /// Required operator key namespace configured on the selected cache policy.
+        #[arg(long = "expect-key-namespace", value_name = "KEY_NAMESPACE")]
+        expect_key_namespace: Option<String>,
+
+        /// Required cache purge user tag for the selected cache policy.
+        #[arg(long = "expect-user-tag", value_name = "USER_TAG")]
+        expect_user_tag: Option<String>,
     },
 
     /// Inspect cached object metadata for one request without dumping response bodies.
@@ -348,6 +360,18 @@ pub enum CliCommand {
         /// Required selected route name for route-scoped cache policies.
         #[arg(long = "expect-route", value_name = "ROUTE")]
         expect_route: Option<String>,
+
+        /// Required cache key namespace for the selected cache policy.
+        #[arg(long = "expect-namespace", value_name = "NAMESPACE")]
+        expect_namespace: Option<String>,
+
+        /// Required operator key namespace configured on the selected cache policy.
+        #[arg(long = "expect-key-namespace", value_name = "KEY_NAMESPACE")]
+        expect_key_namespace: Option<String>,
+
+        /// Required cache purge user tag for the selected cache policy.
+        #[arg(long = "expect-user-tag", value_name = "USER_TAG")]
+        expect_user_tag: Option<String>,
 
         /// Require at least one matching cached object to be eligible for stale-if-error serving.
         #[arg(long)]
@@ -577,6 +601,9 @@ fn run_command(
             expect_scope,
             expect_vhost,
             expect_route,
+            expect_namespace,
+            expect_key_namespace,
+            expect_user_tag,
         } => run_cache_key_command(CacheKeyOptions {
             config_path,
             host: host.clone(),
@@ -594,6 +621,9 @@ fn run_command(
             expect_scope: expect_scope.clone(),
             expect_vhost: expect_vhost.clone(),
             expect_route: expect_route.clone(),
+            expect_namespace: expect_namespace.clone(),
+            expect_key_namespace: expect_key_namespace.clone(),
+            expect_user_tag: expect_user_tag.clone(),
         }),
         CliCommand::CacheLookup {
             host,
@@ -620,6 +650,9 @@ fn run_command(
             expect_scope,
             expect_vhost,
             expect_route,
+            expect_namespace,
+            expect_key_namespace,
+            expect_user_tag,
             expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate,
         } => run_cache_lookup_command(CacheLookupOptions {
@@ -648,6 +681,9 @@ fn run_command(
             expect_scope: expect_scope.clone(),
             expect_vhost: expect_vhost.clone(),
             expect_route: expect_route.clone(),
+            expect_namespace: expect_namespace.clone(),
+            expect_key_namespace: expect_key_namespace.clone(),
+            expect_user_tag: expect_user_tag.clone(),
             expect_serve_stale_if_error: *expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate: *expect_serve_stale_while_revalidate,
         }),
@@ -691,6 +727,9 @@ struct CacheKeyOptions<'a> {
     expect_scope: Option<String>,
     expect_vhost: Option<String>,
     expect_route: Option<String>,
+    expect_namespace: Option<String>,
+    expect_key_namespace: Option<String>,
+    expect_user_tag: Option<String>,
 }
 
 #[derive(Debug)]
@@ -720,6 +759,9 @@ struct CacheLookupOptions<'a> {
     expect_scope: Option<String>,
     expect_vhost: Option<String>,
     expect_route: Option<String>,
+    expect_namespace: Option<String>,
+    expect_key_namespace: Option<String>,
+    expect_user_tag: Option<String>,
     expect_serve_stale_if_error: bool,
     expect_serve_stale_while_revalidate: bool,
 }
@@ -991,6 +1033,21 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     let expected_vhost =
         parse_cache_key_preview_name("cache-key", "--expect-vhost", options.expect_vhost.as_ref())?;
     let expected_route = parse_cache_key_preview_route("cache-key", options.expect_route.as_ref())?;
+    let expected_namespace = parse_cache_key_preview_value(
+        "cache-key",
+        "--expect-namespace",
+        options.expect_namespace.as_ref(),
+    )?;
+    let expected_key_namespace = parse_cache_key_preview_value(
+        "cache-key",
+        "--expect-key-namespace",
+        options.expect_key_namespace.as_ref(),
+    )?;
+    let expected_user_tag = parse_cache_key_preview_value(
+        "cache-key",
+        "--expect-user-tag",
+        options.expect_user_tag.as_ref(),
+    )?;
     let expected_reason = parse_cache_key_preview_reason(
         "cache-key",
         "--expect-reason",
@@ -1014,6 +1071,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
             expected_scope: expected_scope.as_deref(),
             expected_vhost: expected_vhost.as_deref(),
             expected_route: expected_route.as_deref(),
+            expected_namespace: expected_namespace.as_deref(),
+            expected_key_namespace: expected_key_namespace.as_deref(),
+            expected_user_tag: expected_user_tag.as_deref(),
         },
     )?;
 
@@ -1037,6 +1097,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     }
     if let Some(namespace) = preview.namespace.as_deref() {
         println!("namespace: {namespace}");
+    }
+    if let Some(key_namespace) = preview.key_namespace.as_deref() {
+        println!("key_namespace: {key_namespace}");
     }
     if let Some(primary_key) = preview.primary_key.as_deref() {
         println!("primary_key: {primary_key}");
@@ -1070,6 +1133,9 @@ struct CacheKeyPreviewExpectations<'a> {
     expected_scope: Option<&'a str>,
     expected_vhost: Option<&'a str>,
     expected_route: Option<&'a str>,
+    expected_namespace: Option<&'a str>,
+    expected_key_namespace: Option<&'a str>,
+    expected_user_tag: Option<&'a str>,
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
@@ -1132,6 +1198,31 @@ fn validate_cache_key_preview_expectations(
         let found = preview.route.as_deref().unwrap_or("none");
         return Err(format!("cache-key expected route {expected_route}, found {found}").into());
     }
+    if let Some(expected_namespace) = expectations.expected_namespace
+        && preview.namespace.as_deref() != Some(expected_namespace)
+    {
+        let found = preview.namespace.as_deref().unwrap_or("none");
+        return Err(
+            format!("cache-key expected namespace {expected_namespace}, found {found}").into(),
+        );
+    }
+    if let Some(expected_key_namespace) = expectations.expected_key_namespace
+        && preview.key_namespace.as_deref() != Some(expected_key_namespace)
+    {
+        let found = preview.key_namespace.as_deref().unwrap_or("none");
+        return Err(format!(
+            "cache-key expected key namespace {expected_key_namespace}, found {found}"
+        )
+        .into());
+    }
+    if let Some(expected_user_tag) = expectations.expected_user_tag
+        && preview.user_tag.as_deref() != Some(expected_user_tag)
+    {
+        let found = preview.user_tag.as_deref().unwrap_or("none");
+        return Err(
+            format!("cache-key expected user tag {expected_user_tag}, found {found}").into(),
+        );
+    }
     Ok(())
 }
 
@@ -1156,6 +1247,9 @@ fn run_cache_lookup_command(
         expect_scope: None,
         expect_vhost: None,
         expect_route: None,
+        expect_namespace: None,
+        expect_key_namespace: None,
+        expect_user_tag: None,
     };
     let require_object = options.require_object;
     let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
@@ -1171,6 +1265,21 @@ fn run_cache_lookup_command(
     )?;
     let expected_route =
         parse_cache_key_preview_route("cache-lookup", options.expect_route.as_ref())?;
+    let expected_namespace = parse_cache_key_preview_value(
+        "cache-lookup",
+        "--expect-namespace",
+        options.expect_namespace.as_ref(),
+    )?;
+    let expected_key_namespace = parse_cache_key_preview_value(
+        "cache-lookup",
+        "--expect-key-namespace",
+        options.expect_key_namespace.as_ref(),
+    )?;
+    let expected_user_tag = parse_cache_key_preview_value(
+        "cache-lookup",
+        "--expect-user-tag",
+        options.expect_user_tag.as_ref(),
+    )?;
     let expected_reason = parse_cache_key_preview_reason(
         "cache-lookup",
         "--expect-reason",
@@ -1206,6 +1315,9 @@ fn run_cache_lookup_command(
         expected_scope: expected_scope.as_deref(),
         expected_vhost: expected_vhost.as_deref(),
         expected_route: expected_route.as_deref(),
+        expected_namespace: expected_namespace.as_deref(),
+        expected_key_namespace: expected_key_namespace.as_deref(),
+        expected_user_tag: expected_user_tag.as_deref(),
         expect_serve_stale_if_error: options.expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate: options.expect_serve_stale_while_revalidate,
     };
@@ -1234,6 +1346,12 @@ fn run_cache_lookup_command(
     }
     if let Some(combined_hash) = lookup.preview.combined_hash.as_deref() {
         println!("combined_hash: {combined_hash}");
+    }
+    if let Some(namespace) = lookup.preview.namespace.as_deref() {
+        println!("namespace: {namespace}");
+    }
+    if let Some(key_namespace) = lookup.preview.key_namespace.as_deref() {
+        println!("key_namespace: {key_namespace}");
     }
     if let Some(user_tag) = lookup.preview.user_tag.as_deref() {
         println!("user_tag: {user_tag}");
@@ -1381,6 +1499,9 @@ struct CacheLookupExpectations<'a> {
     expected_scope: Option<&'a str>,
     expected_vhost: Option<&'a str>,
     expected_route: Option<&'a str>,
+    expected_namespace: Option<&'a str>,
+    expected_key_namespace: Option<&'a str>,
+    expected_user_tag: Option<&'a str>,
     expect_serve_stale_if_error: bool,
     expect_serve_stale_while_revalidate: bool,
 }
@@ -1410,6 +1531,9 @@ fn validate_cache_lookup_expectations(
         expected_scope,
         expected_vhost,
         expected_route,
+        expected_namespace,
+        expected_key_namespace,
+        expected_user_tag,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     } = expectations;
@@ -1427,6 +1551,9 @@ fn validate_cache_lookup_expectations(
             expected_scope: *expected_scope,
             expected_vhost: *expected_vhost,
             expected_route: *expected_route,
+            expected_namespace: *expected_namespace,
+            expected_key_namespace: *expected_key_namespace,
+            expected_user_tag: *expected_user_tag,
         },
     )
     .map_err(|error| {
@@ -1808,6 +1935,22 @@ fn parse_cache_key_preview_reason(
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_key_preview_value(
+    command: &str,
+    flag: &str,
+    value: Option<&String>,
+) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() || value.len() > 128 || value.chars().any(char::is_control) {
+        return Err(format!("{command} {flag} must be a non-empty bounded value").into());
+    }
+    Ok(Some(value.to_owned()))
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
 fn parse_cache_key_preview_route(
     command: &str,
     route: Option<&String>,
@@ -1834,6 +1977,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_scope,
         expect_vhost,
         expect_route,
+        expect_namespace,
+        expect_key_namespace,
+        expect_user_tag,
     } = options;
     let _ = (
         config_path,
@@ -1852,6 +1998,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_scope,
         expect_vhost,
         expect_route,
+        expect_namespace,
+        expect_key_namespace,
+        expect_user_tag,
     );
     Err("cache-key requires the proxy and cache features".into())
 }
@@ -1886,6 +2035,9 @@ fn run_cache_lookup_command(
         expect_scope,
         expect_vhost,
         expect_route,
+        expect_namespace,
+        expect_key_namespace,
+        expect_user_tag,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     } = options;
@@ -1910,6 +2062,9 @@ fn run_cache_lookup_command(
         expect_scope,
         expect_vhost,
         expect_route,
+        expect_namespace,
+        expect_key_namespace,
+        expect_user_tag,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
     );
@@ -3615,6 +3770,9 @@ mod tests {
             expected_scope: None,
             expected_vhost: None,
             expected_route: None,
+            expected_namespace: None,
+            expected_key_namespace: None,
+            expected_user_tag: None,
             expect_serve_stale_if_error: false,
             expect_serve_stale_while_revalidate: false,
         };
@@ -3925,6 +4083,9 @@ mod tests {
                     expected_scope: Some("route"),
                     expected_vhost: Some("cached"),
                     expected_route: Some("assets"),
+                    expected_namespace: Some("fluxheim-image-v1"),
+                    expected_key_namespace: Some("route-assets-v1"),
+                    expected_user_tag: Some("cached:route:assets"),
                 }
             )
             .is_ok()
@@ -3943,6 +4104,9 @@ mod tests {
                     expected_scope: None,
                     expected_vhost: None,
                     expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .unwrap_err()
@@ -3963,6 +4127,9 @@ mod tests {
                     expected_scope: None,
                     expected_vhost: None,
                     expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .unwrap_err()
@@ -3983,6 +4150,9 @@ mod tests {
                     expected_scope: Some("vhost"),
                     expected_vhost: None,
                     expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .unwrap_err()
@@ -4003,6 +4173,9 @@ mod tests {
                     expected_scope: None,
                     expected_vhost: Some("other"),
                     expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .unwrap_err()
@@ -4023,11 +4196,83 @@ mod tests {
                     expected_scope: None,
                     expected_vhost: None,
                     expected_route: Some("other"),
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .unwrap_err()
             .to_string()
             .contains("expected route other, found assets")
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                    expected_namespace: Some("other-v1"),
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected namespace other-v1, found fluxheim-image-v1")
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: Some("other-v1"),
+                    expected_user_tag: None,
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected key namespace other-v1, found route-assets-v1")
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: Some("cached"),
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected user tag cached, found cached:route:assets")
         );
         assert!(
             super::validate_cache_key_preview_expectations(
@@ -4043,6 +4288,9 @@ mod tests {
                     expected_scope: None,
                     expected_vhost: None,
                     expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .unwrap_err()
@@ -4066,6 +4314,9 @@ mod tests {
                     expected_scope: None,
                     expected_vhost: None,
                     expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .is_ok()
@@ -4084,6 +4335,9 @@ mod tests {
                     expected_scope: None,
                     expected_vhost: None,
                     expected_route: None,
+                    expected_namespace: None,
+                    expected_key_namespace: None,
+                    expected_user_tag: None,
                 }
             )
             .unwrap_err()
@@ -4112,6 +4366,25 @@ mod tests {
             .unwrap()
             .as_deref(),
             Some("method HEAD currently bypasses proxy cache storage")
+        );
+        let expected_namespace = " fluxheim-image-v1 ".to_owned();
+        assert_eq!(
+            super::parse_cache_key_preview_value(
+                "cache-key",
+                "--expect-namespace",
+                Some(&expected_namespace)
+            )
+            .unwrap()
+            .as_deref(),
+            Some("fluxheim-image-v1")
+        );
+        assert!(
+            super::parse_cache_key_preview_value(
+                "cache-key",
+                "--expect-user-tag",
+                Some(&"\n".to_owned())
+            )
+            .is_err()
         );
     }
 
@@ -4323,6 +4596,7 @@ mod tests {
                 storage_tiers: 1,
                 reason: None,
                 namespace: Some("fluxheim-image-v1".to_owned()),
+                key_namespace: Some("route-assets-v1".to_owned()),
                 primary_key: None,
                 primary_hash: Some("primary".to_owned()),
                 variance_hash: None,

@@ -573,7 +573,10 @@ without contacting the upstream. `cache-key` can fail closed with
 `--expect-storage-tiers` when a deploy requires a specific cache policy layout.
 Use `--expect-scope vhost|route`, `--expect-vhost NAME`, and
 `--expect-route NAME` when a deploy must prove that a specific vhost or route
-policy was selected.
+policy was selected. Use `--expect-namespace NAME` for the internal cache
+namespace and `--expect-key-namespace NAME` / `--expect-user-tag TAG` when
+cache namespace migrations or purge-scope automation must fail closed on the
+exact selected key space.
 `fluxheim cache-lookup --host example.com --path /assets/app.js` also checks
 configured cache tiers and prints safe object
 metadata without dumping bodies or header values, including a compact
@@ -586,7 +589,9 @@ the Host header. `cache-lookup` can fail closed for deploy scripts with
 `--expect-header-name`, `--expect-objects`, `--expect-cache-lock-enabled`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
 `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,
-`--expect-route`, `--expect-ineligible`, `--expect-reason`,
+`--expect-route`, `--expect-namespace`, `--expect-key-namespace`,
+`--expect-user-tag`,
+`--expect-ineligible`, `--expect-reason`,
 `--expect-serve-stale-if-error`,
 `--expect-serve-stale-while-revalidate`, `--expect-purge-indexed`, and
 `--expect-freshness-state fresh|stale|expired`.

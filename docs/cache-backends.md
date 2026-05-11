@@ -518,6 +518,10 @@ flags fail when no matching object has an allowed stored body size,
 selected cache policy does not match the required stampede-protection or tier
 layout, `--expect-scope`, `--expect-vhost`, and `--expect-route` fail when the
 selected cache policy is not the intended scope, vhost, or route,
+`--expect-namespace` fails when the internal cache namespace is not expected,
+and `--expect-key-namespace` / `--expect-user-tag` fail when the selected
+operator key namespace or purge user tag is not the intended cache isolation
+boundary,
 `--expect-objects` fails when the lookup does not find exactly the requested
 number of matching objects across enabled tiers,
 `--expect-ineligible` and `--expect-reason` fail when a negative cache-policy

@@ -436,8 +436,10 @@ Stable scope:
     exact vhost or route that a request matches. `cache-key` can also fail
     closed with `--expect-eligible`, `--expect-cache-lock-enabled`,
     `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
-    `--expect-storage-tiers`, plus `--expect-scope` / `--expect-route`, so
-    deploy scripts can assert cache policy layout and selected vhost/route
+    `--expect-storage-tiers`, plus `--expect-scope`, `--expect-vhost`,
+    `--expect-route`, `--expect-namespace`, `--expect-key-namespace`, and
+    `--expect-user-tag`, so deploy scripts can assert cache policy layout,
+    selected vhost/route, internal namespace, and cache isolation boundary
     before warming objects. Both commands can include bounded safe request
     headers such as `Accept-Language` and `Accept-Encoding`, so operators can
     debug negotiated `Vary` variants without contacting upstreams.
@@ -446,7 +448,9 @@ Stable scope:
     `--expect-body-bytes`, `--expect-fresh-ttl-secs`, `--expect-cache-tag`,
     `--expect-header-name`, `--expect-cache-lock-enabled`,
     `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
-    `--expect-storage-tiers`, `--expect-scope`, `--expect-route`,
+    `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,
+    `--expect-route`, `--expect-namespace`, `--expect-key-namespace`,
+    `--expect-user-tag`,
     `--expect-serve-stale-if-error`, `--expect-serve-stale-while-revalidate`,
     `--expect-purge-indexed`, and
     `--expect-freshness-state fresh|stale|expired`, so scripts can assert that

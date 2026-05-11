@@ -326,6 +326,7 @@ hosts = ["cache.test"]
 enabled = true
 status_header = "X-Cache-Status"
 status_reason_header = "X-Cache-Reason"
+key_namespace = "cache-vhost-v1"
 stale_if_error_secs = 60
 stale_if_error_on = ["connect", "http-status"]
 stale_if_error_statuses = [502, 503, 504]
@@ -356,6 +357,7 @@ upstream_tls = false
 enabled = true
 status_header = "X-Cache-Status"
 status_reason_header = "X-Cache-Reason"
+key_namespace = "cache-route-swr-v1"
 stale_while_revalidate_secs = 60
 stale_if_error_secs = 60
 max_object_bytes = "1MiB"
@@ -444,6 +446,9 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
     --expect-disk-tier-enabled \
     --expect-scope vhost \
     --expect-vhost cache.test \
+    --expect-namespace fluxheim-image-v1 \
+    --expect-key-namespace cache-vhost-v1 \
+    --expect-user-tag cache.test \
     --expect-storage-tiers 2
 
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-key \
@@ -454,6 +459,18 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
     --expect-reason "method HEAD currently bypasses proxy cache storage" \
     --expect-scope vhost \
     --expect-vhost cache.test
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-key \
+    --host cache.test \
+    --path /swr.png \
+    --expect-eligible \
+    --expect-cache-lock-enabled \
+    --expect-scope route \
+    --expect-vhost cache.test \
+    --expect-route swr \
+    --expect-namespace fluxheim-image-v1 \
+    --expect-key-namespace cache-route-swr-v1 \
+    --expect-user-tag cache.test:route:swr
 
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
     --host cache.test \
@@ -835,6 +852,9 @@ fi
     --path /revalidate.png \
     --require-object \
     --expect-tier disk \
+    --expect-namespace fluxheim-image-v1 \
+    --expect-key-namespace cache-vhost-v1 \
+    --expect-user-tag cache.test \
     --expect-status 200 \
     --expect-body-bytes 16 \
     --expect-fresh-ttl-secs 120 \
