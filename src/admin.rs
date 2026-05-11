@@ -3712,6 +3712,56 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_activity_reset_endpoint_reports_route_tiered_cache() {
+        let cache_path = unique_temp_path("admin-cache-reset-route-tiered");
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![cached_tiered_route(&cache_path)],
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/activity/reset",
+            None,
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""status":"ok""#));
+        assert!(body.contains(r#""vhosts":1"#));
+        assert!(body.contains(r#""enabled_vhosts":0"#));
+        assert!(body.contains(r#""enabled_vhost_ratio_per_mille":0"#));
+        assert!(body.contains(r#""tiered_vhosts":0"#));
+        assert!(body.contains(r#""tiered_vhost_ratio_per_mille":0"#));
+        assert!(body.contains(r#""configured_routes":1"#));
+        assert!(body.contains(r#""routes_total":1"#));
+        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""enabled_routes":1"#));
+        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""tiered_routes":1"#));
+        assert!(body.contains(r#""tiered_route_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""memory_tiers":1"#));
+        assert!(body.contains(r#""disk_tiers":1"#));
+
+        std::fs::remove_dir_all(cache_path).unwrap();
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_purge_bulk_endpoint_accepts_repeated_paths() {
         let config = Config {
             vhosts: vec![VhostConfig {
