@@ -1,8 +1,9 @@
 # Production Readiness
 
-Fluxheim has a stable `1.0` gateway foundation release. This page states what
-the released line supports, what the next production milestone must add, and
-what operators should verify before using a build beyond local testing.
+Fluxheim has a stable `1.1` certificate-operations release on top of the `1.0`
+gateway foundation. This page states what the released line supports, what the
+active `1.2` operations and cache milestone must prove, and what operators
+should verify before using a build beyond local testing.
 
 ## 0.5 Basic-Sites Preview
 
@@ -81,12 +82,14 @@ not part of the `1.0` stable support promise:
 - WireGuard/Sentinel Mesh or clustered state.
 
 Treat these as design or incubator work until a later versioning-plan milestone
-promotes them.
+promotes them. Some of these items have since been promoted in `1.1` or are
+being promoted in the active `1.2` line; use the sections below for the current
+support promise.
 
-## 1.1 Production Target
+## Stable 1.1 Certificate Operations
 
-The `1.1` line should make TLS and certificate operations practical for normal
-production deployments:
+The `1.1` line makes TLS and certificate operations practical for normal
+production deployments. In addition to the `1.0` behavior, it supports:
 
 - explicit safe TLS policy profiles;
 - minimum TLS version config bounded to safe values;
@@ -105,6 +108,30 @@ store deploy hooks, and full zero-downtime reload through the later snapshot
 model are not part of the first `1.1` promise unless they are explicitly
 promoted with tests and release evidence.
 
+## Active 1.2 Operations And Cache Target
+
+The `1.2` line is the active cache-server and operations-hardening milestone.
+It is intended to promote:
+
+- vhost and route-scoped proxy cache policies with memory, disk, and tiered
+  storage;
+- cache key preview tooling, cache status visibility, and protected purge
+  endpoints;
+- indexed hard and soft purges by primary key, path, user tag, and cache tag;
+- request collapsing with bounded cache-lock waits to reduce backend stampedes;
+- stale-if-error and stale-while-revalidate behavior with explicit cache
+  activity metrics;
+- stable on-disk cache object metadata for combined keys, primary keys, tags,
+  and path indexes;
+- Prometheus metrics plus OpenTelemetry metric and trace export basics;
+- release-gate coverage for proxy cache and local observability smoke suites.
+
+Before calling `1.2` stable, release evidence must include the stable gate,
+cache behavior smokes, and observability smokes. Partial streaming admission,
+slice/range fill, a slab or storage-bin disk backend, distributed cache peer
+fill, Varnish-style ban expressions, and WASM cache hooks remain future work
+unless explicitly promoted with tests and release evidence.
+
 ## Operator Checks
 
 Before using a Fluxheim build for a real site, run the stable gate from the repo
@@ -113,6 +140,9 @@ root:
 ```bash
 scripts/stable_release_gate.sh check
 ```
+
+For `1.2` candidates, this gate also runs the proxy cache and local
+observability smoke suites.
 
 For a release candidate, also run the deeper optional checks that fit the
 deployment:
