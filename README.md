@@ -283,9 +283,9 @@ current development line now includes route/vhost scoped cache policies, memory
 and disk cache tiers, cache locks for request collapsing, protected purge/status
 operations, cache warm/lookup/key tooling, cache policy metrics, OTLP metrics
 export, and end-to-end proxy cache smoke coverage for hit `Age`, conditional
-`304` from `ETag` and `Last-Modified`, byte ranges including ETag/date
-`If-Range`, HEAD probes that do not poison cached GET bodies, validator-based
-upstream revalidation and refresh,
+`304`/`200` validator match and mismatch behavior from `ETag` and
+`Last-Modified`, byte ranges including ETag/date `If-Range`, HEAD probes that
+do not poison cached GET bodies, validator-based upstream revalidation and refresh,
 stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
 `Vary` variants, disk hits after restart, and debug bypass reasons.
 `cache-lookup` also supports deploy-script assertions for object

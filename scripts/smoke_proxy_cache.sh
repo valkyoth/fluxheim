@@ -454,7 +454,9 @@ post_head_get_headers="$TMP_DIR/post-head-get.headers"
 bypass_headers="$TMP_DIR/bypass.headers"
 pragma_bypass_headers="$TMP_DIR/pragma-bypass.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
+conditional_mismatch_headers="$TMP_DIR/conditional-mismatch.headers"
 modified_since_headers="$TMP_DIR/modified-since.headers"
+modified_since_mismatch_headers="$TMP_DIR/modified-since-mismatch.headers"
 range_headers="$TMP_DIR/range.headers"
 if_range_match_headers="$TMP_DIR/if-range-match.headers"
 if_range_mismatch_headers="$TMP_DIR/if-range-mismatch.headers"
@@ -616,6 +618,22 @@ if [ "$conditional_status" != "304" ]; then
     exit 1
 fi
 
+conditional_mismatch_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$conditional_mismatch_headers" -o "$body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H 'If-None-Match: "cache-smoke-other"' \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$conditional_mismatch_status" != "200" ]; then
+    echo "proxy cache smoke failed: cached conditional mismatch returned $conditional_mismatch_status instead of 200" >&2
+    cat "$conditional_mismatch_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$body")" != "0123456789abcdef" ]; then
+    echo "proxy cache smoke failed: cached conditional mismatch body mismatch" >&2
+    exit 1
+fi
+
 modified_since_status=$(
     curl -sS --max-time "$CURL_MAX_TIME" -D "$modified_since_headers" -o /dev/null -w '%{http_code}' \
         -H "Host: cache.test" \
@@ -625,6 +643,22 @@ modified_since_status=$(
 if [ "$modified_since_status" != "304" ]; then
     echo "proxy cache smoke failed: cached If-Modified-Since returned $modified_since_status instead of 304" >&2
     cat "$modified_since_headers" >&2
+    exit 1
+fi
+
+modified_since_mismatch_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$modified_since_mismatch_headers" -o "$body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "If-Modified-Since: Sat, 09 May 2026 00:00:00 GMT" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+)
+if [ "$modified_since_mismatch_status" != "200" ]; then
+    echo "proxy cache smoke failed: cached If-Modified-Since mismatch returned $modified_since_mismatch_status instead of 200" >&2
+    cat "$modified_since_mismatch_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$body")" != "0123456789abcdef" ]; then
+    echo "proxy cache smoke failed: cached If-Modified-Since mismatch body mismatch" >&2
     exit 1
 fi
 
