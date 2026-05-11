@@ -319,8 +319,9 @@ records successful admin purge commands with bounded operation and mode labels;
   revalidate the stored object instead of treating this as a full cache bypass.
   `Cache-Control: no-store` remains a bypass with `request-no-store` so the
   response is not admitted into the shared cache. The proxy cache smoke suite
-  verifies these bounded debug reasons end to end. Keep the reason
-  header disabled unless actively debugging a cache policy.
+  verifies `no-cache`, `max-age=0`, `Pragma: no-cache`, and `no-store` reasons
+  end to end. Keep the reason header disabled unless actively debugging a cache
+  policy.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,

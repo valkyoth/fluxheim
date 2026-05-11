@@ -567,6 +567,7 @@ head_second_headers="$TMP_DIR/head-second.headers"
 post_head_get_headers="$TMP_DIR/post-head-get.headers"
 refresh_headers="$TMP_DIR/refresh.headers"
 pragma_refresh_headers="$TMP_DIR/pragma-refresh.headers"
+max_age_refresh_headers="$TMP_DIR/max-age-refresh.headers"
 no_store_bypass_headers="$TMP_DIR/no-store-bypass.headers"
 header_bypass_headers="$TMP_DIR/header-bypass.headers"
 header_value_bypass_headers="$TMP_DIR/header-value-bypass.headers"
@@ -730,6 +731,21 @@ fi
 if ! grep -qi '^x-cache-reason: request-refresh' "$pragma_refresh_headers"; then
     echo "proxy cache smoke failed: Pragma refresh did not expose bounded reason" >&2
     cat "$pragma_refresh_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$max_age_refresh_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "Cache-Control: max-age=0" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: REVALIDATE' "$max_age_refresh_headers"; then
+    echo "proxy cache smoke failed: Cache-Control max-age=0 did not force cache revalidation" >&2
+    cat "$max_age_refresh_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-refresh' "$max_age_refresh_headers"; then
+    echo "proxy cache smoke failed: Cache-Control max-age=0 did not expose bounded reason" >&2
+    cat "$max_age_refresh_headers" >&2
     exit 1
 fi
 
