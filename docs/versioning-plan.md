@@ -632,7 +632,8 @@ Stable scope for declaring the cache pack complete:
   stale-while-revalidate serving during background refresh,
   stale-if-error serving after upstream failure, cache-lock request collapsing
   for concurrent misses, disk HIT after restart, and request-bypass reason
-  behavior are covered end to end.
+  behavior are covered end to end. Admin stale dry-run and tag purge are smoke
+  tested against real cached objects.
 - Proxied cache revalidation refreshes metadata safely when origins return
   `304 Not Modified`.
 - Large-object byte-range fill is bounded and does not require buffering an
@@ -709,8 +710,8 @@ Exit criteria:
   isolation,
   stale-while-revalidate serving during background refresh, stale-if-error
   serving after upstream failure, cache-lock request collapsing for concurrent
-  misses, disk HIT after restart, and `Cache-Control`/`Pragma`
-  request-bypass reason headers.
+  misses, disk HIT after restart, admin stale dry-run and tag purge against real
+  cached objects, and `Cache-Control`/`Pragma` request-bypass reason headers.
 - Full HEAD cache parity remains a 1.2 cache-completion item: decide whether
   Fluxheim should intentionally bypass HEAD storage or implement explicit
   HEAD-to-GET cache-key conversion with safe body handling.

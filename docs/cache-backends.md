@@ -211,8 +211,8 @@ internal cache implementation.
   revalidation from an origin `304`, stale-object refresh from an origin `200`,
   stale-while-revalidate serving during a background refresh, stale-if-error
   serving after an upstream connection failure, cache-lock request collapsing
-  for concurrent misses, `Vary` variant isolation, and
-  disk-cache HIT behavior after a
+  for concurrent misses, `Vary` variant isolation, admin stale dry-run and tag
+  purge against real cached objects, and disk-cache HIT behavior after a
   Fluxheim process restart without the origin available. Planned work still
   covers edge cases where origins change `Vary`, validators, or freshness
   headers during revalidation and broader cache-header matrix tests across

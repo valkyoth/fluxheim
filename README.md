@@ -289,7 +289,8 @@ assertions on cached conditional/range responses, HEAD probes that do not poison
 cached GET bodies, validator-based upstream revalidation and refresh,
 stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
 `Vary` variants, disk hits after restart, configured request bypass policies,
-input-file and negative-cache warming, and debug bypass reasons.
+input-file and negative-cache warming, admin stale dry-run and tag purge, and
+debug bypass reasons.
 `cache-lookup` also supports deploy-script assertions for object
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
 cache tags, stored header names, exact object count, cache-lock/tier layout, stale-serving

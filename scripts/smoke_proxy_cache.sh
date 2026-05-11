@@ -11,7 +11,7 @@ import socket
 
 sockets = []
 try:
-    for _ in range(2):
+    for _ in range(3):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -25,6 +25,7 @@ PY
 set -- $ports
 FLUXHEIM_PORT=$1
 ORIGIN_PORT=$2
+ADMIN_PORT=$3
 
 ORIGIN_PID=
 FLUXHEIM_PID=
@@ -60,7 +61,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$TMP_DIR/run" "$TMP_DIR/cache"
+mkdir -p "$TMP_DIR/run" "$TMP_DIR/cache" "$TMP_DIR/snapshots"
 
 cat > "$TMP_DIR/origin.py" <<'PY'
 import sys
@@ -309,6 +310,13 @@ format = "text"
 enabled = false
 request_id = false
 
+[admin]
+enabled = true
+listen = "127.0.0.1:$ADMIN_PORT"
+require_loopback = true
+token_env = "FLUXHEIM_ADMIN_TOKEN"
+snapshot_store = "$TMP_DIR/snapshots"
+
 [headers.response]
 enabled = true
 unset = ["server", "x-powered-by"]
@@ -426,7 +434,7 @@ stop_pid() {
 }
 
 start_fluxheim() {
-    "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" &
+    FLUXHEIM_ADMIN_TOKEN=secret-token "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" &
     FLUXHEIM_PID=$!
 }
 
@@ -443,6 +451,10 @@ stop_origin() {
         ORIGIN_PID=
     fi
 }
+
+admin_status_body="$TMP_DIR/admin-status.json"
+admin_stale_dry_run_body="$TMP_DIR/admin-stale-dry-run.json"
+admin_tag_purge_body="$TMP_DIR/admin-tag-purge.json"
 
 start_fluxheim
 
@@ -465,6 +477,19 @@ wait_http() {
 }
 
 wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -o "$admin_status_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/status"; then
+    echo "proxy cache smoke failed: admin endpoint did not become reachable" >&2
+    cat "$TMP_DIR/fluxheim.log" >&2 || true
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$admin_status_body"; then
+    echo "proxy cache smoke failed: admin status endpoint did not return ok" >&2
+    cat "$admin_status_body" >&2
+    exit 1
+fi
 
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-key \
     --host cache.test \
@@ -1468,5 +1493,56 @@ if ! grep -qi '^age:' "$restart_headers"; then
     cat "$restart_headers" >&2
     exit 1
 fi
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_stale_dry_run_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-stale?vhost=cache.test&limit=16&dry_run=true"; then
+    echo "proxy cache smoke failed: admin stale dry-run purge request failed" >&2
+    cat "$admin_stale_dry_run_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '"dry_run":true' "$admin_stale_dry_run_body"; then
+    echo "proxy cache smoke failed: admin stale dry-run purge did not report dry_run=true" >&2
+    cat "$admin_stale_dry_run_body" >&2
+    exit 1
+fi
+if ! grep -q '"would_purge":1' "$admin_stale_dry_run_body"; then
+    echo "proxy cache smoke failed: admin stale dry-run purge did not count stale object" >&2
+    cat "$admin_stale_dry_run_body" >&2
+    exit 1
+fi
+if ! grep -q '"purged":0' "$admin_stale_dry_run_body"; then
+    echo "proxy cache smoke failed: admin stale dry-run purge removed objects" >&2
+    cat "$admin_stale_dry_run_body" >&2
+    exit 1
+fi
+
+if ! curl -sS --max-time "$CURL_MAX_TIME" -X POST -o "$admin_tag_purge_body" \
+    -H "Authorization: Bearer secret-token" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/cache/purge-tag?vhost=cache.test&cache_tag=smoke:input-warm&limit=16"; then
+    echo "proxy cache smoke failed: admin tag purge request failed" >&2
+    cat "$admin_tag_purge_body" >&2 || true
+    exit 1
+fi
+if ! grep -q '"status":"ok"' "$admin_tag_purge_body"; then
+    echo "proxy cache smoke failed: admin tag purge did not return ok" >&2
+    cat "$admin_tag_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"cache_tag":"smoke:input-warm"' "$admin_tag_purge_body"; then
+    echo "proxy cache smoke failed: admin tag purge did not echo bounded cache tag" >&2
+    cat "$admin_tag_purge_body" >&2
+    exit 1
+fi
+if ! grep -q '"purged":1' "$admin_tag_purge_body"; then
+    echo "proxy cache smoke failed: admin tag purge did not remove warmed object" >&2
+    cat "$admin_tag_purge_body" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /input-warm.png \
+    --expect-objects 0
 
 echo "proxy cache smoke: ok"
