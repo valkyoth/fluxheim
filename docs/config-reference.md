@@ -469,6 +469,7 @@ ignore_origin_cache_headers = false
 key_namespace = "repoheim-assets-v1"
 key_parts = ["method", "host", "path", "query"]
 min_uses = 2
+pass_uncacheable_after = 3
 status_ttls = { "200" = 3600, "404" = 60 }
 default_status_ttl_secs = 15
 stale_while_revalidate_secs = 30
@@ -567,6 +568,11 @@ cacheable origin response at least that many times within a short bounded
 window. The default is `1`, which stores the first cacheable response. Increase
 it on routes where one-off URLs should pass through without occupying shared
 cache space.
+`pass_uncacheable_after` is disabled by default with `0`. When set, Fluxheim
+counts repeated uncacheable origin responses for the same cache key in a bounded
+short-lived in-memory table. After the configured threshold, matching requests
+temporarily bypass cache lookup and storage instead of repeatedly entering the
+shared cache path. A later cacheable response clears the pass decision.
 `ignore_origin_cache_headers` removes upstream `Cache-Control` and `Expires`
 before cache admission and downstream delivery. Keep the default `false` unless
 the matched route is known static content and Fluxheim policy is responsible for

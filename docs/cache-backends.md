@@ -51,6 +51,11 @@ internal cache implementation.
   `vhosts.routes.cache.key_parts` provide a constrained cache-key template made
   from safe request fields: `method`, `host`, `path`, and `query`. `path` is
   required, duplicates are rejected, and `query` still obeys `include_query`.
+- `cache.pass_uncacheable_after`, `vhosts.cache.pass_uncacheable_after`, and
+  `vhosts.routes.cache.pass_uncacheable_after` can temporarily pass repeated
+  uncacheable cache keys around cache lookup and storage. The feature is
+  disabled by default and uses a bounded, short-lived in-memory table so dynamic
+  one-off responses do not turn into unbounded state.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream
@@ -319,6 +324,9 @@ A production adapter must:
   bounded partial streaming is still pending.
 - Support request collapsing or integrate with Pingora cache locks. Implemented
   for the memory tier.
+- Support hit-for-pass/pass-cache decisions for repeatedly uncacheable dynamic
+  objects. Implemented as opt-in `pass_uncacheable_after` with a bounded
+  short-lived in-memory decision table.
 - Expose purge semantics for the future admin API. Implemented in the storage
   adapters and protected admin endpoint for single-key and same-host bulk exact
   invalidation, including vhost and route-scoped cache policies.

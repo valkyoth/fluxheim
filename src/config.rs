@@ -3203,6 +3203,8 @@ pub struct CacheConfig {
     #[serde(default = "default_cache_min_uses")]
     pub min_uses: u32,
     #[serde(default)]
+    pub pass_uncacheable_after: u32,
+    #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
     #[serde(default)]
     pub default_status_ttl_secs: Option<u32>,
@@ -3252,6 +3254,7 @@ impl Default for CacheConfig {
             key_namespace: None,
             key_parts: default_cache_key_parts(),
             min_uses: default_cache_min_uses(),
+            pass_uncacheable_after: 0,
             status_ttls: BTreeMap::new(),
             default_status_ttl_secs: None,
             stale_while_revalidate_secs: None,
@@ -7508,6 +7511,7 @@ mod tests {
             key_namespace = "repoheim-assets-v1"
             key_parts = ["method", "host", "path"]
             min_uses = 2
+            pass_uncacheable_after = 3
             status_ttls = { "200" = 3600, "404" = 60 }
             default_status_ttl_secs = 15
             stale_while_revalidate_secs = 30
@@ -7602,6 +7606,7 @@ mod tests {
             [CacheKeyPart::Method, CacheKeyPart::Host, CacheKeyPart::Path]
         );
         assert_eq!(config.cache.min_uses, 2);
+        assert_eq!(config.cache.pass_uncacheable_after, 3);
         assert_eq!(config.cache.status_ttls.get(&200), Some(&3600));
         assert_eq!(config.cache.status_ttls.get(&404), Some(&60));
         assert_eq!(config.cache.default_status_ttl_secs, Some(15));

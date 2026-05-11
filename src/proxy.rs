@@ -53,6 +53,10 @@ const CACHE_MIN_USES_REASON: &str = "cache-min-uses";
 const CACHE_MIN_USES_COUNTER_CAPACITY: u64 = 65_536;
 #[cfg(feature = "cache")]
 const CACHE_MIN_USES_COUNTER_TTL_SECS: u64 = 600;
+#[cfg(feature = "cache")]
+const CACHE_PASS_COUNTER_CAPACITY: u64 = 65_536;
+#[cfg(feature = "cache")]
+const CACHE_PASS_COUNTER_TTL_SECS: u64 = 600;
 
 #[derive(Clone)]
 pub struct FluxProxy {
@@ -2403,8 +2407,14 @@ impl ProxyHttp for FluxProxy {
             return Ok(());
         };
 
-        let cache_request = cache_request_from_header(session.req_header());
-        if crate::cache::image_cache_key(cache_config, &cache_request).is_none() {
+        let Some(cache_key) = state.pingora_image_cache_key_for_request_header(
+            session.req_header(),
+            vhost_index,
+            ctx.route_index,
+        ) else {
+            return Ok(());
+        };
+        if cache_pass_should_bypass(cache_pass_counter(), cache_config, &cache_key.combined()) {
             return Ok(());
         }
 
@@ -2469,8 +2479,10 @@ impl ProxyHttp for FluxProxy {
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
         let vhost = state.vhost(vhost_index);
         let cache = selected_cache_config(vhost, ctx);
+        let cache_key = session.cache.cache_key().combined();
 
         if let Some(reason) = response_cache_admission_rejection(response, cache) {
+            cache_pass_record_uncacheable(cache_pass_counter(), cache, &cache_key);
             return Ok(RespCacheable::Uncacheable(NoCacheReason::Custom(reason)));
         }
 
@@ -2483,13 +2495,12 @@ impl ProxyHttp for FluxProxy {
             authorization_present,
             &FLUXHEIM_CACHE_DEFAULTS,
         );
-        if decision.is_cacheable()
-            && !cache_min_uses_allows_store(
-                cache_min_uses_counter(),
-                cache,
-                &session.cache.cache_key().combined(),
-            )
-        {
+        if !decision.is_cacheable() {
+            cache_pass_record_uncacheable(cache_pass_counter(), cache, &cache_key);
+            return Ok(decision);
+        }
+        cache_pass_record_cacheable(cache_pass_counter(), &cache_key);
+        if !cache_min_uses_allows_store(cache_min_uses_counter(), cache, &cache_key) {
             return Ok(RespCacheable::Uncacheable(NoCacheReason::Custom(
                 CACHE_MIN_USES_REASON,
             )));
@@ -2868,6 +2879,52 @@ fn cache_min_uses_allows_store(
         counter.insert(cache_key.to_owned(), uses);
         false
     }
+}
+
+#[cfg(feature = "cache")]
+fn cache_pass_counter() -> &'static moka::sync::Cache<String, u32> {
+    static COUNTER: OnceLock<moka::sync::Cache<String, u32>> = OnceLock::new();
+    COUNTER.get_or_init(|| {
+        moka::sync::Cache::builder()
+            .max_capacity(CACHE_PASS_COUNTER_CAPACITY)
+            .time_to_live(Duration::from_secs(CACHE_PASS_COUNTER_TTL_SECS))
+            .build()
+    })
+}
+
+#[cfg(feature = "cache")]
+fn cache_pass_should_bypass(
+    counter: &moka::sync::Cache<String, u32>,
+    cache: &crate::config::CacheConfig,
+    cache_key: &str,
+) -> bool {
+    cache.pass_uncacheable_after > 0
+        && counter
+            .get(cache_key)
+            .is_some_and(|uses| uses >= cache.pass_uncacheable_after)
+}
+
+#[cfg(feature = "cache")]
+fn cache_pass_record_uncacheable(
+    counter: &moka::sync::Cache<String, u32>,
+    cache: &crate::config::CacheConfig,
+    cache_key: &str,
+) {
+    if cache.pass_uncacheable_after == 0 {
+        return;
+    }
+
+    let uses = counter
+        .get(cache_key)
+        .unwrap_or(0)
+        .saturating_add(1)
+        .min(cache.pass_uncacheable_after);
+    counter.insert(cache_key.to_owned(), uses);
+}
+
+#[cfg(feature = "cache")]
+fn cache_pass_record_cacheable(counter: &moka::sync::Cache<String, u32>, cache_key: &str) {
+    counter.invalidate(cache_key);
 }
 
 #[cfg(feature = "cache")]
@@ -3970,7 +4027,8 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{
         CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
-        cache_min_uses_allows_store, cache_request_participated, cache_should_serve_stale,
+        cache_min_uses_allows_store, cache_pass_record_cacheable, cache_pass_record_uncacheable,
+        cache_pass_should_bypass, cache_request_participated, cache_should_serve_stale,
         cache_stale_status_allows, cache_status_header_value, cache_status_reason_header_value,
         cache_vary_policy, ignore_origin_cache_headers, response_cache_admission_rejection,
         strip_cache_response_headers, vary_cache_policy, vary_request_hash,
@@ -5870,6 +5928,36 @@ mod tests {
             &default_cache,
             "other-key"
         ));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_pass_bypasses_repeated_uncacheable_keys() {
+        let counter = moka::sync::Cache::builder().max_capacity(16).build();
+        let cache = CacheConfig {
+            pass_uncacheable_after: 2,
+            ..CacheConfig::default()
+        };
+
+        assert!(!cache_pass_should_bypass(&counter, &cache, "key"));
+        cache_pass_record_uncacheable(&counter, &cache, "key");
+        assert!(!cache_pass_should_bypass(&counter, &cache, "key"));
+        cache_pass_record_uncacheable(&counter, &cache, "key");
+        assert!(cache_pass_should_bypass(&counter, &cache, "key"));
+        cache_pass_record_uncacheable(&counter, &cache, "key");
+        assert_eq!(counter.get("key"), Some(2));
+
+        cache_pass_record_cacheable(&counter, "key");
+        assert!(!cache_pass_should_bypass(&counter, &cache, "key"));
+
+        let disabled = CacheConfig::default();
+        cache_pass_record_uncacheable(&counter, &disabled, "disabled-key");
+        assert!(!cache_pass_should_bypass(
+            &counter,
+            &disabled,
+            "disabled-key"
+        ));
+        assert_eq!(counter.get("disabled-key"), None);
     }
 
     #[cfg(feature = "cache")]

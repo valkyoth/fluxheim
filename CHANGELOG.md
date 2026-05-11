@@ -20,6 +20,8 @@ behavior when the change improves security or project direction.
 - Disk cache writes now use a v3 object header that records the combined cache
   key and user tag, allowing Fluxheim to rebuild the disk purge index after a
   process restart while retaining read compatibility with older v1/v2 objects.
+- Cache policies can now set `pass_uncacheable_after` to temporarily bypass the
+  cache path for repeated uncacheable responses with the same cache key.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside
