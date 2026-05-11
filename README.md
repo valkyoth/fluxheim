@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="./.github/images/fluxheim-logo-transparent.webp" alt="Fluxheim" width="420">
-</p>
-
-<p align="center">
   <b>Memory-safe edge server and reverse proxy built on Pingora.</b><br>
   Modular by design. Secure by default. Ready for rootless containers.
 </p>
