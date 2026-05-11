@@ -2344,6 +2344,28 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_warm_dry_run_rejects_unsafe_request_headers() {
+        let dir = TestDir::new("cli-cache-warm-bad-header");
+        let config = dir.simple_config("fluxheim.toml", "example", "example.test");
+
+        let error = run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "cache-warm",
+            "--path",
+            "/assets/app.css",
+            "--header",
+            "Host: other.example",
+            "--dry-run",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cannot set Host"));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_warm_targets_reject_header_injection() {
         let error = super::cache_warm_target("example.test", "/ok\r\nx-bad: 1").unwrap_err();
         assert!(error.to_string().contains("path contains control"));
