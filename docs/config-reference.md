@@ -665,10 +665,12 @@ cache key. It defaults to `true`; set it to `false` only on tightly matched
 static-asset routes where query parameters are not part of the response
 identity.
 `[cache.lock]` controls request collapsing for concurrent misses on the same
-cache key. Keep it enabled for expensive static misses. `age_timeout_secs`
-controls how long an active writer lock is considered valid, while
-`wait_timeout_secs` controls how long readers wait for the writer before
-falling back to their own origin fetch.
+cache key. Keep it enabled for expensive static misses and stampede protection:
+one request fetches the origin object while matching readers wait for the cache
+fill instead of all hitting the backend together. `age_timeout_secs` controls
+how long an active writer lock is considered valid, while `wait_timeout_secs`
+controls how long readers wait for the writer before falling back to their own
+origin fetch.
 
 Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`. Route cache settings use `[vhosts.routes.cache]` and

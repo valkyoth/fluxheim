@@ -575,7 +575,9 @@ Exit criteria:
 - Operators can set a cache key namespace per cache policy to intentionally
   isolate old and new route-cache contents without URL changes.
 - Cache request-collapsing lock enablement and timeouts are configurable per
-  cache policy.
+  cache policy. This is the cache-stampede protection path: one request for an
+  uncached or expired key gets the origin writer permit while matching readers
+  wait for the fill up to the configured timeout.
 - Protected cache purge endpoints can target route-scoped cache policies by
   route name.
 - Protected cache purge responses identify each requested host/method/path/query

@@ -23,11 +23,15 @@ internal cache implementation.
 - `cache.enabled = true` requires at least one storage tier.
 - The proxy emits vhost-aware Pingora cache keys and enables Pingora `HttpCache`
   admission for eligible image requests with a configured memory or disk tier.
-- Pingora cache locks collapse concurrent misses for the same cache key.
-  `cache.lock`, `vhosts.cache.lock`, and `vhosts.routes.cache.lock` configure
-  whether request collapsing is enabled and how long writer age and reader wait
-  timeouts last. Defaults preserve the original 30 second writer age timeout
-  and 30 second waiter timeout.
+- Pingora cache locks collapse concurrent misses for the same cache key to
+  prevent cache stampedes when many clients request the same uncached or
+  expired object at once. One request receives the writer permit and fetches
+  from the origin; matching readers wait for that writer up to the configured
+  timeout instead of all hitting the origin together. `cache.lock`,
+  `vhosts.cache.lock`, and `vhosts.routes.cache.lock` configure whether request
+  collapsing is enabled and how long writer age and reader wait timeouts last.
+  Defaults preserve the original 30 second writer age timeout and 30 second
+  waiter timeout.
 - `cache.status_header`, `vhosts.cache.status_header`, and
   `vhosts.routes.cache.status_header` optionally emit a cache debug header such
   as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
