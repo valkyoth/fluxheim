@@ -511,7 +511,8 @@ Current implementation status:
     and cache-key-part controls;
   - positive and negative status TTLs, optional origin freshness override,
     `stale-if-error`, and `stale-while-revalidate` windows;
-  - configurable cache locks for request collapsing;
+  - configurable cache locks for request collapsing across memory, disk, and
+    tiered cache policies;
   - shared-cache safety controls for `Set-Cookie`, request bypass headers,
     request bypass cookies, request bypass query parameters, response-header
     hiding, origin `Cache-Control`/`Expires` override, explicit `Vary`
@@ -526,7 +527,9 @@ Current implementation status:
     coverage ratio;
   - bounded in-memory purge indexes for memory and disk tiers;
   - process-wide opt-in background stale disk purger;
-  - `fluxheim cache-warm` path warming through the normal local listener;
+  - `fluxheim cache-warm` path warming through the normal local listener with
+    2xx/3xx success accounting and explicit `--allow-status` overrides for
+    deliberate negative-cache warming;
   - Prometheus cache activity metrics and initial OTLP metrics export.
 
 Stable scope for declaring the cache pack complete:

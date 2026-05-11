@@ -439,7 +439,7 @@ A production adapter must:
   enforcing `cache.max_object_bytes` and keeping partial streaming disabled;
   bounded partial streaming is still pending.
 - Support request collapsing or integrate with Pingora cache locks. Implemented
-  for the memory tier.
+  for memory, disk, and tiered cache policies through Pingora cache locks.
 - Support hit-for-pass/pass-cache decisions for repeatedly uncacheable dynamic
   objects. Implemented as opt-in `pass_uncacheable_after` with a bounded
   short-lived in-memory decision table.
