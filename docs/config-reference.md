@@ -196,6 +196,13 @@ enabled = false
 mode = "propagate_only"
 traceparent = true
 log_trace_id = true
+
+[tracing.otlp]
+enabled = false
+endpoint = "http://127.0.0.1:4318/v1/traces"
+service_name = "fluxheim"
+queue_size = 8192
+timeout_secs = 2
 ```
 
 Implemented values:
@@ -207,7 +214,10 @@ Implemented values:
   is enabled.
 
 `tracing.enabled = true` is rejected when Fluxheim is built without
-`otel-tracing`. `otel-tracing` is incompatible with `privacy-mode`.
+`otel-tracing`. `tracing.otlp.enabled = true` requires the `otel-otlp` feature.
+The initial exporter supports OTLP/HTTP JSON over `http://` only, intended for a
+local collector or local Jaeger during development. `otel-tracing` and
+`otel-otlp` are incompatible with `privacy-mode`.
 
 ## Logging
 

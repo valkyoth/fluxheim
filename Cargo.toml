@@ -59,6 +59,7 @@ acme-client = [
 ]
 metrics = ["dep:prometheus"]
 otel-tracing = ["proxy", "dep:getrandom"]
+otel-otlp = ["otel-tracing", "dep:serde_json"]
 privacy-mode = ["proxy", "web"]
 security = []
 
@@ -76,7 +77,7 @@ profile-load-balancer = [
     "tls-rustls",
     "security",
 ]
-profile-observability = ["profile-core", "metrics", "otel-tracing"]
+profile-observability = ["profile-core", "metrics", "otel-tracing", "otel-otlp"]
 profile-privacy = ["proxy", "web", "tls-rustls", "privacy-mode", "security"]
 
 [dependencies]

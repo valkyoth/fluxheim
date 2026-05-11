@@ -101,6 +101,8 @@ struct ProxyRuntimeState {
     https_redirect: HttpsRedirectConfig,
     #[cfg(feature = "otel-tracing")]
     tracing: crate::config::TracingConfig,
+    #[cfg(feature = "otel-otlp")]
+    trace_exporter: Option<crate::otel_otlp::TraceExporter>,
     #[cfg(not(feature = "privacy-mode"))]
     access_log: AccessLoggingConfig,
 }
@@ -245,6 +247,52 @@ impl FluxProxy {
                 latency_ms,
             })
         );
+    }
+
+    #[cfg(feature = "otel-otlp")]
+    fn export_otlp_trace_span(
+        &self,
+        session: &Session,
+        error: Option<&Error>,
+        ctx: &RequestContext,
+    ) {
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let Some(exporter) = state.trace_exporter.as_ref() else {
+            return;
+        };
+        if !state.tracing.enabled || !state.tracing.otlp.enabled {
+            return;
+        }
+        let Some(trace_context) = ctx.trace_context else {
+            return;
+        };
+        let vhost = ctx
+            .vhost_index
+            .and_then(|index| state.vhosts.get(index))
+            .map(|vhost| vhost.name.as_str())
+            .unwrap_or("unknown");
+        let route = ctx
+            .route_index
+            .map(|route_index| format!("route-{route_index}"));
+        let status = session
+            .response_written()
+            .map(|response| response.status.as_u16());
+        let method = session.req_header().method.as_str().to_owned();
+        exporter.try_export(crate::otel_otlp::TraceSpan {
+            trace_id: trace_context.trace_id_hex(),
+            span_id: trace_context.span_id_hex(),
+            parent_span_id: trace_context.parent_span_id_hex(),
+            name: format!("HTTP {method}"),
+            method,
+            vhost: vhost.to_owned(),
+            route,
+            status_code: status,
+            error: error.is_some() || status.is_some_and(|status| status >= 500),
+            start_time_unix_nanos: ctx.started_at_unix_nanos.unwrap_or_else(unix_time_nanos),
+            end_time_unix_nanos: unix_time_nanos(),
+            request_body_bytes: ctx.request_body_bytes_seen,
+            response_body_bytes: ctx.response_body_bytes_seen,
+        });
     }
 
     #[cfg(feature = "cache")]
@@ -1609,6 +1657,8 @@ impl ProxyRuntimeState {
             https_redirect: config.server.https_redirect,
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
+            #[cfg(feature = "otel-otlp")]
+            trace_exporter: crate::otel_otlp::TraceExporter::from_config(&config.tracing.otlp)?,
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -1664,6 +1714,8 @@ impl ProxyRuntimeState {
             https_redirect: config.server.https_redirect,
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
+            #[cfg(feature = "otel-otlp")]
+            trace_exporter: crate::otel_otlp::TraceExporter::from_config(&config.tracing.otlp)?,
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -2329,6 +2381,8 @@ pub struct RequestContext {
     request_id: Option<String>,
     #[cfg(feature = "otel-tracing")]
     trace_context: Option<crate::trace_context::TraceContext>,
+    #[cfg(feature = "otel-otlp")]
+    started_at_unix_nanos: Option<u128>,
     #[cfg(feature = "cache")]
     cache_status_override: Option<CacheStatusOverride>,
 }
@@ -2348,11 +2402,17 @@ impl ProxyHttp for FluxProxy {
         #[cfg(not(feature = "privacy-mode"))]
         let ctx = RequestContext {
             started_at: Some(Instant::now()),
+            #[cfg(feature = "otel-otlp")]
+            started_at_unix_nanos: Some(unix_time_nanos()),
             ..RequestContext::default()
         };
 
         #[cfg(feature = "privacy-mode")]
-        let ctx = RequestContext::default();
+        let ctx = RequestContext {
+            #[cfg(feature = "otel-otlp")]
+            started_at_unix_nanos: Some(unix_time_nanos()),
+            ..RequestContext::default()
+        };
 
         ctx
     }
@@ -2777,6 +2837,9 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(not(feature = "privacy-mode"))]
         self.emit_access_log(session, error, ctx);
+
+        #[cfg(feature = "otel-otlp")]
+        self.export_otlp_trace_span(session, error, ctx);
 
         let Some(signal) = proxy_health_signal(session, error) else {
             return;
@@ -3809,6 +3872,14 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
     {
         body
     }
+}
+
+#[cfg(feature = "otel-otlp")]
+fn unix_time_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
 }
 
 #[cfg(not(feature = "privacy-mode"))]

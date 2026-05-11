@@ -33,6 +33,7 @@ before Cargo starts compiling Pingora.
 | `load-balancer` | No | Pingora load-balancing support and health-check setup. |
 | `metrics` | No | Prometheus metrics listener. |
 | `otel-tracing` | No | W3C `traceparent` propagation and access-log trace ID correlation. |
+| `otel-otlp` | No | Optional OTLP/HTTP JSON trace export to a local collector or Jaeger endpoint. |
 | `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 and rustls TLS-ALPN-01 challenge serving, and the renewal executor contract. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
@@ -77,7 +78,7 @@ feature aliases for common deployment shapes.
 | `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
 | `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
-| `profile-observability` | `profile-core`, `metrics`, `otel-tracing` | Core server with Prometheus metrics and trace context propagation. |
+| `profile-observability` | `profile-core`, `metrics`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
 
 Examples:
@@ -95,6 +96,7 @@ cargo build --no-default-features --features profile-privacy
 | `privacy-mode` + `cache` | Zero-retention builds must not compile request/response cache code. |
 | `privacy-mode` + `metrics` | Zero-retention builds must not compile request metrics. |
 | `privacy-mode` + `otel-tracing` | Zero-retention builds must not compile trace context propagation. |
+| `privacy-mode` + `otel-otlp` | Zero-retention builds must not compile trace export. |
 
 Because `cache` is part of the default build, privacy builds must use
 `--no-default-features`.

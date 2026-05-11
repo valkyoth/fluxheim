@@ -1,12 +1,15 @@
 # OpenTelemetry Tracing
 
 Status: stage 1 trace context propagation is implemented behind the optional
-`otel-tracing` Cargo feature. Internal spans and OTLP export remain planned.
+`otel-tracing` Cargo feature. A first bounded OTLP/HTTP trace exporter is
+implemented behind `otel-otlp` for local collectors and Jaeger test setups.
+Richer internal spans, sampling, exporter health, and TLS/gRPC export remain
+planned.
 
 Cargo features:
 
 - `otel-tracing`: implemented propagation and access-log correlation.
-- `otel-otlp`: planned exporter feature.
+- `otel-otlp`: implemented initial OTLP/HTTP JSON trace export.
 
 Latest crate candidates checked on 2026-05-05:
 
@@ -95,15 +98,21 @@ Avoid:
 
 ## Stage 3: OTLP Trace Export
 
-Full trace export should be optional and intended to send data to a local
-OpenTelemetry Collector or tracing backend. Prometheus can receive OTLP metrics
-over HTTP when its OTLP receiver is enabled, but it is not the direct trace
-storage target for this stage.
+Trace export is optional and intended to send data to a local OpenTelemetry
+Collector or tracing backend. Prometheus can receive OTLP metrics over HTTP when
+its OTLP receiver is enabled, but it is not the direct trace storage target.
+
+Implemented in the first exporter:
+
+- background worker;
+- bounded queue with drop-on-full behavior;
+- OTLP/HTTP JSON export to `http://` endpoints such as local Jaeger
+  `http://127.0.0.1:4318/v1/traces`;
+- request-level server spans with trace ID, regenerated span ID, optional parent
+  span ID, method, vhost, route index, status, error flag, and body byte counts.
 
 Requirements:
 
-- export in a background worker;
-- use bounded queues;
 - expose exporter health through metrics/admin status when those modules are
   enabled;
 - support explicit overflow behavior: `drop_new`, `drop_oldest`, or
@@ -112,8 +121,9 @@ Requirements:
 - support TLS to the collector where the selected crate stack permits it;
 - redact all configured sensitive fields before export.
 
-The first exporter target should be OTLP over gRPC or HTTP, depending on the
-most maintained Rust support at implementation time.
+The current exporter intentionally starts with local HTTP only. Production-grade
+remote export should add TLS and/or gRPC before encouraging network collector
+endpoints.
 
 ## Sampling
 
@@ -144,6 +154,13 @@ enabled = true
 mode = "propagate_only"
 traceparent = true
 log_trace_id = true
+
+[tracing.otlp]
+enabled = false
+endpoint = "http://127.0.0.1:4318/v1/traces"
+service_name = "fluxheim"
+queue_size = 8192
+timeout_secs = 2
 ```
 
 `mode = "propagate_only"` is the only implemented mode in stage 1. It validates
@@ -151,7 +168,7 @@ incoming W3C `traceparent`, generates a fresh context when the inbound header is
 missing or invalid, forwards a normalized `traceparent` to upstreams, and can
 add `trace_id` to structured access logs.
 
-Future exporter configuration is expected to look like this:
+Future sampling configuration is expected to look like this:
 
 ```toml
 
@@ -159,14 +176,6 @@ Future exporter configuration is expected to look like this:
 success_ratio = 0.01
 sample_5xx = true
 slow_request_threshold = "500ms"
-
-[tracing.otlp]
-enabled = false
-endpoint = "http://127.0.0.1:4317"
-protocol = "grpc"
-timeout = "250ms"
-queue_size = 8192
-overflow = "drop_new"
 ```
 
 ## Security Requirements

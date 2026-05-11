@@ -811,6 +811,8 @@ pub struct TracingConfig {
     pub traceparent: bool,
     #[serde(default = "default_true")]
     pub log_trace_id: bool,
+    #[serde(default)]
+    pub otlp: OtlpTraceExportConfig,
 }
 
 impl Default for TracingConfig {
@@ -820,6 +822,7 @@ impl Default for TracingConfig {
             mode: TracingMode::default(),
             traceparent: true,
             log_trace_id: true,
+            otlp: OtlpTraceExportConfig::default(),
         }
     }
 }
@@ -842,6 +845,12 @@ impl TracingConfig {
                 reason: "tracing.enabled requires tracing.mode other than off",
             });
         }
+        if !self.enabled && self.otlp.enabled {
+            return Err(ConfigError::InvalidTracingPolicy {
+                field: "tracing.otlp.enabled",
+                reason: "OTLP trace export requires tracing.enabled = true",
+            });
+        }
         if !self.enabled {
             return Ok(());
         }
@@ -851,6 +860,7 @@ impl TracingConfig {
                 reason: "propagate_only mode requires traceparent propagation",
             });
         }
+        self.otlp.validate()?;
         Ok(())
     }
 }
@@ -861,6 +871,73 @@ pub enum TracingMode {
     Off,
     #[default]
     PropagateOnly,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OtlpTraceExportConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_otlp_trace_endpoint")]
+    pub endpoint: String,
+    #[serde(default = "default_otlp_service_name")]
+    pub service_name: String,
+    #[serde(default = "default_otlp_queue_size")]
+    pub queue_size: usize,
+    #[serde(default = "default_otlp_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for OtlpTraceExportConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: default_otlp_trace_endpoint(),
+            service_name: default_otlp_service_name(),
+            queue_size: default_otlp_queue_size(),
+            timeout_secs: default_otlp_timeout_secs(),
+        }
+    }
+}
+
+impl OtlpTraceExportConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        #[cfg(not(feature = "otel-otlp"))]
+        return Err(ConfigError::OtlpTraceExportNotCompiled);
+
+        #[cfg(feature = "otel-otlp")]
+        {
+            if !valid_http_otlp_endpoint(&self.endpoint) {
+                return Err(ConfigError::InvalidTracingPolicy {
+                    field: "tracing.otlp.endpoint",
+                    reason: "OTLP trace export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
+                });
+            }
+            if !valid_service_name(&self.service_name) {
+                return Err(ConfigError::InvalidTracingPolicy {
+                    field: "tracing.otlp.service_name",
+                    reason: "service name must be 1..=128 visible ASCII bytes without control characters",
+                });
+            }
+            if self.queue_size == 0 || self.queue_size > 1_000_000 {
+                return Err(ConfigError::InvalidTracingPolicy {
+                    field: "tracing.otlp.queue_size",
+                    reason: "queue size must be between 1 and 1,000,000",
+                });
+            }
+            if self.timeout_secs == 0 || self.timeout_secs > 60 {
+                return Err(ConfigError::InvalidTracingPolicy {
+                    field: "tracing.otlp.timeout_secs",
+                    reason: "timeout must be between 1 and 60 seconds",
+                });
+            }
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -4085,6 +4162,7 @@ pub enum ConfigError {
         address: String,
     },
     TracingNotCompiled,
+    OtlpTraceExportNotCompiled,
     InvalidTracingPolicy {
         field: &'static str,
         reason: &'static str,
@@ -4487,6 +4565,10 @@ impl Display for ConfigError {
             Self::TracingNotCompiled => write!(
                 formatter,
                 "tracing.enabled requires building Fluxheim with the otel-tracing feature"
+            ),
+            Self::OtlpTraceExportNotCompiled => write!(
+                formatter,
+                "tracing.otlp.enabled requires building Fluxheim with the otel-otlp feature"
             ),
             Self::InvalidTracingPolicy { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
@@ -4956,6 +5038,94 @@ fn default_metrics_listen() -> String {
 
 fn default_metrics_require_loopback() -> bool {
     true
+}
+
+fn default_otlp_trace_endpoint() -> String {
+    "http://127.0.0.1:4318/v1/traces".to_owned()
+}
+
+fn default_otlp_service_name() -> String {
+    "fluxheim".to_owned()
+}
+
+fn default_otlp_queue_size() -> usize {
+    8192
+}
+
+fn default_otlp_timeout_secs() -> u64 {
+    2
+}
+
+#[cfg(feature = "otel-otlp")]
+fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
+    let Some(rest) = endpoint.strip_prefix("http://") else {
+        return false;
+    };
+    if rest.is_empty()
+        || rest.contains('@')
+        || rest.contains('?')
+        || rest.contains('#')
+        || rest
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
+        return false;
+    }
+    let Some((authority, path)) = rest.split_once('/') else {
+        return false;
+    };
+    if authority.is_empty() || path.is_empty() {
+        return false;
+    }
+    valid_http_authority(authority)
+}
+
+#[cfg(feature = "otel-otlp")]
+fn valid_http_authority(authority: &str) -> bool {
+    if authority.starts_with('[') {
+        let Some(end) = authority.find(']') else {
+            return false;
+        };
+        if end <= 1 {
+            return false;
+        }
+        let tail = &authority[end + 1..];
+        return tail.is_empty() || valid_port_tail(tail);
+    }
+
+    let Some((host, port)) = authority.rsplit_once(':') else {
+        return valid_http_host(authority);
+    };
+    valid_http_host(host) && valid_port(port)
+}
+
+#[cfg(feature = "otel-otlp")]
+fn valid_port_tail(tail: &str) -> bool {
+    tail.strip_prefix(':').is_some_and(valid_port)
+}
+
+#[cfg(feature = "otel-otlp")]
+fn valid_port(port: &str) -> bool {
+    port.parse::<u16>().is_ok_and(|port| port != 0)
+}
+
+#[cfg(feature = "otel-otlp")]
+fn valid_http_host(host: &str) -> bool {
+    !host.is_empty()
+        && !host.starts_with('-')
+        && !host.ends_with('-')
+        && host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+#[cfg(feature = "otel-otlp")]
+fn valid_service_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' ')
 }
 
 fn default_access_logging_enabled() -> bool {
@@ -8668,6 +8838,79 @@ mod tests {
         config.validate().unwrap();
         assert!(config.tracing.enabled);
         assert_eq!(config.tracing.mode, super::TracingMode::PropagateOnly);
+    }
+
+    #[cfg(all(feature = "otel-tracing", feature = "otel-otlp"))]
+    #[test]
+    fn parses_otlp_trace_export_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [tracing]
+            enabled = true
+            mode = "propagate_only"
+
+            [tracing.otlp]
+            enabled = true
+            endpoint = "http://127.0.0.1:4318/v1/traces"
+            service_name = "fluxheim-smoke"
+            queue_size = 64
+            timeout_secs = 1
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert!(config.tracing.otlp.enabled);
+        assert_eq!(
+            config.tracing.otlp.endpoint,
+            "http://127.0.0.1:4318/v1/traces"
+        );
+        assert_eq!(config.tracing.otlp.service_name, "fluxheim-smoke");
+        assert_eq!(config.tracing.otlp.queue_size, 64);
+    }
+
+    #[cfg(all(feature = "otel-tracing", feature = "otel-otlp"))]
+    #[test]
+    fn rejects_invalid_otlp_trace_endpoint() {
+        let config: Config = toml::from_str(
+            r#"
+            [tracing]
+            enabled = true
+
+            [tracing.otlp]
+            enabled = true
+            endpoint = "https://collector.example.test/v1/traces"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTracingPolicy {
+                field: "tracing.otlp.endpoint",
+                reason: "OTLP trace export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
+            })
+        );
+    }
+
+    #[cfg(all(feature = "otel-tracing", not(feature = "otel-otlp")))]
+    #[test]
+    fn rejects_otlp_trace_export_without_feature() {
+        let config: Config = toml::from_str(
+            r#"
+            [tracing]
+            enabled = true
+
+            [tracing.otlp]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::OtlpTraceExportNotCompiled)
+        );
     }
 
     #[cfg(not(feature = "otel-tracing"))]

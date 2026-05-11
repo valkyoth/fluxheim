@@ -11,6 +11,7 @@ const SAMPLED_FLAG: u8 = 0x01;
 pub struct TraceContext {
     trace_id: [u8; 16],
     span_id: [u8; 8],
+    parent_span_id: Option<[u8; 8]>,
     flags: u8,
 }
 
@@ -19,6 +20,7 @@ impl TraceContext {
         Self {
             trace_id: non_zero_random_16(),
             span_id: non_zero_random_8(),
+            parent_span_id: None,
             flags: 0,
         }
     }
@@ -49,6 +51,7 @@ impl TraceContext {
         Some(Self {
             trace_id,
             span_id: non_zero_random_8(),
+            parent_span_id: Some(span_id),
             flags: if trusted_peer {
                 flags & SAMPLED_FLAG
             } else {
@@ -59,6 +62,14 @@ impl TraceContext {
 
     pub fn trace_id_hex(&self) -> String {
         hex_bytes(&self.trace_id)
+    }
+
+    pub fn span_id_hex(&self) -> String {
+        hex_bytes(&self.span_id)
+    }
+
+    pub fn parent_span_id_hex(&self) -> Option<String> {
+        self.parent_span_id.map(|span_id| hex_bytes(&span_id))
     }
 
     pub fn to_traceparent(self) -> String {

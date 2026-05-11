@@ -5,7 +5,7 @@
 # profile features declared there.
 
 TLS_BACKENDS="tls-rustls tls-openssl tls-boringssl tls-s2n"
-PRIVACY_INCOMPATIBLE_FEATURES="cache metrics otel-tracing"
+PRIVACY_INCOMPATIBLE_FEATURES="cache metrics otel-tracing otel-otlp"
 
 expand_fluxheim_feature() {
     case "$1" in
@@ -25,7 +25,7 @@ expand_fluxheim_feature() {
             echo "proxy,web,cache,load-balancer,tls-rustls,security"
             ;;
         profile-observability)
-            echo "proxy,web,cache,tls-rustls,security,metrics,otel-tracing"
+            echo "proxy,web,cache,tls-rustls,security,metrics,otel-tracing,otel-otlp"
             ;;
         profile-privacy)
             echo "proxy,web,tls-rustls,privacy-mode,security"

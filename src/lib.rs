@@ -19,6 +19,8 @@ pub mod headers;
 pub mod load_balancer;
 #[cfg(feature = "metrics")]
 pub mod metrics;
+#[cfg(feature = "otel-otlp")]
+pub mod otel_otlp;
 #[cfg(feature = "proxy")]
 pub mod proxy;
 pub mod reload;
@@ -68,6 +70,11 @@ compile_error!(
 #[cfg(all(feature = "privacy-mode", feature = "otel-tracing"))]
 compile_error!(
     "privacy-mode cannot be combined with otel-tracing; zero-retention builds must not compile trace context propagation"
+);
+
+#[cfg(all(feature = "privacy-mode", feature = "otel-otlp"))]
+compile_error!(
+    "privacy-mode cannot be combined with otel-otlp; zero-retention builds must not compile trace export"
 );
 
 pub fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

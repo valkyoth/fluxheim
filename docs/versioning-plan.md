@@ -385,8 +385,10 @@ Stable scope:
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
     vhost/route scoped cache activity counters; `otel-tracing` now provides
-    W3C `traceparent` propagation and access-log trace ID correlation, while
-    OpenTelemetry internal spans and trace/event export remain planned.
+    W3C `traceparent` propagation and access-log trace ID correlation, and
+    `otel-otlp` now provides initial local OTLP/HTTP trace export. Richer
+    OpenTelemetry internal spans, sampling, exporter health, and trace/event
+    coverage remain planned.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
@@ -748,7 +750,8 @@ Beta scope:
 
 - Remote logging sink with circuit breaker.
 - OTLP metrics export.
-- Compile-time `otel-otlp` exporter to a local OpenTelemetry Collector.
+- Production-grade `otel-otlp` exporter health, TLS/gRPC transport, and
+  collector failure metrics on top of the initial local HTTP exporter.
 - Latency-aware and status-aware trace sampling.
 
 Exit criteria:

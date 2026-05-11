@@ -5,15 +5,19 @@ fluxheim_port="${FLUXHEIM_OBSERVABILITY_PORT:-18180}"
 metrics_port="${FLUXHEIM_OBSERVABILITY_METRICS_PORT:-19191}"
 upstream_port="${FLUXHEIM_OBSERVABILITY_UPSTREAM_PORT:-18181}"
 prometheus_url="${FLUXHEIM_PROMETHEUS_URL:-http://127.0.0.1:9090}"
+jaeger_url="${FLUXHEIM_JAEGER_URL:-http://127.0.0.1:16686}"
+otlp_trace_endpoint="${FLUXHEIM_OTLP_TRACE_ENDPOINT:-http://127.0.0.1:4318/v1/traces}"
 require_prometheus="${FLUXHEIM_PROMETHEUS_REQUIRED:-0}"
 require_fluxheim_scrape="${FLUXHEIM_PROMETHEUS_REQUIRE_FLUXHEIM:-0}"
 require_prometheus_otlp="${FLUXHEIM_PROMETHEUS_REQUIRE_OTLP:-0}"
-tmp="${TMPDIR:-/tmp}/fluxheim-observability-smoke-$$"
+require_jaeger_trace="${FLUXHEIM_JAEGER_REQUIRE_TRACE:-0}"
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-observability-smoke.XXXXXX")"
 config="$tmp/fluxheim.toml"
 body="$tmp/body.txt"
 metrics_body="$tmp/metrics.txt"
 prometheus_body="$tmp/prometheus.json"
 prometheus_flags="$tmp/prometheus-flags.json"
+jaeger_body="$tmp/jaeger.json"
 trace_id="4bf92f3577b34da6a3ce929d0e0e4736"
 span_id="00f067aa0ba902b7"
 traceparent="00-$trace_id-$span_id-01"
@@ -62,7 +66,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
-with socketserver.TCPServer(("127.0.0.1", port), Handler) as server:
+class ReuseTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+with ReuseTCPServer(("127.0.0.1", port), Handler) as server:
     server.serve_forever()
 PY
 upstream_pid="$!"
@@ -92,6 +99,13 @@ enabled = true
 mode = "propagate_only"
 traceparent = true
 log_trace_id = true
+
+[tracing.otlp]
+enabled = true
+endpoint = "$otlp_trace_endpoint"
+service_name = "fluxheim-smoke"
+queue_size = 64
+timeout_secs = 2
 
 [tls]
 enabled = false
@@ -127,6 +141,12 @@ wait_http() {
     done
     return 1
 }
+
+if ! wait_http "http://127.0.0.1:$upstream_port/"; then
+    echo "observability smoke failed: timed out waiting for upstream test server" >&2
+    cat "$tmp/upstream.log" >&2 || true
+    exit 1
+fi
 
 if ! wait_http "http://127.0.0.1:$fluxheim_port/"; then
     echo "observability smoke failed: timed out waiting for Fluxheim listener" >&2
@@ -209,6 +229,29 @@ elif [ "$require_prometheus" = "1" ]; then
     exit 1
 else
     echo "observability smoke: Prometheus API not ready at $prometheus_url; skipped external API check"
+fi
+
+if curl -fsS "$jaeger_url/api/services" >/dev/null 2>&1; then
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if curl -fsS "$jaeger_url/api/traces?service=fluxheim-smoke&limit=20" >"$jaeger_body" \
+            && grep -q "$trace_id" "$jaeger_body"; then
+            echo "observability smoke: Jaeger API ok and received Fluxheim OTLP trace"
+            echo "observability smoke: ok"
+            exit 0
+        fi
+        sleep 0.5
+    done
+    if [ "$require_jaeger_trace" = "1" ]; then
+        echo "observability smoke failed: Jaeger API is reachable but no Fluxheim trace was found" >&2
+        cat "$jaeger_body" >&2 || true
+        exit 1
+    fi
+    echo "observability smoke: Jaeger API ok; Fluxheim trace not present yet"
+elif [ "$require_jaeger_trace" = "1" ]; then
+    echo "observability smoke failed: Jaeger is required but $jaeger_url is not ready" >&2
+    exit 1
+else
+    echo "observability smoke: Jaeger API not ready at $jaeger_url; skipped trace export check"
 fi
 
 echo "observability smoke: ok"
