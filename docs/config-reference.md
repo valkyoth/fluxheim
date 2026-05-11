@@ -152,6 +152,9 @@ named route-scoped cache policy. Route names are resolved within the selected
 vhost. Purge responses include the selected vhost/route, the normalized
 `host`, `method`, `path`, optional query, cache key, and per-tier purge result
 so bulk purge output can be audited without decoding cache keys.
+Indexed scope, prefix, tag, and wildcard purge endpoints accept `soft=true` or
+`x-fluxheim-cache-soft: true` to mark matched objects stale without deleting
+their cached bodies. Hard purge remains the default.
 
 `admin.self_healing.health_path` must be an absolute path no longer than 2048
 bytes and cannot contain whitespace, control characters, backslashes, `?`, or

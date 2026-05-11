@@ -373,6 +373,7 @@ pub struct CacheIndexedPurgeRequest<'a> {
     pub vhost: &'a str,
     pub route: Option<&'a str>,
     pub limit: usize,
+    pub soft: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -382,6 +383,7 @@ pub struct CacheIndexedPathPrefixPurgeRequest<'a> {
     pub route: Option<&'a str>,
     pub path_prefix: &'a str,
     pub limit: usize,
+    pub soft: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -391,6 +393,7 @@ pub struct CacheIndexedTagPurgeRequest<'a> {
     pub route: Option<&'a str>,
     pub cache_tag: &'a str,
     pub limit: usize,
+    pub soft: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -409,6 +412,7 @@ pub struct CacheIndexedPathPatternPurgeRequest<'a> {
     pub route: Option<&'a str>,
     pub path_pattern: &'a str,
     pub limit: usize,
+    pub soft: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -997,12 +1001,28 @@ impl ProxySnapshot {
             .or(vhost
                 .pingora_memory_storage
                 .filter(|_| route_cache.is_none()))
-            .map(|storage| storage.purge_indexed_user_tag(&user_tag, request.limit))
+            .map(|storage| {
+                if request.soft {
+                    storage.soft_purge_indexed_user_tag(&user_tag, request.limit)
+                } else {
+                    Ok(storage.purge_indexed_user_tag(&user_tag, request.limit))
+                }
+            })
+            .transpose()
+            .map_err(|error| io::Error::other(error.to_string()))?
             .unwrap_or_default();
         let disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
-            .map(|storage| storage.purge_indexed_user_tag(&user_tag, request.limit))
+            .map(|storage| {
+                if request.soft {
+                    storage
+                        .soft_purge_indexed_user_tag(&user_tag, request.limit)
+                        .map_err(|error| io::Error::other(error.to_string()))
+                } else {
+                    storage.purge_indexed_user_tag(&user_tag, request.limit)
+                }
+            })
             .transpose()?
             .unwrap_or_default();
 
@@ -1076,14 +1096,38 @@ impl ProxySnapshot {
                 .pingora_memory_storage
                 .filter(|_| route_cache.is_none()))
             .map(|storage| {
-                storage.purge_indexed_path_prefix(&user_tag, request.path_prefix, request.limit)
+                if request.soft {
+                    storage.soft_purge_indexed_path_prefix(
+                        &user_tag,
+                        request.path_prefix,
+                        request.limit,
+                    )
+                } else {
+                    Ok(storage.purge_indexed_path_prefix(
+                        &user_tag,
+                        request.path_prefix,
+                        request.limit,
+                    ))
+                }
             })
+            .transpose()
+            .map_err(|error| io::Error::other(error.to_string()))?
             .unwrap_or_default();
         let disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
-                storage.purge_indexed_path_prefix(&user_tag, request.path_prefix, request.limit)
+                if request.soft {
+                    storage
+                        .soft_purge_indexed_path_prefix(
+                            &user_tag,
+                            request.path_prefix,
+                            request.limit,
+                        )
+                        .map_err(|error| io::Error::other(error.to_string()))
+                } else {
+                    storage.purge_indexed_path_prefix(&user_tag, request.path_prefix, request.limit)
+                }
             })
             .transpose()?
             .unwrap_or_default();
@@ -1152,20 +1196,41 @@ impl ProxySnapshot {
             .map(|cache| format!("{}:route:{}", vhost.name, cache.name))
             .unwrap_or_else(|| vhost.name.clone());
 
-        let memory = route_cache
-            .and_then(|cache| cache.pingora_memory_storage)
-            .or(vhost
-                .pingora_memory_storage
-                .filter(|_| route_cache.is_none()))
-            .map(|storage| {
-                storage.purge_indexed_cache_tag(&user_tag, request.cache_tag, request.limit)
-            })
-            .unwrap_or_default();
+        let memory =
+            route_cache
+                .and_then(|cache| cache.pingora_memory_storage)
+                .or(vhost
+                    .pingora_memory_storage
+                    .filter(|_| route_cache.is_none()))
+                .map(|storage| {
+                    if request.soft {
+                        storage.soft_purge_indexed_cache_tag(
+                            &user_tag,
+                            request.cache_tag,
+                            request.limit,
+                        )
+                    } else {
+                        Ok(storage.purge_indexed_cache_tag(
+                            &user_tag,
+                            request.cache_tag,
+                            request.limit,
+                        ))
+                    }
+                })
+                .transpose()
+                .map_err(|error| io::Error::other(error.to_string()))?
+                .unwrap_or_default();
         let disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
-                storage.purge_indexed_cache_tag(&user_tag, request.cache_tag, request.limit)
+                if request.soft {
+                    storage
+                        .soft_purge_indexed_cache_tag(&user_tag, request.cache_tag, request.limit)
+                        .map_err(|error| io::Error::other(error.to_string()))
+                } else {
+                    storage.purge_indexed_cache_tag(&user_tag, request.cache_tag, request.limit)
+                }
             })
             .transpose()?
             .unwrap_or_default();
@@ -1329,14 +1394,42 @@ impl ProxySnapshot {
                 .pingora_memory_storage
                 .filter(|_| route_cache.is_none()))
             .map(|storage| {
-                storage.purge_indexed_path_pattern(&user_tag, request.path_pattern, request.limit)
+                if request.soft {
+                    storage.soft_purge_indexed_path_pattern(
+                        &user_tag,
+                        request.path_pattern,
+                        request.limit,
+                    )
+                } else {
+                    Ok(storage.purge_indexed_path_pattern(
+                        &user_tag,
+                        request.path_pattern,
+                        request.limit,
+                    ))
+                }
             })
+            .transpose()
+            .map_err(|error| io::Error::other(error.to_string()))?
             .unwrap_or_default();
         let disk = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| {
-                storage.purge_indexed_path_pattern(&user_tag, request.path_pattern, request.limit)
+                if request.soft {
+                    storage
+                        .soft_purge_indexed_path_pattern(
+                            &user_tag,
+                            request.path_pattern,
+                            request.limit,
+                        )
+                        .map_err(|error| io::Error::other(error.to_string()))
+                } else {
+                    storage.purge_indexed_path_pattern(
+                        &user_tag,
+                        request.path_pattern,
+                        request.limit,
+                    )
+                }
             })
             .transpose()?
             .unwrap_or_default();

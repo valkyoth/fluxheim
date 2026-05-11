@@ -373,8 +373,9 @@ Stable scope:
     `Surrogate-Key` / `Cache-Tag` / `X-Cache-Tags` indexed purge support;
     cache policies can now configure or disable trusted tag headers with
     `tag_headers`;
-  - soft purge, where objects are marked stale and refreshed instead of removed
-    immediately;
+  - soft purge, where indexed scope, prefix, tag, and wildcard purge can mark
+    objects stale and keep bodies available for revalidation instead of removing
+    them immediately;
   - broader hit-for-pass/pass-cache policy coverage; `pass_uncacheable_after`
     now provides opt-in bounded pass decisions for repeated uncacheable cache
     keys;

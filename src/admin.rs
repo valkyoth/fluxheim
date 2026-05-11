@@ -260,6 +260,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "limit")),
                 header_value(headers, "x-fluxheim-cache-batches")
                     .or_else(|| query_param(query, "batches")),
+                truthy_header(headers, "x-fluxheim-cache-soft")
+                    || truthy_query_param(query, "soft"),
             ),
             ("POST", "/_fluxheim/cache/purge-prefix") => self.cache_purge_prefix_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
@@ -273,6 +275,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "limit")),
                 header_value(headers, "x-fluxheim-cache-batches")
                     .or_else(|| query_param(query, "batches")),
+                truthy_header(headers, "x-fluxheim-cache-soft")
+                    || truthy_query_param(query, "soft"),
             ),
             ("POST", "/_fluxheim/cache/purge-tag") => self.cache_purge_tag_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
@@ -286,6 +290,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "limit")),
                 header_value(headers, "x-fluxheim-cache-batches")
                     .or_else(|| query_param(query, "batches")),
+                truthy_header(headers, "x-fluxheim-cache-soft")
+                    || truthy_query_param(query, "soft"),
             ),
             ("POST", "/_fluxheim/cache/purge-stale") => self.cache_purge_stale_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
@@ -313,6 +319,8 @@ impl AdminApp {
                     .or_else(|| query_param(query, "limit")),
                 header_value(headers, "x-fluxheim-cache-batches")
                     .or_else(|| query_param(query, "batches")),
+                truthy_header(headers, "x-fluxheim-cache-soft")
+                    || truthy_query_param(query, "soft"),
             ),
             ("POST", "/_fluxheim/snapshot") => {
                 self.create_snapshot_response(header_value(headers, "x-fluxheim-message"))
@@ -714,6 +722,7 @@ impl AdminApp {
         route: Option<&str>,
         limit: Option<&str>,
         batches: Option<&str>,
+        soft: bool,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(
@@ -737,11 +746,13 @@ impl AdminApp {
                     vhost,
                     route,
                     limit,
+                    soft,
                 })
         }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    soft,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
@@ -789,6 +800,7 @@ impl AdminApp {
         path_prefix: Option<&str>,
         limit: Option<&str>,
         batches: Option<&str>,
+        soft: bool,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(
@@ -817,12 +829,14 @@ impl AdminApp {
                     route,
                     path_prefix,
                     limit,
+                    soft,
                 },
             )
         }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    soft,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
@@ -871,6 +885,7 @@ impl AdminApp {
         cache_tag: Option<&str>,
         limit: Option<&str>,
         batches: Option<&str>,
+        soft: bool,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(StatusCode::BAD_REQUEST, "cache tag purge vhost is required");
@@ -896,11 +911,13 @@ impl AdminApp {
                     route,
                     cache_tag,
                     limit,
+                    soft,
                 })
         }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","cache_tag":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","cache_tag":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    soft,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
@@ -1033,6 +1050,7 @@ impl AdminApp {
         path_pattern: Option<&str>,
         limit: Option<&str>,
         batches: Option<&str>,
+        soft: bool,
     ) -> AdminResponse {
         let Some(vhost) = vhost.map(str::trim).filter(|vhost| !vhost.is_empty()) else {
             return error_response(
@@ -1061,12 +1079,14 @@ impl AdminApp {
                     route,
                     path_pattern,
                     limit,
+                    soft,
                 },
             )
         }) {
             Ok(result) => {
                 let body = format!(
-                    r#"{{"status":"ok","matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
+                    soft,
                     result.matched(),
                     result.purged(),
                     result.not_purged(),
@@ -1140,6 +1160,7 @@ impl AdminApp {
         _route: Option<&str>,
         _limit: Option<&str>,
         _batches: Option<&str>,
+        _soft: bool,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -1152,6 +1173,7 @@ impl AdminApp {
         _path_prefix: Option<&str>,
         _limit: Option<&str>,
         _batches: Option<&str>,
+        _soft: bool,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -1164,6 +1186,7 @@ impl AdminApp {
         _cache_tag: Option<&str>,
         _limit: Option<&str>,
         _batches: Option<&str>,
+        _soft: bool,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -1188,6 +1211,7 @@ impl AdminApp {
         _path_pattern: Option<&str>,
         _limit: Option<&str>,
         _batches: Option<&str>,
+        _soft: bool,
     ) -> AdminResponse {
         error_response(StatusCode::BAD_REQUEST, "cache support is not compiled in")
     }
@@ -2885,6 +2909,47 @@ mod tests {
         assert!(body.contains(r#""batch_limit":1"#));
         assert!(body.contains(r#""batches_exhausted":false"#));
         assert!(body.contains(r#""scope":"vhost""#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_prefix_endpoint_accepts_soft_purge() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge-prefix",
+            Some("vhost=cached&path_prefix=/assets/&soft=true"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""soft":true"#));
     }
 
     #[cfg(feature = "cache")]

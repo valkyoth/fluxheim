@@ -251,6 +251,11 @@ internal cache implementation.
   ASCII letters, digits, `_`, `-`, `.`, `:`, `/`, and `=`. Disk cache objects
   persist tags in the v4 object format and rebuild the purge index across
   process restarts while continuing to read older object formats.
+  Indexed scope, prefix, tag, and wildcard purge endpoints also accept
+  `soft=true` or `x-fluxheim-cache-soft: true`. Soft purge rewrites only cache
+  metadata so matched objects become stale immediately but keep their bodies on
+  disk or in memory for revalidation and stale-serving policy. Hard purge is
+  still the default.
   `POST /_fluxheim/cache/purge-stale` scans a bounded number of indexed
   entries for a vhost or route and removes objects whose stored freshness window
   has expired. It is intended as an operator-controlled incremental cleanup

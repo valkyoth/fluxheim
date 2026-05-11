@@ -48,7 +48,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
   TLS-ALPN-01 builds.
 - Route-level static, proxy, and redirect actions.
 - Route-scoped proxy cache policies with memory, disk, and tiered storage,
-  status headers, indexed purge endpoints, stale cleanup, and cache warming.
+  status headers, hard/soft indexed purge endpoints, stale cleanup, and cache
+  warming.
 - Optional global HTTP-to-HTTPS redirect with safe Host validation.
 - External ACME HTTP-01 challenge forwarding helper.
 - Secure request/response header policy, including `Server: fluxheim` by

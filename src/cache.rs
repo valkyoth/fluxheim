@@ -823,6 +823,17 @@ impl PingoraMemoryStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn soft_purge_indexed_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self
+            .purge_index
+            .entries_for_user_tag(user_tag, limit.saturating_add(1));
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
     pub fn purge_indexed_path_prefix(
         &self,
         user_tag: &str,
@@ -835,6 +846,20 @@ impl PingoraMemoryStorage {
             limit.saturating_add(1),
         );
         self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self.purge_index.entries_for_user_tag_path_prefix(
+            user_tag,
+            path_prefix,
+            limit.saturating_add(1),
+        );
+        self.soft_purge_indexed_entries(entries, limit)
     }
 
     pub fn purge_indexed_path_pattern(
@@ -851,6 +876,20 @@ impl PingoraMemoryStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn soft_purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self.purge_index.entries_for_user_tag_path_pattern(
+            user_tag,
+            path_pattern,
+            limit.saturating_add(1),
+        );
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
     pub fn purge_indexed_cache_tag(
         &self,
         user_tag: &str,
@@ -863,6 +902,20 @@ impl PingoraMemoryStorage {
             limit.saturating_add(1),
         );
         self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self.purge_index.entries_for_user_tag_cache_tag(
+            user_tag,
+            cache_tag,
+            limit.saturating_add(1),
+        );
+        self.soft_purge_indexed_entries(entries, limit)
     }
 
     pub fn purge_indexed_stale_user_tag(
@@ -938,6 +991,57 @@ impl PingoraMemoryStorage {
             purged,
             truncated,
         }
+    }
+
+    fn soft_purge_indexed_entries(
+        &self,
+        mut entries: Vec<CachePurgeIndexEntry>,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            let Some(mut object) = self.inner.get(&entry.combined_key) else {
+                self.purge_index.remove_combined(&entry.combined_key);
+                continue;
+            };
+            let meta = stale_cache_meta(&object.internal_meta, &object.response_header)?;
+            let (internal_meta, response_header) = meta.serialize()?;
+            let weight_bytes =
+                pingora_object_weight(&internal_meta, &response_header, &object.body);
+            if weight_bytes > self.max_object_bytes.as_u64() {
+                self.inner.invalidate(&entry.combined_key);
+                self.purge_index.remove_combined(&entry.combined_key);
+                self.activity.store_refusal();
+                continue;
+            }
+            let weight = u32::try_from(weight_bytes).map_err(|_| {
+                self.activity.store_refusal();
+                Error::because(
+                    ErrorType::InternalError,
+                    "cache object weight exceeds moka object weight limit",
+                    std::io::Error::other("cache object too heavy"),
+                )
+            })?;
+
+            object.internal_meta = internal_meta;
+            object.response_header = response_header;
+            object.weight = weight;
+            self.inner.insert(entry.combined_key.clone(), object);
+            purged += 1;
+        }
+        self.inner.run_pending_tasks();
+        if purged > 0 {
+            self.activity.purge();
+        }
+
+        Ok(CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        })
     }
 
     fn lookup_object(&self, key: &pingora::cache::CacheKey) -> Option<PingoraStoredObject> {
@@ -1219,6 +1323,17 @@ impl PingoraDiskStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn soft_purge_indexed_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self
+            .purge_index
+            .entries_for_user_tag(user_tag, limit.saturating_add(1));
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
     pub fn purge_indexed_path_prefix(
         &self,
         user_tag: &str,
@@ -1231,6 +1346,20 @@ impl PingoraDiskStorage {
             limit.saturating_add(1),
         );
         self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self.purge_index.entries_for_user_tag_path_prefix(
+            user_tag,
+            path_prefix,
+            limit.saturating_add(1),
+        );
+        self.soft_purge_indexed_entries(entries, limit)
     }
 
     pub fn purge_indexed_path_pattern(
@@ -1247,6 +1376,20 @@ impl PingoraDiskStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn soft_purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self.purge_index.entries_for_user_tag_path_pattern(
+            user_tag,
+            path_pattern,
+            limit.saturating_add(1),
+        );
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
     pub fn purge_indexed_cache_tag(
         &self,
         user_tag: &str,
@@ -1259,6 +1402,20 @@ impl PingoraDiskStorage {
             limit.saturating_add(1),
         );
         self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self.purge_index.entries_for_user_tag_cache_tag(
+            user_tag,
+            cache_tag,
+            limit.saturating_add(1),
+        );
+        self.soft_purge_indexed_entries(entries, limit)
     }
 
     pub fn purge_indexed_stale_user_tag(
@@ -1324,6 +1481,67 @@ impl PingoraDiskStorage {
                 purged += 1;
             }
             self.purge_index.remove_combined(&entry.combined_key);
+        }
+
+        Ok(CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        })
+    }
+
+    fn soft_purge_indexed_entries(
+        &self,
+        mut entries: Vec<CachePurgeIndexEntry>,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            let Some(object) = self.lookup_object_by_combined(&entry.combined_key)? else {
+                self.purge_index.remove_combined(&entry.combined_key);
+                continue;
+            };
+            let meta = stale_cache_meta(&object.internal_meta, &object.response_header)?;
+            let (internal_meta, response_header) = meta.serialize()?;
+            let combined_key = object
+                .combined_key
+                .unwrap_or_else(|| entry.combined_key.clone());
+            let primary_key = object.primary_key.unwrap_or_default();
+            let user_tag = object.user_tag.unwrap_or_default();
+            let path = self.path_for_combined_key(&entry.combined_key);
+            let parent = path.parent().ok_or_else(|| {
+                Error::because(
+                    ErrorType::InternalError,
+                    "disk cache path has no parent",
+                    std::io::Error::other("disk cache path has no parent"),
+                )
+            })?;
+            self.ensure_safe_cache_parent(parent)
+                .map_err(|error| cache_io_error("validate soft purge disk cache shard", error))?;
+            require_disk_cache_write_destination(&path).map_err(|error| {
+                cache_io_error("validate soft purge disk cache destination", error)
+            })?;
+            self.write_object_atomically(
+                &path,
+                &PingoraStoreKey {
+                    combined: combined_key,
+                    primary: primary_key,
+                    user_tag,
+                    index_path: entry.path.clone(),
+                    cache_tags: object.cache_tags.clone(),
+                },
+                &internal_meta,
+                &response_header,
+                &object.body,
+            )
+            .map_err(|error| cache_io_error("soft purge disk cache object", error))?;
+            purged += 1;
+        }
+        if purged > 0 {
+            self.activity.purge();
         }
 
         Ok(CacheIndexedPurgeResult {
@@ -2029,6 +2247,29 @@ fn pingora_object_weight(internal_meta: &[u8], response_header: &[u8], body: &[u
     (internal_meta.len() as u64)
         .saturating_add(response_header.len() as u64)
         .saturating_add(body.len() as u64)
+}
+
+#[cfg(feature = "proxy")]
+fn stale_cache_meta(internal_meta: &[u8], response_header: &[u8]) -> pingora::Result<CacheMeta> {
+    let previous = CacheMeta::deserialize(internal_meta, response_header)?;
+    let now = std::time::SystemTime::now();
+    let fresh_until = now
+        .checked_sub(std::time::Duration::from_secs(1))
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    let mut meta = CacheMeta::new(
+        fresh_until,
+        previous.created(),
+        previous.stale_while_revalidate_sec(),
+        previous.stale_if_error_sec(),
+        previous.response_header_copy(),
+    );
+    if let Some(variance) = previous.variance() {
+        meta.set_variance(variance);
+    }
+    if let Some(epoch_override) = previous.epoch_override() {
+        meta.set_epoch_override(epoch_override);
+    }
+    Ok(meta)
 }
 
 #[cfg(feature = "proxy")]
@@ -3865,6 +4106,55 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_memory_storage_soft_purges_indexed_cache_tag() {
+        use pingora::cache::Storage;
+
+        let storage = super::pingora_memory_storage_from_plan(super::MemoryTierPlan {
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            object_slots: 4,
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        });
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "soft-key", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "article:1")
+            .unwrap();
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+        assert!(
+            block_on(storage.lookup(&key, &span))
+                .unwrap()
+                .unwrap()
+                .0
+                .is_fresh(std::time::SystemTime::now())
+        );
+
+        let result = storage
+            .soft_purge_indexed_cache_tag("vhost-a", "article:1", 8)
+            .unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
+        let (soft_purged_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        assert!(!soft_purged_meta.is_fresh(std::time::SystemTime::now()));
+        assert_eq!(
+            block_on(hit.read_body()).unwrap(),
+            Some(Bytes::from_static(b"body"))
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_memory_storage_uses_configured_cache_tag_headers() {
         use pingora::cache::Storage;
 
@@ -4229,6 +4519,60 @@ mod tests {
             }
         );
         assert_eq!(rebuilt.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_soft_purges_indexed_cache_tag() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-soft-purge");
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-soft-key", "vhost-a");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "article:1")
+            .unwrap();
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"disk-body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+        assert!(
+            block_on(storage.lookup(&key, &span))
+                .unwrap()
+                .unwrap()
+                .0
+                .is_fresh(std::time::SystemTime::now())
+        );
+
+        let result = storage
+            .soft_purge_indexed_cache_tag("vhost-a", "article:1", 8)
+            .unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 1,
+                purged: 1,
+                truncated: false,
+            }
+        );
+        let (soft_purged_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        assert!(!soft_purged_meta.is_fresh(std::time::SystemTime::now()));
+        assert_eq!(
+            block_on(hit.read_body()).unwrap(),
+            Some(Bytes::from_static(b"disk-body"))
+        );
+        assert_eq!(storage.stats().unwrap().entries, 1);
 
         std::fs::remove_dir_all(root).unwrap();
     }

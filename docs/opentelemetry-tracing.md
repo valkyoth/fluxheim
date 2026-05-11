@@ -63,7 +63,7 @@ Planned spans:
 - `fluxheim.cache_lookup`: memory/disk cache lookup and hit/miss decision;
 - `fluxheim.cache_store`: cache admission and write;
 - `fluxheim.cache_purge`: admin-triggered cache invalidation by scope, prefix,
-  wildcard, tag, or future soft-purge operation;
+  wildcard, tag, or soft-purge operation;
 - `fluxheim.upstream_select`: load-balancer selection;
 - `fluxheim.upstream_connect`: TCP/TLS connect and handshake;
 - `fluxheim.upstream_response`: upstream first-byte and response metadata;
