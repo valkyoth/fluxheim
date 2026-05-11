@@ -5916,6 +5916,85 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_object_lookup_reports_disk_metadata() {
+        use pingora::cache::Storage;
+
+        let cache_path = unique_test_cache_dir("proxy-disk-lookup");
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    disk: crate::config::CacheDiskConfig {
+                        enabled: true,
+                        path: Some(cache_path.clone()),
+                        max_size_bytes: ByteSize::from_bytes(4096),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let storage = vhost.pingora_disk_storage.unwrap();
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+        let key = snapshot
+            .state
+            .pingora_image_cache_key_for_request_header(&request, vhost_index, None)
+            .unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let mut meta = pingora_meta("max-age=60");
+        meta.response_header_mut()
+            .insert_header("Surrogate-Key", "asset:logo")
+            .unwrap();
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"disk-body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let lookup = snapshot
+            .pingora_image_cache_object_lookup_for_request_header(&request)
+            .unwrap();
+
+        assert!(lookup.preview.eligible);
+        assert_eq!(lookup.objects.len(), 1);
+        let object = &lookup.objects[0];
+        assert_eq!(object.tier, crate::cache::CacheObjectTier::Disk);
+        assert!(object.purge_indexed);
+        assert_eq!(object.status, 200);
+        assert!(object.fresh);
+        assert_eq!(object.body_bytes, 9);
+        assert!(object.weight_bytes >= 9);
+        assert_eq!(object.cache_tags, vec!["asset:logo"]);
+        assert!(
+            object
+                .header_names
+                .iter()
+                .any(|name| name == "cache-control")
+        );
+        assert!(object.created_unix_secs.is_some());
+        assert!(object.fresh_until_unix_secs.is_some());
+
+        std::fs::remove_dir_all(cache_path).unwrap();
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn builds_memory_cache_from_routed_vhost_policy() {
         let config = Config {
             vhosts: vec![VhostConfig {
