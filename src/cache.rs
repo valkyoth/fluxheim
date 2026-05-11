@@ -1,5 +1,5 @@
 #[cfg(feature = "proxy")]
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Write as _;
 #[cfg(feature = "proxy")]
 use std::path::Path;
@@ -2101,12 +2101,8 @@ impl PingoraDiskStorage {
     }
 
     fn evict_until_admissible(&self, path: &Path, object_bytes: u64) -> std::io::Result<bool> {
-        let (mut entries, current_size) = self.disk_index.snapshot();
-        let existing_size = entries
-            .iter()
-            .find(|entry| entry.path == path)
-            .map(|entry| entry.size)
-            .unwrap_or(0);
+        let current_size = self.disk_index.total_size();
+        let existing_size = self.disk_index.entry_size(path).unwrap_or(0);
         let max_size = self.max_size_bytes.as_u64();
         let projected_size = current_size
             .saturating_sub(existing_size)
@@ -2116,36 +2112,43 @@ impl PingoraDiskStorage {
         }
 
         let mut bytes_to_free = projected_size.saturating_sub(max_size);
-        let mut removed_any = false;
-        entries.retain(|entry| entry.path != path);
-        entries.sort_by(|left, right| {
-            left.accessed
-                .cmp(&right.accessed)
-                .then_with(|| left.modified.cmp(&right.modified))
-                .then_with(|| left.path.cmp(&right.path))
-        });
-
-        for entry in entries {
-            match remove_disk_cache_object(&self.root, &entry.path) {
-                Ok(true) => {
-                    self.disk_index.remove(&entry.path);
-                    removed_any = true;
-                    self.activity.eviction();
-                    bytes_to_free = bytes_to_free.saturating_sub(entry.size);
-                    if bytes_to_free == 0 {
-                        self.schedule_disk_index_checkpoint();
-                        return Ok(true);
-                    }
+        let mut index_changed = false;
+        while bytes_to_free > 0 {
+            let candidates = self.disk_index.oldest_entries_to_free(path, bytes_to_free);
+            if candidates.is_empty() {
+                if index_changed {
+                    self.schedule_disk_index_checkpoint();
                 }
-                Ok(false) => {}
-                Err(error) => return Err(error),
+                return Ok(false);
+            }
+
+            for entry in candidates {
+                match remove_disk_cache_object(&self.root, &entry.path) {
+                    Ok(true) => {
+                        self.disk_index.remove(&entry.path);
+                        index_changed = true;
+                        self.activity.eviction();
+                        bytes_to_free = bytes_to_free.saturating_sub(entry.size);
+                        if bytes_to_free == 0 {
+                            self.schedule_disk_index_checkpoint();
+                            return Ok(true);
+                        }
+                    }
+                    Ok(false) => {
+                        if self.disk_index.remove(&entry.path) {
+                            index_changed = true;
+                            bytes_to_free = bytes_to_free.saturating_sub(entry.size);
+                        }
+                    }
+                    Err(error) => return Err(error),
+                }
             }
         }
 
-        if removed_any {
+        if index_changed {
             self.schedule_disk_index_checkpoint();
         }
-        Ok(false)
+        Ok(true)
     }
 
     fn index_existing_object_path(&self, path: &Path) -> std::io::Result<()> {
@@ -3045,6 +3048,25 @@ struct DiskCacheEntry {
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
+struct DiskObjectLruKey {
+    accessed: std::time::SystemTime,
+    modified: std::time::SystemTime,
+    path: PathBuf,
+}
+
+#[cfg(feature = "proxy")]
+impl DiskObjectLruKey {
+    fn from_entry(entry: &DiskCacheEntry) -> Self {
+        Self {
+            accessed: entry.accessed,
+            modified: entry.modified,
+            path: entry.path.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
 #[derive(Debug, Clone)]
 struct DiskObjectIndex {
     inner: Arc<RwLock<DiskObjectIndexInner>>,
@@ -3054,6 +3076,7 @@ struct DiskObjectIndex {
 #[derive(Debug, Default)]
 struct DiskObjectIndexInner {
     entries: HashMap<PathBuf, DiskCacheEntry>,
+    lru: BTreeSet<DiskObjectLruKey>,
     total_size: u64,
 }
 
@@ -3070,9 +3093,11 @@ impl DiskObjectIndex {
             return;
         };
         inner.entries.clear();
+        inner.lru.clear();
         inner.total_size = 0;
         for entry in entries {
             inner.total_size = inner.total_size.saturating_add(entry.size);
+            inner.lru.insert(DiskObjectLruKey::from_entry(&entry));
             inner.entries.insert(entry.path.clone(), entry);
         }
     }
@@ -3083,8 +3108,10 @@ impl DiskObjectIndex {
         };
         if let Some(previous) = inner.entries.insert(entry.path.clone(), entry.clone()) {
             inner.total_size = inner.total_size.saturating_sub(previous.size);
+            inner.lru.remove(&DiskObjectLruKey::from_entry(&previous));
         }
         inner.total_size = inner.total_size.saturating_add(entry.size);
+        inner.lru.insert(DiskObjectLruKey::from_entry(&entry));
     }
 
     fn remove(&self, path: &Path) -> bool {
@@ -3095,6 +3122,7 @@ impl DiskObjectIndex {
             return false;
         };
         inner.total_size = inner.total_size.saturating_sub(previous.size);
+        inner.lru.remove(&DiskObjectLruKey::from_entry(&previous));
         true
     }
 
@@ -3103,7 +3131,11 @@ impl DiskObjectIndex {
             return;
         };
         if let Some(entry) = inner.entries.get_mut(path) {
+            let previous = DiskObjectLruKey::from_entry(entry);
             entry.accessed = accessed;
+            let updated = DiskObjectLruKey::from_entry(entry);
+            inner.lru.remove(&previous);
+            inner.lru.insert(updated);
         }
     }
 
@@ -3116,6 +3148,49 @@ impl DiskObjectIndex {
 
     fn entries(&self) -> Vec<DiskCacheEntry> {
         self.snapshot().0
+    }
+
+    fn total_size(&self) -> u64 {
+        let Ok(inner) = self.inner.read() else {
+            return 0;
+        };
+        inner.total_size
+    }
+
+    fn entry_size(&self, path: &Path) -> Option<u64> {
+        let Ok(inner) = self.inner.read() else {
+            return None;
+        };
+        inner.entries.get(path).map(|entry| entry.size)
+    }
+
+    fn oldest_entries_to_free(
+        &self,
+        excluded_path: &Path,
+        bytes_to_free: u64,
+    ) -> Vec<DiskCacheEntry> {
+        if bytes_to_free == 0 {
+            return Vec::new();
+        }
+        let Ok(inner) = self.inner.read() else {
+            return Vec::new();
+        };
+        let mut selected = Vec::new();
+        let mut selected_bytes = 0_u64;
+        for key in &inner.lru {
+            if key.path == excluded_path {
+                continue;
+            }
+            let Some(entry) = inner.entries.get(&key.path) else {
+                continue;
+            };
+            selected_bytes = selected_bytes.saturating_add(entry.size);
+            selected.push(entry.clone());
+            if selected_bytes >= bytes_to_free {
+                break;
+            }
+        }
+        selected
     }
 
     fn stats(&self) -> (usize, u64) {
@@ -4731,6 +4806,56 @@ mod tests {
         );
         assert!(index.remove_combined("combined:b"));
         assert_eq!(index.len(), 1);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn disk_object_index_returns_oldest_entries_without_resorting_snapshot() {
+        let index = super::DiskObjectIndex::new();
+        let base = std::time::UNIX_EPOCH;
+        let path_a = PathBuf::from("/cache/a.fhc");
+        let path_b = PathBuf::from("/cache/b.fhc");
+        let path_c = PathBuf::from("/cache/c.fhc");
+
+        index.upsert(super::DiskCacheEntry {
+            path: path_a.clone(),
+            size: 10,
+            modified: base + std::time::Duration::from_secs(1),
+            accessed: base + std::time::Duration::from_secs(30),
+        });
+        index.upsert(super::DiskCacheEntry {
+            path: path_b.clone(),
+            size: 20,
+            modified: base + std::time::Duration::from_secs(1),
+            accessed: base + std::time::Duration::from_secs(10),
+        });
+        index.upsert(super::DiskCacheEntry {
+            path: path_c.clone(),
+            size: 30,
+            modified: base + std::time::Duration::from_secs(1),
+            accessed: base + std::time::Duration::from_secs(20),
+        });
+
+        let selected = index.oldest_entries_to_free(PathBuf::from("/cache/miss.fhc").as_path(), 25);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|entry| entry.path.as_path())
+                .collect::<Vec<_>>(),
+            vec![path_b.as_path(), path_c.as_path()]
+        );
+
+        index.touch(&path_a, base + std::time::Duration::from_secs(5));
+        let selected = index.oldest_entries_to_free(&path_b, 10);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|entry| entry.path.as_path())
+                .collect::<Vec<_>>(),
+            vec![path_a.as_path()]
+        );
+        assert!(index.remove(&path_a));
+        assert_eq!(index.total_size(), 50);
     }
 
     #[cfg(feature = "proxy")]

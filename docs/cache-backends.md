@@ -207,6 +207,10 @@ internal cache implementation.
   scan live memory or disk object metadata to supplement missing mappings, so
   FIFO eviction from the fast index cannot make live cached objects immune to
   user-tag, path-prefix, wildcard, cache-tag, or stale purges.
+- Disk eviction maintains an ordered LRU view inside the runtime disk-object
+  index. Admissions that need space walk only the oldest entries needed to free
+  the target byte count instead of cloning and sorting the full disk inventory
+  on every eviction cycle.
 - Disk-only cache admission streams response chunks into a bounded temporary
   file under the cache root before the final atomic object write. Partial-write
   streaming remains disabled for the production memory and tiered adapters
