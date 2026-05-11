@@ -446,6 +446,15 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
     --expect-vhost cache.test \
     --expect-storage-tiers 2
 
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-key \
+    --host cache.test \
+    --method HEAD \
+    --path /asset.png \
+    --expect-ineligible \
+    --expect-reason "method HEAD currently bypasses proxy cache storage" \
+    --expect-scope vhost \
+    --expect-vhost cache.test
+
 first_headers="$TMP_DIR/first.headers"
 second_headers="$TMP_DIR/second.headers"
 head_first_headers="$TMP_DIR/head-first.headers"

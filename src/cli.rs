@@ -214,6 +214,14 @@ pub enum CliCommand {
         #[arg(long)]
         expect_eligible: bool,
 
+        /// Require the selected request to be ineligible for caching.
+        #[arg(long)]
+        expect_ineligible: bool,
+
+        /// Required bounded ineligibility reason.
+        #[arg(long = "expect-reason", value_name = "REASON")]
+        expect_reason: Option<String>,
+
         /// Require the selected cache policy to have cache locking enabled.
         #[arg(long)]
         expect_cache_lock_enabled: bool,
@@ -268,6 +276,14 @@ pub enum CliCommand {
         /// Fail when no cached object exists for the selected key.
         #[arg(long)]
         require_object: bool,
+
+        /// Require the selected request to be ineligible for caching.
+        #[arg(long)]
+        expect_ineligible: bool,
+
+        /// Required bounded ineligibility reason.
+        #[arg(long = "expect-reason", value_name = "REASON")]
+        expect_reason: Option<String>,
 
         /// Required cached-object freshness state. May be repeated: fresh, stale, expired.
         #[arg(long = "expect-freshness-state", value_name = "STATE")]
@@ -548,6 +564,8 @@ fn run_command(
             path,
             query,
             expect_eligible,
+            expect_ineligible,
+            expect_reason,
             expect_cache_lock_enabled,
             expect_memory_tier_enabled,
             expect_disk_tier_enabled,
@@ -563,6 +581,8 @@ fn run_command(
             path: path.clone(),
             query: query.clone(),
             expect_eligible: *expect_eligible,
+            expect_ineligible: *expect_ineligible,
+            expect_reason: expect_reason.clone(),
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
             expect_memory_tier_enabled: *expect_memory_tier_enabled,
             expect_disk_tier_enabled: *expect_disk_tier_enabled,
@@ -578,6 +598,8 @@ fn run_command(
             path,
             query,
             require_object,
+            expect_ineligible,
+            expect_reason,
             expect_freshness_states,
             expect_statuses,
             expect_tiers,
@@ -603,6 +625,8 @@ fn run_command(
             path: path.clone(),
             query: query.clone(),
             require_object: *require_object,
+            expect_ineligible: *expect_ineligible,
+            expect_reason: expect_reason.clone(),
             expect_freshness_states: expect_freshness_states.clone(),
             expect_statuses: expect_statuses.clone(),
             expect_tiers: expect_tiers.clone(),
@@ -652,6 +676,8 @@ struct CacheKeyOptions<'a> {
     path: String,
     query: Option<String>,
     expect_eligible: bool,
+    expect_ineligible: bool,
+    expect_reason: Option<String>,
     expect_cache_lock_enabled: bool,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
@@ -670,6 +696,8 @@ struct CacheLookupOptions<'a> {
     path: String,
     query: Option<String>,
     require_object: bool,
+    expect_ineligible: bool,
+    expect_reason: Option<String>,
     expect_freshness_states: Vec<String>,
     expect_statuses: Vec<u16>,
     expect_tiers: Vec<String>,
@@ -956,6 +984,11 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
     let expected_vhost =
         parse_cache_key_preview_name("cache-key", "--expect-vhost", options.expect_vhost.as_ref())?;
     let expected_route = parse_cache_key_preview_route("cache-key", options.expect_route.as_ref())?;
+    let expected_reason = parse_cache_key_preview_reason(
+        "cache-key",
+        "--expect-reason",
+        options.expect_reason.as_ref(),
+    )?;
     let (config, request) = cache_key_command_request(&options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let preview = proxy
@@ -965,6 +998,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         &preview,
         CacheKeyPreviewExpectations {
             expect_eligible: options.expect_eligible,
+            expect_ineligible: options.expect_ineligible,
+            expected_reason: expected_reason.as_deref(),
             expect_cache_lock_enabled: options.expect_cache_lock_enabled,
             expect_memory_tier_enabled: options.expect_memory_tier_enabled,
             expect_disk_tier_enabled: options.expect_disk_tier_enabled,
@@ -1019,6 +1054,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
 #[derive(Clone, Copy)]
 struct CacheKeyPreviewExpectations<'a> {
     expect_eligible: bool,
+    expect_ineligible: bool,
+    expected_reason: Option<&'a str>,
     expect_cache_lock_enabled: bool,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
@@ -1036,6 +1073,15 @@ fn validate_cache_key_preview_expectations(
     if expectations.expect_eligible && !preview.eligible {
         let reason = preview.reason.as_deref().unwrap_or("unknown");
         return Err(format!("cache-key expected eligible request, found false: {reason}").into());
+    }
+    if expectations.expect_ineligible && preview.eligible {
+        return Err("cache-key expected ineligible request, found true".into());
+    }
+    if let Some(expected_reason) = expectations.expected_reason
+        && preview.reason.as_deref() != Some(expected_reason)
+    {
+        let found = preview.reason.as_deref().unwrap_or("none");
+        return Err(format!("cache-key expected reason {expected_reason}, found {found}").into());
     }
     if expectations.expect_cache_lock_enabled && !preview.cache_lock_enabled {
         return Err("cache-key expected cache lock enabled, found false".into());
@@ -1094,6 +1140,8 @@ fn run_cache_lookup_command(
         path: options.path,
         query: options.query,
         expect_eligible: false,
+        expect_ineligible: false,
+        expect_reason: None,
         expect_cache_lock_enabled: false,
         expect_memory_tier_enabled: false,
         expect_disk_tier_enabled: false,
@@ -1116,6 +1164,11 @@ fn run_cache_lookup_command(
     )?;
     let expected_route =
         parse_cache_key_preview_route("cache-lookup", options.expect_route.as_ref())?;
+    let expected_reason = parse_cache_key_preview_reason(
+        "cache-lookup",
+        "--expect-reason",
+        options.expect_reason.as_ref(),
+    )?;
     validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
     validate_cache_lookup_expected_fresh_ttls(&options.expect_fresh_ttl_secs)?;
     validate_cache_lookup_expected_body_bytes(&options.expect_body_bytes)?;
@@ -1135,6 +1188,8 @@ fn run_cache_lookup_command(
         expected_header_names: &expected_header_names,
         expected_cache_tags: &expected_cache_tags,
         expect_purge_indexed: options.expect_purge_indexed,
+        expect_ineligible: options.expect_ineligible,
+        expected_reason: expected_reason.as_deref(),
         expect_cache_lock_enabled: options.expect_cache_lock_enabled,
         expect_memory_tier_enabled: options.expect_memory_tier_enabled,
         expect_disk_tier_enabled: options.expect_disk_tier_enabled,
@@ -1307,6 +1362,8 @@ struct CacheLookupExpectations<'a> {
     expected_header_names: &'a [String],
     expected_cache_tags: &'a [String],
     expect_purge_indexed: bool,
+    expect_ineligible: bool,
+    expected_reason: Option<&'a str>,
     expect_cache_lock_enabled: bool,
     expect_memory_tier_enabled: bool,
     expect_disk_tier_enabled: bool,
@@ -1333,6 +1390,8 @@ fn validate_cache_lookup_expectations(
         expected_header_names,
         expected_cache_tags,
         expect_purge_indexed,
+        expect_ineligible,
+        expected_reason,
         expect_cache_lock_enabled,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
@@ -1348,6 +1407,8 @@ fn validate_cache_lookup_expectations(
         &lookup.preview,
         CacheKeyPreviewExpectations {
             expect_eligible: false,
+            expect_ineligible: *expect_ineligible,
+            expected_reason: *expected_reason,
             expect_cache_lock_enabled: *expect_cache_lock_enabled,
             expect_memory_tier_enabled: *expect_memory_tier_enabled,
             expect_disk_tier_enabled: *expect_disk_tier_enabled,
@@ -1697,6 +1758,22 @@ fn parse_cache_key_preview_name(
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
+fn parse_cache_key_preview_reason(
+    command: &str,
+    flag: &str,
+    reason: Option<&String>,
+) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+    let Some(reason) = reason else {
+        return Ok(None);
+    };
+    let reason = reason.trim();
+    if reason.is_empty() || reason.len() > 256 || reason.chars().any(char::is_control) {
+        return Err(format!("{command} {flag} must be a non-empty bounded reason").into());
+    }
+    Ok(Some(reason.to_owned()))
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
 fn parse_cache_key_preview_route(
     command: &str,
     route: Option<&String>,
@@ -1714,6 +1791,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         path,
         query,
         expect_eligible,
+        expect_ineligible,
+        expect_reason,
         expect_cache_lock_enabled,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
@@ -1730,6 +1809,8 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         path,
         query,
         expect_eligible,
+        expect_ineligible,
+        expect_reason,
         expect_cache_lock_enabled,
         expect_memory_tier_enabled,
         expect_disk_tier_enabled,
@@ -1753,6 +1834,8 @@ fn run_cache_lookup_command(
         path,
         query,
         require_object,
+        expect_ineligible,
+        expect_reason,
         expect_freshness_states,
         expect_statuses,
         expect_tiers,
@@ -1774,6 +1857,8 @@ fn run_cache_lookup_command(
     let _ = (config_path, host, headers, method, path, query);
     let _ = (
         require_object,
+        expect_ineligible,
+        expect_reason,
         expect_freshness_states,
         expect_statuses,
         expect_tiers,
@@ -3484,6 +3569,8 @@ mod tests {
             expected_header_names: no_strings,
             expected_cache_tags: no_strings,
             expect_purge_indexed: false,
+            expect_ineligible: false,
+            expected_reason: None,
             expect_cache_lock_enabled: false,
             expect_memory_tier_enabled: false,
             expect_disk_tier_enabled: false,
@@ -3763,6 +3850,8 @@ mod tests {
                 &preview,
                 super::CacheKeyPreviewExpectations {
                     expect_eligible: true,
+                    expect_ineligible: false,
+                    expected_reason: None,
                     expect_cache_lock_enabled: true,
                     expect_memory_tier_enabled: true,
                     expect_disk_tier_enabled: false,
@@ -3779,6 +3868,8 @@ mod tests {
                 &preview,
                 super::CacheKeyPreviewExpectations {
                     expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
                     expect_cache_lock_enabled: false,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: true,
@@ -3797,6 +3888,8 @@ mod tests {
                 &preview,
                 super::CacheKeyPreviewExpectations {
                     expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
                     expect_cache_lock_enabled: false,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
@@ -3815,6 +3908,8 @@ mod tests {
                 &preview,
                 super::CacheKeyPreviewExpectations {
                     expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
                     expect_cache_lock_enabled: false,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
@@ -3833,6 +3928,8 @@ mod tests {
                 &preview,
                 super::CacheKeyPreviewExpectations {
                     expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
                     expect_cache_lock_enabled: false,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
@@ -3851,6 +3948,8 @@ mod tests {
                 &preview,
                 super::CacheKeyPreviewExpectations {
                     expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: None,
                     expect_cache_lock_enabled: false,
                     expect_memory_tier_enabled: false,
                     expect_disk_tier_enabled: false,
@@ -3864,6 +3963,67 @@ mod tests {
             .to_string()
             .contains("expected route other, found assets")
         );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &preview,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: true,
+                    expected_reason: None,
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected ineligible request, found true")
+        );
+        let mut ineligible = preview.clone();
+        ineligible.eligible = false;
+        ineligible.reason = Some("method HEAD currently bypasses proxy cache storage".to_owned());
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &ineligible,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: true,
+                    expected_reason: Some("method HEAD currently bypasses proxy cache storage"),
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                }
+            )
+            .is_ok()
+        );
+        assert!(
+            super::validate_cache_key_preview_expectations(
+                &ineligible,
+                super::CacheKeyPreviewExpectations {
+                    expect_eligible: false,
+                    expect_ineligible: false,
+                    expected_reason: Some("other"),
+                    expect_cache_lock_enabled: false,
+                    expect_memory_tier_enabled: false,
+                    expect_disk_tier_enabled: false,
+                    expect_storage_tiers: None,
+                    expected_scope: None,
+                    expected_vhost: None,
+                    expected_route: None,
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected reason other")
+        );
         assert_eq!(
             super::parse_cache_key_preview_scope("cache-key", Some(&" Route ".to_owned()))
                 .unwrap()
@@ -3875,6 +4035,17 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("vhost or route")
+        );
+        let expected_reason = " method HEAD currently bypasses proxy cache storage ".to_owned();
+        assert_eq!(
+            super::parse_cache_key_preview_reason(
+                "cache-key",
+                "--expect-reason",
+                Some(&expected_reason)
+            )
+            .unwrap()
+            .as_deref(),
+            Some("method HEAD currently bypasses proxy cache storage")
         );
     }
 

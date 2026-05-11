@@ -567,7 +567,8 @@ actively debugging cache policy.
 For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key
 without contacting the upstream. `cache-key` can fail closed with
-`--expect-eligible`, `--expect-cache-lock-enabled`,
+`--expect-eligible`, `--expect-ineligible`, `--expect-reason`,
+`--expect-cache-lock-enabled`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
 `--expect-storage-tiers` when a deploy requires a specific cache policy layout.
 Use `--expect-scope vhost|route`, `--expect-vhost NAME`, and
@@ -585,7 +586,7 @@ the Host header. `cache-lookup` can fail closed for deploy scripts with
 `--expect-header-name`, `--expect-cache-lock-enabled`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
 `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,
-`--expect-route`,
+`--expect-route`, `--expect-ineligible`, `--expect-reason`,
 `--expect-serve-stale-if-error`,
 `--expect-serve-stale-while-revalidate`, `--expect-purge-indexed`, and
 `--expect-freshness-state fresh|stale|expired`.
