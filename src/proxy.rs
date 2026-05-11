@@ -3150,6 +3150,8 @@ impl ProxyHttp for FluxProxy {
             .unwrap_or(&vhost.cache);
 
         if request_cache_bypass(session.req_header(), cache_config) {
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "bypass");
             return Ok(());
         }
 
@@ -3174,7 +3176,7 @@ impl ProxyHttp for FluxProxy {
         };
         if cache_pass_should_bypass(cache_pass_counter(), cache_config, &cache_key.combined()) {
             #[cfg(feature = "metrics")]
-            crate::metrics::record_cache_activity("policy", "pass");
+            record_cache_policy_activity(vhost, ctx.route_index, "pass");
             ctx.cache_status_override = Some(CacheStatusOverride {
                 status: "BYPASS",
                 reason: Some(CACHE_PASS_REASON),
@@ -3295,7 +3297,12 @@ impl ProxyHttp for FluxProxy {
             Some(_) => CacheStaleEvent::OtherError,
             None => CacheStaleEvent::Updating,
         };
-        cache_should_serve_stale(selected_cache_config(vhost, ctx), event)
+        let allowed = cache_should_serve_stale(selected_cache_config(vhost, ctx), event);
+        if allowed {
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "stale");
+        }
+        allowed
     }
 
     #[cfg(feature = "cache")]
@@ -3453,6 +3460,19 @@ fn selected_cache_config<'a>(
         .and_then(|route_index| vhost.route(route_index).cache.as_ref())
         .map(|cache| &cache.config)
         .unwrap_or(&vhost.cache)
+}
+
+#[cfg(all(feature = "cache", feature = "metrics"))]
+fn record_cache_policy_activity(
+    vhost: &RuntimeVhost,
+    route_index: Option<usize>,
+    event: &'static str,
+) {
+    crate::metrics::record_cache_activity("policy", event);
+    let route = route_index
+        .and_then(|index| vhost.route(index).cache.as_ref())
+        .map(|cache| cache.name.as_str());
+    crate::metrics::record_cache_activity_scope(vhost.name.as_str(), route, "policy", event);
 }
 
 #[cfg(feature = "cache")]

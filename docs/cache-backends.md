@@ -224,9 +224,11 @@ internal cache implementation.
   pressure, whether object-size budgets are realistic, and whether indexed
   scope, prefix, and wildcard purges have useful coverage or are near the
   bounded index cap.
-  Prometheus `fluxheim_cache_activity_total{tier="policy",event="pass"}`
-  records opt-in pass-cache bypass decisions without cache keys, hosts, or
-  paths. Prometheus also exposes
+  Prometheus `fluxheim_cache_activity_total{tier="policy",event="pass"}` and
+  matching scoped counters record opt-in pass-cache bypass decisions without
+  cache keys, hosts, or paths. Policy-level `bypass` records request-side
+  cache bypass rules such as refresh controls, and policy-level `stale` records
+  allowed stale serving decisions. Prometheus also exposes
   `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}` for
   configured vhost and route cache activity using only configured names and
   bounded tier/event labels. `fluxheim_cache_lock_enabled_policies` reports

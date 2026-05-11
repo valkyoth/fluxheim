@@ -447,6 +447,8 @@ fn cache_event_label(event: &str) -> &'static str {
         "eviction" => "eviction",
         "purge" => "purge",
         "pass" => "pass",
+        "bypass" => "bypass",
+        "stale" => "stale",
         _ => "other",
     }
 }
@@ -548,6 +550,8 @@ mod tests {
         record_cache_activity("memory", "hit");
         record_cache_activity("disk", "store_refusal");
         record_cache_activity("policy", "pass");
+        record_cache_activity("policy", "bypass");
+        record_cache_activity("policy", "stale");
         record_cache_activity("attacker-tier", "attacker-event");
 
         let metric_families = prometheus::gather();
@@ -561,6 +565,8 @@ mod tests {
             output.contains(r#"fluxheim_cache_activity_total{event="store_refusal",tier="disk"}"#)
         );
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="pass",tier="policy"}"#));
+        assert!(output.contains(r#"fluxheim_cache_activity_total{event="bypass",tier="policy"}"#));
+        assert!(output.contains(r#"fluxheim_cache_activity_total{event="stale",tier="policy"}"#));
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="other",tier="other"}"#));
         assert!(!output.contains("attacker-tier"));
         assert!(!output.contains("attacker-event"));
@@ -573,6 +579,7 @@ mod tests {
 
         record_cache_activity_scope("cached", None, "memory", "hit");
         record_cache_activity_scope("cached", Some("assets"), "disk", "purge");
+        record_cache_activity_scope("cached", Some("assets"), "policy", "bypass");
 
         let metric_families = prometheus::gather();
         let mut output = Vec::new();
@@ -585,6 +592,9 @@ mod tests {
         ));
         assert!(output.contains(
             r#"fluxheim_cache_activity_scope_total{event="purge",route="assets",scope="route",tier="disk",vhost="cached"}"#
+        ));
+        assert!(output.contains(
+            r#"fluxheim_cache_activity_scope_total{event="bypass",route="assets",scope="route",tier="policy",vhost="cached"}"#
         ));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
