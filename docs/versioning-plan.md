@@ -381,7 +381,7 @@ Stable scope:
   - broader hit-for-pass/pass-cache policy coverage; `pass_uncacheable_after`
     now provides opt-in bounded pass decisions for repeated uncacheable cache
     keys;
-  - broader end-to-end proxy regressions beyond the current cache HIT `Age`,
+  - broader cache-header regressions beyond the current proxy cache HIT `Age`,
     conditional `304`, and byte-range `206` release smoke;
   - cache observability through both Prometheus and OpenTelemetry, including
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,

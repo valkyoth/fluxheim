@@ -167,7 +167,7 @@ internal cache implementation.
   suite verifies proxy cache HIT behavior, cached-hit `Age`, conditional `304`,
   and byte-range `206` behavior end to end. Planned work still covers full
   validator-based revalidation for proxied cache responses and broader
-  cache-header tests for static and proxied responses.
+  cache-header matrix tests across static and proxied responses.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and

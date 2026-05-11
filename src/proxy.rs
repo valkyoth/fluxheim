@@ -6010,6 +6010,172 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn background_stale_disk_purge_scans_vhost_and_route_caches() {
+        use pingora::cache::Storage;
+
+        let vhost_cache_path = unique_test_cache_dir("proxy-background-vhost-disk-purge");
+        let route_cache_path = unique_test_cache_dir("proxy-background-route-disk-purge");
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    disk: crate::config::CacheDiskConfig {
+                        enabled: true,
+                        path: Some(vhost_cache_path.clone()),
+                        max_size_bytes: ByteSize::from_bytes(4096),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "assets".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/assets/".to_owned()),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    max_request_body_bytes: None,
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstream: Some("127.0.0.1:3000".to_owned()),
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    cache: Some(CacheConfig {
+                        enabled: true,
+                        disk: crate::config::CacheDiskConfig {
+                            enabled: true,
+                            path: Some(route_cache_path.clone()),
+                            max_size_bytes: ByteSize::from_bytes(4096),
+                        },
+                        max_object_bytes: ByteSize::from_bytes(512),
+                        ..CacheConfig::default()
+                    }),
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let vhost_storage = vhost.pingora_disk_storage.unwrap();
+        let route_cache = vhost.routes[0].cache.as_ref().unwrap();
+        let route_storage = route_cache.pingora_disk_storage.unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+
+        let vhost_stale_key = crate::cache::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &vhost.cache,
+            &crate::cache::CacheRequest {
+                method: "GET",
+                host: Some("cached.example"),
+                path: "/img/stale.png",
+                query: None,
+            },
+            &vhost.name,
+        )
+        .unwrap();
+        let vhost_fresh_key = crate::cache::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &vhost.cache,
+            &crate::cache::CacheRequest {
+                method: "GET",
+                host: Some("cached.example"),
+                path: "/img/fresh.png",
+                query: None,
+            },
+            &vhost.name,
+        )
+        .unwrap();
+        let route_stale_key = crate::cache::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &route_cache.config,
+            &crate::cache::CacheRequest {
+                method: "GET",
+                host: Some("cached.example"),
+                path: "/assets/stale.png",
+                query: None,
+            },
+            "cached:route:assets",
+        )
+        .unwrap();
+        let route_fresh_key = crate::cache::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &route_cache.config,
+            &crate::cache::CacheRequest {
+                method: "GET",
+                host: Some("cached.example"),
+                path: "/assets/fresh.png",
+                query: None,
+            },
+            "cached:route:assets",
+        )
+        .unwrap();
+
+        for (storage, key, meta) in [
+            (
+                vhost_storage,
+                &vhost_stale_key,
+                stale_pingora_meta("max-age=60"),
+            ),
+            (vhost_storage, &vhost_fresh_key, pingora_meta("max-age=60")),
+            (
+                route_storage,
+                &route_stale_key,
+                stale_pingora_meta("max-age=60"),
+            ),
+            (route_storage, &route_fresh_key, pingora_meta("max-age=60")),
+        ] {
+            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+
+        let result = proxy.purge_stale_disk_cache_once(8, 1).unwrap();
+
+        assert_eq!(result.targets, 2);
+        assert_eq!(result.scanned, 4);
+        assert_eq!(result.stale, 2);
+        assert_eq!(result.purged, 2);
+        assert!(!result.truncated);
+        assert!(
+            block_on(vhost_storage.lookup(&vhost_stale_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(vhost_storage.lookup(&vhost_fresh_key, &span))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            block_on(route_storage.lookup(&route_stale_key, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(route_storage.lookup(&route_fresh_key, &span))
+                .unwrap()
+                .is_some()
+        );
+
+        std::fs::remove_dir_all(vhost_cache_path).unwrap();
+        std::fs::remove_dir_all(route_cache_path).unwrap();
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn purge_image_cache_bulk_removes_multiple_memory_entries() {
         use bytes::Bytes;
         use pingora::cache::Storage;
@@ -7544,6 +7710,23 @@ mod tests {
         pingora::cache::CacheMeta::new(
             now.checked_add(std::time::Duration::from_secs(60)).unwrap(),
             now,
+            0,
+            0,
+            header,
+        )
+    }
+
+    #[cfg(feature = "cache")]
+    fn stale_pingora_meta(cache_control: &str) -> pingora::cache::CacheMeta {
+        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        header
+            .insert_header("cache-control", cache_control)
+            .unwrap();
+        let now = std::time::SystemTime::now();
+        pingora::cache::CacheMeta::new(
+            now.checked_sub(std::time::Duration::from_secs(60)).unwrap(),
+            now.checked_sub(std::time::Duration::from_secs(120))
+                .unwrap(),
             0,
             0,
             header,
