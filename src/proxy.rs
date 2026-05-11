@@ -3149,9 +3149,13 @@ impl ProxyHttp for FluxProxy {
             .map(|cache| &cache.config)
             .unwrap_or(&vhost.cache);
 
-        if request_cache_bypass(session.req_header(), cache_config) {
+        if let Some(reason) = request_cache_bypass_reason(session.req_header(), cache_config) {
             #[cfg(feature = "metrics")]
             record_cache_policy_activity(vhost, ctx.route_index, "bypass");
+            ctx.cache_status_override = Some(CacheStatusOverride {
+                status: "BYPASS",
+                reason: Some(reason),
+            });
             return Ok(());
         }
 
@@ -4355,23 +4359,32 @@ fn proxy_metrics_vhost(ctx: &RequestContext) -> &str {
 }
 
 #[cfg(feature = "cache")]
+#[cfg_attr(not(test), allow(dead_code))]
 fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheConfig) -> bool {
+    request_cache_bypass_reason(request, cache).is_some()
+}
+
+#[cfg(feature = "cache")]
+fn request_cache_bypass_reason(
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<&'static str> {
     if cache
         .bypass_request_headers
         .iter()
         .any(|header| request.headers.contains_key(header.as_str()))
     {
-        return true;
+        return Some("request-header");
     }
     if request_headers_match_cache_bypass_value(request, &cache.bypass_request_header_values) {
-        return true;
+        return Some("request-header-value");
     }
     if request_cookies_match_cache_bypass(
         request_header_values(request, "cookie"),
         &cache.bypass_cookie_names,
         &cache.bypass_cookie_values,
     ) {
-        return true;
+        return Some("request-cookie");
     }
     if request.uri.query().is_some_and(|query| {
         query_matches_cache_bypass(
@@ -4380,13 +4393,14 @@ fn request_cache_bypass(request: &RequestHeader, cache: &crate::config::CacheCon
             &cache.bypass_query_values,
         )
     }) {
-        return true;
+        return Some("request-query");
     }
 
     crate::cache_headers::request_values_force_cache_refresh(
         request_header_values(request, "cache-control"),
         request_header_values(request, "pragma"),
     )
+    .then_some("request-refresh")
 }
 
 #[cfg(feature = "cache")]
@@ -4857,8 +4871,6 @@ mod tests {
     use crate::test_support::unique_temp_path;
 
     #[cfg(feature = "cache")]
-    use super::request_cache_bypass;
-    #[cfg(feature = "cache")]
     use super::{
         CACHE_PASS_REASON, CacheStaleEvent, CacheStatusOverride, MAX_VARY_FIELDS, VaryCachePolicy,
         apply_cache_status_ttl, cache_min_uses_allows_store, cache_pass_record_cacheable,
@@ -4875,6 +4887,8 @@ mod tests {
         redirect_authority, request_body_chunk_limit_status, request_limit_status,
         route_redirect_location, route_rewritten_path_and_query,
     };
+    #[cfg(feature = "cache")]
+    use super::{request_cache_bypass, request_cache_bypass_reason};
 
     #[test]
     fn routes_known_hosts() {
@@ -7024,6 +7038,11 @@ mod tests {
                 request_cache_bypass(&request, &CacheConfig::default()),
                 "{name}: {value}"
             );
+            assert_eq!(
+                request_cache_bypass_reason(&request, &CacheConfig::default()),
+                Some("request-refresh"),
+                "{name}: {value}"
+            );
         }
 
         let mut request =
@@ -7033,6 +7052,10 @@ mod tests {
             .unwrap();
 
         assert!(!request_cache_bypass(&request, &CacheConfig::default()));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &CacheConfig::default()),
+            None
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -7069,6 +7092,10 @@ mod tests {
 
         request.insert_header("cookie", "session=private").unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-header")
+        );
 
         let mut request =
             pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
@@ -7076,6 +7103,10 @@ mod tests {
             .insert_header("authorization", "Bearer secret")
             .unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-header")
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -7098,6 +7129,10 @@ mod tests {
         request.append_header("x-preview-mode", "0").unwrap();
         request.append_header("x-preview-mode", "1").unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-header-value")
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -7116,6 +7151,10 @@ mod tests {
             .insert_header("cookie", "theme=dark; sessionid=abc")
             .unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-cookie")
+        );
 
         let mut request =
             pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
@@ -7126,6 +7165,10 @@ mod tests {
             .append_header("cookie", "wordpress_logged_in=1")
             .unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-cookie")
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -7149,6 +7192,10 @@ mod tests {
             .insert_header("cookie", "theme=dark; preview=1")
             .unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-cookie")
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -7167,10 +7214,18 @@ mod tests {
             pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1&preview=true", None)
                 .unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-query")
+        );
 
         let request =
             pingora::http::RequestHeader::build("GET", b"/assets/app.js?token", None).unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-query")
+        );
 
         let request =
             pingora::http::RequestHeader::build("GET", b"/assets/app.js?previewed=true", None)
@@ -7195,6 +7250,10 @@ mod tests {
             pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1&mode=private", None)
                 .unwrap();
         assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-query")
+        );
 
         let request =
             pingora::http::RequestHeader::build("GET", b"/assets/app.js?moder=private", None)

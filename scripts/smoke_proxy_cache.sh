@@ -156,6 +156,7 @@ backend = "rustls"
 [cache]
 enabled = true
 status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
 max_object_bytes = "1MiB"
 
 [cache.memory]
@@ -178,6 +179,7 @@ hosts = ["cache.test"]
 [vhosts.cache]
 enabled = true
 status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
 max_object_bytes = "1MiB"
 
 [vhosts.cache.memory]
@@ -261,6 +263,7 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
 
 first_headers="$TMP_DIR/first.headers"
 second_headers="$TMP_DIR/second.headers"
+bypass_headers="$TMP_DIR/bypass.headers"
 conditional_headers="$TMP_DIR/conditional.headers"
 range_headers="$TMP_DIR/range.headers"
 restart_headers="$TMP_DIR/restart.headers"
@@ -288,6 +291,21 @@ fi
 if ! grep -qi '^age:' "$second_headers"; then
     echo "proxy cache smoke failed: cache HIT did not include Age header" >&2
     cat "$second_headers" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$bypass_headers" -o "$body" \
+    -H "Host: cache.test" \
+    -H "Cache-Control: no-cache" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
+if ! grep -qi '^x-cache-status: BYPASS' "$bypass_headers"; then
+    echo "proxy cache smoke failed: client refresh bypass did not expose BYPASS status" >&2
+    cat "$bypass_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: request-refresh' "$bypass_headers"; then
+    echo "proxy cache smoke failed: client refresh bypass did not expose bounded reason" >&2
+    cat "$bypass_headers" >&2
     exit 1
 fi
 
