@@ -681,10 +681,12 @@ without parsing text fixtures for every module.
    - HTTP cache semantics.
    - Stale-while-revalidate.
    - Purge/admin API. Implemented for protected single-key invalidation through
-     `POST /_fluxheim/cache/purge` and same-host bulk invalidation through
-     `POST /_fluxheim/cache/purge-bulk`. Purge removes all stored `Vary`
-     variants for the selected primary cache identity in memory and disk tiers;
-     tag/prefix purge is planned after a cache index lands.
+     `POST /_fluxheim/cache/purge`, same-host bulk invalidation through
+     `POST /_fluxheim/cache/purge-bulk`, indexed scope purge, path-prefix
+     purge, tag purge, wildcard path-pattern purge, and stale purge. Purge
+     removes all stored `Vary` variants for the selected primary cache identity
+     in memory and disk tiers. Indexed purge endpoints support vhost and route
+     scopes, bounded batch limits, hard purge, and soft purge where applicable.
    - Cache admin status. Implemented through protected
      `GET /_fluxheim/cache/status` with aggregate and per-vhost memory/disk
      counters plus hit, miss, store, refused-store, and purge activity.
