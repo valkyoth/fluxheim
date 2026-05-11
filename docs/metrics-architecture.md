@@ -166,6 +166,14 @@ Baseline:
 
 - Prometheus/OpenMetrics text through the local metrics listener.
 - Loopback by default.
+- Local smoke coverage starts Fluxheim with `profile-observability`, sends a
+  proxied request, verifies `traceparent` propagation, checks the local metrics
+  listener for Fluxheim series, and optionally queries a Prometheus HTTP API.
+  Use `scripts/smoke_observability_local.sh`; set
+  `FLUXHEIM_PROMETHEUS_REQUIRE_FLUXHEIM=1` when a local Prometheus scrape job is
+  expected to contain Fluxheim metrics, and
+  `FLUXHEIM_PROMETHEUS_REQUIRE_OTLP=1` when Prometheus must have its OTLP
+  metrics receiver enabled.
 
 Optional push:
 
@@ -179,6 +187,11 @@ Optional OTLP:
 - behind `metrics-otlp`.
 - default off.
 - use explicit remote endpoint and timeout config.
+- can target a Prometheus HTTP OTLP metrics receiver at
+  `/api/v1/otlp/v1/metrics` when Prometheus is started with
+  `--web.enable-otlp-receiver`.
+- covers metrics only; traces still need an OpenTelemetry Collector or tracing
+  backend.
 
 Exporter health metrics:
 

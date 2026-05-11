@@ -356,6 +356,7 @@ cargo build --release --no-default-features --features proxy,metrics
 cargo build --release --no-default-features --features proxy,tls-rustls,acme
 cargo build --release --no-default-features --features profile-load-balancer
 cargo build --release --no-default-features --features profile-observability
+scripts/smoke_observability_local.sh
 ```
 
 TLS backend validation is split into its own helper because BoringSSL requires

@@ -93,10 +93,12 @@ Avoid:
 - request/response bodies;
 - client IP unless a non-privacy deployment explicitly enables it.
 
-## Stage 3: OTLP Export
+## Stage 3: OTLP Trace Export
 
-Full export should be optional and intended to send data to a local
-OpenTelemetry Collector.
+Full trace export should be optional and intended to send data to a local
+OpenTelemetry Collector or tracing backend. Prometheus can receive OTLP metrics
+over HTTP when its OTLP receiver is enabled, but it is not the direct trace
+storage target for this stage.
 
 Requirements:
 
@@ -189,6 +191,9 @@ overflow = "drop_new"
 - Generate trace context when absent.
 - Inject trace context into upstream requests.
 - Correlate trace ID in access logs when logging is enabled.
+- Run `scripts/smoke_observability_local.sh` to prove stage 1 propagation
+  through a live proxy path and verify Prometheus metrics are exposed from the
+  same `profile-observability` build.
 - Ensure malformed trace headers are never reflected.
 - Ensure untrusted sampled flags do not force sampling.
 - Verify sampling decisions for success, slow, and `5xx` requests.
