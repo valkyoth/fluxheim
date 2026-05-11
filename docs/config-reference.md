@@ -571,8 +571,9 @@ metadata without dumping bodies or header values. Both commands accept repeated
 as `Accept-Language` or `Accept-Encoding`; use `--host` for the Host header.
 `fluxheim cache-warm --header "Name: value"` warms negotiated variants with
 the same safe request-header syntax, and `fluxheim cache-warm --dry-run`
-validates warm targets, repeat counts, cache-status expectations, request
-headers, and listener selection without sending requests, which is useful
+validates bounded warm target input files, repeat counts, cache-status
+expectations, request headers, and listener selection without sending requests,
+which is useful
 before release deploy jobs.
 `hide_response_headers` removes selected upstream response headers before cache
 admission and downstream delivery. Use it only on tightly matched cache routes,

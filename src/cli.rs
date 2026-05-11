@@ -500,6 +500,9 @@ struct CacheWarmTarget {
 }
 
 #[cfg(feature = "cache")]
+const CACHE_WARM_INPUT_MAX_BYTES: usize = 1024 * 1024;
+
+#[cfg(feature = "cache")]
 fn run_cache_warm_command(
     options: CacheWarmOptions<'_>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1062,7 +1065,7 @@ fn cache_warm_targets(
     }
 
     if let Some(input) = input {
-        let content = std::fs::read_to_string(input)?;
+        let content = read_cache_warm_input(input)?;
         for (line_number, line) in content.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -1091,6 +1094,22 @@ fn cache_warm_targets(
         .into());
     }
     Ok(targets)
+}
+
+#[cfg(feature = "cache")]
+fn read_cache_warm_input(input: &std::path::Path) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let file = std::fs::File::open(input)?;
+    let mut content = String::new();
+    file.take((CACHE_WARM_INPUT_MAX_BYTES as u64) + 1)
+        .read_to_string(&mut content)?;
+    if content.len() > CACHE_WARM_INPUT_MAX_BYTES {
+        return Err(format!(
+            "cache-warm input file must be at most {} bytes",
+            CACHE_WARM_INPUT_MAX_BYTES
+        )
+        .into());
+    }
+    Ok(content)
 }
 
 #[cfg(feature = "cache")]
@@ -2316,6 +2335,20 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_input_file_is_bounded() {
+        let dir = TestDir::new("cli-cache-warm-input-bound");
+        let input = dir.path.join("warm.txt");
+        fs::write(&input, vec![b'#'; super::CACHE_WARM_INPUT_MAX_BYTES + 1]).unwrap();
+
+        let error = super::cache_warm_targets(Some("example.test"), &[], Some(&input), 8)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("cache-warm input file must be at most"));
     }
 
     #[cfg(feature = "cache")]

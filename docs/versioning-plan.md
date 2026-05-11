@@ -430,8 +430,8 @@ Stable scope:
     cache-status header values so warm scripts fail when traffic bypasses the
     selected cache policy unexpectedly, can repeat each target with a
     cache-status sequence such as `MISS,HIT`, can warm negotiated variants with
-    bounded safe request headers, and can dry-run target parsing without
-    sending requests to a running server;
+    bounded safe request headers, caps input files before parsing, and can
+    dry-run target parsing without sending requests to a running server;
   - cache observability through both Prometheus and OpenTelemetry, including
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured

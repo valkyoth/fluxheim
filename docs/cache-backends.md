@@ -74,10 +74,12 @@ internal cache implementation.
   Fluxheim HTTP listener. It uses normal `GET` requests with the selected Host
   header, so vhost routing, route matching, cache keys, and admission rules are
   identical to real traffic. It accepts repeated `--path` values or an input
-  file containing `/path` or `host.example /path` lines. Warm requests count
-  2xx and 3xx responses as successful by default. Use repeated
-  `--allow-status` values only for deliberate negative-cache workflows, such as
-  warming a configured 404 TTL. When a cache policy emits a status header,
+  file containing `/path` or `host.example /path` lines. Input files are capped
+  at 1 MiB, and the parsed target count is still bounded by `--max-targets`.
+  Warm requests count 2xx and 3xx responses as successful by default. Use
+  repeated `--allow-status` values only for deliberate negative-cache
+  workflows, such as warming a configured 404 TTL. When a cache policy emits a
+  status header,
   `--expect-cache-status` can require bounded values such as `MISS`, `HIT`, or
   `REVALIDATED`, so release scripts can fail if a warm request bypassed the
   cache unexpectedly. Use `--repeat` with `--expect-cache-status-sequence` to
