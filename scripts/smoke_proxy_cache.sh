@@ -412,6 +412,16 @@ if ! grep -qi '^age:' "$revalidate_third_headers"; then
     exit 1
 fi
 
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /revalidate.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-fresh-ttl-secs 120 \
+    --expect-header-name etag \
+    --expect-freshness-state fresh
+
 curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_en_first_headers" -o "$vary_en_body" \
     -H "Host: cache.test" \
     -H "Accept-Language: en" \

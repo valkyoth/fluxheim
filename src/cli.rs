@@ -249,6 +249,10 @@ pub enum CliCommand {
         #[arg(long = "expect-tier", value_name = "TIER")]
         expect_tiers: Vec<String>,
 
+        /// Required cached-object fresh TTL in seconds. May be repeated.
+        #[arg(long = "expect-fresh-ttl-secs", value_name = "SECONDS")]
+        expect_fresh_ttl_secs: Vec<u64>,
+
         /// Required stored response header name. May be repeated.
         #[arg(long = "expect-header-name", value_name = "HEADER")]
         expect_header_names: Vec<String>,
@@ -489,6 +493,7 @@ fn run_command(
             expect_freshness_states,
             expect_statuses,
             expect_tiers,
+            expect_fresh_ttl_secs,
             expect_header_names,
             expect_cache_tags,
             expect_purge_indexed,
@@ -503,6 +508,7 @@ fn run_command(
             expect_freshness_states: expect_freshness_states.clone(),
             expect_statuses: expect_statuses.clone(),
             expect_tiers: expect_tiers.clone(),
+            expect_fresh_ttl_secs: expect_fresh_ttl_secs.clone(),
             expect_header_names: expect_header_names.clone(),
             expect_cache_tags: expect_cache_tags.clone(),
             expect_purge_indexed: *expect_purge_indexed,
@@ -551,6 +557,7 @@ struct CacheLookupOptions<'a> {
     expect_freshness_states: Vec<String>,
     expect_statuses: Vec<u16>,
     expect_tiers: Vec<String>,
+    expect_fresh_ttl_secs: Vec<u64>,
     expect_header_names: Vec<String>,
     expect_cache_tags: Vec<String>,
     expect_purge_indexed: bool,
@@ -882,6 +889,7 @@ fn run_cache_lookup_command(
     let expected_header_names = parse_cache_lookup_header_names(&options.expect_header_names)?;
     let expected_cache_tags = parse_cache_lookup_cache_tags(&options.expect_cache_tags)?;
     validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
+    validate_cache_lookup_expected_fresh_ttls(&options.expect_fresh_ttl_secs)?;
     let (config, request) = cache_key_command_request(&cache_key_options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let lookup = proxy
@@ -892,6 +900,7 @@ fn run_cache_lookup_command(
         expected_states: &expected_states,
         expected_statuses: &options.expect_statuses,
         expected_tiers: &expected_tiers,
+        expected_fresh_ttl_secs: &options.expect_fresh_ttl_secs,
         expected_header_names: &expected_header_names,
         expected_cache_tags: &expected_cache_tags,
         expect_purge_indexed: options.expect_purge_indexed,
@@ -1053,6 +1062,7 @@ struct CacheLookupExpectations<'a> {
     expected_states: &'a [crate::cache::CacheObjectFreshnessState],
     expected_statuses: &'a [u16],
     expected_tiers: &'a [crate::cache::CacheObjectTier],
+    expected_fresh_ttl_secs: &'a [u64],
     expected_header_names: &'a [String],
     expected_cache_tags: &'a [String],
     expect_purge_indexed: bool,
@@ -1068,6 +1078,7 @@ fn validate_cache_lookup_expectations(
         expected_states,
         expected_statuses,
         expected_tiers,
+        expected_fresh_ttl_secs,
         expected_header_names,
         expected_cache_tags,
         expect_purge_indexed,
@@ -1150,6 +1161,24 @@ fn validate_cache_lookup_expectations(
             return Err(format!("cache-lookup expected tier {expected}, found {found}").into());
         }
     }
+    if !expected_fresh_ttl_secs.is_empty() {
+        let matched = lookup
+            .objects
+            .iter()
+            .any(|object| expected_fresh_ttl_secs.contains(&object.fresh_ttl_secs));
+        if !matched {
+            let expected = expected_fresh_ttl_secs
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            let found = cache_lookup_found_fresh_ttls(lookup);
+            return Err(format!(
+                "cache-lookup expected fresh TTL seconds {expected}, found {found}"
+            )
+            .into());
+        }
+    }
     for expected in *expected_header_names {
         let matched = lookup.objects.iter().any(|object| {
             object
@@ -1183,6 +1212,21 @@ fn validate_cache_lookup_expectations(
         return Err("cache-lookup expected at least one purge-indexed object, found none".into());
     }
     Ok(())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn cache_lookup_found_fresh_ttls(lookup: &crate::proxy::CacheObjectLookup) -> String {
+    let mut ttls = lookup
+        .objects
+        .iter()
+        .map(|object| object.fresh_ttl_secs.to_string())
+        .collect::<Vec<_>>();
+    if ttls.is_empty() {
+        return "none".to_owned();
+    }
+    ttls.sort_unstable();
+    ttls.dedup();
+    ttls.join(",")
 }
 
 #[cfg(all(feature = "cache", feature = "proxy"))]
@@ -1230,6 +1274,16 @@ fn validate_cache_lookup_expected_statuses(
     Ok(())
 }
 
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_lookup_expected_fresh_ttls(
+    ttls: &[u64],
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if ttls.len() > 32 {
+        return Err("cache-lookup accepts at most 32 --expect-fresh-ttl-secs values".into());
+    }
+    Ok(())
+}
+
 #[cfg(not(all(feature = "cache", feature = "proxy")))]
 fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Error + Send + Sync>> {
     let CacheKeyOptions {
@@ -1259,6 +1313,7 @@ fn run_cache_lookup_command(
         expect_freshness_states,
         expect_statuses,
         expect_tiers,
+        expect_fresh_ttl_secs,
         expect_header_names,
         expect_cache_tags,
         expect_purge_indexed,
@@ -1269,6 +1324,7 @@ fn run_cache_lookup_command(
         expect_freshness_states,
         expect_statuses,
         expect_tiers,
+        expect_fresh_ttl_secs,
         expect_header_names,
         expect_cache_tags,
         expect_purge_indexed,
@@ -2953,12 +3009,14 @@ mod tests {
         let no_states = &[] as &[crate::cache::CacheObjectFreshnessState];
         let no_statuses = &[] as &[u16];
         let no_tiers = &[] as &[crate::cache::CacheObjectTier];
+        let no_ttls = &[] as &[u64];
         let no_strings = &[] as &[String];
         let default_expectations = super::CacheLookupExpectations {
             require_object: false,
             expected_states: no_states,
             expected_statuses: no_statuses,
             expected_tiers: no_tiers,
+            expected_fresh_ttl_secs: no_ttls,
             expected_header_names: no_strings,
             expected_cache_tags: no_strings,
             expect_purge_indexed: false,
@@ -2972,6 +3030,7 @@ mod tests {
                     expected_states: &states,
                     expected_statuses: &[200],
                     expected_tiers: &tiers,
+                    expected_fresh_ttl_secs: &[0],
                     expected_header_names: &["etag".to_owned()],
                     expected_cache_tags: &["asset:logo".to_owned()],
                     expect_purge_indexed: true,
@@ -3014,6 +3073,25 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expected tier disk, found memory")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(
+                &lookup,
+                &super::CacheLookupExpectations {
+                    expected_fresh_ttl_secs: &[120],
+                    ..default_expectations
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected fresh TTL seconds 120, found 0")
+        );
+        assert!(super::validate_cache_lookup_expected_fresh_ttls(&[0]).is_ok());
+        assert!(
+            super::validate_cache_lookup_expected_fresh_ttls(&[1; 33])
+                .unwrap_err()
+                .to_string()
+                .contains("at most 32")
         );
         assert_eq!(
             super::parse_cache_lookup_header_names(&[" ETag ".to_owned()]).unwrap(),

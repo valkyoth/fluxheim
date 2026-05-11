@@ -431,11 +431,12 @@ Stable scope:
     `Accept-Encoding`, so operators can debug negotiated `Vary` variants
     without contacting upstreams. `cache-lookup` can fail closed for deploy
     checks with `--require-object`, `--expect-tier`, `--expect-status`,
-    `--expect-cache-tag`, `--expect-header-name`, `--expect-purge-indexed`, and
+    `--expect-fresh-ttl-secs`, `--expect-cache-tag`, `--expect-header-name`,
+    `--expect-purge-indexed`, and
     `--expect-freshness-state fresh|stale|expired`, so scripts can assert that
-    warm objects exist, preserved expected response metadata, are purge-index
-    reachable, and are in an acceptable serving state without contacting
-    upstreams;
+    warm objects exist, preserved expected response metadata and freshness
+    policy, are purge-index reachable, and are in an acceptable serving state
+    without contacting upstreams;
   - cache warm/import/export workflows for deploys and repository mirrors,
     including clear failure accounting and no hidden best-effort misses.
     `cache-warm` now treats only 2xx/3xx responses as successful by default
