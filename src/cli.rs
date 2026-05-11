@@ -240,6 +240,10 @@ pub enum CliCommand {
         /// Required cached-object freshness state. May be repeated: fresh, stale, expired.
         #[arg(long = "expect-freshness-state", value_name = "STATE")]
         expect_freshness_states: Vec<String>,
+
+        /// Required cached-object HTTP status. May be repeated.
+        #[arg(long = "expect-status", value_name = "STATUS")]
+        expect_statuses: Vec<u16>,
     },
 }
 
@@ -467,6 +471,7 @@ fn run_command(
             query,
             require_object,
             expect_freshness_states,
+            expect_statuses,
         } => run_cache_lookup_command(CacheLookupOptions {
             config_path,
             host: host.clone(),
@@ -476,6 +481,7 @@ fn run_command(
             query: query.clone(),
             require_object: *require_object,
             expect_freshness_states: expect_freshness_states.clone(),
+            expect_statuses: expect_statuses.clone(),
         }),
     }
 }
@@ -519,6 +525,7 @@ struct CacheLookupOptions<'a> {
     query: Option<String>,
     require_object: bool,
     expect_freshness_states: Vec<String>,
+    expect_statuses: Vec<u16>,
 }
 
 #[cfg(feature = "cache")]
@@ -843,12 +850,18 @@ fn run_cache_lookup_command(
     };
     let require_object = options.require_object;
     let expected_states = parse_cache_lookup_freshness_states(&options.expect_freshness_states)?;
+    validate_cache_lookup_expected_statuses(&options.expect_statuses)?;
     let (config, request) = cache_key_command_request(&cache_key_options)?;
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
     let lookup = proxy
         .snapshot()
         .pingora_image_cache_object_lookup_for_request_header(&request)?;
-    validate_cache_lookup_expectations(&lookup, require_object, &expected_states)?;
+    validate_cache_lookup_expectations(
+        &lookup,
+        require_object,
+        &expected_states,
+        &options.expect_statuses,
+    )?;
 
     println!("cache object lookup:");
     println!("vhost: {}", lookup.preview.vhost);
@@ -932,6 +945,7 @@ fn validate_cache_lookup_expectations(
     lookup: &crate::proxy::CacheObjectLookup,
     require_object: bool,
     expected_states: &[crate::cache::CacheObjectFreshnessState],
+    expected_statuses: &[u16],
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if require_object && lookup.objects.is_empty() {
         return Err("cache-lookup expected at least one cached object, found none".into());
@@ -960,6 +974,45 @@ fn validate_cache_lookup_expectations(
             return Err(
                 format!("cache-lookup expected freshness state {expected}, found {found}").into(),
             );
+        }
+    }
+    if !expected_statuses.is_empty() {
+        let matched = lookup
+            .objects
+            .iter()
+            .any(|object| expected_statuses.contains(&object.status));
+        if !matched {
+            let expected = expected_statuses
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(",");
+            let found = if lookup.objects.is_empty() {
+                "none".to_owned()
+            } else {
+                lookup
+                    .objects
+                    .iter()
+                    .map(|object| object.status.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            return Err(format!("cache-lookup expected status {expected}, found {found}").into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "cache", feature = "proxy"))]
+fn validate_cache_lookup_expected_statuses(
+    statuses: &[u16],
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for status in statuses {
+        if !(100..=599).contains(status) {
+            return Err(format!(
+                "cache-lookup --expect-status must be an HTTP status code, got {status}"
+            )
+            .into());
         }
     }
     Ok(())
@@ -992,9 +1045,10 @@ fn run_cache_lookup_command(
         query,
         require_object,
         expect_freshness_states,
+        expect_statuses,
     } = options;
     let _ = (config_path, host, headers, method, path, query);
-    let _ = (require_object, expect_freshness_states);
+    let _ = (require_object, expect_freshness_states, expect_statuses);
     Err("cache-lookup requires the proxy and cache features".into())
 }
 
@@ -2672,16 +2726,23 @@ mod tests {
         let lookup = cache_lookup_with_state(crate::cache::CacheObjectFreshnessState::Stale);
         let states = super::parse_cache_lookup_freshness_states(&["stale".to_owned()]).unwrap();
 
-        assert!(super::validate_cache_lookup_expectations(&lookup, true, &states).is_ok());
+        assert!(super::validate_cache_lookup_expectations(&lookup, true, &states, &[200]).is_ok());
         assert!(
             super::validate_cache_lookup_expectations(
                 &lookup,
                 false,
-                &[crate::cache::CacheObjectFreshnessState::Fresh]
+                &[crate::cache::CacheObjectFreshnessState::Fresh],
+                &[]
             )
             .unwrap_err()
             .to_string()
             .contains("expected freshness state fresh, found stale")
+        );
+        assert!(
+            super::validate_cache_lookup_expectations(&lookup, false, &[], &[404])
+                .unwrap_err()
+                .to_string()
+                .contains("expected status 404, found 200")
         );
         assert!(
             super::parse_cache_lookup_freshness_states(&["invalid".to_owned()])
@@ -2689,11 +2750,17 @@ mod tests {
                 .to_string()
                 .contains("fresh, stale, or expired")
         );
+        assert!(super::validate_cache_lookup_expected_statuses(&[99]).is_err());
         assert!(
-            super::validate_cache_lookup_expectations(&cache_lookup_without_objects(), true, &[])
-                .unwrap_err()
-                .to_string()
-                .contains("expected at least one cached object")
+            super::validate_cache_lookup_expectations(
+                &cache_lookup_without_objects(),
+                true,
+                &[],
+                &[]
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expected at least one cached object")
         );
     }
 

@@ -430,7 +430,7 @@ Stable scope:
     bounded safe request headers such as `Accept-Language` and
     `Accept-Encoding`, so operators can debug negotiated `Vary` variants
     without contacting upstreams. `cache-lookup` can fail closed for deploy
-    checks with `--require-object` and
+    checks with `--require-object`, `--expect-status`, and
     `--expect-freshness-state fresh|stale|expired`, so scripts can assert that
     warm objects exist and are in an acceptable serving state without
     contacting upstreams;
