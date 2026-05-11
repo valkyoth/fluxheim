@@ -573,6 +573,8 @@ counts repeated uncacheable origin responses for the same cache key in a bounded
 short-lived in-memory table. After the configured threshold, matching requests
 temporarily bypass cache lookup and storage instead of repeatedly entering the
 shared cache path. A later cacheable response clears the pass decision.
+When `status_header` and `status_reason_header` are configured, this policy is
+reported as `BYPASS` with reason `cache-pass`.
 `ignore_origin_cache_headers` removes upstream `Cache-Control` and `Expires`
 before cache admission and downstream delivery. Keep the default `false` unless
 the matched route is known static content and Fluxheim policy is responsible for

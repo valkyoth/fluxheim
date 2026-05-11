@@ -195,8 +195,8 @@ internal cache implementation.
 - `cache.status_header` can expose compact response debug states such as
   `HIT`, `MISS`, `STALE`, and `BYPASS`. `cache.status_reason_header` can expose
   bounded no-cache reasons such as `OriginNotCache`, `ResponseTooLarge`, or
-  Fluxheim policy reasons such as `cache-min-uses`. Keep the reason header
-  disabled unless actively debugging a cache policy.
+  Fluxheim policy reasons such as `cache-min-uses` and `cache-pass`. Keep the
+  reason header disabled unless actively debugging a cache policy.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,

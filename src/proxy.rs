@@ -1951,6 +1951,15 @@ pub struct RequestContext {
     started_at: Option<Instant>,
     #[cfg(not(feature = "privacy-mode"))]
     request_id: Option<String>,
+    #[cfg(feature = "cache")]
+    cache_status_override: Option<CacheStatusOverride>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CacheStatusOverride {
+    status: &'static str,
+    reason: Option<&'static str>,
 }
 
 #[async_trait]
@@ -2288,7 +2297,12 @@ impl ProxyHttp for FluxProxy {
         let vhost = state.vhost(vhost_index);
         apply_downstream_flow_control(session, &selected_runtime_proxy(vhost, ctx).config);
         #[cfg(feature = "cache")]
-        insert_cache_status_headers(session, response, selected_cache_config(vhost, ctx))?;
+        insert_cache_status_headers(
+            session,
+            response,
+            selected_cache_config(vhost, ctx),
+            ctx.cache_status_override,
+        )?;
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)
     }
@@ -2415,6 +2429,10 @@ impl ProxyHttp for FluxProxy {
             return Ok(());
         };
         if cache_pass_should_bypass(cache_pass_counter(), cache_config, &cache_key.combined()) {
+            ctx.cache_status_override = Some(CacheStatusOverride {
+                status: "BYPASS",
+                reason: Some(CACHE_PASS_REASON),
+            });
             return Ok(());
         }
 
@@ -2696,17 +2714,18 @@ fn insert_cache_status_headers(
     session: &Session,
     response: &mut ResponseHeader,
     cache: &crate::config::CacheConfig,
+    override_status: Option<CacheStatusOverride>,
 ) -> Result<()> {
     let phase = session.cache.phase();
 
     if let Some(header_name) = cache.status_header.as_deref()
-        && let Some(status) = cache_status_header_value(phase)
+        && let Some(status) = cache_status_header_value(phase, override_status)
     {
         response.insert_header(header_name.to_owned(), status)?;
     }
 
     if let Some(header_name) = cache.status_reason_header.as_deref()
-        && let Some(reason) = cache_status_reason_header_value(phase)
+        && let Some(reason) = cache_status_reason_header_value(phase, override_status)
     {
         response.insert_header(header_name.to_owned(), reason)?;
     }
@@ -2928,6 +2947,9 @@ fn cache_pass_record_cacheable(counter: &moka::sync::Cache<String, u32>, cache_k
 }
 
 #[cfg(feature = "cache")]
+const CACHE_PASS_REASON: &str = "cache-pass";
+
+#[cfg(feature = "cache")]
 fn cache_should_serve_stale(cache: &crate::config::CacheConfig, event: CacheStaleEvent) -> bool {
     match event {
         CacheStaleEvent::UpstreamError(kind) => {
@@ -2991,7 +3013,14 @@ fn cache_stale_error_kind(error: &Error) -> crate::config::CacheStaleErrorKind {
 }
 
 #[cfg(feature = "cache")]
-fn cache_status_header_value(phase: CachePhase) -> Option<&'static str> {
+fn cache_status_header_value(
+    phase: CachePhase,
+    override_status: Option<CacheStatusOverride>,
+) -> Option<&'static str> {
+    if let Some(override_status) = override_status {
+        return Some(override_status.status);
+    }
+
     match phase {
         CachePhase::Disabled(NoCacheReason::NeverEnabled)
         | CachePhase::Uninit
@@ -3008,7 +3037,14 @@ fn cache_status_header_value(phase: CachePhase) -> Option<&'static str> {
 }
 
 #[cfg(feature = "cache")]
-fn cache_status_reason_header_value(phase: CachePhase) -> Option<&'static str> {
+fn cache_status_reason_header_value(
+    phase: CachePhase,
+    override_status: Option<CacheStatusOverride>,
+) -> Option<&'static str> {
+    if let Some(override_status) = override_status {
+        return override_status.reason;
+    }
+
     match phase {
         CachePhase::Disabled(NoCacheReason::NeverEnabled)
         | CachePhase::Uninit
@@ -4023,16 +4059,17 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::request_cache_bypass;
     #[cfg(feature = "cache")]
-    use super::{CacheBulkPurgeRequest, CachePurgeRequest};
-    #[cfg(feature = "cache")]
     use super::{
-        CacheStaleEvent, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
-        cache_min_uses_allows_store, cache_pass_record_cacheable, cache_pass_record_uncacheable,
-        cache_pass_should_bypass, cache_request_participated, cache_should_serve_stale,
-        cache_stale_status_allows, cache_status_header_value, cache_status_reason_header_value,
-        cache_vary_policy, ignore_origin_cache_headers, response_cache_admission_rejection,
-        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
+        CACHE_PASS_REASON, CacheStaleEvent, CacheStatusOverride, MAX_VARY_FIELDS, VaryCachePolicy,
+        apply_cache_status_ttl, cache_min_uses_allows_store, cache_pass_record_cacheable,
+        cache_pass_record_uncacheable, cache_pass_should_bypass, cache_request_participated,
+        cache_should_serve_stale, cache_stale_status_allows, cache_status_header_value,
+        cache_status_reason_header_value, cache_vary_policy, ignore_origin_cache_headers,
+        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
+        vary_request_hash,
     };
+    #[cfg(feature = "cache")]
+    use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
         FluxProxy, count_response_body_chunk, http_peer_for_proxy, https_redirect_location,
         redirect_authority, request_body_chunk_limit_status, request_limit_status,
@@ -5848,34 +5885,44 @@ mod tests {
         use pingora::cache::{CachePhase, NoCacheReason};
 
         assert_eq!(
-            cache_status_header_value(CachePhase::Disabled(NoCacheReason::NeverEnabled)),
+            cache_status_header_value(CachePhase::Disabled(NoCacheReason::NeverEnabled), None),
             None
         );
-        assert_eq!(cache_status_header_value(CachePhase::Uninit), None);
-        assert_eq!(cache_status_header_value(CachePhase::CacheKey), None);
+        assert_eq!(cache_status_header_value(CachePhase::Uninit, None), None);
+        assert_eq!(cache_status_header_value(CachePhase::CacheKey, None), None);
         assert_eq!(
-            cache_status_header_value(CachePhase::Bypass),
+            cache_status_header_value(CachePhase::Bypass, None),
             Some("BYPASS")
         );
-        assert_eq!(cache_status_header_value(CachePhase::Hit), Some("HIT"));
-        assert_eq!(cache_status_header_value(CachePhase::Miss), Some("MISS"));
-        assert_eq!(cache_status_header_value(CachePhase::Stale), Some("STALE"));
         assert_eq!(
-            cache_status_header_value(CachePhase::StaleUpdating),
+            cache_status_header_value(CachePhase::Hit, None),
+            Some("HIT")
+        );
+        assert_eq!(
+            cache_status_header_value(CachePhase::Miss, None),
+            Some("MISS")
+        );
+        assert_eq!(
+            cache_status_header_value(CachePhase::Stale, None),
+            Some("STALE")
+        );
+        assert_eq!(
+            cache_status_header_value(CachePhase::StaleUpdating, None),
             Some("STALE-UPDATING")
         );
         assert_eq!(
-            cache_status_header_value(CachePhase::Expired),
+            cache_status_header_value(CachePhase::Expired, None),
             Some("EXPIRED")
         );
         assert_eq!(
-            cache_status_header_value(CachePhase::Revalidated),
+            cache_status_header_value(CachePhase::Revalidated, None),
             Some("REVALIDATED")
         );
         assert_eq!(
-            cache_status_header_value(CachePhase::RevalidatedNoCache(
-                NoCacheReason::OriginNotCache
-            )),
+            cache_status_header_value(
+                CachePhase::RevalidatedNoCache(NoCacheReason::OriginNotCache),
+                None
+            ),
             Some("REVALIDATED-NOCACHE")
         );
     }
@@ -5886,25 +5933,56 @@ mod tests {
         use pingora::cache::{CachePhase, NoCacheReason};
 
         assert_eq!(
-            cache_status_reason_header_value(CachePhase::Disabled(NoCacheReason::NeverEnabled)),
+            cache_status_reason_header_value(
+                CachePhase::Disabled(NoCacheReason::NeverEnabled),
+                None
+            ),
             None
         );
-        assert_eq!(cache_status_reason_header_value(CachePhase::Bypass), None);
         assert_eq!(
-            cache_status_reason_header_value(CachePhase::Disabled(NoCacheReason::OriginNotCache)),
+            cache_status_reason_header_value(CachePhase::Bypass, None),
+            None
+        );
+        assert_eq!(
+            cache_status_reason_header_value(
+                CachePhase::Disabled(NoCacheReason::OriginNotCache),
+                None
+            ),
             Some("OriginNotCache")
         );
         assert_eq!(
-            cache_status_reason_header_value(CachePhase::Disabled(NoCacheReason::Custom(
-                "cache-min-uses"
-            ))),
+            cache_status_reason_header_value(
+                CachePhase::Disabled(NoCacheReason::Custom("cache-min-uses")),
+                None
+            ),
             Some("cache-min-uses")
         );
         assert_eq!(
-            cache_status_reason_header_value(CachePhase::RevalidatedNoCache(
-                NoCacheReason::ResponseTooLarge
-            )),
+            cache_status_reason_header_value(
+                CachePhase::RevalidatedNoCache(NoCacheReason::ResponseTooLarge),
+                None
+            ),
             Some("ResponseTooLarge")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_status_override_reports_policy_bypass_reason() {
+        use pingora::cache::CachePhase;
+
+        let override_status = Some(CacheStatusOverride {
+            status: "BYPASS",
+            reason: Some(CACHE_PASS_REASON),
+        });
+
+        assert_eq!(
+            cache_status_header_value(CachePhase::Uninit, override_status),
+            Some("BYPASS")
+        );
+        assert_eq!(
+            cache_status_reason_header_value(CachePhase::Uninit, override_status),
+            Some("cache-pass")
         );
     }
 

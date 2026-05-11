@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
   process restart while retaining read compatibility with older v1/v2 objects.
 - Cache policies can now set `pass_uncacheable_after` to temporarily bypass the
   cache path for repeated uncacheable responses with the same cache key.
+- Cache debug headers now report pass-cache policy bypasses as `BYPASS` with
+  reason `cache-pass` when `status_reason_header` is enabled.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - Cache activity JSON now includes `miss_ratio_per_mille` alongside
