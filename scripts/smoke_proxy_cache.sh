@@ -78,6 +78,8 @@ ETAG = '"cache-smoke-v1"'
 REVALIDATE_ETAG = '"cache-smoke-revalidate"'
 REFRESH_OLD_ETAG = '"cache-smoke-refresh-old"'
 REFRESH_NEW_ETAG = '"cache-smoke-refresh-new"'
+SWR_OLD_ETAG = '"cache-smoke-swr-old"'
+SWR_NEW_ETAG = '"cache-smoke-swr-new"'
 STALE_ERROR_ETAG = '"cache-smoke-stale-error"'
 LOCKED_ETAG = '"cache-smoke-locked"'
 LAST_MODIFIED = "Sun, 10 May 2026 00:00:00 GMT"
@@ -165,6 +167,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-length", str(len(body)))
             self.send_header("cache-control", "public, max-age=1")
             self.send_header("etag", REFRESH_OLD_ETAG)
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path == "/swr.png":
+            if self.headers.get("if-none-match") == SWR_OLD_ETAG:
+                time.sleep(0.8)
+                body = b"swr-new-body"
+                self.send_response(200)
+                self.send_header("content-type", "image/png")
+                self.send_header("content-length", str(len(body)))
+                self.send_header("cache-control", "public, max-age=120")
+                self.send_header("etag", SWR_NEW_ETAG)
+                self.send_header("last-modified", LAST_MODIFIED)
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            body = b"swr-old-body"
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=1")
+            self.send_header("etag", SWR_OLD_ETAG)
             self.send_header("last-modified", LAST_MODIFIED)
             self.end_headers()
             self.wfile.write(body)
@@ -300,6 +327,31 @@ max_size_bytes = "32MiB"
 [vhosts.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
+
+[[vhosts.routes]]
+name = "swr"
+path_exact = "/swr.png"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_PORT"]
+upstream_tls = false
+
+[vhosts.routes.cache]
+enabled = true
+status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
+stale_while_revalidate_secs = 60
+stale_if_error_secs = 60
+max_object_bytes = "1MiB"
+
+[vhosts.routes.cache.memory]
+enabled = true
+max_size_bytes = "16MiB"
+
+[vhosts.routes.cache.disk]
+enabled = true
+path = "$TMP_DIR/cache"
+max_size_bytes = "32MiB"
 EOF
 
 python3 "$TMP_DIR/origin.py" "$ORIGIN_PORT" &
@@ -387,6 +439,9 @@ revalidate_third_headers="$TMP_DIR/revalidate-third.headers"
 refresh_first_headers="$TMP_DIR/refresh-first.headers"
 refresh_second_headers="$TMP_DIR/refresh-second.headers"
 refresh_third_headers="$TMP_DIR/refresh-third.headers"
+swr_first_headers="$TMP_DIR/swr-first.headers"
+swr_second_headers="$TMP_DIR/swr-second.headers"
+swr_third_headers="$TMP_DIR/swr-third.headers"
 stale_error_first_headers="$TMP_DIR/stale-error-first.headers"
 stale_error_second_headers="$TMP_DIR/stale-error-second.headers"
 restart_headers="$TMP_DIR/restart.headers"
@@ -394,6 +449,7 @@ body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
 revalidate_body="$TMP_DIR/revalidate-body.bin"
 refresh_body="$TMP_DIR/refresh-body.bin"
+swr_body="$TMP_DIR/swr-body.bin"
 stale_error_body="$TMP_DIR/stale-error-body.bin"
 vary_en_first_headers="$TMP_DIR/vary-en-first.headers"
 vary_en_second_headers="$TMP_DIR/vary-en-second.headers"
@@ -571,6 +627,71 @@ fi
     --expect-tier disk \
     --expect-status 200 \
     --expect-body-bytes 14 \
+    --expect-fresh-ttl-secs 120 \
+    --expect-header-name etag \
+    --expect-freshness-state fresh
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$swr_first_headers" -o "$swr_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/swr.png"
+if ! grep -qi '^x-cache-status: MISS' "$swr_first_headers"; then
+    echo "proxy cache smoke failed: initial stale-while-revalidate request was not a cache MISS" >&2
+    cat "$swr_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$swr_body")" != "swr-old-body" ]; then
+    echo "proxy cache smoke failed: initial stale-while-revalidate body mismatch" >&2
+    exit 1
+fi
+
+sleep 1.2
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /swr.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-body-bytes 12 \
+    --expect-header-name etag \
+    --expect-serve-stale-while-revalidate \
+    --expect-freshness-state stale
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$swr_second_headers" -o "$swr_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/swr.png"
+if ! grep -qi '^x-cache-status: STALE-UPDATING' "$swr_second_headers"; then
+    echo "proxy cache smoke failed: stale-while-revalidate did not serve stale while updating" >&2
+    cat "$swr_second_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$swr_body")" != "swr-old-body" ]; then
+    echo "proxy cache smoke failed: stale-while-revalidate stale body mismatch" >&2
+    exit 1
+fi
+
+sleep 1.2
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$swr_third_headers" -o "$swr_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/swr.png"
+if ! grep -qi '^x-cache-status: HIT' "$swr_third_headers"; then
+    echo "proxy cache smoke failed: stale-while-revalidate background refresh did not make asset fresh" >&2
+    cat "$swr_third_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$swr_body")" != "swr-new-body" ]; then
+    echo "proxy cache smoke failed: stale-while-revalidate refreshed body mismatch" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /swr.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-body-bytes 12 \
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
     --expect-freshness-state fresh

@@ -394,9 +394,10 @@ Stable scope:
   - broader cache-header regressions beyond the current proxy cache HIT `Age`,
     conditional `304`, byte-range `206`, validator-based upstream revalidation
     from origin `304`, stale-object refresh from origin `200`,
+    stale-while-revalidate serving during a background refresh,
     stale-if-error serving after an upstream connection failure, cache-lock
-    request collapsing for concurrent misses, `Vary` variant isolation, disk HIT
-    after restart, and request-bypass reason release smoke;
+    request collapsing for concurrent misses, `Vary` variant isolation, disk
+    HIT after restart, and request-bypass reason release smoke;
   - full validator-based upstream revalidation edge-case coverage for proxied
     cache responses, including explicit behavior when origins change `Vary`,
     `ETag`, `Last-Modified`, or freshness headers during revalidation;
@@ -606,9 +607,10 @@ Stable scope for declaring the cache pack complete:
 - Cache warm and metadata/debug commands suitable for release deploys and
   production incident response.
 - Proxy cache HIT `Age`, conditional `304`, byte-range `206`, `Vary` variant
-  isolation, stale-if-error serving after upstream failure, cache-lock request
-  collapsing for concurrent misses, disk HIT after restart, and request-bypass
-  reason behavior are covered end to end.
+  isolation, stale-while-revalidate serving during background refresh,
+  stale-if-error serving after upstream failure, cache-lock request collapsing
+  for concurrent misses, disk HIT after restart, and request-bypass reason
+  behavior are covered end to end.
 - Proxied cache revalidation refreshes metadata safely when origins return
   `304 Not Modified`.
 - Large-object byte-range fill is bounded and does not require buffering an
@@ -679,9 +681,9 @@ Exit criteria:
   Fluxheim serves from cache. Pingora provides the cache-hit `Age`,
   conditional, and range hooks; Fluxheim's smoke suite covers proxy cache HIT
   `Age`, conditional `304`, byte-range `206`, `Vary` variant isolation,
-  stale-if-error serving after upstream failure, cache-lock request collapsing
-  for concurrent misses, disk HIT after restart, and request-bypass reason
-  headers.
+  stale-while-revalidate serving during background refresh, stale-if-error
+  serving after upstream failure, cache-lock request collapsing for concurrent
+  misses, disk HIT after restart, and request-bypass reason headers.
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 

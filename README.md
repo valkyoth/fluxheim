@@ -284,8 +284,8 @@ and disk cache tiers, cache locks for request collapsing, protected purge/status
 operations, cache warm/lookup/key tooling, cache policy metrics, OTLP metrics
 export, and end-to-end proxy cache smoke coverage for hit `Age`, conditional
 `304`, byte ranges, validator-based upstream revalidation and refresh,
-stale-if-error serving, cache-lock request collapsing, `Vary` variants, disk
-hits after restart, and debug bypass reasons. `cache-lookup` also supports deploy-script assertions for object
+stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
+`Vary` variants, disk hits after restart, and debug bypass reasons. `cache-lookup` also supports deploy-script assertions for object
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
 cache tags, stored header names, cache-lock/tier layout, stale-serving
 eligibility, purge-index reachability, and fresh/stale/expired state. Remaining `1.2`
