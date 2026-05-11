@@ -2489,9 +2489,7 @@ fn safe_disk_index_relative_path(root: &Path, relative_path: &str) -> Option<Pat
     if shard.len() != 2 || !shard.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
-    let Some(encoded) = file_name.strip_suffix(".fhc") else {
-        return None;
-    };
+    let encoded = file_name.strip_suffix(".fhc")?;
     if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
@@ -4106,6 +4104,7 @@ fn cache_object_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
         })
 }
 
+#[cfg_attr(not(feature = "proxy"), allow(dead_code))]
 fn default_cache_tag_headers_for_storage() -> Vec<String> {
     ["surrogate-key", "cache-tag", "x-cache-tags"]
         .into_iter()

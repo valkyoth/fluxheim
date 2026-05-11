@@ -37,6 +37,9 @@ behavior when the change improves security or project direction.
 - Cache policies can now opt into Pingora's cacheability predictor with
   `[cache.predictor]`, `[vhosts.cache.predictor]`, and
   `[vhosts.routes.cache.predictor]`.
+- `fluxheim cache-key` and `fluxheim cache-lookup` now report selected
+  cacheability predictor state and can assert it with
+  `--expect-cache-predictor-enabled`.
 - Route-scoped cache runtime stats now appear in the protected admin cache
   status endpoint and activity-reset response.
 - `fluxheim cache-lookup` can now assert exact stored response header values

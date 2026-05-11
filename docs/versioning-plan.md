@@ -438,13 +438,15 @@ Stable scope:
     Lookup output also reports purge-index membership so operators can tell
     whether indexed scope, prefix, tag, wildcard, and stale purges can reach an
     object without a full scan. `cache-key` and `cache-lookup` report the
-    selected cache-lock state, wait timeout, and memory/disk tier availability
-    so operators can verify stampede-protection and storage policy for the
-    exact vhost or route that a request matches. `cache-key` can also fail
+    selected cache-lock state, wait timeout, cacheability predictor state, and
+    memory/disk tier availability so operators can verify stampede-protection,
+    predictor, and storage policy for the exact vhost or route that a request
+    matches. `cache-key` can also fail
     closed with `--expect-eligible`, `--expect-cache-lock-enabled`,
     `--expect-cache-lock-wait-timeout-secs`,
-    `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
-    `--expect-storage-tiers`, plus `--expect-scope`, `--expect-vhost`,
+    `--expect-cache-predictor-enabled`, `--expect-memory-tier-enabled`,
+    `--expect-disk-tier-enabled`, and `--expect-storage-tiers`, plus
+    `--expect-scope`, `--expect-vhost`,
     `--expect-route`, `--expect-namespace`, `--expect-key-namespace`, and
     `--expect-user-tag`, so deploy scripts can assert cache policy layout,
     selected vhost/route, internal namespace, and cache isolation boundary
@@ -457,6 +459,7 @@ Stable scope:
     `--expect-header-name`, `--expect-header "Name: value"`,
     `--expect-cache-lock-enabled`,
     `--expect-cache-lock-wait-timeout-secs`,
+    `--expect-cache-predictor-enabled`,
     `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
     `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,
     `--expect-route`, `--expect-namespace`, `--expect-key-namespace`,

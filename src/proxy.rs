@@ -556,6 +556,7 @@ pub struct CacheKeyPreview {
     pub eligible: bool,
     pub cache_lock_enabled: bool,
     pub cache_lock_wait_timeout_secs: u64,
+    pub cache_predictor_enabled: bool,
     pub memory_tier_enabled: bool,
     pub disk_tier_enabled: bool,
     pub storage_tiers: u8,
@@ -907,6 +908,9 @@ impl ProxySnapshot {
         let disk_tier_enabled = route_cache
             .map(|cache| cache.pingora_disk_storage.is_some())
             .unwrap_or(vhost.pingora_disk_storage.is_some());
+        let cache_predictor_enabled = route_cache
+            .map(|cache| cache.pingora_cache_predictor.is_some())
+            .unwrap_or(vhost.pingora_cache_predictor.is_some());
         let storage_tiers = u8::from(memory_tier_enabled) + u8::from(disk_tier_enabled);
         let key = self.state.pingora_image_cache_key_for_request_header(
             request,
@@ -922,6 +926,7 @@ impl ProxySnapshot {
                 eligible: true,
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
+                cache_predictor_enabled,
                 memory_tier_enabled,
                 disk_tier_enabled,
                 storage_tiers,
@@ -941,6 +946,7 @@ impl ProxySnapshot {
                 eligible: false,
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
+                cache_predictor_enabled,
                 memory_tier_enabled,
                 disk_tier_enabled,
                 storage_tiers,
@@ -6017,6 +6023,10 @@ mod tests {
                             enabled: true,
                             max_size_bytes: ByteSize::from_bytes(2048),
                         },
+                        predictor: crate::config::CachePredictorConfig {
+                            enabled: true,
+                            ..crate::config::CachePredictorConfig::default()
+                        },
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
@@ -6096,6 +6106,10 @@ mod tests {
                             enabled: true,
                             max_size_bytes: ByteSize::from_bytes(2048),
                         },
+                        predictor: crate::config::CachePredictorConfig {
+                            enabled: true,
+                            ..crate::config::CachePredictorConfig::default()
+                        },
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
@@ -6119,6 +6133,7 @@ mod tests {
         assert_eq!(preview.scope, super::CacheKeyPreviewScope::Route);
         assert!(preview.cache_lock_enabled);
         assert_eq!(preview.cache_lock_wait_timeout_secs, 30);
+        assert!(preview.cache_predictor_enabled);
         assert!(preview.memory_tier_enabled);
         assert!(!preview.disk_tier_enabled);
         assert_eq!(preview.storage_tiers, 1);
@@ -6173,6 +6188,7 @@ mod tests {
         assert_eq!(preview.scope, super::CacheKeyPreviewScope::Vhost);
         assert!(preview.cache_lock_enabled);
         assert_eq!(preview.cache_lock_wait_timeout_secs, 30);
+        assert!(!preview.cache_predictor_enabled);
         assert!(preview.memory_tier_enabled);
         assert!(!preview.disk_tier_enabled);
         assert_eq!(preview.storage_tiers, 1);

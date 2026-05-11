@@ -559,8 +559,9 @@ fluxheim --config /etc/fluxheim/fluxheim.toml cache-lookup \
 The preview and lookup commands validate the effective config, select the same
 vhost and route cache policy as a live request, and print the selected
 namespace, primary cache-key material, compact hashes, user tag, cache-lock
-state, cache-lock wait timeout, selected memory/disk tier availability, and
-ineligibility reason when the request is not admitted. `cache-lookup` also
+state, cache-lock wait timeout, cacheability predictor state, selected
+memory/disk tier availability, and ineligibility reason when the request is not
+admitted. `cache-lookup` also
 checks the selected memory and disk tiers for matching objects and prints safe
 metadata such as status, body size, freshness timestamps, cache tags, and stored
 header names. It also reports a compact `freshness_state` plus
@@ -581,6 +582,7 @@ cached HTTP status, repeated `--expect-fresh-ttl-secs` flags fail when no
 matching object has an allowed stored fresh TTL, repeated `--expect-body-bytes`
 flags fail when no matching object has an allowed stored body size,
 `--expect-cache-lock-enabled`, `--expect-cache-lock-wait-timeout-secs`,
+`--expect-cache-predictor-enabled`,
 `--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
 `--expect-storage-tiers` fail when the selected cache policy does not match the
 required stampede-protection or tier layout, `--expect-scope`,
@@ -653,15 +655,18 @@ Additional Pingora cache primitives worth exposing as Fluxheim matures:
   These are good candidates for low-cardinality Prometheus histograms and
   OpenTelemetry span attributes because they explain slow cache hits and
   stampede waits without exposing cache keys or paths.
-- `CacheablePredictor` remembers keys whose previous responses were
-  uncacheable, allowing future requests to bypass cache and cache locks early.
-  Fluxheim's `pass_uncacheable_after` covers the same user-facing problem
-  conservatively; a Pingora-backed predictor can replace or strengthen that
-  path once metrics and bounded capacity controls are in place.
-- `ForcedFreshness` can force an object to be treated as expired, absent, or
-  fresh. Fluxheim should only expose this through bounded admin/debug controls,
-  not broad public request headers, because force-fresh can mask origin
-  updates and force-miss can amplify origin load.
+- `CacheablePredictor` is exposed through opt-in `[cache.predictor]`,
+  `[vhosts.cache.predictor]`, and `[vhosts.routes.cache.predictor]` settings.
+  `cache-key` and `cache-lookup` report and can assert the selected predictor
+  state with `--expect-cache-predictor-enabled`. Fluxheim skips custom
+  Fluxheim policy reasons in the predictor so local min-use, bypass, and
+  response-header refusal controls remain governed by Fluxheim counters.
+- `ForcedFreshness::ForceExpired` is already used for bounded client refresh
+  revalidation (`Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
+  `Pragma: no-cache`). Future force-miss or force-fresh controls should only be
+  exposed through bounded admin/debug interfaces, not broad public request
+  headers, because force-fresh can mask origin updates and force-miss can
+  amplify origin load.
 - `CachePut` can fill cache storage from a supplied HTTP response stream. This
   would let deploy tooling preload selected objects without loopback HTTP
   warmups while still using the same storage, metadata, and eviction paths.
