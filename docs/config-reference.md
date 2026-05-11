@@ -771,6 +771,8 @@ or larger operator-controlled cleanup windows. With metrics enabled,
 `fluxheim_cache_purger_runs_total{outcome}` and
 `fluxheim_cache_purger_entries_total{result}` show whether the background
 purger is cleanly keeping up or returning `truncated` runs.
+`fluxheim_cache_purger_duration_seconds{outcome}` reports per-tick cleanup
+duration with bounded outcome labels and without cache paths or keys.
 
 ## TLS
 

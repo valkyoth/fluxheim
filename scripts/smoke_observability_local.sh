@@ -294,6 +294,11 @@ if ! grep -q 'fluxheim_cache_purger_runs_total{outcome="skipped"}' "$metrics_bod
     head -n 80 "$metrics_body" >&2 || true
     exit 1
 fi
+if ! grep -q 'fluxheim_cache_purger_duration_seconds_bucket{outcome="skipped"' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed cache purger duration histogram" >&2
+    grep 'fluxheim_cache_purger_' "$metrics_body" >&2 || true
+    exit 1
+fi
 
 for _ in 1 2 3 4 5 6 7 8 9 10; do
     curl -fsS "http://127.0.0.1:$metrics_port/metrics" >"$metrics_body"

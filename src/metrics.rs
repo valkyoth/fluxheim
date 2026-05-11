@@ -21,6 +21,7 @@ static CACHE_OPERATION_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new(
 static CACHE_PURGES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGER_RUNS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_PURGER_ENTRIES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static CACHE_PURGER_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
 static METRICS_OTLP_EXPORTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 
 pub fn enabled() -> bool {
@@ -46,6 +47,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_purges_total()?;
     cache_purger_runs_total()?;
     cache_purger_entries_total()?;
+    cache_purger_duration_seconds()?;
     metrics_otlp_exports_total()?;
     Ok(())
 }
@@ -160,6 +162,15 @@ pub fn record_cache_purger_entries(result: &str, amount: u64) {
             .with_label_values(&[cache_purger_entry_result_label(result)])
             .inc_by(amount),
         Err(error) => log::debug!("metrics cache purger entry counter unavailable: {error}"),
+    }
+}
+
+pub fn record_cache_purger_duration(outcome: &str, duration: Duration) {
+    match cache_purger_duration_seconds() {
+        Ok(histogram) => histogram
+            .with_label_values(&[cache_purger_outcome_label(outcome)])
+            .observe(duration.as_secs_f64()),
+        Err(error) => log::debug!("metrics cache purger duration histogram unavailable: {error}"),
     }
 }
 
@@ -518,6 +529,36 @@ fn cache_purger_entries_total() -> Result<&'static IntCounterVec, prometheus::Er
     })
 }
 
+fn cache_purger_duration_seconds() -> Result<&'static HistogramVec, prometheus::Error> {
+    if let Some(histogram) = CACHE_PURGER_DURATION_SECONDS.get() {
+        return Ok(histogram);
+    }
+
+    let histogram = HistogramVec::new(
+        HistogramOpts::new(
+            "fluxheim_cache_purger_duration_seconds",
+            "Fluxheim background stale disk cache purger run duration by bounded outcome.",
+        )
+        .buckets(vec![
+            0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+            30.0,
+        ]),
+        &["outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(histogram.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = CACHE_PURGER_DURATION_SECONDS.set(histogram);
+    CACHE_PURGER_DURATION_SECONDS.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_cache_purger_duration_seconds failed to initialize".to_owned(),
+        )
+    })
+}
+
 fn metrics_otlp_exports_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     if let Some(counter) = METRICS_OTLP_EXPORTS_TOTAL.get() {
         return Ok(counter);
@@ -727,8 +768,8 @@ mod tests {
     use super::{
         cache_config_stats, init, method_bucket, record_cache_activity,
         record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
-        record_cache_purger_entries, record_cache_purger_run, record_config,
-        record_metrics_otlp_export, record_proxy_outcome, status_class,
+        record_cache_purger_duration, record_cache_purger_entries, record_cache_purger_run,
+        record_config, record_metrics_otlp_export, record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -918,6 +959,8 @@ mod tests {
         record_cache_purger_entries("scanned", 7);
         record_cache_purger_entries("purged", 2);
         record_cache_purger_entries("attacker-result", 3);
+        record_cache_purger_duration("truncated", std::time::Duration::from_millis(25));
+        record_cache_purger_duration("attacker-outcome", std::time::Duration::from_millis(50));
 
         let metric_families = prometheus::gather();
         let mut output = Vec::new();
@@ -930,6 +973,12 @@ mod tests {
         assert!(output.contains(r#"fluxheim_cache_purger_entries_total{result="scanned"} 7"#));
         assert!(output.contains(r#"fluxheim_cache_purger_entries_total{result="purged"} 2"#));
         assert!(output.contains(r#"fluxheim_cache_purger_entries_total{result="other"} 3"#));
+        assert!(
+            output.contains(r#"fluxheim_cache_purger_duration_seconds_bucket{outcome="truncated""#)
+        );
+        assert!(
+            output.contains(r#"fluxheim_cache_purger_duration_seconds_bucket{outcome="other""#)
+        );
         assert!(!output.contains("attacker-outcome"));
         assert!(!output.contains("attacker-result"));
         assert!(!output.contains("cache_key"));

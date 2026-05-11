@@ -339,7 +339,9 @@ records successful admin purge commands with bounded operation and mode labels;
   `fluxheim_cache_purger_runs_total{outcome}` and
   `fluxheim_cache_purger_entries_total{result}` expose bounded background stale
   disk cleanup progress, including `truncated` runs that need larger or more
-  frequent cleanup windows.
+  frequent cleanup windows. `fluxheim_cache_purger_duration_seconds{outcome}`
+  records bounded per-tick duration so operators can distinguish an idle
+  cleanup loop from one falling behind or blocked on slow storage.
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as
@@ -443,7 +445,9 @@ records successful admin purge commands with bounded operation and mode labels;
   controls. The background purger uses the same fresh-entry rotation as the
   admin stale purge, so a bounded run can keep making progress even when fresh
   entries sit before expired entries in the index. The admin endpoint remains
-  available for explicit dry-runs and larger maintenance windows.
+  available for explicit dry-runs and larger maintenance windows. Metrics
+  include bounded run outcome, entry counts, and per-tick duration so operators
+  can see whether cleanup windows need to be raised.
 
 Example admin cache invalidation requests:
 

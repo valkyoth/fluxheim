@@ -201,10 +201,13 @@ impl pingora::services::background::BackgroundService for CacheStalePurgerBackgr
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
 fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::FluxProxy) {
+    #[cfg(feature = "metrics")]
+    let started_at = std::time::Instant::now();
+
     match proxy.purge_stale_disk_cache_once(config.limit, config.batches) {
         Ok(result) if result.targets == 0 => {
             #[cfg(feature = "metrics")]
-            record_cache_stale_purge_metrics("skipped", &result);
+            record_cache_stale_purge_metrics("skipped", &result, started_at.elapsed());
             log::debug!("cache stale disk purge skipped; no disk cache targets");
         }
         Ok(result) if result.purged == 0 => {
@@ -216,6 +219,7 @@ fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::
                     "clean"
                 },
                 &result,
+                started_at.elapsed(),
             );
             log::debug!(
                 "cache stale disk purge complete; targets={} scanned={} stale={} purged=0 truncated={}",
@@ -234,6 +238,7 @@ fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::
                     "purged"
                 },
                 &result,
+                started_at.elapsed(),
             );
             log::info!(
                 "cache stale disk purge complete; targets={} scanned={} stale={} purged={} truncated={}",
@@ -246,7 +251,10 @@ fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::
         }
         Err(error) => {
             #[cfg(feature = "metrics")]
-            crate::metrics::record_cache_purger_run("error");
+            {
+                crate::metrics::record_cache_purger_run("error");
+                crate::metrics::record_cache_purger_duration("error", started_at.elapsed());
+            }
             log::error!("cache stale disk purge failed: {error}");
         }
     }
@@ -256,11 +264,13 @@ fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::
 fn record_cache_stale_purge_metrics(
     outcome: &str,
     result: &crate::proxy::CacheBackgroundPurgeResult,
+    duration: std::time::Duration,
 ) {
     crate::metrics::record_cache_purger_run(outcome);
     crate::metrics::record_cache_purger_entries("scanned", usize_to_u64_saturating(result.scanned));
     crate::metrics::record_cache_purger_entries("stale", usize_to_u64_saturating(result.stale));
     crate::metrics::record_cache_purger_entries("purged", usize_to_u64_saturating(result.purged));
+    crate::metrics::record_cache_purger_duration(outcome, duration);
 }
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]

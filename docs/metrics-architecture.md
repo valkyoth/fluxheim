@@ -96,6 +96,9 @@ Current cache baseline:
 - `fluxheim_cache_activity_total{tier,event}`
 - `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`
 - `fluxheim_cache_operation_duration_seconds{scope,vhost,route,phase,operation}`
+- `fluxheim_cache_purger_runs_total{outcome}`
+- `fluxheim_cache_purger_entries_total{result}`
+- `fluxheim_cache_purger_duration_seconds{outcome}`
 
 The configuration gauges are aggregate, label-free, and populated from
 validated configuration when the metrics listener starts. The local
@@ -115,6 +118,8 @@ histograms use the same configured-name labels plus bounded `phase` and
 `operation` labels. `operation` is `lookup` or `lock_wait`, so dashboards can
 separate storage lookup cost from request-collapsing wait time without
 high-cardinality request labels.
+Cache purger duration histograms use the bounded purger `outcome` label only,
+so operators can see when cleanup ticks are getting slow without exposing cache
 paths, queries, cache keys, and purge identities. Future OpenTelemetry
 attributes should mirror the same low-cardinality concepts used by admin JSON
 and Prometheus.

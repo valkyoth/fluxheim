@@ -390,7 +390,8 @@ Stable scope:
     so batched stale cleanup can advance through fresh front pages and reach
     expired entries later in the same vhost or route bucket. Prometheus
     counters report background purger outcomes and scanned/stale/purged entry
-    counts so operators can see when cleanup is truncated and falling behind;
+    counts, and duration histograms report bounded per-tick cleanup time, so
+    operators can see when cleanup is truncated, slow, or falling behind;
   - cache warmer/preload command or admin workflow for release deploys;
     `fluxheim cache-warm` now warms explicit paths through a running local HTTP
     listener so vhost, route, cache-key, and admission policy stay identical to
