@@ -146,15 +146,17 @@ internal cache implementation.
   real cache directory path. Startup removes stale Fluxheim-owned disk-cache
   temp files after a conservative age threshold, while ignoring unrelated files
   and fresh temp files so snapshot reloads do not race active cache writers.
-- New disk cache objects use the v3 object header, which stores the combined
-  cache key, primary key, and user tag. On startup Fluxheim scans valid disk
-  cache objects and rebuilds the bounded purge index for v3 entries, so indexed
-  disk purges can survive process restarts. Older v1/v2 disk objects remain
-  readable but cannot fully rebuild indexed purge metadata because they did not
-  store the combined key and user tag.
-- Partial-write streaming is explicitly disabled for the production memory
-  and disk adapters until in-progress response buffering can be bounded for
-  unknown-size origin responses.
+- New disk cache objects use the v5 object header, which stores the combined
+  cache key, primary key, user tag, cache tags, and path-index metadata. On
+  startup Fluxheim scans valid disk cache objects and rebuilds the bounded
+  purge index for v5 entries, so indexed scope, prefix, wildcard, tag, and
+  stale disk purges can survive process restarts. Older v1-v4 disk objects
+  remain readable, but earlier formats cannot fully rebuild every indexed purge
+  metadata field because they did not store all of the v5 index fields.
+- Disk-only cache admission streams response chunks into a bounded temporary
+  file under the cache root before the final atomic object write. Partial-write
+  streaming remains disabled for the production memory and tiered adapters
+  until in-progress object accounting is proven there as well.
 - Cache-header semantics are partially implemented and remain a cache-pack
   hardening requirement before cache is considered complete. Static responses
   emit configurable `Cache-Control`, optional `Expires`, `ETag`,
@@ -270,8 +272,9 @@ internal cache implementation.
   for responses that carried one of the configured cache `tag_headers`.
   Tags are exact-match, bounded, de-duplicated per object, and may contain
   ASCII letters, digits, `_`, `-`, `.`, `:`, `/`, and `=`. Disk cache objects
-  persist tags in the v4 object format and rebuild the purge index across
-  process restarts while continuing to read older object formats.
+  persist tags and path-index metadata in the v5 object format and rebuild the
+  purge index across process restarts while continuing to read older object
+  formats.
   Indexed scope, prefix, tag, and wildcard purge endpoints also accept
   `soft=true` or `x-fluxheim-cache-soft: true`. Soft purge rewrites only cache
   metadata so matched objects become stale immediately but keep their bodies on

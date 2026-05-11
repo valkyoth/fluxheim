@@ -599,8 +599,9 @@ without parsing text fixtures for every module.
        rejects missing/non-image content types, redirects, and errors;
      - CDN-facing headers should be user-configurable through header policy and
        documented examples, not hardcoded globally.
-   - Request collapsing. Implemented for the memory tier with Pingora
-     `CacheLock`.
+   - Request collapsing. Implemented for memory, disk, and tiered cache
+     policies with Pingora `CacheLock`; cache-lock coverage is exposed in
+     metrics/admin status so stampede-protection gaps are visible.
    - Oversized memory admission refusal. Implemented: objects above
      `cache.max_object_bytes` are not stored.
    - Disk storage. Implemented as a complete-object Pingora `Storage` adapter
@@ -612,9 +613,11 @@ without parsing text fixtures for every module.
    - Multi-tier cache promotion/fallback. Implemented with a tiered Pingora
      storage adapter: memory is L1, disk is L2, misses write to both tiers,
      disk hits promote to memory when they fit, and purge invalidates both.
-   - Pingora `Storage` adapter partial streaming admission. Planned with a
-     bounded in-progress spool; disabled for memory and disk tiers until
-     unknown-size origin responses can be bounded safely.
+   - Pingora `Storage` adapter partial streaming admission. Implemented for
+     disk-only cache admission with bounded same-root temporary files and an
+     atomic final object write. Memory and tiered production adapters still
+     keep Pingora partial-write support disabled until their in-progress object
+     accounting is proven.
    - Route-scoped reverse-proxy cache policy for production gateway migrations.
      Needed for Forgejo-style static path caching such as
      `/avatars`, `/repo-avatars`, `/assets`, and `/img`, with explicit path
@@ -649,11 +652,12 @@ without parsing text fixtures for every module.
        otherwise personalized-content safe;
      - bounded cache-key indexing for memory and disk tiers is implemented as
        the foundation for broader invalidation. Indexed vhost/route scope
-       purge, path-prefix purge, and wildcard path-pattern purge are
-       implemented through the admin API. A background purger for complete disk
-       cleanup is still planned;
-     - startup cache-index loading that is incremental and bounded so large
-       disk caches do not block the gateway;
+       purge, path-prefix purge, tag purge, wildcard path-pattern purge, and
+       stale purge are implemented through the admin API. A background stale
+       disk purger is implemented through `[cache_purger]`;
+     - startup cache-index loading rebuilds the bounded purge index from stored
+       v5 disk object metadata. Planned: make this rebuild incremental so very
+       large disk caches do not block gateway startup;
      - byte-range/slice caching for large immutable files, with explicit
        warnings that the source object must not change during slice fill.
    - Dedicated cache-server feature track inspired by Varnish/Vinyl-style

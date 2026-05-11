@@ -17,9 +17,10 @@ behavior when the change improves security or project direction.
   hits, misses, stores, store refusals, evictions, and purges.
 - The release smoke suite now verifies proxy cache HIT behavior, cached-hit
   `Age`, conditional `304`, and byte-range `206` behavior end to end.
-- Disk cache writes now use a v3 object header that records the combined cache
-  key and user tag, allowing Fluxheim to rebuild the disk purge index after a
-  process restart while retaining read compatibility with older v1/v2 objects.
+- Disk cache writes now use a v5 object header that records the combined cache
+  key, primary key, user tag, cache tags, and path-index metadata, allowing
+  Fluxheim to rebuild disk purge indexes after a process restart while
+  retaining read compatibility with older v1-v4 objects.
 - Cache policies can now set `pass_uncacheable_after` to temporarily bypass the
   cache path for repeated uncacheable responses with the same cache key.
 - Cache debug headers now report pass-cache policy bypasses as `BYPASS` with

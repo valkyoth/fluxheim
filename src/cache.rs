@@ -46,6 +46,8 @@ const DISK_CACHE_MAGIC_V3: &[u8] = b"FLUXHEIM-CACHE-v3\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V4: &[u8] = b"FLUXHEIM-CACHE-v4\n";
 #[cfg(feature = "proxy")]
+const DISK_CACHE_MAGIC_V5: &[u8] = b"FLUXHEIM-CACHE-v5\n";
+#[cfg(feature = "proxy")]
 const CACHE_PURGE_INDEX_MAX_ENTRIES: usize = 65_536;
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
@@ -1149,6 +1151,7 @@ impl PingoraMemoryStorage {
                 combined_key: Some(combined_key.clone()),
                 primary_key: Some(store_key.primary.clone()),
                 user_tag: Some(store_key.user_tag.clone()),
+                index_path: store_key.index_path.clone(),
                 cache_tags: store_key.cache_tags.clone(),
                 internal_meta,
                 response_header,
@@ -1315,7 +1318,9 @@ impl PingoraDiskStorage {
                 continue;
             };
             let user_tag = object.user_tag.unwrap_or_default();
-            let path = cache_primary_component(&primary_key, "path");
+            let path = object
+                .index_path
+                .or_else(|| cache_primary_component(&primary_key, "path"));
             self.purge_index.insert_with_path_and_tags(
                 combined_key,
                 primary_key,
@@ -2215,6 +2220,7 @@ struct PingoraStoredObject {
     combined_key: Option<String>,
     primary_key: Option<String>,
     user_tag: Option<String>,
+    index_path: Option<String>,
     cache_tags: Vec<String>,
     internal_meta: Vec<u8>,
     response_header: Vec<u8>,
@@ -2669,15 +2675,18 @@ fn disk_cache_header_overhead(store_key: &PingoraStoreKey) -> u64 {
     let primary_len = store_key.primary.len() as u64;
     let user_tag_len = store_key.user_tag.len() as u64;
     let cache_tags_len = encoded_cache_tags_len(&store_key.cache_tags) as u64;
-    (DISK_CACHE_MAGIC_V4.len() as u64)
+    let index_path_len = store_key.index_path.as_deref().unwrap_or_default().len() as u64;
+    (DISK_CACHE_MAGIC_V5.len() as u64)
         .saturating_add(decimal_line_len(combined_len))
         .saturating_add(decimal_line_len(primary_len))
         .saturating_add(decimal_line_len(user_tag_len))
         .saturating_add(decimal_line_len(cache_tags_len))
+        .saturating_add(decimal_line_len(index_path_len))
         .saturating_add(combined_len)
         .saturating_add(primary_len)
         .saturating_add(user_tag_len)
         .saturating_add(cache_tags_len)
+        .saturating_add(index_path_len)
 }
 
 #[cfg(feature = "proxy")]
@@ -2771,6 +2780,9 @@ impl Storage for PingoraMemoryStorage {
         object.internal_meta = internal_meta;
         object.response_header = response_header;
         object.cache_tags = cache_tags_from_meta(meta, &self.cache_tag_headers);
+        object.index_path = key
+            .primary_key_str()
+            .and_then(|primary| cache_primary_component(primary, "path"));
         object.weight = weight;
         self.purge_index.insert_with_path_and_tags(
             combined_key.clone(),
@@ -3244,11 +3256,14 @@ fn write_disk_cache_object(
     let mut file = create_new_disk_cache_file(path)?;
     let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
 
-    file.write_all(DISK_CACHE_MAGIC_V4)?;
+    let index_path = store_key.index_path.as_deref().unwrap_or_default();
+
+    file.write_all(DISK_CACHE_MAGIC_V5)?;
     writeln!(file, "{}", store_key.combined.len())?;
     writeln!(file, "{}", store_key.primary.len())?;
     writeln!(file, "{}", store_key.user_tag.len())?;
     writeln!(file, "{}", encoded_cache_tags.len())?;
+    writeln!(file, "{}", index_path.len())?;
     writeln!(file, "{}", internal_meta.len())?;
     writeln!(file, "{}", response_header.len())?;
     writeln!(file, "{}", body.len())?;
@@ -3256,6 +3271,7 @@ fn write_disk_cache_object(
     file.write_all(store_key.primary.as_bytes())?;
     file.write_all(store_key.user_tag.as_bytes())?;
     file.write_all(encoded_cache_tags.as_bytes())?;
+    file.write_all(index_path.as_bytes())?;
     file.write_all(internal_meta)?;
     file.write_all(response_header)?;
     file.write_all(body)?;
@@ -3277,11 +3293,14 @@ fn write_disk_cache_object_from_body_file(
     let mut file = create_new_disk_cache_file(path)?;
     let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
 
-    file.write_all(DISK_CACHE_MAGIC_V4)?;
+    let index_path = store_key.index_path.as_deref().unwrap_or_default();
+
+    file.write_all(DISK_CACHE_MAGIC_V5)?;
     writeln!(file, "{}", store_key.combined.len())?;
     writeln!(file, "{}", store_key.primary.len())?;
     writeln!(file, "{}", store_key.user_tag.len())?;
     writeln!(file, "{}", encoded_cache_tags.len())?;
+    writeln!(file, "{}", index_path.len())?;
     writeln!(file, "{}", internal_meta.len())?;
     writeln!(file, "{}", response_header.len())?;
     writeln!(file, "{body_len}")?;
@@ -3289,6 +3308,7 @@ fn write_disk_cache_object_from_body_file(
     file.write_all(store_key.primary.as_bytes())?;
     file.write_all(store_key.user_tag.as_bytes())?;
     file.write_all(encoded_cache_tags.as_bytes())?;
+    file.write_all(index_path.as_bytes())?;
     file.write_all(internal_meta)?;
     file.write_all(response_header)?;
 
@@ -3424,7 +3444,9 @@ fn parse_disk_cache_object(
     max_object_bytes: ByteSize,
 ) -> std::io::Result<PingoraStoredObject> {
     let (mut offset, format_version) =
-        if bytes.get(..DISK_CACHE_MAGIC_V4.len()) == Some(DISK_CACHE_MAGIC_V4) {
+        if bytes.get(..DISK_CACHE_MAGIC_V5.len()) == Some(DISK_CACHE_MAGIC_V5) {
+            (DISK_CACHE_MAGIC_V5.len(), 5_u8)
+        } else if bytes.get(..DISK_CACHE_MAGIC_V4.len()) == Some(DISK_CACHE_MAGIC_V4) {
             (DISK_CACHE_MAGIC_V4.len(), 4_u8)
         } else if bytes.get(..DISK_CACHE_MAGIC_V3.len()) == Some(DISK_CACHE_MAGIC_V3) {
             (DISK_CACHE_MAGIC_V3.len(), 3_u8)
@@ -3459,6 +3481,11 @@ fn parse_disk_cache_object(
     } else {
         0
     };
+    let index_path_len = if format_version >= 5 {
+        parse_disk_cache_len(bytes, &mut offset)?
+    } else {
+        0
+    };
     let internal_meta_len = parse_disk_cache_len(bytes, &mut offset)?;
     let response_header_len = parse_disk_cache_len(bytes, &mut offset)?;
     let body_len = parse_disk_cache_len(bytes, &mut offset)?;
@@ -3477,6 +3504,7 @@ fn parse_disk_cache_object(
         .and_then(|value| value.checked_add(primary_key_len))
         .and_then(|value| value.checked_add(user_tag_len))
         .and_then(|value| value.checked_add(cache_tags_len))
+        .and_then(|value| value.checked_add(index_path_len))
         .and_then(|value| value.checked_add(internal_meta_len))
         .and_then(|value| value.checked_add(response_header_len))
         .and_then(|value| value.checked_add(body_len))
@@ -3503,7 +3531,8 @@ fn parse_disk_cache_object(
     let primary_key_end = combined_key_end + primary_key_len;
     let user_tag_end = primary_key_end + user_tag_len;
     let cache_tags_end = user_tag_end + cache_tags_len;
-    let internal_meta_end = cache_tags_end + internal_meta_len;
+    let index_path_end = cache_tags_end + index_path_len;
+    let internal_meta_end = index_path_end + internal_meta_len;
     let response_header_end = internal_meta_end + response_header_len;
     let combined_key = if format_version >= 3 {
         Some(cache_object_utf8(
@@ -3534,12 +3563,19 @@ fn parse_disk_cache_object(
     } else {
         Vec::new()
     };
+    let index_path = if format_version >= 5 {
+        let value = cache_object_utf8(&bytes[cache_tags_end..index_path_end], "index path")?;
+        (!value.is_empty()).then_some(value)
+    } else {
+        None
+    };
     Ok(PingoraStoredObject {
         combined_key,
         primary_key,
         user_tag,
+        index_path,
         cache_tags,
-        internal_meta: bytes[cache_tags_end..internal_meta_end].to_vec(),
+        internal_meta: bytes[index_path_end..internal_meta_end].to_vec(),
         response_header: bytes[internal_meta_end..response_header_end].to_vec(),
         body: Arc::from(&bytes[response_header_end..][..]),
         weight,
@@ -4982,7 +5018,7 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
-    fn pingora_disk_storage_rebuilds_purge_index_from_v4_objects() {
+    fn pingora_disk_storage_rebuilds_purge_index_from_persistent_objects() {
         use pingora::cache::Storage;
 
         let root = unique_test_cache_dir("disk-persistent-index");
@@ -5005,11 +5041,12 @@ mod tests {
         block_on(miss.finish()).unwrap();
         assert_eq!(writer.purge_index.len(), 1);
 
-        let rebuilt = super::PingoraDiskStorage::new(
-            root.clone(),
-            ByteSize::from_bytes(4096),
-            ByteSize::from_bytes(1024),
-        )
+        let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 1);
         let result = rebuilt
@@ -5024,6 +5061,97 @@ mod tests {
             }
         );
         assert_eq!(rebuilt.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_rebuilds_path_prefix_index_metadata() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("disk-persistent-path-index");
+        let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        let config = enabled_cache();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+        let asset = super::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &config,
+            &CacheRequest {
+                method: "GET",
+                host: Some("example.test"),
+                path: "/assets/logo.png",
+                query: None,
+            },
+            "vhost-a",
+        )
+        .unwrap();
+        let nested_asset = super::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &config,
+            &CacheRequest {
+                method: "GET",
+                host: Some("example.test"),
+                path: "/assets/icons/menu.png",
+                query: None,
+            },
+            "vhost-a",
+        )
+        .unwrap();
+        let image = super::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &config,
+            &CacheRequest {
+                method: "GET",
+                host: Some("example.test"),
+                path: "/img/logo.png",
+                query: None,
+            },
+            "vhost-a",
+        )
+        .unwrap();
+
+        for key in [&asset, &nested_asset, &image] {
+            let mut miss = block_on(writer.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+        }
+        assert_eq!(writer.purge_index.len(), 3);
+
+        let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+        })
+        .unwrap();
+        assert_eq!(rebuilt.purge_index.len(), 3);
+        let result = rebuilt
+            .purge_indexed_path_prefix("vhost-a", "/assets/", 8)
+            .unwrap();
+
+        assert_eq!(
+            result,
+            super::CacheIndexedPurgeResult {
+                matched: 2,
+                purged: 2,
+                truncated: false,
+            }
+        );
+        assert!(block_on(rebuilt.lookup(&asset, &span)).unwrap().is_none());
+        assert!(
+            block_on(rebuilt.lookup(&nested_asset, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(block_on(rebuilt.lookup(&image, &span)).unwrap().is_some());
 
         std::fs::remove_dir_all(root).unwrap();
     }
