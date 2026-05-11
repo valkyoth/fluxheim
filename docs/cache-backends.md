@@ -196,6 +196,11 @@ internal cache implementation.
   v1-v4 disk objects remain
   readable, but earlier formats cannot fully rebuild every indexed purge
   metadata field because they did not store all of the v5 index fields.
+  Startup indexing is capped to a bounded object count to avoid unbounded
+  memory use while reading attacker-influenced cache directories. If a
+  checkpoint or shard scan exceeds that cap, Fluxheim logs a warning, indexes
+  the first bounded set, and continues starting instead of failing the process.
+  A later storage-bin backend should replace this with an incremental index.
 - Disk-only cache admission streams response chunks into a bounded temporary
   file under the cache root before the final atomic object write. Partial-write
   streaming remains disabled for the production memory and tiered adapters
