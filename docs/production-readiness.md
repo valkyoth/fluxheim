@@ -124,7 +124,9 @@ It is intended to promote:
 - stable on-disk cache object metadata for combined keys, primary keys, tags,
   and path indexes;
 - Prometheus metrics plus OpenTelemetry metric and trace export basics;
-- release-gate coverage for proxy cache and local observability smoke suites.
+- release-gate coverage for proxy cache, local observability smoke suites, and
+  the published full/default, cache, and load-balancer container feature
+  profiles.
 
 Before calling `1.2` stable, release evidence must include the stable gate,
 cache behavior smokes, and observability smokes. Partial streaming admission,
@@ -142,7 +144,8 @@ scripts/stable_release_gate.sh check
 ```
 
 For `1.2` candidates, this gate also runs the proxy cache and local
-observability smoke suites.
+observability smoke suites, and verifies the published container feature
+profiles against the packaged container config.
 
 For a release candidate, also run the deeper optional checks that fit the
 deployment:

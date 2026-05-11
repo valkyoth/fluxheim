@@ -85,6 +85,9 @@ cargo check --no-default-features --features profile-cache-server
 cargo check --no-default-features --features profile-load-balancer
 cargo check --no-default-features --features profile-observability
 cargo check --no-default-features --features profile-privacy
+cargo check --no-default-features --features profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo check --no-default-features --features profile-cache-server,acme-client
+cargo check --no-default-features --features proxy,web,load-balancer,tls-rustls,security,acme-client
 expect_cargo_check_failure "privacy-mode" "privacy-mode cannot be combined with the cache feature"
 expect_cargo_check_failure_no_defaults "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
 expect_feature_validation_failure "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
@@ -114,6 +117,9 @@ cargo run --quiet -- --check-config --config examples/tls-intermediate.toml >/de
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/container/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config packaging/container/fluxheim.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp -- --check-config --config packaging/container/fluxheim.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-cache-server,acme-client -- --check-config --config packaging/container/fluxheim.toml >/dev/null
+cargo run --quiet --no-default-features --features proxy,web,load-balancer,tls-rustls,security,acme-client -- --check-config --config packaging/container/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config packaging/default/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/conf.d >/dev/null
 cargo run --quiet -- --check-config --config examples/gateway-1-0 >/dev/null
