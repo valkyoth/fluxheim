@@ -394,6 +394,16 @@ fi
     --repeat 2 \
     --expect-cache-status-sequence MISS,HIT
 
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --header "Accept-Language: de" \
+    --path /warm-vary.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-status 200 \
+    --expect-purge-indexed \
+    --expect-freshness-state fresh
+
 curl -sS --max-time "$CURL_MAX_TIME" -D "$warm_vary_headers" -o "$warm_vary_body" \
     -H "Host: cache.test" \
     -H "Accept-Language: de" \
