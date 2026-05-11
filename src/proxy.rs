@@ -1916,6 +1916,9 @@ impl RuntimeRoute {
         route: &crate::config::RouteConfig,
         base_headers: &crate::config::HeaderPolicyConfig,
     ) -> io::Result<Self> {
+        #[cfg(not(feature = "cache"))]
+        let _ = vhost_name;
+
         let headers = base_headers.with_vhost_overlay(&route.headers);
         let matcher = if let Some(path) = &route.path_exact {
             RuntimeRouteMatcher::Exact(path.clone())

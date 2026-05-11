@@ -61,6 +61,11 @@ internal cache implementation.
   uncacheable cache keys around cache lookup and storage. The feature is
   disabled by default and uses a bounded, short-lived in-memory table so dynamic
   one-off responses do not turn into unbounded state.
+- `fluxheim cache-warm` preloads explicit paths through a running local
+  Fluxheim HTTP listener. It uses normal `GET` requests with the selected Host
+  header, so vhost routing, route matching, cache keys, and admission rules are
+  identical to real traffic. It accepts repeated `--path` values or an input
+  file containing `/path` or `host.example /path` lines.
 - `cache.ignore_origin_cache_headers`,
   `vhosts.cache.ignore_origin_cache_headers`, and
   `vhosts.routes.cache.ignore_origin_cache_headers` remove upstream
@@ -299,6 +304,25 @@ curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
 
 curl -X POST -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
   "http://127.0.0.1:9090/_fluxheim/cache/purge-wildcard?vhost=repoheim.eu&pattern=/assets/*.png&limit=500"
+```
+
+Example cache warm after a release deploy:
+
+```sh
+fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
+  --listen 127.0.0.1:80 \
+  --host repoheim.eu \
+  --path /assets/css/index.css \
+  --path /assets/img/logo.png
+
+cat > /tmp/fluxheim-warm.txt <<'EOF'
+repoheim.eu /assets/css/index.css
+repoheim.eu /assets/img/logo.png
+EOF
+
+fluxheim --config /etc/fluxheim/fluxheim.toml cache-warm \
+  --listen 127.0.0.1:80 \
+  --input /tmp/fluxheim-warm.txt
 ```
 
 Example: `cache.memory.max_size_bytes = "1GiB"` with

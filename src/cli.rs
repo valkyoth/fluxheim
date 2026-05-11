@@ -1,6 +1,8 @@
 use std::error::Error;
 #[cfg(feature = "acme-client")]
 use std::io::{self, Write};
+#[cfg(feature = "cache")]
+use std::io::{Read, Write as _};
 #[cfg(feature = "acme-client")]
 use std::path::Path;
 use std::path::PathBuf;
@@ -121,6 +123,37 @@ pub enum CliCommand {
         /// systemd drop-in directory for fluxheim.service.
         #[arg(long, default_value = "/etc/systemd/system/fluxheim.service.d")]
         systemd_dropin_dir: PathBuf,
+    },
+
+    /// Warm configured cache paths through a running local Fluxheim listener.
+    CacheWarm {
+        /// Local Fluxheim HTTP listener to connect to. Defaults to the first server.listen address.
+        #[arg(long)]
+        listen: Option<String>,
+
+        /// Host header to use for --path entries. Defaults to the configured default vhost host.
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Absolute request path to warm. May be repeated.
+        #[arg(long = "path", value_name = "PATH")]
+        paths: Vec<String>,
+
+        /// Read warm targets from a file. Lines may be "/path" or "host.example /path".
+        #[arg(long, value_name = "FILE")]
+        input: Option<PathBuf>,
+
+        /// Per-request socket timeout in seconds.
+        #[arg(long, default_value_t = 10)]
+        timeout_secs: u64,
+
+        /// Maximum number of warm targets accepted from --path plus --input.
+        #[arg(long, default_value_t = 256)]
+        max_targets: usize,
+
+        /// Stop on the first failed warm request.
+        #[arg(long)]
+        fail_fast: bool,
     },
 }
 
@@ -289,7 +322,347 @@ fn run_command(
             secrets_dir: secrets_dir.clone(),
             systemd_dropin_dir: systemd_dropin_dir.clone(),
         }),
+        CliCommand::CacheWarm {
+            listen,
+            host,
+            paths,
+            input,
+            timeout_secs,
+            max_targets,
+            fail_fast,
+        } => run_cache_warm_command(CacheWarmOptions {
+            config_path,
+            listen: listen.clone(),
+            host: host.clone(),
+            paths: paths.clone(),
+            input: input.clone(),
+            timeout_secs: *timeout_secs,
+            max_targets: *max_targets,
+            fail_fast: *fail_fast,
+        }),
     }
+}
+
+#[derive(Debug)]
+struct CacheWarmOptions<'a> {
+    config_path: Option<&'a std::path::Path>,
+    listen: Option<String>,
+    host: Option<String>,
+    paths: Vec<String>,
+    input: Option<PathBuf>,
+    timeout_secs: u64,
+    max_targets: usize,
+    fail_fast: bool,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct CacheWarmTarget {
+    host: String,
+    path: String,
+}
+
+#[cfg(feature = "cache")]
+fn run_cache_warm_command(
+    options: CacheWarmOptions<'_>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let config = Config::load(options.config_path)?;
+    config.validate()?;
+
+    if options.timeout_secs == 0 {
+        return Err("cache-warm --timeout-secs must be greater than zero".into());
+    }
+    if options.max_targets == 0 || options.max_targets > 4096 {
+        return Err("cache-warm --max-targets must be between 1 and 4096".into());
+    }
+
+    let listen = cache_warm_listen_addr(&config, options.listen.as_deref())?;
+    let default_host = match options.host {
+        Some(host) => {
+            validate_cache_warm_host(&host)?;
+            Some(host)
+        }
+        None => cache_warm_default_host(&config),
+    };
+    let targets = cache_warm_targets(
+        default_host.as_deref(),
+        &options.paths,
+        options.input.as_deref(),
+        options.max_targets,
+    )?;
+
+    println!("cache warm targets: {}", targets.len());
+    println!("cache warm listener: {listen}");
+
+    let timeout = std::time::Duration::from_secs(options.timeout_secs);
+    let mut warmed = 0_usize;
+    let mut failed = 0_usize;
+    for target in targets {
+        match cache_warm_request(&listen, &target, timeout) {
+            Ok(result) => {
+                warmed = warmed.saturating_add(1);
+                println!(
+                    "warmed: host={} path={} status={} bytes={}",
+                    target.host, target.path, result.status, result.bytes_read
+                );
+            }
+            Err(error) => {
+                failed = failed.saturating_add(1);
+                eprintln!(
+                    "failed: host={} path={} error={}",
+                    target.host,
+                    target.path,
+                    error.to_string().replace('\n', " ")
+                );
+                if options.fail_fast {
+                    break;
+                }
+            }
+        }
+    }
+
+    println!("cache warm completed: warmed={warmed} failed={failed}");
+    if failed > 0 {
+        return Err(format!("cache warm failed for {failed} target(s)").into());
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "cache"))]
+fn run_cache_warm_command(
+    options: CacheWarmOptions<'_>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let CacheWarmOptions {
+        config_path,
+        listen,
+        host,
+        paths,
+        input,
+        timeout_secs,
+        max_targets,
+        fail_fast,
+    } = options;
+    let _ = (
+        config_path,
+        listen,
+        host,
+        paths,
+        input,
+        timeout_secs,
+        max_targets,
+        fail_fast,
+    );
+    Err("cache-warm requires the cache feature".into())
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct CacheWarmResult {
+    status: u16,
+    bytes_read: u64,
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_listen_addr(
+    config: &Config,
+    listen: Option<&str>,
+) -> Result<std::net::SocketAddr, Box<dyn Error + Send + Sync>> {
+    let candidate = listen
+        .or_else(|| config.server.listen.first().map(String::as_str))
+        .ok_or("cache-warm requires a server.listen address or --listen")?;
+    let mut address: std::net::SocketAddr = candidate.parse()?;
+    address.set_ip(match address.ip() {
+        std::net::IpAddr::V4(ip) if ip.is_unspecified() => {
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+        }
+        std::net::IpAddr::V6(ip) if ip.is_unspecified() => {
+            std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)
+        }
+        ip => ip,
+    });
+    Ok(address)
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_default_host(config: &Config) -> Option<String> {
+    config
+        .server
+        .default_vhost
+        .as_deref()
+        .and_then(|name| config.vhosts.iter().find(|vhost| vhost.name == name))
+        .and_then(|vhost| vhost.hosts.first())
+        .cloned()
+        .or_else(|| {
+            config
+                .vhosts
+                .iter()
+                .find_map(|vhost| vhost.hosts.first().cloned())
+        })
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_targets(
+    default_host: Option<&str>,
+    paths: &[String],
+    input: Option<&std::path::Path>,
+    max_targets: usize,
+) -> Result<Vec<CacheWarmTarget>, Box<dyn Error + Send + Sync>> {
+    let mut targets = Vec::new();
+    for path in paths {
+        let host = default_host.ok_or("cache-warm --host is required when warming --path")?;
+        targets.push(cache_warm_target(host, path)?);
+    }
+
+    if let Some(input) = input {
+        let content = std::fs::read_to_string(input)?;
+        for (line_number, line) in content.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let target = cache_warm_target_from_line(default_host, line).map_err(|error| {
+                format!(
+                    "invalid cache-warm input at {}:{}: {error}",
+                    input.display(),
+                    line_number + 1
+                )
+            })?;
+            targets.push(target);
+        }
+    }
+
+    if targets.is_empty() {
+        return Err("cache-warm requires at least one --path or --input target".into());
+    }
+    if targets.len() > max_targets {
+        return Err(format!(
+            "cache-warm target count {} exceeds --max-targets {}",
+            targets.len(),
+            max_targets
+        )
+        .into());
+    }
+    Ok(targets)
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_target_from_line(
+    default_host: Option<&str>,
+    line: &str,
+) -> Result<CacheWarmTarget, Box<dyn Error + Send + Sync>> {
+    if line.starts_with('/') {
+        let host = default_host.ok_or("host is required for path-only input lines")?;
+        return cache_warm_target(host, line);
+    }
+
+    let mut parts = line.split_whitespace();
+    let host = parts.next().ok_or("missing host")?;
+    let path = parts.next().ok_or("missing path")?;
+    if parts.next().is_some() {
+        return Err("expected either /path or host /path".into());
+    }
+    cache_warm_target(host, path)
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_target(
+    host: &str,
+    path: &str,
+) -> Result<CacheWarmTarget, Box<dyn Error + Send + Sync>> {
+    validate_cache_warm_host(host)?;
+    validate_cache_warm_path(path)?;
+    Ok(CacheWarmTarget {
+        host: host.to_owned(),
+        path: path.to_owned(),
+    })
+}
+
+#[cfg(feature = "cache")]
+fn validate_cache_warm_host(host: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if host.is_empty() || host.len() > 253 {
+        return Err("host must be 1-253 bytes".into());
+    }
+    if host.bytes().any(|byte| {
+        byte.is_ascii_control()
+            || byte.is_ascii_whitespace()
+            || matches!(byte, b'/' | b'\\' | b'?' | b'#')
+    }) {
+        return Err("host contains characters that cannot be used in an HTTP Host header".into());
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn validate_cache_warm_path(path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !path.starts_with('/') {
+        return Err("path must start with /".into());
+    }
+    if path.len() > 8192 {
+        return Err("path must be at most 8192 bytes".into());
+    }
+    if path
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+    {
+        return Err("path contains control or whitespace bytes".into());
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_request(
+    listen: &std::net::SocketAddr,
+    target: &CacheWarmTarget,
+    timeout: std::time::Duration,
+) -> Result<CacheWarmResult, Box<dyn Error + Send + Sync>> {
+    let mut stream = std::net::TcpStream::connect_timeout(listen, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    write!(
+        stream,
+        "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: fluxheim-cache-warm/{}\r\nAccept: */*\r\nConnection: close\r\n\r\n",
+        target.path,
+        target.host,
+        env!("CARGO_PKG_VERSION")
+    )?;
+    stream.flush()?;
+
+    let mut bytes_read = 0_u64;
+    let mut prefix = Vec::with_capacity(512);
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        bytes_read = bytes_read.saturating_add(read as u64);
+        if prefix.len() < 512 {
+            let remaining = 512 - prefix.len();
+            prefix.extend_from_slice(&buffer[..read.min(remaining)]);
+        }
+    }
+
+    let status = cache_warm_status_from_prefix(&prefix)?;
+    Ok(CacheWarmResult { status, bytes_read })
+}
+
+#[cfg(feature = "cache")]
+fn cache_warm_status_from_prefix(prefix: &[u8]) -> Result<u16, Box<dyn Error + Send + Sync>> {
+    let line_end = prefix
+        .windows(2)
+        .position(|window| window == b"\r\n")
+        .ok_or("response did not include a complete HTTP status line")?;
+    let status_line = std::str::from_utf8(&prefix[..line_end])?;
+    let mut parts = status_line.split_whitespace();
+    let protocol = parts.next().ok_or("missing HTTP protocol in status line")?;
+    if !protocol.starts_with("HTTP/") {
+        return Err("response status line does not start with HTTP/".into());
+    }
+    let status = parts
+        .next()
+        .ok_or("missing HTTP status code")?
+        .parse::<u16>()?;
+    Ok(status)
 }
 
 #[derive(Debug)]
@@ -1180,6 +1553,86 @@ mod tests {
         .unwrap();
 
         assert_eq!(store.current_id().unwrap(), Some(first.id));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_targets_accept_default_host_and_input_hosts() {
+        let dir = TestDir::new("cli-cache-warm-targets");
+        let input = dir.path.join("warm.txt");
+        fs::write(
+            &input,
+            "\n# release preload\n/assets/app.css\ncdn.example /img/logo.png?v=1\n",
+        )
+        .unwrap();
+
+        let targets =
+            super::cache_warm_targets(Some("example.test"), &["/".to_owned()], Some(&input), 8)
+                .unwrap();
+
+        assert_eq!(
+            targets,
+            vec![
+                super::CacheWarmTarget {
+                    host: "example.test".to_owned(),
+                    path: "/".to_owned(),
+                },
+                super::CacheWarmTarget {
+                    host: "example.test".to_owned(),
+                    path: "/assets/app.css".to_owned(),
+                },
+                super::CacheWarmTarget {
+                    host: "cdn.example".to_owned(),
+                    path: "/img/logo.png?v=1".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_targets_reject_header_injection() {
+        let error = super::cache_warm_target("example.test", "/ok\r\nx-bad: 1").unwrap_err();
+        assert!(error.to_string().contains("path contains control"));
+
+        let error = super::cache_warm_target("bad host", "/ok").unwrap_err();
+        assert!(error.to_string().contains("Host header"));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_listen_rewrites_unspecified_address_to_loopback() {
+        let config = crate::config::Config {
+            server: crate::config::ServerConfig {
+                listen: vec!["0.0.0.0:8080".to_owned()],
+                ..crate::config::ServerConfig::default()
+            },
+            ..crate::config::Config::default()
+        };
+
+        assert_eq!(
+            super::cache_warm_listen_addr(&config, None).unwrap(),
+            "127.0.0.1:8080".parse().unwrap()
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_warm_status_parser_reads_status_code() {
+        assert_eq!(
+            super::cache_warm_status_from_prefix(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+                .unwrap(),
+            200
+        );
+        assert!(super::cache_warm_status_from_prefix(b"bad\r\n").is_err());
+    }
+
+    #[cfg(not(feature = "cache"))]
+    #[test]
+    fn cache_warm_requires_cache_feature() {
+        let error = run_from_args(["fluxheim", "cache-warm", "--path", "/"]).unwrap_err();
+
+        assert!(error.to_string().contains("cache feature"));
     }
 
     struct TestDir {

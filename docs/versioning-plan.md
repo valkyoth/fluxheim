@@ -366,6 +366,9 @@ Stable scope:
     cleanup for expired indexed entries with dry-run mode and conservative
     batching for production safety checks;
   - cache warmer/preload command or admin workflow for release deploys;
+    `fluxheim cache-warm` now warms explicit paths through a running local HTTP
+    listener so vhost, route, cache-key, and admission policy stay identical to
+    production traffic;
   - richer cache-tag policy controls on top of the initial exact-match
     `Surrogate-Key` / `Cache-Tag` / `X-Cache-Tags` indexed purge support;
     cache policies can now configure or disable trusted tag headers with

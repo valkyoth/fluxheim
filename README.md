@@ -26,13 +26,13 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current `1.1.x` line is
-the production gateway baseline for static sites, vhosts, route-level proxying,
-redirects, rustls SNI, managed ACME issuance and renewal, secure headers, and
-container-friendly or native systemd operation. Active `1.2` work focuses on
-operations polish: clearer multi-file config diagnostics, production container
-runbooks, ACME companion/timer workflows, metrics/admin tooling, and proxy
-runtime tuning.
+[Pingora](https://github.com/cloudflare/pingora). The current main branch is
+the `1.2` operations and cache completion line: static sites, vhosts,
+route-level proxying, redirects, rustls SNI, managed ACME issuance and renewal,
+secure headers, container/native systemd operation, and the production cache
+pack are the active focus. The latest released `1.1.x` line remains the
+production gateway baseline while `1.2` finishes cache tooling, observability,
+and operator ergonomics.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -47,6 +47,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 - Managed ACME certificate issuance and renewal for HTTP-01 and rustls
   TLS-ALPN-01 builds.
 - Route-level static, proxy, and redirect actions.
+- Route-scoped proxy cache policies with memory, disk, and tiered storage,
+  status headers, indexed purge endpoints, stale cleanup, and cache warming.
 - Optional global HTTP-to-HTTPS redirect with safe Host validation.
 - External ACME HTTP-01 challenge forwarding helper.
 - Secure request/response header policy, including `Server: fluxheim` by
