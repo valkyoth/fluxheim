@@ -2796,6 +2796,55 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_purge_endpoint_accepts_header_route_target() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![cached_assets_route()],
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+        let mut headers = auth_headers();
+        headers.insert("x-fluxheim-cache-vhost", HeaderValue::from_static("cached"));
+        headers.insert("x-fluxheim-cache-route", HeaderValue::from_static("assets"));
+        headers.insert(
+            "x-fluxheim-cache-host",
+            HeaderValue::from_static("cached.example"),
+        );
+        headers.insert("x-fluxheim-cache-method", HeaderValue::from_static("HEAD"));
+        headers.insert(
+            "x-fluxheim-cache-path",
+            HeaderValue::from_static("/assets/logo.png"),
+        );
+        headers.insert("x-fluxheim-cache-query", HeaderValue::from_static("v=1"));
+
+        let response = app.handle("POST", "/_fluxheim/cache/purge", None, &headers);
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""purged":false"#));
+        assert!(body.contains(r#""not_purged":true"#));
+        assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""route":"assets""#));
+        assert!(body.contains(r#""scope":"route""#));
+        assert!(body.contains(r#""host":"cached.example""#));
+        assert!(body.contains(r#""method":"HEAD""#));
+        assert!(body.contains(r#""path":"/assets/logo.png""#));
+        assert!(body.contains(r#""query":"v=1""#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_purge_index_endpoint_accepts_vhost_scope() {
         let config = Config {
             vhosts: vec![VhostConfig {
