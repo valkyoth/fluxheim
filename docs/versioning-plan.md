@@ -364,7 +364,9 @@ Stable scope:
     can advance large scope, prefix, and wildcard purges without removing
     request limits, and `purge-stale` now provides bounded operator-triggered
     cleanup for expired indexed entries with dry-run mode and conservative
-    batching for production safety checks;
+    batching for production safety checks. `[cache_purger]` now adds an
+    opt-in process-wide background stale disk cleanup loop that uses the same
+    bounded indexed primitive per vhost and route cache;
   - cache warmer/preload command or admin workflow for release deploys;
     `fluxheim cache-warm` now warms explicit paths through a running local HTTP
     listener so vhost, route, cache-key, and admission policy stay identical to
@@ -385,8 +387,8 @@ Stable scope:
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
     vhost/route scoped cache activity counters; `otel-tracing` now provides
-    W3C `traceparent` propagation and access-log trace ID correlation, and
-    `otel-otlp` now provides initial local OTLP/HTTP trace export. Richer
+    W3C `traceparent` propagation and access-log trace ID correlation,
+    `otel-otlp` now provides initial local OTLP/HTTP trace export, and
     `metrics-otlp` now provides initial local OTLP/HTTP metrics export for
     Prometheus/collector receivers. Richer OpenTelemetry internal spans,
     sampling, exporter health, histogram export, and trace/event coverage remain

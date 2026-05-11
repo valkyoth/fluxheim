@@ -47,6 +47,8 @@ pub struct Config {
     #[serde(default)]
     pub cache: CacheConfig,
     #[serde(default)]
+    pub cache_purger: CachePurgerConfig,
+    #[serde(default)]
     pub web: WebConfig,
     #[serde(default)]
     pub vhosts: Vec<VhostConfig>,
@@ -153,6 +155,9 @@ impl Config {
         if let Some(cache) = fragment.cache {
             self.cache = cache;
         }
+        if let Some(cache_purger) = fragment.cache_purger {
+            self.cache_purger = cache_purger;
+        }
         if let Some(web) = fragment.web {
             self.web = web;
         }
@@ -171,6 +176,7 @@ impl Config {
         self.validate_tls_listeners()?;
         self.proxy.validate()?;
         self.cache.validate("cache")?;
+        self.cache_purger.validate()?;
         self.web.validate()?;
         self.validate_vhosts()?;
         Ok(())
@@ -305,6 +311,8 @@ struct ConfigFragment {
     proxy: Option<ProxyConfig>,
     #[serde(default)]
     cache: Option<CacheConfig>,
+    #[serde(default)]
+    cache_purger: Option<CachePurgerConfig>,
     #[serde(default)]
     web: Option<WebConfig>,
     #[serde(default)]
@@ -1014,6 +1022,60 @@ impl OtlpTraceExportConfig {
             }
             Ok(())
         }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CachePurgerConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_cache_purger_interval_secs")]
+    pub interval_secs: u64,
+    #[serde(default = "default_cache_purger_limit")]
+    pub limit: usize,
+    #[serde(default = "default_cache_purger_batches")]
+    pub batches: usize,
+}
+
+impl Default for CachePurgerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: default_cache_purger_interval_secs(),
+            limit: default_cache_purger_limit(),
+            batches: default_cache_purger_batches(),
+        }
+    }
+}
+
+impl CachePurgerConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.enabled {
+            #[cfg(not(feature = "cache"))]
+            return Err(ConfigError::CachePurgerNotCompiled);
+        }
+
+        if self.interval_secs == 0 || self.interval_secs > 86_400 {
+            return Err(ConfigError::InvalidCachePurgerPolicy {
+                field: "cache_purger.interval_secs",
+                reason: "interval must be between 1 and 86400 seconds",
+            });
+        }
+        if self.limit == 0 || self.limit > 100_000 {
+            return Err(ConfigError::InvalidCachePurgerPolicy {
+                field: "cache_purger.limit",
+                reason: "limit must be between 1 and 100000 indexed entries",
+            });
+        }
+        if self.batches == 0 || self.batches > 100 {
+            return Err(ConfigError::InvalidCachePurgerPolicy {
+                field: "cache_purger.batches",
+                reason: "batches must be between 1 and 100",
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -4480,6 +4542,11 @@ pub enum ConfigError {
     CacheTierSmallerThanMaxObject {
         tier: String,
     },
+    CachePurgerNotCompiled,
+    InvalidCachePurgerPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
     MissingCacheDiskPath {
         scope: &'static str,
     },
@@ -4984,6 +5051,13 @@ impl Display for ConfigError {
                 formatter,
                 "{tier}.max_size_bytes must be at least cache.max_object_bytes"
             ),
+            Self::CachePurgerNotCompiled => write!(
+                formatter,
+                "cache_purger.enabled requires building Fluxheim with the cache feature"
+            ),
+            Self::InvalidCachePurgerPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
             Self::MissingCacheDiskPath { scope } => {
                 write!(
                     formatter,
@@ -5159,6 +5233,18 @@ fn default_otlp_queue_size() -> usize {
 
 fn default_otlp_timeout_secs() -> u64 {
     2
+}
+
+fn default_cache_purger_interval_secs() -> u64 {
+    300
+}
+
+fn default_cache_purger_limit() -> usize {
+    512
+}
+
+fn default_cache_purger_batches() -> usize {
+    1
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
@@ -6288,11 +6374,11 @@ mod tests {
 
     use super::{
         AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, CacheKeyPart,
-        CacheStaleErrorKind, Config, ConfigError, ConfigLoadError, HeaderPolicyConfig,
-        LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig, ServerLimitsConfig,
-        StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsCurvePreference,
-        TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig, VhostHeaderPolicyConfig,
-        VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+        CachePurgerConfig, CacheStaleErrorKind, Config, ConfigError, ConfigLoadError,
+        HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig,
+        ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
+        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig,
+        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
         valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     #[cfg(unix)]
@@ -8620,6 +8706,97 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "cache")]
+    fn parses_cache_purger_config() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache_purger]
+            enabled = true
+            interval_secs = 60
+            limit = 1000
+            batches = 4
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.cache_purger,
+            CachePurgerConfig {
+                enabled: true,
+                interval_secs: 60,
+                limit: 1000,
+                batches: 4,
+            }
+        );
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_cache_purger_limits() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache_purger]
+            interval_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCachePurgerPolicy {
+                field: "cache_purger.interval_secs",
+                reason: "interval must be between 1 and 86400 seconds",
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [cache_purger]
+            limit = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCachePurgerPolicy {
+                field: "cache_purger.limit",
+                reason: "limit must be between 1 and 100000 indexed entries",
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [cache_purger]
+            batches = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCachePurgerPolicy {
+                field: "cache_purger.batches",
+                reason: "batches must be between 1 and 100",
+            })
+        );
+    }
+
+    #[test]
+    #[cfg(not(feature = "cache"))]
+    fn rejects_enabled_cache_purger_without_cache_feature() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache_purger]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.validate(), Err(ConfigError::CachePurgerNotCompiled));
+    }
+
+    #[test]
     fn rejects_invalid_cache_method() {
         let config: Config = toml::from_str(
             r#"
@@ -8771,6 +8948,7 @@ mod tests {
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
+            cache_purger: CachePurgerConfig::default(),
             web: WebConfig::default(),
             vhosts: vec![],
         };
@@ -9579,6 +9757,7 @@ mod tests {
                 ..ProxyConfig::default()
             },
             cache: CacheConfig::default(),
+            cache_purger: CachePurgerConfig::default(),
             web: WebConfig::default(),
             vhosts: vec![],
         };
@@ -9671,6 +9850,7 @@ mod tests {
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
+            cache_purger: CachePurgerConfig::default(),
             web: WebConfig {
                 root: Some(PathBuf::from("public")),
                 index_files: vec![],
@@ -9695,6 +9875,7 @@ mod tests {
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
+            cache_purger: CachePurgerConfig::default(),
             web: WebConfig {
                 root: Some(PathBuf::from("public")),
                 index_files: vec!["pages/index.html".to_owned()],
@@ -10104,6 +10285,7 @@ mod tests {
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
             cache: CacheConfig::default(),
+            cache_purger: CachePurgerConfig::default(),
             web: WebConfig::default(),
             vhosts: vec![
                 VhostConfig {

@@ -385,6 +385,15 @@ impl FluxProxy {
     }
 
     #[cfg(feature = "cache")]
+    pub fn purge_stale_disk_cache_once(
+        &self,
+        limit: usize,
+        batches: usize,
+    ) -> io::Result<CacheBackgroundPurgeResult> {
+        self.snapshot().purge_stale_disk_cache_once(limit, batches)
+    }
+
+    #[cfg(feature = "cache")]
     pub fn purge_indexed_image_cache_path_pattern(
         &self,
         request: CacheIndexedPathPatternPurgeRequest<'_>,
@@ -535,6 +544,16 @@ pub struct CacheStalePurgeResult {
     pub disk_stale: usize,
     pub disk_purged: usize,
     pub disk_truncated: bool,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct CacheBackgroundPurgeResult {
+    pub targets: usize,
+    pub scanned: usize,
+    pub stale: usize,
+    pub purged: usize,
+    pub truncated: bool,
 }
 
 #[cfg(feature = "cache")]
@@ -1383,6 +1402,52 @@ impl ProxySnapshot {
     }
 
     #[cfg(feature = "cache")]
+    pub fn purge_stale_disk_cache_once(
+        &self,
+        limit: usize,
+        batches: usize,
+    ) -> io::Result<CacheBackgroundPurgeResult> {
+        if limit == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache stale disk purge limit must be greater than zero",
+            ));
+        }
+        if batches == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cache stale disk purge batches must be greater than zero",
+            ));
+        }
+
+        let mut result = CacheBackgroundPurgeResult::default();
+        for vhost in &self.state.vhosts {
+            if let Some(storage) = vhost.pingora_disk_storage {
+                purge_stale_disk_storage_batches(
+                    storage,
+                    &vhost.name,
+                    limit,
+                    batches,
+                    &mut result,
+                )?;
+            }
+
+            for route in &vhost.routes {
+                let Some(cache) = &route.cache else {
+                    continue;
+                };
+                let Some(storage) = cache.pingora_disk_storage else {
+                    continue;
+                };
+                let user_tag = format!("{}:route:{}", vhost.name, cache.name);
+                purge_stale_disk_storage_batches(storage, &user_tag, limit, batches, &mut result)?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    #[cfg(feature = "cache")]
     pub fn purge_indexed_image_cache_path_pattern(
         &self,
         request: CacheIndexedPathPatternPurgeRequest<'_>,
@@ -1499,6 +1564,33 @@ impl ProxySnapshot {
             disk_truncated: disk.truncated,
         })
     }
+}
+
+#[cfg(feature = "cache")]
+fn purge_stale_disk_storage_batches(
+    storage: &'static crate::cache::PingoraDiskStorage,
+    user_tag: &str,
+    limit: usize,
+    batches: usize,
+    result: &mut CacheBackgroundPurgeResult,
+) -> io::Result<()> {
+    result.targets = result.targets.saturating_add(1);
+
+    for _ in 0..batches {
+        let batch = storage
+            .purge_indexed_stale_user_tag(user_tag, limit, false)
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        result.scanned = result.scanned.saturating_add(batch.scanned);
+        result.stale = result.stale.saturating_add(batch.stale);
+        result.purged = result.purged.saturating_add(batch.purged);
+        result.truncated |= batch.truncated;
+
+        if !batch.truncated || batch.purged == 0 {
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(feature = "cache")]

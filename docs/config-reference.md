@@ -674,6 +674,25 @@ Per-vhost cache settings use `[vhosts.cache]`, `[vhosts.cache.memory]`, and
 `[vhosts.cache.disk]`. Route cache settings use `[vhosts.routes.cache]` and
 the same nested `memory`, `disk`, and `lock` subtables.
 
+`[cache_purger]` is a process-wide stale disk cleanup loop. It is disabled by
+default and requires the `cache` feature.
+
+```toml
+[cache_purger]
+enabled = false
+interval_secs = 300
+limit = 512
+batches = 1
+```
+
+When enabled, Fluxheim periodically scans indexed disk-cache entries for each
+vhost and route cache, removes entries whose stored freshness window has
+expired, and stops after the configured bounded `limit` and `batches` per
+target. It does not walk arbitrary cache directories. Keep `limit` and
+`batches` modest on large production caches; the admin
+`/_fluxheim/cache/purge-stale` endpoint remains available for explicit
+dry-runs or larger operator-controlled cleanup windows.
+
 ## TLS
 
 ```toml

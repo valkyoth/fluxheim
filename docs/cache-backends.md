@@ -259,7 +259,8 @@ internal cache implementation.
   `POST /_fluxheim/cache/purge-stale` scans a bounded number of indexed
   entries for a vhost or route and removes objects whose stored freshness window
   has expired. It is intended as an operator-controlled incremental cleanup
-  command until a background disk purger lands. Add `dry_run=true` or
+  command and as the same bounded primitive used by the optional
+  `[cache_purger]` background disk cleanup loop. Add `dry_run=true` or
   `x-fluxheim-cache-dry-run: true` to count stale objects without deleting
   them; dry-run responses include `would_purge` plus per-tier
   `memory_would_purge` and `disk_would_purge`. Stale purge also accepts
@@ -287,7 +288,11 @@ internal cache implementation.
   `batches_exhausted = true` means the configured batch limit was reached while
   more indexed entries may remain. The index is bounded in memory, mirrors
   disk-tier writes, and is designed for operational invalidation rather than as
-  a complete filesystem scan. A background disk purger remains planned.
+  a complete filesystem scan.
+  `[cache_purger]` can periodically run stale disk cleanup for every indexed
+  vhost and route cache with conservative per-target `limit` and `batches`
+  controls, while the admin endpoint remains available for explicit dry-runs
+  and larger maintenance windows.
 
 Example admin cache invalidation requests:
 

@@ -17,6 +17,8 @@ use crate::config::AcmeAutomationMode;
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 use crate::config::AcmeChallenge;
+#[cfg(all(feature = "proxy", feature = "cache"))]
+use crate::config::CachePurgerConfig;
 use crate::config::Config;
 #[cfg(feature = "proxy")]
 use crate::config::{LoggingFormat, LoggingTarget};
@@ -85,6 +87,23 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let admin_proxy = proxy.clone();
     let mut proxy_service = pingora::proxy::http_proxy_service(&server.configuration, proxy);
 
+    #[cfg(feature = "cache")]
+    if config.cache_purger.enabled {
+        log::info!(
+            "cache stale disk purger enabled; interval={}s limit={} batches={}",
+            config.cache_purger.interval_secs,
+            config.cache_purger.limit,
+            config.cache_purger.batches
+        );
+        server.add_service(pingora::services::background::background_service(
+            "Cache stale disk purger",
+            CacheStalePurgerBackgroundService {
+                config: config.cache_purger.clone(),
+                proxy: admin_proxy.clone(),
+            },
+        ));
+    }
+
     for listen in &config.server.listen {
         log::info!("proxy listener enabled on {listen}");
         proxy_service.add_tcp(listen);
@@ -150,6 +169,65 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 fn acme_background_service_enabled(config: &Config) -> bool {
     config.tls.acme.automation == AcmeAutomationMode::Background
         && !crate::acme::renewal_targets(config).is_empty()
+}
+
+#[cfg(all(feature = "proxy", feature = "cache"))]
+struct CacheStalePurgerBackgroundService {
+    config: CachePurgerConfig,
+    proxy: crate::proxy::FluxProxy,
+}
+
+#[cfg(all(feature = "proxy", feature = "cache"))]
+#[async_trait::async_trait]
+impl pingora::services::background::BackgroundService for CacheStalePurgerBackgroundService {
+    async fn start(&self, mut shutdown: pingora::server::ShutdownWatch) {
+        let interval = std::time::Duration::from_secs(self.config.interval_secs);
+
+        loop {
+            if *shutdown.borrow() {
+                break;
+            }
+
+            run_cache_stale_purge_tick(&self.config, &self.proxy);
+
+            match tokio::time::timeout(interval, shutdown.changed()).await {
+                Ok(Ok(())) => continue,
+                Ok(Err(_closed)) => break,
+                Err(_elapsed) => continue,
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "proxy", feature = "cache"))]
+fn run_cache_stale_purge_tick(config: &CachePurgerConfig, proxy: &crate::proxy::FluxProxy) {
+    match proxy.purge_stale_disk_cache_once(config.limit, config.batches) {
+        Ok(result) if result.targets == 0 => {
+            log::debug!("cache stale disk purge skipped; no disk cache targets");
+        }
+        Ok(result) if result.purged == 0 => {
+            log::debug!(
+                "cache stale disk purge complete; targets={} scanned={} stale={} purged=0 truncated={}",
+                result.targets,
+                result.scanned,
+                result.stale,
+                result.truncated
+            );
+        }
+        Ok(result) => {
+            log::info!(
+                "cache stale disk purge complete; targets={} scanned={} stale={} purged={} truncated={}",
+                result.targets,
+                result.scanned,
+                result.stale,
+                result.purged,
+                result.truncated
+            );
+        }
+        Err(error) => {
+            log::error!("cache stale disk purge failed: {error}");
+        }
+    }
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client"))]
