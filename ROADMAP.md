@@ -207,6 +207,31 @@ These are realistic additions to implement across the stable core and early
      count/size equivalents, clear defaults, streaming behavior when disabled,
      and tests proving slow clients cannot exhaust worker memory.
 
+5b. **Traffic Quotas And Rate Limits**
+   - Add a typed traffic-control policy that can be applied globally, per
+     vhost, and per route. The first stable scope should cover common
+     production controls such as requests per second/minute, page views, visits
+     per day/month, total transferred bytes per day/month, and route-specific
+     caps such as `/chat/` request or bandwidth budgets.
+   - Policies must define the identity key explicitly: whole server, vhost,
+     route, verified client IP, authenticated user, API key, or a future
+     identity claim. Fail closed when a policy references an identity source
+     that is unavailable.
+   - Use bounded local counters first for single-node installs, then design a
+     distributed counter backend for clustered deployments. Global hard quotas
+     that need exact consistency must not pretend to work correctly across
+     multiple nodes without shared state.
+   - Expose clear actions for quota/rate failures: `429` with `Retry-After`,
+     static error page, JSON response for API clients, or redirect only where
+     explicitly configured. Log and metric labels must stay low-cardinality.
+   - Add observability from the start: current usage, remaining budget, reset
+     time, dropped/rejected request counters, and per-policy decision logs with
+     privacy-safe labels.
+   - Integrate with cache carefully: cache hits still consume page-view or
+     bandwidth quotas when the operator asks for user-visible traffic limits,
+     but backend-protection rate limits may count only cache misses or upstream
+     attempts.
+
 6. **Load-Balancing Policy Options**
    - Keep round-robin as the stable default.
    - Add explicit config for additional Pingora-supported policies where they

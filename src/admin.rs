@@ -3159,6 +3159,47 @@ mod tests {
 
     #[cfg(feature = "cache")]
     #[test]
+    fn cache_purge_stale_endpoint_reports_route_scope() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![cached_assets_route()],
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge-stale",
+            Some("vhost=cached&route=assets&limit=16&dry_run=true"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""dry_run":true"#));
+        assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""route":"assets""#));
+        assert!(body.contains(r#""scope":"route""#));
+        assert!(body.contains(r#""scanned":0"#));
+        assert!(body.contains(r#""stale":0"#));
+        assert!(body.contains(r#""would_purge":0"#));
+        assert!(body.contains(r#""purged":0"#));
+        assert!(body.contains(r#""not_purged":0"#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
     fn cache_purge_wildcard_endpoint_accepts_path_pattern() {
         let config = Config {
             vhosts: vec![VhostConfig {
@@ -3213,6 +3254,45 @@ mod tests {
         assert!(body.contains(r#""batch_limit":1"#));
         assert!(body.contains(r#""batches_exhausted":false"#));
         assert!(body.contains(r#""scope":"vhost""#));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_purge_wildcard_endpoint_reports_route_scope() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![cached_assets_route()],
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/cache/purge-wildcard",
+            Some("vhost=cached&route=assets&pattern=/assets/*.png&limit=16"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""vhost":"cached""#));
+        assert!(body.contains(r#""route":"assets""#));
+        assert!(body.contains(r#""scope":"route""#));
+        assert!(body.contains(r#""path_pattern":"/assets/*.png""#));
+        assert!(body.contains(r#""matched":0"#));
+        assert!(body.contains(r#""not_purged":0"#));
+        assert!(body.contains(r#""repeat_required":false"#));
     }
 
     #[cfg(feature = "cache")]
