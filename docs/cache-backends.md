@@ -419,9 +419,11 @@ Checked on 2026-05-05:
 Pingora's HTTP cache storage layer requires implementations of `Storage`,
 `HandleHit`, and `HandleMiss`. Fluxheim now has memory, disk, and tiered
 memory-plus-disk implementations of those traits. Request collapsing is
-integrated with Pingora cache locks. The next adapter pass should design bounded
-partial streaming writes instead of copying Pingora's test-only in-memory cache
-behavior.
+integrated with Pingora cache locks. Disk-only admissions now stream response
+body chunks into a bounded temp file under the cache root before atomically
+committing the final object, avoiding whole-object admission buffering for the
+disk tier. Reader-visible partial writes remain disabled until Fluxheim can
+provide a safe tagged reader for in-progress objects.
 
 ## Adapter Requirements
 
@@ -444,8 +446,9 @@ A production adapter must:
 - Keep CDN/browser cache headers configurable through header policy and
   examples instead of hardcoded provider-specific defaults.
 - Avoid unbounded buffering for large responses. Implemented for memory by
-  enforcing `cache.max_object_bytes` and keeping partial streaming disabled;
-  bounded partial streaming is still pending.
+  enforcing `cache.max_object_bytes`; implemented for disk-only cache admission
+  by writing bounded response chunks to a temp file before final commit.
+  Reader-visible partial streaming is still pending.
 - Support request collapsing or integrate with Pingora cache locks. Implemented
   for memory, disk, and tiered cache policies through Pingora cache locks.
 - Support hit-for-pass/pass-cache decisions for repeatedly uncacheable dynamic

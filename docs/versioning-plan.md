@@ -356,6 +356,10 @@ Stable scope:
   repository avatar/assets paths, where only one proxy route should use a cache
   tier while the rest of the vhost remains uncached.
 - Cache completion work promoted into 1.2:
+  - disk-only cache admission now streams body chunks into a bounded temp file
+    under the cache root before atomically committing the final object, so the
+    disk tier no longer buffers the full response body in memory during
+    admission. Reader-visible partial writes remain planned;
   - broader persistent cache index coverage for older disk object formats and
     future metadata migrations; new v3 disk objects already rebuild the bounded
     purge index across process restarts;

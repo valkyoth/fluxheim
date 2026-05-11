@@ -1660,19 +1660,6 @@ impl PingoraDiskStorage {
         }
     }
 
-    fn put_object(
-        &self,
-        store_key: PingoraStoreKey,
-        meta: CacheMeta,
-        body: Arc<[u8]>,
-    ) -> pingora::Result<Option<usize>> {
-        let cache_tags = cache_tags_from_meta(&meta, &self.cache_tag_headers);
-        let (internal_meta, response_header) = meta.serialize()?;
-        let mut store_key = store_key;
-        store_key.cache_tags = cache_tags;
-        self.put_serialized_object(store_key, internal_meta, response_header, body)
-    }
-
     fn put_serialized_object(
         &self,
         store_key: PingoraStoreKey,
@@ -1726,6 +1713,70 @@ impl PingoraDiskStorage {
         );
         self.activity.store();
         Ok(Some(body.len()))
+    }
+
+    fn put_streamed_object(
+        &self,
+        store_key: PingoraStoreKey,
+        internal_meta: Vec<u8>,
+        response_header: Vec<u8>,
+        body_path: &Path,
+        body_len: u64,
+    ) -> pingora::Result<Option<usize>> {
+        let object_bytes = pingora_object_weight_len(&internal_meta, &response_header, body_len);
+        let header_overhead = disk_cache_header_overhead(&store_key);
+        let encoded_object_bytes = object_bytes.saturating_add(header_overhead);
+        if object_bytes > self.max_object_bytes.as_u64()
+            || header_overhead > DISK_CACHE_HEADER_OVERHEAD_LIMIT
+            || encoded_object_bytes > self.max_size_bytes.as_u64()
+        {
+            self.activity.store_refusal();
+            return Ok(None);
+        }
+
+        let path = self.path_for_combined_key(&store_key.combined);
+        let combined_key = store_key.combined.clone();
+        if !self
+            .evict_until_admissible(&path, encoded_object_bytes)
+            .map_err(|error| cache_io_error("evict disk cache objects", error))?
+        {
+            self.activity.store_refusal();
+            return Ok(None);
+        }
+
+        let parent = path.parent().ok_or_else(|| {
+            Error::because(
+                ErrorType::InternalError,
+                "disk cache path has no parent",
+                std::io::Error::other("disk cache path has no parent"),
+            )
+        })?;
+        self.ensure_safe_cache_parent(parent)
+            .map_err(|error| cache_io_error("create disk cache shard", error))?;
+        require_disk_cache_write_destination(&path)
+            .map_err(|error| cache_io_error("validate disk cache object destination", error))?;
+        self.write_streamed_object_atomically(
+            &path,
+            &store_key,
+            &internal_meta,
+            &response_header,
+            body_path,
+            body_len,
+        )
+        .map_err(|error| {
+            self.activity.store_refusal();
+            cache_io_error("write streamed disk cache object", error)
+        })?;
+        self.purge_index.insert_with_path_and_tags(
+            combined_key,
+            store_key.primary,
+            store_key.user_tag,
+            store_key.index_path,
+            store_key.cache_tags,
+        );
+        self.activity.store();
+        let created = usize::try_from(body_len).unwrap_or(usize::MAX);
+        Ok(Some(created))
     }
 
     fn evict_until_admissible(&self, path: &Path, object_bytes: u64) -> std::io::Result<bool> {
@@ -1820,7 +1871,119 @@ impl PingoraDiskStorage {
         }))
     }
 
+    fn create_body_temp(&self) -> std::io::Result<(PathBuf, std::fs::File)> {
+        let temp_dir = self.body_temp_dir()?;
+        let mut last_error = None;
+        for _ in 0..4 {
+            let tmp_path = self.random_temp_path_in(&temp_dir, "body")?;
+            match create_new_disk_cache_file(&tmp_path) {
+                Ok(file) => return Ok((tmp_path, file)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    last_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "disk cache temporary path collision",
+            )
+        }))
+    }
+
+    fn body_temp_dir(&self) -> std::io::Result<PathBuf> {
+        let temp_dir = self.root.join("tmp");
+        match std::fs::symlink_metadata(&temp_dir) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "disk cache temp directory is not a real directory: {}",
+                        temp_dir.display()
+                    ),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir_all(&temp_dir)?;
+            }
+            Err(error) => return Err(error),
+        }
+        if cache_path_contains_symlink(&self.root, &temp_dir)? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "disk cache temp directory contains symlink: {}",
+                    temp_dir.display()
+                ),
+            ));
+        }
+        let canonical = temp_dir.canonicalize()?;
+        if canonical.starts_with(&self.root) {
+            Ok(canonical)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "disk cache temp directory escaped root: {}",
+                    canonical.display()
+                ),
+            ))
+        }
+    }
+
+    fn write_streamed_object_atomically(
+        &self,
+        path: &Path,
+        store_key: &PingoraStoreKey,
+        internal_meta: &[u8],
+        response_header: &[u8],
+        body_path: &Path,
+        body_len: u64,
+    ) -> std::io::Result<()> {
+        let mut last_error = None;
+        for _ in 0..4 {
+            let tmp_path = self.tmp_path_for(path)?;
+            let write_result = write_disk_cache_object_from_body_file(
+                &tmp_path,
+                store_key,
+                internal_meta,
+                response_header,
+                body_path,
+                body_len,
+            )
+            .and_then(|()| std::fs::rename(&tmp_path, path));
+            match write_result {
+                Ok(()) => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    last_error = Some(error);
+                }
+                Err(error) => {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(error);
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "disk cache temporary path collision",
+            )
+        }))
+    }
+
     fn tmp_path_for(&self, path: &Path) -> std::io::Result<PathBuf> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("disk cache path has no parent"))?;
+        self.random_temp_path_in(parent, "object")
+    }
+
+    fn random_temp_path_in(&self, parent: &Path, label: &str) -> std::io::Result<PathBuf> {
         let mut nonce = [0_u8; 16];
         getrandom::fill(&mut nonce).map_err(|error| {
             std::io::Error::other(format!("generate cache temp nonce: {error}"))
@@ -1829,7 +1992,11 @@ impl PingoraDiskStorage {
         for byte in nonce {
             let _ = write!(&mut encoded, "{byte:02x}");
         }
-        Ok(path.with_extension(format!("tmp.{}.{}", std::process::id(), encoded)))
+        Ok(parent.join(format!(
+            ".fluxheim-{label}-{}.{}.tmp",
+            std::process::id(),
+            encoded
+        )))
     }
 
     fn safe_existing_object_path(&self, path: &Path) -> std::io::Result<Option<PathBuf>> {
@@ -2310,9 +2477,14 @@ fn cached_object_weight(object: &CachedImageObject) -> u64 {
 
 #[cfg(feature = "proxy")]
 fn pingora_object_weight(internal_meta: &[u8], response_header: &[u8], body: &[u8]) -> u64 {
+    pingora_object_weight_len(internal_meta, response_header, body.len() as u64)
+}
+
+#[cfg(feature = "proxy")]
+fn pingora_object_weight_len(internal_meta: &[u8], response_header: &[u8], body_len: u64) -> u64 {
     (internal_meta.len() as u64)
         .saturating_add(response_header.len() as u64)
-        .saturating_add(body.len() as u64)
+        .saturating_add(body_len)
 }
 
 #[cfg(feature = "proxy")]
@@ -2543,11 +2715,18 @@ impl Storage for PingoraDiskStorage {
         meta: &CacheMeta,
         _trace: &pingora::cache::trace::SpanHandle,
     ) -> pingora::Result<MissHandler> {
+        let store_key =
+            PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers);
+        let (temp_path, temp_file) = self
+            .create_body_temp()
+            .map_err(|error| cache_io_error("create disk cache streamed body temp file", error))?;
         Ok(Box::new(PingoraDiskMissHandler {
             storage: self,
-            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
+            store_key,
             serialized_meta: meta.serialize()?,
-            body: Vec::new(),
+            temp_path: Some(temp_path),
+            temp_file: Some(temp_file),
+            body_len: 0,
             max_object_bytes: self.max_object_bytes.as_u64(),
             exceeded_limit: false,
         }))
@@ -2809,9 +2988,28 @@ struct PingoraDiskMissHandler {
     storage: &'static PingoraDiskStorage,
     store_key: PingoraStoreKey,
     serialized_meta: (Vec<u8>, Vec<u8>),
-    body: Vec<u8>,
+    temp_path: Option<PathBuf>,
+    temp_file: Option<std::fs::File>,
+    body_len: u64,
     max_object_bytes: u64,
     exceeded_limit: bool,
+}
+
+#[cfg(feature = "proxy")]
+impl PingoraDiskMissHandler {
+    fn cleanup_temp(&mut self) {
+        let _ = self.temp_file.take();
+        if let Some(path) = self.temp_path.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
+impl Drop for PingoraDiskMissHandler {
+    fn drop(&mut self) {
+        self.cleanup_temp();
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2822,28 +3020,54 @@ impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
             return Ok(());
         }
 
-        let next_len = (self.body.len() as u64).saturating_add(data.len() as u64);
+        let next_len = self.body_len.saturating_add(data.len() as u64);
         if next_len > self.max_object_bytes {
             self.exceeded_limit = true;
-            self.body.clear();
+            self.cleanup_temp();
             return Ok(());
         }
-        self.body.extend_from_slice(&data);
+        let Some(file) = self.temp_file.as_mut() else {
+            return Err(cache_io_error(
+                "write disk cache streamed body",
+                std::io::Error::other("disk cache streamed body temp file is closed"),
+            ));
+        };
+        use std::io::Write as _;
+        file.write_all(&data)
+            .map_err(|error| cache_io_error("write disk cache streamed body", error))?;
+        self.body_len = next_len;
         Ok(())
     }
 
     async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
-        if self.exceeded_limit {
+        let mut this = *self;
+        if this.exceeded_limit {
+            this.cleanup_temp();
             return Ok(MissFinishType::Created(0));
         }
 
-        let meta = CacheMeta::deserialize(&self.serialized_meta.0, &self.serialized_meta.1)?;
-        let Some(created) =
-            self.storage
-                .put_object(self.store_key, meta, Arc::<[u8]>::from(self.body))?
+        if let Some(file) = this.temp_file.take() {
+            file.sync_all()
+                .map_err(|error| cache_io_error("sync disk cache streamed body", error))?;
+        }
+        let Some(temp_path) = this.temp_path.as_deref() else {
+            return Err(cache_io_error(
+                "finish disk cache streamed body",
+                std::io::Error::other("disk cache streamed body temp file is missing"),
+            ));
+        };
+        let Some(created) = this.storage.put_streamed_object(
+            this.store_key.clone(),
+            this.serialized_meta.0.clone(),
+            this.serialized_meta.1.clone(),
+            temp_path,
+            this.body_len,
+        )?
         else {
+            this.cleanup_temp();
             return Ok(MissFinishType::Created(0));
         };
+        this.cleanup_temp();
         Ok(MissFinishType::Created(created))
     }
 }
@@ -2910,12 +3134,7 @@ fn write_disk_cache_object(
 ) -> std::io::Result<()> {
     use std::io::Write as _;
 
-    let mut options = std::fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(target_os = "linux")]
-    options.custom_flags(O_NOFOLLOW);
-
-    let mut file = options.open(path)?;
+    let mut file = create_new_disk_cache_file(path)?;
     let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
 
     file.write_all(DISK_CACHE_MAGIC_V4)?;
@@ -2935,6 +3154,72 @@ fn write_disk_cache_object(
     file.write_all(body)?;
     file.sync_all()?;
     Ok(())
+}
+
+#[cfg(feature = "proxy")]
+fn write_disk_cache_object_from_body_file(
+    path: &Path,
+    store_key: &PingoraStoreKey,
+    internal_meta: &[u8],
+    response_header: &[u8],
+    body_path: &Path,
+    body_len: u64,
+) -> std::io::Result<()> {
+    use std::io::{Read as _, Write as _};
+
+    let mut file = create_new_disk_cache_file(path)?;
+    let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
+
+    file.write_all(DISK_CACHE_MAGIC_V4)?;
+    writeln!(file, "{}", store_key.combined.len())?;
+    writeln!(file, "{}", store_key.primary.len())?;
+    writeln!(file, "{}", store_key.user_tag.len())?;
+    writeln!(file, "{}", encoded_cache_tags.len())?;
+    writeln!(file, "{}", internal_meta.len())?;
+    writeln!(file, "{}", response_header.len())?;
+    writeln!(file, "{body_len}")?;
+    file.write_all(store_key.combined.as_bytes())?;
+    file.write_all(store_key.primary.as_bytes())?;
+    file.write_all(store_key.user_tag.as_bytes())?;
+    file.write_all(encoded_cache_tags.as_bytes())?;
+    file.write_all(internal_meta)?;
+    file.write_all(response_header)?;
+
+    let body_file = open_existing_disk_cache_file(body_path)?;
+    let metadata = body_file.metadata()?;
+    if !metadata.is_file() || metadata.len() != body_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "disk cache streamed body length changed before commit",
+        ));
+    }
+    let copied = std::io::copy(&mut body_file.take(body_len.saturating_add(1)), &mut file)?;
+    if copied != body_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "disk cache streamed body ended before expected length",
+        ));
+    }
+    file.sync_all()?;
+    Ok(())
+}
+
+#[cfg(feature = "proxy")]
+fn create_new_disk_cache_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NOFOLLOW);
+    options.open(path)
+}
+
+#[cfg(feature = "proxy")]
+fn open_existing_disk_cache_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    options.custom_flags(O_NOFOLLOW);
+    options.open(path)
 }
 
 #[cfg(feature = "proxy")]
@@ -4568,11 +4853,13 @@ mod tests {
         let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"disk-"), false)).unwrap();
         block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        assert_eq!(std::fs::read_dir(root.join("tmp")).unwrap().count(), 1);
         let finish = block_on(miss.finish()).unwrap();
         assert!(matches!(
             finish,
             pingora::cache::storage::MissFinishType::Created(9)
         ));
+        assert_eq!(std::fs::read_dir(root.join("tmp")).unwrap().count(), 0);
 
         let (stored_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
         assert!(stored_meta.is_fresh(std::time::SystemTime::now()));
