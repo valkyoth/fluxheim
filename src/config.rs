@@ -4247,6 +4247,11 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
     if message.contains("unknown field `vhost`") {
         return Some("hint: virtual hosts are configured with [[vhosts]], not [[vhost]]");
     }
+    if message.contains("unknown field `action`") && message.contains("path_prefix") {
+        return Some(
+            "hint: routes select their action by defining one nested table: [vhosts.routes.proxy], [vhosts.routes.web], or [vhosts.routes.redirect]; do not set action = \"proxy\"",
+        );
+    }
     if message.contains("invalid type: map, expected a sequence") {
         return Some(
             "hint: start each virtual host with [[vhosts]] before nested tables such as [vhosts.proxy]",
@@ -10611,6 +10616,35 @@ mod tests {
         assert!(message.contains("failed to parse config"), "{message}");
         assert!(
             message.contains("uses [vhosts.proxy], not [[vhosts.proxy]]"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn config_parse_error_hints_route_action_field() {
+        let dir = TestDir::new("config-route-action-field");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [[vhosts.routes]]
+            name = "app"
+            path_prefix = "/"
+            action = "proxy"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"), "{message}");
+        assert!(
+            message.contains("routes select their action by defining one nested table"),
             "{message}"
         );
     }

@@ -142,7 +142,9 @@ Routes are matched in this order:
 - longest path prefix;
 - one optional fallback route.
 
-Each route must define one action: `redirect`, `proxy`, or `web`.
+Each route must define exactly one action by adding one nested table:
+`[vhosts.routes.redirect]`, `[vhosts.routes.proxy]`, or `[vhosts.routes.web]`.
+Do not add an `action = "proxy"` field.
 
 ```toml
 [[vhosts]]
