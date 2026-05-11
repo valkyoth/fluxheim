@@ -4242,6 +4242,11 @@ fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
     if message.contains("unknown field `vhost`") {
         return Some("hint: virtual hosts are configured with [[vhosts]], not [[vhost]]");
     }
+    if message.contains("unknown field `certificates`") {
+        return Some(
+            "hint: vhost TLS uses [vhosts.tls.certificate] for one certificate pair; use global [[tls.certificates]] for additional listener certificates",
+        );
+    }
     None
 }
 
@@ -10512,6 +10517,34 @@ mod tests {
 
         assert!(message.contains("failed to parse config"));
         assert!(message.contains("hint: virtual hosts are configured with [[vhosts]]"));
+    }
+
+    #[test]
+    fn config_parse_error_hints_plural_vhost_tls_certificate_table() {
+        let dir = TestDir::new("config-plural-vhost-tls-certificates");
+        let config = dir.child("fluxheim.toml");
+        fs::write(
+            &config,
+            r#"
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [vhosts.tls]
+            enabled = true
+
+            [[vhosts.tls.certificates]]
+            cert_path = "/etc/fluxheim/tls/site/fullchain.pem"
+            key_path = "/etc/fluxheim/tls/site/privkey.pem"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&config)).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse config"));
+        assert!(message.contains("hint: vhost TLS uses [vhosts.tls.certificate]"));
     }
 
     #[test]
