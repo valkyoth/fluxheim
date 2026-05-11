@@ -12,6 +12,24 @@ pub fn request_values_force_cache_refresh<'a>(
 }
 
 #[cfg(feature = "cache")]
+pub fn request_values_force_cache_revalidation<'a>(
+    cache_control: impl IntoIterator<Item = &'a str>,
+    pragma: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    pragma.into_iter().any(is_pragma_no_cache)
+        || cache_control
+            .into_iter()
+            .any(cache_control_forces_revalidation)
+}
+
+#[cfg(feature = "cache")]
+pub fn request_values_forbid_cache_store<'a>(
+    cache_control: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    cache_control.into_iter().any(cache_control_forbids_store)
+}
+
+#[cfg(feature = "cache")]
 pub fn response_values_forbid_shared_cache<'a>(
     cache_control: impl IntoIterator<Item = &'a str>,
 ) -> Option<&'static str> {
@@ -26,17 +44,37 @@ fn is_pragma_no_cache(value: &str) -> bool {
 
 fn cache_control_forces_refresh(value: &str) -> bool {
     value.split(',').any(|directive| {
-        let directive = directive.trim();
-        let (name, value) = directive
-            .split_once('=')
-            .map_or((directive, None), |(name, value)| {
-                (name.trim(), Some(value.trim()))
-            });
-
+        let (name, value) = cache_control_directive_parts(directive);
         name.eq_ignore_ascii_case("no-cache")
             || name.eq_ignore_ascii_case("no-store")
             || (name.eq_ignore_ascii_case("max-age") && value == Some("0"))
     })
+}
+
+#[cfg(feature = "cache")]
+fn cache_control_forces_revalidation(value: &str) -> bool {
+    value.split(',').any(|directive| {
+        let (name, value) = cache_control_directive_parts(directive);
+        name.eq_ignore_ascii_case("no-cache")
+            || (name.eq_ignore_ascii_case("max-age") && value == Some("0"))
+    })
+}
+
+#[cfg(feature = "cache")]
+fn cache_control_forbids_store(value: &str) -> bool {
+    value.split(',').any(|directive| {
+        let (name, _) = cache_control_directive_parts(directive);
+        name.eq_ignore_ascii_case("no-store")
+    })
+}
+
+fn cache_control_directive_parts(directive: &str) -> (&str, Option<&str>) {
+    let directive = directive.trim();
+    directive
+        .split_once('=')
+        .map_or((directive, None), |(name, value)| {
+            (name.trim(), Some(value.trim()))
+        })
 }
 
 #[cfg(feature = "cache")]
@@ -125,6 +163,34 @@ mod tests {
         assert!(!super::request_values_force_cache_refresh(
             ["public, max-age=60"],
             ["ignored"]
+        ));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn separates_request_revalidation_from_no_store() {
+        for value in ["no-cache", "max-age=0", "max-age = 0", "public, no-cache"] {
+            assert!(
+                super::request_values_force_cache_revalidation([value], []),
+                "cache-control: {value}"
+            );
+            assert!(
+                !super::request_values_forbid_cache_store([value]),
+                "cache-control: {value}"
+            );
+        }
+
+        assert!(super::request_values_force_cache_revalidation(
+            ["public, max-age=60"],
+            ["no-cache"]
+        ));
+        assert!(super::request_values_forbid_cache_store(["no-store"]));
+        assert!(super::request_values_forbid_cache_store([
+            "public, no-store"
+        ]));
+        assert!(!super::request_values_force_cache_revalidation(
+            ["no-store"],
+            []
         ));
     }
 

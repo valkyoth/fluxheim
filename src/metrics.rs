@@ -632,6 +632,7 @@ fn cache_event_label(event: &str) -> &'static str {
         "pass" => "pass",
         "bypass" => "bypass",
         "stale" => "stale",
+        "revalidate" => "revalidate",
         _ => "other",
     }
 }
@@ -790,6 +791,7 @@ mod tests {
         record_cache_activity("policy", "pass");
         record_cache_activity("policy", "bypass");
         record_cache_activity("policy", "stale");
+        record_cache_activity("policy", "revalidate");
         record_cache_activity("attacker-tier", "attacker-event");
 
         let metric_families = prometheus::gather();
@@ -805,6 +807,9 @@ mod tests {
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="pass",tier="policy"}"#));
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="bypass",tier="policy"}"#));
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="stale",tier="policy"}"#));
+        assert!(
+            output.contains(r#"fluxheim_cache_activity_total{event="revalidate",tier="policy"}"#)
+        );
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="other",tier="other"}"#));
         assert!(!output.contains("attacker-tier"));
         assert!(!output.contains("attacker-event"));

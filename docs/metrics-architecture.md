@@ -103,8 +103,9 @@ observability smoke verifies the route/vhost cache policy gauges, the
 request-collapsing policy count, and the maximum configured lock wait timeout.
 `fluxheim_cache_activity_total` uses only bounded labels: `tier` is `memory`,
 `disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
-`store_refusal`, `eviction`, `purge`, `pass`, or `other`. These metrics
-intentionally avoid raw hosts, paths, queries, cache keys, and purge identities.
+`store_refusal`, `eviction`, `purge`, `pass`, `bypass`, `stale`,
+`revalidate`, or `other`. These metrics intentionally avoid raw hosts, paths,
+queries, cache keys, and purge identities.
 `fluxheim_cache_activity_scope_total` uses the same bounded `tier` and `event`
 labels plus configured-name labels: `scope` is `vhost` or `route`, `vhost` is
 the configured vhost name, and `route` is empty for vhost cache or the

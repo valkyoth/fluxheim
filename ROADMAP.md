@@ -649,12 +649,14 @@ without parsing text fixtures for every module.
      stale serving metadata, and bounded `NoCacheReason` status reporting.
      Planned operator-facing additions from Pingora's cache internals:
      cacheable-predictor integration for historically uncacheable keys,
-     bounded force-revalidate/force-miss/force-fresh
-     controls for admin/debug workflows, and direct `CachePut`-style preload
-     so deploys can fill selected objects without loopback HTTP warmups.
+     bounded force-miss/force-fresh controls for admin/debug workflows, and
+     direct `CachePut`-style preload so deploys can fill selected objects
+     without loopback HTTP warmups.
      Implemented: low-cardinality lock-duration and lookup-duration histograms
      from `HttpCacheDigest`, exported through Prometheus and OTLP metrics, plus
-     cache phase/timing attributes on OTLP request traces.
+     cache phase/timing attributes on OTLP request traces. Implemented:
+     client refresh requests now use Pingora `ForcedFreshness::ForceExpired`
+     to revalidate cached objects instead of bypassing cache entirely.
      Reader-visible partial streaming writes remain deliberately post-1.2 and
      should be implemented through Pingora's `lookup_streaming_write` /
      streaming-tag model, not by exposing incomplete disk files directly.

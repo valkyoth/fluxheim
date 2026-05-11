@@ -302,13 +302,19 @@ records successful admin purge commands with bounded operation and mode labels;
   `POST /_fluxheim/cache/activity/reset` resets vhost and route activity
   counters without clearing cached objects.
 - `cache.status_header` can expose compact response debug states such as
-  `HIT`, `MISS`, `STALE`, and `BYPASS`. `cache.status_reason_header` can expose
+  `HIT`, `MISS`, `STALE`, `BYPASS`, and `REVALIDATE`.
+  `cache.status_reason_header` can expose
   bounded no-cache reasons such as `OriginNotCache`, `ResponseTooLarge`, or
   Fluxheim policy reasons such as `request-refresh`, `request-header`,
   `request-header-value`, `request-cookie`, `request-query`, `cache-min-uses`,
-  and `cache-pass`. The proxy cache smoke suite verifies these configured
-  request-bypass reasons end to end. Keep the reason header disabled unless
-  actively debugging a cache policy.
+  and `cache-pass`. `request-refresh` means the client requested revalidation
+  through `Cache-Control: no-cache`, `Cache-Control: max-age=0`, or
+  `Pragma: no-cache`; Fluxheim keeps cache enabled and asks Pingora to
+  revalidate the stored object instead of treating this as a full cache bypass.
+  `Cache-Control: no-store` remains a bypass with `request-no-store` so the
+  response is not admitted into the shared cache. The proxy cache smoke suite
+  verifies these configured request-bypass reasons end to end. Keep the reason
+  header disabled unless actively debugging a cache policy.
   `POST /_fluxheim/cache/purge` invalidates one cache identity from the
   selected vhost or, when `route` / `x-fluxheim-cache-route` is provided, from
   the selected route cache. If the object has negotiated `Vary` variants,

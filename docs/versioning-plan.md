@@ -476,13 +476,14 @@ Stable scope:
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
     vhost/route scoped cache activity counters, purge counters, cache-lock
-    coverage, and policy-level pass/bypass/stale decisions without cache keys,
-    hosts, or paths. `otel-tracing` now provides W3C `traceparent` propagation
-    and access-log trace ID correlation, `otel-otlp` now provides initial local
-    OTLP/HTTP trace export, and `metrics-otlp` now provides initial local
-    OTLP/HTTP metrics export for Prometheus/collector receivers with bounded
-    exporter success/failure counters. Richer OpenTelemetry internal spans,
-    sampling, histogram export, and trace/event coverage remain planned.
+    coverage, and policy-level pass/bypass/stale/revalidate decisions without
+    cache keys, hosts, or paths. `otel-tracing` now provides W3C `traceparent`
+    propagation and access-log trace ID correlation, `otel-otlp` now provides
+    initial local OTLP/HTTP trace export, and `metrics-otlp` now provides
+    local OTLP/HTTP metrics export for Prometheus/collector receivers with
+    bounded exporter success/failure counters and histograms. Richer
+    OpenTelemetry internal spans, sampling, and trace/event coverage remain
+    planned.
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
