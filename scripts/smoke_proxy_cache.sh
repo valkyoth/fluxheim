@@ -427,6 +427,7 @@ wait_http "http://127.0.0.1:$FLUXHEIM_PORT/asset.png"
     --expect-memory-tier-enabled \
     --expect-disk-tier-enabled \
     --expect-scope vhost \
+    --expect-vhost cache.test \
     --expect-storage-tiers 2
 
 first_headers="$TMP_DIR/first.headers"
@@ -721,6 +722,7 @@ sleep 1.2
     --expect-header-name etag \
     --expect-serve-stale-while-revalidate \
     --expect-scope route \
+    --expect-vhost cache.test \
     --expect-route swr \
     --expect-freshness-state stale
 
@@ -762,6 +764,7 @@ fi
     --expect-fresh-ttl-secs 120 \
     --expect-header-name etag \
     --expect-scope route \
+    --expect-vhost cache.test \
     --expect-route swr \
     --expect-freshness-state fresh
 
@@ -832,6 +835,7 @@ PY
     --expect-memory-tier-enabled \
     --expect-disk-tier-enabled \
     --expect-storage-tiers 2 \
+    --expect-vhost cache.test \
     --expect-freshness-state fresh
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_en_first_headers" -o "$vary_en_body" \
