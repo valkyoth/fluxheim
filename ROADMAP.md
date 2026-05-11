@@ -26,10 +26,15 @@ commands, Prometheus/OpenTelemetry visibility, production Podman/ACME
 migration notes, and the remaining hardening needed before Fluxheim cache can
 be considered complete.
 
-Advanced load balancing, Sentinel Mesh/WireGuard, advanced certificate
-automation, WASM cache policy hooks, slab/bin cache storage, and distributed
-cache state remain important, but they should graduate in later minor releases
-according to the versioning plan.
+After the `1.2` cache-stable baseline and focused cache-only follow-ups,
+`1.3` is planned as the load-balancer stabilization release. Its target is
+HAProxy/nginx-style migration coverage on top of Pingora's load-balancing
+primitives: named upstream pools, weighted round-robin, least-connections,
+hash/consistent-hash policies, active/passive health checks, retry/redispatch,
+backup/drain/slow-start behavior, and Prometheus/OpenTelemetry/admin
+visibility. Sentinel Mesh/WireGuard, advanced certificate automation, and
+larger application-server features remain later minor releases according to
+the versioning plan.
 In-process Linux seccomp/Landlock sandboxing is also post-`1.0` work: the
 stable `1.0` boundary is hardened systemd/container deployment, while
 kernel-enforced in-process sandboxing should remain an optional compile-time

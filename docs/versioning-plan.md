@@ -547,27 +547,89 @@ Exit criteria:
 
 ### 1.3 - Load Balancer
 
-Goal: graduate Pingora load balancing to stable.
+Goal: graduate Pingora load balancing to stable while covering the migration
+surface operators expect from HAProxy and nginx-style HTTP upstreams, and while
+exposing Pingora's native load-balancing primitives in a safe Fluxheim config.
 
 Stable scope:
 
 - Compile-time `load-balancer` module.
-- Multiple upstreams per vhost.
-- Round-robin stable default.
-- Health checks.
-- Upstream TLS/SNI.
-- Clear all-nodes-down behavior.
+- Named upstream pools that can be selected globally, per vhost, or per route,
+  so one vhost can proxy normal app traffic and route-specific traffic to
+  different backend sets.
+- Multiple upstreams per pool with safe address validation and per-upstream
+  metadata: name, address, weight, backup, disabled/down, drain/maintenance,
+  max in-flight requests or connections, and optional slow-start after recovery.
+- Weighted round-robin stable default.
+- Additional selection policies needed for common HAProxy/nginx migrations and
+  Pingora parity:
+  - least-connections / least-in-flight;
+  - source-IP hash;
+  - generic hash by a bounded key template such as host, path, header, or
+    request ID;
+  - consistent hash / Ketama for cache-stateful upstreams;
+  - random and power-of-two-choices where Pingora support and tests are strong
+    enough.
+- Active health checks:
+  - TCP connect checks;
+  - HTTP checks with method, path, expected status range, expected response
+    header/body substring, Host header, and upstream TLS/SNI where configured;
+  - interval, timeout, consecutive success/failure thresholds, initial state,
+    and parallel check controls.
+- Passive health observation from real proxy traffic: connection failures,
+  upstream timeout/error classes, selected HTTP status classes, bounded
+  error-limit windows, and configurable actions such as mark-down,
+  fast-recheck, or temporary ejection.
+- Retry and redispatch controls:
+  - bounded retries for connection failures and selected HTTP status codes;
+  - redispatch to a different healthy upstream after configured retry counts;
+  - method/body safety so non-idempotent or streaming requests are not retried
+    unless explicitly allowed.
+- Upstream TLS/SNI and certificate verification controls aligned with the
+  existing proxy TLS surface.
+- Per-upstream and per-pool timeout/keepalive controls, including connect,
+  read, send, idle keepalive, and reuse-pool sizing.
+- Clear all-nodes-down behavior with configurable fail status, optional static
+  error page integration, and no accidental fallback to an unrelated pool.
+- Load-balancer observability:
+  - Prometheus and OpenTelemetry counters/histograms for selected upstream,
+    health transitions, retries, redispatches, ejections, all-down responses,
+    in-flight requests, and latency;
+  - admin status for each pool/upstream with health state, active traffic,
+    last error, and drain/maintenance state.
+- Runtime/reload behavior:
+  - config validation catches duplicate upstream names, invalid weights,
+    impossible thresholds, and unsafe hash/header keys;
+  - graceful reload keeps serving with the old pool until the new pool is
+    validated;
+  - health-check background services are included in reload impact
+    classification.
+- Migration docs mapping common HAProxy and nginx upstream concepts to Fluxheim
+  config.
 
 Beta scope:
 
-- Hash-based policies if Pingora support and tests are strong enough.
+- Sticky sessions through cookie/header persistence if there is a safe,
+  bounded design that does not conflict with privacy mode.
+- Dynamic service discovery beyond static config and normal DNS resolution,
+  using Pingora's service-discovery interface when it can be tested reliably.
+- Least-time / EWMA latency-aware selection if the metrics and failure-mode
+  tests are strong enough.
+- Weighted random two-choice as a distributed-load-balancer policy.
+- Per-upstream queueing if it can be bounded and made visible to operators.
 
 Exit criteria:
 
 - `--features proxy,load-balancer` release build passes.
 - Health check transitions are tested.
-- Failover behavior is documented.
+- Failover, retry, redispatch, all-down, backup, drain, and slow-start
+  behavior are documented and smoke tested.
 - Load-balancer metrics are available when `metrics` is enabled.
+- OpenTelemetry attributes use low-cardinality pool/upstream names only and do
+  not expose raw URLs, headers, cookies, or request bodies.
+- HAProxy/nginx migration fixtures cover weighted round-robin, backup servers,
+  least-connections, hash/consistent-hash routing, health-check failure,
+  redispatch, and all-down behavior.
 
 ### 1.4 - Cache Pack
 
@@ -627,10 +689,11 @@ Current implementation status:
     gauges and request-collapsing lock timeout gauges.
   - Pingora cache primitives already used directly or through adapters:
     `Storage`, `HandleHit`, `HandleMiss`, `CacheLock`, cache phase/reason
-    reporting, variance keys for `Vary`, and stale metadata. Remaining 1.2
-    candidate work from Pingora's cache surface is to add bounded
-    forced-freshness controls for operator debugging. Pingora's cacheability
-    predictor is now available as an explicit opt-in policy through
+    reporting, variance keys for `Vary`, stale metadata, and bounded
+    forced-freshness through `ForcedFreshness::ForceExpired` when clients send
+    refresh headers such as `Cache-Control: no-cache`, `max-age=0`, or
+    `Pragma: no-cache`. Pingora's cacheability predictor is now available as
+    an explicit opt-in policy through
     `[cache.predictor]`, `[vhosts.cache.predictor]`, and
     `[vhosts.routes.cache.predictor]`, with Fluxheim custom policy reasons
     skipped so configured bypass/refusal counters remain authoritative.
