@@ -2300,11 +2300,11 @@ struct RuntimeErrorPage {
 }
 
 impl RuntimeProxy {
-    fn from_config(config: &ProxyConfig) -> io::Result<Self> {
+    fn from_config(config: &ProxyConfig, scope: &str) -> io::Result<Self> {
         let error_pages = config
             .error_pages
             .iter()
-            .map(RuntimeErrorPage::from_config)
+            .map(|error_page| RuntimeErrorPage::from_config(scope, error_page))
             .collect::<io::Result<Vec<_>>>()?;
         Ok(Self {
             config: config.clone(),
@@ -2318,10 +2318,14 @@ impl RuntimeProxy {
 }
 
 impl RuntimeErrorPage {
-    fn from_config(config: &crate::config::ProxyErrorPageConfig) -> io::Result<Self> {
+    fn from_config(scope: &str, config: &crate::config::ProxyErrorPageConfig) -> io::Result<Self> {
         #[cfg(feature = "web")]
         {
-            let web = StaticFileServer::from_config(&config.web)?.ok_or_else(|| {
+            let web = static_file_server_from_config(
+                format!("{scope} error page status {} web", config.status),
+                &config.web,
+            )?
+            .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
@@ -2339,6 +2343,7 @@ impl RuntimeErrorPage {
 
         #[cfg(not(feature = "web"))]
         {
+            let _ = scope;
             Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
@@ -2370,14 +2375,22 @@ impl RuntimeRoute {
         let action = if let Some(redirect) = &route.redirect {
             RuntimeRouteAction::Redirect(redirect.clone())
         } else if let Some(proxy) = &route.proxy {
-            RuntimeRouteAction::Proxy(RuntimeProxy::from_config(proxy)?)
+            let proxy_scope = format!("vhost {vhost_name:?} route {:?} proxy", route.name);
+            RuntimeRouteAction::Proxy(RuntimeProxy::from_config(proxy, &proxy_scope)?)
         } else if let Some(web) = &route.web {
             #[cfg(feature = "web")]
             {
-                let web = StaticFileServer::from_config(web)?.ok_or_else(|| {
+                let web = static_file_server_from_config(
+                    format!("vhost {vhost_name:?} route {:?} web", route.name),
+                    web,
+                )?
+                .ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
-                        format!("route {:?} static web action requires web.root", route.name),
+                        format!(
+                            "vhost {vhost_name:?} route {:?} static web action requires web.root",
+                            route.name
+                        ),
                     )
                 })?;
                 RuntimeRouteAction::Web(web)
@@ -2539,7 +2552,7 @@ impl RuntimeVhost {
             max_request_body_bytes: None,
             #[cfg(feature = "load-balancer")]
             load_balancer,
-            proxy: RuntimeProxy::from_config(&proxy)?,
+            proxy: RuntimeProxy::from_config(&proxy, "default proxy")?,
             request_headers: headers.request,
             response_headers: headers.response,
             #[cfg(feature = "cache")]
@@ -2557,7 +2570,7 @@ impl RuntimeVhost {
             #[cfg(feature = "cache")]
             cache,
             #[cfg(feature = "web")]
-            web: StaticFileServer::from_config(&web)?,
+            web: static_file_server_from_config("default web", &web)?,
             routes: Vec::new(),
         })
     }
@@ -2620,6 +2633,9 @@ impl RuntimeVhost {
             &vhost.cache,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
+        let proxy_scope = format!("vhost {:?} proxy", vhost.name);
+        #[cfg(feature = "web")]
+        let web_scope = format!("vhost {:?} web", vhost.name);
 
         Ok(Self {
             name: vhost.name.clone(),
@@ -2627,7 +2643,7 @@ impl RuntimeVhost {
             max_request_body_bytes: vhost.max_request_body_bytes,
             #[cfg(feature = "load-balancer")]
             load_balancer,
-            proxy: RuntimeProxy::from_config(&vhost.proxy)?,
+            proxy: RuntimeProxy::from_config(&vhost.proxy, &proxy_scope)?,
             request_headers: headers.request,
             response_headers: headers.response,
             #[cfg(feature = "cache")]
@@ -2645,10 +2661,20 @@ impl RuntimeVhost {
             #[cfg(feature = "cache")]
             cache: vhost.cache.clone(),
             #[cfg(feature = "web")]
-            web: StaticFileServer::from_config(&vhost.web)?,
+            web: static_file_server_from_config(web_scope, &vhost.web)?,
             routes,
         })
     }
+}
+
+#[cfg(feature = "web")]
+fn static_file_server_from_config(
+    scope: impl std::fmt::Display,
+    web: &crate::config::WebConfig,
+) -> io::Result<Option<StaticFileServer>> {
+    let scope = scope.to_string();
+    StaticFileServer::from_config(web)
+        .map_err(|error| io::Error::new(error.kind(), format!("{scope}: {error}")))
 }
 
 #[derive(Debug, Default)]
@@ -5423,7 +5449,7 @@ mod tests {
             strip_prefix: Some("/chat/".to_owned()),
             max_request_body_bytes: None,
             action: super::RuntimeRouteAction::Proxy(
-                super::RuntimeProxy::from_config(&ProxyConfig::default()).unwrap(),
+                super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
             #[cfg(feature = "cache")]
             cache: None,
@@ -5492,7 +5518,7 @@ mod tests {
             ..ProxyConfig::default()
         };
 
-        let runtime = super::RuntimeProxy::from_config(&proxy).unwrap();
+        let runtime = super::RuntimeProxy::from_config(&proxy, "test proxy").unwrap();
 
         assert!(runtime.error_page(502).is_some());
         assert!(runtime.error_page(503).is_none());

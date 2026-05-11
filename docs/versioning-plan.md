@@ -328,7 +328,9 @@ Stable scope:
 - Basic self-healing rollback.
 - Better config diagnostics for production operators: include source file paths
   for `conf.d` parse errors, vhost/route context for validation errors where
-  available, and actionable hints for common table-shape mistakes.
+  available, and actionable hints for common table-shape mistakes. Static web
+  root validation now reports whether the failing path belongs to global web
+  config, a vhost, a route, or a proxy error-page web block.
 - Production container migration docs and helpers:
   - document the first-issuance sequence for HTTP-01, including the requirement
     that Fluxheim is the process serving public port 80 before ACME validation;

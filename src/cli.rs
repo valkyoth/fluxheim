@@ -306,12 +306,15 @@ fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send +
 
 #[cfg(all(feature = "web", not(feature = "proxy")))]
 fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    validate_web_runtime_config(&config.web)?;
+    validate_web_runtime_config("global web", &config.web)?;
     for vhost in &config.vhosts {
-        validate_web_runtime_config(&vhost.web)?;
+        validate_web_runtime_config(&format!("vhost {:?} web", vhost.name), &vhost.web)?;
         for route in &vhost.routes {
             if let Some(web) = &route.web {
-                validate_web_runtime_config(web)?;
+                validate_web_runtime_config(
+                    &format!("vhost {:?} route {:?} web", vhost.name, route.name),
+                    web,
+                )?;
             }
         }
     }
@@ -320,9 +323,11 @@ fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send +
 
 #[cfg(all(feature = "web", not(feature = "proxy")))]
 fn validate_web_runtime_config(
+    scope: &str,
     config: &crate::config::WebConfig,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    crate::web::StaticFileServer::from_config(config)?;
+    crate::web::StaticFileServer::from_config(config)
+        .map_err(|error| format!("{scope}: {error}"))?;
     Ok(())
 }
 
@@ -2188,7 +2193,35 @@ mod tests {
         ])
         .unwrap_err();
 
-        assert!(error.to_string().contains("web root does not exist"));
+        let error = error.to_string();
+        assert!(error.contains("vhost \"example\" web"));
+        assert!(error.contains("web root does not exist"));
+    }
+
+    #[cfg(feature = "web")]
+    #[test]
+    fn validate_config_rejects_missing_route_static_root_with_context() {
+        let dir = TestDir::new("cli-validate-missing-route-root");
+        let missing_root = safe_child_path(&dir.path, "missing-route-site");
+        let config = dir.route_web_config(
+            "fluxheim.toml",
+            "example",
+            "example.test",
+            "assets",
+            &missing_root,
+        );
+
+        let error = run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "--validate-config",
+        ])
+        .unwrap_err();
+
+        let error = error.to_string();
+        assert!(error.contains("vhost \"example\" route \"assets\" web"));
+        assert!(error.contains("web root does not exist"));
     }
 
     #[cfg(not(feature = "acme-client"))]
@@ -2648,6 +2681,38 @@ mod tests {
                     hosts = ["{host}"]
 
                     [vhosts.web]
+                    root = "{}"
+                    "#,
+                    root.display()
+                ),
+            )
+            .expect("write config");
+            path
+        }
+
+        #[cfg(feature = "web")]
+        fn route_web_config(
+            &self,
+            name: &str,
+            vhost_name: &str,
+            host: &str,
+            route_name: &str,
+            root: &Path,
+        ) -> PathBuf {
+            let path = safe_child_path(&self.path, name);
+            fs::write(
+                &path,
+                format!(
+                    r#"
+                    [[vhosts]]
+                    name = "{vhost_name}"
+                    hosts = ["{host}"]
+
+                    [[vhosts.routes]]
+                    name = "{route_name}"
+                    path_prefix = "/assets/"
+
+                    [vhosts.routes.web]
                     root = "{}"
                     "#,
                     root.display()
