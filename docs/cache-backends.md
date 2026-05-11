@@ -607,6 +607,27 @@ committing the final object, avoiding whole-object admission buffering for the
 disk tier. Reader-visible partial writes remain disabled until Fluxheim can
 provide a safe tagged reader for in-progress objects.
 
+Additional Pingora cache primitives worth exposing as Fluxheim matures:
+
+- `HttpCacheDigest` records cache lock wait time and lookup/header-read time.
+  These are good candidates for low-cardinality Prometheus histograms and
+  OpenTelemetry span attributes because they explain slow cache hits and
+  stampede waits without exposing cache keys or paths.
+- `CacheablePredictor` remembers keys whose previous responses were
+  uncacheable, allowing future requests to bypass cache and cache locks early.
+  Fluxheim's `pass_uncacheable_after` covers the same user-facing problem
+  conservatively; a Pingora-backed predictor can replace or strengthen that
+  path once metrics and bounded capacity controls are in place.
+- `ForcedFreshness` can force an object to be treated as expired, absent, or
+  fresh. Fluxheim should only expose this through bounded admin/debug controls,
+  not broad public request headers, because force-fresh can mask origin
+  updates and force-miss can amplify origin load.
+- `CachePut` can fill cache storage from a supplied HTTP response stream. This
+  would let deploy tooling preload selected objects without loopback HTTP
+  warmups while still using the same storage, metadata, and eviction paths.
+  The existing `cache-warm` command remains the safest first interface because
+  it exercises the real vhost, route, and admission policy.
+
 ## Adapter Requirements
 
 A production adapter must:

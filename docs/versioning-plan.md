@@ -605,6 +605,16 @@ Current implementation status:
     counters for disk hits, scoped purge events, policy bypasses, and allowed
     stale serving, while the local observability smoke asserts cache policy
     gauges and request-collapsing lock timeout gauges.
+  - Pingora cache primitives already used directly or through adapters:
+    `Storage`, `HandleHit`, `HandleMiss`, `CacheLock`, cache phase/reason
+    reporting, variance keys for `Vary`, and stale metadata. Remaining 1.2
+    candidate work from Pingora's cache surface is to expose
+    `HttpCacheDigest` lock/lookup timing as Prometheus and OpenTelemetry
+    metrics, add bounded forced-freshness controls for operator debugging, and
+    integrate a cacheable predictor for keys that repeatedly prove
+    uncacheable. Direct `CachePut`-style preload is useful but can land after
+    the loopback `cache-warm` path because it is an operator convenience, not
+    a correctness prerequisite.
 
 Stable scope for declaring the cache pack complete:
 

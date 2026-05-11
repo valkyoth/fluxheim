@@ -644,6 +644,18 @@ without parsing text fixtures for every module.
      seed the disk-object index without a full shard scan. Planned: add a
      compact append-only journal or periodic checkpoint throttling if very
      high-churn cache workloads make full checkpoint rewrites too expensive.
+   - Pingora cache surface review. Implemented foundations already cover
+     `Storage`, `HandleHit`, `HandleMiss`, `CacheLock`, `Vary` variance keys,
+     stale serving metadata, and bounded `NoCacheReason` status reporting.
+     Planned operator-facing additions from Pingora's cache internals:
+     cacheable-predictor integration for historically uncacheable keys,
+     low-cardinality lock-duration and lookup-duration metrics from
+     `HttpCacheDigest`, bounded force-revalidate/force-miss/force-fresh
+     controls for admin/debug workflows, and direct `CachePut`-style preload
+     so deploys can fill selected objects without loopback HTTP warmups.
+     Reader-visible partial streaming writes remain deliberately post-1.2 and
+     should be implemented through Pingora's `lookup_streaming_write` /
+     streaming-tag model, not by exposing incomplete disk files directly.
    - Multi-tier cache promotion/fallback. Implemented with a tiered Pingora
      storage adapter: memory is L1, disk is L2, misses write to both tiers,
      disk hits promote to memory when they fit, and purge invalidates both.
@@ -713,7 +725,11 @@ without parsing text fixtures for every module.
        storage inspection, and safe config activation through the existing
        admin/snapshot model;
      - extension points for optional policy modules or WASM filters after the
-       stable typed policy language is complete.
+       stable typed policy language is complete. These WASM hooks should also
+       cover cache phases such as lookup, admission, hit delivery, purge
+       tagging, and synthetic responses so Fluxheim can eventually offer a
+       safer typed equivalent to custom cache policy languages without making
+       arbitrary code part of the default cache path.
    - HTTP cache semantics.
    - Stale-while-revalidate.
    - Purge/admin API. Implemented for protected single-key invalidation through
