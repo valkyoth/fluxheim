@@ -26,7 +26,7 @@ OS_CONTAINERS = {
     "ubi-10": "registry.access.redhat.com/ubi10/ubi:latest",
 }
 
-DEFAULT_RPM_FEATURES = "profile-core,acme-client"
+DEFAULT_RPM_FEATURES = "profile-observability,acme-client"
 SAFE_VERSION_TAG = re.compile(r"^(latest|v?[0-9]+(?:\.[0-9A-Za-z_+]+)*)$")
 SAFE_RPM_RELEASE = re.compile(r"^[0-9][0-9A-Za-z._+~]*$")
 SAFE_FEATURES = re.compile(r"^(default|[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*)$")
@@ -292,6 +292,11 @@ install -Dm0644 packaging/systemd/actalis-eab.conf "${INSTALL_ROOT}/usr/share/do
 install -Dm0644 packaging/systemd/actalis-eab-acme.conf "${INSTALL_ROOT}/usr/share/doc/fluxheim/systemd/actalis-eab-acme.conf"
 install -Dm0644 LICENSE "${INSTALL_ROOT}/usr/share/licenses/fluxheim/LICENSE"
 for doc in README.md CHANGELOG.md ROADMAP.md SECURITY.md; do
+    if [ -f "$doc" ]; then
+        install -Dm0644 "$doc" "${INSTALL_ROOT}/usr/share/doc/fluxheim/$doc"
+    fi
+done
+for doc in RELEASE_NOTES_*.md; do
     if [ -f "$doc" ]; then
         install -Dm0644 "$doc" "${INSTALL_ROOT}/usr/share/doc/fluxheim/$doc"
     fi

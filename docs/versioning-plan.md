@@ -384,8 +384,9 @@ Stable scope:
     disk tier no longer buffers the full response body in memory during
     admission. Startup also cleans stale Fluxheim-owned temp files after a
     conservative age threshold while preserving fresh active-writer temps.
-    Reader-visible partial writes are not a 1.2 stable blocker unless
-    production testing promotes them into the optional `1.2.4` cache follow-up;
+    Reader-visible partial writes are not a 1.2 stable blocker and should move
+    through a later focused cache follow-up if production testing proves it
+    necessary;
   - broader persistent cache index coverage for older disk object formats and
     future metadata migrations; new v5 disk objects rebuild purge metadata
     across process restarts with combined-key, primary-key, user-tag,
@@ -663,7 +664,7 @@ Exit criteria:
   least-connections, hash/consistent-hash routing, health-check failure,
   redispatch, and all-down behavior.
 
-### 1.4 - Cache Pack
+### Cache Maturity Follow-Ups
 
 Goal: add controlled image/static caching.
 
@@ -783,18 +784,21 @@ Stable scope for declaring the cache pack complete:
 
 Focused cache-only follow-up releases after 1.2:
 
-- `1.2.1`: optional slab/bin disk storage backend for large, high-churn caches.
+- `1.2.1`: opt-in local/static vhost caching. This release has one job: make
+  Fluxheim's cache model consistent for operators who expect local `[vhosts.web]`
+  and route-scoped web actions to participate in the same cache controls as
+  proxied content. The local static-file cache should support whole-vhost and
+  partial route/path scopes, prefer memory caching first to avoid duplicating
+  local files on disk, key by canonical static path plus file identity metadata,
+  keep the existing symlink/traversal protections, and expose an optional
+  static cache-status header.
+- `1.2.2`: optional slab/bin disk storage backend for large, high-churn caches.
   This release has one job: evaluate and, if safe, add a storage-bin backend
   that pre-allocates large data files, stores objects in fixed-size or classed
   extents, maintains a durable free map and object index, supports crash
   recovery and compaction, and exposes fragmentation/space-amplification
   metrics. The filesystem object backend stays the portable default until slab
   storage proves safer and faster in production tests.
-- `1.2.2`: Wasm cache policy hooks. Keep the default cache model declarative,
-  but add constrained Rust/Wasm hooks inspired by VCL for lookup/admission,
-  bounded cache-key components, response `put_object` policy, safe header
-  mutation, TTL override, tag assignment, and later metadata invalidation
-  decisions.
 - `1.2.3`: distributed cache metadata and peer-fill. This release has one job:
   decide and implement the first safe multi-node cache coherence model for
   clustered deployments, including peer-fill limits, failure behavior, metrics,
@@ -802,15 +806,9 @@ Focused cache-only follow-up releases after 1.2:
 - `1.2.4`: reserved only if production 1.2 testing exposes one more
   cache-specific gap that should close before the 1.3 line starts. Candidate
   work includes proper Pingora-path partial streaming/slice range fill,
-  HEAD-to-GET cache-key conversion with safe body handling, optional local
-  static-file caching for `[vhosts.web]` and route-scoped web actions, cache
-  import/export workflows for mirrors, or bounded metadata ban predicates. The
-  local static-file cache should be opt-in, support whole-vhost and partial
-  route/path scopes, prefer memory caching first to avoid duplicating local
-  files on disk, key by canonical static path plus file identity metadata, keep
-  the existing symlink/traversal protections, and expose an optional static
-  cache-status header. If no such blocker appears, skip `1.2.4` and move to
-  `1.3`.
+  HEAD-to-GET cache-key conversion with safe body handling, cache import/export
+  workflows for mirrors, or bounded metadata ban predicates. If no such blocker
+  appears, skip `1.2.4` and move to `1.3`.
 
 Exit criteria:
 
@@ -875,7 +873,61 @@ Exit criteria:
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 
-### 1.4a - Compression Pack
+### 1.4 - WASM Extensibility
+
+Goal: add one shared sandboxed extension runtime for nginx-Lua-style operator
+logic and VCL-like cache policy decisions, instead of creating separate
+partial extension systems for cache, proxy, WAF, or media features.
+
+Stable scope:
+
+- Compile-time `wasm` module.
+- Plugin loading from approved directories with strict path, ownership, and
+  symlink validation.
+- Wasmtime-based sandbox evaluation after license/advisory review.
+- Request header hook.
+- Response header hook.
+- Access-control hook returning allow, deny, or continue.
+- Cache-policy hooks inspired by VCL, but designed as a constrained Rust/Wasm
+  ABI rather than an embedded language:
+  - lookup/admission hook for bypass, pass, continue, or deny decisions;
+  - safe cache-key component hook with typed inputs and explicit
+    low-cardinality output limits;
+  - `put_object`/store-admission hook for response-header inspection,
+    TTL override, tag assignment, and header mutation;
+  - invalidation hook for metadata predicates after the declarative 1.2 ban
+    model is proven;
+  - all cache hooks must be bounded by fuel, wall time, memory, output size,
+    and deterministic failure behavior.
+- Strict module, memory, fuel, wall-time, log, mutation, synthetic response,
+  and concurrency limits.
+- Plugin hashing and admin/metrics visibility when those modules are enabled.
+
+Beta scope:
+
+- Compile-time `wasm-proxy-abi` compatibility path.
+- Per-vhost and per-route plugin chains.
+- WASM-powered policy hooks for media, auth, WAF, or logging redaction.
+
+Experimental scope:
+
+- `wasm-wasi` with explicit capability grants.
+- Streaming body hooks.
+
+Exit criteria:
+
+- WASM features are absent from default and privacy builds.
+- Symlinked plugin files and symlinked parents are rejected.
+- Unsupported ABI and host calls fail deterministically.
+- Fuel exhaustion, timeout, trap, and plugin panic behavior is tested.
+- Plugins cannot access bodies, filesystem, network, env, admin APIs, cache
+  internals, or secrets without explicit capability grants.
+- Plugins cannot directly control routing destinations or upstream TLS
+  verification. Cache-key influence is allowed only through the constrained
+  cache hook ABI with typed inputs, configured output limits, and explicit
+  operator opt-in per vhost or route.
+
+### 1.5 - Compression Pack
 
 Goal: add safe, opt-in response compression without blocking request workers or
 breaking cache correctness.
@@ -905,7 +957,7 @@ Exit criteria:
 - Downstream disconnects cancel or stop compression work.
 - Default and `privacy-mode` builds prove compression is absent.
 
-### 1.5 - Media Transform Pack
+### 1.6 - Media Transform Pack
 
 Goal: add safe, opt-in image transformation for static and proxied image
 responses.
@@ -938,7 +990,7 @@ Exit criteria:
   format, dimensions, quality, and `Accept` bucket.
 - `privacy-mode` rejects incompatible transform/cache combinations.
 
-### 1.6 - Advanced Certificate Automation
+### 1.7 - Advanced Certificate Automation
 
 Goal: extend the `1.1` certificate lifecycle with provider-specific and
 zero-downtime automation that is too broad for the first ACME release.
@@ -961,7 +1013,7 @@ Exit criteria:
 - Private key storage permissions are validated.
 - Tests cover renewal scheduling and reload classification.
 
-### 1.7 - Privacy And Security Profiles
+### 1.8 - Privacy And Security Profiles
 
 Goal: provide explicit security/privacy build profiles.
 
@@ -986,7 +1038,7 @@ Exit criteria:
 - Forwarded IP headers are stripped in privacy mode.
 - WAF is dry-run capable and redacts secrets before beta promotion.
 
-### 1.8 - Cloudflare Origin Pack
+### 1.9 - Cloudflare Origin Pack
 
 Goal: support Cloudflare as a verified trusted peer.
 
@@ -1002,7 +1054,7 @@ Stable scope:
 Beta scope:
 
 - AOP/mTLS automation.
-- Origin CA automation if not stabilized in 1.5.
+- Origin CA automation if not stabilized in `1.7`.
 
 Exit criteria:
 
@@ -1010,7 +1062,7 @@ Exit criteria:
 - API tokens are never logged.
 - AOP mode clearly distinguishes global, zone-level, and per-hostname trust.
 
-### 1.8a - Trusted Client Identity Layer
+### 1.9a - Trusted Client Identity Layer
 
 Goal: make restored client identity safe, auditable, and reusable across load
 balancers, private gateways, and provider packs.
@@ -1043,7 +1095,7 @@ Exit criteria:
 - Privacy builds reject real-client restoration and IP enrichment unless a
   no-retention design is implemented.
 
-### 1.9 - Advanced Metrics And Logging
+### 1.10 - Advanced Metrics And Logging
 
 Goal: add richer observability without hurting the request path.
 
@@ -1079,7 +1131,7 @@ Exit criteria:
 - Sensitive span attributes are redacted.
 - OpenTelemetry features are absent from default and privacy builds.
 
-### 1.10 - Traffic Policy And Safety Pack
+### 1.11 - Traffic Policy And Safety Pack
 
 Goal: add declarative redirect/rewrite policy plus controlled release-safety
 tools for operators who need to test new backends without changing
@@ -1115,7 +1167,7 @@ Exit criteria:
 - Mirroring is incompatible with `privacy-mode`.
 - Tests cover cancellation, timeout, sampling, and redaction behavior.
 
-### 1.11 - External Authorization And Identity-Aware Routing
+### 1.12 - External Authorization And Identity-Aware Routing
 
 Goal: enforce access decisions through a trusted authorization service first,
 then add native identity verification and claim-aware routing.
@@ -1173,7 +1225,7 @@ Exit criteria:
   wrong-audience tokens.
 - Signed-link tokens and decoded claims are redacted from logs and errors.
 
-### 1.12 - Cluster State
+### 1.13 - Cluster State
 
 Goal: let Fluxheim nodes share selected operational and security state without
 requiring external infrastructure for the first useful cases.
@@ -1201,7 +1253,7 @@ Exit criteria:
 - Global rate limits document whether they are `local_only`, `eventual`, or
   `strict`.
 
-### 1.13 - AI Gateway
+### 1.14 - AI Gateway
 
 Goal: add AI-aware proxy controls for cost, safety, and cacheability where
 operators explicitly opt in.
@@ -1233,7 +1285,7 @@ Exit criteria:
 - Tests cover token budgets, provider metadata parsing, redaction, cache
   isolation, and default/privacy build absence.
 
-### 1.14 - Sentinel Mesh
+### 1.15 - Sentinel Mesh
 
 Goal: graduate the encrypted gateway-to-backend tunnel design into a supported
 small-cluster routing module.
@@ -1258,7 +1310,7 @@ Exit criteria:
 - Rootless Podman smoke coverage exists for the supported transport.
 - Mesh code is absent from default and privacy builds.
 
-### 1.15 - Optional Host Sandbox Module
+### 1.16 - Optional Host Sandbox Module
 
 Goal: provide an opt-in in-process Linux sandbox for deployments that cannot
 rely only on systemd or container runtime policy.
@@ -1349,59 +1401,6 @@ Exit criteria:
 - Any segment or bitstream mutation has parser fuzzing, codec/container
   compatibility tests, and a documented legal/privacy policy.
 
-### 2.2 - WASM Extensibility
-
-Goal: add sandboxed, operator-provided extension logic after the core request
-lifecycle, security profiles, WAF, auth, observability, and media-policy needs
-are well understood.
-
-Stable scope:
-
-- Compile-time `wasm` module.
-- Plugin loading from approved directories.
-- Wasmtime-based sandbox evaluation after license/advisory review.
-- Request header hook.
-- Response header hook.
-- Access-control hook returning allow, deny, or continue.
-- Cache-policy hooks inspired by VCL, but designed as a constrained Rust/Wasm
-  ABI rather than an embedded language:
-  - lookup/admission hook for bypass, pass, continue, or deny decisions;
-  - safe cache-key component hook with typed inputs and explicit
-    low-cardinality output limits;
-  - `put_object`/store-admission hook for response-header inspection,
-    TTL override, tag assignment, and header mutation;
-  - invalidation hook for metadata predicates after the declarative 1.2 ban
-    model is proven;
-  - all cache hooks must be bounded by fuel, wall time, memory, output size,
-    and deterministic failure behavior.
-- Strict module, memory, fuel, wall-time, log, mutation, synthetic response,
-  and concurrency limits.
-- Plugin hashing and admin/metrics visibility when those modules are enabled.
-
-Beta scope:
-
-- Compile-time `wasm-proxy-abi` compatibility path.
-- Per-vhost and per-route plugin chains.
-- WASM-powered policy hooks for media, auth, WAF, or logging redaction.
-
-Experimental scope:
-
-- `wasm-wasi` with explicit capability grants.
-- Streaming body hooks.
-
-Exit criteria:
-
-- WASM features are absent from default and privacy builds.
-- Symlinked plugin files and symlinked parents are rejected.
-- Unsupported ABI and host calls fail deterministically.
-- Fuel exhaustion, timeout, trap, and plugin panic behavior is tested.
-- Plugins cannot access bodies, filesystem, network, env, admin APIs, cache
-  internals, or secrets without explicit capability grants.
-- Plugins cannot directly control routing destinations or upstream TLS
-  verification. Cache-key influence is allowed only through the constrained
-  cache hook ABI with typed inputs, configured output limits, and explicit
-  operator opt-in per vhost or route.
-
 ### Experimental-Only Tracks
 
 These should not be promised in a stable minor until proven:
@@ -1461,16 +1460,17 @@ the exception while the cache server is being completed as a focused sequence:
 - `v0.5.1`: security or bug fixes for the basic-sites preview.
 - `v1.0.1`: security or bug fixes for stable core.
 - `v1.1.1`: fixes for TLS policy hardening.
-- `v1.2.1`: focused slab/bin cache storage backend, if it proves safe enough
+- `v1.2.1`: focused opt-in local static-file caching for whole vhosts or
+  matched web routes.
+- `v1.2.2`: focused slab/bin cache storage backend, if it proves safe enough
   after `1.2`.
-- `v1.2.2`: focused Wasm cache policy hook release.
 - `v1.2.3`: focused distributed cache metadata and peer-fill release.
 - `v1.2.4`: optional cache-only follow-up if production testing finds one more
-  cache blocker before `1.3`; likely candidates include opt-in local
-  static-file caching for whole vhosts or matched web routes, proper
-  Pingora-path partial streaming/slice range fill, HEAD-to-GET cache parity,
-  cache import/export, or bounded metadata ban predicates.
+  cache blocker before `1.3`; likely candidates include proper Pingora-path
+  partial streaming/slice range fill, HEAD-to-GET cache parity, cache
+  import/export, or bounded metadata ban predicates.
 - `v1.3.1`: fixes for load balancer.
+- `v1.4.1`: fixes for the shared Wasm extensibility runtime.
 
 ## Changelog Shape
 

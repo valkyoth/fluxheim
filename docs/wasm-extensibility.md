@@ -1,6 +1,6 @@
 # WASM Extensibility
 
-Status: far-future optional module family.
+Status: planned `1.4` optional module family.
 
 Planned Cargo features:
 
@@ -16,20 +16,23 @@ Latest crate candidates checked on 2026-05-05:
 
 WASM extensibility gives Fluxheim a sandboxed way to run operator-provided
 logic without compiling that logic into the Fluxheim binary. It should be
-treated as a major extension boundary, not as a small scripting feature.
+treated as a major extension boundary, not as a small scripting feature. The
+same runtime should cover nginx-Lua-style request/response hooks and VCL-like
+cache policy hooks, instead of creating separate partial extension systems.
 
 ## Design Goals
 
 - Keep WASM runtime code out of default builds.
 - Use a reviewed standard ABI where practical.
-- Start with request/response header and access-control hooks.
+- Start with request/response header hooks, access-control hooks, and bounded
+  cache-policy hooks.
 - Make all host calls explicit, small, and auditable.
 - Keep plugin execution bounded by memory, fuel, wall-time, and output limits.
 - Prevent plugins from seeing secrets, bodies, filesystem, network, or admin
   APIs unless explicitly granted by policy.
 - Make plugin failures isolated from the process and from unrelated requests.
 
-## Stage 1: Header And Access-Control Hooks
+## Stage 1: Header, Access-Control, And Cache Policy Hooks
 
 The first useful scope should cover the common extension cases without exposing
 request bodies or arbitrary I/O.
@@ -39,6 +42,11 @@ Allowed hooks:
 - request headers before upstream selection;
 - response headers before sending to the client;
 - access-control decision: allow, deny with status, or continue;
+- cache lookup/admission decision: bypass, pass, continue, or deny;
+- bounded cache-key component decision with typed inputs and low-cardinality
+  output limits;
+- cache store-admission decision for TTL override, tag assignment, and safe
+  response-header mutation;
 - synthetic response with small bounded body for deny/error cases.
 
 Non-goals for the first stage:
@@ -47,7 +55,7 @@ Non-goals for the first stage:
 - filesystem access;
 - outbound network access;
 - spawning processes;
-- direct cache access;
+- direct raw cache object access;
 - admin/control API access.
 
 ## Stage 2: Proxy ABI Compatibility
@@ -114,8 +122,9 @@ ABI version, feature set, and Fluxheim version.
 - Host calls must never expose admin tokens, ACME/EAB secrets, private keys,
   authorization headers, cookies, raw request bodies, or filesystem paths unless
   explicitly allowed and redacted.
-- Plugins must not control cache keys, routing destinations, or upstream TLS
-  verification directly. They may return typed decisions that Fluxheim validates.
+- Plugins must not control routing destinations or upstream TLS verification
+  directly. Cache-key influence is allowed only through constrained typed hook
+  outputs that Fluxheim validates, bounds, and records.
 - Plugin panics, traps, timeout, or fuel exhaustion must produce configured
   fail behavior and must not crash Fluxheim.
 - `privacy-mode` should reject WASM features by default.

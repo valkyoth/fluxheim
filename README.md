@@ -319,15 +319,18 @@ metrics. Remaining `1.2` hardening is release-candidate validation plus
 production Podman/ACME examples, admin/metrics operations polish,
 rollback/snapshot improvements, and proxy
 buffering/backpressure controls for app migrations. After `1.2`, cache work is
-planned as focused cache-only follow-ups: `1.2.1` for slab/bin disk storage,
-`1.2.2` for Wasm cache policy hooks, `1.2.3` for distributed cache
-metadata/peer-fill, and optional `1.2.4` only if production testing finds one
-more cache-specific blocker before `1.3`.
+planned as focused cache-only follow-ups: `1.2.1` for opt-in local/static
+vhost caching, `1.2.2` for slab/bin disk storage, `1.2.3` for distributed
+cache metadata/peer-fill, and an optional `1.2.4` only if production testing
+finds one more cache blocker. `1.3` is the load-balancer/proxy parity line.
+The Wasm work is now planned as a shared `1.4` extensibility release, covering
+nginx-Lua-style hooks and VCL-like cache policy hooks through one sandboxed
+runtime instead of a small cache-only `1.2.x` feature.
 
-Later releases continue with load balancing, cache improvements, advanced
+Later releases continue with compression, media transforms, advanced
 certificate automation, privacy/security profiles, Cloudflare origin support,
 observability, auth, cluster state, AI-aware controls, Sentinel Mesh, PHP/CGI
-boundaries, media-edge work, and WASM extensibility.
+boundaries, and media-edge work.
 
 See [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for
 the full release ladder.

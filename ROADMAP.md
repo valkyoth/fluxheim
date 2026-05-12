@@ -27,14 +27,20 @@ migration notes, and the remaining hardening needed before Fluxheim cache can
 be considered complete.
 
 After the `1.2` cache-stable baseline and focused cache-only follow-ups,
-`1.3` is planned as the load-balancer stabilization release. Its target is
+the cache-only sequence is now `1.2.1` for opt-in local/static vhost caching,
+`1.2.2` for slab/bin disk storage, `1.2.3` for distributed cache
+metadata/peer-fill, and an optional `1.2.4` only if production testing finds
+one more cache-specific blocker. `1.3` is planned as the load-balancer
+stabilization release. Its target is
 HAProxy/nginx-style migration coverage on top of Pingora's load-balancing
 primitives: named upstream pools, weighted round-robin, least-connections,
 hash/consistent-hash policies, active/passive health checks, retry/redispatch,
 backup/drain/slow-start behavior, and Prometheus/OpenTelemetry/admin
-visibility. Sentinel Mesh/WireGuard, advanced certificate automation, and
-larger application-server features remain later minor releases according to
-the versioning plan.
+visibility. `1.4` is planned as the shared Wasm extensibility release for
+nginx-Lua-style request/response hooks and VCL-like cache policy hooks through
+one sandboxed runtime. Sentinel Mesh/WireGuard, advanced certificate
+automation, and larger application-server features remain later minor releases
+according to the versioning plan.
 In-process Linux seccomp/Landlock sandboxing is also post-`1.0` work: the
 stable `1.0` boundary is hardened systemd/container deployment, while
 kernel-enforced in-process sandboxing should remain an optional compile-time
@@ -1432,6 +1438,8 @@ without parsing text fixtures for every module.
 24. **Future WASM Extensibility**
    - Architecture and security plan documented in
      [WASM Extensibility](docs/wasm-extensibility.md).
+   - Target release: `1.4` as one shared extension runtime, not a partial
+     cache-only `1.2.x` implementation.
    - WASM support must be optional, compile-time gated, and disabled by
      default. Planned features:
      - `wasm`: shared runtime config, plugin loading, limits, host-call policy,

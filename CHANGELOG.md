@@ -9,6 +9,10 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## 1.2.0 - Operations And Cache Completion Pack
+
 ### Added
 
 - Metrics builds now publish aggregate cache configuration gauges for vhost,

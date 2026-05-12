@@ -28,8 +28,9 @@ format = "json"
 target = "stderr"
 
 [logging.file]
-enabled = true
-path = "/var/log/fluxheim/fluxheim.log"
+enabled = false
+# Enable only when /var/log/fluxheim exists and is mounted writable.
+# path = "/var/log/fluxheim/fluxheim.log"
 append = true
 
 [logging.access]

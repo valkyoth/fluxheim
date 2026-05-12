@@ -1,4 +1,4 @@
-%global fluxheim_features profile-core,acme-client
+%global fluxheim_features profile-observability,acme-client
 %global rust_min_version 1.95
 %bcond_without tests
 
@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.1.0
+Version:        1.2.0
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -15,7 +15,7 @@ URL:            https://github.com/valkyoth/fluxheim
 Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
 # Create with:
 #   cargo vendor vendor > /tmp/fluxheim-cargo-config.toml
-#   tar -czf fluxheim-1.1.0-vendor.tar.gz vendor
+#   tar -czf fluxheim-1.2.0-vendor.tar.gz vendor
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        fluxheim.tmpfiles
 Source3:        fluxheim.service
@@ -47,9 +47,10 @@ Requires(pre):   shadow-utils
 Requires:       ca-certificates
 
 %description
-Fluxheim is a modular Rust edge server built on Pingora. The 1.1 release builds
-on the stable gateway foundation with explicit TLS policy profiles and native
-ACME certificate operations for normal production deployments.
+Fluxheim is a modular Rust edge server built on Pingora. The 1.2 release builds
+on the stable gateway and ACME foundation with cache-server operations,
+Prometheus metrics, and OpenTelemetry export support compiled into the packaged
+native build.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -127,7 +128,7 @@ fi
 
 %files
 %license LICENSE
-%doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_1.1.0.md docs examples
+%doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_*.md docs examples
 %{_docdir}/fluxheim/systemd/actalis-eab.conf
 %{_docdir}/fluxheim/systemd/actalis-eab-acme.conf
 %{_bindir}/fluxheim
@@ -149,6 +150,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue May 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.0-1
+- Cache-server operations release with observability-enabled native packaging.
+
 * Sat May 09 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.1.0-1
 - TLS policy and ACME certificate operations release with modern/intermediate profiles and native renewal support.
 

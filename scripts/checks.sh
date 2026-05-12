@@ -77,7 +77,7 @@ cargo test --no-default-features --features proxy,cache
 cargo test --no-default-features --features cache
 cargo test --no-default-features --features web
 cargo test --no-default-features --features profile-core
-cargo check --no-default-features --features profile-core,acme-client
+cargo check --no-default-features --features profile-observability,acme-client
 scripts/validate-1-0-core.sh check
 cargo check --no-default-features --features profile-static-site
 cargo check --no-default-features --features profile-reverse-proxy

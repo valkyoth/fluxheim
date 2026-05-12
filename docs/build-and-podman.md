@@ -36,12 +36,12 @@ recommended backend.
 
 See [Feature Matrix](features.md) for the complete feature/profile list.
 
-Fluxheim's production RPM and published container images intentionally compile
-`profile-core,acme-client` for the `1.1.x` line. That keeps the normal gateway
-surface small while including the managed ACME issuer, renewal CLI, and
-background renewal service that operators expect from packaged builds. Custom
-source builds can still omit `acme-client` when certificate automation is not
-needed.
+Fluxheim's production RPM intentionally compiles
+`profile-observability,acme-client` for the `1.2.x` line. That keeps the normal
+gateway/cache surface available while including the managed ACME issuer,
+renewal CLI, background renewal service, Prometheus metrics, and OpenTelemetry
+export support that operators expect from packaged builds. Custom source builds
+can still omit `acme-client` or observability features when they are not needed.
 
 For package scripts or custom CI that accept user-provided feature strings, run
 the feature preflight before invoking Cargo:
@@ -671,8 +671,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.1.0 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.1.0 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.2.0 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.2.0 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date
