@@ -5333,6 +5333,7 @@ mod tests {
                 enabled: true,
                 path: Some(PathBuf::from("/var/cache/fluxheim/example.test")),
                 max_size_bytes: ByteSize::from_bytes(8 * 1024 * 1024 * 1024),
+                ..CacheDiskConfig::default()
             },
             ..CacheConfig::default()
         };
@@ -5362,6 +5363,7 @@ mod tests {
                 enabled: false,
                 path: Some(PathBuf::from("/var/cache/fluxheim")),
                 max_size_bytes: ByteSize::from_bytes(10 * 1024 * 1024 * 1024),
+                ..CacheDiskConfig::default()
             },
             ..CacheConfig::default()
         };

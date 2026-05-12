@@ -96,6 +96,7 @@ enabled = false
 max_size_bytes = "1GiB"
 
 [cache.disk]
+backend = "filesystem"
 enabled = false
 max_size_bytes = "10GiB"
 

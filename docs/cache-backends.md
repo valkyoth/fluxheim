@@ -187,6 +187,11 @@ internal cache implementation.
   temp locations after a conservative age threshold, while ignoring unrelated
   files and fresh temp files so snapshot reloads do not race active cache
   writers.
+- `cache.disk.backend = "filesystem"` is the stable default disk backend. The
+  `storage-bin` backend name is reserved for the focused `1.2.2` slab/bin
+  storage line and currently fails closed if configured, so operators cannot
+  accidentally assume the filesystem object store has slab/bin allocation
+  semantics.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
   startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint

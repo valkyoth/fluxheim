@@ -4215,6 +4215,7 @@ mod tests {
                         enabled: true,
                         path: Some(cache_path.clone()),
                         max_size_bytes: ByteSize::from_bytes(4096),
+                        ..crate::config::CacheDiskConfig::default()
                     },
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
@@ -4371,6 +4372,7 @@ mod tests {
                         enabled: true,
                         path: Some(cache_path.clone()),
                         max_size_bytes: ByteSize::from_bytes(4096),
+                        ..crate::config::CacheDiskConfig::default()
                     },
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
@@ -5588,6 +5590,7 @@ mod tests {
                     enabled: true,
                     path: Some(cache_path.to_path_buf()),
                     max_size_bytes: ByteSize::from_bytes(4096),
+                    ..crate::config::CacheDiskConfig::default()
                 },
                 max_object_bytes: ByteSize::from_bytes(512),
                 ..CacheConfig::default()

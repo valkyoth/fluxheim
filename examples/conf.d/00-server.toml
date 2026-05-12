@@ -84,6 +84,7 @@ enabled = false
 max_size_bytes = "1GiB"
 
 [cache.disk]
+backend = "filesystem"
 enabled = false
 # path = "/var/cache/fluxheim"
 max_size_bytes = "10GiB"

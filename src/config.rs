@@ -4218,15 +4218,26 @@ pub struct CacheDiskConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
+    pub backend: CacheDiskBackend,
+    #[serde(default)]
     pub path: Option<PathBuf>,
     #[serde(default = "default_cache_disk_max_size_bytes")]
     pub max_size_bytes: ByteSize,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheDiskBackend {
+    #[default]
+    Filesystem,
+    StorageBin,
 }
 
 impl Default for CacheDiskConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            backend: CacheDiskBackend::Filesystem,
             path: None,
             max_size_bytes: default_cache_disk_max_size_bytes(),
         }
@@ -4237,6 +4248,13 @@ impl CacheDiskConfig {
     fn validate(&self, scope: &'static str, max_object_bytes: ByteSize) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
+        }
+
+        if self.backend == CacheDiskBackend::StorageBin {
+            return Err(ConfigError::UnsupportedCacheDiskBackend {
+                scope,
+                backend: "storage-bin",
+            });
         }
 
         let Some(path) = &self.path else {
@@ -4777,6 +4795,10 @@ pub enum ConfigError {
     CacheTierSmallerThanMaxObject {
         tier: String,
     },
+    UnsupportedCacheDiskBackend {
+        scope: &'static str,
+        backend: &'static str,
+    },
     CachePurgerNotCompiled,
     InvalidCachePurgerPolicy {
         field: &'static str,
@@ -5300,6 +5322,10 @@ impl Display for ConfigError {
             Self::CacheTierSmallerThanMaxObject { tier } => write!(
                 formatter,
                 "{tier}.max_size_bytes must be at least cache.max_object_bytes"
+            ),
+            Self::UnsupportedCacheDiskBackend { scope, backend } => write!(
+                formatter,
+                "{scope}.disk.backend = {backend:?} is recognized for the 1.2.2 storage-bin line but is not implemented yet"
             ),
             Self::CachePurgerNotCompiled => write!(
                 formatter,
@@ -6628,8 +6654,8 @@ mod tests {
 
     use super::{
         AdminConfig, AdminHealthConfig, AdminHealthResponseMode, AdminRemoteTransportMode,
-        AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheKeyPart,
-        CachePurgerConfig, CacheStaleErrorKind, Config, ConfigError, ConfigLoadError,
+        AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
+        CacheKeyPart, CachePurgerConfig, CacheStaleErrorKind, Config, ConfigError, ConfigLoadError,
         HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig,
         ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
         TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig,
@@ -9171,6 +9197,60 @@ mod tests {
             config.validate(),
             Err(ConfigError::MissingCacheDiskPath { scope: "cache" })
         );
+    }
+
+    #[test]
+    fn parses_filesystem_disk_cache_backend() {
+        let root = unique_temp_path("config-cache-filesystem-backend");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            backend = "filesystem"
+            path = "{}"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(config.cache.disk.backend, CacheDiskBackend::Filesystem);
+        assert_eq!(config.validate(), Ok(()));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_reserved_storage_bin_backend_until_implemented() {
+        let root = unique_temp_path("config-cache-storage-bin-backend");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            backend = "storage-bin"
+            path = "{}"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(config.cache.disk.backend, CacheDiskBackend::StorageBin);
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::UnsupportedCacheDiskBackend {
+                scope: "cache",
+                backend: "storage-bin"
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(unix)]

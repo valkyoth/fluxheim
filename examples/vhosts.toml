@@ -255,6 +255,7 @@ enabled = true
 max_size_bytes = "1GiB"
 
 [vhosts.cache.disk]
+backend = "filesystem"
 enabled = false
 # path = "/var/cache/fluxheim/example.test"
 max_size_bytes = "10GiB"

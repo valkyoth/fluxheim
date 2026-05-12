@@ -11,6 +11,17 @@ behavior when the change improves security or project direction.
 
 No unreleased changes yet.
 
+## 1.2.2 - Storage-Bin Disk Cache Follow-Up
+
+Released: in progress
+
+### Added
+
+- Started the `1.2.2` storage-bin cache line with an explicit
+  `cache.disk.backend` selector. The current filesystem backend remains the
+  default and `storage-bin` is recognized but fails closed until the allocator
+  and durable index are implemented.
+
 ## 1.2.1 - Local Static Cache Follow-Up
 
 Released: 2026-05-12

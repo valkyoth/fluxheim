@@ -590,6 +590,7 @@ max_size_bytes = "1GiB"
 
 [cache.disk]
 enabled = false
+backend = "filesystem"
 path = "/var/cache/fluxheim"
 max_size_bytes = "10GiB"
 
@@ -611,6 +612,10 @@ Fluxheim also rejects disk cache roots whose nearest existing parent is
 group- or world-writable, such as creating a cache root directly below `/tmp`; use a
 dedicated cache directory such as `/var/cache/fluxheim` or a pre-created private
 runtime directory.
+`cache.disk.backend` defaults to `filesystem`, the stable complete-object disk
+backend used by `1.2.0` and `1.2.1`. The `storage-bin` backend name is reserved
+for the focused `1.2.2` slab/bin storage line and is recognized but rejected
+until the preallocated-bin allocator and durable index are implemented.
 
 `local_static` is disabled by default. When set to `true`, the same cache
 policy may also store local `[web]`, `[vhosts.web]`, and route-scoped

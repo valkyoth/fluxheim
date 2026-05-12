@@ -322,10 +322,13 @@ produce new cache entries, and memory storage is preferred when both memory and
 disk tiers are configured to avoid duplicating site files on disk. Cache
 inspection and exact purge tooling uses the same local static key when the
 request resolves to a local file. After that,
-cache work continues as focused cache-only releases: `1.2.2` for slab/bin disk
-storage, `1.2.3` for distributed cache metadata/peer-fill, and an optional
-`1.2.4` only if production testing finds one more cache blocker. `1.3` is the
-load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
+cache work continues as focused cache-only releases. The active `1.2.2` line is
+slab/bin disk storage. Its first slice reserves
+`cache.disk.backend = "storage-bin"` and rejects it fail-closed while the
+allocator and durable index are implemented. `1.2.3` is planned for distributed
+cache metadata/peer-fill, and an optional `1.2.4` only if production testing
+finds one more cache blocker. `1.3` is the load-balancer/proxy parity line.
+Wasm is planned as a shared `1.4`
 extensibility release, covering nginx-Lua-style hooks and VCL-like cache policy
 hooks through one sandboxed runtime.
 

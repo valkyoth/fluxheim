@@ -798,7 +798,9 @@ Focused cache-only follow-up releases after 1.2:
   extents, maintains a durable free map and object index, supports crash
   recovery and compaction, and exposes fragmentation/space-amplification
   metrics. The filesystem object backend stays the portable default until slab
-  storage proves safer and faster in production tests.
+  storage proves safer and faster in production tests. The first `1.2.2` slice
+  reserves the `cache.disk.backend = "storage-bin"` config value and rejects it
+  fail-closed until the allocator and index are implemented.
 - `1.2.3`: distributed cache metadata and peer-fill. This release has one job:
   decide and implement the first safe multi-node cache coherence model for
   clustered deployments, including peer-fill limits, failure behavior, metrics,
