@@ -801,16 +801,25 @@ Focused cache-only follow-up releases after 1.2:
   storage proves safer and faster in production tests. The first `1.2.2` slice
   reserves the `cache.disk.backend = "storage-bin"` config value and rejects it
   fail-closed until the allocator and index are implemented.
-- `1.2.3`: distributed cache metadata and peer-fill. This release has one job:
+- `1.2.3`: optional cache encryption at rest. This release has one job: add an
+  opt-in cache encryption layer for disk cache objects, with key metadata
+  designed alongside the storage-bin format. The default remains unencrypted and
+  does not require OpenBao. Initial providers should include a local file or
+  systemd credential key source for small deployments and an OpenBao
+  Transit/KMS provider for regulated deployments that need centralized key
+  custody, key versioning, and rotation. The cache object format must record
+  encryption algorithm, key id/version, nonce, and authenticated-data scope so
+  objects cannot be swapped between cache keys.
+- `1.2.4`: distributed cache metadata and peer-fill. This release has one job:
   decide and implement the first safe multi-node cache coherence model for
   clustered deployments, including peer-fill limits, failure behavior, metrics,
   and clear isolation between vhosts/routes.
-- `1.2.4`: reserved only if production 1.2 testing exposes one more
+- `1.2.5`: reserved only if production 1.2 testing exposes one more
   cache-specific gap that should close before the 1.3 line starts. Candidate
   work includes proper Pingora-path partial streaming/slice range fill,
   HEAD-to-GET cache-key conversion with safe body handling, cache import/export
   workflows for mirrors, or bounded metadata ban predicates. If no such blocker
-  appears, skip `1.2.4` and move to `1.3`.
+  appears, skip `1.2.5` and move to `1.3`.
 
 Cross-cutting packaging follow-up for the next suitable `1.2.x` or `1.3`
 release: add proper manual pages for native deployments, including
@@ -1477,8 +1486,10 @@ the exception while the cache server is being completed as a focused sequence:
   matched web routes.
 - `v1.2.2`: focused slab/bin cache storage backend, if it proves safe enough
   after `1.2`.
-- `v1.2.3`: focused distributed cache metadata and peer-fill release.
-- `v1.2.4`: optional cache-only follow-up if production testing finds one more
+- `v1.2.3`: focused optional cache encryption at rest with local-key and
+  OpenBao Transit/KMS providers.
+- `v1.2.4`: focused distributed cache metadata and peer-fill release.
+- `v1.2.5`: optional cache-only follow-up if production testing finds one more
   cache blocker before `1.3`; likely candidates include proper Pingora-path
   partial streaming/slice range fill, HEAD-to-GET cache parity, cache
   import/export, or bounded metadata ban predicates.
