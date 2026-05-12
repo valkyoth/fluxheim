@@ -301,10 +301,13 @@ cache tags, stored header names and exact header values, exact object count,
 cache-lock/predictor/tier layout, stale-serving eligibility, selected cache
 scope/vhost/route, internal namespace, operator key namespace, user tag,
 cache-lock wait timeout, negative policy reasons, purge-index reachability, and
-fresh/stale/expired state. Remaining `1.2` hardening focuses on the documented
-Pingora revalidation edge, very large disk-cache loader/purger behavior,
-production Podman/ACME examples, a separate ACME companion service/timer flow,
-admin/metrics operations tooling, rollback/snapshot improvements, and proxy
+fresh/stale/expired state. The `1.2` cache baseline now includes the documented
+proxy revalidation metadata behavior, full disk-cache startup scans with
+checkpoint merging, debounced checkpoint writes, purge-index pruning on
+eviction, bounded background stale cleanup, and aggregate memory/disk pressure
+metrics. Remaining `1.2` hardening is release-candidate validation plus
+production Podman/ACME examples, the separate ACME companion service/timer flow,
+admin/metrics operations polish, rollback/snapshot improvements, and proxy
 buffering/backpressure controls for app migrations. After `1.2`, cache work is
 planned as focused cache-only follow-ups: `1.2.1` for slab/bin disk storage,
 `1.2.2` for Wasm cache policy hooks, `1.2.3` for distributed cache

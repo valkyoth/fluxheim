@@ -358,13 +358,14 @@ Stable scope:
   repository avatar/assets paths, where only one proxy route should use a cache
   tier while the rest of the vhost remains uncached.
 - Cache completion work promoted into 1.2:
-  - `1.2` is the stable cache-completion release. Finish the remaining cache
-    safety and operations concerns here before moving to the next feature line:
-    the documented proxied `304 Not Modified` metadata merge edge, very large
-    disk-cache loader/purger pacing and visibility, cache-debug/release-gate
-    coverage, and production validation for stampede protection. Larger cache
-    architecture extensions are split into focused `1.2.x` releases below so
-    each follow-up has one clear job;
+  - `1.2` is the stable cache-completion release. The main cache safety and
+    operations concerns are now in the current development line: the documented
+    proxied `304 Not Modified` metadata merge edge, very large disk-cache
+    loader/purger pacing and visibility, cache-debug/release-gate coverage,
+    and production validation for stampede protection. Remaining work before
+    tagging `1.2` should be release-candidate validation and narrow polish, not
+    new cache architecture. Larger cache architecture extensions are split into
+    focused `1.2.x` releases below so each follow-up has one clear job;
   - disk-only cache admission now streams body chunks into a bounded temp file
     under the cache root before atomically committing the final object, so the
     disk tier no longer buffers the full response body in memory during
@@ -439,9 +440,13 @@ Stable scope:
     should use the proper Pingora cache path and move to the optional cache
     follow-up slot if production testing proves it is required before 1.3;
   - cache manager/loader hardening beyond the current startup purge-index
-    rebuild and stale purger: configurable incremental loader/purger pacing,
-    storage-pressure cleanup based on LRU/last-access metadata where Pingora
-    exposes it, and operator-facing logs/metrics when cleanup falls behind;
+    rebuild and stale purger: full deterministic startup scans now prevent
+    checkpoint orphans, startup enforces the disk-size budget before serving,
+    stale cleanup is bounded and observable, and aggregate pressure gauges show
+    whether memory or disk caches are approaching their budgets. Additional
+    configurable incremental loader/purger pacing can move to a later patch if
+    production scale testing shows startup scans or cleanup ticks need more
+    shaping;
   - invalidation maturity beyond exact purge and wildcard/prefix/tag purge:
     evaluate whether stored metadata predicates are needed for the 1.2 stable
     baseline. If they are not required for production safety, keep them out of
