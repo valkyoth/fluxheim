@@ -342,6 +342,19 @@ Stable scope:
   - document container secret mounts for EAB files without relabel suffixes
     when the host tree is already labeled for container access.
 - Prometheus metrics baseline on loopback by default.
+- Strict host-routing mode for hardened deployments: missing or invalid host
+  identity returns `400`, unknown hosts return `421`, default-vhost fallback
+  remains available for compatibility, and rejections are visible through
+  low-cardinality metrics plus security logs.
+- Built-in admin authentication brute-force throttling with bounded per-source
+  and global failure windows, progressive lockouts, and metrics/security-log
+  events for failed or throttled control-plane access.
+- Authenticated admin health checks by default. Unauthenticated health is an
+  explicit loopback-only compatibility mode, and health probes can use an empty
+  `204` response to reduce control-plane fingerprinting.
+- Remote admin transport must fail closed: non-loopback admin listeners require
+  an explicit `trusted_tls_terminator` declaration until Fluxheim has
+  first-class admin TLS/mTLS support.
 - Observability changes should be designed as paired surfaces where practical:
   Prometheus metrics for aggregate dashboards and OpenTelemetry
   traces/attributes/events for request-path diagnosis. Cache observability in
@@ -958,6 +971,10 @@ Stable scope:
 - Compile-time incompatibility guards.
 - No access logs, request metrics, disk cache, WAF audit logs, or client-IP
   forwarding in privacy builds.
+- Hardened filesystem trust checks inspect sensitive path ownership and write
+  permissions consistently across config, TLS, ACME, admin token, snapshot,
+  process, log, and cache paths. POSIX ACL inspection is tracked here as the
+  next strict-profile hardening step after mode-bit enforcement.
 
 Beta scope:
 

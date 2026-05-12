@@ -100,6 +100,13 @@ require_loopback = true
 token_env = "FLUXHEIM_ADMIN_TOKEN"
 snapshot_store = "/var/lib/fluxheim/snapshots"
 
+[admin.transport]
+mode = "local_only"
+
+[admin.health]
+unauthenticated = false
+response = "status"
+
 [admin.self_healing]
 enabled = true
 validation_window_secs = 30
@@ -108,8 +115,13 @@ min_successful_checks = 1
 max_error_rate_per_mille = 100
 ```
 
-The initial listener must be private by default. Remote exposure should require
-an explicit config change plus a stronger authentication and network policy.
+The initial listener must be private by default. Remote exposure now requires
+`admin.require_loopback = false` plus `[admin.transport] mode =
+"trusted_tls_terminator"`, which is an explicit operator declaration that TLS
+or mTLS is terminated by a trusted local sidecar, reverse proxy, or load
+balancer before traffic reaches the plain admin listener. First-class admin
+TLS/mTLS is still tracked as future work; do not expose the admin listener over
+cleartext networks.
 
 Implemented endpoints:
 
@@ -123,8 +135,10 @@ Implemented endpoints:
 - `POST /_fluxheim/self-heal/fail`
 - `POST /_fluxheim/self-heal/report`
 
-`/_fluxheim/health` is intentionally unauthenticated for local watchdogs.
-All other admin endpoints require `Authorization: Bearer <token>`.
+All admin endpoints, including `/_fluxheim/health`, require
+`Authorization: Bearer <token>` by default. For local-only watchdogs, set
+`[admin.health] unauthenticated = true` while keeping `admin.listen` loopback;
+use `response = "minimal"` for an empty `204` probe response.
 
 Create a snapshot over HTTP:
 

@@ -3243,9 +3243,9 @@ fn validate_acme_init_path(
         .into());
     }
     #[cfg(unix)]
-    if existing_parent_is_world_writable(path)? {
+    if existing_parent_has_insecure_write_permissions(path)? {
         return Err(format!(
-            "{field} must not be below a world-writable parent: {}",
+            "{field} must not be below a group- or world-writable parent: {}",
             path.display()
         )
         .into());
@@ -3358,23 +3358,11 @@ fn existing_prefix_contains_symlink(
 }
 
 #[cfg(all(feature = "acme-client", unix))]
-fn existing_parent_is_world_writable(path: &Path) -> Result<bool, Box<dyn Error + Send + Sync>> {
-    use std::os::unix::fs::MetadataExt;
-
-    let Some(parent) = path.parent() else {
-        return Ok(true);
-    };
-    let mut current = PathBuf::new();
-    for component in parent.components() {
-        current.push(component);
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.mode() & 0o002 != 0 => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Ok(false)
+fn existing_parent_has_insecure_write_permissions(
+    path: &Path,
+) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    crate::fs_trust::existing_parent_has_insecure_write_permissions(path)
+        .map_err(|error| error.into())
 }
 
 #[cfg(feature = "acme-client")]

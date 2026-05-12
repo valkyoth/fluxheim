@@ -124,6 +124,15 @@ It is intended to promote:
 - stable on-disk cache object metadata for combined keys, primary keys, tags,
   and path indexes;
 - Prometheus metrics plus OpenTelemetry metric and trace export basics;
+- strict host-routing mode that rejects missing, invalid, and unknown host
+  headers instead of failing open to the default vhost;
+- built-in admin bearer-token brute-force throttling with per-source and global
+  failure windows, progressive lockouts, security logs, and metrics;
+- authenticated admin health checks by default, with explicit loopback-only
+  unauthenticated mode and optional empty `204` responses for local probes;
+- fail-closed remote admin transport guardrails: non-loopback admin listeners
+  require an explicit `trusted_tls_terminator` declaration until first-class
+  admin TLS/mTLS lands;
 - release-gate coverage for proxy cache, local observability smoke suites, and
   the published full/default, cache, and load-balancer container feature
   profiles.
@@ -181,9 +190,15 @@ Before starting the server:
 - do not mix compatibility aliases such as `upstream` with preferred fields
   such as `upstreams`;
 - keep TLS private keys, ACME storage, log files, cache roots, runtime paths,
-  admin token files, and snapshot stores outside world-writable directories;
+  admin token files, and snapshot stores outside group- or world-writable directories;
 - keep admin and metrics listeners loopback-only unless a trusted local
   sidecar or network policy protects them;
+- set `[admin.transport] mode = "trusted_tls_terminator"` only when a trusted
+  local TLS/mTLS terminator protects every remote hop to the admin plane;
+- keep admin authentication throttling enabled unless a stricter external
+  control-plane rate limiter is already enforcing equivalent limits;
+- keep admin health authenticated unless a local-only supervisor needs an
+  unauthenticated loopback probe;
 - explicitly decide whether access logging may include raw host and path
   values.
 

@@ -4,6 +4,8 @@ use std::time::Duration;
 use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, Opts};
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ENABLED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
@@ -40,6 +42,8 @@ pub fn enabled() -> bool {
 
 pub fn init() -> Result<(), prometheus::Error> {
     proxy_requests_total()?;
+    host_routing_rejections_total()?;
+    admin_auth_events_total()?;
     cache_vhosts()?;
     cache_enabled_vhosts()?;
     cache_tiered_vhosts()?;
@@ -133,6 +137,24 @@ pub fn record_proxy_outcome(vhost: &str, method: &str, status: Option<u16>, erro
             ])
             .inc(),
         Err(error) => log::debug!("metrics counter unavailable: {error}"),
+    }
+}
+
+pub fn record_host_routing_rejection(reason: &str) {
+    match host_routing_rejections_total() {
+        Ok(counter) => counter
+            .with_label_values(&[host_routing_reason_label(reason)])
+            .inc(),
+        Err(error) => log::debug!("metrics counter unavailable: {error}"),
+    }
+}
+
+pub fn record_admin_auth_event(event: &str, scope: &str) {
+    match admin_auth_events_total() {
+        Ok(counter) => counter
+            .with_label_values(&[admin_auth_event_label(event), admin_auth_scope_label(scope)])
+            .inc(),
+        Err(error) => log::debug!("metrics admin auth counter unavailable: {error}"),
     }
 }
 
@@ -345,6 +367,54 @@ fn proxy_requests_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     PROXY_REQUESTS_TOTAL
         .get()
         .ok_or_else(|| prometheus::Error::Msg("metrics counter failed to initialize".to_owned()))
+}
+
+fn host_routing_rejections_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = HOST_ROUTING_REJECTIONS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_host_routing_rejections_total",
+            "Total Fluxheim strict host-routing rejections by reason.",
+        ),
+        &["reason"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = HOST_ROUTING_REJECTIONS_TOTAL.set(counter);
+    HOST_ROUTING_REJECTIONS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("host routing counter failed to initialize".to_owned())
+    })
+}
+
+fn admin_auth_events_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = ADMIN_AUTH_EVENTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_admin_auth_events_total",
+            "Total Fluxheim admin authentication security events by event and throttle scope.",
+        ),
+        &["event", "scope"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = ADMIN_AUTH_EVENTS_TOTAL.set(counter);
+    ADMIN_AUTH_EVENTS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("admin auth event counter failed to initialize".to_owned())
+    })
 }
 
 fn cache_vhosts() -> Result<&'static IntGauge, prometheus::Error> {
@@ -788,6 +858,31 @@ fn status_class(status: Option<u16>) -> &'static str {
     }
 }
 
+fn host_routing_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "missing" => "missing",
+        "invalid" => "invalid",
+        "unknown" => "unknown",
+        _ => "other",
+    }
+}
+
+fn admin_auth_event_label(event: &str) -> &'static str {
+    match event {
+        "failure" => "failure",
+        "throttled" => "throttled",
+        _ => "other",
+    }
+}
+
+fn admin_auth_scope_label(scope: &str) -> &'static str {
+    match scope {
+        "source" => "source",
+        "global" => "global",
+        _ => "other",
+    }
+}
+
 fn cache_tier_label(tier: &str) -> &'static str {
     match tier {
         "memory" => "memory",
@@ -907,10 +1002,11 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        cache_config_stats, init, method_bucket, record_cache_activity,
+        cache_config_stats, init, method_bucket, record_admin_auth_event, record_cache_activity,
         record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
         record_cache_purger_duration, record_cache_purger_entries, record_cache_purger_run,
-        record_config, record_metrics_otlp_export, record_proxy_outcome, status_class,
+        record_config, record_host_routing_rejection, record_metrics_otlp_export,
+        record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -932,6 +1028,46 @@ mod tests {
         assert!(output.contains(r#"class="server_error""#));
         assert!(output.contains(r#"status_class="5xx""#));
         assert!(!output.contains(r#"status="502""#));
+    }
+
+    #[test]
+    fn records_host_routing_rejection_counter() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_host_routing_rejection("missing");
+        record_host_routing_rejection("attacker-reason");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_host_routing_rejections_total"));
+        assert!(output.contains(r#"reason="missing""#));
+        assert!(output.contains(r#"reason="other""#));
+    }
+
+    #[test]
+    fn records_admin_auth_event_counter() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_admin_auth_event("failure", "source");
+        record_admin_auth_event("throttled", "global");
+        record_admin_auth_event("attacker-event", "attacker-scope");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_admin_auth_events_total"));
+        assert!(output.contains(r#"event="failure",scope="source""#));
+        assert!(output.contains(r#"event="throttled",scope="global""#));
+        assert!(output.contains(r#"event="other",scope="other""#));
     }
 
     #[test]

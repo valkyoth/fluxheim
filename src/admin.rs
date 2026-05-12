@@ -1,9 +1,9 @@
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::error::Error;
 use std::fs;
 use std::io::Read;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use crate::config::{AdminConfig, Config};
+use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
 use crate::reload::{ReloadReason, classify_reload};
 use crate::snapshot::{ConfigSnapshot, SnapshotError, SnapshotStore};
@@ -56,11 +56,14 @@ pub struct AdminApp {
     current_config: Arc<ArcSwap<Config>>,
     proxy: FluxProxy,
     health_path: String,
+    health_unauthenticated: bool,
+    health_response: AdminHealthResponseMode,
     self_healing_enabled: bool,
     validation_window_secs: u64,
     min_successful_checks: usize,
     max_error_rate_per_mille: u16,
     state: Arc<Mutex<AdminRuntimeState>>,
+    auth_throttle: AdminAuthThrottle,
 }
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
@@ -100,6 +103,193 @@ struct PendingValidation {
     expires_unix_secs: u64,
     successful_checks: usize,
     failed_checks: usize,
+}
+
+#[derive(Clone)]
+struct AdminAuthThrottle {
+    config: AdminAuthThrottleConfig,
+    state: Arc<Mutex<AdminAuthThrottleState>>,
+}
+
+#[derive(Debug, Default)]
+struct AdminAuthThrottleState {
+    global_failures: VecDeque<u64>,
+    global_locked_until: u64,
+    global_lockouts: u32,
+    sources: HashMap<AuthSource, AdminAuthSourceState>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
+enum AuthSource {
+    Ip(IpAddr),
+    Unknown,
+}
+
+#[derive(Debug, Default)]
+struct AdminAuthSourceState {
+    failures: VecDeque<u64>,
+    locked_until: u64,
+    lockouts: u32,
+    last_seen: u64,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum AdminAuthThrottleScope {
+    Source,
+    Global,
+}
+
+impl AdminAuthThrottle {
+    fn new(config: AdminAuthThrottleConfig) -> Self {
+        Self {
+            config,
+            state: Arc::new(Mutex::new(AdminAuthThrottleState::default())),
+        }
+    }
+
+    fn pre_auth_check(&self, source: Option<IpAddr>) -> Option<AdminAuthThrottleScope> {
+        if !self.config.enabled {
+            return None;
+        }
+        let now = unix_secs();
+        let source = AuthSource::from(source);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.prune(now, &self.config);
+
+        if state.global_locked_until > now {
+            return Some(AdminAuthThrottleScope::Global);
+        }
+        state.sources.get(&source).and_then(|record| {
+            (record.locked_until > now).then_some(AdminAuthThrottleScope::Source)
+        })
+    }
+
+    fn record_failure(&self, source: Option<IpAddr>) -> Option<AdminAuthThrottleScope> {
+        if !self.config.enabled {
+            return None;
+        }
+        let now = unix_secs();
+        let source = AuthSource::from(source);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.prune(now, &self.config);
+        state.global_failures.push_back(now);
+        state.ensure_source_capacity(now, &self.config, source);
+
+        let source_locked = {
+            let source_record = state.sources.entry(source).or_default();
+            source_record.last_seen = now;
+            source_record.failures.push_back(now);
+            if source_record.failures.len() >= self.config.per_source_failures {
+                source_record.lockouts = source_record.lockouts.saturating_add(1);
+                source_record.locked_until =
+                    now.saturating_add(lockout_secs(&self.config, source_record.lockouts));
+                source_record.failures.clear();
+                true
+            } else {
+                false
+            }
+        };
+
+        if state.global_failures.len() >= self.config.global_failures {
+            state.global_lockouts = state.global_lockouts.saturating_add(1);
+            state.global_locked_until =
+                now.saturating_add(lockout_secs(&self.config, state.global_lockouts));
+            state.global_failures.clear();
+            return Some(AdminAuthThrottleScope::Global);
+        }
+
+        source_locked.then_some(AdminAuthThrottleScope::Source)
+    }
+
+    fn record_success(&self, source: Option<IpAddr>) {
+        if !self.config.enabled {
+            return;
+        }
+        let source = AuthSource::from(source);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.sources.remove(&source);
+    }
+}
+
+impl AdminAuthThrottleState {
+    fn prune(&mut self, now: u64, config: &AdminAuthThrottleConfig) {
+        let cutoff = now.saturating_sub(config.window_secs);
+        prune_failures(&mut self.global_failures, cutoff);
+        self.sources.retain(|_, record| {
+            prune_failures(&mut record.failures, cutoff);
+            record.locked_until > now || !record.failures.is_empty()
+        });
+    }
+
+    fn ensure_source_capacity(
+        &mut self,
+        now: u64,
+        config: &AdminAuthThrottleConfig,
+        source: AuthSource,
+    ) {
+        if self.sources.contains_key(&source) || self.sources.len() < config.max_sources {
+            return;
+        }
+        if let Some(oldest) = self
+            .sources
+            .iter()
+            .filter(|(_, record)| record.locked_until <= now)
+            .min_by_key(|(_, record)| record.last_seen)
+            .or_else(|| {
+                self.sources
+                    .iter()
+                    .min_by_key(|(_, record)| record.last_seen)
+            })
+            .map(|(source, _)| *source)
+        {
+            self.sources.remove(&oldest);
+        }
+    }
+}
+
+impl From<Option<IpAddr>> for AuthSource {
+    fn from(source: Option<IpAddr>) -> Self {
+        source.map(Self::Ip).unwrap_or(Self::Unknown)
+    }
+}
+
+impl AdminAuthThrottleScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Source => "source",
+            Self::Global => "global",
+        }
+    }
+}
+
+fn prune_failures(failures: &mut VecDeque<u64>, cutoff: u64) {
+    while failures.front().is_some_and(|seen_at| *seen_at < cutoff) {
+        failures.pop_front();
+    }
+}
+
+fn lockout_secs(config: &AdminAuthThrottleConfig, lockouts: u32) -> u64 {
+    let exponent = lockouts.saturating_sub(1).min(20);
+    let multiplier = 1_u64.checked_shl(exponent).unwrap_or(u64::MAX);
+    config
+        .base_lockout_secs
+        .saturating_mul(multiplier)
+        .min(config.max_lockout_secs)
+}
+
+fn auth_source_label(source: Option<IpAddr>) -> String {
+    source
+        .map(|source| source.to_string())
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 pub struct AdminServices {
@@ -159,6 +349,8 @@ impl AdminApp {
             current_config: Arc::new(ArcSwap::from_pointee(config.clone())),
             proxy,
             health_path: config.admin.self_healing.health_path.clone(),
+            health_unauthenticated: config.admin.health.unauthenticated,
+            health_response: config.admin.health.response,
             self_healing_enabled: config.admin.self_healing.enabled,
             validation_window_secs: config.admin.self_healing.validation_window_secs,
             min_successful_checks: config.admin.self_healing.min_successful_checks,
@@ -168,6 +360,7 @@ impl AdminApp {
                 known_good_snapshot: runtime_snapshot,
                 pending_validation: None,
             })),
+            auth_throttle: AdminAuthThrottle::new(config.admin.auth_throttle),
         };
 
         if app.self_healing_enabled {
@@ -177,12 +370,24 @@ impl AdminApp {
         Ok(app)
     }
 
+    #[cfg(test)]
     fn handle(
         &self,
         method: &str,
         path: &str,
         query: Option<&str>,
         headers: &HeaderMap,
+    ) -> AdminResponse {
+        self.handle_with_source(method, path, query, headers, None)
+    }
+
+    fn handle_with_source(
+        &self,
+        method: &str,
+        path: &str,
+        query: Option<&str>,
+        headers: &HeaderMap,
+        source: Option<IpAddr>,
     ) -> AdminResponse {
         if let Some(response) = self.enforce_self_healing_deadline() {
             return response;
@@ -192,18 +397,61 @@ impl AdminApp {
             return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"path_too_large"}"#);
         }
 
-        if path == self.health_path {
+        let health_request = path == self.health_path;
+        if health_request && self.health_unauthenticated {
             if method != "GET" {
                 return json_response(
                     StatusCode::METHOD_NOT_ALLOWED,
                     br#"{"error":"method_not_allowed"}"#,
                 );
             }
-            return json_response(StatusCode::OK, br#"{"status":"ok"}"#);
+            return self.health_response();
+        }
+
+        if let Some(scope) = self.auth_throttle.pre_auth_check(source) {
+            record_admin_auth_event("throttled", scope);
+            log::warn!(
+                target: "fluxheim::security",
+                "admin auth request throttled source={} scope={}",
+                auth_source_label(source),
+                scope.as_str()
+            );
+            return json_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                br#"{"error":"admin_auth_throttled"}"#,
+            );
         }
 
         if !authorized(authorization_header(headers), &self.token) {
+            let scope = self.auth_throttle.record_failure(source);
+            record_admin_auth_event("failure", scope.unwrap_or(AdminAuthThrottleScope::Source));
+            log::warn!(
+                target: "fluxheim::security",
+                "admin auth failed source={} throttled={}",
+                auth_source_label(source),
+                scope.map(AdminAuthThrottleScope::as_str).unwrap_or("none")
+            );
+            if scope.is_some() {
+                record_admin_auth_event(
+                    "throttled",
+                    scope.unwrap_or(AdminAuthThrottleScope::Source),
+                );
+                return json_response(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    br#"{"error":"admin_auth_throttled"}"#,
+                );
+            }
             return json_response(StatusCode::UNAUTHORIZED, br#"{"error":"unauthorized"}"#);
+        }
+        self.auth_throttle.record_success(source);
+        if health_request {
+            if method != "GET" {
+                return json_response(
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    br#"{"error":"method_not_allowed"}"#,
+                );
+            }
+            return self.health_response();
         }
         if query.is_some_and(|query| query.len() > MAX_ADMIN_QUERY_BYTES) {
             return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"query_too_large"}"#);
@@ -363,6 +611,13 @@ impl AdminApp {
                 StatusCode::METHOD_NOT_ALLOWED,
                 br#"{"error":"method_not_allowed"}"#,
             ),
+        }
+    }
+
+    fn health_response(&self) -> AdminResponse {
+        match self.health_response {
+            AdminHealthResponseMode::Minimal => empty_response(StatusCode::NO_CONTENT),
+            AdminHealthResponseMode::Status => json_response(StatusCode::OK, br#"{"status":"ok"}"#),
         }
     }
 
@@ -1617,11 +1872,16 @@ impl BackgroundService for AdminApp {
 impl ServeHttp for AdminApp {
     async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
         let request = session.req_header();
-        let response = self.handle(
+        let source = session
+            .client_addr()
+            .and_then(|addr| addr.as_inet())
+            .map(|addr| addr.ip());
+        let response = self.handle_with_source(
             request.method.as_str(),
             request.uri.path(),
             request.uri.query(),
             &request.headers,
+            source,
         );
 
         let body_len = response.body.len();
@@ -1691,14 +1951,14 @@ fn read_secret_file(path: &Path) -> Result<Zeroizing<String>, Box<dyn Error + Se
     }
 
     #[cfg(unix)]
-    if secret_existing_parent_is_world_writable(path).map_err(|error| {
+    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).map_err(|error| {
         format!(
             "failed to inspect admin token parent path {}: {error}",
             path.display()
         )
     })? {
         return Err(format!(
-            "admin token file {} must not be below a world-writable directory",
+            "admin token file {} must not be below a group- or world-writable directory",
             path.display()
         )
         .into());
@@ -1768,30 +2028,6 @@ fn secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
     }
 
     Ok(false)
-}
-
-#[cfg(unix)]
-fn secret_existing_parent_is_world_writable(path: &Path) -> std::io::Result<bool> {
-    let mut current = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-
-    loop {
-        match fs::symlink_metadata(current) {
-            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o002 != 0),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let Some(parent) = current.parent() else {
-                    return Ok(false);
-                };
-                if parent == current {
-                    return Ok(false);
-                }
-                current = parent;
-            }
-            Err(error) => return Err(error),
-        }
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1864,12 +2100,28 @@ fn json_response(status: StatusCode, body: &[u8]) -> AdminResponse {
     }
 }
 
+fn empty_response(status: StatusCode) -> AdminResponse {
+    AdminResponse {
+        status,
+        content_type: "application/octet-stream",
+        body: Vec::new(),
+    }
+}
+
 fn error_response(status: StatusCode, error: &str) -> AdminResponse {
     json_response(
         status,
         format!(r#"{{"status":"error","error":"{}"}}"#, json_escape(error)).as_bytes(),
     )
 }
+
+#[cfg(feature = "metrics")]
+fn record_admin_auth_event(event: &str, scope: AdminAuthThrottleScope) {
+    crate::metrics::record_admin_auth_event(event, scope.as_str());
+}
+
+#[cfg(not(feature = "metrics"))]
+fn record_admin_auth_event(_event: &str, _scope: AdminAuthThrottleScope) {}
 
 fn snapshot_json(snapshot: &ConfigSnapshot, current: Option<&str>) -> String {
     let message = snapshot
@@ -2605,13 +2857,13 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::{
-        AdminApp, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
+        AdminApp, AdminAuthThrottle, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
         admin_services_from_config, authorized, constant_time_eq, read_bounded_secret_file,
         read_secret_file,
     };
     use crate::config::{
-        AdminConfig, AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig, VhostConfig,
-        WebConfig,
+        AdminAuthThrottleConfig, AdminConfig, AdminHealthConfig, AdminHealthResponseMode,
+        AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig, VhostConfig, WebConfig,
     };
     #[cfg(feature = "cache")]
     use crate::config::{ByteSize, CacheConfig, RouteConfig};
@@ -2619,7 +2871,7 @@ mod tests {
     use crate::snapshot::SnapshotStore;
     use crate::test_support::unique_temp_path;
     #[cfg(unix)]
-    use crate::test_support::unique_world_writable_child;
+    use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
 
     fn app() -> AdminApp {
         app_with_config(Config::default())
@@ -2639,26 +2891,60 @@ mod tests {
                 .expect("secure private admin snapshot test store");
         }
         let proxy = FluxProxy::from_config(&config).unwrap();
+        let auth_throttle = AdminAuthThrottle::new(config.admin.auth_throttle);
+        let health_unauthenticated = config.admin.health.unauthenticated;
+        let health_response = config.admin.health.response;
         AdminApp {
             token: AdminToken::new("secret-token"),
             store: SnapshotStore::new(store),
             current_config: Arc::new(ArcSwap::from_pointee(config)),
             proxy,
             health_path: "/_fluxheim/health".to_owned(),
+            health_unauthenticated,
+            health_response,
             self_healing_enabled,
             validation_window_secs: AdminSelfHealingConfig::default().validation_window_secs,
             min_successful_checks: AdminSelfHealingConfig::default().min_successful_checks,
             max_error_rate_per_mille: AdminSelfHealingConfig::default().max_error_rate_per_mille,
             state: Arc::new(std::sync::Mutex::new(AdminRuntimeState::default())),
+            auth_throttle,
         }
     }
 
     #[test]
-    fn health_endpoint_does_not_require_auth() {
+    fn health_endpoint_requires_auth_by_default() {
         let response = app().handle("GET", "/_fluxheim/health", None, &HeaderMap::new());
+        assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+
+        let response = app().handle("GET", "/_fluxheim/health", None, &auth_headers());
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body, br#"{"status":"ok"}"#);
+    }
+
+    #[test]
+    fn health_endpoint_can_be_explicitly_unauthenticated() {
+        let mut config = Config::default();
+        config.admin.health.unauthenticated = true;
+        let response =
+            app_with_config(config).handle("GET", "/_fluxheim/health", None, &HeaderMap::new());
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body, br#"{"status":"ok"}"#);
+    }
+
+    #[test]
+    fn health_endpoint_can_minimize_response() {
+        let mut config = Config::default();
+        config.admin.health = AdminHealthConfig {
+            unauthenticated: true,
+            response: AdminHealthResponseMode::Minimal,
+        };
+        let response =
+            app_with_config(config).handle("GET", "/_fluxheim/health", None, &HeaderMap::new());
+
+        assert_eq!(response.status, StatusCode::NO_CONTENT);
+        assert!(response.body.is_empty());
     }
 
     #[test]
@@ -2673,6 +2959,84 @@ mod tests {
                 .unwrap()
                 .contains(r#""pending_validation":null"#)
         );
+    }
+
+    #[test]
+    fn admin_auth_throttle_locks_repeated_failures_by_source() {
+        let mut config = Config::default();
+        config.admin.auth_throttle = AdminAuthThrottleConfig {
+            enabled: true,
+            window_secs: 60,
+            per_source_failures: 2,
+            global_failures: 100,
+            base_lockout_secs: 60,
+            max_lockout_secs: 60,
+            max_sources: 16,
+        };
+        let app = app_with_config(config);
+        let source = Some("192.0.2.10".parse().unwrap());
+        let other_source = Some("192.0.2.11".parse().unwrap());
+
+        let response =
+            app.handle_with_source("GET", "/_fluxheim/status", None, &HeaderMap::new(), source);
+        assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+
+        let response =
+            app.handle_with_source("GET", "/_fluxheim/status", None, &HeaderMap::new(), source);
+        assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.body, br#"{"error":"admin_auth_throttled"}"#);
+
+        let response =
+            app.handle_with_source("GET", "/_fluxheim/status", None, &auth_headers(), source);
+        assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
+
+        let response = app.handle_with_source(
+            "GET",
+            "/_fluxheim/status",
+            None,
+            &auth_headers(),
+            other_source,
+        );
+        assert_eq!(response.status, StatusCode::OK);
+    }
+
+    #[test]
+    fn admin_auth_throttle_can_lock_globally() {
+        let mut config = Config::default();
+        config.admin.auth_throttle = AdminAuthThrottleConfig {
+            enabled: true,
+            window_secs: 60,
+            per_source_failures: 100,
+            global_failures: 2,
+            base_lockout_secs: 60,
+            max_lockout_secs: 60,
+            max_sources: 16,
+        };
+        let app = app_with_config(config);
+
+        for source in ["192.0.2.20", "192.0.2.21"] {
+            let response = app.handle_with_source(
+                "GET",
+                "/_fluxheim/status",
+                None,
+                &HeaderMap::new(),
+                Some(source.parse().unwrap()),
+            );
+            if source == "192.0.2.20" {
+                assert_eq!(response.status, StatusCode::UNAUTHORIZED);
+            } else {
+                assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
+            }
+        }
+
+        let response = app.handle_with_source(
+            "GET",
+            "/_fluxheim/status",
+            None,
+            &auth_headers(),
+            Some("192.0.2.22".parse().unwrap()),
+        );
+        assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[test]
@@ -5117,7 +5481,24 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("must not be below a world-writable directory")
+                .contains("must not be below a group- or world-writable directory")
+        );
+        let _ = std::fs::remove_file(token_file);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn admin_token_file_must_not_be_below_group_writable_directory() {
+        let token_file =
+            unique_group_writable_child("admin-token-group-writable-parent", "admin-token");
+        std::fs::write(&token_file, "secret-token\n").unwrap();
+
+        let error = read_secret_file(&token_file).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("must not be below a group- or world-writable directory")
         );
         let _ = std::fs::remove_file(token_file);
     }

@@ -132,7 +132,7 @@ impl Display for TlsStorageIssue {
             ),
             Self::CertificatePathHasWorldWritableParent { scope, path } => write!(
                 formatter,
-                "{scope}.cert_path {} uses a world-writable parent directory",
+                "{scope}.cert_path {} uses a group- or world-writable parent directory",
                 path.display()
             ),
             Self::PrivateKeyReadFailed {
@@ -151,7 +151,7 @@ impl Display for TlsStorageIssue {
             ),
             Self::PrivateKeyPathHasWorldWritableParent { scope, path } => write!(
                 formatter,
-                "{scope}.key_path {} uses a world-writable parent directory",
+                "{scope}.key_path {} uses a group- or world-writable parent directory",
                 path.display()
             ),
             Self::InsecurePrivateKeyPermissions { scope, path, mode } => write!(
@@ -195,7 +195,7 @@ impl Display for TlsStorageIssue {
                 path,
             } => write!(
                 formatter,
-                "tls.acme.issuers.{issuer}.eab.{field}_file {} uses a world-writable parent directory",
+                "tls.acme.issuers.{issuer}.eab.{field}_file {} uses a group- or world-writable parent directory",
                 path.display()
             ),
             Self::InsecureAcmeEabSecretPermissions {
@@ -232,7 +232,7 @@ impl Display for TlsStorageIssue {
             ),
             Self::AcmeStoragePathHasWorldWritableParent { path } => write!(
                 formatter,
-                "tls.acme.storage {} uses a world-writable parent directory",
+                "tls.acme.storage {} uses a group- or world-writable parent directory",
                 path.display()
             ),
             Self::InsecureAcmeStoragePermissions { path, mode } => write!(
@@ -630,7 +630,7 @@ fn push_certificate_world_writable_parent_issue(
     path: &Path,
     issues: &mut Vec<TlsStorageIssue>,
 ) -> bool {
-    match path_has_world_writable_parent(path) {
+    match path_has_insecure_writable_parent(path) {
         Ok(true) => {
             issues.push(TlsStorageIssue::CertificatePathHasWorldWritableParent {
                 scope: scope.to_owned(),
@@ -655,7 +655,7 @@ fn push_private_key_world_writable_parent_issue(
     path: &Path,
     issues: &mut Vec<TlsStorageIssue>,
 ) -> bool {
-    match path_has_world_writable_parent(path) {
+    match path_has_insecure_writable_parent(path) {
         Ok(true) => {
             issues.push(TlsStorageIssue::PrivateKeyPathHasWorldWritableParent {
                 scope: scope.to_owned(),
@@ -679,7 +679,7 @@ fn push_acme_storage_world_writable_parent_issue(
     path: &Path,
     issues: &mut Vec<TlsStorageIssue>,
 ) -> bool {
-    match path_has_world_writable_parent(path) {
+    match path_has_insecure_writable_parent(path) {
         Ok(true) => {
             issues.push(TlsStorageIssue::AcmeStoragePathHasWorldWritableParent {
                 path: path.to_path_buf(),
@@ -703,7 +703,7 @@ fn push_acme_eab_world_writable_parent_issue(
     path: &Path,
     issues: &mut Vec<TlsStorageIssue>,
 ) -> bool {
-    match path_has_world_writable_parent(path) {
+    match path_has_insecure_writable_parent(path) {
         Ok(true) => {
             issues.push(TlsStorageIssue::AcmeEabSecretPathHasWorldWritableParent {
                 issuer: issuer.to_owned(),
@@ -725,33 +725,8 @@ fn push_acme_eab_world_writable_parent_issue(
     }
 }
 
-#[cfg(unix)]
-fn path_has_world_writable_parent(path: &Path) -> io::Result<bool> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut current = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-
-    loop {
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(false),
-            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o002 != 0),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                if !current.pop() {
-                    return Ok(false);
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn path_has_world_writable_parent(_path: &Path) -> io::Result<bool> {
-    Ok(false)
+fn path_has_insecure_writable_parent(path: &Path) -> io::Result<bool> {
+    crate::fs_trust::existing_parent_has_insecure_write_permissions(path)
 }
 
 fn symlink_inspection_error(error: io::Error) -> String {
@@ -897,9 +872,9 @@ mod tests {
         ProxyConfig, ServerConfig, StaticCertificateConfig, TlsConfig, VhostConfig,
         VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
     };
-    #[cfg(unix)]
-    use crate::test_support::unique_world_writable_child;
     use crate::test_support::{safe_child_path, unique_temp_path};
+    #[cfg(unix)]
+    use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
 
     use super::{
         DownstreamCertificateSelector, TlsStorageIssue, recommended_acme_storage_mode,
@@ -1056,6 +1031,32 @@ mod tests {
         let cert = unique_world_writable_child("tls-world-writable-parent", "fullchain.pem");
         let key = unique_world_writable_child("tls-world-writable-parent-key", "key.pem");
         let acme = unique_world_writable_child("tls-world-writable-parent-acme", "acme");
+        let config = tls_config(cert.clone(), key.clone(), acme.clone());
+
+        let check = validate_tls_storage(&config);
+
+        assert_eq!(
+            check.issues,
+            vec![
+                TlsStorageIssue::CertificatePathHasWorldWritableParent {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: cert,
+                },
+                TlsStorageIssue::PrivateKeyPathHasWorldWritableParent {
+                    scope: "tls.certificates[0]".to_owned(),
+                    path: key,
+                },
+                TlsStorageIssue::AcmeStoragePathHasWorldWritableParent { path: acme },
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_tls_storage_below_group_writable_parent() {
+        let cert = unique_group_writable_child("tls-group-writable-parent", "fullchain.pem");
+        let key = unique_group_writable_child("tls-group-writable-parent-key", "key.pem");
+        let acme = unique_group_writable_child("tls-group-writable-parent-acme", "acme");
         let config = tls_config(cert.clone(), key.clone(), acme.clone());
 
         let check = validate_tls_storage(&config);

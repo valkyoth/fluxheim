@@ -37,8 +37,8 @@ use pingora::{
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
 use crate::config::{
-    Config, HttpsRedirectConfig, ProxyConfig, RouteRedirectConfig, ServerLimitsConfig,
-    normalize_host,
+    Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig, RouteRedirectConfig,
+    ServerLimitsConfig, normalize_host,
 };
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
@@ -107,6 +107,7 @@ struct ProxyRuntimeState {
     trusted_proxies: Vec<TrustedProxy>,
     limits: ServerLimitsConfig,
     https_redirect: HttpsRedirectConfig,
+    host_routing: HostRoutingConfig,
     #[cfg(feature = "otel-tracing")]
     tracing: crate::config::TracingConfig,
     #[cfg(feature = "otel-otlp")]
@@ -119,6 +120,38 @@ struct ProxyRuntimeState {
 enum TrustedProxy {
     Exact(IpAddr),
     Cidr { network: IpAddr, prefix: u8 },
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum HostRoutingRejectReason {
+    Missing,
+    Invalid,
+    Unknown,
+}
+
+impl HostRoutingRejectReason {
+    fn status(self) -> u16 {
+        match self {
+            Self::Missing | Self::Invalid => 400,
+            Self::Unknown => 421,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Invalid => "invalid",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    fn response_body(self) -> &'static [u8] {
+        match self {
+            Self::Missing => b"missing host header",
+            Self::Invalid => b"invalid host header",
+            Self::Unknown => b"unknown host",
+        }
+    }
 }
 
 impl TrustedProxy {
@@ -2063,6 +2096,7 @@ impl ProxyRuntimeState {
             trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
+            host_routing: config.server.host_routing,
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2120,6 +2154,7 @@ impl ProxyRuntimeState {
             trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
+            host_routing: config.server.host_routing,
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2130,19 +2165,40 @@ impl ProxyRuntimeState {
     }
 
     fn vhost_index(&self, host: Option<&str>) -> usize {
-        let Some(host) = host.and_then(normalize_host) else {
-            return self.default_vhost;
+        self.resolve_vhost_index(host).unwrap_or(self.default_vhost)
+    }
+
+    fn request_vhost_index(
+        &self,
+        host: Option<&str>,
+    ) -> std::result::Result<usize, HostRoutingRejectReason> {
+        match self.resolve_vhost_index(host) {
+            Ok(index) => Ok(index),
+            Err(reason) if self.host_routing.strict => Err(reason),
+            Err(_) => Ok(self.default_vhost),
+        }
+    }
+
+    fn resolve_vhost_index(
+        &self,
+        host: Option<&str>,
+    ) -> std::result::Result<usize, HostRoutingRejectReason> {
+        let Some(host) = host else {
+            return Err(HostRoutingRejectReason::Missing);
+        };
+        let Some(host) = normalize_host(host) else {
+            return Err(HostRoutingRejectReason::Invalid);
         };
 
         if let Some(index) = self.host_index.get(&host) {
-            return *index;
+            return Ok(*index);
         }
 
         self.wildcard_hosts
             .iter()
             .find(|wildcard| wildcard.matches(&host))
             .map(|wildcard| wildcard.vhost_index)
-            .unwrap_or(self.default_vhost)
+            .ok_or(HostRoutingRejectReason::Unknown)
     }
 
     fn vhost(&self, index: usize) -> &RuntimeVhost {
@@ -2921,9 +2977,15 @@ impl ProxyHttp for FluxProxy {
 
     async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         let state = self.state.load_full();
-
-        let vhost_index = state.vhost_index(request_host(session));
         ctx.state = Some(Arc::clone(&state));
+
+        let vhost_index = match state.request_vhost_index(request_host(session)) {
+            Ok(index) => index,
+            Err(reason) => {
+                respond_host_routing_rejection(session, reason).await?;
+                return Ok(true);
+            }
+        };
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
         ctx.route_index = vhost.route_index(session.req_header().uri.path());
@@ -3648,6 +3710,22 @@ fn downstream_tls(session: &Session) -> bool {
     session
         .digest()
         .is_some_and(|digest| digest.ssl_digest.is_some())
+}
+
+async fn respond_host_routing_rejection(
+    session: &mut Session,
+    reason: HostRoutingRejectReason,
+) -> Result<()> {
+    log::warn!(
+        target: "fluxheim::security",
+        "rejecting request with {} host routing failure",
+        reason.as_str()
+    );
+    #[cfg(feature = "metrics")]
+    crate::metrics::record_host_routing_rejection(reason.as_str());
+    session
+        .respond_error_with_body(reason.status(), Bytes::from_static(reason.response_body()))
+        .await
 }
 
 #[cfg(feature = "web")]
@@ -5261,8 +5339,8 @@ mod tests {
     use bytes::Bytes;
 
     use crate::config::{
-        ByteSize, CacheConfig, Config, HttpsRedirectConfig, ProxyConfig, RouteConfig,
-        RouteRedirectConfig, ServerConfig, ServerLimitsConfig, VhostConfig, WebConfig,
+        ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
+        RouteConfig, RouteRedirectConfig, ServerConfig, ServerLimitsConfig, VhostConfig, WebConfig,
     };
     #[cfg(any(feature = "cache", feature = "web"))]
     use crate::test_support::unique_temp_path;
@@ -5280,9 +5358,9 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, count_response_body_chunk, http_peer_for_proxy, https_redirect_location,
-        redirect_authority, request_body_chunk_limit_status, request_limit_status,
-        route_redirect_location, route_rewritten_path_and_query,
+        FluxProxy, HostRoutingRejectReason, count_response_body_chunk, http_peer_for_proxy,
+        https_redirect_location, redirect_authority, request_body_chunk_limit_status,
+        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -5366,6 +5444,49 @@ mod tests {
 
         assert_eq!(proxy.route_host(Some("missing.example")), "default.example");
         assert_eq!(proxy.route_host(None), "default.example");
+        assert_eq!(proxy.route_host(Some("not a host")), "default.example");
+    }
+
+    #[test]
+    fn strict_host_routing_rejects_missing_invalid_and_unknown_hosts() {
+        let config = Config {
+            server: ServerConfig {
+                host_routing: HostRoutingConfig { strict: true },
+                ..ServerConfig::default()
+            },
+            vhosts: vec![VhostConfig {
+                name: "default.example".to_owned(),
+                hosts: vec!["default.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let snapshot = FluxProxy::from_config(&config).unwrap().snapshot();
+
+        assert_eq!(
+            snapshot.state.request_vhost_index(Some("default.example")),
+            Ok(0)
+        );
+        assert_eq!(
+            snapshot.state.request_vhost_index(None),
+            Err(HostRoutingRejectReason::Missing)
+        );
+        assert_eq!(
+            snapshot.state.request_vhost_index(Some("not a host")),
+            Err(HostRoutingRejectReason::Invalid)
+        );
+        assert_eq!(
+            snapshot.state.request_vhost_index(Some("unknown.example")),
+            Err(HostRoutingRejectReason::Unknown)
+        );
     }
 
     #[test]

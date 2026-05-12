@@ -13,8 +13,6 @@ use toml::value::{Datetime, Offset};
 
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 
 #[cfg(target_os = "linux")]
 const O_NOFOLLOW: i32 = 0o400000;
@@ -386,6 +384,8 @@ pub struct ServerConfig {
     pub process: ServerProcessConfig,
     #[serde(default)]
     pub https_redirect: HttpsRedirectConfig,
+    #[serde(default)]
+    pub host_routing: HostRoutingConfig,
 }
 
 impl Default for ServerConfig {
@@ -398,6 +398,7 @@ impl Default for ServerConfig {
             limits: ServerLimitsConfig::default(),
             process: ServerProcessConfig::default(),
             https_redirect: HttpsRedirectConfig::default(),
+            host_routing: HostRoutingConfig::default(),
         }
     }
 }
@@ -424,6 +425,9 @@ impl ServerConfig {
         }
         if let Some(https_redirect) = fragment.https_redirect {
             self.https_redirect = https_redirect;
+        }
+        if let Some(host_routing) = fragment.host_routing {
+            self.host_routing = host_routing;
         }
     }
 
@@ -487,6 +491,15 @@ struct ServerConfigFragment {
     process: Option<ServerProcessConfig>,
     #[serde(default)]
     https_redirect: Option<HttpsRedirectConfig>,
+    #[serde(default)]
+    host_routing: Option<HostRoutingConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostRoutingConfig {
+    #[serde(default)]
+    pub strict: bool,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
@@ -635,6 +648,12 @@ pub struct AdminConfig {
     #[serde(default)]
     pub snapshot_store: Option<PathBuf>,
     #[serde(default)]
+    pub transport: AdminTransportConfig,
+    #[serde(default)]
+    pub health: AdminHealthConfig,
+    #[serde(default)]
+    pub auth_throttle: AdminAuthThrottleConfig,
+    #[serde(default)]
     pub self_healing: AdminSelfHealingConfig,
 }
 
@@ -647,6 +666,9 @@ impl Default for AdminConfig {
             token_env: None,
             token_file: None,
             snapshot_store: None,
+            transport: AdminTransportConfig::default(),
+            health: AdminHealthConfig::default(),
+            auth_throttle: AdminAuthThrottleConfig::default(),
             self_healing: AdminSelfHealingConfig::default(),
         }
     }
@@ -680,6 +702,7 @@ impl AdminConfig {
         validate_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
         validate_non_world_writable_parent("admin.token_file", self.token_file.as_deref())?;
         validate_non_world_writable_parent("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        self.auth_throttle.validate()?;
         self.self_healing.validate()?;
 
         if !self.enabled {
@@ -688,6 +711,18 @@ impl AdminConfig {
 
         if self.require_loopback && !listen.ip().is_loopback() {
             return Err(ConfigError::AdminListenNotLoopback {
+                address: self.listen.clone(),
+            });
+        }
+        if !listen.ip().is_loopback()
+            && self.transport.mode != AdminRemoteTransportMode::TrustedTlsTerminator
+        {
+            return Err(ConfigError::RemoteAdminRequiresSecureTransport {
+                address: self.listen.clone(),
+            });
+        }
+        if self.health.unauthenticated && !listen.ip().is_loopback() {
+            return Err(ConfigError::UnauthenticatedAdminHealthNotLoopback {
                 address: self.listen.clone(),
             });
         }
@@ -703,6 +738,111 @@ impl AdminConfig {
                 }
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminTransportConfig {
+    #[serde(default)]
+    pub mode: AdminRemoteTransportMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminRemoteTransportMode {
+    #[default]
+    LocalOnly,
+    TrustedTlsTerminator,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminHealthConfig {
+    #[serde(default)]
+    pub unauthenticated: bool,
+    #[serde(default)]
+    pub response: AdminHealthResponseMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdminHealthResponseMode {
+    Minimal,
+    #[default]
+    Status,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminAuthThrottleConfig {
+    #[serde(default = "default_admin_auth_throttle_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_admin_auth_throttle_window_secs")]
+    pub window_secs: u64,
+    #[serde(default = "default_admin_auth_throttle_per_source_failures")]
+    pub per_source_failures: usize,
+    #[serde(default = "default_admin_auth_throttle_global_failures")]
+    pub global_failures: usize,
+    #[serde(default = "default_admin_auth_throttle_base_lockout_secs")]
+    pub base_lockout_secs: u64,
+    #[serde(default = "default_admin_auth_throttle_max_lockout_secs")]
+    pub max_lockout_secs: u64,
+    #[serde(default = "default_admin_auth_throttle_max_sources")]
+    pub max_sources: usize,
+}
+
+impl Default for AdminAuthThrottleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_admin_auth_throttle_enabled(),
+            window_secs: default_admin_auth_throttle_window_secs(),
+            per_source_failures: default_admin_auth_throttle_per_source_failures(),
+            global_failures: default_admin_auth_throttle_global_failures(),
+            base_lockout_secs: default_admin_auth_throttle_base_lockout_secs(),
+            max_lockout_secs: default_admin_auth_throttle_max_lockout_secs(),
+            max_sources: default_admin_auth_throttle_max_sources(),
+        }
+    }
+}
+
+impl AdminAuthThrottleConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.window_secs == 0 {
+            return Err(ConfigError::InvalidAdminAuthThrottle {
+                field: "admin.auth_throttle.window_secs",
+            });
+        }
+        if self.per_source_failures == 0 {
+            return Err(ConfigError::InvalidAdminAuthThrottle {
+                field: "admin.auth_throttle.per_source_failures",
+            });
+        }
+        if self.global_failures == 0 {
+            return Err(ConfigError::InvalidAdminAuthThrottle {
+                field: "admin.auth_throttle.global_failures",
+            });
+        }
+        if self.base_lockout_secs == 0 {
+            return Err(ConfigError::InvalidAdminAuthThrottle {
+                field: "admin.auth_throttle.base_lockout_secs",
+            });
+        }
+        if self.max_lockout_secs < self.base_lockout_secs {
+            return Err(ConfigError::InvalidAdminAuthThrottle {
+                field: "admin.auth_throttle.max_lockout_secs",
+            });
+        }
+        if self.max_sources == 0 {
+            return Err(ConfigError::InvalidAdminAuthThrottle {
+                field: "admin.auth_throttle.max_sources",
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -1152,7 +1292,7 @@ impl LoggingFileConfig {
         validate_path("logging.file.path", self.path.as_deref())?;
         #[cfg(unix)]
         if let Some(path) = self.path.as_deref()
-            && path_existing_parent_is_world_writable(path).unwrap_or(true)
+            && crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true)
         {
             return Err(ConfigError::UnsafePath {
                 field: "logging.file.path".to_owned(),
@@ -4106,7 +4246,7 @@ impl CacheDiskConfig {
         let path_field = format!("{scope}.disk.path");
         validate_path(path_field.clone(), Some(path))?;
         #[cfg(unix)]
-        if path_existing_parent_is_world_writable(path).unwrap_or(true) {
+        if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true) {
             return Err(ConfigError::UnsafePath {
                 field: path_field,
                 path: path.to_path_buf(),
@@ -4355,6 +4495,12 @@ pub enum ConfigError {
     AdminListenNotLoopback {
         address: String,
     },
+    RemoteAdminRequiresSecureTransport {
+        address: String,
+    },
+    UnauthenticatedAdminHealthNotLoopback {
+        address: String,
+    },
     MissingAdminAuth,
     ConflictingAdminAuth,
     MissingAdminSnapshotStore,
@@ -4369,6 +4515,9 @@ pub enum ConfigError {
         path: PathBuf,
     },
     InvalidAdminSelfHealing {
+        field: &'static str,
+    },
+    InvalidAdminAuthThrottle {
         field: &'static str,
     },
     InvalidAdminHealthPath {
@@ -4758,6 +4907,14 @@ impl Display for ConfigError {
                 formatter,
                 "admin.listen must be loopback when admin.require_loopback = true, got {address:?}"
             ),
+            Self::RemoteAdminRequiresSecureTransport { address } => write!(
+                formatter,
+                "remote admin listener {address:?} requires admin.transport.mode = \"trusted_tls_terminator\"; keep admin.listen loopback or terminate TLS/mTLS in a trusted local sidecar"
+            ),
+            Self::UnauthenticatedAdminHealthNotLoopback { address } => write!(
+                formatter,
+                "admin.health.unauthenticated requires admin.listen to be loopback, got {address:?}"
+            ),
             Self::MissingAdminAuth => write!(
                 formatter,
                 "admin.enabled requires admin.token_env or admin.token_file"
@@ -4780,6 +4937,9 @@ impl Display for ConfigError {
                 path.display()
             ),
             Self::InvalidAdminSelfHealing { field } => {
+                write!(formatter, "{field} must be within the allowed range")
+            }
+            Self::InvalidAdminAuthThrottle { field } => {
                 write!(formatter, "{field} must be within the allowed range")
             }
             Self::InvalidAdminHealthPath { path } => write!(
@@ -5264,6 +5424,34 @@ fn default_admin_listen() -> String {
 
 fn default_admin_require_loopback() -> bool {
     true
+}
+
+fn default_admin_auth_throttle_enabled() -> bool {
+    true
+}
+
+fn default_admin_auth_throttle_window_secs() -> u64 {
+    60
+}
+
+fn default_admin_auth_throttle_per_source_failures() -> usize {
+    10
+}
+
+fn default_admin_auth_throttle_global_failures() -> usize {
+    100
+}
+
+fn default_admin_auth_throttle_base_lockout_secs() -> u64 {
+    30
+}
+
+fn default_admin_auth_throttle_max_lockout_secs() -> u64 {
+    900
+}
+
+fn default_admin_auth_throttle_max_sources() -> usize {
+    4096
 }
 
 fn default_admin_validation_window_secs() -> u64 {
@@ -6045,7 +6233,7 @@ fn validate_non_world_writable_parent(
     };
 
     #[cfg(unix)]
-    if path_existing_parent_is_world_writable(path).unwrap_or(true) {
+    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true) {
         return Err(ConfigError::UnsafePath {
             field,
             path: path.to_path_buf(),
@@ -6087,7 +6275,7 @@ fn validate_required_process_path(field: &'static str, path: &Path) -> Result<()
     }
     validate_path(field, Some(path))?;
     #[cfg(unix)]
-    if path_existing_parent_is_world_writable(path).unwrap_or(true) {
+    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true) {
         return Err(ConfigError::UnsafePath {
             field: field.to_owned(),
             path: path.to_path_buf(),
@@ -6120,30 +6308,6 @@ fn path_existing_prefix_contains_symlink(path: &Path) -> std::io::Result<bool> {
     }
 
     Ok(false)
-}
-
-#[cfg(unix)]
-fn path_existing_parent_is_world_writable(path: &Path) -> std::io::Result<bool> {
-    let mut current = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-
-    loop {
-        match fs::symlink_metadata(current) {
-            Ok(metadata) => return Ok(metadata.permissions().mode() & 0o002 != 0),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let Some(parent) = current.parent() else {
-                    return Ok(false);
-                };
-                if parent == current {
-                    return Ok(false);
-                }
-                current = parent;
-            }
-            Err(error) => return Err(error),
-        }
-    }
 }
 
 fn validate_optional_header_value(
@@ -6460,7 +6624,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        AdminConfig, AdminSelfHealingConfig, ByteSize, CacheConfig, CacheKeyPart,
+        AdminConfig, AdminHealthConfig, AdminHealthResponseMode, AdminRemoteTransportMode,
+        AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheKeyPart,
         CachePurgerConfig, CacheStaleErrorKind, Config, ConfigError, ConfigLoadError,
         HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig,
         ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
@@ -6468,9 +6633,9 @@ mod tests {
         VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
         valid_dynamic_header_variable, validate_dynamic_header_template,
     };
-    #[cfg(unix)]
-    use crate::test_support::unique_world_writable_child;
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
+    #[cfg(unix)]
+    use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
     use proptest::prelude::*;
 
     #[test]
@@ -7714,6 +7879,29 @@ mod tests {
     #[test]
     fn rejects_tls_certificate_paths_under_world_writable_parent() {
         let cert_path = unique_world_writable_child("config-tls-world-writable", "fullchain.pem");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            enabled = true
+
+            [[tls.certificates]]
+            cert_path = "{}"
+            key_path = "/var/lib/fluxheim/key.pem"
+            "#,
+            cert_path.display()
+        ))
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::UnsafePath { field, .. }) if field == "tls.certificates.cert_path"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_tls_certificate_paths_under_group_writable_parent() {
+        let cert_path = unique_group_writable_child("config-tls-group-writable", "fullchain.pem");
         let config: Config = toml::from_str(&format!(
             r#"
             [tls]
@@ -9069,6 +9257,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_strict_host_routing_mode() {
+        let config: Config = toml::from_str(
+            r#"
+            [server.host_routing]
+            strict = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.server.host_routing.strict);
+        config.validate().unwrap();
+    }
+
+    #[test]
     fn rejects_invalid_tls_listener() {
         let config = Config {
             server: ServerConfig {
@@ -9181,6 +9383,22 @@ mod tests {
             token_env = "FLUXHEIM_ADMIN_TOKEN"
             snapshot_store = "/var/lib/fluxheim/snapshots"
 
+            [admin.transport]
+            mode = "local_only"
+
+            [admin.health]
+            unauthenticated = false
+            response = "minimal"
+
+            [admin.auth_throttle]
+            enabled = true
+            window_secs = 30
+            per_source_failures = 3
+            global_failures = 50
+            base_lockout_secs = 10
+            max_lockout_secs = 120
+            max_sources = 1024
+
             [admin.self_healing]
             enabled = true
             validation_window_secs = 45
@@ -9197,6 +9415,65 @@ mod tests {
         assert_eq!(
             config.admin.snapshot_store.as_deref(),
             Some(Path::new("/var/lib/fluxheim/snapshots"))
+        );
+        assert_eq!(
+            config.admin.health.response,
+            AdminHealthResponseMode::Minimal
+        );
+        assert_eq!(
+            config.admin.transport.mode,
+            AdminRemoteTransportMode::LocalOnly
+        );
+        assert_eq!(config.admin.auth_throttle.per_source_failures, 3);
+        assert_eq!(config.admin.auth_throttle.global_failures, 50);
+    }
+
+    #[test]
+    fn rejects_remote_unauthenticated_admin_health() {
+        let config = Config {
+            admin: AdminConfig {
+                enabled: true,
+                listen: "0.0.0.0:9090".to_owned(),
+                require_loopback: false,
+                token_env: Some("FLUXHEIM_ADMIN_TOKEN".to_owned()),
+                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                transport: AdminTransportConfig {
+                    mode: AdminRemoteTransportMode::TrustedTlsTerminator,
+                },
+                health: AdminHealthConfig {
+                    unauthenticated: true,
+                    ..AdminHealthConfig::default()
+                },
+                ..AdminConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::UnauthenticatedAdminHealthNotLoopback {
+                address: "0.0.0.0:9090".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_admin_auth_throttle() {
+        let config: Config = toml::from_str(
+            r#"
+            [admin.auth_throttle]
+            enabled = true
+            max_lockout_secs = 1
+            base_lockout_secs = 2
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidAdminAuthThrottle {
+                field: "admin.auth_throttle.max_lockout_secs"
+            })
         );
     }
 
@@ -9427,21 +9704,23 @@ mod tests {
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn parses_file_logging_config() {
-        let config: Config = toml::from_str(
+        let log_path = unique_temp_path("config-file-logging").join("fluxheim.log");
+        let config: Config = toml::from_str(&format!(
             r#"
             [logging.file]
             enabled = true
-            path = "/var/log/fluxheim/fluxheim.log"
+            path = "{}"
             append = false
             "#,
-        )
+            log_path.display()
+        ))
         .unwrap();
 
         config.validate().unwrap();
         assert!(config.logging.file.enabled);
         assert_eq!(
             config.logging.file.path.as_deref(),
-            Some(std::path::Path::new("/var/log/fluxheim/fluxheim.log"))
+            Some(log_path.as_path())
         );
         assert!(!config.logging.file.append);
     }
@@ -9628,6 +9907,48 @@ mod tests {
                 address: "0.0.0.0:9090".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn rejects_remote_admin_without_trusted_tls_terminator() {
+        let config = Config {
+            admin: AdminConfig {
+                enabled: true,
+                listen: "0.0.0.0:9090".to_owned(),
+                require_loopback: false,
+                token_env: Some("FLUXHEIM_ADMIN_TOKEN".to_owned()),
+                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                ..AdminConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::RemoteAdminRequiresSecureTransport {
+                address: "0.0.0.0:9090".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn accepts_remote_admin_when_trusted_tls_terminator_is_explicit() {
+        let config = Config {
+            admin: AdminConfig {
+                enabled: true,
+                listen: "0.0.0.0:9090".to_owned(),
+                require_loopback: false,
+                token_env: Some("FLUXHEIM_ADMIN_TOKEN".to_owned()),
+                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                transport: AdminTransportConfig {
+                    mode: AdminRemoteTransportMode::TrustedTlsTerminator,
+                },
+                ..AdminConfig::default()
+            },
+            ..Config::default()
+        };
+
+        config.validate().unwrap();
     }
 
     #[cfg(unix)]

@@ -13,6 +13,7 @@ pub mod cache;
 pub mod cache_headers;
 pub mod cli;
 pub mod config;
+mod fs_trust;
 #[cfg(feature = "proxy")]
 pub mod headers;
 #[cfg(feature = "load-balancer")]

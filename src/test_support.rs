@@ -57,6 +57,16 @@ pub(crate) fn unique_world_writable_child(label: &str, child: &str) -> PathBuf {
     safe_relative_path(&parent, child)
 }
 
+#[cfg(unix)]
+pub(crate) fn unique_group_writable_child(label: &str, child: &str) -> PathBuf {
+    let parent = unique_temp_path(label);
+    std::fs::create_dir_all(&parent).expect("create group-writable test parent");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o770))
+        .expect("mark test parent group-writable");
+    safe_relative_path(&parent, child)
+}
+
 fn assert_safe_label(label: &str) {
     assert!(!label.is_empty(), "test path label cannot be empty");
     assert!(

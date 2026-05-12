@@ -27,12 +27,6 @@ use sha2::{Digest, Sha256};
 
 use crate::config::{ByteSize, CacheConfig, CacheKeyPart, normalize_host};
 
-#[cfg(all(feature = "proxy", target_os = "linux"))]
-use std::os::unix::fs::OpenOptionsExt;
-
-#[cfg(all(feature = "proxy", target_os = "linux"))]
-const O_NOFOLLOW: i32 = 0o400000;
-
 #[cfg(feature = "proxy")]
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
 #[cfg(feature = "proxy")]
@@ -2424,7 +2418,7 @@ impl PingoraDiskStorage {
             ));
         }
 
-        let metadata = canonical.metadata()?;
+        let metadata = SafeDiskCachePath::from_path(canonical.clone()).metadata()?;
         if !metadata.is_file() {
             return Ok(None);
         }
@@ -2664,65 +2658,94 @@ impl SafeDiskCachePath {
         &self.path
     }
 
+    fn parent_and_name(&self) -> std::io::Result<(&Path, &std::ffi::OsStr)> {
+        let parent = self.path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("disk cache path has no parent: {}", self.path.display()),
+            )
+        })?;
+        let name = self.path.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("disk cache path has no file name: {}", self.path.display()),
+            )
+        })?;
+        Ok((parent, name))
+    }
+
+    fn open_parent_dir(&self) -> std::io::Result<std::fs::File> {
+        let (parent, _) = self.parent_and_name()?;
+        let fd = rustix::fs::open(
+            parent,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::DIRECTORY,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
     fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
-        // codeql[rust/path-injection]: SafeDiskCachePath is constructed only
-        // after cache-root confinement, deterministic shard/temp-name
-        // validation, and symlink checks. Request paths are never passed here.
-        // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
-        // cache-root-confined paths after shard/temp name validation and
-        // symlink checks; callers never pass request paths directly.
-        self.path.metadata()
+        self.open_existing_file()?.metadata()
     }
 
     fn create_new_file(&self) -> std::io::Result<std::fs::File> {
-        let mut options = std::fs::OpenOptions::new();
-        options.create_new(true).write(true);
-        #[cfg(target_os = "linux")]
-        options.custom_flags(O_NOFOLLOW);
-        // codeql[rust/path-injection]: SafeDiskCachePath is constructed only
-        // after cache-root confinement, deterministic shard/temp-name
-        // validation, and symlink checks. O_NOFOLLOW rejects final symlinks on
-        // Linux.
-        // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
-        // cache-root-confined paths after shard/temp name validation and
-        // symlink checks; O_NOFOLLOW prevents final symlink traversal on Linux.
-        options.open(&self.path)
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .map_err(rustix_to_io_error)?;
+        Ok(fd.into())
     }
 
     fn open_existing_file(&self) -> std::io::Result<std::fs::File> {
-        let mut options = std::fs::OpenOptions::new();
-        options.read(true);
-        #[cfg(target_os = "linux")]
-        options.custom_flags(O_NOFOLLOW);
-        // codeql[rust/path-injection]: SafeDiskCachePath is constructed only
-        // after cache-root confinement, deterministic shard/temp-name
-        // validation, and symlink checks. O_NOFOLLOW rejects final symlinks on
-        // Linux.
-        // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
-        // cache-root-confined paths after shard/temp name validation and
-        // symlink checks; O_NOFOLLOW prevents final symlink traversal on Linux.
-        options.open(&self.path)
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(rustix_to_io_error)?;
+        Ok(fd.into())
     }
 
     fn rename_from(&self, source: &SafeDiskCachePath) -> std::io::Result<()> {
-        // codeql[rust/path-injection]: Both paths are SafeDiskCachePath values
-        // produced inside the validated disk-cache root from deterministic
-        // object names or Fluxheim-owned temporary names.
-        // lgtm[rust/path-injection]: Both paths are SafeDiskCachePath values
-        // produced inside the disk-cache root from deterministic object names
-        // or Fluxheim-owned temporary names.
-        std::fs::rename(source.as_path(), self.as_path())
+        let (_, source_name) = source.parent_and_name()?;
+        let (_, destination_name) = self.parent_and_name()?;
+        let source_parent = source.open_parent_dir()?;
+        let destination_parent = self.open_parent_dir()?;
+        rustix::fs::renameat(
+            &source_parent,
+            source_name,
+            &destination_parent,
+            destination_name,
+        )
+        .map_err(rustix_to_io_error)
     }
 
     fn remove_file(&self) -> std::io::Result<()> {
-        // codeql[rust/path-injection]: SafeDiskCachePath deletion is restricted
-        // to Fluxheim-owned cache object/checkpoint/temp paths under the
-        // validated disk-cache root.
-        // lgtm[rust/path-injection]: SafeDiskCachePath deletion is restricted
-        // to Fluxheim-owned cache object/checkpoint/temp paths under the
-        // validated disk-cache root.
-        std::fs::remove_file(&self.path)
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        rustix::fs::unlinkat(&parent, name, rustix::fs::AtFlags::empty())
+            .map_err(rustix_to_io_error)
     }
+}
+
+#[cfg(feature = "proxy")]
+fn rustix_to_io_error(error: rustix::io::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
 #[cfg(feature = "proxy")]
@@ -3409,20 +3432,16 @@ fn remove_disk_cache_object(root: &Path, path: &Path) -> std::io::Result<bool> {
         ));
     }
 
-    // codeql[rust/path-injection]: remove_disk_cache_object is called with
-    // deterministic cache object paths from the disk index or hash-derived
-    // object name. The extension, root confinement, and full path symlink chain
-    // were checked immediately above.
-    let metadata = match std::fs::symlink_metadata(path) {
+    let safe_path = SafeDiskCachePath::from_path(path.to_path_buf());
+    let metadata = match safe_path.metadata() {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error),
     };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    if !metadata.is_file() {
         return Ok(false);
     }
 
-    let safe_path = SafeDiskCachePath::from_path(path.to_path_buf());
     match safe_path.remove_file() {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -4367,12 +4386,7 @@ fn read_disk_cache_object(
         ));
     }
 
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(target_os = "linux")]
-    options.custom_flags(O_NOFOLLOW);
-
-    let file = options.open(&canonical)?;
+    let file = SafeDiskCachePath::from_path(canonical).open_existing_file()?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(std::io::Error::new(
@@ -4414,19 +4428,28 @@ fn read_disk_cache_object(
 
 #[cfg(feature = "proxy")]
 fn require_disk_cache_write_destination(path: &Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!(
-                    "disk cache object destination is unsafe: {}",
-                    path.display()
-                ),
-            ))
-        }
+    match SafeDiskCachePath::from_path(path.to_path_buf()).metadata() {
+        Ok(metadata) if !metadata.is_file() => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "disk cache object destination is unsafe: {}",
+                path.display()
+            ),
+        )),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+        Err(error) => {
+            if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "disk cache object destination is unsafe: {}",
+                        path.display()
+                    ),
+                ));
+            }
+            Err(error)
+        }
     }
 }
 
@@ -6215,7 +6238,7 @@ mod tests {
         assert_eq!(block_on(hit.read_body()).unwrap(), None);
         assert_eq!(storage.stats().unwrap().entries, 1);
 
-        std::fs::remove_dir_all(root).unwrap();
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(feature = "proxy")]

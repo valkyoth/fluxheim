@@ -36,8 +36,12 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 - Static website hosting with MIME detection, index files, `GET`/`HEAD`,
   `ETag`, conditional `304`, and single byte ranges.
-- Vhost routing by Host header with default-vhost fallback.
+- Vhost routing by Host header with default-vhost fallback, plus opt-in strict
+  host routing for hardened multi-tenant deployments.
 - Whole-vhost and route-level reverse proxying.
+- Admin control-plane bearer-token authentication with loopback defaults and
+  built-in brute-force throttling; admin health is authenticated by default and
+  non-loopback admin listeners require an explicit trusted TLS terminator mode.
 - Static/bought certificate support with rustls as the default TLS backend.
 - Multi-certificate SNI selection on the default rustls TLS backend.
 - Managed ACME certificate issuance and renewal for HTTP-01 and rustls
@@ -297,6 +301,10 @@ admin purge shape and cache activity counters for disk hits plus scoped purge
 events, policy bypasses, client refresh revalidation, and allowed stale
 serving. The local observability smoke checks Prometheus/OpenTelemetry export
 plumbing and cache policy gauges for request-collapsing coverage.
+Strict host-routing rejections also emit a low-cardinality Prometheus counter
+and security warning log for missing, invalid, or unknown host identity.
+Admin authentication failures and lockouts emit bounded Prometheus counters and
+security logs for alerting on control-plane guessing attempts.
 `cache-lookup` also supports deploy-script assertions for object
 presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
 cache tags, stored header names and exact header values, exact object count,

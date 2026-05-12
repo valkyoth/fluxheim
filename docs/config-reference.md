@@ -78,6 +78,9 @@ graceful_shutdown_timeout_seconds = 30
 enabled = false
 status = 308
 # target_port = 8443
+
+[server.host_routing]
+strict = false
 ```
 
 Notes:
@@ -86,6 +89,10 @@ Notes:
 - TLS listeners are explicit through `tls_listen`; Fluxheim does not infer TLS
   from port numbers.
 - `default_vhost`, when set, must match a configured `[[vhosts]].name`.
+- `[server.host_routing].strict = false` preserves compatibility by falling
+  back to `default_vhost` for missing, invalid, or unknown host names. Set it
+  to `true` in hardened multi-tenant deployments to reject missing or invalid
+  host identity with `400` and unknown hosts with `421`.
 - If vhosts live in a sibling `conf.d` directory and `--config` points at the
   main file, set top-level `include_conf_d = true`; alternatively point
   `--config` at the config directory so visible `.toml` files are loaded in
@@ -102,7 +109,7 @@ Notes:
   worker threads per service.
 - `pid_file`, `upgrade_sock`, and optional `error_log` must not contain parent
   traversal, must not be below symlinked existing parent directories, and on
-  Unix must not use a world-writable existing parent such as `/tmp`. Use a
+  Unix must not use a group- or world-writable existing parent such as `/tmp`. Use a
   dedicated runtime directory such as `/run/fluxheim`.
 - `[server.https_redirect]` is disabled by default. When enabled, cleartext
   requests receive a direct HTTPS redirect before static serving or proxying.
@@ -126,6 +133,22 @@ token_env = "FLUXHEIM_ADMIN_TOKEN"
 token_file = "/run/secrets/fluxheim-admin-token"
 snapshot_store = "/var/lib/fluxheim/snapshots"
 
+[admin.transport]
+mode = "local_only"
+
+[admin.health]
+unauthenticated = false
+response = "status"
+
+[admin.auth_throttle]
+enabled = true
+window_secs = 60
+per_source_failures = 10
+global_failures = 100
+base_lockout_secs = 30
+max_lockout_secs = 900
+max_sources = 4096
+
 [admin.self_healing]
 enabled = false
 validation_window_secs = 30
@@ -137,13 +160,32 @@ max_error_rate_per_mille = 100
 If `admin.enabled = true`, configure `token_env` or `token_file`. Snapshot and
 rollback endpoints also require `snapshot_store`. `token_file` and
 `snapshot_store` must not contain parent traversal, must not sit below a
-symlinked parent directory, and on Unix must not use a world-writable existing
-parent such as `/tmp`. The snapshot store runtime applies the same rule when it
+symlinked parent directory, and on Unix must not use a group- or world-writable
+existing parent such as `/tmp`. The snapshot store runtime applies the same rule when it
 is used directly by CLI/admin paths.
+
+Remote admin exposure fails closed. Keep `admin.listen` loopback whenever
+possible. If `admin.require_loopback = false` and `admin.listen` is non-loopback,
+Fluxheim requires `[admin.transport] mode = "trusted_tls_terminator"` to make
+the operator explicitly declare that a trusted local sidecar, reverse proxy, or
+load balancer terminates TLS/mTLS before traffic reaches the plain admin
+listener. Direct first-class admin TLS/mTLS remains planned; do not expose the
+admin listener over cleartext networks.
 
 Admin endpoint paths are capped at 2048 bytes and query strings are capped at
 16 KiB before endpoint-specific parsing. Prefer headers for long cache purge
 values.
+
+`admin.auth_throttle` is enabled by default and protects all authenticated
+`/_fluxheim/*` endpoints, including the built-in health check unless it is
+explicitly configured for loopback-only unauthenticated probes. Repeated failed
+bearer-token attempts are tracked per direct socket source and globally over
+`window_secs`; once either limit is reached, Fluxheim returns `429` until the
+progressive lockout expires. `max_sources` bounds the in-memory per-source
+failure table. With metrics enabled,
+`fluxheim_admin_auth_events_total{event,scope}` records failed and throttled
+admin authentication events, and security logs are emitted without reflecting
+the attempted token.
 
 The protected cache purge endpoints accept the optional `vhost` and `route`
 query parameters, or `x-fluxheim-cache-vhost` and
@@ -158,15 +200,18 @@ their cached bodies. Hard purge remains the default.
 
 `admin.self_healing.health_path` must be an absolute path no longer than 2048
 bytes and cannot contain whitespace, control characters, backslashes, `?`, or
-`#`. Custom health paths must not use the protected `/_fluxheim/` admin prefix;
-the built-in `/_fluxheim/health` endpoint is the only unauthenticated path in
-that namespace.
+`#`. Custom health paths must not use the protected `/_fluxheim/` admin prefix.
+The built-in `/_fluxheim/health` endpoint requires bearer-token authentication
+by default. Set `[admin.health] unauthenticated = true` only for loopback-bound
+local probes; validation rejects unauthenticated health on non-loopback admin
+listeners. `admin.health.response = "minimal"` returns an empty `204` instead
+of the default JSON status body to reduce fingerprinting.
 
 Snapshot messages submitted through the admin API are trimmed and capped at
 4096 bytes of non-control text before they are persisted.
 
 On Linux, `token_file` is opened without following symlinks, must resolve to a
-regular file handle, must not sit below a symlinked or world-writable parent
+regular file handle, must not sit below a symlinked or group- or world-writable parent
 directory, and is capped at 8 KiB both before and during the read. Prefer
 rootless container secrets or a local file readable only by the Fluxheim user.
 
@@ -267,7 +312,7 @@ when `logging.file.enabled = true`.
 paths are resolved from the config file that defines them. Existing symlinked
 path prefixes are rejected during config validation, and Linux opens the log file
 without following a final symlink. On Unix, file logs must use a dedicated log
-directory and are rejected when the nearest existing parent is world-writable,
+directory and are rejected when the nearest existing parent is group- or world-writable,
 such as `/tmp`.
 
 In `privacy-mode` builds, access logging and file logging must stay disabled.
@@ -562,7 +607,7 @@ Each enabled tier must be at least as large as `max_object_bytes`.
 Disk cache requires `cache.disk.path`. The disk cache root must be a real
 directory and must not sit below a symlinked parent directory. On Unix,
 Fluxheim also rejects disk cache roots whose nearest existing parent is
-world-writable, such as creating a cache root directly below `/tmp`; use a
+group- or world-writable, such as creating a cache root directly below `/tmp`; use a
 dedicated cache directory such as `/var/cache/fluxheim` or a pre-created private
 runtime directory.
 
@@ -882,11 +927,11 @@ fluxheim --config path/to/fluxheim.toml --check-tls-storage
 On Unix, private keys should be owner-only and ACME storage directories should
 be owner-only. The storage checker rejects symlinked certificate files, private
 key files, ACME EAB secret files, ACME storage directories, and paths below
-symlinked or world-writable directories; mount or configure the real paths
+symlinked or group- or world-writable directories; mount or configure the real paths
 directly. If Fluxheim cannot inspect any TLS path prefix for symlinks,
 validation fails closed and reports the path as unreadable. Config validation
 also rejects static certificate paths, ACME storage paths, and ACME EAB secret
-files when their nearest existing parent directory is world-writable. EAB secret
+files when their nearest existing parent directory is group- or world-writable. EAB secret
 files are checked with the same owner-only permission rule as private keys.
 
 ## ACME
@@ -1003,7 +1048,7 @@ default_issuer = "google-trust-services"
 
 EAB secret files are validated as sensitive files by
 `fluxheim --check-tls-storage`: they must be regular files, must not be
-symlinks, must not sit below symlinked or world-writable parent directories, and
+symlinks, must not sit below symlinked or group- or world-writable parent directories, and
 should be readable only by the Fluxheim process owner.
 
 When `[vhosts.tls.acme]` is enabled, Fluxheim derives managed certificate files
