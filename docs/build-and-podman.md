@@ -463,6 +463,20 @@ services:
       - gateway_net
 ```
 
+For managed ACME in containers, use the same bind mounts for the gateway and
+the one-shot renewal container. A complete example with an external
+`fluxheim-acme` service is available at
+[examples/podman-compose-acme.yml](../examples/podman-compose-acme.yml).
+Start the gateway first, then run due-only renewal with:
+
+```bash
+podman compose -f examples/podman-compose-acme.yml up -d fluxheim
+podman compose -f examples/podman-compose-acme.yml run --rm fluxheim-acme
+```
+
+Keep `tls.acme.automation = "external"` in this mode so the long-running
+gateway does not also run the background renewal loop.
+
 ### Container ACME First Issuance
 
 For HTTP-01 ACME, the CA must be able to reach Fluxheim on public port `80`.

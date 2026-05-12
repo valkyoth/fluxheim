@@ -1,0 +1,53 @@
+name: fluxheim-gateway-acme
+
+networks:
+  gateway_net:
+    external: true
+
+services:
+  fluxheim:
+    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    container_name: fluxheim_gateway
+    restart: always
+    stop_signal: SIGTERM
+    stop_grace_period: 15s
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
+      - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U
+      - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U
+      - /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z
+      - /srv/sites/example/public:/srv/sites/example/public:ro,Z
+      # Keep secret files pre-labeled for container access and avoid relabeling
+      # individual secrets with :Z.
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+    networks:
+      - gateway_net
+
+  fluxheim-acme:
+    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    container_name: fluxheim_acme
+    restart: "no"
+    depends_on:
+      - fluxheim
+    command:
+      - "--config"
+      - "/etc/fluxheim/fluxheim.toml"
+      - "acme-renew"
+    volumes:
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
+      - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U
+      - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U
+      - /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z
+      - /srv/sites/example/public:/srv/sites/example/public:ro,Z
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+    networks:
+      - gateway_net
