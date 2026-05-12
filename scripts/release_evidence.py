@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
 
 def run(command: list[str], cwd: Path | None = None) -> CommandResult:
     completed = subprocess.run(
-        command,
+        command,  # lgtm[py/command-line-injection] fixed command vectors; release input is regex-limited before use
         cwd=cwd,
         check=True,
         text=True,
@@ -156,7 +156,7 @@ def first_nonempty_line(value: str) -> str:
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with path.open("rb") as handle:  # lgtm[py/path-injection] only called for repo-owned release outputs
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -168,13 +168,13 @@ def checksum_line(path: Path, display_name: str | None = None) -> str:
 
 def download_source_archives(root: Path, version: str, tag: str, repo: str) -> list[str]:
     output_dir = root / "dist" / "checksums"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)  # lgtm[py/path-injection] fixed path under git root
     lines = []
     for extension in SOURCE_ARCHIVES:
         filename = f"fluxheim-{version}.{extension}"
         destination = output_dir / filename
         url = f"https://github.com/{repo}/archive/refs/tags/{tag}.{extension}"
-        with urllib.request.urlopen(url) as response, destination.open("wb") as handle:
+        with urllib.request.urlopen(url) as response, destination.open("wb") as handle:  # lgtm[py/path-injection] filename uses regex-validated version and fixed archive suffix
             shutil.copyfileobj(response, handle)
         lines.append(checksum_line(destination, filename))
     return lines
@@ -216,24 +216,24 @@ def build_release_archive(
             cwd=root,
         )
 
-    shutil.rmtree(output_dir, ignore_errors=True)
-    output_dir.mkdir(parents=True)
-    shutil.copy2(root / "target" / "release" / "fluxheim", output_dir / "fluxheim")
+    shutil.rmtree(output_dir, ignore_errors=True)  # lgtm[py/path-injection] output dir is dist/fluxheim-<validated-version>-<fixed-profile>-<rustc-target>
+    output_dir.mkdir(parents=True)  # lgtm[py/path-injection] output dir is under repo dist/
+    shutil.copy2(root / "target" / "release" / "fluxheim", output_dir / "fluxheim")  # lgtm[py/path-injection] fixed source and destination under git root
     for filename in DIST_COPY_FILES:
-        shutil.copy2(root / filename, output_dir / filename)
+        shutil.copy2(root / filename, output_dir / filename)  # lgtm[py/path-injection] filename comes from fixed allowlist
     release_notes = root / f"RELEASE_NOTES_{version}.md"
-    if release_notes.exists():
-        shutil.copy2(release_notes, output_dir / release_notes.name)
+    if release_notes.exists():  # lgtm[py/path-injection] version is regex-limited to release-safe characters
+        shutil.copy2(release_notes, output_dir / release_notes.name)  # lgtm[py/path-injection] release notes path is repo-root plus validated version
     for dirname in DIST_COPY_DIRS:
         destination = output_dir / dirname
-        if destination.exists():
-            shutil.rmtree(destination)
-        shutil.copytree(root / dirname, destination)
+        if destination.exists():  # lgtm[py/path-injection] dirname is from fixed allowlist
+            shutil.rmtree(destination)  # lgtm[py/path-injection] destination is under repo dist/ and fixed dirname allowlist
+        shutil.copytree(root / dirname, destination)  # lgtm[py/path-injection] source/destination directory names are fixed allowlist
 
-    if archive.exists():
-        archive.unlink()
-    with tarfile.open(archive, "w:gz") as tar:
-        tar.add(output_dir, arcname=dist_name)
+    if archive.exists():  # lgtm[py/path-injection] archive is under repo dist/ with validated release version
+        archive.unlink()  # lgtm[py/path-injection] archive is under repo dist/ with validated release version
+    with tarfile.open(archive, "w:gz") as tar:  # lgtm[py/path-injection] archive is under repo dist/ with validated release version
+        tar.add(output_dir, arcname=dist_name)  # lgtm[py/path-injection] output dir is under repo dist/
     return checksum_line(archive, archive.name)
 
 
