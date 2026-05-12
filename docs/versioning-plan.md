@@ -429,7 +429,10 @@ Stable scope:
     bounded `Cache-Control: no-store` request-bypass reason in release smoke;
   - full validator-based upstream revalidation edge-case coverage for proxied
     cache responses, including explicit behavior when origins change `Vary`,
-    `ETag`, `Last-Modified`, or freshness headers during revalidation;
+    `ETag`, `Last-Modified`, or freshness headers during revalidation. 1.2 now
+    preserves changed `Last-Modified` values from origin `304 Not Modified`
+    responses and protects changed `Vary` values by refusing the revalidation
+    metadata update until variance re-keying can move into the Pingora path;
   - large-object range and slice behavior stays in the stable-cache review for
     1.2 only as a safety concern: current behavior must be explicit, bounded,
     and tested. A larger reader-visible partial write or slice-fill design
@@ -751,9 +754,11 @@ Stable scope for declaring the cache pack complete:
   restart, with bounded Prometheus purge counters asserted for every protected
   purge shape in that smoke path.
 - Proxied cache revalidation refreshes metadata safely when origins return
-  `304 Not Modified`. Freshness metadata and `ETag` are covered in the current
-  smoke suite; changed `Last-Modified` or `Vary` fields on 304 remain a Pingora
-  cache merge limitation to fix upstream or behind a narrow local patch.
+  `304 Not Modified`. Freshness metadata, `ETag`, and changed `Last-Modified`
+  values are covered in the current smoke suite. Changed `Vary` values on 304
+  are detected and treated as a refused revalidation metadata update so
+  existing variant metadata is preserved; full changed-`Vary` re-keying remains
+  a Pingora-path follow-up.
 - `scripts/stable_release_gate.sh` runs the promoted proxy-cache and local
   observability smoke suites before a `1.2` stable release.
 

@@ -620,7 +620,9 @@ without parsing text fixtures for every module.
        end-to-end release smoke coverage now asserts cached-hit `Age`, cached
        `Last-Modified` preservation, conditional `304`, byte-range `206`,
        `Vary` variant isolation, validator-based 304 revalidation metadata,
-       and disk HIT behavior after process restart;
+       changed `Last-Modified` preservation from origin `304 Not Modified`,
+       safe refusal of changed `Vary` revalidation metadata, and disk HIT
+       behavior after process restart;
      - `Vary` must be part of the cache-key strategy before content
        negotiation, compression, image filtering, or media variants are marked
        stable. Implemented for Pingora cache variance: repeated `Vary` headers

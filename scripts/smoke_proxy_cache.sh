@@ -6,6 +6,7 @@ TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-proxy-cache-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 CURL_MAX_TIME=${FLUXHEIM_SMOKE_CURL_MAX_TIME:-5}
 LAST_MODIFIED="Sun, 10 May 2026 00:00:00 GMT"
+REVALIDATED_LAST_MODIFIED="Mon, 11 May 2026 00:00:00 GMT"
 
 ports=$(python3 - <<'PY'
 import socket
@@ -81,6 +82,7 @@ INPUT_WARM_BODY = b"input-warm-body"
 ETAG = '"cache-smoke-v1"'
 INPUT_WARM_ETAG = '"cache-smoke-input-warm"'
 REVALIDATE_ETAG = '"cache-smoke-revalidate"'
+REVALIDATE_LAST_MODIFIED_ETAG = '"cache-smoke-revalidate-last-modified"'
 REFRESH_OLD_ETAG = '"cache-smoke-refresh-old"'
 REFRESH_NEW_ETAG = '"cache-smoke-refresh-new"'
 SWR_OLD_ETAG = '"cache-smoke-swr-old"'
@@ -88,6 +90,7 @@ SWR_NEW_ETAG = '"cache-smoke-swr-new"'
 STALE_ERROR_ETAG = '"cache-smoke-stale-error"'
 LOCKED_ETAG = '"cache-smoke-locked"'
 LAST_MODIFIED = "Sun, 10 May 2026 00:00:00 GMT"
+REVALIDATED_LAST_MODIFIED = "Mon, 11 May 2026 00:00:00 GMT"
 COUNTS = {}
 COUNTS_LOCK = threading.Lock()
 
@@ -177,6 +180,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-length", str(len(body)))
             self.send_header("cache-control", "public, max-age=1")
             self.send_header("etag", REVALIDATE_ETAG)
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path == "/revalidate-last-modified.png":
+            if self.headers.get("if-none-match") == REVALIDATE_LAST_MODIFIED_ETAG:
+                self.send_response(304)
+                self.send_header("cache-control", "public, max-age=120")
+                self.send_header("etag", REVALIDATE_LAST_MODIFIED_ETAG)
+                self.send_header("last-modified", REVALIDATED_LAST_MODIFIED)
+                self.end_headers()
+                return
+
+            body = b"revalidated-lm-body"
+            self.send_response(200)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=1")
+            self.send_header("etag", REVALIDATE_LAST_MODIFIED_ETAG)
             self.send_header("last-modified", LAST_MODIFIED)
             self.end_headers()
             self.wfile.write(body)
@@ -599,6 +622,9 @@ if_range_date_mismatch_headers="$TMP_DIR/if-range-date-mismatch.headers"
 revalidate_first_headers="$TMP_DIR/revalidate-first.headers"
 revalidate_second_headers="$TMP_DIR/revalidate-second.headers"
 revalidate_third_headers="$TMP_DIR/revalidate-third.headers"
+revalidate_lm_first_headers="$TMP_DIR/revalidate-lm-first.headers"
+revalidate_lm_second_headers="$TMP_DIR/revalidate-lm-second.headers"
+revalidate_lm_third_headers="$TMP_DIR/revalidate-lm-third.headers"
 refresh_first_headers="$TMP_DIR/refresh-first.headers"
 refresh_second_headers="$TMP_DIR/refresh-second.headers"
 refresh_third_headers="$TMP_DIR/refresh-third.headers"
@@ -615,6 +641,7 @@ if_range_mismatch_body="$TMP_DIR/if-range-mismatch-body.bin"
 if_range_date_match_body="$TMP_DIR/if-range-date-match-body.bin"
 if_range_date_mismatch_body="$TMP_DIR/if-range-date-mismatch-body.bin"
 revalidate_body="$TMP_DIR/revalidate-body.bin"
+revalidate_lm_body="$TMP_DIR/revalidate-lm-body.bin"
 refresh_body="$TMP_DIR/refresh-body.bin"
 swr_body="$TMP_DIR/swr-body.bin"
 stale_error_body="$TMP_DIR/stale-error-body.bin"
@@ -1184,6 +1211,67 @@ fi
     --expect-header 'etag: "cache-smoke-revalidate"' \
     --expect-header-name last-modified \
     --expect-header "last-modified: $LAST_MODIFIED" \
+    --expect-freshness-state fresh
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$revalidate_lm_first_headers" -o "$revalidate_lm_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/revalidate-last-modified.png"
+if ! grep -qi '^x-cache-status: MISS' "$revalidate_lm_first_headers"; then
+    echo "proxy cache smoke failed: initial Last-Modified revalidation request was not a cache MISS" >&2
+    cat "$revalidate_lm_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$revalidate_lm_body")" != "revalidated-lm-body" ]; then
+    echo "proxy cache smoke failed: initial Last-Modified revalidation body mismatch" >&2
+    exit 1
+fi
+
+sleep 1.2
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$revalidate_lm_second_headers" -o "$revalidate_lm_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/revalidate-last-modified.png"
+if ! grep -qi '^x-cache-status: REVALIDATED' "$revalidate_lm_second_headers"; then
+    echo "proxy cache smoke failed: stale asset did not revalidate changed Last-Modified from upstream 304" >&2
+    cat "$revalidate_lm_second_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$revalidate_lm_body")" != "revalidated-lm-body" ]; then
+    echo "proxy cache smoke failed: revalidated Last-Modified asset body mismatch" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$revalidate_lm_third_headers" -o "$revalidate_lm_body" \
+    -H "Host: cache.test" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/revalidate-last-modified.png"
+if ! grep -qi '^x-cache-status: HIT' "$revalidate_lm_third_headers"; then
+    echo "proxy cache smoke failed: changed Last-Modified revalidation did not leave asset fresh" >&2
+    cat "$revalidate_lm_third_headers" >&2
+    exit 1
+fi
+if ! grep -qi "^last-modified: $REVALIDATED_LAST_MODIFIED" "$revalidate_lm_third_headers"; then
+    echo "proxy cache smoke failed: changed Last-Modified was not persisted after upstream 304" >&2
+    cat "$revalidate_lm_third_headers" >&2
+    exit 1
+fi
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" cache-lookup \
+    --host cache.test \
+    --path /revalidate-last-modified.png \
+    --require-object \
+    --expect-tier disk \
+    --expect-cache-lock-wait-timeout-secs 30 \
+    --expect-cache-predictor-enabled \
+    --expect-namespace fluxheim-image-v1 \
+    --expect-key-namespace cache-vhost-v1 \
+    --expect-user-tag cache.test \
+    --expect-status 200 \
+    --expect-body-bytes 19 \
+    --expect-fresh-ttl-secs 120 \
+    --expect-header-name etag \
+    --expect-header 'etag: "cache-smoke-revalidate-last-modified"' \
+    --expect-header-name last-modified \
+    --expect-header "last-modified: $REVALIDATED_LAST_MODIFIED" \
     --expect-freshness-state fresh
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$refresh_first_headers" -o "$refresh_body" \

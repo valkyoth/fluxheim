@@ -272,12 +272,14 @@ internal cache implementation.
   `method-head` reason; the smoke suite verifies those probes do not poison
   cached GET entries. Full HEAD-to-GET cache parity remains future
   compatibility work.
-  Planned work still covers edge cases where origins change `Vary` or
-  `Last-Modified` during `304 Not Modified` revalidation. Pingora 0.8 updates
-  freshness metadata and `ETag` on 304, but its revalidation merge path does
-  not currently merge changed `Vary` or `Last-Modified` fields. Broader
-  cache-header matrix tests across static and proxied responses remain useful
-  hardening work.
+  Fluxheim preserves changed `Last-Modified` values when an origin returns
+  `304 Not Modified` during proxy-cache revalidation. Changed `Vary` values
+  during 304 revalidation are detected and treated as a no-store revalidation
+  response, keeping the existing cached metadata instead of corrupting variant
+  selection. Full changed-`Vary` re-keying remains a future Pingora-path
+  improvement because the stored variance key must change together with the
+  response metadata. Broader cache-header matrix tests across static and
+  proxied responses remain useful hardening work.
 - When both memory and disk tiers are enabled on a vhost, Fluxheim uses a
   tiered Pingora storage adapter: memory is L1, disk is L2, misses are written
   to both tiers, disk hits are promoted back into memory when they fit, and

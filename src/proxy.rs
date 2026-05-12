@@ -62,6 +62,8 @@ const CACHE_PASS_COUNTER_TTL_SECS: u64 = 600;
 #[cfg(feature = "cache")]
 const CACHE_PREDICTOR_SHARDS: usize = 16;
 #[cfg(feature = "cache")]
+const REVALIDATION_VARY_CHANGED_REASON: &str = "revalidation-vary-changed";
+#[cfg(feature = "cache")]
 type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 
 #[derive(Clone)]
@@ -2876,6 +2878,8 @@ pub struct RequestContext {
     cache_status_override: Option<CacheStatusOverride>,
     #[cfg(feature = "cache")]
     cache_observed_phase: Option<CachePhase>,
+    #[cfg(feature = "cache")]
+    revalidation_304_headers: Option<Revalidation304Headers>,
 }
 
 #[cfg(feature = "cache")]
@@ -2883,6 +2887,13 @@ pub struct RequestContext {
 struct CacheStatusOverride {
     status: &'static str,
     reason: Option<&'static str>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct Revalidation304Headers {
+    last_modified: Vec<::http::HeaderValue>,
+    vary: Vec<::http::HeaderValue>,
 }
 
 #[async_trait]
@@ -3194,6 +3205,7 @@ impl ProxyHttp for FluxProxy {
             selected_cache_config(vhost, ctx),
             session.cache.phase(),
         );
+        ctx.revalidation_304_headers = capture_revalidation_304_headers(upstream_response);
         Ok(())
     }
 
@@ -3477,6 +3489,23 @@ impl ProxyHttp for FluxProxy {
         let vhost = state.vhost(vhost_index);
         let cache = selected_cache_config(vhost, ctx);
         let cache_key = session.cache.cache_key().combined();
+        let adjusted_response;
+        let response = if let Some(revalidation_headers) = ctx.revalidation_304_headers.as_ref() {
+            if revalidation_304_vary_changed(response, revalidation_headers) {
+                log::warn!(
+                    "origin changed Vary during cache revalidation for vhost {}; keeping existing cached metadata",
+                    vhost.name
+                );
+                return Ok(RespCacheable::Uncacheable(NoCacheReason::Custom(
+                    REVALIDATION_VARY_CHANGED_REASON,
+                )));
+            }
+            adjusted_response =
+                response_with_revalidation_304_headers(response, revalidation_headers)?;
+            &adjusted_response
+        } else {
+            response
+        };
 
         if let Some(reason) = response_cache_admission_rejection(response, cache) {
             cache_pass_record_uncacheable(cache_pass_counter(), cache, &cache_key);
@@ -3749,6 +3778,76 @@ fn record_cache_policy_activity(
         .and_then(|index| vhost.route(index).cache.as_ref())
         .map(|cache| cache.name.as_str());
     crate::metrics::record_cache_activity_scope(vhost.name.as_str(), route, "policy", event);
+}
+
+#[cfg(feature = "cache")]
+fn capture_revalidation_304_headers(response: &ResponseHeader) -> Option<Revalidation304Headers> {
+    if response.status != StatusCode::NOT_MODIFIED {
+        return None;
+    }
+
+    let headers = Revalidation304Headers {
+        last_modified: response
+            .headers
+            .get_all("last-modified")
+            .iter()
+            .cloned()
+            .collect(),
+        vary: response.headers.get_all("vary").iter().cloned().collect(),
+    };
+
+    (!headers.last_modified.is_empty() || !headers.vary.is_empty()).then_some(headers)
+}
+
+#[cfg(feature = "cache")]
+fn response_with_revalidation_304_headers(
+    response: &ResponseHeader,
+    revalidation_headers: &Revalidation304Headers,
+) -> Result<ResponseHeader> {
+    let mut response = response.clone();
+    replace_response_header_values(
+        &mut response,
+        "last-modified",
+        &revalidation_headers.last_modified,
+    )?;
+    Ok(response)
+}
+
+#[cfg(feature = "cache")]
+fn replace_response_header_values(
+    response: &mut ResponseHeader,
+    header_name: &'static str,
+    values: &[::http::HeaderValue],
+) -> Result<()> {
+    if values.is_empty() {
+        return Ok(());
+    }
+    response.remove_header(header_name);
+    for (index, value) in values.iter().enumerate() {
+        if index == 0 {
+            response.insert_header(header_name, value.clone())?;
+        } else {
+            response.append_header(header_name, value.clone())?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn revalidation_304_vary_changed(
+    response: &ResponseHeader,
+    revalidation_headers: &Revalidation304Headers,
+) -> bool {
+    if revalidation_headers.vary.is_empty() {
+        return false;
+    }
+    let current = response
+        .headers
+        .get_all("vary")
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    current != revalidation_headers.vary
 }
 
 #[cfg(feature = "cache")]
@@ -5187,7 +5286,9 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{
-        request_cache_bypass, request_cache_bypass_reason, request_cache_revalidation_requested,
+        capture_revalidation_304_headers, request_cache_bypass, request_cache_bypass_reason,
+        request_cache_revalidation_requested, response_with_revalidation_304_headers,
+        revalidation_304_vary_changed,
     };
 
     #[test]
@@ -7914,6 +8015,43 @@ mod tests {
             cache_status_reason_header_value(CachePhase::Uninit, override_status),
             Some("cache-pass")
         );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn revalidation_304_headers_preserve_last_modified_and_detect_vary_changes() {
+        let mut merged = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        merged
+            .insert_header("last-modified", "Sun, 10 May 2026 00:00:00 GMT")
+            .unwrap();
+        merged.insert_header("vary", "Accept-Encoding").unwrap();
+
+        let mut not_modified = pingora::http::ResponseHeader::build(304, Some(1)).unwrap();
+        not_modified
+            .insert_header("last-modified", "Mon, 11 May 2026 00:00:00 GMT")
+            .unwrap();
+        not_modified
+            .insert_header("vary", "Accept-Encoding")
+            .unwrap();
+
+        let captured = capture_revalidation_304_headers(&not_modified).unwrap();
+        assert!(!revalidation_304_vary_changed(&merged, &captured));
+
+        let adjusted = response_with_revalidation_304_headers(&merged, &captured).unwrap();
+        assert_eq!(
+            adjusted
+                .headers
+                .get("last-modified")
+                .and_then(|value| value.to_str().ok()),
+            Some("Mon, 11 May 2026 00:00:00 GMT")
+        );
+
+        let mut changed_vary = pingora::http::ResponseHeader::build(304, Some(1)).unwrap();
+        changed_vary
+            .insert_header("vary", "Accept-Language")
+            .unwrap();
+        let captured = capture_revalidation_304_headers(&changed_vary).unwrap();
+        assert!(revalidation_304_vary_changed(&merged, &captured));
     }
 
     #[cfg(feature = "cache")]
