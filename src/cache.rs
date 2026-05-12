@@ -2665,6 +2665,9 @@ impl SafeDiskCachePath {
     }
 
     fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
+        // codeql[rust/path-injection]: SafeDiskCachePath is constructed only
+        // after cache-root confinement, deterministic shard/temp-name
+        // validation, and symlink checks. Request paths are never passed here.
         // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
         // cache-root-confined paths after shard/temp name validation and
         // symlink checks; callers never pass request paths directly.
@@ -2676,6 +2679,10 @@ impl SafeDiskCachePath {
         options.create_new(true).write(true);
         #[cfg(target_os = "linux")]
         options.custom_flags(O_NOFOLLOW);
+        // codeql[rust/path-injection]: SafeDiskCachePath is constructed only
+        // after cache-root confinement, deterministic shard/temp-name
+        // validation, and symlink checks. O_NOFOLLOW rejects final symlinks on
+        // Linux.
         // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
         // cache-root-confined paths after shard/temp name validation and
         // symlink checks; O_NOFOLLOW prevents final symlink traversal on Linux.
@@ -2687,6 +2694,10 @@ impl SafeDiskCachePath {
         options.read(true);
         #[cfg(target_os = "linux")]
         options.custom_flags(O_NOFOLLOW);
+        // codeql[rust/path-injection]: SafeDiskCachePath is constructed only
+        // after cache-root confinement, deterministic shard/temp-name
+        // validation, and symlink checks. O_NOFOLLOW rejects final symlinks on
+        // Linux.
         // lgtm[rust/path-injection]: SafeDiskCachePath is used only for
         // cache-root-confined paths after shard/temp name validation and
         // symlink checks; O_NOFOLLOW prevents final symlink traversal on Linux.
@@ -2694,6 +2705,9 @@ impl SafeDiskCachePath {
     }
 
     fn rename_from(&self, source: &SafeDiskCachePath) -> std::io::Result<()> {
+        // codeql[rust/path-injection]: Both paths are SafeDiskCachePath values
+        // produced inside the validated disk-cache root from deterministic
+        // object names or Fluxheim-owned temporary names.
         // lgtm[rust/path-injection]: Both paths are SafeDiskCachePath values
         // produced inside the disk-cache root from deterministic object names
         // or Fluxheim-owned temporary names.
@@ -2701,6 +2715,9 @@ impl SafeDiskCachePath {
     }
 
     fn remove_file(&self) -> std::io::Result<()> {
+        // codeql[rust/path-injection]: SafeDiskCachePath deletion is restricted
+        // to Fluxheim-owned cache object/checkpoint/temp paths under the
+        // validated disk-cache root.
         // lgtm[rust/path-injection]: SafeDiskCachePath deletion is restricted
         // to Fluxheim-owned cache object/checkpoint/temp paths under the
         // validated disk-cache root.
@@ -3365,7 +3382,7 @@ fn cleanup_stale_disk_cache_temp_dir(
         if age < min_age {
             continue;
         }
-        std::fs::remove_file(&canonical)?;
+        SafeDiskCachePath::from_path(canonical).remove_file()?;
         removed = removed.saturating_add(1);
     }
     Ok(removed)
@@ -3392,6 +3409,10 @@ fn remove_disk_cache_object(root: &Path, path: &Path) -> std::io::Result<bool> {
         ));
     }
 
+    // codeql[rust/path-injection]: remove_disk_cache_object is called with
+    // deterministic cache object paths from the disk index or hash-derived
+    // object name. The extension, root confinement, and full path symlink chain
+    // were checked immediately above.
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
@@ -3401,7 +3422,8 @@ fn remove_disk_cache_object(root: &Path, path: &Path) -> std::io::Result<bool> {
         return Ok(false);
     }
 
-    match std::fs::remove_file(path) {
+    let safe_path = SafeDiskCachePath::from_path(path.to_path_buf());
+    match safe_path.remove_file() {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error),
