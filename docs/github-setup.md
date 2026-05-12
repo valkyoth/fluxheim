@@ -187,11 +187,12 @@ upload.
 
 ## First Tag After GitHub Import
 
-After the repository is on GitHub and checks pass, create an incubator tag
-instead of jumping straight to 1.0:
+After the repository is on GitHub and checks pass, create a signed incubator
+tag instead of jumping straight to 1.0:
 
 ```bash
-git tag -a v0.1.0 -m "Fluxheim 0.1.0 repository baseline"
+git tag -s v0.1.0 -m "Fluxheim 0.1.0 repository baseline"
+git tag -v v0.1.0
 git push origin v0.1.0
 ```
 

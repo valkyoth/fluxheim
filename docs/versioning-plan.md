@@ -1451,13 +1451,17 @@ reaches Pingora.
 
 ## Git Tags
 
-Use annotated tags:
+Use signed annotated tags. This repository should have SSH signing configured
+locally with `gpg.format=ssh`, `user.signingkey`, and `tag.gpgSign=true`; verify
+with `git config --local --get tag.gpgSign`.
 
 ```bash
-git tag -a v0.5.0 -m "Fluxheim 0.5.0"
+git tag -s v0.5.0 -m "Fluxheim 0.5.0"
+git tag -v v0.5.0
 git push origin v0.5.0
 
-git tag -a v1.0.0 -m "Fluxheim 1.0.0"
+git tag -s v1.0.0 -m "Fluxheim 1.0.0"
+git tag -v v1.0.0
 git push origin v1.0.0
 ```
 
