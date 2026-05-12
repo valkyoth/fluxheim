@@ -3208,7 +3208,9 @@ impl ProxyHttp for FluxProxy {
                         return Ok(true);
                     }
                     let static_request = StaticServeRequest {
+                        #[cfg(feature = "cache")]
                         vhost,
+                        #[cfg(feature = "cache")]
                         route_index: None,
                         web,
                         file: &file,
@@ -3841,6 +3843,12 @@ async fn serve_static_route(
     web: &StaticFileServer,
     route: &RuntimeRoute,
 ) -> Result<bool> {
+    #[cfg(not(feature = "cache"))]
+    {
+        let _ = vhost;
+        let _ = route_index;
+    }
+
     let method = session.req_header().method.as_str().to_owned();
     if method != "GET" && method != "HEAD" {
         return Ok(false);
@@ -3891,7 +3899,9 @@ async fn serve_static_route(
                 return Ok(true);
             }
             let static_request = StaticServeRequest {
+                #[cfg(feature = "cache")]
                 vhost,
+                #[cfg(feature = "cache")]
                 route_index: Some(route_index),
                 web,
                 file: &file,
@@ -3930,7 +3940,9 @@ async fn serve_static_route(
 
 #[cfg(feature = "web")]
 struct StaticServeRequest<'a> {
+    #[cfg(feature = "cache")]
     vhost: &'a RuntimeVhost,
+    #[cfg(feature = "cache")]
     route_index: Option<usize>,
     web: &'a StaticFileServer,
     file: &'a crate::web::StaticFile,
