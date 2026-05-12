@@ -109,16 +109,13 @@ fn build_metrics_payload(
                 for metric in family.get_metric() {
                     data_points.push(number_data_point(
                         metric,
-                        metric
-                            .get_counter()
-                            .as_ref()
-                            .map_or(0.0, |counter| counter.value()),
+                        metric.get_counter().get_value(),
                         &time_unix_nanos,
                     ));
                 }
                 metrics.push(json!({
-                    "name": family.name(),
-                    "description": family.help(),
+                    "name": family.get_name(),
+                    "description": family.get_help(),
                     "unit": "1",
                     "sum": {
                         "aggregationTemporality": "AGGREGATION_TEMPORALITY_CUMULATIVE",
@@ -132,16 +129,13 @@ fn build_metrics_payload(
                 for metric in family.get_metric() {
                     data_points.push(number_data_point(
                         metric,
-                        metric
-                            .get_gauge()
-                            .as_ref()
-                            .map_or(0.0, |gauge| gauge.value()),
+                        metric.get_gauge().get_value(),
                         &time_unix_nanos,
                     ));
                 }
                 metrics.push(json!({
-                    "name": family.name(),
-                    "description": family.help(),
+                    "name": family.get_name(),
+                    "description": family.get_help(),
                     "unit": "1",
                     "gauge": {
                         "dataPoints": data_points,
@@ -154,8 +148,8 @@ fn build_metrics_payload(
                     data_points.push(histogram_data_point(metric, &time_unix_nanos));
                 }
                 metrics.push(json!({
-                    "name": family.name(),
-                    "description": family.help(),
+                    "name": family.get_name(),
+                    "description": family.get_help(),
                     "unit": "s",
                     "histogram": {
                         "aggregationTemporality": "AGGREGATION_TEMPORALITY_CUMULATIVE",
@@ -196,7 +190,7 @@ fn number_data_point(
         "attributes": metric
             .get_label()
             .iter()
-            .map(|label| string_attr(label.name(), label.value()))
+            .map(|label| string_attr(label.get_name(), label.get_value()))
             .collect::<Vec<_>>(),
         "timeUnixNano": time_unix_nanos,
         "asDouble": value,
@@ -213,10 +207,10 @@ fn histogram_data_point(
     let mut explicit_bounds = Vec::new();
 
     for bucket in histogram.get_bucket() {
-        let cumulative_count = bucket.cumulative_count();
+        let cumulative_count = bucket.get_cumulative_count();
         bucket_counts.push(cumulative_count.saturating_sub(previous_count));
         previous_count = cumulative_count;
-        explicit_bounds.push(bucket.upper_bound());
+        explicit_bounds.push(bucket.get_upper_bound());
     }
     bucket_counts.push(histogram.get_sample_count().saturating_sub(previous_count));
 
@@ -224,7 +218,7 @@ fn histogram_data_point(
         "attributes": metric
             .get_label()
             .iter()
-            .map(|label| string_attr(label.name(), label.value()))
+            .map(|label| string_attr(label.get_name(), label.get_value()))
             .collect::<Vec<_>>(),
         "timeUnixNano": time_unix_nanos,
         "count": histogram.get_sample_count(),
