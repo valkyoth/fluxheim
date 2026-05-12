@@ -22,13 +22,11 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current main branch is
-the `1.2` operations and cache completion line: static sites, vhosts,
-route-level proxying, redirects, rustls SNI, managed ACME issuance and renewal,
-secure headers, container/native systemd operation, and the production cache
-pack are the active focus. The latest released `1.1.x` line remains the
-production gateway baseline while `1.2` finishes cache tooling, observability,
-and operator ergonomics.
+[Pingora](https://github.com/cloudflare/pingora). The current stable line is
+`1.2.x`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+managed ACME issuance and renewal, secure headers, container/native systemd
+operation, production proxy-cache controls, and Prometheus/OpenTelemetry
+operations support.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -180,7 +178,7 @@ For managed certificate issuance, see
 [`examples/acme-http-01.toml`](examples/acme-http-01.toml). For an issuer that
 requires External Account Binding, see
 [`examples/acme-actalis.toml`](examples/acme-actalis.toml).
-Packaged `1.1.x` builds include `acme-init` for guided issuer bootstrap:
+Packaged `1.2.x` builds include `acme-init` for guided issuer bootstrap:
 
 ```bash
 sudo fluxheim acme-init actalis
@@ -253,12 +251,13 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Stable: 1.1 Certificate Operations
+## Current Stable: 1.2 Operations And Cache
 
 Fluxheim does not treat every planned feature as part of the stable core. The
 `1.0` release established the first gateway-ready baseline for representative
-real multi-site configs. The `1.1` release adds production certificate
-operations on top of that baseline.
+real multi-site configs. The `1.1` release added production certificate
+operations on top of that baseline. The `1.2.0` release completes the first
+production proxy-cache and observability baseline.
 
 Included in `1.0`: route-level exact/prefix/fallback matching, route actions
 for proxy/static/redirects, route prefix stripping, per-route body limits,
@@ -280,52 +279,50 @@ safe ACME storage, guided `acme-init` bootstrap, and packaged
 `fluxheim-acme.service` / `fluxheim-acme.timer` units for deployments that
 prefer external renewal scheduling.
 
-Active `1.2` work: cache-server completion and operations diagnostics. The
-current development line now includes route/vhost scoped cache policies, memory
-and disk cache tiers, cache locks for request collapsing, protected purge/status
+Added in `1.2.0`: route/vhost scoped proxy-cache policies, memory and disk
+cache tiers, cache locks for request collapsing, protected purge/status
 operations, opt-in cacheability predictors, cache warm/lookup/key tooling,
 cache policy metrics, OTLP metrics export, and end-to-end proxy cache smoke
 coverage for hit `Age`, conditional `304`/`200` validator match and mismatch
 behavior from `ETag` and `Last-Modified`, byte ranges including ETag/date
-`If-Range`, cache-status
-assertions on cached conditional/range responses, intentional HEAD storage
-bypass that does not poison cached GET bodies, validator-based upstream
-revalidation and refresh,
-stale-while-revalidate, stale-if-error serving, cache-lock request collapsing,
-`Vary` variants, disk hits after restart, configured request bypass policies,
-input-file and negative-cache warming, admin exact/bulk purge, stale dry-run,
-vhost prefix/tag/wildcard purges, route-scoped purge after process restart,
-client refresh revalidation, and debug bypass reasons.
-The same smoke path now asserts bounded Prometheus purge counters for each
-admin purge shape and cache activity counters for disk hits plus scoped purge
-events, policy bypasses, client refresh revalidation, and allowed stale
-serving. The local observability smoke checks Prometheus/OpenTelemetry export
-plumbing and cache policy gauges for request-collapsing coverage.
-Strict host-routing rejections also emit a low-cardinality Prometheus counter
-and security warning log for missing, invalid, or unknown host identity.
-Admin authentication failures and lockouts emit bounded Prometheus counters and
+`If-Range`, cache-status assertions on cached conditional/range responses,
+intentional HEAD storage bypass that does not poison cached GET bodies,
+validator-based upstream revalidation and refresh, stale-while-revalidate,
+stale-if-error serving, cache-lock request collapsing, `Vary` variants, disk
+hits after restart, configured request bypass policies, input-file and
+negative-cache warming, admin exact/bulk purge, stale dry-run, vhost
+prefix/tag/wildcard purges, route-scoped purge after process restart, client
+refresh revalidation, and debug bypass reasons.
+
+The `1.2.0` release also adds bounded Prometheus purge counters for each admin
+purge shape, cache activity counters for disk hits and scoped purge events,
+policy bypasses, client refresh revalidation, allowed stale serving, aggregate
+memory/disk pressure gauges, and OpenTelemetry export smoke coverage. Strict
+host-routing rejections emit a low-cardinality Prometheus counter and security
+warning log for missing, invalid, or unknown host identity. Admin
+authentication failures and lockouts emit bounded Prometheus counters and
 security logs for alerting on control-plane guessing attempts.
-`cache-lookup` also supports deploy-script assertions for object
-presence, storage tier, HTTP status, stored body size, stored fresh TTL, stored
-cache tags, stored header names and exact header values, exact object count,
+
+`cache-lookup` supports deploy-script assertions for object presence, storage
+tier, HTTP status, stored body size, stored fresh TTL, stored cache tags, stored
+header names and exact header values, exact object count,
 cache-lock/predictor/tier layout, stale-serving eligibility, selected cache
 scope/vhost/route, internal namespace, operator key namespace, user tag,
 cache-lock wait timeout, negative policy reasons, purge-index reachability, and
-fresh/stale/expired state. The `1.2` cache baseline now includes the documented
+fresh/stale/expired state. The `1.2.0` cache baseline includes the documented
 proxy revalidation metadata behavior, full disk-cache startup scans with
 checkpoint merging, debounced checkpoint writes, purge-index pruning on
 eviction, bounded background stale cleanup, and aggregate memory/disk pressure
-metrics. Remaining `1.2` hardening is release-candidate validation plus
-production Podman/ACME examples, admin/metrics operations polish,
-rollback/snapshot improvements, and proxy
-buffering/backpressure controls for app migrations. After `1.2`, cache work is
-planned as focused cache-only follow-ups: `1.2.1` for opt-in local/static
-vhost caching, `1.2.2` for slab/bin disk storage, `1.2.3` for distributed
-cache metadata/peer-fill, and an optional `1.2.4` only if production testing
-finds one more cache blocker. `1.3` is the load-balancer/proxy parity line.
-The Wasm work is now planned as a shared `1.4` extensibility release, covering
-nginx-Lua-style hooks and VCL-like cache policy hooks through one sandboxed
-runtime instead of a small cache-only `1.2.x` feature.
+metrics.
+
+The `1.2.0` cache stores proxy responses. Local/static vhost response caching
+is intentionally left as the focused `1.2.1` follow-up. After that, cache work
+continues as focused cache-only releases: `1.2.2` for slab/bin disk storage,
+`1.2.3` for distributed cache metadata/peer-fill, and an optional `1.2.4` only
+if production testing finds one more cache blocker. `1.3` is the
+load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
+extensibility release, covering nginx-Lua-style hooks and VCL-like cache policy
+hooks through one sandboxed runtime.
 
 Later releases continue with compression, media transforms, advanced
 certificate automation, privacy/security profiles, Cloudflare origin support,
