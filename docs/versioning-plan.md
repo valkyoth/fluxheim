@@ -810,6 +810,13 @@ Focused cache-only follow-up releases after 1.2:
   workflows for mirrors, or bounded metadata ban predicates. If no such blocker
   appears, skip `1.2.4` and move to `1.3`.
 
+Cross-cutting packaging follow-up for the next suitable `1.2.x` or `1.3`
+release: add proper manual pages for native deployments, including
+`fluxheim(8)`, `fluxheim.toml(5)`, ACME, cache, snapshot, reload/rollback, and
+config-validation workflows. The RPM should install the generated/static man
+pages into the distro manpath and the package checks should verify they are
+present.
+
 Exit criteria:
 
 - Cache cannot exceed configured memory/disk budgets.

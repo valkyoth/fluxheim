@@ -1479,6 +1479,12 @@ without parsing text fixtures for every module.
      non-root runtime user.
    - Rootless Podman smoke script. Implemented for image build, packaged config
      validation, and runtime UID verification.
+   - Proper manual pages for the operator CLI and packaged service:
+     `fluxheim(8)`, `fluxheim.toml(5)`, and focused subcommand pages for ACME,
+     cache, snapshot, reload/rollback, and validation workflows. The RPM should
+     install these under the distro manpath and include them in package
+     validation, so native deployments have offline command/config
+     documentation.
    - Release/security checklist. Implemented in
      [Release Checklist](docs/release-checklist.md), with a wrapper script for
      local release gates.
