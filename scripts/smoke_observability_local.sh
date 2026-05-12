@@ -47,7 +47,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-mkdir -p "$tmp"
+mkdir -p "$tmp/cache"
 
 python3 - "$upstream_port" >"$tmp/upstream.log" 2>&1 <<'PY' &
 import http.server
@@ -180,6 +180,11 @@ max_object_bytes = "256KiB"
 
 [vhosts.routes.cache.memory]
 enabled = true
+max_size_bytes = "1MiB"
+
+[vhosts.routes.cache.disk]
+enabled = true
+path = "$tmp/cache"
 max_size_bytes = "1MiB"
 
 [vhosts.routes.cache.lock]
@@ -334,6 +339,24 @@ if ! grep -q 'fluxheim_cache_memory_max_size_bytes 2097152' "$metrics_body"; the
     exit 1
 fi
 
+if ! grep -q 'fluxheim_cache_disk_entries 1' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed runtime disk cache entry gauge" >&2
+    grep 'fluxheim_cache_disk_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -Eq 'fluxheim_cache_disk_size_bytes [1-9][0-9]*' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed runtime disk cache size gauge" >&2
+    grep 'fluxheim_cache_disk_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_disk_max_size_bytes 1048576' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed runtime disk cache budget gauge" >&2
+    grep 'fluxheim_cache_disk_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
 if ! grep -q 'fluxheim_cache_operation_duration_seconds_bucket' "$metrics_body"; then
     echo "observability smoke failed: metrics endpoint missed cache operation duration histogram" >&2
     grep 'fluxheim_cache_operation_duration' "$metrics_body" >&2 || true
@@ -358,19 +381,19 @@ if ! grep -q 'operation="lookup"' "$metrics_body"; then
     exit 1
 fi
 
-for _ in 1 2 3 4 5; do
+for _ in 1 2 3 4 5 6 7 8 9 10; do
     curl -fsS "http://127.0.0.1:$metrics_port/metrics" >"$metrics_body"
-    if grep -q 'fluxheim_cache_purger_runs_total{outcome="skipped"}' "$metrics_body"; then
+    if grep -q 'fluxheim_cache_purger_runs_total{outcome=' "$metrics_body"; then
         break
     fi
-    sleep 0.2
+    sleep 0.5
 done
-if ! grep -q 'fluxheim_cache_purger_runs_total{outcome="skipped"}' "$metrics_body"; then
+if ! grep -q 'fluxheim_cache_purger_runs_total{outcome=' "$metrics_body"; then
     echo "observability smoke failed: metrics endpoint missed cache purger outcome metric" >&2
     head -n 80 "$metrics_body" >&2 || true
     exit 1
 fi
-if ! grep -q 'fluxheim_cache_purger_duration_seconds_bucket{outcome="skipped"' "$metrics_body"; then
+if ! grep -q 'fluxheim_cache_purger_duration_seconds_bucket{outcome=' "$metrics_body"; then
     echo "observability smoke failed: metrics endpoint missed cache purger duration histogram" >&2
     grep 'fluxheim_cache_purger_' "$metrics_body" >&2 || true
     exit 1
