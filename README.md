@@ -272,7 +272,9 @@ Added in `1.1`: named TLS policy profiles, minimum protocol and ALPN controls,
 multi-certificate rustls SNI, managed ACME issuance and renewal for HTTP-01 and
 rustls TLS-ALPN-01 builds, Actalis and Google Trust Services EAB-capable issuer
 configuration, file-backed secret support for containers/systemd credentials,
-safe ACME storage, and guided `acme-init` bootstrap.
+safe ACME storage, guided `acme-init` bootstrap, and packaged
+`fluxheim-acme.service` / `fluxheim-acme.timer` units for deployments that
+prefer external renewal scheduling.
 
 Active `1.2` work: cache-server completion and operations diagnostics. The
 current development line now includes route/vhost scoped cache policies, memory
@@ -306,8 +308,8 @@ proxy revalidation metadata behavior, full disk-cache startup scans with
 checkpoint merging, debounced checkpoint writes, purge-index pruning on
 eviction, bounded background stale cleanup, and aggregate memory/disk pressure
 metrics. Remaining `1.2` hardening is release-candidate validation plus
-production Podman/ACME examples, the separate ACME companion service/timer flow,
-admin/metrics operations polish, rollback/snapshot improvements, and proxy
+production Podman/ACME examples, admin/metrics operations polish,
+rollback/snapshot improvements, and proxy
 buffering/backpressure controls for app migrations. After `1.2`, cache work is
 planned as focused cache-only follow-ups: `1.2.1` for slab/bin disk storage,
 `1.2.2` for Wasm cache policy hooks, `1.2.3` for distributed cache
