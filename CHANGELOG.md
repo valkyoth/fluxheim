@@ -9,6 +9,12 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## 1.2.1 - Local Static Cache Follow-Up
+
+Released: 2026-05-12
+
 ### Added
 
 - Added the `1.2.1` focused local/static vhost cache follow-up with an explicit
