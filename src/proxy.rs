@@ -5872,7 +5872,7 @@ fn approximate_request_header_bytes(request: &RequestHeader) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, time::Duration};
+    use std::time::Duration;
 
     use bytes::Bytes;
 
@@ -6764,8 +6764,8 @@ mod tests {
     #[test]
     fn cache_key_preview_uses_local_static_key_when_enabled() {
         let root = unique_temp_path("local-static-cache-preview");
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("asset.webp"), "local-static").unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("asset.webp"), "local-static").unwrap();
 
         let config = Config {
             vhosts: vec![VhostConfig {
@@ -6814,15 +6814,15 @@ mod tests {
                 .is_some_and(|key| key.contains("file:"))
         );
 
-        let _ = fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(all(feature = "cache", feature = "web"))]
     #[test]
     fn exact_purge_uses_local_static_key_when_enabled() {
         let root = unique_temp_path("local-static-cache-purge");
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("asset.webp"), "local-static").unwrap();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("asset.webp"), "local-static").unwrap();
 
         let config = Config {
             vhosts: vec![VhostConfig {
@@ -6881,7 +6881,7 @@ mod tests {
                 .is_some_and(|primary| primary.contains("file:"))
         );
 
-        let _ = fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(feature = "cache")]
