@@ -15,6 +15,16 @@ static CACHE_MEMORY_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_MEMORY_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_MEMORY_WEIGHTED_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_MEMORY_MAX_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_MEMORY_FILL_RATIO_PER_MILLE: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_MEMORY_PURGE_INDEX_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_MAX_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_FILL_RATIO_PER_MILLE: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_PURGE_INDEX_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ACTIVITY_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_ACTIVITY_SCOPE_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_OPERATION_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
@@ -41,6 +51,16 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_disk_tiers()?;
     cache_lock_enabled_policies()?;
     cache_lock_wait_timeout_max_seconds()?;
+    cache_memory_entries()?;
+    cache_memory_weighted_size_bytes()?;
+    cache_memory_max_size_bytes()?;
+    cache_memory_fill_ratio_per_mille()?;
+    cache_memory_purge_index_entries()?;
+    cache_disk_entries()?;
+    cache_disk_size_bytes()?;
+    cache_disk_max_size_bytes()?;
+    cache_disk_fill_ratio_per_mille()?;
+    cache_disk_purge_index_entries()?;
     cache_activity_total()?;
     cache_activity_scope_total()?;
     cache_operation_duration_seconds()?;
@@ -67,6 +87,38 @@ pub fn record_config(config: &crate::config::Config) {
     set_gauge(
         cache_lock_wait_timeout_max_seconds(),
         stats.lock_wait_timeout_max_secs,
+    );
+}
+
+#[cfg(all(feature = "proxy", feature = "cache"))]
+pub fn record_cache_runtime_totals(totals: &crate::proxy::CacheRuntimeTotals) {
+    set_gauge(cache_memory_entries(), totals.memory_entries);
+    set_gauge(
+        cache_memory_weighted_size_bytes(),
+        totals.memory_weighted_size_bytes,
+    );
+    set_gauge(cache_memory_max_size_bytes(), totals.memory_max_size_bytes);
+    set_gauge(
+        cache_memory_fill_ratio_per_mille(),
+        ratio_per_mille(
+            totals.memory_weighted_size_bytes,
+            totals.memory_max_size_bytes,
+        ),
+    );
+    set_gauge(
+        cache_memory_purge_index_entries(),
+        totals.memory_purge_index_entries,
+    );
+    set_gauge(cache_disk_entries(), totals.disk_entries);
+    set_gauge(cache_disk_size_bytes(), totals.disk_size_bytes);
+    set_gauge(cache_disk_max_size_bytes(), totals.disk_max_size_bytes);
+    set_gauge(
+        cache_disk_fill_ratio_per_mille(),
+        ratio_per_mille(totals.disk_size_bytes, totals.disk_max_size_bytes),
+    );
+    set_gauge(
+        cache_disk_purge_index_entries(),
+        totals.disk_purge_index_entries,
     );
 }
 
@@ -260,6 +312,13 @@ fn set_gauge(gauge: Result<&'static IntGauge, prometheus::Error>, value: u64) {
     }
 }
 
+fn ratio_per_mille(value: u64, max: u64) -> u64 {
+    if max == 0 {
+        return 0;
+    }
+    value.saturating_mul(1000) / max
+}
+
 fn u64_to_i64_saturating(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
@@ -373,6 +432,86 @@ fn cache_lock_wait_timeout_max_seconds() -> Result<&'static IntGauge, prometheus
         &CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS,
         "fluxheim_cache_lock_wait_timeout_max_seconds",
         "Maximum configured Fluxheim cache request-collapsing wait timeout across lock-enabled cache policies.",
+    )
+}
+
+fn cache_memory_entries() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_MEMORY_ENTRIES,
+        "fluxheim_cache_memory_entries",
+        "Current aggregate Fluxheim memory-cache object count.",
+    )
+}
+
+fn cache_memory_weighted_size_bytes() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_MEMORY_WEIGHTED_SIZE_BYTES,
+        "fluxheim_cache_memory_weighted_size_bytes",
+        "Current aggregate Fluxheim memory-cache weighted size in bytes.",
+    )
+}
+
+fn cache_memory_max_size_bytes() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_MEMORY_MAX_SIZE_BYTES,
+        "fluxheim_cache_memory_max_size_bytes",
+        "Configured aggregate Fluxheim memory-cache size budget in bytes.",
+    )
+}
+
+fn cache_memory_fill_ratio_per_mille() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_MEMORY_FILL_RATIO_PER_MILLE,
+        "fluxheim_cache_memory_fill_ratio_per_mille",
+        "Current aggregate Fluxheim memory-cache fill ratio in per-mille units.",
+    )
+}
+
+fn cache_memory_purge_index_entries() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_MEMORY_PURGE_INDEX_ENTRIES,
+        "fluxheim_cache_memory_purge_index_entries",
+        "Current aggregate Fluxheim memory-cache purge-index entry count.",
+    )
+}
+
+fn cache_disk_entries() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_ENTRIES,
+        "fluxheim_cache_disk_entries",
+        "Current aggregate Fluxheim disk-cache object count.",
+    )
+}
+
+fn cache_disk_size_bytes() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_SIZE_BYTES,
+        "fluxheim_cache_disk_size_bytes",
+        "Current aggregate Fluxheim disk-cache size in bytes.",
+    )
+}
+
+fn cache_disk_max_size_bytes() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_MAX_SIZE_BYTES,
+        "fluxheim_cache_disk_max_size_bytes",
+        "Configured aggregate Fluxheim disk-cache size budget in bytes.",
+    )
+}
+
+fn cache_disk_fill_ratio_per_mille() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_FILL_RATIO_PER_MILLE,
+        "fluxheim_cache_disk_fill_ratio_per_mille",
+        "Current aggregate Fluxheim disk-cache fill ratio in per-mille units.",
+    )
+}
+
+fn cache_disk_purge_index_entries() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_PURGE_INDEX_ENTRIES,
+        "fluxheim_cache_disk_purge_index_entries",
+        "Current aggregate Fluxheim disk-cache purge-index entry count.",
     )
 }
 
@@ -765,6 +904,8 @@ mod tests {
         VhostTlsConfig, WebConfig,
     };
 
+    #[cfg(all(feature = "proxy", feature = "cache"))]
+    use super::record_cache_runtime_totals;
     use super::{
         cache_config_stats, init, method_bucket, record_cache_activity,
         record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
@@ -818,6 +959,44 @@ mod tests {
         assert!(output.contains("fluxheim_cache_disk_tiers 1"));
         assert!(output.contains("fluxheim_cache_lock_enabled_policies 2"));
         assert!(output.contains("fluxheim_cache_lock_wait_timeout_max_seconds 30"));
+        assert!(!output.contains("cache_key"));
+        assert!(!output.contains("path="));
+    }
+
+    #[cfg(all(feature = "proxy", feature = "cache"))]
+    #[test]
+    fn records_cache_runtime_storage_pressure_gauges() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_cache_runtime_totals(&crate::proxy::CacheRuntimeTotals {
+            memory_entries: 3,
+            memory_weighted_size_bytes: 512,
+            memory_max_size_bytes: 1024,
+            memory_purge_index_entries: 4,
+            disk_entries: 5,
+            disk_size_bytes: 2048,
+            disk_max_size_bytes: 4096,
+            disk_purge_index_entries: 6,
+            ..crate::proxy::CacheRuntimeTotals::default()
+        });
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_cache_memory_entries 3"));
+        assert!(output.contains("fluxheim_cache_memory_weighted_size_bytes 512"));
+        assert!(output.contains("fluxheim_cache_memory_max_size_bytes 1024"));
+        assert!(output.contains("fluxheim_cache_memory_fill_ratio_per_mille 500"));
+        assert!(output.contains("fluxheim_cache_memory_purge_index_entries 4"));
+        assert!(output.contains("fluxheim_cache_disk_entries 5"));
+        assert!(output.contains("fluxheim_cache_disk_size_bytes 2048"));
+        assert!(output.contains("fluxheim_cache_disk_max_size_bytes 4096"));
+        assert!(output.contains("fluxheim_cache_disk_fill_ratio_per_mille 500"));
+        assert!(output.contains("fluxheim_cache_disk_purge_index_entries 6"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
     }

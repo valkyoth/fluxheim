@@ -22,6 +22,9 @@ use crate::config::CachePurgerConfig;
 use crate::config::Config;
 #[cfg(feature = "proxy")]
 use crate::config::{LoggingFormat, LoggingTarget};
+
+#[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
+const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
 #[cfg(all(
     feature = "proxy",
     any(
@@ -85,6 +88,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let proxy = crate::proxy::FluxProxy::from_config(&config)?;
 
     let admin_proxy = proxy.clone();
+    #[cfg(all(feature = "cache", feature = "metrics"))]
+    let metrics_proxy = proxy.clone();
     let mut proxy_service = pingora::proxy::http_proxy_service(&server.configuration, proxy);
 
     #[cfg(feature = "cache")]
@@ -131,6 +136,16 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     if config.metrics.enabled {
         crate::metrics::init()?;
         crate::metrics::record_config(&config);
+        #[cfg(feature = "cache")]
+        {
+            record_cache_runtime_metrics(&metrics_proxy);
+            server.add_service(pingora::services::background::background_service(
+                "Cache runtime metrics",
+                CacheRuntimeMetricsBackgroundService {
+                    proxy: metrics_proxy.clone(),
+                },
+            ));
+        }
         let mut metrics_service = pingora::services::listening::Service::prometheus_http_service();
         log::info!("metrics listener enabled on {}", config.metrics.listen);
         metrics_service.add_tcp(&config.metrics.listen);
@@ -163,6 +178,41 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
+struct CacheRuntimeMetricsBackgroundService {
+    proxy: crate::proxy::FluxProxy,
+}
+
+#[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
+#[async_trait::async_trait]
+impl pingora::services::background::BackgroundService for CacheRuntimeMetricsBackgroundService {
+    async fn start(&self, mut shutdown: pingora::server::ShutdownWatch) {
+        let interval = std::time::Duration::from_secs(CACHE_RUNTIME_METRICS_INTERVAL_SECS);
+
+        loop {
+            if *shutdown.borrow() {
+                break;
+            }
+
+            record_cache_runtime_metrics(&self.proxy);
+
+            match tokio::time::timeout(interval, shutdown.changed()).await {
+                Ok(Ok(())) => continue,
+                Ok(Err(_closed)) => break,
+                Err(_elapsed) => continue,
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
+fn record_cache_runtime_metrics(proxy: &crate::proxy::FluxProxy) {
+    match proxy.cache_runtime_stats() {
+        Ok(stats) => crate::metrics::record_cache_runtime_totals(&stats.totals),
+        Err(error) => log::debug!("cache runtime metrics unavailable: {error}"),
+    }
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client"))]

@@ -255,6 +255,14 @@ curl -fsS \
     -H "Host: observability.test" \
     "http://127.0.0.1:$fluxheim_port/cached.css" >"$cache_body"
 
+for _ in 1 2 3 4 5 6 7; do
+    curl -fsS "http://127.0.0.1:$metrics_port/metrics" >"$metrics_body"
+    if grep -q 'fluxheim_cache_memory_entries 1' "$metrics_body"; then
+        break
+    fi
+    sleep 1
+done
+
 if curl -fsS "http://127.0.0.1:$metrics_port/metrics" >"$metrics_body" \
     && grep -q "fluxheim_" "$metrics_body"; then
     :
@@ -305,6 +313,24 @@ fi
 if ! grep -q 'fluxheim_cache_lock_wait_timeout_max_seconds 17' "$metrics_body"; then
     echo "observability smoke failed: metrics endpoint missed cache lock timeout gauge" >&2
     grep 'fluxheim_cache_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_memory_entries 1' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed runtime memory cache entry gauge" >&2
+    grep 'fluxheim_cache_memory_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -Eq 'fluxheim_cache_memory_weighted_size_bytes [1-9][0-9]*' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed runtime memory cache size gauge" >&2
+    grep 'fluxheim_cache_memory_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_memory_max_size_bytes 2097152' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed runtime memory cache budget gauge" >&2
+    grep 'fluxheim_cache_memory_' "$metrics_body" >&2 || true
     exit 1
 fi
 

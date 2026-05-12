@@ -508,8 +508,9 @@ Stable scope:
     per-vhost/per-route/tier hit, miss, stale, bypass, store, refusal, eviction,
     purge, and storage-pressure signals. Prometheus now exposes configured
     vhost/route scoped cache activity counters, purge counters, cache-lock
-    coverage, and policy-level pass/bypass/stale/revalidate decisions without
-    cache keys, hosts, or paths. `otel-tracing` now provides W3C `traceparent`
+    coverage, aggregate memory/disk storage-pressure gauges, and policy-level
+    pass/bypass/stale/revalidate decisions without cache keys, hosts, or paths.
+    `otel-tracing` now provides W3C `traceparent`
     propagation and access-log trace ID correlation, `otel-otlp` now provides
     initial local OTLP/HTTP trace export, and `metrics-otlp` now provides
     local OTLP/HTTP metrics export for Prometheus/collector receivers with

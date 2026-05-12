@@ -773,6 +773,12 @@ or larger operator-controlled cleanup windows. With metrics enabled,
 purger is cleanly keeping up or returning `truncated` runs.
 `fluxheim_cache_purger_duration_seconds{outcome}` reports per-tick cleanup
 duration with bounded outcome labels and without cache paths or keys.
+Aggregate storage-pressure gauges such as `fluxheim_cache_memory_entries`,
+`fluxheim_cache_memory_weighted_size_bytes`, `fluxheim_cache_memory_max_size_bytes`,
+`fluxheim_cache_disk_entries`, `fluxheim_cache_disk_size_bytes`, and
+`fluxheim_cache_disk_max_size_bytes` are updated while metrics are enabled.
+Use the protected admin cache-status endpoint when you need vhost or route
+breakdowns.
 
 ## TLS
 

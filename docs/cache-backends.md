@@ -334,6 +334,12 @@ histograms, so operators can distinguish slow storage reads from stampede wait
 time without labeling cache keys, paths, queries, cookies, or request headers.
 The OTLP metrics exporter includes histogram payloads, so the same timing
 series is available to Prometheus-compatible scraping and OTLP collectors.
+Aggregate storage-pressure gauges expose current memory and disk object
+counts, byte usage, configured byte budgets, fill ratios, and purge-index entry
+counts through `fluxheim_cache_memory_*` and `fluxheim_cache_disk_*` metrics.
+These gauges intentionally avoid per-cache-key or per-path labels; vhost and
+route level detail remains available through the protected admin cache-status
+JSON.
 `fluxheim_cache_purges_total{operation,scope,vhost,route,mode}`
 records successful admin purge commands with bounded operation and mode labels;
   it does not label cache keys, paths, tags, wildcard patterns, hosts, or query
