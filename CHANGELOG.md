@@ -13,10 +13,20 @@ behavior when the change improves security or project direction.
 
 - Metrics builds now publish aggregate cache configuration gauges for vhost,
   route, policy, and storage-tier coverage.
+- Metrics builds now publish aggregate memory and disk cache storage-pressure
+  gauges, including object counts, byte usage, configured budgets, fill ratios,
+  and purge-index entry counts.
 - Metrics builds now publish bounded cache activity counters for memory and disk
   hits, misses, stores, store refusals, evictions, and purges.
+- The local observability smoke now verifies Prometheus cache operation
+  histograms plus memory and disk storage-pressure gauges while also checking
+  local Prometheus OTLP metrics and Jaeger OTLP traces when available.
 - The release smoke suite now verifies proxy cache HIT behavior, cached-hit
   `Age`, conditional `304`, and byte-range `206` behavior end to end.
+- Proxy cache revalidation now preserves changed `Last-Modified` metadata from
+  origin `304 Not Modified` responses and refuses metadata updates when a
+  revalidation response changes `Vary`, keeping existing variant metadata
+  intact until full re-keying support is added.
 - Disk cache writes now use a v5 object header that records the combined cache
   key, primary key, user tag, cache tags, and path-index metadata, allowing
   Fluxheim to rebuild disk purge indexes after a process restart while
