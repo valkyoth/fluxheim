@@ -13,6 +13,8 @@ No unreleased changes yet.
 
 ## 1.2.0 - Operations And Cache Completion Pack
 
+Released: 2026-05-12
+
 ### Added
 
 - Metrics builds now publish aggregate cache configuration gauges for vhost,
