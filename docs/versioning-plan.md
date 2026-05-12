@@ -787,11 +787,11 @@ Focused cache-only follow-up releases after 1.2:
 - `1.2.1`: opt-in local/static vhost caching. This release has one job: make
   Fluxheim's cache model consistent for operators who expect local `[vhosts.web]`
   and route-scoped web actions to participate in the same cache controls as
-  proxied content. The local static-file cache should support whole-vhost and
-  partial route/path scopes, prefer memory caching first to avoid duplicating
-  local files on disk, key by canonical static path plus file identity metadata,
-  keep the existing symlink/traversal protections, and expose an optional
-  static cache-status header.
+  proxied content. The local static-file cache supports whole-vhost and
+  route-scoped web actions, prefers memory caching first to avoid duplicating
+  local files on disk, keys by request identity plus canonical static file
+  identity metadata, keeps the existing symlink/traversal protections, and
+  exposes optional static cache-status and `Age` headers.
 - `1.2.2`: optional slab/bin disk storage backend for large, high-churn caches.
   This release has one job: evaluate and, if safe, add a storage-bin backend
   that pre-allocates large data files, stores objects in fixed-size or classed

@@ -3598,6 +3598,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
+    pub local_static: bool,
+    #[serde(default)]
     pub status_header: Option<String>,
     #[serde(default)]
     pub status_reason_header: Option<String>,
@@ -3671,6 +3673,7 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            local_static: false,
             status_header: None,
             status_reason_header: None,
             hide_response_headers: Vec::new(),
@@ -8248,6 +8251,7 @@ mod tests {
             r#"
             [cache]
             enabled = true
+            local_static = true
             status_header = "X-Cache-Status"
             status_reason_header = "X-Cache-Reason"
             hide_response_headers = ["set-cookie"]
@@ -8301,6 +8305,7 @@ mod tests {
         .unwrap();
 
         assert!(config.cache.enabled);
+        assert!(config.cache.local_static);
         assert_eq!(
             config.cache.status_header,
             Some("X-Cache-Status".to_owned())

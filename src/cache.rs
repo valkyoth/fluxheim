@@ -87,6 +87,15 @@ pub struct CacheRequest<'a> {
     pub query: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct StaticCacheRequest<'a> {
+    pub method: &'a str,
+    pub host: Option<&'a str>,
+    pub path: &'a str,
+    pub query: Option<&'a str>,
+    pub file_identity: &'a str,
+}
+
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct CacheKey(String);
 
@@ -4725,6 +4734,17 @@ pub fn pingora_image_cache_key(
         .map(|key| pingora::cache::CacheKey::new(namespace, key.as_str(), user_tag))
 }
 
+#[cfg(feature = "proxy")]
+pub fn pingora_static_cache_key(
+    namespace: &str,
+    config: &CacheConfig,
+    request: &StaticCacheRequest<'_>,
+    user_tag: &str,
+) -> Option<pingora::cache::CacheKey> {
+    static_cache_key(config, request)
+        .map(|key| pingora::cache::CacheKey::new(namespace, key.as_str(), user_tag))
+}
+
 pub fn eligible_image_request(config: &CacheConfig, request: &CacheRequest<'_>) -> bool {
     config.enabled
         && config.has_enabled_tier()
@@ -4764,6 +4784,50 @@ pub fn image_cache_key(config: &CacheConfig, request: &CacheRequest<'_>) -> Opti
     Some(CacheKey(key))
 }
 
+pub fn eligible_static_request(config: &CacheConfig, request: &StaticCacheRequest<'_>) -> bool {
+    config.enabled
+        && config.local_static
+        && config.has_enabled_tier()
+        && request.method == "GET"
+        && image_extension(request.path).is_some_and(|extension| {
+            config
+                .image_extensions
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+        })
+}
+
+pub fn static_cache_key(
+    config: &CacheConfig,
+    request: &StaticCacheRequest<'_>,
+) -> Option<CacheKey> {
+    if !eligible_static_request(config, request) {
+        return None;
+    }
+
+    let mut key = String::from("fluxheim-image-v1;");
+    if let Some(namespace) = config.key_namespace.as_deref() {
+        append_component(&mut key, "namespace", namespace);
+    }
+    for part in &config.key_parts {
+        match part {
+            CacheKeyPart::Method => append_component(&mut key, "method", request.method),
+            CacheKeyPart::Host => append_component(
+                &mut key,
+                "host",
+                &request.host.and_then(normalize_host).unwrap_or_default(),
+            ),
+            CacheKeyPart::Path => append_component(&mut key, "path", request.path),
+            CacheKeyPart::Query if config.include_query => {
+                append_component(&mut key, "query", request.query.unwrap_or_default());
+            }
+            CacheKeyPart::Query => {}
+        }
+    }
+    append_component(&mut key, "file", request.file_identity);
+    Some(CacheKey(key))
+}
+
 fn method_allowed(config: &CacheConfig, method: &str) -> bool {
     config.methods.iter().any(|candidate| candidate == method)
 }
@@ -4797,7 +4861,8 @@ mod tests {
 
     use super::{
         CacheRequest, CacheStoreError, CachedHeader, CachedImageObject, MemoryImageCache,
-        eligible_image_request, image_cache_key, memory_image_cache_from_config, storage_plan,
+        StaticCacheRequest, eligible_image_request, image_cache_key,
+        memory_image_cache_from_config, static_cache_key, storage_plan,
     };
     use crate::config::{ByteSize, CacheConfig, CacheDiskConfig, CacheKeyPart, CacheMemoryConfig};
     #[cfg(feature = "proxy")]
@@ -5211,6 +5276,26 @@ mod tests {
             ..enabled_cache()
         };
         assert_ne!(image_cache_key(&other_config, &request).unwrap(), key);
+    }
+
+    #[test]
+    fn static_cache_key_requires_explicit_local_static_opt_in() {
+        let mut config = enabled_cache();
+        config.local_static = false;
+        let request = StaticCacheRequest {
+            method: "GET",
+            host: Some("example.test"),
+            path: "/asset.webp",
+            query: None,
+            file_identity: "/srv/site/asset.webp:1:2",
+        };
+
+        assert_eq!(static_cache_key(&config, &request), None);
+
+        config.local_static = true;
+        let key = static_cache_key(&config, &request).unwrap();
+        assert!(key.as_str().contains("path:11:/asset.webp"));
+        assert!(key.as_str().contains("/srv/site/asset.webp:1:2"));
     }
 
     #[test]

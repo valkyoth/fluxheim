@@ -9,7 +9,11 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
-No unreleased changes yet.
+### Added
+
+- Added the `1.2.1` focused local/static vhost cache follow-up with an explicit
+  `local_static` cache-policy opt-in, local cache `MISS`/`HIT`/`Age` headers,
+  and cache-key/lookup/exact-purge support for local static objects.
 
 ## 1.2.0 - Operations And Cache Completion Pack
 

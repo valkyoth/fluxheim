@@ -947,7 +947,7 @@ impl ProxySnapshot {
             .map(|cache| cache.pingora_cache_predictor.is_some())
             .unwrap_or(vhost.pingora_cache_predictor.is_some());
         let storage_tiers = u8::from(memory_tier_enabled) + u8::from(disk_tier_enabled);
-        let key = self.state.pingora_image_cache_key_for_request_header(
+        let key = self.state.pingora_effective_cache_key_for_request_header(
             request,
             vhost_index,
             route_index,
@@ -1015,7 +1015,7 @@ impl ProxySnapshot {
         let vhost = self.state.vhost(vhost_index);
         let route_index = vhost.route_index(request.uri.path());
         let route_cache = route_index.and_then(|index| vhost.route(index).cache.as_ref());
-        let Some(key) = self.state.pingora_image_cache_key_for_request_header(
+        let Some(key) = self.state.pingora_effective_cache_key_for_request_header(
             request,
             vhost_index,
             route_index,
@@ -1266,22 +1266,31 @@ impl ProxySnapshot {
             path: request.path,
             query: request.query,
         };
-        let key = crate::cache::pingora_image_cache_key(
-            "fluxheim-image-v1",
-            cache_config,
-            &cache_request,
-            user_tag,
-        )
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                if route_cache.is_some() {
-                    "request is not eligible for this route cache policy"
-                } else {
-                    "request is not eligible for this vhost cache policy"
-                },
-            )
-        })?;
+        #[cfg(feature = "web")]
+        let static_key =
+            self.state
+                .static_cache_key_for_purge_request(vhost, route_cache, &request);
+        #[cfg(not(feature = "web"))]
+        let static_key = None;
+        let key = static_key
+            .or_else(|| {
+                crate::cache::pingora_image_cache_key(
+                    "fluxheim-image-v1",
+                    cache_config,
+                    &cache_request,
+                    user_tag,
+                )
+            })
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    if route_cache.is_some() {
+                        "request is not eligible for this route cache policy"
+                    } else {
+                        "request is not eligible for this vhost cache policy"
+                    },
+                )
+            })?;
         let cache_key = key.combined();
         let memory_purged = route_cache
             .and_then(|cache| cache.pingora_memory_storage)
@@ -2212,6 +2221,101 @@ impl ProxyRuntimeState {
     }
 
     #[cfg(feature = "cache")]
+    fn pingora_effective_cache_key_for_request_header(
+        &self,
+        request: &RequestHeader,
+        vhost_index: usize,
+        route_index: Option<usize>,
+    ) -> Option<PingoraCacheKey> {
+        #[cfg(feature = "web")]
+        if let Some(key) =
+            self.static_cache_key_for_request_header(request, vhost_index, route_index)
+        {
+            return Some(key);
+        }
+        self.pingora_image_cache_key_for_request_header(request, vhost_index, route_index)
+    }
+
+    #[cfg(all(feature = "cache", feature = "web"))]
+    fn static_cache_key_for_request_header(
+        &self,
+        request: &RequestHeader,
+        vhost_index: usize,
+        route_index: Option<usize>,
+    ) -> Option<PingoraCacheKey> {
+        if proxy_cache_method_temporarily_bypassed(request.method.as_str()) {
+            return None;
+        }
+        let vhost = self.vhost(vhost_index);
+        let route_cache = route_index.and_then(|index| vhost.route(index).cache.as_ref());
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
+        if !cache_config.local_static {
+            return None;
+        }
+
+        let file = local_static_file_for_request(vhost, route_index, request.uri.path()).ok()??;
+        let route_user_tag;
+        let user_tag = if let Some(route_cache) = route_cache {
+            route_user_tag = format!("{}:route:{}", vhost.name, route_cache.name);
+            route_user_tag.as_str()
+        } else {
+            vhost.name.as_str()
+        };
+        static_cache_key_for_file_parts(
+            request.method.as_str(),
+            request_host_header(request),
+            request.uri.path(),
+            request.uri.query(),
+            cache_config,
+            user_tag,
+            &file,
+        )
+    }
+
+    #[cfg(all(feature = "cache", feature = "web"))]
+    fn static_cache_key_for_purge_request(
+        &self,
+        vhost: &RuntimeVhost,
+        route_cache: Option<&RuntimeRouteCache>,
+        request: &CachePurgeRequest<'_>,
+    ) -> Option<PingoraCacheKey> {
+        let route_index = route_cache.and_then(|cache| {
+            vhost.routes.iter().position(|route| {
+                route
+                    .cache
+                    .as_ref()
+                    .is_some_and(|candidate| candidate.name == cache.name)
+            })
+        });
+        let cache_config = route_cache
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
+        if !cache_config.local_static {
+            return None;
+        }
+
+        let file = local_static_file_for_request(vhost, route_index, request.path).ok()??;
+        let route_user_tag;
+        let user_tag = if let Some(route_cache) = route_cache {
+            route_user_tag = format!("{}:route:{}", vhost.name, route_cache.name);
+            route_user_tag.as_str()
+        } else {
+            vhost.name.as_str()
+        };
+        static_cache_key_for_file_parts(
+            request.method,
+            Some(request.host),
+            request.path,
+            request.query,
+            cache_config,
+            user_tag,
+            &file,
+        )
+    }
+
+    #[cfg(feature = "cache")]
     fn pingora_image_cache_key_for_request_header(
         &self,
         request: &RequestHeader,
@@ -3047,7 +3151,7 @@ impl ProxyHttp for FluxProxy {
                 }
                 #[cfg(feature = "web")]
                 RuntimeRouteAction::Web(web) => {
-                    if serve_static_route(session, ctx, web, route).await? {
+                    if serve_static_route(session, ctx, vhost, route_index, web, route).await? {
                         return Ok(true);
                     }
                     return Ok(false);
@@ -3103,15 +3207,15 @@ impl ProxyHttp for FluxProxy {
                             .await?;
                         return Ok(true);
                     }
-                    ctx.response_body_bytes_seen = plan.response_body_bytes;
-                    crate::web::serve_static_file(
-                        session,
+                    let static_request = StaticServeRequest {
+                        vhost,
+                        route_index: None,
                         web,
-                        &file,
-                        &plan,
-                        &vhost.response_headers,
-                    )
-                    .await?;
+                        file: &file,
+                        plan: &plan,
+                        response_headers: &vhost.response_headers,
+                    };
+                    serve_static_file_maybe_cached(session, ctx, static_request).await?;
                     Ok(true)
                 }
                 Ok(ResolveResult::DirectoryListing(listing)) => {
@@ -3732,6 +3836,8 @@ async fn respond_host_routing_rejection(
 async fn serve_static_route(
     session: &mut Session,
     ctx: &mut RequestContext,
+    vhost: &RuntimeVhost,
+    route_index: usize,
     web: &StaticFileServer,
     route: &RuntimeRoute,
 ) -> Result<bool> {
@@ -3784,9 +3890,15 @@ async fn serve_static_route(
                     .await?;
                 return Ok(true);
             }
-            ctx.response_body_bytes_seen = plan.response_body_bytes;
-            crate::web::serve_static_file(session, web, &file, &plan, &route.response_headers)
-                .await?;
+            let static_request = StaticServeRequest {
+                vhost,
+                route_index: Some(route_index),
+                web,
+                file: &file,
+                plan: &plan,
+                response_headers: &route.response_headers,
+            };
+            serve_static_file_maybe_cached(session, ctx, static_request).await?;
             Ok(true)
         }
         Ok(ResolveResult::DirectoryListing(listing)) => {
@@ -3814,6 +3926,432 @@ async fn serve_static_route(
             Ok(true)
         }
     }
+}
+
+#[cfg(feature = "web")]
+struct StaticServeRequest<'a> {
+    vhost: &'a RuntimeVhost,
+    route_index: Option<usize>,
+    web: &'a StaticFileServer,
+    file: &'a crate::web::StaticFile,
+    plan: &'a crate::web::StaticResponsePlan,
+    response_headers: &'a crate::config::ResponseHeaderPolicyConfig,
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+async fn serve_static_file_maybe_cached(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    request: StaticServeRequest<'_>,
+) -> Result<()> {
+    let StaticServeRequest {
+        vhost,
+        route_index,
+        web,
+        file,
+        plan,
+        response_headers,
+    } = request;
+    let cache = static_cache_config(vhost, route_index);
+    let cache_headers = |status, reason| crate::web::StaticCacheHeaders {
+        status_header: cache.status_header.as_deref(),
+        status,
+        reason_header: cache.status_reason_header.as_deref(),
+        reason,
+        age_secs: None,
+    };
+
+    let Some(storage) = static_cache_storage(vhost, route_index) else {
+        ctx.response_body_bytes_seen = plan.response_body_bytes;
+        return crate::web::serve_static_file(session, web, file, plan, response_headers).await;
+    };
+
+    let Some(cache_key) =
+        static_cache_key_for_file(session.req_header(), cache, vhost, route_index, file)
+    else {
+        ctx.response_body_bytes_seen = plan.response_body_bytes;
+        let headers = if cache.local_static {
+            cache_headers(Some("BYPASS"), Some("static-ineligible"))
+        } else {
+            crate::web::StaticCacheHeaders::default()
+        };
+        return crate::web::serve_static_file_with_cache_headers(
+            session,
+            web,
+            file,
+            plan,
+            response_headers,
+            plan.status,
+            headers,
+        )
+        .await;
+    };
+
+    if let Some(reason) = request_cache_bypass_reason(session.req_header(), cache) {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, route_index, "bypass");
+        ctx.response_body_bytes_seen = plan.response_body_bytes;
+        return crate::web::serve_static_file_with_cache_headers(
+            session,
+            web,
+            file,
+            plan,
+            response_headers,
+            plan.status,
+            cache_headers(Some("BYPASS"), Some(reason)),
+        )
+        .await;
+    }
+
+    let request_refresh = request_cache_revalidation_requested(session.req_header(), cache);
+    let trace = pingora::cache::trace::Span::inactive().handle();
+    if !request_refresh
+        && let Some((meta, hit)) = storage.lookup(&cache_key, &trace).await?
+        && meta.is_fresh(std::time::SystemTime::now())
+    {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, route_index, "hit");
+        let age_secs = meta.age().as_secs();
+        let body = read_cache_hit_body(hit, storage, &cache_key, &trace).await?;
+        if body.len() as u64 == file.len {
+            let body = static_cached_body_for_plan(&body, plan)?;
+            let mut headers = cache_headers(Some("HIT"), None);
+            headers.age_secs = Some(age_secs);
+            ctx.response_body_bytes_seen = plan.response_body_bytes;
+            return crate::web::serve_static_file_with_body_and_cache_headers(
+                session,
+                web,
+                file,
+                plan,
+                response_headers,
+                headers,
+                body,
+            )
+            .await;
+        }
+    }
+
+    let storeable = plan.status == 200
+        && matches!(plan.body, crate::web::StaticResponseBody::Full)
+        && plan.response_body_bytes <= cache.max_object_bytes.as_u64();
+    if !storeable {
+        ctx.response_body_bytes_seen = plan.response_body_bytes;
+        return crate::web::serve_static_file_with_cache_headers(
+            session,
+            web,
+            file,
+            plan,
+            response_headers,
+            plan.status,
+            cache_headers(Some("BYPASS"), Some("static-not-storeable")),
+        )
+        .await;
+    }
+
+    let body = crate::web::read_static_response_body(file, plan.body).map_err(|error| {
+        Error::because(
+            ErrorType::InternalError,
+            "failed to read static file",
+            error,
+        )
+    })?;
+    let store_response = crate::web::build_static_response_header(
+        web,
+        file,
+        plan,
+        response_headers,
+        crate::web::StaticCacheHeaders::default(),
+    )?;
+    if let Some(reason) = response_cache_admission_rejection(&store_response, cache) {
+        ctx.response_body_bytes_seen = plan.response_body_bytes;
+        return crate::web::serve_static_file_with_body_and_cache_headers(
+            session,
+            web,
+            file,
+            plan,
+            response_headers,
+            cache_headers(Some("BYPASS"), Some(reason)),
+            body,
+        )
+        .await;
+    }
+    let Some(ttl_secs) = static_cache_fresh_ttl_secs(cache, &store_response) else {
+        ctx.response_body_bytes_seen = plan.response_body_bytes;
+        return crate::web::serve_static_file_with_body_and_cache_headers(
+            session,
+            web,
+            file,
+            plan,
+            response_headers,
+            cache_headers(Some("BYPASS"), Some("zero-freshness")),
+            body,
+        )
+        .await;
+    };
+
+    let now = std::time::SystemTime::now();
+    let fresh_until = now
+        .checked_add(std::time::Duration::from_secs(u64::from(ttl_secs)))
+        .unwrap_or(now);
+    let meta = CacheMeta::new(
+        fresh_until,
+        now,
+        cache.stale_while_revalidate_secs.unwrap_or(0),
+        cache.stale_if_error_secs.unwrap_or(0),
+        store_response,
+    );
+    let mut miss = storage.get_miss_handler(&cache_key, &meta, &trace).await?;
+    miss.write_body(body.clone(), true).await?;
+    let _ = miss.finish().await?;
+    #[cfg(feature = "metrics")]
+    record_cache_policy_activity(vhost, route_index, "store");
+    ctx.response_body_bytes_seen = plan.response_body_bytes;
+    crate::web::serve_static_file_with_body_and_cache_headers(
+        session,
+        web,
+        file,
+        plan,
+        response_headers,
+        cache_headers(
+            Some(if request_refresh {
+                "REVALIDATED"
+            } else {
+                "MISS"
+            }),
+            None,
+        ),
+        body,
+    )
+    .await
+}
+
+#[cfg(all(feature = "web", not(feature = "cache")))]
+async fn serve_static_file_maybe_cached(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    request: StaticServeRequest<'_>,
+) -> Result<()> {
+    let StaticServeRequest {
+        web,
+        file,
+        plan,
+        response_headers,
+        ..
+    } = request;
+    ctx.response_body_bytes_seen = plan.response_body_bytes;
+    crate::web::serve_static_file(session, web, file, plan, response_headers).await
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn static_cache_config(
+    vhost: &RuntimeVhost,
+    route_index: Option<usize>,
+) -> &crate::config::CacheConfig {
+    route_index
+        .and_then(|index| vhost.route(index).cache.as_ref())
+        .map(|cache| &cache.config)
+        .unwrap_or(&vhost.cache)
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn static_cache_storage(
+    vhost: &RuntimeVhost,
+    route_index: Option<usize>,
+) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+    if let Some(route_cache) = route_index.and_then(|index| vhost.route(index).cache.as_ref()) {
+        return route_cache
+            .pingora_memory_storage
+            .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+            .or_else(|| {
+                route_cache
+                    .pingora_disk_storage
+                    .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+            });
+    }
+    vhost
+        .pingora_memory_storage
+        .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+        .or_else(|| {
+            vhost
+                .pingora_disk_storage
+                .map(|storage| storage as &'static (dyn pingora::cache::Storage + Sync))
+        })
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn static_cache_key_for_file(
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+    vhost: &RuntimeVhost,
+    route_index: Option<usize>,
+    file: &crate::web::StaticFile,
+) -> Option<PingoraCacheKey> {
+    let route_user_tag;
+    let user_tag = if let Some(route_index) = route_index
+        && let Some(route_cache) = vhost.route(route_index).cache.as_ref()
+    {
+        route_user_tag = format!("{}:route:{}", vhost.name, route_cache.name);
+        route_user_tag.as_str()
+    } else {
+        vhost.name.as_str()
+    };
+    static_cache_key_for_file_parts(
+        request.method.as_str(),
+        request_host_header(request),
+        request.uri.path(),
+        request.uri.query(),
+        cache,
+        user_tag,
+        file,
+    )
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn static_cache_key_for_file_parts(
+    method: &str,
+    host: Option<&str>,
+    path: &str,
+    query: Option<&str>,
+    cache: &crate::config::CacheConfig,
+    user_tag: &str,
+    file: &crate::web::StaticFile,
+) -> Option<PingoraCacheKey> {
+    crate::cache::pingora_static_cache_key(
+        "fluxheim-static-v1",
+        cache,
+        &crate::cache::StaticCacheRequest {
+            method,
+            host,
+            path,
+            query,
+            file_identity: &file.cache_identity(),
+        },
+        user_tag,
+    )
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn local_static_file_for_request(
+    vhost: &RuntimeVhost,
+    route_index: Option<usize>,
+    request_path: &str,
+) -> io::Result<Option<crate::web::StaticFile>> {
+    if let Some(route_index) = route_index {
+        let route = vhost.route(route_index);
+        let RuntimeRouteAction::Web(web) = &route.action else {
+            return Ok(None);
+        };
+        let path = static_route_request_path_from_parts(request_path, route);
+        return match web.resolve(&path)? {
+            ResolveResult::Found(file) => Ok(Some(file)),
+            _ => Ok(None),
+        };
+    }
+
+    let Some(web) = vhost.web.as_ref() else {
+        return Ok(None);
+    };
+    match web.resolve(request_path)? {
+        ResolveResult::Found(file) => Ok(Some(file)),
+        _ => Ok(None),
+    }
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn static_route_request_path_from_parts(request_path: &str, route: &RuntimeRoute) -> String {
+    let Some(strip_prefix) = route.strip_prefix.as_deref() else {
+        return request_path.to_owned();
+    };
+    let Some(suffix) = request_path.strip_prefix(strip_prefix) else {
+        return request_path.to_owned();
+    };
+    if suffix.is_empty() {
+        "/".to_owned()
+    } else if suffix.starts_with('/') {
+        suffix.to_owned()
+    } else {
+        format!("/{suffix}")
+    }
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+async fn read_cache_hit_body(
+    mut hit: HitHandler,
+    storage: &'static (dyn pingora::cache::Storage + Sync),
+    key: &PingoraCacheKey,
+    trace: &pingora::cache::trace::SpanHandle,
+) -> Result<Bytes> {
+    let mut body = bytes::BytesMut::new();
+    while let Some(chunk) = hit.read_body().await? {
+        body.extend_from_slice(&chunk);
+        if body.len() as u64 > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
+            return Error::e_explain(
+                ErrorType::InternalError,
+                "cached static body exceeds buffered response limit",
+            );
+        }
+    }
+    hit.finish(storage, key, trace).await?;
+    Ok(body.freeze())
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn static_cached_body_for_plan(
+    cached: &Bytes,
+    plan: &crate::web::StaticResponsePlan,
+) -> Result<Bytes> {
+    match plan.body {
+        crate::web::StaticResponseBody::None => Ok(Bytes::new()),
+        crate::web::StaticResponseBody::Full => Ok(cached.clone()),
+        crate::web::StaticResponseBody::Range { start, len } => {
+            let start = usize::try_from(start)
+                .map_err(|_| Error::new_str("cached static range start exceeds platform size"))?;
+            let len = usize::try_from(len)
+                .map_err(|_| Error::new_str("cached static range length exceeds platform size"))?;
+            let end = start.saturating_add(len);
+            if end > cached.len() {
+                return Error::e_explain(
+                    ErrorType::InternalError,
+                    "cached static range exceeds cached body",
+                );
+            }
+            Ok(cached.slice(start..end))
+        }
+    }
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn static_cache_fresh_ttl_secs(
+    cache: &crate::config::CacheConfig,
+    response: &ResponseHeader,
+) -> Option<u32> {
+    cache
+        .status_ttls
+        .get(&response.status.as_u16())
+        .copied()
+        .or(cache.default_status_ttl_secs)
+        .or_else(|| response_cache_control_max_age(response))
+        .filter(|ttl| *ttl > 0)
+}
+
+#[cfg(all(feature = "web", feature = "cache"))]
+fn response_cache_control_max_age(response: &ResponseHeader) -> Option<u32> {
+    response
+        .headers
+        .get_all("cache-control")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .find_map(|directive| {
+            let (name, value) = directive.trim().split_once('=')?;
+            if name.trim().eq_ignore_ascii_case("s-maxage")
+                || name.trim().eq_ignore_ascii_case("max-age")
+            {
+                value.trim().trim_matches('"').parse::<u32>().ok()
+            } else {
+                None
+            }
+        })
 }
 
 fn selected_runtime_proxy<'a>(vhost: &'a RuntimeVhost, ctx: &RequestContext) -> &'a RuntimeProxy {
@@ -5334,7 +5872,7 @@ fn approximate_request_header_bytes(request: &RequestHeader) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{fs, time::Duration};
 
     use bytes::Bytes;
 
@@ -6220,6 +6758,130 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[cfg(all(feature = "cache", feature = "web"))]
+    #[test]
+    fn cache_key_preview_uses_local_static_key_when_enabled() {
+        let root = unique_temp_path("local-static-cache-preview");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("asset.webp"), "local-static").unwrap();
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    local_static: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig {
+                    root: Some(root.clone()),
+                    ..WebConfig::default()
+                },
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/asset.webp?v=1", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+
+        let preview = proxy
+            .snapshot()
+            .pingora_image_cache_key_preview_for_request_header(&request);
+
+        assert!(preview.eligible);
+        assert_eq!(preview.namespace.as_deref(), Some("fluxheim-static-v1"));
+        assert_eq!(preview.user_tag.as_deref(), Some("cached"));
+        assert!(
+            preview
+                .primary_key
+                .as_deref()
+                .is_some_and(|key| key.contains("file:"))
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(all(feature = "cache", feature = "web"))]
+    #[test]
+    fn exact_purge_uses_local_static_key_when_enabled() {
+        let root = unique_temp_path("local-static-cache-purge");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("asset.webp"), "local-static").unwrap();
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    local_static: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig {
+                    root: Some(root.clone()),
+                    ..WebConfig::default()
+                },
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost = snapshot
+            .state
+            .vhost(snapshot.state.vhost_index(Some("cached.example")));
+
+        let key = snapshot
+            .state
+            .static_cache_key_for_purge_request(
+                vhost,
+                None,
+                &CachePurgeRequest {
+                    vhost: None,
+                    route: None,
+                    host: "cached.example",
+                    method: "GET",
+                    path: "/asset.webp",
+                    query: Some("v=1"),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(key.namespace_str(), Some("fluxheim-static-v1"));
+        assert_eq!(key.user_tag, "cached");
+        assert!(
+            key.primary_key_str()
+                .is_some_and(|primary| primary.contains("file:"))
+        );
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[cfg(feature = "cache")]

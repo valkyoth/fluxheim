@@ -19,16 +19,16 @@ Fluxheim `1.1.0` added TLS policy hardening plus ACME runtime issuance and
 renewal for Let's Encrypt and Actalis, so deployments do not depend on manual
 certificate copy scripts.
 
-The active `1.2.0` focus is cache-server completion and operations diagnostics:
-route/vhost scoped cache policies, memory/disk/tiered storage, request
-collapsing, protected purge/status operations, cache warm and inspection
-commands, Prometheus/OpenTelemetry visibility, production Podman/ACME
-migration notes, and the remaining hardening needed before Fluxheim cache can
-be considered complete.
+The `1.2.0` cache-server baseline delivered route/vhost scoped cache policies,
+memory/disk/tiered storage, request collapsing, protected purge/status
+operations, cache warm and inspection commands, Prometheus/OpenTelemetry
+visibility, and production Podman/ACME migration notes.
 
-After the `1.2` cache-stable baseline and focused cache-only follow-ups,
-the cache-only sequence is now `1.2.1` for opt-in local/static vhost caching,
-`1.2.2` for slab/bin disk storage, `1.2.3` for distributed cache
+The active `1.2.1` follow-up is focused opt-in local/static vhost caching so
+local `[vhosts.web]` files and route-scoped web actions can use the same cache
+policy model as proxied static content when operators explicitly enable it.
+After `1.2.1`, the cache-only sequence is `1.2.2` for slab/bin disk storage,
+`1.2.3` for distributed cache
 metadata/peer-fill, and an optional `1.2.4` only if production testing finds
 one more cache-specific blocker. `1.3` is planned as the load-balancer
 stabilization release. Its target is

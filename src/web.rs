@@ -372,6 +372,33 @@ pub struct StaticFile {
     inode: u64,
 }
 
+impl StaticFile {
+    #[cfg(feature = "proxy")]
+    pub fn cache_identity(&self) -> String {
+        let modified = self
+            .modified
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| format!("{}:{}", duration.as_secs(), duration.subsec_nanos()))
+            .unwrap_or_else(|| "0:0".to_owned());
+
+        #[cfg(unix)]
+        {
+            format!(
+                "{}:{}:{}:{}:{}",
+                self.path.display(),
+                self.device,
+                self.inode,
+                self.len,
+                modified
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            format!("{}:{}:{}", self.path.display(), self.len, modified)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticResponsePlan {
     pub status: u16,
@@ -387,6 +414,16 @@ pub enum StaticResponseBody {
     None,
     Full,
     Range { start: u64, len: u64 },
+}
+
+#[cfg(all(feature = "web", feature = "proxy"))]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct StaticCacheHeaders<'a> {
+    pub status_header: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub reason_header: Option<&'a str>,
+    pub reason: Option<&'a str>,
+    pub age_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -498,11 +535,34 @@ pub async fn serve_static_file_with_status(
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
     status: u16,
 ) -> pingora::Result<()> {
+    serve_static_file_with_cache_headers(
+        session,
+        server,
+        file,
+        plan,
+        response_policy,
+        status,
+        StaticCacheHeaders::default(),
+    )
+    .await
+}
+
+#[cfg(all(feature = "web", feature = "proxy"))]
+pub async fn serve_static_file_with_cache_headers(
+    session: &mut pingora::proxy::Session,
+    server: &StaticFileServer,
+    file: &StaticFile,
+    plan: &StaticResponsePlan,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+    status: u16,
+    cache_headers: StaticCacheHeaders<'_>,
+) -> pingora::Result<()> {
     use pingora::prelude::{InternalError, OrErr};
 
     let mut plan = plan.clone();
     plan.status = status;
-    let response = build_static_response_header(server, file, &plan, response_policy)?;
+    let response =
+        build_static_response_header(server, file, &plan, response_policy, cache_headers)?;
 
     if matches!(plan.body, StaticResponseBody::None) {
         session
@@ -512,8 +572,34 @@ pub async fn serve_static_file_with_status(
         session
             .write_response_header(Box::new(response), false)
             .await?;
-        let body = read_static_body(file, plan.body)
+        let body = read_static_response_body(file, plan.body)
             .or_err(InternalError, "failed to read static file")?;
+        session.write_response_body(Some(body), true).await?;
+    }
+
+    Ok(())
+}
+
+#[cfg(all(feature = "web", feature = "proxy"))]
+pub async fn serve_static_file_with_body_and_cache_headers(
+    session: &mut pingora::proxy::Session,
+    server: &StaticFileServer,
+    file: &StaticFile,
+    plan: &StaticResponsePlan,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+    cache_headers: StaticCacheHeaders<'_>,
+    body: bytes::Bytes,
+) -> pingora::Result<()> {
+    let response =
+        build_static_response_header(server, file, plan, response_policy, cache_headers)?;
+    if matches!(plan.body, StaticResponseBody::None) {
+        session
+            .write_response_header(Box::new(response), true)
+            .await?;
+    } else {
+        session
+            .write_response_header(Box::new(response), false)
+            .await?;
         session.write_response_body(Some(body), true).await?;
     }
 
@@ -634,11 +720,12 @@ fn html_escape(value: &str) -> String {
 }
 
 #[cfg(all(feature = "web", feature = "proxy"))]
-fn build_static_response_header(
+pub fn build_static_response_header(
     server: &StaticFileServer,
     file: &StaticFile,
     plan: &StaticResponsePlan,
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
+    cache_headers: StaticCacheHeaders<'_>,
 ) -> pingora::Result<pingora::http::ResponseHeader> {
     let mut response = pingora::http::ResponseHeader::build(plan.status, Some(9))?;
     response.insert_header("content-type", file.mime.as_str())?;
@@ -657,6 +744,19 @@ fn build_static_response_header(
     }
     if let Some(content_range) = plan.content_range.as_deref() {
         response.insert_header("content-range", content_range)?;
+    }
+    if let Some(header) = cache_headers.status_header
+        && let Some(status) = cache_headers.status
+    {
+        response.insert_header(header.to_owned(), status.to_owned())?;
+    }
+    if let Some(header) = cache_headers.reason_header
+        && let Some(reason) = cache_headers.reason
+    {
+        response.insert_header(header.to_owned(), reason.to_owned())?;
+    }
+    if let Some(age_secs) = cache_headers.age_secs {
+        response.insert_header("age", age_secs)?;
     }
     crate::headers::apply_response_policy(&mut response, response_policy)?;
 
@@ -802,7 +902,10 @@ fn if_range_allows_range(modified: Option<SystemTime>, etag: &str, if_range: Opt
 }
 
 #[cfg(feature = "proxy")]
-fn read_static_body(file: &StaticFile, body: StaticResponseBody) -> io::Result<bytes::Bytes> {
+pub fn read_static_response_body(
+    file: &StaticFile,
+    body: StaticResponseBody,
+) -> io::Result<bytes::Bytes> {
     match body {
         StaticResponseBody::None => Ok(bytes::Bytes::new()),
         StaticResponseBody::Full => {
@@ -918,8 +1021,8 @@ mod tests {
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
     use super::{
-        ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions, StaticResponseBody,
-        parse_single_byte_range, plan_static_response,
+        ResolveResult, StaticCacheHeaders, StaticFile, StaticFileServer, StaticRequestConditions,
+        StaticResponseBody, parse_single_byte_range, plan_static_response,
     };
 
     #[test]
@@ -1089,6 +1192,13 @@ mod tests {
             &file,
             &plan,
             &crate::config::ResponseHeaderPolicyConfig::default(),
+            StaticCacheHeaders {
+                status_header: Some("x-cache-status"),
+                status: Some("HIT"),
+                reason_header: Some("x-cache-reason"),
+                reason: Some("fresh"),
+                age_secs: Some(12),
+            },
         )
         .unwrap();
 
@@ -1128,6 +1238,27 @@ mod tests {
                 .get("accept-ranges")
                 .and_then(|value| value.to_str().ok()),
             Some("bytes")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("x-cache-status")
+                .and_then(|value| value.to_str().ok()),
+            Some("HIT")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("x-cache-reason")
+                .and_then(|value| value.to_str().ok()),
+            Some("fresh")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("age")
+                .and_then(|value| value.to_str().ok()),
+            Some("12")
         );
     }
 
@@ -1477,7 +1608,7 @@ mod tests {
         fs::remove_file(&index).unwrap();
         std::os::unix::fs::symlink(outside.child("secret.txt"), &index).unwrap();
 
-        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+        let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
@@ -1493,7 +1624,7 @@ mod tests {
             panic!("expected static file")
         };
 
-        let body = super::read_static_body(&file, StaticResponseBody::Full).unwrap();
+        let body = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap();
 
         assert_eq!(body, bytes::Bytes::from_static(b"ok"));
     }
@@ -1513,7 +1644,7 @@ mod tests {
             inode: 0,
         };
 
-        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+        let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
@@ -1531,7 +1662,7 @@ mod tests {
         fs::rename(root.child("index.html"), root.child("old-index.html")).unwrap();
         fs::write(root.child("index.html"), "no").unwrap();
 
-        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+        let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
@@ -1548,7 +1679,7 @@ mod tests {
         };
         fs::write(root.child("index.html"), "changed").unwrap();
 
-        let error = super::read_static_body(&file, StaticResponseBody::Full).unwrap_err();
+        let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }

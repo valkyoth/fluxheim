@@ -552,6 +552,7 @@ compiled.
 ```toml
 [cache]
 enabled = false
+local_static = false
 status_header = "X-Cache-Status"
 status_reason_header = "X-Cache-Reason"
 hide_response_headers = ["set-cookie"]
@@ -611,9 +612,21 @@ group- or world-writable, such as creating a cache root directly below `/tmp`; u
 dedicated cache directory such as `/var/cache/fluxheim` or a pre-created private
 runtime directory.
 
+`local_static` is disabled by default. When set to `true`, the same cache
+policy may also store local `[web]`, `[vhosts.web]`, and route-scoped
+`[vhosts.routes.web]` file responses. Local static caching is opt-in because it
+changes an otherwise direct file-read path into a shared in-process cache path.
+Fluxheim keys local static cache objects by the request cache key plus canonical
+file identity metadata, so a changed local file creates a new cache key instead
+of serving the old body. Memory storage is preferred when both memory and disk
+tiers are configured, avoiding a second disk copy of files that already exist
+under the static site root. Disk-only cache policies are still accepted for
+operators who explicitly want disk-backed local static caching.
+
 `status_header` is optional. When set, Fluxheim emits a cache debug header such
 as `X-Cache-Status: HIT`, `MISS`, `STALE`, `BYPASS`, `EXPIRED`, or
-`REVALIDATED` for requests that participate in the proxy cache.
+`REVALIDATED` for requests that participate in the proxy cache or opt-in local
+static cache.
 `status_reason_header` is optional. When set, Fluxheim emits a bounded reason
 header such as `OriginNotCache`, `ResponseTooLarge`, or `cache-min-uses` when
 the cache phase has an explicit no-cache reason. Leave it unset unless you are

@@ -22,10 +22,12 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$tmp/public"
 printf '%s\n' '<!doctype html><title>Fluxheim smoke</title><h1>Fluxheim smoke ok</h1>' > "$tmp/public/index.html"
+printf '%s\n' 'local-static-cache-webp' > "$tmp/public/asset.webp"
 
 cat > "$config" <<EOF
 [server]
 listen = ["127.0.0.1:$port"]
+default_vhost = "static.test"
 trusted_proxies = []
 
 [server.limits]
@@ -63,10 +65,28 @@ backend = "rustls"
 [cache]
 enabled = false
 
-[web]
+[[vhosts]]
+name = "static.test"
+hosts = ["static.test"]
+
+[vhosts.cache]
+enabled = true
+local_static = true
+status_header = "x-cache-status"
+status_reason_header = "x-cache-reason"
+image_extensions = ["webp"]
+content_types = ["image/webp"]
+max_object_bytes = "1MiB"
+
+[vhosts.cache.memory]
+enabled = true
+max_size_bytes = "16MiB"
+
+[vhosts.web]
 root = "$tmp/public"
 index_files = ["index.html"]
 deny_dotfiles = true
+cache_control = "public, max-age=60"
 EOF
 
 cargo build --quiet
@@ -101,5 +121,34 @@ case "$headers" in
         exit 1
         ;;
 esac
+
+asset_headers="$tmp/asset-headers.txt"
+asset_body="$tmp/asset-body.txt"
+curl -sS -D "$asset_headers" -o "$asset_body" -H "Host: static.test" "http://127.0.0.1:$port/asset.webp"
+if ! grep -q "local-static-cache-webp" "$asset_body"; then
+    echo "static smoke failed: local cached asset body mismatch on first request" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: MISS' "$asset_headers"; then
+    echo "static smoke failed: first local static cache request was not MISS" >&2
+    cat "$asset_headers" >&2
+    exit 1
+fi
+
+curl -sS -D "$asset_headers" -o "$asset_body" -H "Host: static.test" "http://127.0.0.1:$port/asset.webp"
+if ! grep -q "local-static-cache-webp" "$asset_body"; then
+    echo "static smoke failed: local cached asset body mismatch on second request" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$asset_headers"; then
+    echo "static smoke failed: second local static cache request was not HIT" >&2
+    cat "$asset_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^age:' "$asset_headers"; then
+    echo "static smoke failed: local static cache HIT did not include Age header" >&2
+    cat "$asset_headers" >&2
+    exit 1
+fi
 
 echo "static smoke: ok"

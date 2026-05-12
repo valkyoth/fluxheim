@@ -242,6 +242,9 @@ parallel = false
 
 [vhosts.cache]
 enabled = true
+# Opt in when this vhost serves local [vhosts.web] files that should use the
+# same cache policy as proxied static assets.
+local_static = true
 status_header = "X-Cache-Status"
 image_extensions = ["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"]
 methods = ["GET", "HEAD"]

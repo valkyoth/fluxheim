@@ -233,6 +233,15 @@ internal cache implementation.
   browser/CDN-facing headers such as `Cache-Control`, `Expires`, `Vary`, and
   provider-specific cache controls. Proxied image cache admission bypasses
   Fluxheim's cache when the request sends `Cache-Control: no-store`.
+  Local static-file responses are still direct file reads by default. When a
+  selected cache policy sets `local_static = true`, local `[vhosts.web]` files
+  and route-scoped web actions can participate in the same cache policy model
+  as proxied static assets. Fluxheim keys these entries by request identity plus
+  canonical file identity metadata, prefers memory storage over disk when both
+  tiers are configured, emits configured cache-status headers, and includes
+  `Age` on local static cache hits. The cache-key, cache-lookup, and exact
+  cache purge paths resolve local static files and use the same file-identity
+  key when `local_static` is enabled.
   `Cache-Control: no-cache`, `Cache-Control: max-age=0`, and
   `Pragma: no-cache` are ignored by default for shared-cache protection; when
   `allow_client_cache_refresh` is enabled they keep cache lookup enabled and
