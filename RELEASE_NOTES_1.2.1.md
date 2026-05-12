@@ -54,7 +54,7 @@ actions into Fluxheim's cache policy model with `local_static = true`.
 
 Record during the release:
 
-- Commit: to be filled after the release-prep commit
+- Commit: `v1.2.1` tag target
 - Local gate: GitHub CI green before tag; local release metadata checks passed
 - CodeQL/code scanning: no open release-blocking alerts before tag
 - Source archive checksums: to be filled

@@ -24,11 +24,11 @@ memory/disk/tiered storage, request collapsing, protected purge/status
 operations, cache warm and inspection commands, Prometheus/OpenTelemetry
 visibility, and production Podman/ACME migration notes.
 
-The active `1.2.1` follow-up is focused opt-in local/static vhost caching so
-local `[vhosts.web]` files and route-scoped web actions can use the same cache
-policy model as proxied static content when operators explicitly enable it.
-After `1.2.1`, the cache-only sequence is `1.2.2` for slab/bin disk storage,
-`1.2.3` for distributed cache
+The `1.2.1` follow-up added focused opt-in local/static vhost caching so local
+`[vhosts.web]` files and route-scoped web actions can use the same cache policy
+model as proxied static content when operators explicitly enable it. After
+`1.2.1`, the cache-only sequence is `1.2.2` for slab/bin disk storage, `1.2.3`
+for distributed cache
 metadata/peer-fill, and an optional `1.2.4` only if production testing finds
 one more cache-specific blocker. `1.3` is planned as the load-balancer
 stabilization release. Its target is
