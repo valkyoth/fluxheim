@@ -192,6 +192,11 @@ internal cache implementation.
   storage line and currently fails closed if configured, so operators cannot
   accidentally assume the filesystem object store has slab/bin allocation
   semantics.
+- The reserved `[cache.disk.storage_bin]` table already documents the first
+  allocator controls: `bin_size_bytes`, `preallocate`, and `max_open_bins`.
+  These settings are parsed and validated while the backend remains disabled,
+  which lets deployment templates settle before the storage-bin writer,
+  durable free-map, and recovery path are enabled.
 - Optional cache encryption at rest is planned for the `1.2.x` cache line after
   the storage-bin format is defined. It should remain disabled by default and
   support both small-deployment local key sources and OpenBao Transit/KMS-backed

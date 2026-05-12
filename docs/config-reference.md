@@ -594,6 +594,11 @@ backend = "filesystem"
 path = "/var/cache/fluxheim"
 max_size_bytes = "10GiB"
 
+[cache.disk.storage_bin]
+bin_size_bytes = "256MiB"
+preallocate = false
+max_open_bins = 16
+
 [cache.lock]
 enabled = true
 age_timeout_secs = 30
@@ -615,7 +620,12 @@ runtime directory.
 `cache.disk.backend` defaults to `filesystem`, the stable complete-object disk
 backend used by `1.2.0` and `1.2.1`. The `storage-bin` backend name is reserved
 for the focused `1.2.2` slab/bin storage line and is recognized but rejected
-until the preallocated-bin allocator and durable index are implemented.
+until the preallocated-bin allocator and durable index are implemented. The
+reserved `[cache.disk.storage_bin]` table defines the intended allocator shape:
+`bin_size_bytes` must be at least `cache.max_object_bytes` and no larger than
+`cache.disk.max_size_bytes`, `preallocate` controls whether Fluxheim should
+reserve full bin files ahead of object writes, and `max_open_bins` bounds the
+number of concurrently opened bin files.
 
 `local_static` is disabled by default. When set to `true`, the same cache
 policy may also store local `[web]`, `[vhosts.web]`, and route-scoped

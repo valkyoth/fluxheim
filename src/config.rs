@@ -4223,6 +4223,8 @@ pub struct CacheDiskConfig {
     pub path: Option<PathBuf>,
     #[serde(default = "default_cache_disk_max_size_bytes")]
     pub max_size_bytes: ByteSize,
+    #[serde(default)]
+    pub storage_bin: CacheDiskStorageBinConfig,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -4240,6 +4242,7 @@ impl Default for CacheDiskConfig {
             backend: CacheDiskBackend::Filesystem,
             path: None,
             max_size_bytes: default_cache_disk_max_size_bytes(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         }
     }
 }
@@ -4248,6 +4251,11 @@ impl CacheDiskConfig {
     fn validate(&self, scope: &'static str, max_object_bytes: ByteSize) -> Result<(), ConfigError> {
         if !self.enabled {
             return Ok(());
+        }
+
+        if self.backend == CacheDiskBackend::StorageBin {
+            self.storage_bin
+                .validate(scope, self.max_size_bytes, max_object_bytes)?;
         }
 
         if self.backend == CacheDiskBackend::StorageBin {
@@ -4286,6 +4294,51 @@ impl CacheDiskConfig {
             });
         }
 
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheDiskStorageBinConfig {
+    #[serde(default = "default_cache_storage_bin_size_bytes")]
+    pub bin_size_bytes: ByteSize,
+    #[serde(default)]
+    pub preallocate: bool,
+    #[serde(default = "default_cache_storage_bin_max_open_bins")]
+    pub max_open_bins: usize,
+}
+
+impl Default for CacheDiskStorageBinConfig {
+    fn default() -> Self {
+        Self {
+            bin_size_bytes: default_cache_storage_bin_size_bytes(),
+            preallocate: false,
+            max_open_bins: default_cache_storage_bin_max_open_bins(),
+        }
+    }
+}
+
+impl CacheDiskStorageBinConfig {
+    fn validate(
+        &self,
+        scope: &'static str,
+        disk_max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+    ) -> Result<(), ConfigError> {
+        let field = format!("{scope}.disk.storage_bin.bin_size_bytes");
+        if self.bin_size_bytes.as_u64() == 0 {
+            return Err(ConfigError::InvalidCacheTierMaxSize { field });
+        }
+        if self.bin_size_bytes < max_object_bytes {
+            return Err(ConfigError::CacheStorageBinSmallerThanMaxObject { scope });
+        }
+        if self.bin_size_bytes > disk_max_size_bytes {
+            return Err(ConfigError::CacheStorageBinLargerThanDiskTier { scope });
+        }
+        if self.max_open_bins == 0 {
+            return Err(ConfigError::InvalidCacheStorageBinMaxOpenBins { scope });
+        }
         Ok(())
     }
 }
@@ -4794,6 +4847,15 @@ pub enum ConfigError {
     },
     CacheTierSmallerThanMaxObject {
         tier: String,
+    },
+    CacheStorageBinLargerThanDiskTier {
+        scope: &'static str,
+    },
+    CacheStorageBinSmallerThanMaxObject {
+        scope: &'static str,
+    },
+    InvalidCacheStorageBinMaxOpenBins {
+        scope: &'static str,
     },
     UnsupportedCacheDiskBackend {
         scope: &'static str,
@@ -5323,6 +5385,18 @@ impl Display for ConfigError {
                 formatter,
                 "{tier}.max_size_bytes must be at least cache.max_object_bytes"
             ),
+            Self::CacheStorageBinLargerThanDiskTier { scope } => write!(
+                formatter,
+                "{scope}.disk.storage_bin.bin_size_bytes must not exceed {scope}.disk.max_size_bytes"
+            ),
+            Self::CacheStorageBinSmallerThanMaxObject { scope } => write!(
+                formatter,
+                "{scope}.disk.storage_bin.bin_size_bytes must be at least {scope}.max_object_bytes"
+            ),
+            Self::InvalidCacheStorageBinMaxOpenBins { scope } => write!(
+                formatter,
+                "{scope}.disk.storage_bin.max_open_bins must be greater than zero"
+            ),
             Self::UnsupportedCacheDiskBackend { scope, backend } => write!(
                 formatter,
                 "{scope}.disk.backend = {backend:?} is recognized for the 1.2.2 storage-bin line but is not implemented yet"
@@ -5822,6 +5896,14 @@ fn default_cache_memory_max_size_bytes() -> ByteSize {
 
 fn default_cache_disk_max_size_bytes() -> ByteSize {
     ByteSize::from_bytes(10 * 1024 * 1024 * 1024)
+}
+
+fn default_cache_storage_bin_size_bytes() -> ByteSize {
+    ByteSize::from_bytes(256 * 1024 * 1024)
+}
+
+fn default_cache_storage_bin_max_open_bins() -> usize {
+    16
 }
 
 fn default_index_files() -> Vec<String> {
@@ -9248,6 +9330,110 @@ mod tests {
                 scope: "cache",
                 backend: "storage-bin"
             })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parses_reserved_storage_bin_backend_options() {
+        let root = unique_temp_path("config-cache-storage-bin-options");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+            max_object_bytes = "32MiB"
+
+            [cache.disk]
+            enabled = true
+            backend = "storage-bin"
+            path = "{}"
+            max_size_bytes = "2GiB"
+
+            [cache.disk.storage_bin]
+            bin_size_bytes = "512MiB"
+            preallocate = true
+            max_open_bins = 8
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(config.cache.disk.backend, CacheDiskBackend::StorageBin);
+        assert_eq!(
+            config.cache.disk.storage_bin.bin_size_bytes,
+            ByteSize::from_bytes(512 * 1024 * 1024)
+        );
+        assert!(config.cache.disk.storage_bin.preallocate);
+        assert_eq!(config.cache.disk.storage_bin.max_open_bins, 8);
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::UnsupportedCacheDiskBackend {
+                scope: "cache",
+                backend: "storage-bin"
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_storage_bin_smaller_than_cache_object_limit() {
+        let root = unique_temp_path("config-cache-storage-bin-too-small");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+            max_object_bytes = "64MiB"
+
+            [cache.disk]
+            enabled = true
+            backend = "storage-bin"
+            path = "{}"
+            max_size_bytes = "2GiB"
+
+            [cache.disk.storage_bin]
+            bin_size_bytes = "32MiB"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::CacheStorageBinSmallerThanMaxObject { scope: "cache" })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_zero_storage_bin_max_open_bins() {
+        let root = unique_temp_path("config-cache-storage-bin-open-bins");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            backend = "storage-bin"
+            path = "{}"
+            max_size_bytes = "2GiB"
+
+            [cache.disk.storage_bin]
+            max_open_bins = 0
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheStorageBinMaxOpenBins { scope: "cache" })
         );
 
         let _ = std::fs::remove_dir_all(root);
