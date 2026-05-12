@@ -16,6 +16,7 @@ require_jaeger_trace="${FLUXHEIM_JAEGER_REQUIRE_TRACE:-0}"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-observability-smoke.XXXXXX")"
 config="$tmp/fluxheim.toml"
 body="$tmp/body.txt"
+cache_body="$tmp/cache-body.txt"
 metrics_body="$tmp/metrics.txt"
 prometheus_body="$tmp/prometheus.json"
 prometheus_flags="$tmp/prometheus-flags.json"
@@ -57,6 +58,17 @@ port = int(sys.argv[1])
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/cached.css":
+            body = b"body { color: #123456; }\n"
+            self.send_response(200)
+            self.send_header("content-type", "text/css")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=120")
+            self.send_header("etag", '"observability-cache-v1"')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         traceparent = self.headers.get("traceparent", "")
         body = f"traceparent={traceparent}\n".encode("utf-8")
         self.send_response(200)
@@ -160,7 +172,7 @@ upstream_tls = false
 
 [[vhosts.routes]]
 name = "observability-cache"
-path_exact = "/cached"
+path_exact = "/cached.css"
 
 [vhosts.routes.cache]
 enabled = true
@@ -229,6 +241,20 @@ if grep -q "$span_id" "$body"; then
     exit 1
 fi
 
+curl -fsS \
+    -H "Host: observability.test" \
+    "http://127.0.0.1:$fluxheim_port/cached.css" >"$cache_body"
+
+if ! grep -q "body { color: #123456; }" "$cache_body"; then
+    echo "observability smoke failed: cache route response body mismatch" >&2
+    cat "$cache_body" >&2
+    exit 1
+fi
+
+curl -fsS \
+    -H "Host: observability.test" \
+    "http://127.0.0.1:$fluxheim_port/cached.css" >"$cache_body"
+
 if curl -fsS "http://127.0.0.1:$metrics_port/metrics" >"$metrics_body" \
     && grep -q "fluxheim_" "$metrics_body"; then
     :
@@ -279,6 +305,30 @@ fi
 if ! grep -q 'fluxheim_cache_lock_wait_timeout_max_seconds 17' "$metrics_body"; then
     echo "observability smoke failed: metrics endpoint missed cache lock timeout gauge" >&2
     grep 'fluxheim_cache_' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'fluxheim_cache_operation_duration_seconds_bucket' "$metrics_body"; then
+    echo "observability smoke failed: metrics endpoint missed cache operation duration histogram" >&2
+    grep 'fluxheim_cache_operation_duration' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'phase="miss"' "$metrics_body"; then
+    echo "observability smoke failed: cache operation metrics missed cache miss phase" >&2
+    grep 'fluxheim_cache_operation_duration' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'phase="hit"' "$metrics_body"; then
+    echo "observability smoke failed: cache operation metrics missed cache hit phase" >&2
+    grep 'fluxheim_cache_operation_duration' "$metrics_body" >&2 || true
+    exit 1
+fi
+
+if ! grep -q 'operation="lookup"' "$metrics_body"; then
+    echo "observability smoke failed: cache operation metrics missed lookup operation" >&2
+    grep 'fluxheim_cache_operation_duration' "$metrics_body" >&2 || true
     exit 1
 fi
 
