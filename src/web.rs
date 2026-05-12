@@ -1020,9 +1020,11 @@ mod tests {
     use crate::config::WebConfig;
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
 
+    #[cfg(feature = "proxy")]
+    use super::StaticCacheHeaders;
     use super::{
-        ResolveResult, StaticCacheHeaders, StaticFile, StaticFileServer, StaticRequestConditions,
-        StaticResponseBody, parse_single_byte_range, plan_static_response,
+        ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions, StaticResponseBody,
+        parse_single_byte_range, plan_static_response,
     };
 
     #[test]
