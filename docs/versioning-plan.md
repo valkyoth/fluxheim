@@ -789,9 +789,15 @@ Focused cache-only follow-up releases after 1.2:
 - `1.2.4`: reserved only if production 1.2 testing exposes one more
   cache-specific gap that should close before the 1.3 line starts. Candidate
   work includes proper Pingora-path partial streaming/slice range fill,
-  HEAD-to-GET cache-key conversion with safe body handling, cache
-  import/export workflows for mirrors, or bounded metadata ban predicates. If
-  no such blocker appears, skip `1.2.4` and move to `1.3`.
+  HEAD-to-GET cache-key conversion with safe body handling, optional local
+  static-file caching for `[vhosts.web]` and route-scoped web actions, cache
+  import/export workflows for mirrors, or bounded metadata ban predicates. The
+  local static-file cache should be opt-in, support whole-vhost and partial
+  route/path scopes, prefer memory caching first to avoid duplicating local
+  files on disk, key by canonical static path plus file identity metadata, keep
+  the existing symlink/traversal protections, and expose an optional static
+  cache-status header. If no such blocker appears, skip `1.2.4` and move to
+  `1.3`.
 
 Exit criteria:
 
@@ -1443,7 +1449,10 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.2.2`: focused Wasm cache policy hook release.
 - `v1.2.3`: focused distributed cache metadata and peer-fill release.
 - `v1.2.4`: optional cache-only follow-up if production testing finds one more
-  cache blocker before `1.3`.
+  cache blocker before `1.3`; likely candidates include opt-in local
+  static-file caching for whole vhosts or matched web routes, proper
+  Pingora-path partial streaming/slice range fill, HEAD-to-GET cache parity,
+  cache import/export, or bounded metadata ban predicates.
 - `v1.3.1`: fixes for load balancer.
 
 ## Changelog Shape
