@@ -202,6 +202,9 @@ internal cache implementation.
   data files, with 16-digit hexadecimal bin ids. Object metadata will point to
   `(bin_id, offset, len)` locations that must fit entirely within a single bin;
   oversized objects remain rejected by the existing per-object cache limit.
+- Startup creates the manifest atomically, reuses it on later starts, and
+  rejects a storage-bin root if the manifest no longer matches the configured
+  bin size, total byte budget, preallocation mode, or open-bin cap.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without

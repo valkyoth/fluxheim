@@ -194,6 +194,17 @@ impl StorageBinManifest {
             max_open_bins,
         })
     }
+
+    pub fn ensure_matches_layout(&self, layout: &StorageBinLayoutPlan) -> std::io::Result<()> {
+        let expected = Self::from_layout(layout);
+        if self == &expected {
+            return Ok(());
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "storage-bin manifest does not match configured cache disk layout",
+        ))
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2925,6 +2936,180 @@ fn reject_unimplemented_disk_backend(backend: CacheDiskBackend) -> std::io::Resu
             "cache.disk.backend = \"storage-bin\" is recognized but not implemented yet",
         )),
     }
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn prepare_storage_bin_layout(
+    layout: &StorageBinLayoutPlan,
+) -> std::io::Result<StorageBinManifest> {
+    let root = prepare_disk_cache_root(&layout.root)?;
+    let canonical_layout = StorageBinLayoutPlan {
+        root: root.clone(),
+        manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
+        data_dir: root.join(STORAGE_BIN_DATA_DIR),
+        bin_size_bytes: layout.bin_size_bytes,
+        max_size_bytes: layout.max_size_bytes,
+        preallocate: layout.preallocate,
+        max_open_bins: layout.max_open_bins,
+    };
+
+    prepare_storage_bin_data_dir(&root, &canonical_layout.data_dir)?;
+    match read_storage_bin_manifest(&root, &canonical_layout.manifest_path)? {
+        Some(manifest) => {
+            manifest.ensure_matches_layout(&canonical_layout)?;
+            Ok(manifest)
+        }
+        None => {
+            let manifest = StorageBinManifest::from_layout(&canonical_layout);
+            write_storage_bin_manifest(&root, &canonical_layout.manifest_path, &manifest)?;
+            Ok(manifest)
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn prepare_storage_bin_data_dir(root: &Path, data_dir: &Path) -> std::io::Result<PathBuf> {
+    if cache_path_contains_symlink(root, data_dir)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin data directory contains symlink: {}",
+                data_dir.display()
+            ),
+        ));
+    }
+    match std::fs::symlink_metadata(data_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "storage-bin data directory is not a real directory: {}",
+                    data_dir.display()
+                ),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(data_dir)?;
+        }
+        Err(error) => return Err(error),
+    }
+    if cache_path_contains_symlink(root, data_dir)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin data directory contains symlink: {}",
+                data_dir.display()
+            ),
+        ));
+    }
+    let canonical = data_dir.canonicalize()?;
+    if !canonical.starts_with(root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin data directory escaped root: {}",
+                canonical.display()
+            ),
+        ));
+    }
+    Ok(canonical)
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn read_storage_bin_manifest(
+    root: &Path,
+    path: &Path,
+) -> std::io::Result<Option<StorageBinManifest>> {
+    use std::io::Read as _;
+
+    if cache_path_contains_symlink(root, path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin manifest path contains symlink: {}",
+                path.display()
+            ),
+        ));
+    }
+    let canonical = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !canonical.starts_with(root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin manifest escaped root: {}", canonical.display()),
+        ));
+    }
+
+    // lgtm[rs/path-injection] path is derived from the validated cache root and
+    // opened through NOFOLLOW helpers after canonical root containment checks.
+    let mut file = SafeDiskCachePath::from_path(canonical).open_existing_file()?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    StorageBinManifest::decode(&contents).map(Some)
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn write_storage_bin_manifest(
+    root: &Path,
+    path: &Path,
+    manifest: &StorageBinManifest,
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    if !path.starts_with(root) || cache_path_contains_symlink(root, path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin manifest path is unsafe: {}", path.display()),
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin manifest path has no parent: {}",
+                path.display()
+            ),
+        )
+    })?;
+    let temp_path = storage_bin_manifest_temp_path(parent)?;
+    let path = SafeDiskCachePath::from_path(path.to_path_buf());
+    let temp_path = SafeDiskCachePath::from_path(temp_path);
+    let write_result = (|| {
+        let mut file = create_new_disk_cache_file(temp_path.as_path())?;
+        file.write_all(manifest.encode().as_bytes())?;
+        file.sync_all()?;
+        path.rename_from(&temp_path)
+    })();
+    if write_result.is_err() {
+        let _ = temp_path.remove_file();
+    }
+    write_result
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn storage_bin_manifest_temp_path(parent: &Path) -> std::io::Result<PathBuf> {
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|error| {
+        std::io::Error::other(format!("generate storage-bin manifest temp nonce: {error}"))
+    })?;
+    let mut encoded = String::with_capacity(nonce.len() * 2);
+    for byte in nonce {
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    Ok(parent.join(format!(
+        ".fluxheim-storage-bin-manifest.{}.{}.tmp",
+        std::process::id(),
+        encoded
+    )))
 }
 
 #[cfg(feature = "proxy")]
@@ -5841,6 +6026,63 @@ mod tests {
         let decoded = super::StorageBinManifest::decode(&manifest.encode()).unwrap();
 
         assert_eq!(decoded, manifest);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_prepare_writes_and_reuses_manifest() {
+        let root = unique_test_cache_dir("storage-bin-manifest");
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(256),
+            max_object_bytes: ByteSize::from_bytes(64),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(128),
+                preallocate: true,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+
+        let written = super::prepare_storage_bin_layout(&layout).unwrap();
+        let reused = super::prepare_storage_bin_layout(&layout).unwrap();
+
+        assert_eq!(reused, written);
+        assert!(root.join(".fluxheim-storage-bin-v1").is_file());
+        assert!(root.join("bins").is_dir());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_prepare_rejects_mismatched_manifest() {
+        let root = unique_test_cache_dir("storage-bin-manifest-mismatch");
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(256),
+            max_object_bytes: ByteSize::from_bytes(64),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(128),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        super::prepare_storage_bin_layout(&layout).unwrap();
+
+        let changed = super::StorageBinLayoutPlan {
+            bin_size_bytes: ByteSize::from_bytes(64),
+            ..layout
+        };
+        let error = super::prepare_storage_bin_layout(&changed).unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(feature = "proxy")]
