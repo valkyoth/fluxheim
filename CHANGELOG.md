@@ -11,9 +11,26 @@ behavior when the change improves security or project direction.
 
 No unreleased changes yet.
 
-## 1.2.2 - Storage-Bin Disk Cache Follow-Up
+## 1.2.3 - Optional Cache Encryption Follow-Up
 
 Released: in progress
+
+### Added
+
+- Started the `1.2.3` optional cache encryption-at-rest line with
+  `[cache.disk.encryption]` policy configuration. Encryption remains disabled
+  by default and normal deployments do not need OpenBao.
+- Added local-key AES-256-GCM encryption for disk cache objects. Local keys can
+  be loaded from a safe file path or a systemd/container credential, and
+  encrypted cache objects authenticate the configured key id plus combined cache
+  key as associated data.
+- Added OpenBao Transit/KMS configuration validation as the provider shape for
+  regulated deployments, while failing closed if operators enable the provider
+  before runtime OpenBao key operations are implemented.
+
+## 1.2.2 - Storage-Bin Disk Cache Follow-Up
+
+Released: 2026-05-13
 
 ### Added
 

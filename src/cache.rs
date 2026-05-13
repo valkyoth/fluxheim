@@ -26,8 +26,8 @@ use pingora::{Error, ErrorType};
 use sha2::{Digest, Sha256};
 
 use crate::config::{
-    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskStorageBinConfig, CacheKeyPart,
-    normalize_host,
+    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig,
+    CacheDiskEncryptionProvider, CacheDiskStorageBinConfig, CacheKeyPart, normalize_host,
 };
 
 #[cfg(feature = "proxy")]
@@ -49,6 +49,8 @@ const DISK_CACHE_MAGIC_V3: &[u8] = b"FLUXHEIM-CACHE-v3\n";
 const DISK_CACHE_MAGIC_V4: &[u8] = b"FLUXHEIM-CACHE-v4\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_MAGIC_V5: &[u8] = b"FLUXHEIM-CACHE-v5\n";
+#[cfg(feature = "proxy")]
+const DISK_CACHE_ENCRYPTED_MAGIC_V1: &[u8] = b"FLUXHEIM-CACHE-ENC-v1\n";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_INDEX_MAGIC_V1: &str = "FLUXHEIM-DISK-INDEX-v1";
 #[cfg(feature = "proxy")]
@@ -92,6 +94,109 @@ pub struct DiskTierPlan {
     pub max_object_bytes: ByteSize,
     pub cache_tag_headers: Vec<String>,
     pub storage_bin: CacheDiskStorageBinConfig,
+    pub encryption: CacheDiskEncryptionConfig,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone)]
+struct DiskCacheEncryption {
+    key_id: Arc<str>,
+    key: Arc<ring::aead::LessSafeKey>,
+}
+
+#[cfg(feature = "proxy")]
+impl DiskCacheEncryption {
+    fn from_config(config: &CacheDiskEncryptionConfig) -> std::io::Result<Option<Self>> {
+        if !config.enabled {
+            return Ok(None);
+        }
+        if config.provider != CacheDiskEncryptionProvider::Local {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "cache disk encryption provider is not implemented yet",
+            ));
+        }
+
+        let key_bytes = match (&config.key_file, config.key_credential.as_deref()) {
+            (Some(path), None) => read_cache_encryption_key_file(path)?,
+            (None, Some(credential)) => {
+                let path = cache_encryption_credential_path(credential);
+                read_cache_encryption_key_file(&path)?
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "cache disk encryption requires exactly one local key source",
+                ));
+            }
+        };
+        let key =
+            ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &key_bytes).map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid cache disk encryption key",
+                )
+            })?;
+        Ok(Some(Self {
+            key_id: Arc::from(config.key_id.as_deref().unwrap_or("local")),
+            key: Arc::new(ring::aead::LessSafeKey::new(key)),
+        }))
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn cache_encryption_credential_path(credential_name: &str) -> PathBuf {
+    std::env::var_os("CREDENTIALS_DIRECTORY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/secrets"))
+        .join(credential_name)
+}
+
+#[cfg(feature = "proxy")]
+fn read_cache_encryption_key_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    use std::io::Read as _;
+
+    let mut file = SafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cache disk encryption key must be a small regular file",
+        ));
+    }
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    parse_cache_encryption_hex_key(contents.trim())
+}
+
+#[cfg(feature = "proxy")]
+fn parse_cache_encryption_hex_key(value: &str) -> std::io::Result<[u8; 32]> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cache disk encryption key must be 64 hex characters",
+        ));
+    }
+    let mut key = [0_u8; 32];
+    for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_value(chunk[0])?;
+        let low = hex_value(chunk[1])?;
+        key[index] = (high << 4) | low;
+    }
+    Ok(key)
+}
+
+#[cfg(feature = "proxy")]
+fn hex_value(byte: u8) -> std::io::Result<u8> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid hex digit",
+        )),
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -2008,6 +2113,7 @@ pub struct PingoraDiskStorage {
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
     cache_tag_headers: Arc<[String]>,
+    encryption: Option<DiskCacheEncryption>,
     activity: CacheActivityCounters,
 }
 
@@ -2024,6 +2130,7 @@ pub struct StorageBinDiskStorage {
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
     cache_tag_headers: Arc<[String]>,
+    encryption: Option<DiskCacheEncryption>,
     activity: CacheActivityCounters,
 }
 
@@ -2064,6 +2171,7 @@ impl StorageBinDiskStorage {
                 "StorageBinDiskStorage requires cache.disk.backend = \"storage-bin\"",
             ));
         }
+        let encryption = DiskCacheEncryption::from_config(&plan.encryption)?;
         let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -2083,11 +2191,15 @@ impl StorageBinDiskStorage {
         let recovered_purge_index = CachePurgeIndex::new();
         let mut valid_entries = Vec::new();
         for entry in recovered_entries {
-            let object =
-                match read_storage_bin_index_entry_object(&layout, plan.max_object_bytes, &entry) {
-                    Ok(object) => object,
-                    Err(_) => continue,
-                };
+            let object = match read_storage_bin_index_entry_object(
+                &layout,
+                plan.max_object_bytes,
+                encryption.as_ref(),
+                &entry,
+            ) {
+                Ok(object) => object,
+                Err(_) => continue,
+            };
             if object.combined_key.as_deref() != Some(entry.combined_key.as_str()) {
                 continue;
             }
@@ -2127,6 +2239,7 @@ impl StorageBinDiskStorage {
             max_size_bytes: plan.max_size_bytes,
             max_object_bytes: plan.max_object_bytes,
             cache_tag_headers: Arc::from(plan.cache_tag_headers),
+            encryption,
             activity,
         })
     }
@@ -2194,8 +2307,14 @@ impl StorageBinDiskStorage {
             return Ok(None);
         }
 
-        let encoded = encode_disk_cache_object(&store_key, &internal_meta, &response_header, &body)
-            .map_err(|error| cache_io_error("encode storage-bin cache object", error))?;
+        let encoded = encode_disk_cache_object_maybe_encrypted(
+            self.encryption.as_ref(),
+            &store_key,
+            &internal_meta,
+            &response_header,
+            &body,
+        )
+        .map_err(|error| cache_io_error("encode storage-bin cache object", error))?;
         let encoded_len = encoded.len() as u64;
         if !self
             .evict_until_admissible(&store_key.combined, encoded_len)
@@ -2368,8 +2487,12 @@ impl StorageBinDiskStorage {
             .files
             .read_object(entry.location)
             .map_err(|error| cache_io_error("read storage-bin cache object", error))?;
-        let object = parse_disk_cache_object(&bytes, self.max_object_bytes)
-            .map_err(|error| cache_io_error("parse storage-bin cache object", error))?;
+        let object = parse_disk_cache_object_maybe_encrypted(
+            &bytes,
+            self.max_object_bytes,
+            self.encryption.as_ref(),
+        )
+        .map_err(|error| cache_io_error("parse storage-bin cache object", error))?;
         if let Ok(mut objects) = self.objects.write()
             && let Some(entry) = objects.get_mut(combined_key)
         {
@@ -2401,8 +2524,12 @@ impl StorageBinDiskStorage {
             .files
             .read_object(entry.location)
             .map_err(|error| cache_io_error("read storage-bin cache object", error))?;
-        parse_disk_cache_object(&bytes, self.max_object_bytes)
-            .map_err(|error| cache_io_error("parse storage-bin cache object", error))
+        parse_disk_cache_object_maybe_encrypted(
+            &bytes,
+            self.max_object_bytes,
+            self.encryption.as_ref(),
+        )
+        .map_err(|error| cache_io_error("parse storage-bin cache object", error))
     }
 
     pub fn inspect_cache_key(
@@ -3176,11 +3303,13 @@ impl PingoraDiskStorageBackend {
 impl PingoraDiskStorage {
     pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
         reject_unimplemented_disk_backend(plan.backend)?;
-        Self::new_with_cache_tag_headers(
+        let encryption = DiskCacheEncryption::from_config(&plan.encryption)?;
+        Self::new_with_cache_tag_headers_and_encryption(
             plan.path,
             plan.max_size_bytes,
             plan.max_object_bytes,
             plan.cache_tag_headers,
+            encryption,
         )
     }
 
@@ -3190,11 +3319,13 @@ impl PingoraDiskStorage {
         route: Option<&str>,
     ) -> std::io::Result<Self> {
         reject_unimplemented_disk_backend(plan.backend)?;
+        let encryption = DiskCacheEncryption::from_config(&plan.encryption)?;
         Self::new_with_metric_scope(
             plan.path,
             plan.max_size_bytes,
             plan.max_object_bytes,
             plan.cache_tag_headers,
+            encryption,
             vhost,
             route,
         )
@@ -3219,11 +3350,28 @@ impl PingoraDiskStorage {
         max_object_bytes: ByteSize,
         cache_tag_headers: Vec<String>,
     ) -> std::io::Result<Self> {
+        Self::new_with_cache_tag_headers_and_encryption(
+            root,
+            max_size_bytes,
+            max_object_bytes,
+            cache_tag_headers,
+            None,
+        )
+    }
+
+    fn new_with_cache_tag_headers_and_encryption(
+        root: PathBuf,
+        max_size_bytes: ByteSize,
+        max_object_bytes: ByteSize,
+        cache_tag_headers: Vec<String>,
+        encryption: Option<DiskCacheEncryption>,
+    ) -> std::io::Result<Self> {
         Self::new_with_activity(
             root,
             max_size_bytes,
             max_object_bytes,
             cache_tag_headers,
+            encryption,
             CacheActivityCounters::new("disk"),
         )
     }
@@ -3233,6 +3381,7 @@ impl PingoraDiskStorage {
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
         cache_tag_headers: Vec<String>,
+        encryption: Option<DiskCacheEncryption>,
         vhost: &str,
         route: Option<&str>,
     ) -> std::io::Result<Self> {
@@ -3241,6 +3390,7 @@ impl PingoraDiskStorage {
             max_size_bytes,
             max_object_bytes,
             cache_tag_headers,
+            encryption,
             CacheActivityCounters::new_with_metric_scope("disk", vhost, route),
         )
     }
@@ -3250,6 +3400,7 @@ impl PingoraDiskStorage {
         max_size_bytes: ByteSize,
         max_object_bytes: ByteSize,
         cache_tag_headers: Vec<String>,
+        encryption: Option<DiskCacheEncryption>,
         activity: CacheActivityCounters,
     ) -> std::io::Result<Self> {
         let root = prepare_disk_cache_root(&root)?;
@@ -3265,6 +3416,7 @@ impl PingoraDiskStorage {
             max_size_bytes,
             max_object_bytes,
             cache_tag_headers: Arc::from(cache_tag_headers),
+            encryption,
             activity,
         };
         storage.rebuild_disk_indexes()?;
@@ -3308,8 +3460,13 @@ impl PingoraDiskStorage {
                 continue;
             };
             let object = match read_disk_cache_object(&self.root, &read_path, self.max_object_bytes)
-                .and_then(|bytes| parse_disk_cache_object(&bytes, self.max_object_bytes))
-            {
+                .and_then(|bytes| {
+                    parse_disk_cache_object_maybe_encrypted(
+                        &bytes,
+                        self.max_object_bytes,
+                        self.encryption.as_ref(),
+                    )
+                }) {
                 Ok(object) => object,
                 Err(_) => {
                     let _ = remove_disk_cache_object(&self.root, &read_path);
@@ -3379,8 +3536,13 @@ impl PingoraDiskStorage {
                 continue;
             };
             let object = match read_disk_cache_object(&self.root, &read_path, self.max_object_bytes)
-                .and_then(|bytes| parse_disk_cache_object(&bytes, self.max_object_bytes))
-            {
+                .and_then(|bytes| {
+                    parse_disk_cache_object_maybe_encrypted(
+                        &bytes,
+                        self.max_object_bytes,
+                        self.encryption.as_ref(),
+                    )
+                }) {
                 Ok(object) => object,
                 Err(_) => continue,
             };
@@ -3662,8 +3824,13 @@ impl PingoraDiskStorage {
                 continue;
             };
             let object = match read_disk_cache_object(&self.root, &read_path, self.max_object_bytes)
-                .and_then(|bytes| parse_disk_cache_object(&bytes, self.max_object_bytes))
-            {
+                .and_then(|bytes| {
+                    parse_disk_cache_object_maybe_encrypted(
+                        &bytes,
+                        self.max_object_bytes,
+                        self.encryption.as_ref(),
+                    )
+                }) {
                 Ok(object) => object,
                 Err(_) => continue,
             };
@@ -3793,7 +3960,11 @@ impl PingoraDiskStorage {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(cache_io_error("read disk cache object", error)),
         };
-        match parse_disk_cache_object(&bytes, self.max_object_bytes) {
+        match parse_disk_cache_object_maybe_encrypted(
+            &bytes,
+            self.max_object_bytes,
+            self.encryption.as_ref(),
+        ) {
             Ok(object) => {
                 let _ = self.index_existing_object_path_with_combined_key(
                     &read_path,
@@ -4042,7 +4213,11 @@ impl PingoraDiskStorage {
         path: &Path,
     ) -> std::io::Result<Option<String>> {
         let bytes = read_disk_cache_object(&self.root, path, self.max_object_bytes)?;
-        let object = parse_disk_cache_object(&bytes, self.max_object_bytes)?;
+        let object = parse_disk_cache_object_maybe_encrypted(
+            &bytes,
+            self.max_object_bytes,
+            self.encryption.as_ref(),
+        )?;
         Ok(object.combined_key)
     }
 
@@ -4085,6 +4260,7 @@ impl PingoraDiskStorage {
             let destination = SafeDiskCachePath::from_path(path.to_path_buf());
             let write_result = write_disk_cache_object(
                 tmp_path.as_path(),
+                self.encryption.as_ref(),
                 store_key,
                 internal_meta,
                 response_header,
@@ -4191,6 +4367,7 @@ impl PingoraDiskStorage {
             let destination = SafeDiskCachePath::from_path(path.to_path_buf());
             let write_result = write_disk_cache_object_from_body_file(
                 tmp_path.as_path(),
+                self.encryption.as_ref(),
                 store_key,
                 internal_meta,
                 response_header,
@@ -4700,11 +4877,12 @@ fn write_storage_bin_index_from_objects(
 fn read_storage_bin_index_entry_object(
     layout: &StorageBinLayoutPlan,
     max_object_bytes: ByteSize,
+    encryption: Option<&DiskCacheEncryption>,
     entry: &StorageBinIndexEntry,
 ) -> std::io::Result<PingoraStoredObject> {
     let files = StorageBinFileSet::new(layout.clone());
     let bytes = files.read_object(entry.location)?;
-    parse_disk_cache_object(&bytes, max_object_bytes)
+    parse_disk_cache_object_maybe_encrypted(&bytes, max_object_bytes, encryption)
 }
 
 #[cfg(feature = "proxy")]
@@ -5877,6 +6055,7 @@ pub fn storage_plan(config: &CacheConfig) -> CacheStoragePlan {
                 max_object_bytes: config.max_object_bytes,
                 cache_tag_headers: config.tag_headers.clone(),
                 storage_bin: config.disk.storage_bin.clone(),
+                encryption: config.disk.encryption.clone(),
             })
         })
         .flatten();
@@ -6781,6 +6960,7 @@ impl pingora::cache::storage::HandleMiss for PingoraTieredMissHandler {
 #[cfg(feature = "proxy")]
 fn write_disk_cache_object(
     path: &Path,
+    encryption: Option<&DiskCacheEncryption>,
     store_key: &PingoraStoreKey,
     internal_meta: &[u8],
     response_header: &[u8],
@@ -6789,7 +6969,8 @@ fn write_disk_cache_object(
     use std::io::Write as _;
 
     let mut file = create_new_disk_cache_file(path)?;
-    file.write_all(&encode_disk_cache_object(
+    file.write_all(&encode_disk_cache_object_maybe_encrypted(
+        encryption,
         store_key,
         internal_meta,
         response_header,
@@ -6797,6 +6978,21 @@ fn write_disk_cache_object(
     )?)?;
     file.sync_all()?;
     Ok(())
+}
+
+#[cfg(feature = "proxy")]
+fn encode_disk_cache_object_maybe_encrypted(
+    encryption: Option<&DiskCacheEncryption>,
+    store_key: &PingoraStoreKey,
+    internal_meta: &[u8],
+    response_header: &[u8],
+    body: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    let encoded = encode_disk_cache_object(store_key, internal_meta, response_header, body)?;
+    match encryption {
+        Some(encryption) => encrypt_disk_cache_object(encryption, &store_key.combined, &encoded),
+        None => Ok(encoded),
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -6845,8 +7041,150 @@ fn encode_disk_cache_object(
 }
 
 #[cfg(feature = "proxy")]
+fn encrypt_disk_cache_object(
+    encryption: &DiskCacheEncryption,
+    combined_key: &str,
+    plaintext: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    use std::io::Write as _;
+
+    let mut nonce = [0_u8; 12];
+    getrandom::fill(&mut nonce).map_err(|error| {
+        std::io::Error::other(format!("generate cache encryption nonce: {error}"))
+    })?;
+    let nonce_value = ring::aead::Nonce::assume_unique_for_key(nonce);
+    let mut ciphertext = plaintext.to_vec();
+    encryption
+        .key
+        .seal_in_place_append_tag(
+            nonce_value,
+            ring::aead::Aad::from(cache_encryption_aad(&encryption.key_id, combined_key)),
+            &mut ciphertext,
+        )
+        .map_err(|_| std::io::Error::other("encrypt cache object"))?;
+
+    let mut encoded = Vec::with_capacity(
+        DISK_CACHE_ENCRYPTED_MAGIC_V1.len()
+            + 128
+            + encryption.key_id.len()
+            + combined_key.len()
+            + nonce.len()
+            + ciphertext.len(),
+    );
+    encoded.write_all(DISK_CACHE_ENCRYPTED_MAGIC_V1)?;
+    writeln!(encoded, "{}", encryption.key_id.len())?;
+    writeln!(encoded, "{}", combined_key.len())?;
+    writeln!(encoded, "{}", nonce.len())?;
+    writeln!(encoded, "{}", ciphertext.len())?;
+    encoded.write_all(encryption.key_id.as_bytes())?;
+    encoded.write_all(combined_key.as_bytes())?;
+    encoded.write_all(&nonce)?;
+    encoded.write_all(&ciphertext)?;
+    Ok(encoded)
+}
+
+#[cfg(feature = "proxy")]
+fn decrypt_disk_cache_object_if_needed(
+    bytes: &[u8],
+    encryption: Option<&DiskCacheEncryption>,
+) -> std::io::Result<Vec<u8>> {
+    if bytes.get(..DISK_CACHE_ENCRYPTED_MAGIC_V1.len()) != Some(DISK_CACHE_ENCRYPTED_MAGIC_V1) {
+        if encryption.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unencrypted cache object found while cache disk encryption is enabled",
+            ));
+        }
+        return Ok(bytes.to_vec());
+    }
+
+    let Some(encryption) = encryption else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted cache object found but cache disk encryption is disabled",
+        ));
+    };
+
+    let mut offset = DISK_CACHE_ENCRYPTED_MAGIC_V1.len();
+    let key_id_len = parse_disk_cache_len(bytes, &mut offset)?;
+    let combined_key_len = parse_disk_cache_len(bytes, &mut offset)?;
+    let nonce_len = parse_disk_cache_len(bytes, &mut offset)?;
+    let ciphertext_len = parse_disk_cache_len(bytes, &mut offset)?;
+    if nonce_len != 12 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid encrypted cache object nonce length",
+        ));
+    }
+    let total_len = offset
+        .checked_add(key_id_len)
+        .and_then(|value| value.checked_add(combined_key_len))
+        .and_then(|value| value.checked_add(nonce_len))
+        .and_then(|value| value.checked_add(ciphertext_len))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "encrypted cache object size overflow",
+            )
+        })?;
+    if total_len != bytes.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted cache object length mismatch",
+        ));
+    }
+
+    let key_id_end = offset + key_id_len;
+    let combined_key_end = key_id_end + combined_key_len;
+    let nonce_end = combined_key_end + nonce_len;
+    let key_id = cache_object_utf8(&bytes[offset..key_id_end], "encryption key id")?;
+    if key_id != encryption.key_id.as_ref() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "encrypted cache object key id does not match configured key",
+        ));
+    }
+    let combined_key = cache_object_utf8(&bytes[key_id_end..combined_key_end], "combined key")?;
+    let mut nonce = [0_u8; 12];
+    nonce.copy_from_slice(&bytes[combined_key_end..nonce_end]);
+    let mut plaintext = bytes[nonce_end..].to_vec();
+    encryption
+        .key
+        .open_in_place(
+            ring::aead::Nonce::assume_unique_for_key(nonce),
+            ring::aead::Aad::from(cache_encryption_aad(&encryption.key_id, &combined_key)),
+            &mut plaintext,
+        )
+        .map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "decrypt cache object")
+        })?;
+    let plaintext_len = plaintext
+        .len()
+        .checked_sub(ring::aead::AES_256_GCM.tag_len())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "short encrypted cache object",
+            )
+        })?;
+    plaintext.truncate(plaintext_len);
+    Ok(plaintext)
+}
+
+#[cfg(feature = "proxy")]
+fn cache_encryption_aad(key_id: &str, combined_key: &str) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(32 + key_id.len() + combined_key.len());
+    aad.extend_from_slice(b"fluxheim-cache-disk-v1\0");
+    aad.extend_from_slice(key_id.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(combined_key.as_bytes());
+    aad
+}
+
+#[cfg(feature = "proxy")]
 fn write_disk_cache_object_from_body_file(
     path: &Path,
+    encryption: Option<&DiskCacheEncryption>,
     store_key: &PingoraStoreKey,
     internal_meta: &[u8],
     response_header: &[u8],
@@ -6854,6 +7192,35 @@ fn write_disk_cache_object_from_body_file(
     body_len: u64,
 ) -> std::io::Result<()> {
     use std::io::{Read as _, Write as _};
+
+    if encryption.is_some() {
+        let body_file = open_existing_disk_cache_file(body_path)?;
+        let metadata = body_file.metadata()?;
+        if !metadata.is_file() || metadata.len() != body_len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "disk cache streamed body length changed before commit",
+            ));
+        }
+        let mut body = Vec::new();
+        let copied = body_file
+            .take(body_len.saturating_add(1))
+            .read_to_end(&mut body)? as u64;
+        if copied != body_len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "disk cache streamed body ended before expected length",
+            ));
+        }
+        return write_disk_cache_object(
+            path,
+            encryption,
+            store_key,
+            internal_meta,
+            response_header,
+            &body,
+        );
+    }
 
     let mut file = create_new_disk_cache_file(path)?;
     let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
@@ -7144,6 +7511,16 @@ fn parse_disk_cache_object(
 }
 
 #[cfg(feature = "proxy")]
+fn parse_disk_cache_object_maybe_encrypted(
+    bytes: &[u8],
+    max_object_bytes: ByteSize,
+    encryption: Option<&DiskCacheEncryption>,
+) -> std::io::Result<PingoraStoredObject> {
+    let bytes = decrypt_disk_cache_object_if_needed(bytes, encryption)?;
+    parse_disk_cache_object(&bytes, max_object_bytes)
+}
+
+#[cfg(feature = "proxy")]
 fn cache_object_utf8(bytes: &[u8], field: &str) -> std::io::Result<String> {
     std::str::from_utf8(bytes)
         .map(str::to_owned)
@@ -7403,8 +7780,8 @@ mod tests {
         memory_image_cache_from_config, static_cache_key, storage_plan,
     };
     use crate::config::{
-        ByteSize, CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskStorageBinConfig,
-        CacheKeyPart, CacheMemoryConfig,
+        ByteSize, CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskEncryptionConfig,
+        CacheDiskStorageBinConfig, CacheKeyPart, CacheMemoryConfig,
     };
     #[cfg(feature = "proxy")]
     use crate::test_support::unique_temp_path;
@@ -7890,6 +8267,7 @@ mod tests {
                 max_object_bytes: ByteSize::from_bytes(64 * 1024 * 1024),
                 cache_tag_headers: super::default_cache_tag_headers_for_storage(),
                 storage_bin: CacheDiskStorageBinConfig::default(),
+                encryption: CacheDiskEncryptionConfig::default(),
             }
         );
     }
@@ -7909,6 +8287,7 @@ mod tests {
                     preallocate: true,
                     max_open_bins: 4,
                 },
+                ..CacheDiskConfig::default()
             },
             ..CacheConfig::default()
         };
@@ -7938,6 +8317,7 @@ mod tests {
                 preallocate: true,
                 max_open_bins: 8,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
 
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
@@ -7985,6 +8365,7 @@ mod tests {
                 preallocate: true,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
 
@@ -8013,6 +8394,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         super::prepare_storage_bin_layout(&layout).unwrap();
@@ -8078,6 +8460,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         let mut free_map = super::StorageBinFreeMap::new(&layout);
@@ -8137,6 +8520,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         let mut free_map = super::StorageBinFreeMap::new(&layout);
@@ -8167,6 +8551,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         let mut free_map = super::StorageBinFreeMap::new(&layout);
@@ -8198,6 +8583,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         super::prepare_storage_bin_layout(&layout).unwrap();
@@ -8229,6 +8615,7 @@ mod tests {
                 preallocate: true,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         super::prepare_storage_bin_layout(&layout).unwrap();
@@ -8265,6 +8652,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "/asset.webp", "vhost");
@@ -8315,6 +8703,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "/rewrite.webp", "vhost");
@@ -8373,6 +8762,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         super::prepare_storage_bin_layout(&layout).unwrap();
@@ -8408,6 +8798,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let storage = super::StorageBinDiskStorage::from_plan(plan.clone()).unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "/restart.webp", "vhost");
@@ -8454,6 +8845,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let index_path = super::storage_bin_index_path(&root);
@@ -8512,6 +8904,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         };
         let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
         let storage = super::StorageBinDiskStorage::from_plan(plan).unwrap();
@@ -8556,6 +8949,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "/purge.webp", "vhost");
@@ -8603,6 +8997,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let meta = pingora_meta("max-age=60");
@@ -8659,6 +9054,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let meta = pingora_meta("max-age=60");
@@ -8711,6 +9107,7 @@ mod tests {
                     preallocate: false,
                     max_open_bins: 4,
                 },
+                encryption: CacheDiskEncryptionConfig::default(),
             })
             .unwrap(),
         ));
@@ -8762,6 +9159,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let meta = pingora_meta("max-age=60");
@@ -9783,6 +10181,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-key", "vhost");
@@ -9814,6 +10213,60 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_disk_storage_encrypts_local_key_objects() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("encrypted-round-trip");
+        let key_path = root.join("cache-key.hex");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            &key_path,
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
+        )
+        .unwrap();
+        let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
+            path: root.join("objects"),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig {
+                enabled: true,
+                key_id: Some("test-key-v1".to_owned()),
+                key_file: Some(key_path),
+                ..CacheDiskEncryptionConfig::default()
+            },
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "encrypted-key", "vhost");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"secret-cache-body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let object_path = storage.path_for_combined_key(&key.combined());
+        let encoded = std::fs::read(&object_path).unwrap();
+        assert!(encoded.starts_with(super::DISK_CACHE_ENCRYPTED_MAGIC_V1));
+        assert!(
+            !encoded
+                .windows(b"secret-cache-body".len())
+                .any(|window| window == b"secret-cache-body")
+        );
+
+        let (_stored_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        assert_eq!(
+            block_on(hit.read_body()).unwrap(),
+            Some(Bytes::from_static(b"secret-cache-body"))
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_disk_storage_rejects_reserved_storage_bin_backend() {
         let root = unique_test_cache_dir("storage-bin-runtime-guard");
         let error = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
@@ -9823,6 +10276,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap_err();
 
@@ -9845,6 +10299,7 @@ mod tests {
                 preallocate: false,
                 max_open_bins: 4,
             },
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
 
@@ -9932,6 +10387,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-index-key", "vhost-a");
@@ -9953,6 +10409,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 1);
@@ -9985,6 +10442,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let route = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
@@ -9994,6 +10452,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -10017,6 +10476,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 2);
@@ -10047,6 +10507,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "checkpoint-key", "vhost-a");
@@ -10069,6 +10530,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
 
@@ -10093,6 +10555,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let checkpoint = super::disk_index_checkpoint_path(storage.root());
@@ -10143,6 +10606,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -10172,6 +10636,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
 
@@ -10195,6 +10660,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(4096),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -10217,6 +10683,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(4096),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
 
@@ -10237,6 +10704,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "checkpoint-key", "vhost-a");
@@ -10260,6 +10728,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
 
@@ -10283,6 +10752,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let config = enabled_cache();
@@ -10339,6 +10809,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 3);
@@ -10379,6 +10850,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let config = enabled_cache();
@@ -10430,6 +10902,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "legacy-v4-key", "vhost-a");
@@ -10460,6 +10933,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 1);
@@ -10493,6 +10967,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-soft-key", "vhost-a");
@@ -10549,6 +11024,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale", "vhost-a");
@@ -10603,6 +11079,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let fresh_first =
@@ -10694,6 +11171,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale-dry", "vhost-a");
@@ -10739,6 +11217,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let base_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-vary-key", "vhost");
@@ -10790,6 +11269,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(8),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-oversized-key", "vhost");
@@ -10824,6 +11304,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let user_tag = "v".repeat((super::DISK_CACHE_HEADER_OVERHEAD_LIMIT + 1) as usize);
@@ -10897,6 +11378,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new(
@@ -10943,6 +11425,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write", "vhost");
@@ -10979,6 +11462,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-read", "vhost");
@@ -11012,6 +11496,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write-target", "vhost");
@@ -11048,6 +11533,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "inside-symlink", "vhost");
@@ -11085,6 +11571,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap_err();
 
@@ -11109,6 +11596,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap_err();
 
@@ -11249,6 +11737,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost");
@@ -11291,6 +11780,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "object", "vhost");
@@ -11322,6 +11812,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost");
@@ -11371,6 +11862,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let storage = super::pingora_tiered_storage_from_parts(memory, disk);
@@ -11416,6 +11908,7 @@ mod tests {
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         })
         .unwrap();
         let storage = super::pingora_tiered_storage_from_parts(memory, disk);
@@ -11576,8 +12069,15 @@ mod tests {
             meta,
             &super::default_cache_tag_headers_for_storage(),
         );
-        super::write_disk_cache_object(&path, &store_key, &internal_meta, &response_header, body)
-            .unwrap();
+        super::write_disk_cache_object(
+            &path,
+            None,
+            &store_key,
+            &internal_meta,
+            &response_header,
+            body,
+        )
+        .unwrap();
     }
 
     #[cfg(feature = "proxy")]

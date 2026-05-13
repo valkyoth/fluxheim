@@ -237,12 +237,13 @@ internal cache implementation.
   count, largest free range, and bin file count through the admin cache JSON and
   Prometheus aggregate gauges. These are the first operational signals for
   fragmentation and space amplification under high-churn workloads.
-- Optional cache encryption at rest is planned for the `1.2.x` cache line after
-  the storage-bin format is defined. It should remain disabled by default and
-  support both small-deployment local key sources and OpenBao Transit/KMS-backed
-  key providers, so operators who do not run OpenBao are not forced to add it.
-  Encrypted objects should bind the cache key, user tag, vhost/route scope, and
-  storage metadata as authenticated data.
+- Optional cache encryption at rest is part of the `1.2.x` cache line after
+  the storage-bin format is defined. It remains disabled by default. The first
+  provider is local-key AES-256-GCM object encryption using a safe key file or
+  systemd/container credential. OpenBao Transit/KMS configuration is validated
+  as the regulated-deployment provider shape, but enabled OpenBao runtime key
+  operations fail closed until that provider is implemented. Encrypted objects
+  bind the configured key id and combined cache key as authenticated data.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
   startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint

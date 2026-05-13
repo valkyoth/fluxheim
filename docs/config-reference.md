@@ -599,6 +599,23 @@ bin_size_bytes = "256MiB"
 preallocate = false
 max_open_bins = 16
 
+[cache.disk.encryption]
+enabled = false
+provider = "local"
+algorithm = "aes-256-gcm"
+# key_id = "cache-v1"
+# key_file = "/run/secrets/fluxheim-cache-key"
+# key_credential = "fluxheim-cache-key"
+
+# Optional provider shape for later OpenBao Transit/KMS-backed deployments:
+# provider = "openbao-transit"
+#
+# [cache.disk.encryption.openbao]
+# address = "https://openbao.internal.example"
+# mount = "transit"
+# key_name = "fluxheim-cache"
+# token_credential = "openbao-token"
+
 [cache.lock]
 enabled = true
 age_timeout_secs = 30
@@ -626,6 +643,24 @@ table defines the allocator shape:
 `cache.disk.max_size_bytes`, `preallocate` controls whether Fluxheim should
 reserve full bin files ahead of object writes, and `max_open_bins` bounds the
 number of concurrently opened bin files.
+
+`[cache.disk.encryption]` is disabled by default. When `enabled = true` with
+`provider = "local"`, Fluxheim encrypts disk cache objects with AES-256-GCM
+before they are written to the filesystem or storage-bin backend. The local key
+must be a 64-character hex-encoded 256-bit key loaded from exactly one of
+`key_file` or `key_credential`; credential names are resolved through
+`$CREDENTIALS_DIRECTORY` when present or `/run/secrets` otherwise. `key_id`
+is stored with the encrypted object and is included with the combined cache key
+as authenticated data, so objects cannot be silently swapped between cache
+keys. Local cache encryption is intended for cache-at-rest protection; it does
+not encrypt memory cache contents.
+
+`provider = "openbao-transit"` reserves the OpenBao Transit/KMS integration
+shape for regulated deployments that need centralized key custody and rotation.
+The provider configuration validates HTTPS endpoints, loopback-only cleartext
+endpoints, safe mount/key names, and file/credential token sources, but enabled
+OpenBao runtime encryption remains a follow-up after the local-key provider.
+The default local-key provider does not require OpenBao.
 
 `local_static` is disabled by default. When set to `true`, the same cache
 policy may also store local `[web]`, `[vhosts.web]`, and route-scoped

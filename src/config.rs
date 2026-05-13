@@ -3719,6 +3719,7 @@ impl CacheConfig {
         {
             *path = base_dir.join(&path);
         }
+        self.disk.encryption.resolve_relative_paths(base_dir);
     }
 
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
@@ -4225,6 +4226,8 @@ pub struct CacheDiskConfig {
     pub max_size_bytes: ByteSize,
     #[serde(default)]
     pub storage_bin: CacheDiskStorageBinConfig,
+    #[serde(default)]
+    pub encryption: CacheDiskEncryptionConfig,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -4243,6 +4246,7 @@ impl Default for CacheDiskConfig {
             path: None,
             max_size_bytes: default_cache_disk_max_size_bytes(),
             storage_bin: CacheDiskStorageBinConfig::default(),
+            encryption: CacheDiskEncryptionConfig::default(),
         }
     }
 }
@@ -4257,6 +4261,7 @@ impl CacheDiskConfig {
             self.storage_bin
                 .validate(scope, self.max_size_bytes, max_object_bytes)?;
         }
+        self.encryption.validate(scope)?;
 
         let Some(path) = &self.path else {
             return Err(ConfigError::MissingCacheDiskPath { scope });
@@ -4289,6 +4294,318 @@ impl CacheDiskConfig {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheDiskEncryptionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: CacheDiskEncryptionProvider,
+    #[serde(default)]
+    pub algorithm: CacheDiskEncryptionAlgorithm,
+    #[serde(default)]
+    pub key_id: Option<String>,
+    #[serde(default)]
+    pub key_file: Option<PathBuf>,
+    #[serde(default)]
+    pub key_credential: Option<String>,
+    #[serde(default)]
+    pub openbao: CacheDiskEncryptionOpenBaoConfig,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheDiskEncryptionProvider {
+    #[default]
+    Local,
+    OpenbaoTransit,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CacheDiskEncryptionAlgorithm {
+    #[default]
+    #[serde(rename = "aes-256-gcm")]
+    Aes256Gcm,
+    #[serde(rename = "xchacha20-poly1305")]
+    XChaCha20Poly1305,
+}
+
+impl Default for CacheDiskEncryptionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: CacheDiskEncryptionProvider::Local,
+            algorithm: CacheDiskEncryptionAlgorithm::Aes256Gcm,
+            key_id: None,
+            key_file: None,
+            key_credential: None,
+            openbao: CacheDiskEncryptionOpenBaoConfig::default(),
+        }
+    }
+}
+
+impl CacheDiskEncryptionConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(key_file) = &mut self.key_file
+            && key_file.is_relative()
+        {
+            *key_file = base_dir.join(&key_file);
+        }
+        self.openbao.resolve_relative_paths(base_dir);
+    }
+
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        let key_file_field = format!("{scope}.disk.encryption.key_file");
+        validate_path(key_file_field.clone(), self.key_file.as_deref())?;
+        validate_non_world_writable_parent(key_file_field, self.key_file.as_deref())?;
+
+        if let Some(key_id) = self.key_id.as_deref() {
+            validate_cache_encryption_label(scope, "key_id", key_id)?;
+        }
+        if let Some(credential) = self.key_credential.as_deref()
+            && !valid_credential_name(credential)
+        {
+            return Err(ConfigError::InvalidCacheEncryptionCredentialName {
+                scope,
+                field: "key_credential",
+                credential: credential.to_owned(),
+            });
+        }
+
+        self.openbao.validate(scope)?;
+
+        if !self.enabled {
+            return Ok(());
+        }
+
+        match self.provider {
+            CacheDiskEncryptionProvider::Local => {
+                if self.algorithm != CacheDiskEncryptionAlgorithm::Aes256Gcm {
+                    return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                        scope,
+                        field: "disk.encryption.algorithm",
+                        reason: "local provider currently supports only \"aes-256-gcm\"",
+                    });
+                }
+                if self.openbao.is_configured() {
+                    return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                        scope,
+                        field: "disk.encryption.openbao",
+                        reason: "openbao settings require provider = \"openbao-transit\"",
+                    });
+                }
+                validate_cache_encryption_secret_choice(
+                    scope,
+                    "key",
+                    self.key_file.as_ref(),
+                    self.key_credential.as_deref(),
+                )?;
+            }
+            CacheDiskEncryptionProvider::OpenbaoTransit => {
+                if self.key_file.is_some() || self.key_credential.is_some() {
+                    return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                        scope,
+                        field: "disk.encryption.key",
+                        reason: "local key sources require provider = \"local\"",
+                    });
+                }
+                self.openbao.validate_enabled(scope)?;
+                return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                    scope,
+                    field: "disk.encryption.provider",
+                    reason: "openbao-transit runtime encryption is not implemented yet",
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct CacheDiskEncryptionOpenBaoConfig {
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub mount: Option<String>,
+    #[serde(default)]
+    pub key_name: Option<String>,
+    #[serde(default)]
+    pub token_file: Option<PathBuf>,
+    #[serde(default)]
+    pub token_credential: Option<String>,
+}
+
+impl CacheDiskEncryptionOpenBaoConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(token_file) = &mut self.token_file
+            && token_file.is_relative()
+        {
+            *token_file = base_dir.join(&token_file);
+        }
+    }
+
+    fn is_configured(&self) -> bool {
+        self.address.is_some()
+            || self.mount.is_some()
+            || self.key_name.is_some()
+            || self.token_file.is_some()
+            || self.token_credential.is_some()
+    }
+
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if let Some(address) = self.address.as_deref()
+            && invalid_cache_encryption_openbao_address(address)
+        {
+            return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope,
+                field: "disk.encryption.openbao.address",
+                reason: "must be an http://127.0.0.1, http://[::1], or https:// URL without credentials, query, or fragment",
+            });
+        }
+        if let Some(mount) = self.mount.as_deref() {
+            validate_cache_encryption_label(scope, "openbao.mount", mount)?;
+        }
+        if let Some(key_name) = self.key_name.as_deref() {
+            validate_cache_encryption_label(scope, "openbao.key_name", key_name)?;
+        }
+        let token_file_field = format!("{scope}.disk.encryption.openbao.token_file");
+        validate_path(token_file_field.clone(), self.token_file.as_deref())?;
+        validate_non_world_writable_parent(token_file_field, self.token_file.as_deref())?;
+        if let Some(credential) = self.token_credential.as_deref()
+            && !valid_credential_name(credential)
+        {
+            return Err(ConfigError::InvalidCacheEncryptionCredentialName {
+                scope,
+                field: "openbao.token_credential",
+                credential: credential.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_enabled(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if self
+            .address
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope,
+                field: "disk.encryption.openbao.address",
+                reason: "is required when provider = \"openbao-transit\"",
+            });
+        }
+        if self
+            .mount
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope,
+                field: "disk.encryption.openbao.mount",
+                reason: "is required when provider = \"openbao-transit\"",
+            });
+        }
+        if self
+            .key_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+        {
+            return Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope,
+                field: "disk.encryption.openbao.key_name",
+                reason: "is required when provider = \"openbao-transit\"",
+            });
+        }
+        validate_cache_encryption_secret_choice(
+            scope,
+            "openbao.token",
+            self.token_file.as_ref(),
+            self.token_credential.as_deref(),
+        )
+    }
+}
+
+fn validate_cache_encryption_secret_choice(
+    scope: &'static str,
+    field: &'static str,
+    file: Option<&PathBuf>,
+    credential: Option<&str>,
+) -> Result<(), ConfigError> {
+    let file = file.filter(|path| !path.as_os_str().is_empty());
+    let credential = credential.map(str::trim).filter(|value| !value.is_empty());
+    match (file.is_some(), credential.is_some()) {
+        (true, false) | (false, true) => Ok(()),
+        (false, false) => Err(ConfigError::InvalidCacheEncryptionPolicy {
+            scope,
+            field,
+            reason: "must be read from a file or systemd/container credential",
+        }),
+        (true, true) => Err(ConfigError::InvalidCacheEncryptionPolicy {
+            scope,
+            field,
+            reason: "cannot use more than one secret source",
+        }),
+    }
+}
+
+fn validate_cache_encryption_label(
+    scope: &'static str,
+    field: &'static str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 128
+        || value.starts_with('.')
+        || value.contains("..")
+        || value
+            .chars()
+            .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/' | ':')))
+    {
+        return Err(ConfigError::InvalidCacheEncryptionPolicy {
+            scope,
+            field,
+            reason: "must be 1-128 safe ASCII label characters",
+        });
+    }
+    Ok(())
+}
+
+fn invalid_cache_encryption_openbao_address(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 2048
+        || value.chars().any(char::is_whitespace)
+        || value.contains('@')
+        || value.contains('?')
+        || value.contains('#')
+    {
+        return true;
+    }
+    if value.starts_with("https://") {
+        let rest = value.trim_start_matches("https://");
+        let authority = rest.split('/').next().unwrap_or_default();
+        return authority.is_empty();
+    }
+    let Some(rest) = value.strip_prefix("http://") else {
+        return true;
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    !(authority == "127.0.0.1"
+        || authority.starts_with("127.0.0.1:")
+        || authority.starts_with("[::1]"))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -4850,6 +5167,16 @@ pub enum ConfigError {
     InvalidCacheStorageBinMaxOpenBins {
         scope: &'static str,
     },
+    InvalidCacheEncryptionPolicy {
+        scope: &'static str,
+        field: &'static str,
+        reason: &'static str,
+    },
+    InvalidCacheEncryptionCredentialName {
+        scope: &'static str,
+        field: &'static str,
+        credential: String,
+    },
     UnsupportedCacheDiskBackend {
         scope: &'static str,
         backend: &'static str,
@@ -5389,6 +5716,19 @@ impl Display for ConfigError {
             Self::InvalidCacheStorageBinMaxOpenBins { scope } => write!(
                 formatter,
                 "{scope}.disk.storage_bin.max_open_bins must be greater than zero"
+            ),
+            Self::InvalidCacheEncryptionPolicy {
+                scope,
+                field,
+                reason,
+            } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
+            Self::InvalidCacheEncryptionCredentialName {
+                scope,
+                field,
+                credential,
+            } => write!(
+                formatter,
+                "{scope}.disk.encryption.{field} credential name {credential:?} must be a safe credential name"
             ),
             Self::UnsupportedCacheDiskBackend { scope, backend } => write!(
                 formatter,
@@ -6730,12 +7070,12 @@ mod tests {
     use super::{
         AdminConfig, AdminHealthConfig, AdminHealthResponseMode, AdminRemoteTransportMode,
         AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
-        CacheKeyPart, CachePurgerConfig, CacheStaleErrorKind, Config, ConfigError, ConfigLoadError,
-        HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig,
-        ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
-        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig,
-        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
-        valid_dynamic_header_variable, validate_dynamic_header_template,
+        CacheDiskEncryptionProvider, CacheKeyPart, CachePurgerConfig, CacheStaleErrorKind, Config,
+        ConfigError, ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig,
+        ProxyConfig, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
+        TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig,
+        VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host,
+        normalize_host_pattern, valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
     #[cfg(unix)]
@@ -9415,6 +9755,257 @@ mod tests {
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidCacheStorageBinMaxOpenBins { scope: "cache" })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn accepts_cache_disk_encryption_local_file() {
+        let root = unique_temp_path("config-cache-encryption-local");
+        let secrets = root.join("secrets");
+        std::fs::create_dir_all(&secrets).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}/cache"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "local"
+            algorithm = "aes-256-gcm"
+            key_id = "cache-v1"
+            key_file = "{}/cache-key"
+            "#,
+            root.display(),
+            secrets.display()
+        ))
+        .unwrap();
+
+        assert!(config.cache.disk.encryption.enabled);
+        assert_eq!(
+            config.cache.disk.encryption.provider,
+            CacheDiskEncryptionProvider::Local
+        );
+        assert_eq!(config.validate(), Ok(()));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn accepts_cache_disk_encryption_local_credential() {
+        let root = unique_temp_path("config-cache-encryption-credential");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "local"
+            key_credential = "fluxheim-cache-key"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(config.validate(), Ok(()));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_enabled_cache_disk_encryption_without_secret_source() {
+        let root = unique_temp_path("config-cache-encryption-missing-key");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "local"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope: "cache",
+                field: "key",
+                reason: "must be read from a file or systemd/container credential",
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_conflicting_cache_disk_encryption_secret_sources() {
+        let root = unique_temp_path("config-cache-encryption-conflict");
+        let secrets = root.join("secrets");
+        std::fs::create_dir_all(&secrets).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}/cache"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "local"
+            key_file = "{}/cache-key"
+            key_credential = "fluxheim-cache-key"
+            "#,
+            root.display(),
+            secrets.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope: "cache",
+                field: "key",
+                reason: "cannot use more than one secret source",
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_unimplemented_local_cache_disk_encryption_algorithm() {
+        let root = unique_temp_path("config-cache-encryption-local-algorithm");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "local"
+            algorithm = "xchacha20-poly1305"
+            key_credential = "fluxheim-cache-key"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope: "cache",
+                field: "disk.encryption.algorithm",
+                reason: "local provider currently supports only \"aes-256-gcm\"",
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_enabled_cache_disk_encryption_openbao_transit_until_runtime_provider_exists() {
+        let root = unique_temp_path("config-cache-encryption-openbao");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "openbao-transit"
+            algorithm = "xchacha20-poly1305"
+
+            [cache.disk.encryption.openbao]
+            address = "https://openbao.internal.example"
+            mount = "transit"
+            key_name = "fluxheim-cache"
+            token_credential = "openbao-token"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.cache.disk.encryption.provider,
+            CacheDiskEncryptionProvider::OpenbaoTransit
+        );
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope: "cache",
+                field: "disk.encryption.provider",
+                reason: "openbao-transit runtime encryption is not implemented yet",
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_plain_http_openbao_non_loopback_address() {
+        let root = unique_temp_path("config-cache-encryption-openbao-http");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "openbao-transit"
+
+            [cache.disk.encryption.openbao]
+            address = "http://openbao.internal.example"
+            mount = "transit"
+            key_name = "fluxheim-cache"
+            token_credential = "openbao-token"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope: "cache",
+                field: "disk.encryption.openbao.address",
+                reason: "must be an http://127.0.0.1, http://[::1], or https:// URL without credentials, query, or fragment",
+            })
         );
 
         let _ = std::fs::remove_dir_all(root);

@@ -322,7 +322,7 @@ produce new cache entries, and memory storage is preferred when both memory and
 disk tiers are configured to avoid duplicating site files on disk. Cache
 inspection and exact purge tooling uses the same local static key when the
 request resolves to a local file. After that,
-cache work continues as focused cache-only releases. The active `1.2.2` line is
+cache work continues as focused cache-only releases. The `1.2.2` line added
 slab/bin disk storage. The storage-bin backend now has manifest/bin files,
 durable object index recovery, free-range reuse, LRU eviction parity, and
 Pingora `Storage` trait support, plus runtime backend selection. It also
@@ -333,8 +333,11 @@ or eviction can reclaim fully-free tail bin files without moving live objects.
 Production smoke coverage now verifies live proxy `MISS` then `HIT` behavior
 and bin/index creation before treating it as the recommended disk backend.
 `examples/cache-storage-bin.toml` shows a focused storage-bin cache policy.
-`1.2.3` is planned for optional cache encryption at rest with local-key and
-OpenBao Transit/KMS providers; OpenBao is not required for default deployments.
+The active `1.2.3` line adds optional cache encryption at rest. Local-key
+AES-256-GCM encryption can wrap disk cache objects using a safe file or
+systemd/container credential, while OpenBao Transit/KMS remains an optional
+provider shape for regulated deployments and is not required for default
+deployments.
 `1.2.4` is planned for distributed cache metadata/peer-fill, and an optional
 `1.2.5` only if production testing finds one more cache blocker. `1.3` is the
 load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
