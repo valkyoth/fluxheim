@@ -205,6 +205,10 @@ internal cache implementation.
 - Startup creates the manifest atomically, reuses it on later starts, and
   rejects a storage-bin root if the manifest no longer matches the configured
   bin size, total byte budget, preallocation mode, or open-bin cap.
+- Bin files are opened through the same no-follow disk-cache path helpers used
+  by filesystem cache objects. Writes must match the allocated object length,
+  reads are bounded by the recorded location, and `preallocate = true` expands
+  new bin files to the configured bin size before object bytes are committed.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without

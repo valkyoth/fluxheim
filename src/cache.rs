@@ -238,6 +238,86 @@ impl StorageBinObjectLocation {
 
 #[cfg(feature = "proxy")]
 #[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone)]
+pub struct StorageBinFileSet {
+    layout: StorageBinLayoutPlan,
+}
+
+#[cfg(feature = "proxy")]
+impl StorageBinFileSet {
+    pub fn new(layout: StorageBinLayoutPlan) -> Self {
+        Self { layout }
+    }
+
+    pub fn write_object(
+        &self,
+        location: StorageBinObjectLocation,
+        bytes: &[u8],
+    ) -> std::io::Result<()> {
+        if bytes.len() as u64 != location.len {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin write length does not match object location",
+            ));
+        }
+        let location = location.validate(self.layout.bin_size_bytes)?;
+        let mut file = self.open_bin_for_write(location.bin_id)?;
+        write_storage_bin_range(&mut file, location.offset, bytes)
+    }
+
+    pub fn read_object(&self, location: StorageBinObjectLocation) -> std::io::Result<Vec<u8>> {
+        let location = location.validate(self.layout.bin_size_bytes)?;
+        let mut file = self.open_bin_for_read(location.bin_id)?;
+        read_storage_bin_range(&mut file, location.offset, location.len)
+    }
+
+    fn open_bin_for_write(&self, bin_id: u64) -> std::io::Result<std::fs::File> {
+        let path = self.safe_bin_path(bin_id)?;
+        if let Some(parent) = path.parent() {
+            prepare_storage_bin_data_dir(&self.layout.root, parent)?;
+        }
+        let safe_path = SafeDiskCachePath::from_path(path);
+        match safe_path.open_read_write_file() {
+            Ok(file) => Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let file = safe_path.create_new_read_write_file()?;
+                if self.layout.preallocate {
+                    file.set_len(self.layout.bin_size_bytes.as_u64())?;
+                    file.sync_all()?;
+                }
+                Ok(file)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn open_bin_for_read(&self, bin_id: u64) -> std::io::Result<std::fs::File> {
+        let path = self.safe_bin_path(bin_id)?;
+        SafeDiskCachePath::from_path(path).open_existing_file()
+    }
+
+    fn safe_bin_path(&self, bin_id: u64) -> std::io::Result<PathBuf> {
+        if bin_id >= self.layout.max_bins() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin id exceeds configured cache budget",
+            ));
+        }
+        let path = self.layout.bin_path(bin_id);
+        if !path.starts_with(&self.layout.root)
+            || cache_path_contains_symlink(&self.layout.root, &path)?
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("storage-bin path is unsafe: {}", path.display()),
+            ));
+        }
+        Ok(path)
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct StorageBinFreeRange {
     pub offset: u64,
@@ -484,6 +564,39 @@ fn parse_storage_bin_manifest_value<'a>(
         ));
     };
     Ok(value)
+}
+
+#[cfg(feature = "proxy")]
+fn write_storage_bin_range(
+    file: &mut std::fs::File,
+    offset: u64,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    use std::io::{Seek as _, Write as _};
+
+    file.seek(std::io::SeekFrom::Start(offset))?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+#[cfg(feature = "proxy")]
+fn read_storage_bin_range(
+    file: &mut std::fs::File,
+    offset: u64,
+    len: u64,
+) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read as _, Seek as _};
+
+    let capacity = usize::try_from(len).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "storage-bin object is too large for this platform",
+        )
+    })?;
+    file.seek(std::io::SeekFrom::Start(offset))?;
+    let mut bytes = vec![0; capacity];
+    file.read_exact(&mut bytes)?;
+    Ok(bytes)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3311,6 +3424,23 @@ impl SafeDiskCachePath {
         Ok(fd.into())
     }
 
+    fn create_new_read_write_file(&self) -> std::io::Result<std::fs::File> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::RDWR
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        )
+        .map_err(rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
     fn open_existing_file(&self) -> std::io::Result<std::fs::File> {
         let (_, name) = self.parent_and_name()?;
         let parent = self.open_parent_dir()?;
@@ -3318,6 +3448,19 @@ impl SafeDiskCachePath {
             &parent,
             name,
             rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+        )
+        .map_err(rustix_to_io_error)?;
+        Ok(fd.into())
+    }
+
+    fn open_read_write_file(&self) -> std::io::Result<std::fs::File> {
+        let (_, name) = self.parent_and_name()?;
+        let parent = self.open_parent_dir()?;
+        let fd = rustix::fs::openat(
+            &parent,
+            name,
+            rustix::fs::OFlags::RDWR | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
             rustix::fs::Mode::empty(),
         )
         .map_err(rustix_to_io_error)?;
@@ -6209,6 +6352,73 @@ mod tests {
             }
         );
         assert!(free_map.allocate(1).unwrap().is_none());
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_file_set_writes_and_reads_bounded_ranges() {
+        let root = unique_test_cache_dir("storage-bin-files");
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(128),
+            max_object_bytes: ByteSize::from_bytes(64),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        super::prepare_storage_bin_layout(&layout).unwrap();
+        let files = super::StorageBinFileSet::new(layout);
+        let location = super::StorageBinObjectLocation {
+            bin_id: 0,
+            offset: 8,
+            len: 11,
+        };
+
+        files.write_object(location, b"hello-cache").unwrap();
+
+        assert_eq!(files.read_object(location).unwrap(), b"hello-cache");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_file_set_preallocates_bin_files_when_configured() {
+        let root = unique_test_cache_dir("storage-bin-preallocate");
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(128),
+            max_object_bytes: ByteSize::from_bytes(64),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: true,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        super::prepare_storage_bin_layout(&layout).unwrap();
+        let bin_path = layout.bin_path(0);
+        let files = super::StorageBinFileSet::new(layout);
+
+        files
+            .write_object(
+                super::StorageBinObjectLocation {
+                    bin_id: 0,
+                    offset: 0,
+                    len: 3,
+                },
+                b"bin",
+            )
+            .unwrap();
+
+        assert_eq!(std::fs::metadata(bin_path).unwrap().len(), 64);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
