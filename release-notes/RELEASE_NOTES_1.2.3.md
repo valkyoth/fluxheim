@@ -28,6 +28,8 @@ where Fluxheim should store only Transit ciphertext in the cache backend.
   do not require OpenBao.
 - Added `examples/podman-compose-openbao.yml` for a local OpenBao dev server.
 - Added focused local-key and OpenBao Transit encrypted cache example configs.
+- Added release-gate smoke coverage for local-key encrypted storage-bin cache
+  traffic.
 - Added `scripts/smoke_openbao_cache_encryption.sh` to verify real
   Transit-backed proxy-cache `MISS` then `HIT` behavior and confirm that stored
   cache objects contain `vault:v...` ciphertext rather than plaintext response

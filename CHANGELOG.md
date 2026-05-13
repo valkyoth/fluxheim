@@ -33,6 +33,8 @@ Released: in progress
   encrypted proxy-cache storage.
 - Added focused local-key and OpenBao Transit encrypted cache example configs
   and CI validation for both.
+- Added release-gate smoke coverage for local-key encrypted storage-bin cache
+  traffic.
 
 ## 1.2.2 - Storage-Bin Disk Cache Follow-Up
 
