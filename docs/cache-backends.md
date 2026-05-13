@@ -197,6 +197,11 @@ internal cache implementation.
   These settings are parsed and validated while the backend remains disabled,
   which lets deployment templates settle before the storage-bin writer,
   durable free-map, and recovery path are enabled.
+- The storage-bin layout reserves a root-local
+  `.fluxheim-storage-bin-v1` manifest and deterministic `bins/NNNN.fhbin`
+  data files, with 16-digit hexadecimal bin ids. Object metadata will point to
+  `(bin_id, offset, len)` locations that must fit entirely within a single bin;
+  oversized objects remain rejected by the existing per-object cache limit.
 - Optional cache encryption at rest is planned for the `1.2.x` cache line after
   the storage-bin format is defined. It should remain disabled by default and
   support both small-deployment local key sources and OpenBao Transit/KMS-backed

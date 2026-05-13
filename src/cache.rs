@@ -54,6 +54,12 @@ const DISK_CACHE_INDEX_MAGIC_V1: &str = "FLUXHEIM-DISK-INDEX-v1";
 #[cfg(feature = "proxy")]
 const DISK_CACHE_INDEX_FILENAME: &str = ".fluxheim-disk-index-v1";
 #[cfg(feature = "proxy")]
+const STORAGE_BIN_MANIFEST_MAGIC_V1: &str = "FLUXHEIM-STORAGE-BIN-v1";
+#[cfg(feature = "proxy")]
+const STORAGE_BIN_MANIFEST_FILENAME: &str = ".fluxheim-storage-bin-v1";
+#[cfg(feature = "proxy")]
+const STORAGE_BIN_DATA_DIR: &str = "bins";
+#[cfg(feature = "proxy")]
 const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAG_LEN: usize = 128;
@@ -82,6 +88,197 @@ pub struct DiskTierPlan {
     pub max_object_bytes: ByteSize,
     pub cache_tag_headers: Vec<String>,
     pub storage_bin: CacheDiskStorageBinConfig,
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StorageBinLayoutPlan {
+    pub root: PathBuf,
+    pub manifest_path: PathBuf,
+    pub data_dir: PathBuf,
+    pub bin_size_bytes: ByteSize,
+    pub max_size_bytes: ByteSize,
+    pub preallocate: bool,
+    pub max_open_bins: usize,
+}
+
+#[cfg(feature = "proxy")]
+impl StorageBinLayoutPlan {
+    pub fn from_disk_plan(plan: &DiskTierPlan) -> Option<Self> {
+        (plan.backend == CacheDiskBackend::StorageBin).then(|| {
+            let root = plan.path.clone();
+            Self {
+                manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
+                data_dir: root.join(STORAGE_BIN_DATA_DIR),
+                root,
+                bin_size_bytes: plan.storage_bin.bin_size_bytes,
+                max_size_bytes: plan.max_size_bytes,
+                preallocate: plan.storage_bin.preallocate,
+                max_open_bins: plan.storage_bin.max_open_bins,
+            }
+        })
+    }
+
+    pub fn max_bins(&self) -> u64 {
+        let bin_size = self.bin_size_bytes.as_u64();
+        if bin_size == 0 {
+            return 0;
+        }
+        self.max_size_bytes.as_u64().div_ceil(bin_size)
+    }
+
+    pub fn bin_path(&self, bin_id: u64) -> PathBuf {
+        self.data_dir.join(format!("{bin_id:016x}.fhbin"))
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct StorageBinManifest {
+    pub bin_size_bytes: ByteSize,
+    pub max_size_bytes: ByteSize,
+    pub preallocate: bool,
+    pub max_open_bins: usize,
+}
+
+#[cfg(feature = "proxy")]
+impl StorageBinManifest {
+    pub fn from_layout(plan: &StorageBinLayoutPlan) -> Self {
+        Self {
+            bin_size_bytes: plan.bin_size_bytes,
+            max_size_bytes: plan.max_size_bytes,
+            preallocate: plan.preallocate,
+            max_open_bins: plan.max_open_bins,
+        }
+    }
+
+    pub fn encode(&self) -> String {
+        format!(
+            "{STORAGE_BIN_MANIFEST_MAGIC_V1}\nbin_size_bytes={}\nmax_size_bytes={}\npreallocate={}\nmax_open_bins={}\n",
+            self.bin_size_bytes.as_u64(),
+            self.max_size_bytes.as_u64(),
+            self.preallocate,
+            self.max_open_bins
+        )
+    }
+
+    pub fn decode(contents: &str) -> std::io::Result<Self> {
+        let mut lines = contents.lines();
+        match lines.next() {
+            Some(STORAGE_BIN_MANIFEST_MAGIC_V1) => {}
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid storage-bin manifest magic",
+                ));
+            }
+        }
+
+        let bin_size_bytes = parse_storage_bin_manifest_u64(lines.next(), "bin_size_bytes")?;
+        let max_size_bytes = parse_storage_bin_manifest_u64(lines.next(), "max_size_bytes")?;
+        let preallocate = parse_storage_bin_manifest_bool(lines.next(), "preallocate")?;
+        let max_open_bins = parse_storage_bin_manifest_usize(lines.next(), "max_open_bins")?;
+        if lines.next().is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "storage-bin manifest has trailing fields",
+            ));
+        }
+
+        Ok(Self {
+            bin_size_bytes: ByteSize::from_bytes(bin_size_bytes),
+            max_size_bytes: ByteSize::from_bytes(max_size_bytes),
+            preallocate,
+            max_open_bins,
+        })
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct StorageBinObjectLocation {
+    pub bin_id: u64,
+    pub offset: u64,
+    pub len: u64,
+}
+
+#[cfg(feature = "proxy")]
+impl StorageBinObjectLocation {
+    pub fn validate(self, bin_size_bytes: ByteSize) -> std::io::Result<Self> {
+        let bin_size = bin_size_bytes.as_u64();
+        let end = self.offset.checked_add(self.len).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "storage-bin object location overflows",
+            )
+        })?;
+        if self.len == 0 || end > bin_size {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "storage-bin object location is outside its bin",
+            ));
+        }
+        Ok(self)
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn parse_storage_bin_manifest_u64(line: Option<&str>, key: &str) -> std::io::Result<u64> {
+    parse_storage_bin_manifest_value(line, key)?
+        .parse::<u64>()
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid storage-bin manifest {key}: {error}"),
+            )
+        })
+}
+
+#[cfg(feature = "proxy")]
+fn parse_storage_bin_manifest_usize(line: Option<&str>, key: &str) -> std::io::Result<usize> {
+    parse_storage_bin_manifest_value(line, key)?
+        .parse::<usize>()
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid storage-bin manifest {key}: {error}"),
+            )
+        })
+}
+
+#[cfg(feature = "proxy")]
+fn parse_storage_bin_manifest_bool(line: Option<&str>, key: &str) -> std::io::Result<bool> {
+    parse_storage_bin_manifest_value(line, key)?
+        .parse::<bool>()
+        .map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid storage-bin manifest {key}: {error}"),
+            )
+        })
+}
+
+#[cfg(feature = "proxy")]
+fn parse_storage_bin_manifest_value<'a>(
+    line: Option<&'a str>,
+    key: &str,
+) -> std::io::Result<&'a str> {
+    let Some(line) = line else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("missing storage-bin manifest {key}"),
+        ));
+    };
+    let Some(value) = line.strip_prefix(&format!("{key}=")) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("missing storage-bin manifest {key}"),
+        ));
+    };
+    Ok(value)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -5404,6 +5601,89 @@ mod tests {
         );
         assert!(plan.storage_bin.preallocate);
         assert_eq!(plan.storage_bin.max_open_bins, 4);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_layout_plan_derives_manifest_and_bin_paths() {
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: PathBuf::from("/var/cache/fluxheim/example.test"),
+            max_size_bytes: ByteSize::from_bytes(1024 * 1024 * 1024),
+            max_object_bytes: ByteSize::from_bytes(32 * 1024 * 1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(256 * 1024 * 1024),
+                preallocate: true,
+                max_open_bins: 8,
+            },
+        };
+
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+
+        assert_eq!(
+            layout.manifest_path,
+            PathBuf::from("/var/cache/fluxheim/example.test/.fluxheim-storage-bin-v1")
+        );
+        assert_eq!(
+            layout.bin_path(42),
+            PathBuf::from("/var/cache/fluxheim/example.test/bins/000000000000002a.fhbin")
+        );
+        assert_eq!(layout.max_bins(), 4);
+        assert!(layout.preallocate);
+        assert_eq!(layout.max_open_bins, 8);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_manifest_round_trips() {
+        let manifest = super::StorageBinManifest {
+            bin_size_bytes: ByteSize::from_bytes(128 * 1024 * 1024),
+            max_size_bytes: ByteSize::from_bytes(1024 * 1024 * 1024),
+            preallocate: true,
+            max_open_bins: 4,
+        };
+
+        let decoded = super::StorageBinManifest::decode(&manifest.encode()).unwrap();
+
+        assert_eq!(decoded, manifest);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_object_location_rejects_out_of_bin_ranges() {
+        assert_eq!(
+            super::StorageBinObjectLocation {
+                bin_id: 7,
+                offset: 8,
+                len: 16,
+            }
+            .validate(ByteSize::from_bytes(64))
+            .unwrap(),
+            super::StorageBinObjectLocation {
+                bin_id: 7,
+                offset: 8,
+                len: 16,
+            }
+        );
+        assert!(
+            super::StorageBinObjectLocation {
+                bin_id: 7,
+                offset: 48,
+                len: 17,
+            }
+            .validate(ByteSize::from_bytes(64))
+            .is_err()
+        );
+        assert!(
+            super::StorageBinObjectLocation {
+                bin_id: 7,
+                offset: 8,
+                len: 0,
+            }
+            .validate(ByteSize::from_bytes(64))
+            .is_err()
+        );
     }
 
     #[test]
