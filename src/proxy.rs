@@ -592,6 +592,10 @@ pub struct CacheKeyPreview {
     pub cache_lock_enabled: bool,
     pub cache_lock_wait_timeout_secs: u64,
     pub cache_predictor_enabled: bool,
+    pub peer_fill_enabled: bool,
+    pub peer_fill_peer_count: usize,
+    pub peer_fill_max_concurrent_requests: usize,
+    pub peer_fill_fail_open: bool,
     pub memory_tier_enabled: bool,
     pub disk_tier_enabled: bool,
     pub storage_tiers: u8,
@@ -951,6 +955,10 @@ impl ProxySnapshot {
         let cache_predictor_enabled = route_cache
             .map(|cache| cache.pingora_cache_predictor.is_some())
             .unwrap_or(vhost.pingora_cache_predictor.is_some());
+        let peer_fill_enabled = cache_config.peer_fill.enabled;
+        let peer_fill_peer_count = cache_config.peer_fill.peers.len();
+        let peer_fill_max_concurrent_requests = cache_config.peer_fill.max_concurrent_requests;
+        let peer_fill_fail_open = cache_config.peer_fill.fail_open;
         let storage_tiers = u8::from(memory_tier_enabled) + u8::from(disk_tier_enabled);
         let key = self.state.pingora_effective_cache_key_for_request_header(
             request,
@@ -967,6 +975,10 @@ impl ProxySnapshot {
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
                 cache_predictor_enabled,
+                peer_fill_enabled,
+                peer_fill_peer_count,
+                peer_fill_max_concurrent_requests,
+                peer_fill_fail_open,
                 memory_tier_enabled,
                 disk_tier_enabled,
                 storage_tiers,
@@ -987,6 +999,10 @@ impl ProxySnapshot {
                 cache_lock_enabled,
                 cache_lock_wait_timeout_secs,
                 cache_predictor_enabled,
+                peer_fill_enabled,
+                peer_fill_peer_count,
+                peer_fill_max_concurrent_requests,
+                peer_fill_fail_open,
                 memory_tier_enabled,
                 disk_tier_enabled,
                 storage_tiers,

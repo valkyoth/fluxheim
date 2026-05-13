@@ -25,6 +25,8 @@ is implemented and tested.
   HTTP requires `allow_insecure_http = true`.
 - Added aggregate Prometheus gauges for peer-fill enabled policies, configured
   peers, and maximum configured peer-fill concurrency.
+- Added `cache-key` and `cache-lookup` output plus expectation flags for
+  selected peer-fill policy shape.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 

@@ -752,9 +752,10 @@ For offline debugging, `fluxheim cache-key --host example.com --path
 without contacting the upstream. `cache-key` can fail closed with
 `--expect-eligible`, `--expect-ineligible`, `--expect-reason`,
 `--expect-cache-lock-enabled`, `--expect-cache-lock-wait-timeout-secs`,
-`--expect-cache-predictor-enabled`, `--expect-memory-tier-enabled`,
-`--expect-disk-tier-enabled`, and `--expect-storage-tiers` when a deploy
-requires a specific cache policy layout.
+`--expect-cache-predictor-enabled`, `--expect-peer-fill-enabled`,
+`--expect-peer-fill-peers`, `--expect-peer-fill-max-concurrent-requests`,
+`--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`, and
+`--expect-storage-tiers` when a deploy requires a specific cache policy layout.
 Use `--expect-scope vhost|route`, `--expect-vhost NAME`, and
 `--expect-route NAME` when a deploy must prove that a specific vhost or route
 policy was selected. Use `--expect-namespace NAME` for the internal cache
@@ -773,7 +774,9 @@ the Host header. `cache-lookup` can fail closed for deploy scripts with
 `--expect-header-name`, `--expect-header "Name: value"`, `--expect-objects`,
 `--expect-cache-lock-enabled`,
 `--expect-cache-lock-wait-timeout-secs`, `--expect-cache-predictor-enabled`,
-`--expect-memory-tier-enabled`, `--expect-disk-tier-enabled`,
+`--expect-peer-fill-enabled`, `--expect-peer-fill-peers`,
+`--expect-peer-fill-max-concurrent-requests`, `--expect-memory-tier-enabled`,
+`--expect-disk-tier-enabled`,
 `--expect-storage-tiers`, `--expect-scope`, `--expect-vhost`,
 `--expect-route`, `--expect-namespace`, `--expect-key-namespace`,
 `--expect-user-tag`,

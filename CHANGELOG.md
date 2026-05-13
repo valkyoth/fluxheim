@@ -24,6 +24,8 @@ Released: in progress
   the peer-fill configuration shape.
 - Added aggregate Prometheus gauges for peer-fill enabled policies, configured
   peers, and maximum configured peer-fill concurrency.
+- Added `cache-key` and `cache-lookup` preview fields and fail-closed
+  expectation flags for selected peer-fill policy shape.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 
