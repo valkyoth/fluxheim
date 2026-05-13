@@ -120,6 +120,7 @@ jobs:
           cargo run --quiet -- --check-config --config examples/vhosts.toml
           cargo run --quiet -- --check-config --config examples/acme-http-01.toml
           cargo run --quiet -- --check-config --config examples/acme-actalis.toml
+          cargo run --quiet -- --check-config --config examples/cache-storage-bin.toml
           cargo run --quiet -- --check-config --config examples/tls-modern.toml
           cargo run --quiet -- --check-config --config examples/tls-intermediate.toml
           cargo run --quiet -- --check-config --config examples/privacy.toml

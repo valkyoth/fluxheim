@@ -40,6 +40,8 @@ Released: in progress
   during normal shutdown.
 - Added conservative storage-bin tail reclamation so eviction and purge can
   remove fully-free highest-numbered bin files without moving live objects.
+- Added a focused `examples/cache-storage-bin.toml` fixture and CI validation
+  for the storage-bin cache backend.
 
 ## 1.2.1 - Local Static Cache Follow-Up
 

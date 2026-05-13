@@ -1,0 +1,55 @@
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "cache.example.test"
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[cache]
+enabled = true
+status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
+allow_client_cache_refresh = false
+key_namespace = "storage-bin-example-v1"
+key_parts = ["method", "host", "path", "query"]
+min_uses = 1
+default_status_ttl_secs = 300
+stale_while_revalidate_secs = 30
+stale_if_error_secs = 120
+stale_if_error_on = ["connect", "timeout", "http-status"]
+stale_if_error_statuses = [500, 502, 503, 504]
+methods = ["GET", "HEAD"]
+content_types = ["image/*", "text/css", "application/javascript", "font/*"]
+image_extensions = ["avif", "css", "gif", "ico", "jpg", "js", "png", "svg", "webp", "woff2"]
+max_object_bytes = "32MiB"
+
+[cache.memory]
+enabled = true
+max_size_bytes = "512MiB"
+
+[cache.disk]
+enabled = true
+backend = "storage-bin"
+path = "cache/storage-bin"
+max_size_bytes = "20GiB"
+
+[cache.disk.storage_bin]
+bin_size_bytes = "256MiB"
+preallocate = false
+max_open_bins = 16
+
+[cache.lock]
+enabled = true
+age_timeout_secs = 30
+wait_timeout_secs = 30
+
+[[vhosts]]
+name = "cache.example.test"
+hosts = ["cache.example.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:3000"]
+upstream_tls = false
+

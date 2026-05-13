@@ -112,6 +112,7 @@ cargo run --quiet -- --check-config --config examples/admin.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/vhosts.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/acme-http-01.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/acme-actalis.toml >/dev/null
+cargo run --quiet -- --check-config --config examples/cache-storage-bin.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/tls-modern.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/tls-intermediate.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
