@@ -26,6 +26,7 @@ Released: in progress
   peers, and maximum configured peer-fill concurrency.
 - Added `cache-key` and `cache-lookup` preview fields and fail-closed
   expectation flags for selected peer-fill policy shape.
+- Added peer-fill policy coverage to protected admin cache-status JSON.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

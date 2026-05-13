@@ -2245,7 +2245,7 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
     format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"lock_enabled_policies":{},"lock_enabled_policy_ratio_per_mille":{},"memory_tiers":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_tiers":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_allocated_size_bytes":{},"disk_free_size_bytes":{},"disk_free_ratio_per_mille":{},"disk_free_range_count":{},"disk_largest_free_range_bytes":{},"disk_bin_files":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"lock_enabled_policies":{},"lock_enabled_policy_ratio_per_mille":{},"peer_fill_enabled_policies":{},"peer_fill_enabled_policy_ratio_per_mille":{},"peer_fill_peers":{},"peer_fill_max_concurrent_requests":{},"memory_tiers":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_tiers":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_allocated_size_bytes":{},"disk_free_size_bytes":{},"disk_free_ratio_per_mille":{},"disk_free_range_count":{},"disk_largest_free_range_bytes":{},"disk_bin_files":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
         totals.vhosts,
         totals.enabled_vhosts,
         ratio_per_mille(totals.enabled_vhosts, totals.vhosts),
@@ -2263,6 +2263,13 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
             totals.lock_enabled_policies,
             totals.enabled_cache_policies()
         ),
+        totals.peer_fill_enabled_policies,
+        ratio_per_mille(
+            totals.peer_fill_enabled_policies,
+            totals.enabled_cache_policies()
+        ),
+        totals.peer_fill_peers,
+        totals.peer_fill_max_concurrent_requests,
         totals.memory_tiers,
         totals.memory_entries,
         totals.memory_weighted_size_bytes,
@@ -2318,12 +2325,16 @@ fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"storage_tiers":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"peer_fill_enabled":{},"peer_fill_peers":{},"peer_fill_max_concurrent_requests":{},"peer_fill_fail_open":{},"storage_tiers":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
             json_escape(&vhost.name),
             vhost.enabled,
             vhost.tiered,
             vhost.lock_enabled,
             vhost.lock_wait_timeout_secs,
+            vhost.peer_fill_enabled,
+            vhost.peer_fill_peers,
+            vhost.peer_fill_max_concurrent_requests,
+            vhost.peer_fill_fail_open,
             cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
             vhost.configured_routes,
             vhost.routes_total,
@@ -2348,12 +2359,16 @@ fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> String {
             body.push(',');
         }
         body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"storage_tiers":{},"memory":{},"disk":{}}}"#,
+            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"peer_fill_enabled":{},"peer_fill_peers":{},"peer_fill_max_concurrent_requests":{},"peer_fill_fail_open":{},"storage_tiers":{},"memory":{},"disk":{}}}"#,
             json_escape(&route.name),
             route.enabled,
             route.tiered,
             route.lock_enabled,
             route.lock_wait_timeout_secs,
+            route.peer_fill_enabled,
+            route.peer_fill_peers,
+            route.peer_fill_max_concurrent_requests,
+            route.peer_fill_fail_open,
             cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
             memory_cache_stats_json(route.memory.as_ref()),
             disk_cache_stats_json(route.disk.as_ref())
@@ -4233,6 +4248,15 @@ mod tests {
                         max_size_bytes: ByteSize::from_bytes(4096),
                         ..crate::config::CacheDiskConfig::default()
                     },
+                    peer_fill: crate::config::CachePeerFillConfig {
+                        enabled: true,
+                        peers: vec![crate::config::CachePeerConfig {
+                            name: "cache-peer".to_owned(),
+                            base_url: "https://cache-peer.example:8443".to_owned(),
+                        }],
+                        max_concurrent_requests: 128,
+                        ..crate::config::CachePeerFillConfig::default()
+                    },
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
@@ -4266,6 +4290,10 @@ mod tests {
         assert!(body.contains(r#""tiered_route_ratio_per_mille":0"#));
         assert!(body.contains(r#""lock_enabled_policies":2"#));
         assert!(body.contains(r#""lock_enabled_policy_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""peer_fill_enabled_policies":1"#));
+        assert!(body.contains(r#""peer_fill_enabled_policy_ratio_per_mille":500"#));
+        assert!(body.contains(r#""peer_fill_peers":1"#));
+        assert!(body.contains(r#""peer_fill_max_concurrent_requests":128"#));
         assert!(body.contains(r#""memory_tiers":2"#));
         assert!(body.contains(r#""memory_entries":0"#));
         assert!(body.contains(r#""memory_average_weighted_size_bytes":0"#));
@@ -4288,6 +4316,10 @@ mod tests {
         assert!(body.contains(r#""tiered":true"#));
         assert!(body.contains(r#""lock_enabled":true"#));
         assert!(body.contains(r#""lock_wait_timeout_secs":30"#));
+        assert!(body.contains(r#""peer_fill_enabled":true"#));
+        assert!(body.contains(r#""peer_fill_peers":1"#));
+        assert!(body.contains(r#""peer_fill_max_concurrent_requests":128"#));
+        assert!(body.contains(r#""peer_fill_fail_open":true"#));
         assert!(body.contains(r#""storage_tiers":2"#));
         assert!(body.contains(r#""configured_routes":2"#));
         assert!(body.contains(r#""routes_total":1"#));
@@ -4312,7 +4344,7 @@ mod tests {
         assert!(body.contains(r#""bin_files":0"#));
         assert!(body.contains(r#""routes":[{"name":"assets""#));
         assert!(body.contains(
-            r#""routes":[{"name":"assets","enabled":true,"tiered":false,"lock_enabled":true,"lock_wait_timeout_secs":30,"storage_tiers":1"#
+            r#""routes":[{"name":"assets","enabled":true,"tiered":false,"lock_enabled":true,"lock_wait_timeout_secs":30,"peer_fill_enabled":false,"peer_fill_peers":0,"peer_fill_max_concurrent_requests":64,"peer_fill_fail_open":true,"storage_tiers":1"#
         ));
 
         std::fs::remove_dir_all(cache_path).unwrap();
@@ -4356,13 +4388,15 @@ mod tests {
         assert!(body.contains(r#""tiered_route_ratio_per_mille":1000"#));
         assert!(body.contains(r#""lock_enabled_policies":1"#));
         assert!(body.contains(r#""lock_enabled_policy_ratio_per_mille":1000"#));
+        assert!(body.contains(r#""peer_fill_enabled_policies":0"#));
+        assert!(body.contains(r#""peer_fill_enabled_policy_ratio_per_mille":0"#));
         assert!(body.contains(r#""memory_tiers":1"#));
         assert!(body.contains(r#""disk_tiers":1"#));
         assert!(
-            body.contains(r#""name":"cached","enabled":false,"tiered":false,"lock_enabled":false,"lock_wait_timeout_secs":30"#)
+            body.contains(r#""name":"cached","enabled":false,"tiered":false,"lock_enabled":false,"lock_wait_timeout_secs":30,"peer_fill_enabled":false,"peer_fill_peers":0,"peer_fill_max_concurrent_requests":64,"peer_fill_fail_open":true"#)
         );
         assert!(body.contains(
-            r#""routes":[{"name":"media","enabled":true,"tiered":true,"lock_enabled":true,"lock_wait_timeout_secs":30"#
+            r#""routes":[{"name":"media","enabled":true,"tiered":true,"lock_enabled":true,"lock_wait_timeout_secs":30,"peer_fill_enabled":false,"peer_fill_peers":0,"peer_fill_max_concurrent_requests":64,"peer_fill_fail_open":true"#
         ));
         assert!(body.contains(r#""storage_tiers":2"#));
         assert!(body.contains(r#""memory":{"entries":0"#));

@@ -826,6 +826,9 @@ pub struct CacheRuntimeTotals {
     pub enabled_routes: u64,
     pub tiered_routes: u64,
     pub lock_enabled_policies: u64,
+    pub peer_fill_enabled_policies: u64,
+    pub peer_fill_peers: u64,
+    pub peer_fill_max_concurrent_requests: u64,
     pub memory_tiers: u64,
     pub memory_entries: u64,
     pub memory_weighted_size_bytes: u64,
@@ -866,6 +869,10 @@ pub struct CacheVhostStats {
     pub tiered: bool,
     pub lock_enabled: bool,
     pub lock_wait_timeout_secs: u64,
+    pub peer_fill_enabled: bool,
+    pub peer_fill_peers: usize,
+    pub peer_fill_max_concurrent_requests: usize,
+    pub peer_fill_fail_open: bool,
     pub configured_routes: u64,
     pub routes_total: u64,
     pub enabled_routes: u64,
@@ -883,6 +890,10 @@ pub struct CacheRouteStats {
     pub tiered: bool,
     pub lock_enabled: bool,
     pub lock_wait_timeout_secs: u64,
+    pub peer_fill_enabled: bool,
+    pub peer_fill_peers: usize,
+    pub peer_fill_max_concurrent_requests: usize,
+    pub peer_fill_fail_open: bool,
     pub memory: Option<crate::cache::MemoryCacheStats>,
     pub disk: Option<crate::cache::DiskCacheStats>,
 }
@@ -1114,6 +1125,7 @@ impl ProxySnapshot {
             if vhost.pingora_cache_lock.is_some() {
                 totals.lock_enabled_policies = totals.lock_enabled_policies.saturating_add(1);
             }
+            accumulate_peer_fill_stats(&mut totals, &vhost.cache);
             let configured_routes = vhost.routes.len() as u64;
             totals.configured_routes = totals.configured_routes.saturating_add(configured_routes);
 
@@ -1143,6 +1155,7 @@ impl ProxySnapshot {
                 if cache.pingora_cache_lock.is_some() {
                     totals.lock_enabled_policies = totals.lock_enabled_policies.saturating_add(1);
                 }
+                accumulate_peer_fill_stats(&mut totals, &cache.config);
                 let route_memory = cache.pingora_memory_storage.map(|storage| storage.stats());
                 let route_disk = cache
                     .pingora_disk_storage
@@ -1155,6 +1168,13 @@ impl ProxySnapshot {
                     tiered: cache.pingora_tiered_storage.is_some(),
                     lock_enabled: cache.pingora_cache_lock.is_some(),
                     lock_wait_timeout_secs: cache.cache_lock_wait_timeout.as_secs(),
+                    peer_fill_enabled: cache.config.peer_fill.enabled,
+                    peer_fill_peers: cache.config.peer_fill.peers.len(),
+                    peer_fill_max_concurrent_requests: cache
+                        .config
+                        .peer_fill
+                        .max_concurrent_requests,
+                    peer_fill_fail_open: cache.config.peer_fill.fail_open,
                     memory: route_memory,
                     disk: route_disk,
                 });
@@ -1166,6 +1186,10 @@ impl ProxySnapshot {
                 tiered: vhost.pingora_tiered_storage.is_some(),
                 lock_enabled: vhost.pingora_cache_lock.is_some(),
                 lock_wait_timeout_secs: vhost.cache_lock_wait_timeout.as_secs(),
+                peer_fill_enabled: vhost.cache.peer_fill.enabled,
+                peer_fill_peers: vhost.cache.peer_fill.peers.len(),
+                peer_fill_max_concurrent_requests: vhost.cache.peer_fill.max_concurrent_requests,
+                peer_fill_fail_open: vhost.cache.peer_fill.fail_open,
                 configured_routes,
                 routes_total: routes.len() as u64,
                 enabled_routes,
@@ -2038,6 +2062,20 @@ fn accumulate_cache_stats(
         totals.evictions = totals.evictions.saturating_add(disk.activity.evictions);
         totals.purges = totals.purges.saturating_add(disk.activity.purges);
     }
+}
+
+#[cfg(feature = "cache")]
+fn accumulate_peer_fill_stats(totals: &mut CacheRuntimeTotals, cache: &crate::config::CacheConfig) {
+    if !cache.peer_fill.enabled {
+        return;
+    }
+    totals.peer_fill_enabled_policies = totals.peer_fill_enabled_policies.saturating_add(1);
+    totals.peer_fill_peers = totals
+        .peer_fill_peers
+        .saturating_add(cache.peer_fill.peers.len() as u64);
+    totals.peer_fill_max_concurrent_requests = totals
+        .peer_fill_max_concurrent_requests
+        .max(cache.peer_fill.max_concurrent_requests as u64);
 }
 
 impl ProxyRuntimeState {

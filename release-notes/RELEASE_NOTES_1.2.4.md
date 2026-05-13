@@ -27,6 +27,7 @@ is implemented and tested.
   peers, and maximum configured peer-fill concurrency.
 - Added `cache-key` and `cache-lookup` output plus expectation flags for
   selected peer-fill policy shape.
+- Added peer-fill policy coverage to protected admin cache-status JSON.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 

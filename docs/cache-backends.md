@@ -415,6 +415,10 @@ policies, giving dashboards a low-cardinality timeout budget signal.
 `fluxheim_cache_peer_fill_enabled_policies`, `fluxheim_cache_peer_fill_peers`,
 and `fluxheim_cache_peer_fill_max_concurrent_requests` expose the aggregate
 distributed-cache peer-fill rollout shape without peer names or URLs.
+The protected `GET /_fluxheim/cache/status` admin endpoint also reports
+peer-fill enabled policy counts, peer counts, maximum concurrency, and per-vhost
+or per-route peer-fill flags so operators can audit the selected policy shape
+without exposing peer URLs.
 `fluxheim_cache_operation_duration_seconds{scope,vhost,route,phase,operation}`
 records Pingora cache lookup and cache-lock wait durations as bounded
 histograms, so operators can distinguish slow storage reads from stampede wait
