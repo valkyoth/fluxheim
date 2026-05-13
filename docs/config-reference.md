@@ -665,6 +665,15 @@ configured key id plus combined cache key are passed as associated data, so a
 stored ciphertext is bound to the cache object identity. The default local-key
 provider does not require OpenBao.
 
+For local validation, `examples/podman-compose-openbao.yml` starts an OpenBao
+development server and `scripts/smoke_openbao_cache_encryption.sh` runs an
+end-to-end proxy-cache test against OpenBao Transit. The smoke test enables the
+Transit engine, creates a cache key, serves a cacheable object through
+Fluxheim, verifies `MISS` then `HIT`, and checks that the stored cache object
+contains OpenBao `vault:v...` ciphertext rather than the plaintext response
+body. It is intentionally optional because normal CI should not depend on a
+local Podman/OpenBao runtime.
+
 `local_static` is disabled by default. When set to `true`, the same cache
 policy may also store local `[web]`, `[vhosts.web]`, and route-scoped
 `[vhosts.routes.web]` file responses. Local static caching is opt-in because it

@@ -27,12 +27,12 @@ use sha2::{Digest, Sha256};
 #[cfg(feature = "proxy")]
 use zeroize::Zeroizing;
 
+#[cfg(feature = "proxy")]
+use crate::config::CacheDiskEncryptionProvider;
 use crate::config::{
     ByteSize, CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheDiskStorageBinConfig,
     CacheKeyPart, normalize_host,
 };
-#[cfg(feature = "proxy")]
-use crate::config::CacheDiskEncryptionProvider;
 
 #[cfg(feature = "proxy")]
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
@@ -8069,12 +8069,12 @@ mod tests {
         StaticCacheRequest, eligible_image_request, image_cache_key,
         memory_image_cache_from_config, static_cache_key, storage_plan,
     };
+    #[cfg(feature = "proxy")]
+    use crate::config::CacheDiskEncryptionProvider;
     use crate::config::{
         ByteSize, CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskEncryptionConfig,
         CacheDiskStorageBinConfig, CacheKeyPart, CacheMemoryConfig,
     };
-    #[cfg(feature = "proxy")]
-    use crate::config::CacheDiskEncryptionProvider;
     #[cfg(feature = "proxy")]
     use crate::test_support::unique_temp_path;
 

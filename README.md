@@ -337,7 +337,11 @@ The active `1.2.3` line adds optional cache encryption at rest. Local-key
 AES-256-GCM encryption can wrap disk cache objects using a safe file or
 systemd/container credential, while OpenBao Transit can keep cache encryption
 keys under external custody and return only Transit ciphertext for storage.
-Both providers are opt-in and default deployments do not need OpenBao.
+Both providers are opt-in and default deployments do not need OpenBao. For
+developer validation, `examples/podman-compose-openbao.yml` starts a local
+OpenBao dev server and `scripts/smoke_openbao_cache_encryption.sh` verifies
+Transit-backed encrypted proxy-cache storage with real `MISS` then `HIT`
+traffic.
 `1.2.4` is planned for distributed cache metadata/peer-fill, and an optional
 `1.2.5` only if production testing finds one more cache blocker. `1.3` is the
 load-balancer/proxy parity line. Wasm is planned as a shared `1.4`

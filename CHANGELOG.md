@@ -28,6 +28,9 @@ Released: in progress
   call OpenBao Transit over HTTPS, load the token from a safe file or
   systemd/container credential, and store only the Transit ciphertext in the
   filesystem or storage-bin cache backend.
+- Added optional Podman/OpenBao developer validation with a dev-mode OpenBao
+  compose file and an end-to-end smoke script that verifies Transit-backed
+  encrypted proxy-cache storage.
 
 ## 1.2.2 - Storage-Bin Disk Cache Follow-Up
 

@@ -30,8 +30,9 @@ model as proxied static content when operators explicitly enable it. The active
 `1.2.2` line is slab/bin disk storage. Its first slice reserves
 `cache.disk.backend = "storage-bin"` with the allocator, durable index, and
 runtime backend selection in place. `1.2.3` adds optional cache encryption at
-rest, including local-key and OpenBao Transit key providers, without forcing
-OpenBao on normal deployments. After that, the
+rest, including local-key and OpenBao Transit key providers plus an optional
+Podman/OpenBao Transit smoke path, without forcing OpenBao on normal
+deployments. After that, the
 cache-only sequence is `1.2.4` for distributed cache metadata/peer-fill, and an
 optional `1.2.5` only if production testing finds one more cache-specific
 blocker. `1.3` is planned as the load-balancer

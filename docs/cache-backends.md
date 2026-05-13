@@ -244,7 +244,11 @@ internal cache implementation.
   outside Fluxheim, calls Transit encrypt/decrypt over HTTPS or loopback HTTP,
   and stores only the returned Transit ciphertext in the cache backend.
   Encrypted objects bind the configured key id and combined cache key as
-  authenticated data.
+  authenticated data. `examples/podman-compose-openbao.yml` and
+  `scripts/smoke_openbao_cache_encryption.sh` provide an optional local
+  OpenBao Transit smoke path for this provider; the script starts a dev OpenBao
+  container, enables Transit, creates a cache key, and verifies a Fluxheim
+  proxy-cache `MISS` followed by `HIT` without plaintext cache storage.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
   startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint
