@@ -38,6 +38,8 @@ Released: in progress
 - Added a best-effort storage-bin index flush on clean storage teardown so the
   debounce path reduces write amplification without dropping fresh cache entries
   during normal shutdown.
+- Added conservative storage-bin tail reclamation so eviction and purge can
+  remove fully-free highest-numbered bin files without moving live objects.
 
 ## 1.2.1 - Local Static Cache Follow-Up
 

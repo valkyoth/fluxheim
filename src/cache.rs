@@ -275,6 +275,17 @@ impl StorageBinFileSet {
         read_storage_bin_range(&mut file, location.offset, location.len)
     }
 
+    pub fn remove_bin(&self, bin_id: u64) -> std::io::Result<()> {
+        let path = self.safe_bin_path(bin_id)?;
+        let safe_path = SafeDiskCachePath::from_path(path);
+        // lgtm[rs/path-injection] bin path is derived from a validated storage-bin root and bounded bin id
+        match safe_path.remove_file() {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
     fn open_bin_for_write(&self, bin_id: u64) -> std::io::Result<std::fs::File> {
         let path = self.safe_bin_path(bin_id)?;
         if let Some(parent) = path.parent() {
@@ -525,6 +536,26 @@ impl StorageBinFreeMap {
 
     fn bin_files(&self) -> u64 {
         self.next_bin_id
+    }
+
+    fn reclaim_free_tail_bins(&mut self) -> Vec<u64> {
+        let mut reclaimed = Vec::new();
+        while self.next_bin_id > 0 {
+            let bin_id = self.next_bin_id - 1;
+            let Some(capacity) = self.bin_capacity(bin_id) else {
+                break;
+            };
+            let Some(ranges) = self.free.get(&bin_id) else {
+                break;
+            };
+            if ranges.len() != 1 || ranges[0].offset != 0 || ranges[0].len != capacity {
+                break;
+            }
+            self.free.remove(&bin_id);
+            self.next_bin_id -= 1;
+            reclaimed.push(bin_id);
+        }
+        reclaimed
     }
 
     fn allocate_from_free_ranges(
@@ -2849,11 +2880,25 @@ impl StorageBinDiskStorage {
     }
 
     fn release_location(&self, location: StorageBinObjectLocation) -> std::io::Result<()> {
-        let mut free_map = self
-            .free_map
-            .lock()
-            .map_err(|_| std::io::Error::other("storage-bin free map lock poisoned"))?;
-        free_map.release(location)
+        let reclaimed = {
+            let mut free_map = self
+                .free_map
+                .lock()
+                .map_err(|_| std::io::Error::other("storage-bin free map lock poisoned"))?;
+            free_map.release(location)?;
+            free_map.reclaim_free_tail_bins()
+        };
+
+        for bin_id in reclaimed {
+            if let Err(error) = self.files.remove_bin(bin_id) {
+                log::warn!(
+                    "failed to remove reclaimed storage-bin cache file {} for {}: {error}",
+                    bin_id,
+                    self.layout.root.display()
+                );
+            }
+        }
+        Ok(())
     }
 }
 
@@ -8110,6 +8155,36 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn storage_bin_free_map_reclaims_fully_free_tail_bins() {
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: PathBuf::from("/var/cache/fluxheim/example.test"),
+            max_size_bytes: ByteSize::from_bytes(192),
+            max_object_bytes: ByteSize::from_bytes(64),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        let mut free_map = super::StorageBinFreeMap::new(&layout);
+        let first = free_map.allocate(32).unwrap().unwrap();
+        let second = free_map.allocate(64).unwrap().unwrap();
+        assert_eq!(free_map.bin_files(), 2);
+
+        free_map.release(second).unwrap();
+        assert_eq!(free_map.reclaim_free_tail_bins(), vec![1]);
+        assert_eq!(free_map.bin_files(), 1);
+
+        free_map.release(first).unwrap();
+        assert_eq!(free_map.reclaim_free_tail_bins(), vec![0]);
+        assert_eq!(free_map.bin_files(), 0);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn storage_bin_file_set_writes_and_reads_bounded_ranges() {
         let root = unique_test_cache_dir("storage-bin-files");
         let plan = super::DiskTierPlan {
@@ -8565,6 +8640,55 @@ mod tests {
         );
         assert!(storage.stats().unwrap().entries < 3);
         assert!(storage.stats().unwrap().activity.evictions > 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_reclaims_tail_bin_after_purge() {
+        let root = unique_test_cache_dir("storage-bin-storage-tail-reclaim");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1800),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(2048),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+        let meta = pingora_meta("max-age=60");
+        let first = pingora::cache::CacheKey::new("fluxheim-test", "/first.webp", "vhost");
+        let second = pingora::cache::CacheKey::new("fluxheim-test", "/second.webp", "vhost");
+        for key in [&first, &second] {
+            let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+                key,
+                &meta,
+                &super::default_cache_tag_headers_for_storage(),
+            );
+            let (internal_meta, response_header) = meta.serialize().unwrap();
+            storage
+                .put_object(
+                    store_key,
+                    internal_meta,
+                    response_header,
+                    Arc::from(vec![b'x'; 1300].into_boxed_slice()),
+                )
+                .unwrap();
+        }
+        assert_eq!(storage.stats().unwrap().bin_files, 2);
+        assert!(storage.layout.bin_path(1).exists());
+
+        assert!(storage.purge_combined(&second.combined()).unwrap());
+
+        let stats = storage.stats().unwrap();
+        assert_eq!(stats.entries, 1);
+        assert_eq!(stats.bin_files, 1);
+        assert!(!storage.layout.bin_path(1).exists());
 
         std::fs::remove_dir_all(root).unwrap();
     }

@@ -221,7 +221,9 @@ internal cache implementation.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without
-  growing the number of bin files.
+  growing the number of bin files. When purge or eviction frees the
+  highest-numbered bin files completely, Fluxheim reclaims those tail bins
+  without moving live objects.
 - Storage-bin eviction follows the same basic LRU contract as the filesystem
   disk cache: before admitting a new object it removes the oldest tracked
   objects until the projected encoded-byte total fits under
