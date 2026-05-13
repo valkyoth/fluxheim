@@ -4587,8 +4587,8 @@ fn prepare_storage_bin_data_dir(root: &Path, data_dir: &Path) -> std::io::Result
             ),
         ));
     }
-    match std::fs::symlink_metadata(data_dir) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+    match cache_path_file_type_no_follow(data_dir)? {
+        Some(file_type) if file_type.is_symlink() || !file_type.is_dir() => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 format!(
@@ -4597,11 +4597,10 @@ fn prepare_storage_bin_data_dir(root: &Path, data_dir: &Path) -> std::io::Result
                 ),
             ));
         }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::create_dir_all(data_dir)?;
+        Some(_) => {}
+        None => {
+            create_cache_dir_all(data_dir)?;
         }
-        Err(error) => return Err(error),
     }
     if cache_path_contains_symlink(root, data_dir)? {
         return Err(std::io::Error::new(
@@ -4996,8 +4995,8 @@ fn prepare_disk_cache_root(root: &Path) -> std::io::Result<PathBuf> {
         ));
     }
 
-    match std::fs::symlink_metadata(root) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+    match cache_path_file_type_no_follow(root)? {
+        Some(file_type) if file_type.is_symlink() || !file_type.is_dir() => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!(
@@ -5006,21 +5005,10 @@ fn prepare_disk_cache_root(root: &Path) -> std::io::Result<PathBuf> {
                 ),
             ));
         }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::create_dir_all(root)?;
-            let metadata = std::fs::symlink_metadata(root)?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    format!(
-                        "disk cache root must be a real directory: {}",
-                        root.display()
-                    ),
-                ));
-            }
+        Some(_) => {}
+        None => {
+            create_cache_dir_all(root)?;
         }
-        Err(error) => return Err(error),
     }
 
     if configured_cache_path_contains_symlink(root)? {
@@ -5034,6 +5022,62 @@ fn prepare_disk_cache_root(root: &Path) -> std::io::Result<PathBuf> {
     }
 
     root.canonicalize()
+}
+
+#[cfg(feature = "proxy")]
+fn cache_path_file_type_no_follow(path: &Path) -> std::io::Result<Option<rustix::fs::FileType>> {
+    match rustix::fs::statat(rustix::fs::CWD, path, rustix::fs::AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(stat) => Ok(Some(rustix::fs::FileType::from_raw_mode(stat.st_mode))),
+        Err(error) if error == rustix::io::Errno::NOENT => Ok(None),
+        Err(error) => Err(rustix_to_io_error(error)),
+    }
+}
+
+#[cfg(feature = "proxy")]
+fn create_cache_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if matches!(
+            component,
+            std::path::Component::Prefix(_)
+                | std::path::Component::RootDir
+                | std::path::Component::CurDir
+        ) {
+            continue;
+        }
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "cache directory path must not contain parent traversal: {}",
+                    path.display()
+                ),
+            ));
+        }
+
+        match cache_path_file_type_no_follow(&current)? {
+            Some(file_type) if file_type.is_symlink() || !file_type.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "cache directory path is not a real directory: {}",
+                        current.display()
+                    ),
+                ));
+            }
+            Some(_) => {}
+            None => {
+                let mode = rustix::fs::Mode::RWXU | rustix::fs::Mode::RGRP | rustix::fs::Mode::XGRP;
+                match rustix::fs::mkdir(&current, mode) {
+                    Ok(()) => {}
+                    Err(error) if error == rustix::io::Errno::EXIST => {}
+                    Err(error) => return Err(rustix_to_io_error(error)),
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "proxy")]

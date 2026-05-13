@@ -161,6 +161,13 @@ sha256sum "dist/checksums/fluxheim-${RELEASE_VERSION}.zip"
 
 Edit the GitHub release notes and add these checksums.
 
+After the tag and image workflows are available, the maintainer helper can
+collect the release evidence block:
+
+```bash
+scripts/release_evidence.sh "${RELEASE_VERSION}"
+```
+
 ## 7. Publish And Verify Container Images
 
 The image workflow publishes the configured image variants after the tag push.
