@@ -326,8 +326,9 @@ cache work continues as focused cache-only releases. The active `1.2.2` line is
 slab/bin disk storage. The storage-bin backend now has manifest/bin files,
 durable object index recovery, free-range reuse, LRU eviction parity, and
 Pingora `Storage` trait support, plus runtime backend selection. Production
-smoke coverage is the remaining gate before treating it as the recommended disk
-backend. `1.2.3` is planned for optional cache encryption at rest with
+smoke coverage now verifies live proxy `MISS` then `HIT` behavior and bin/index
+creation before treating it as the recommended disk backend. `1.2.3` is planned
+for optional cache encryption at rest with
 local-key and OpenBao Transit/KMS providers; OpenBao is not required for default
 deployments. `1.2.4` is planned for distributed cache metadata/peer-fill, and
 an optional `1.2.5` only if

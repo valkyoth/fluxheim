@@ -206,8 +206,9 @@ internal cache implementation.
 - The storage-bin backend prototype can encode, allocate, store, read, purge,
   and release objects through the manifest/bin/free-map primitives. Restart
   recovery, eviction parity, the Pingora `Storage` implementation, and runtime
-  backend selection are in place; production smoke coverage is the remaining
-  release gate before treating it as the recommended disk backend.
+  backend selection are in place. The release gate includes a storage-bin smoke
+  that verifies live proxy traffic populates the bin/index files and returns
+  `MISS` followed by `HIT`.
 - A root-local `.fluxheim-storage-bin-index-v1` records each combined cache key
   and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
   validates each referenced object by parsing the v5 cache object bytes, rebuilds

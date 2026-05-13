@@ -168,7 +168,17 @@ done
 FLUXHEIM_PID=$!
 
 i=0
-until curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${FLUXHEIM_PORT}/asset.webp" >/dev/null 2>&1; do
+until python3 - "$FLUXHEIM_PORT" <<'PY'
+import socket
+import sys
+
+try:
+    with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=0.2):
+        pass
+except OSError:
+    raise SystemExit(1)
+PY
+do
     i=$((i + 1))
     if [ "$i" -gt 50 ]; then
         echo "timed out waiting for fluxheim" >&2
@@ -188,6 +198,7 @@ curl -sS --max-time "$CURL_MAX_TIME" -D "$second_headers" -o "$second_body" \
     "http://127.0.0.1:${FLUXHEIM_PORT}/asset.webp"
 
 cmp "$first_body" "$second_body" >/dev/null
+grep -qi '^x-cache-status: MISS' "$first_headers"
 grep -qi '^x-cache-status: HIT' "$second_headers"
 
 count=$(curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__count")
