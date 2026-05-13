@@ -2096,6 +2096,13 @@ impl StorageBinDiskStorage {
         let encoded = encode_disk_cache_object(&store_key, &internal_meta, &response_header, &body)
             .map_err(|error| cache_io_error("encode storage-bin cache object", error))?;
         let encoded_len = encoded.len() as u64;
+        if !self
+            .evict_until_admissible(&store_key.combined, encoded_len)
+            .map_err(|error| cache_io_error("evict storage-bin cache objects", error))?
+        {
+            self.activity.store_refusal();
+            return Ok(None);
+        }
         let location = {
             let mut free_map = self.free_map.lock().map_err(|_| {
                 cache_io_error(
@@ -2151,6 +2158,85 @@ impl StorageBinDiskStorage {
         );
         self.activity.store();
         Ok(Some(body.len()))
+    }
+
+    fn evict_until_admissible(
+        &self,
+        incoming_combined_key: &str,
+        object_bytes: u64,
+    ) -> std::io::Result<bool> {
+        let max_size = self.max_size_bytes.as_u64();
+        if object_bytes > max_size {
+            return Ok(false);
+        }
+
+        let mut evicted = Vec::new();
+        {
+            let mut objects = self
+                .objects
+                .write()
+                .map_err(|_| std::io::Error::other("storage-bin object index lock poisoned"))?;
+            let existing_size = objects
+                .get(incoming_combined_key)
+                .map(|entry| entry.size)
+                .unwrap_or(0);
+            let current_size = objects
+                .values()
+                .fold(0_u64, |total, entry| total.saturating_add(entry.size));
+            let projected_size = current_size
+                .saturating_sub(existing_size)
+                .saturating_add(object_bytes);
+            if projected_size <= max_size {
+                return Ok(true);
+            }
+
+            let mut bytes_to_free = projected_size - max_size;
+            let mut candidates = objects
+                .iter()
+                .filter(|(combined_key, _)| combined_key.as_str() != incoming_combined_key)
+                .map(|(combined_key, entry)| {
+                    (
+                        combined_key.clone(),
+                        entry.accessed,
+                        entry.location.bin_id,
+                        entry.location.offset,
+                        entry.size,
+                    )
+                })
+                .collect::<Vec<_>>();
+            candidates.sort_by(|left, right| {
+                left.1
+                    .cmp(&right.1)
+                    .then_with(|| left.2.cmp(&right.2))
+                    .then_with(|| left.3.cmp(&right.3))
+                    .then_with(|| left.0.cmp(&right.0))
+            });
+
+            for (combined_key, _, _, _, _) in candidates {
+                if bytes_to_free == 0 {
+                    break;
+                }
+                if let Some(entry) = objects.remove(&combined_key) {
+                    bytes_to_free = bytes_to_free.saturating_sub(entry.size);
+                    evicted.push((combined_key, entry));
+                }
+            }
+
+            if bytes_to_free > 0 {
+                for (combined_key, entry) in evicted.drain(..) {
+                    objects.insert(combined_key, entry);
+                }
+                return Ok(false);
+            }
+        }
+
+        for (combined_key, entry) in evicted {
+            self.release_location(entry.location)?;
+            self.purge_index.remove_combined(&combined_key);
+            self.activity.eviction();
+        }
+        self.write_index()?;
+        Ok(true)
     }
 
     fn lookup_object_by_combined(
@@ -7208,6 +7294,62 @@ mod tests {
                 .is_none()
         );
         assert_eq!(storage.stats().unwrap().entries, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_evicts_oldest_object_to_admit_new_object() {
+        let root = unique_test_cache_dir("storage-bin-storage-evict");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(1024),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+        let meta = pingora_meta("max-age=60");
+        let mut keys = Vec::new();
+        for name in ["first", "second", "third"] {
+            let key = pingora::cache::CacheKey::new("fluxheim-test", name, "vhost");
+            let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+                &key,
+                &meta,
+                &super::default_cache_tag_headers_for_storage(),
+            );
+            let (internal_meta, response_header) = meta.serialize().unwrap();
+            storage
+                .put_object(
+                    store_key,
+                    internal_meta,
+                    response_header,
+                    Arc::from(vec![b'x'; 320].into_boxed_slice()),
+                )
+                .unwrap();
+            keys.push(key);
+        }
+
+        assert!(
+            storage
+                .lookup_object_by_combined(&keys[0].combined())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            storage
+                .lookup_object_by_combined(&keys[2].combined())
+                .unwrap()
+                .is_some()
+        );
+        assert!(storage.stats().unwrap().entries < 3);
+        assert!(storage.stats().unwrap().activity.evictions > 0);
 
         std::fs::remove_dir_all(root).unwrap();
     }

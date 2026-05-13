@@ -221,6 +221,11 @@ internal cache implementation.
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without
   growing the number of bin files.
+- Storage-bin eviction follows the same basic LRU contract as the filesystem
+  disk cache: before admitting a new object it removes the oldest tracked
+  objects until the projected encoded-byte total fits under
+  `cache.disk.max_size_bytes`, releases their bin ranges, removes purge-index
+  metadata, and persists the updated storage-bin index.
 - Optional cache encryption at rest is planned for the `1.2.x` cache line after
   the storage-bin format is defined. It should remain disabled by default and
   support both small-deployment local key sources and OpenBao Transit/KMS-backed
