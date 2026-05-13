@@ -831,6 +831,11 @@ pub struct CacheRuntimeTotals {
     pub disk_tiers: u64,
     pub disk_entries: u64,
     pub disk_size_bytes: u64,
+    pub disk_allocated_size_bytes: u64,
+    pub disk_free_size_bytes: u64,
+    pub disk_free_range_count: u64,
+    pub disk_largest_free_range_bytes: u64,
+    pub disk_bin_files: u64,
     pub disk_max_size_bytes: u64,
     pub disk_purge_index_entries: u64,
     pub disk_purge_index_max_entries: u64,
@@ -1986,6 +1991,19 @@ fn accumulate_cache_stats(
         totals.disk_tiers = totals.disk_tiers.saturating_add(1);
         totals.disk_entries = totals.disk_entries.saturating_add(disk.entries);
         totals.disk_size_bytes = totals.disk_size_bytes.saturating_add(disk.size_bytes);
+        totals.disk_allocated_size_bytes = totals
+            .disk_allocated_size_bytes
+            .saturating_add(disk.allocated_size_bytes);
+        totals.disk_free_size_bytes = totals
+            .disk_free_size_bytes
+            .saturating_add(disk.free_size_bytes);
+        totals.disk_free_range_count = totals
+            .disk_free_range_count
+            .saturating_add(disk.free_range_count);
+        totals.disk_largest_free_range_bytes = totals
+            .disk_largest_free_range_bytes
+            .max(disk.largest_free_range_bytes);
+        totals.disk_bin_files = totals.disk_bin_files.saturating_add(disk.bin_files);
         totals.disk_max_size_bytes = totals
             .disk_max_size_bytes
             .saturating_add(disk.max_size_bytes.as_u64());

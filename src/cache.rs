@@ -493,6 +493,40 @@ impl StorageBinFreeMap {
         self.free.get(&bin_id).map(Vec::as_slice).unwrap_or(&[])
     }
 
+    fn allocated_size_bytes(&self) -> u64 {
+        (0..self.next_bin_id)
+            .filter_map(|bin_id| self.bin_capacity(bin_id))
+            .fold(0_u64, u64::saturating_add)
+    }
+
+    fn free_size_bytes(&self) -> u64 {
+        self.free
+            .values()
+            .flatten()
+            .map(|range| range.len)
+            .fold(0_u64, u64::saturating_add)
+    }
+
+    fn free_range_count(&self) -> u64 {
+        self.free
+            .values()
+            .map(|ranges| u64::try_from(ranges.len()).unwrap_or(u64::MAX))
+            .fold(0_u64, u64::saturating_add)
+    }
+
+    fn largest_free_range_bytes(&self) -> u64 {
+        self.free
+            .values()
+            .flatten()
+            .map(|range| range.len)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn bin_files(&self) -> u64 {
+        self.next_bin_id
+    }
+
     fn allocate_from_free_ranges(
         &mut self,
         len: u64,
@@ -735,8 +769,14 @@ pub struct MemoryCacheStats {
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct DiskCacheStats {
+    pub backend: &'static str,
     pub entries: u64,
     pub size_bytes: u64,
+    pub allocated_size_bytes: u64,
+    pub free_size_bytes: u64,
+    pub free_range_count: u64,
+    pub largest_free_range_bytes: u64,
+    pub bin_files: u64,
     pub max_size_bytes: ByteSize,
     pub max_object_bytes: ByteSize,
     pub purge_index_entries: u64,
@@ -2068,9 +2108,31 @@ impl StorageBinDiskStorage {
             ),
             Err(_) => (0, 0),
         };
+        let (
+            allocated_size_bytes,
+            free_size_bytes,
+            free_range_count,
+            largest_free_range_bytes,
+            bin_files,
+        ) = match self.free_map.lock() {
+            Ok(free_map) => (
+                free_map.allocated_size_bytes(),
+                free_map.free_size_bytes(),
+                free_map.free_range_count(),
+                free_map.largest_free_range_bytes(),
+                free_map.bin_files(),
+            ),
+            Err(_) => (0, 0, 0, 0, 0),
+        };
         Ok(DiskCacheStats {
+            backend: "storage-bin",
             entries,
             size_bytes,
+            allocated_size_bytes,
+            free_size_bytes,
+            free_range_count,
+            largest_free_range_bytes,
+            bin_files,
             max_size_bytes: self.max_size_bytes,
             max_object_bytes: self.max_object_bytes,
             purge_index_entries: self.purge_index.len() as u64,
@@ -3132,8 +3194,14 @@ impl PingoraDiskStorage {
     pub fn stats(&self) -> std::io::Result<DiskCacheStats> {
         let (entries, size_bytes) = self.disk_index.stats();
         Ok(DiskCacheStats {
+            backend: "filesystem",
             entries: entries as u64,
             size_bytes,
+            allocated_size_bytes: size_bytes,
+            free_size_bytes: 0,
+            free_range_count: 0,
+            largest_free_range_bytes: 0,
+            bin_files: 0,
             max_size_bytes: self.max_size_bytes,
             max_object_bytes: self.max_object_bytes,
             purge_index_entries: self.purge_index.len() as u64,
@@ -8163,8 +8231,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(object.body.as_ref(), vec![b'b'; 1300].as_slice());
-        assert_eq!(storage.stats().unwrap().entries, 1);
-        assert_eq!(storage.stats().unwrap().activity.stores, 2);
+        let stats = storage.stats().unwrap();
+        assert_eq!(stats.backend, "storage-bin");
+        assert_eq!(stats.entries, 1);
+        assert_eq!(stats.allocated_size_bytes, 2048);
+        assert!(stats.free_size_bytes > 0);
+        assert_eq!(stats.free_range_count, 1);
+        assert!(stats.largest_free_range_bytes > 0);
+        assert_eq!(stats.bin_files, 1);
+        assert_eq!(stats.activity.stores, 2);
 
         std::fs::remove_dir_all(root).unwrap();
     }

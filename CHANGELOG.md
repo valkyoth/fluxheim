@@ -30,6 +30,11 @@ Released: in progress
 - Debounced storage-bin index writes after insert, eviction, and purge bursts
   so high-cardinality cache fills do not rewrite the full durable index once per
   object.
+- Added storage-bin storage-pressure reporting for allocated bin bytes, reusable
+  free bytes, free range count, largest free range, and bin file count in admin
+  cache stats and aggregate Prometheus gauges.
+- Fixed same-key storage-bin rewrites so revalidation or replacement can reuse
+  the previous object's range instead of refusing an otherwise admissible write.
 
 ## 1.2.1 - Local Static Cache Follow-Up
 

@@ -2245,7 +2245,7 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Strin
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
     format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"lock_enabled_policies":{},"lock_enabled_policy_ratio_per_mille":{},"memory_tiers":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_tiers":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"lock_enabled_policies":{},"lock_enabled_policy_ratio_per_mille":{},"memory_tiers":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_tiers":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_allocated_size_bytes":{},"disk_free_size_bytes":{},"disk_free_ratio_per_mille":{},"disk_free_range_count":{},"disk_largest_free_range_bytes":{},"disk_bin_files":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
         totals.vhosts,
         totals.enabled_vhosts,
         ratio_per_mille(totals.enabled_vhosts, totals.vhosts),
@@ -2282,6 +2282,15 @@ fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
         totals.disk_entries,
         totals.disk_size_bytes,
         average_bytes(totals.disk_size_bytes, totals.disk_entries),
+        totals.disk_allocated_size_bytes,
+        totals.disk_free_size_bytes,
+        ratio_per_mille(
+            totals.disk_free_size_bytes,
+            totals.disk_allocated_size_bytes
+        ),
+        totals.disk_free_range_count,
+        totals.disk_largest_free_range_bytes,
+        totals.disk_bin_files,
         totals.disk_max_size_bytes,
         ratio_per_mille(totals.disk_size_bytes, totals.disk_max_size_bytes),
         totals.disk_purge_index_entries,
@@ -2384,10 +2393,17 @@ fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> String
     stats
         .map(|stats| {
             format!(
-                r#"{{"entries":{},"size_bytes":{},"average_object_size_bytes":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+                r#"{{"backend":"{}","entries":{},"size_bytes":{},"average_object_size_bytes":{},"allocated_size_bytes":{},"free_size_bytes":{},"free_ratio_per_mille":{},"free_range_count":{},"largest_free_range_bytes":{},"bin_files":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
+                stats.backend,
                 stats.entries,
                 stats.size_bytes,
                 average_bytes(stats.size_bytes, stats.entries),
+                stats.allocated_size_bytes,
+                stats.free_size_bytes,
+                ratio_per_mille(stats.free_size_bytes, stats.allocated_size_bytes),
+                stats.free_range_count,
+                stats.largest_free_range_bytes,
+                stats.bin_files,
                 stats.max_size_bytes.as_u64(),
                 ratio_per_mille(stats.size_bytes, stats.max_size_bytes.as_u64()),
                 stats.max_object_bytes.as_u64(),
@@ -4286,8 +4302,14 @@ mod tests {
         assert!(body.contains(r#""purge_index_entries":0"#));
         assert!(body.contains(r#""purge_index_max_entries":18446744073709551615"#));
         assert!(body.contains(r#""purge_index_fill_ratio_per_mille":0"#));
-        assert!(body.contains(r#""disk":{"entries":0"#));
+        assert!(body.contains(r#""disk":{"backend":"filesystem","entries":0"#));
         assert!(body.contains(r#""average_object_size_bytes":0"#));
+        assert!(body.contains(r#""allocated_size_bytes":0"#));
+        assert!(body.contains(r#""free_size_bytes":0"#));
+        assert!(body.contains(r#""free_ratio_per_mille":0"#));
+        assert!(body.contains(r#""free_range_count":0"#));
+        assert!(body.contains(r#""largest_free_range_bytes":0"#));
+        assert!(body.contains(r#""bin_files":0"#));
         assert!(body.contains(r#""routes":[{"name":"assets""#));
         assert!(body.contains(
             r#""routes":[{"name":"assets","enabled":true,"tiered":false,"lock_enabled":true,"lock_wait_timeout_secs":30,"storage_tiers":1"#

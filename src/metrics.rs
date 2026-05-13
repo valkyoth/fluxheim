@@ -24,6 +24,11 @@ static CACHE_MEMORY_FILL_RATIO_PER_MILLE: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_PURGE_INDEX_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_ALLOCATED_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_FREE_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_FREE_RANGE_COUNT: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_LARGEST_FREE_RANGE_BYTES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_DISK_BIN_FILES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_MAX_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_FILL_RATIO_PER_MILLE: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_PURGE_INDEX_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
@@ -62,6 +67,11 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_memory_purge_index_entries()?;
     cache_disk_entries()?;
     cache_disk_size_bytes()?;
+    cache_disk_allocated_size_bytes()?;
+    cache_disk_free_size_bytes()?;
+    cache_disk_free_range_count()?;
+    cache_disk_largest_free_range_bytes()?;
+    cache_disk_bin_files()?;
     cache_disk_max_size_bytes()?;
     cache_disk_fill_ratio_per_mille()?;
     cache_disk_purge_index_entries()?;
@@ -115,6 +125,17 @@ pub fn record_cache_runtime_totals(totals: &crate::proxy::CacheRuntimeTotals) {
     );
     set_gauge(cache_disk_entries(), totals.disk_entries);
     set_gauge(cache_disk_size_bytes(), totals.disk_size_bytes);
+    set_gauge(
+        cache_disk_allocated_size_bytes(),
+        totals.disk_allocated_size_bytes,
+    );
+    set_gauge(cache_disk_free_size_bytes(), totals.disk_free_size_bytes);
+    set_gauge(cache_disk_free_range_count(), totals.disk_free_range_count);
+    set_gauge(
+        cache_disk_largest_free_range_bytes(),
+        totals.disk_largest_free_range_bytes,
+    );
+    set_gauge(cache_disk_bin_files(), totals.disk_bin_files);
     set_gauge(cache_disk_max_size_bytes(), totals.disk_max_size_bytes);
     set_gauge(
         cache_disk_fill_ratio_per_mille(),
@@ -558,6 +579,46 @@ fn cache_disk_size_bytes() -> Result<&'static IntGauge, prometheus::Error> {
         &CACHE_DISK_SIZE_BYTES,
         "fluxheim_cache_disk_size_bytes",
         "Current aggregate Fluxheim disk-cache size in bytes.",
+    )
+}
+
+fn cache_disk_allocated_size_bytes() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_ALLOCATED_SIZE_BYTES,
+        "fluxheim_cache_disk_allocated_size_bytes",
+        "Current aggregate Fluxheim disk-cache allocated storage bytes.",
+    )
+}
+
+fn cache_disk_free_size_bytes() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_FREE_SIZE_BYTES,
+        "fluxheim_cache_disk_free_size_bytes",
+        "Current aggregate Fluxheim disk-cache free allocated bytes.",
+    )
+}
+
+fn cache_disk_free_range_count() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_FREE_RANGE_COUNT,
+        "fluxheim_cache_disk_free_range_count",
+        "Current aggregate Fluxheim storage-bin disk-cache free range count.",
+    )
+}
+
+fn cache_disk_largest_free_range_bytes() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_LARGEST_FREE_RANGE_BYTES,
+        "fluxheim_cache_disk_largest_free_range_bytes",
+        "Largest Fluxheim storage-bin disk-cache free range in bytes across configured tiers.",
+    )
+}
+
+fn cache_disk_bin_files() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_DISK_BIN_FILES,
+        "fluxheim_cache_disk_bin_files",
+        "Current aggregate Fluxheim storage-bin disk-cache bin file count.",
     )
 }
 
@@ -1112,6 +1173,11 @@ mod tests {
             memory_purge_index_entries: 4,
             disk_entries: 5,
             disk_size_bytes: 2048,
+            disk_allocated_size_bytes: 3072,
+            disk_free_size_bytes: 1024,
+            disk_free_range_count: 2,
+            disk_largest_free_range_bytes: 768,
+            disk_bin_files: 3,
             disk_max_size_bytes: 4096,
             disk_purge_index_entries: 6,
             ..crate::proxy::CacheRuntimeTotals::default()
@@ -1130,6 +1196,11 @@ mod tests {
         assert!(output.contains("fluxheim_cache_memory_purge_index_entries 4"));
         assert!(output.contains("fluxheim_cache_disk_entries 5"));
         assert!(output.contains("fluxheim_cache_disk_size_bytes 2048"));
+        assert!(output.contains("fluxheim_cache_disk_allocated_size_bytes 3072"));
+        assert!(output.contains("fluxheim_cache_disk_free_size_bytes 1024"));
+        assert!(output.contains("fluxheim_cache_disk_free_range_count 2"));
+        assert!(output.contains("fluxheim_cache_disk_largest_free_range_bytes 768"));
+        assert!(output.contains("fluxheim_cache_disk_bin_files 3"));
         assert!(output.contains("fluxheim_cache_disk_max_size_bytes 4096"));
         assert!(output.contains("fluxheim_cache_disk_fill_ratio_per_mille 500"));
         assert!(output.contains("fluxheim_cache_disk_purge_index_entries 6"));

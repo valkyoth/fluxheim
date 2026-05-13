@@ -230,6 +230,10 @@ internal cache implementation.
   reset, cache-key inspection, exact purge, indexed hard/soft purge by user tag,
   path prefix/pattern, or cache tag, and stale-object purge all operate through
   the durable storage-bin object index plus the in-memory purge index.
+- Storage-bin stats report allocated bin bytes, reusable free bytes, free range
+  count, largest free range, and bin file count through the admin cache JSON and
+  Prometheus aggregate gauges. These are the first operational signals for
+  fragmentation and space amplification under high-churn workloads.
 - Optional cache encryption at rest is planned for the `1.2.x` cache line after
   the storage-bin format is defined. It should remain disabled by default and
   support both small-deployment local key sources and OpenBao Transit/KMS-backed
