@@ -618,10 +618,10 @@ group- or world-writable, such as creating a cache root directly below `/tmp`; u
 dedicated cache directory such as `/var/cache/fluxheim` or a pre-created private
 runtime directory.
 `cache.disk.backend` defaults to `filesystem`, the stable complete-object disk
-backend used by `1.2.0` and `1.2.1`. The `storage-bin` backend name is reserved
-for the focused `1.2.2` slab/bin storage line and is recognized but rejected
-until the preallocated-bin allocator and durable index are implemented. The
-reserved `[cache.disk.storage_bin]` table defines the intended allocator shape:
+backend used by `1.2.0` and `1.2.1`. `storage-bin` selects the focused `1.2.2`
+slab/bin disk backend, which stores objects inside bounded `.fhbin` data files
+with a durable object index and free-range reuse. The `[cache.disk.storage_bin]`
+table defines the allocator shape:
 `bin_size_bytes` must be at least `cache.max_object_bytes` and no larger than
 `cache.disk.max_size_bytes`, `preallocate` controls whether Fluxheim should
 reserve full bin files ahead of object writes, and `max_open_bins` bounds the

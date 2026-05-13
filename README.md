@@ -325,11 +325,12 @@ request resolves to a local file. After that,
 cache work continues as focused cache-only releases. The active `1.2.2` line is
 slab/bin disk storage. The storage-bin backend now has manifest/bin files,
 durable object index recovery, free-range reuse, LRU eviction parity, and
-Pingora `Storage` trait support, but live runtime selection remains fail-closed
-until the last factory and smoke-test work is complete. `1.2.3` is planned for
-optional cache encryption at rest with local-key and OpenBao Transit/KMS
-providers; OpenBao is not required for default deployments. `1.2.4` is planned
-for distributed cache metadata/peer-fill, and an optional `1.2.5` only if
+Pingora `Storage` trait support, plus runtime backend selection. Production
+smoke coverage is the remaining gate before treating it as the recommended disk
+backend. `1.2.3` is planned for optional cache encryption at rest with
+local-key and OpenBao Transit/KMS providers; OpenBao is not required for default
+deployments. `1.2.4` is planned for distributed cache metadata/peer-fill, and
+an optional `1.2.5` only if
 production testing finds one more cache blocker. `1.3` is the
 load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
 extensibility release, covering nginx-Lua-style hooks and VCL-like cache policy

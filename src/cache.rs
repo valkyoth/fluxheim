@@ -2710,6 +2710,264 @@ impl StorageBinDiskStorage {
 }
 
 #[cfg(feature = "proxy")]
+#[derive(Debug)]
+pub enum PingoraDiskStorageBackend {
+    Filesystem(Box<PingoraDiskStorage>),
+    StorageBin(Box<StorageBinDiskStorage>),
+}
+
+#[cfg(feature = "proxy")]
+impl PingoraDiskStorageBackend {
+    pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
+        match plan.backend {
+            CacheDiskBackend::Filesystem => PingoraDiskStorage::from_plan(plan)
+                .map(|storage| Self::Filesystem(Box::new(storage))),
+            CacheDiskBackend::StorageBin => StorageBinDiskStorage::from_plan(plan)
+                .map(|storage| Self::StorageBin(Box::new(storage))),
+        }
+    }
+
+    pub fn from_plan_with_metric_scope(
+        plan: DiskTierPlan,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> std::io::Result<Self> {
+        match plan.backend {
+            CacheDiskBackend::Filesystem => {
+                PingoraDiskStorage::from_plan_with_metric_scope(plan, vhost, route)
+                    .map(|storage| Self::Filesystem(Box::new(storage)))
+            }
+            CacheDiskBackend::StorageBin => {
+                StorageBinDiskStorage::from_plan_with_metric_scope(plan, vhost, route)
+                    .map(|storage| Self::StorageBin(Box::new(storage)))
+            }
+        }
+    }
+
+    pub fn root(&self) -> &Path {
+        match self {
+            Self::Filesystem(storage) => storage.root(),
+            Self::StorageBin(storage) => &storage.layout.root,
+        }
+    }
+
+    pub fn stats(&self) -> std::io::Result<DiskCacheStats> {
+        match self {
+            Self::Filesystem(storage) => storage.stats(),
+            Self::StorageBin(storage) => storage.stats(),
+        }
+    }
+
+    pub fn reset_activity(&self) {
+        match self {
+            Self::Filesystem(storage) => storage.reset_activity(),
+            Self::StorageBin(storage) => storage.reset_activity(),
+        }
+    }
+
+    fn record_hit(&self) {
+        match self {
+            Self::Filesystem(storage) => storage.activity.hit(),
+            Self::StorageBin(storage) => storage.activity.hit(),
+        }
+    }
+
+    fn record_miss(&self) {
+        match self {
+            Self::Filesystem(storage) => storage.activity.miss(),
+            Self::StorageBin(storage) => storage.activity.miss(),
+        }
+    }
+
+    fn max_object_bytes(&self) -> ByteSize {
+        match self {
+            Self::Filesystem(storage) => storage.max_object_bytes,
+            Self::StorageBin(storage) => storage.max_object_bytes,
+        }
+    }
+
+    fn put_serialized_object(
+        &self,
+        store_key: PingoraStoreKey,
+        internal_meta: Vec<u8>,
+        response_header: Vec<u8>,
+        body: Arc<[u8]>,
+    ) -> pingora::Result<Option<usize>> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.put_serialized_object(store_key, internal_meta, response_header, body)
+            }
+            Self::StorageBin(storage) => {
+                storage.put_object(store_key, internal_meta, response_header, body)
+            }
+        }
+    }
+
+    pub fn purge_cache_key(&self, key: &pingora::cache::CacheKey) -> std::io::Result<bool> {
+        match self {
+            Self::Filesystem(storage) => storage.purge_cache_key(key),
+            Self::StorageBin(storage) => storage.purge_cache_key(key),
+        }
+    }
+
+    pub fn purge_indexed_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => storage.purge_indexed_user_tag(user_tag, limit),
+            Self::StorageBin(storage) => storage.purge_indexed_user_tag(user_tag, limit),
+        }
+    }
+
+    pub fn soft_purge_indexed_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => storage.soft_purge_indexed_user_tag(user_tag, limit),
+            Self::StorageBin(storage) => storage.soft_purge_indexed_user_tag(user_tag, limit),
+        }
+    }
+
+    pub fn purge_indexed_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.purge_indexed_path_prefix(user_tag, path_prefix, limit)
+            }
+            Self::StorageBin(storage) => {
+                storage.purge_indexed_path_prefix(user_tag, path_prefix, limit)
+            }
+        }
+    }
+
+    pub fn soft_purge_indexed_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.soft_purge_indexed_path_prefix(user_tag, path_prefix, limit)
+            }
+            Self::StorageBin(storage) => {
+                storage.soft_purge_indexed_path_prefix(user_tag, path_prefix, limit)
+            }
+        }
+    }
+
+    pub fn purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.purge_indexed_path_pattern(user_tag, path_pattern, limit)
+            }
+            Self::StorageBin(storage) => {
+                storage.purge_indexed_path_pattern(user_tag, path_pattern, limit)
+            }
+        }
+    }
+
+    pub fn soft_purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.soft_purge_indexed_path_pattern(user_tag, path_pattern, limit)
+            }
+            Self::StorageBin(storage) => {
+                storage.soft_purge_indexed_path_pattern(user_tag, path_pattern, limit)
+            }
+        }
+    }
+
+    pub fn purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.purge_indexed_cache_tag(user_tag, cache_tag, limit)
+            }
+            Self::StorageBin(storage) => {
+                storage.purge_indexed_cache_tag(user_tag, cache_tag, limit)
+            }
+        }
+    }
+
+    pub fn soft_purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.soft_purge_indexed_cache_tag(user_tag, cache_tag, limit)
+            }
+            Self::StorageBin(storage) => {
+                storage.soft_purge_indexed_cache_tag(user_tag, cache_tag, limit)
+            }
+        }
+    }
+
+    pub fn purge_indexed_stale_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+        dry_run: bool,
+    ) -> pingora::Result<CacheStalePurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.purge_indexed_stale_user_tag(user_tag, limit, dry_run)
+            }
+            Self::StorageBin(storage) => {
+                storage.purge_indexed_stale_user_tag(user_tag, limit, dry_run)
+            }
+        }
+    }
+
+    pub fn inspect_cache_key(
+        &self,
+        key: &pingora::cache::CacheKey,
+    ) -> pingora::Result<Option<CacheObjectMetadata>> {
+        match self {
+            Self::Filesystem(storage) => storage.inspect_cache_key(key),
+            Self::StorageBin(storage) => storage.inspect_cache_key(key),
+        }
+    }
+
+    fn lookup_object(
+        &self,
+        key: &pingora::cache::CacheKey,
+    ) -> pingora::Result<Option<PingoraStoredObject>> {
+        match self {
+            Self::Filesystem(storage) => storage.lookup_object(key),
+            Self::StorageBin(storage) => {
+                storage.object_for_combined_without_activity(&key.combined())
+            }
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
 impl PingoraDiskStorage {
     pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
         reject_unimplemented_disk_backend(plan.backend)?;
@@ -3894,7 +4152,7 @@ fn reject_unimplemented_disk_backend(backend: CacheDiskBackend) -> std::io::Resu
         CacheDiskBackend::Filesystem => Ok(()),
         CacheDiskBackend::StorageBin => Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "cache.disk.backend = \"storage-bin\" is recognized but not implemented yet",
+            "cache.disk.backend = \"storage-bin\" requires the generic disk storage backend factory",
         )),
     }
 }
@@ -4841,12 +5099,15 @@ fn symlink_free_regular_metadata(
 #[derive(Debug)]
 pub struct PingoraTieredStorage {
     memory: &'static PingoraMemoryStorage,
-    disk: &'static PingoraDiskStorage,
+    disk: &'static PingoraDiskStorageBackend,
 }
 
 #[cfg(feature = "proxy")]
 impl PingoraTieredStorage {
-    pub fn new(memory: &'static PingoraMemoryStorage, disk: &'static PingoraDiskStorage) -> Self {
+    pub fn new(
+        memory: &'static PingoraMemoryStorage,
+        disk: &'static PingoraDiskStorageBackend,
+    ) -> Self {
         Self { memory, disk }
     }
 
@@ -4854,7 +5115,7 @@ impl PingoraTieredStorage {
         self.memory
     }
 
-    pub fn disk(&self) -> &'static PingoraDiskStorage {
+    pub fn disk(&self) -> &'static PingoraDiskStorageBackend {
         self.disk
     }
 
@@ -5332,9 +5593,32 @@ pub fn pingora_disk_storage_from_plan(
 }
 
 #[cfg(feature = "proxy")]
+pub fn pingora_disk_storage_backend_from_config_with_metric_scope(
+    config: &CacheConfig,
+    vhost: &str,
+    route: Option<&str>,
+) -> std::io::Result<Option<&'static PingoraDiskStorageBackend>> {
+    storage_plan(config)
+        .disk
+        .map(|plan| {
+            PingoraDiskStorageBackend::from_plan_with_metric_scope(plan, vhost, route)
+                .map(|storage| Box::leak(Box::new(storage)) as &'static PingoraDiskStorageBackend)
+        })
+        .transpose()
+}
+
+#[cfg(feature = "proxy")]
+pub fn pingora_disk_storage_backend_from_plan(
+    plan: DiskTierPlan,
+) -> std::io::Result<&'static PingoraDiskStorageBackend> {
+    PingoraDiskStorageBackend::from_plan(plan)
+        .map(|storage| Box::leak(Box::new(storage)) as &'static PingoraDiskStorageBackend)
+}
+
+#[cfg(feature = "proxy")]
 pub fn pingora_tiered_storage_from_parts(
     memory: &'static PingoraMemoryStorage,
-    disk: &'static PingoraDiskStorage,
+    disk: &'static PingoraDiskStorageBackend,
 ) -> &'static PingoraTieredStorage {
     Box::leak(Box::new(PingoraTieredStorage::new(memory, disk)))
 }
@@ -5812,6 +6096,65 @@ impl Storage for StorageBinDiskStorage {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
+impl Storage for PingoraDiskStorageBackend {
+    async fn lookup(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+        match self {
+            Self::Filesystem(storage) => storage.lookup(key, trace).await,
+            Self::StorageBin(storage) => storage.lookup(key, trace).await,
+        }
+    }
+
+    async fn get_miss_handler(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        meta: &CacheMeta,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<MissHandler> {
+        match self {
+            Self::Filesystem(storage) => storage.get_miss_handler(key, meta, trace).await,
+            Self::StorageBin(storage) => storage.get_miss_handler(key, meta, trace).await,
+        }
+    }
+
+    async fn purge(
+        &'static self,
+        key: &pingora::cache::key::CompactCacheKey,
+        purge_type: PurgeType,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<bool> {
+        match self {
+            Self::Filesystem(storage) => storage.purge(key, purge_type, trace).await,
+            Self::StorageBin(storage) => storage.purge(key, purge_type, trace).await,
+        }
+    }
+
+    async fn update_meta(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        meta: &CacheMeta,
+        trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<bool> {
+        match self {
+            Self::Filesystem(storage) => storage.update_meta(key, meta, trace).await,
+            Self::StorageBin(storage) => storage.update_meta(key, meta, trace).await,
+        }
+    }
+
+    fn support_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
 impl Storage for PingoraTieredStorage {
     async fn lookup(
         &'static self,
@@ -5831,10 +6174,10 @@ impl Storage for PingoraTieredStorage {
         self.memory.activity.miss();
 
         let Some(object) = self.disk.lookup_object(key)? else {
-            self.disk.activity.miss();
+            self.disk.record_miss();
             return Ok(None);
         };
-        self.disk.activity.hit();
+        self.disk.record_hit();
         let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
         let primary_key = object.primary_key.clone().unwrap_or_else(|| key.primary());
         let _promoted = self.memory.put_serialized_object(
@@ -5878,7 +6221,7 @@ impl Storage for PingoraTieredStorage {
                 .memory
                 .max_object_bytes
                 .as_u64()
-                .min(self.disk.max_object_bytes.as_u64()),
+                .min(self.disk.max_object_bytes().as_u64()),
             exceeded_limit: false,
         }))
     }
@@ -9019,6 +9362,29 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn pingora_disk_storage_backend_accepts_storage_bin_backend() {
+        let root = unique_test_cache_dir("storage-bin-runtime-backend");
+        let storage = super::pingora_disk_storage_backend_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+
+        assert_eq!(storage.root(), root.as_path());
+        assert_eq!(storage.stats().unwrap().entries, 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn disk_cache_scan_uses_deterministic_hex_shards() {
         let root = unique_test_cache_dir("deterministic-shards");
         std::fs::create_dir_all(root.join("ab")).unwrap();
@@ -10528,7 +10894,7 @@ mod tests {
             object_slots: 2,
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
-        let disk = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+        let disk = super::pingora_disk_storage_backend_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
@@ -10573,7 +10939,7 @@ mod tests {
             object_slots: 2,
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
-        let disk = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+        let disk = super::pingora_disk_storage_backend_from_plan(super::DiskTierPlan {
             backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),

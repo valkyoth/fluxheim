@@ -1926,7 +1926,7 @@ fn cache_key_preview_ineligible_reason(
 
 #[cfg(feature = "cache")]
 fn purge_stale_disk_storage_batches(
-    storage: &'static crate::cache::PingoraDiskStorage,
+    storage: &'static crate::cache::PingoraDiskStorageBackend,
     user_tag: &str,
     limit: usize,
     batches: usize,
@@ -2378,7 +2378,7 @@ struct RuntimeVhost {
     #[cfg(feature = "cache")]
     pingora_memory_storage: Option<&'static crate::cache::PingoraMemoryStorage>,
     #[cfg(feature = "cache")]
-    pingora_disk_storage: Option<&'static crate::cache::PingoraDiskStorage>,
+    pingora_disk_storage: Option<&'static crate::cache::PingoraDiskStorageBackend>,
     #[cfg(feature = "cache")]
     pingora_tiered_storage: Option<&'static crate::cache::PingoraTieredStorage>,
     #[cfg(feature = "cache")]
@@ -2456,7 +2456,7 @@ struct RuntimeRouteCache {
     config: crate::config::CacheConfig,
     memory_cache: Option<crate::cache::MemoryImageCache>,
     pingora_memory_storage: Option<&'static crate::cache::PingoraMemoryStorage>,
-    pingora_disk_storage: Option<&'static crate::cache::PingoraDiskStorage>,
+    pingora_disk_storage: Option<&'static crate::cache::PingoraDiskStorageBackend>,
     pingora_tiered_storage: Option<&'static crate::cache::PingoraTieredStorage>,
     pingora_cache_lock: Option<&'static CacheKeyLockImpl>,
     pingora_cache_predictor: Option<&'static (dyn CacheablePredictor + Sync)>,
@@ -2504,7 +2504,7 @@ impl RuntimeRouteCache {
                 Some(name),
             );
         let pingora_disk_storage =
-            crate::cache::pingora_disk_storage_from_config_with_metric_scope(
+            crate::cache::pingora_disk_storage_backend_from_config_with_metric_scope(
                 config,
                 vhost_name,
                 Some(name),
@@ -2859,7 +2859,7 @@ impl RuntimeVhost {
             );
         #[cfg(feature = "cache")]
         let pingora_disk_storage =
-            crate::cache::pingora_disk_storage_from_config_with_metric_scope(
+            crate::cache::pingora_disk_storage_backend_from_config_with_metric_scope(
                 &cache, "default", None,
             )?;
         #[cfg(feature = "cache")]
@@ -2952,7 +2952,7 @@ impl RuntimeVhost {
             );
         #[cfg(feature = "cache")]
         let pingora_disk_storage =
-            crate::cache::pingora_disk_storage_from_config_with_metric_scope(
+            crate::cache::pingora_disk_storage_backend_from_config_with_metric_scope(
                 &vhost.cache,
                 &vhost.name,
                 None,

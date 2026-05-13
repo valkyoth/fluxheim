@@ -19,12 +19,11 @@ Released: in progress
 
 - Started the `1.2.2` storage-bin cache line with an explicit
   `cache.disk.backend` selector. The current filesystem backend remains the
-  default and `storage-bin` is recognized but fails closed until the allocator
-  and durable index are implemented.
+  default and `storage-bin` is recognized as the focused slab/bin backend.
 - Added the isolated storage-bin cache storage prototype with manifest/bin
   files, durable object index recovery, free-range reuse, LRU eviction parity,
-  purge-index synchronization, and Pingora `Storage` trait support while live
-  runtime selection remains fail-closed.
+  purge-index synchronization, Pingora `Storage` trait support, and runtime
+  backend selection.
 - Added storage-bin management parity for runtime stats, activity reset, cache
   inspection, exact purge, indexed hard/soft purge, and stale-object purge so
   the backend has the same operational hooks needed by the filesystem tier.

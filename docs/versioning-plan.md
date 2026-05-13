@@ -798,9 +798,9 @@ Focused cache-only follow-up releases after 1.2:
   extents, maintains a durable free map and object index, supports crash
   recovery and compaction, and exposes fragmentation/space-amplification
   metrics. The filesystem object backend stays the portable default until slab
-  storage proves safer and faster in production tests. The first `1.2.2` slice
-  reserves the `cache.disk.backend = "storage-bin"` config value and rejects it
-  fail-closed until the allocator and index are implemented.
+  storage proves safer and faster in production tests. The `1.2.2` line adds
+  the `cache.disk.backend = "storage-bin"` runtime backend after the allocator,
+  durable index, recovery path, and operational hooks are in place.
 - `1.2.3`: optional cache encryption at rest. This release has one job: add an
   opt-in cache encryption layer for disk cache objects, with key metadata
   designed alongside the storage-bin format. The default remains unencrypted and

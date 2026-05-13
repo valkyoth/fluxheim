@@ -4258,13 +4258,6 @@ impl CacheDiskConfig {
                 .validate(scope, self.max_size_bytes, max_object_bytes)?;
         }
 
-        if self.backend == CacheDiskBackend::StorageBin {
-            return Err(ConfigError::UnsupportedCacheDiskBackend {
-                scope,
-                backend: "storage-bin",
-            });
-        }
-
         let Some(path) = &self.path else {
             return Err(ConfigError::MissingCacheDiskPath { scope });
         };
@@ -5399,7 +5392,7 @@ impl Display for ConfigError {
             ),
             Self::UnsupportedCacheDiskBackend { scope, backend } => write!(
                 formatter,
-                "{scope}.disk.backend = {backend:?} is recognized for the 1.2.2 storage-bin line but is not implemented yet"
+                "{scope}.disk.backend = {backend:?} is not supported by this build"
             ),
             Self::CachePurgerNotCompiled => write!(
                 formatter,
@@ -9306,7 +9299,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_reserved_storage_bin_backend_until_implemented() {
+    fn accepts_storage_bin_backend() {
         let root = unique_temp_path("config-cache-storage-bin-backend");
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
@@ -9324,13 +9317,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.cache.disk.backend, CacheDiskBackend::StorageBin);
-        assert_eq!(
-            config.validate(),
-            Err(ConfigError::UnsupportedCacheDiskBackend {
-                scope: "cache",
-                backend: "storage-bin"
-            })
-        );
+        assert_eq!(config.validate(), Ok(()));
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -9367,13 +9354,7 @@ mod tests {
         );
         assert!(config.cache.disk.storage_bin.preallocate);
         assert_eq!(config.cache.disk.storage_bin.max_open_bins, 8);
-        assert_eq!(
-            config.validate(),
-            Err(ConfigError::UnsupportedCacheDiskBackend {
-                scope: "cache",
-                backend: "storage-bin"
-            })
-        );
+        assert_eq!(config.validate(), Ok(()));
 
         let _ = std::fs::remove_dir_all(root);
     }

@@ -188,15 +188,9 @@ internal cache implementation.
   files and fresh temp files so snapshot reloads do not race active cache
   writers.
 - `cache.disk.backend = "filesystem"` is the stable default disk backend. The
-  `storage-bin` backend name is reserved for the focused `1.2.2` slab/bin
-  storage line and currently fails closed if configured, so operators cannot
-  accidentally assume the filesystem object store has slab/bin allocation
-  semantics.
-- The reserved `[cache.disk.storage_bin]` table already documents the first
-  allocator controls: `bin_size_bytes`, `preallocate`, and `max_open_bins`.
-  These settings are parsed and validated while the backend remains disabled,
-  which lets deployment templates settle before the storage-bin writer,
-  durable free-map, and recovery path are enabled.
+  `storage-bin` backend enables the focused `1.2.2` slab/bin storage line.
+- The `[cache.disk.storage_bin]` table controls the first allocator settings:
+  `bin_size_bytes`, `preallocate`, and `max_open_bins`.
 - The storage-bin layout reserves a root-local
   `.fluxheim-storage-bin-v1` manifest and deterministic `bins/NNNN.fhbin`
   data files, with 16-digit hexadecimal bin ids. Object metadata will point to
@@ -211,9 +205,9 @@ internal cache implementation.
   new bin files to the configured bin size before object bytes are committed.
 - The storage-bin backend prototype can encode, allocate, store, read, purge,
   and release objects through the manifest/bin/free-map primitives. Restart
-  recovery, eviction parity, and the Pingora `Storage` implementation are in
-  place, while the live cache factory still fails closed until the remaining
-  runtime wiring and production-smoke coverage are complete.
+  recovery, eviction parity, the Pingora `Storage` implementation, and runtime
+  backend selection are in place; production smoke coverage is the remaining
+  release gate before treating it as the recommended disk backend.
 - A root-local `.fluxheim-storage-bin-index-v1` records each combined cache key
   and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
   validates each referenced object by parsing the v5 cache object bytes, rebuilds

@@ -28,8 +28,8 @@ The `1.2.1` follow-up added focused opt-in local/static vhost caching so local
 `[vhosts.web]` files and route-scoped web actions can use the same cache policy
 model as proxied static content when operators explicitly enable it. The active
 `1.2.2` line is slab/bin disk storage. Its first slice reserves
-`cache.disk.backend = "storage-bin"` and rejects it fail-closed while the
-allocator and durable index are implemented. `1.2.3` is planned as optional
+`cache.disk.backend = "storage-bin"` with the allocator, durable index, and
+runtime backend selection in place. `1.2.3` is planned as optional
 cache encryption at rest, including local-key and OpenBao Transit/KMS key
 providers, without forcing OpenBao on normal deployments. After that, the
 cache-only sequence is `1.2.4` for distributed cache metadata/peer-fill, and an
