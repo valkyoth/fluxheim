@@ -1951,6 +1951,7 @@ pub struct StorageBinDiskStorage {
     purge_index: CachePurgeIndex,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
+    cache_tag_headers: Arc<[String]>,
     activity: CacheActivityCounters,
 }
 
@@ -2052,6 +2053,7 @@ impl StorageBinDiskStorage {
             purge_index: recovered_purge_index,
             max_size_bytes: plan.max_size_bytes,
             max_object_bytes: plan.max_object_bytes,
+            cache_tag_headers: Arc::from(plan.cache_tag_headers),
             activity,
         })
     }
@@ -5333,6 +5335,81 @@ impl Storage for PingoraDiskStorage {
 
 #[cfg(feature = "proxy")]
 #[async_trait]
+impl Storage for StorageBinDiskStorage {
+    async fn lookup(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        _trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<Option<(CacheMeta, HitHandler)>> {
+        let Some(object) = self.lookup_object_by_combined(&key.combined())? else {
+            return Ok(None);
+        };
+        let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
+        let handler = PingoraMemoryHitHandler {
+            body: object.body,
+            offset: 0,
+            end: None,
+        };
+        Ok(Some((meta, Box::new(handler))))
+    }
+
+    async fn get_miss_handler(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        meta: &CacheMeta,
+        _trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<MissHandler> {
+        Ok(Box::new(StorageBinMissHandler {
+            storage: self,
+            store_key: PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
+            serialized_meta: meta.serialize()?,
+            body: Vec::new(),
+            max_object_bytes: self.max_object_bytes.as_u64(),
+            exceeded_limit: false,
+        }))
+    }
+
+    async fn purge(
+        &'static self,
+        key: &pingora::cache::key::CompactCacheKey,
+        _purge_type: PurgeType,
+        _trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<bool> {
+        self.purge_combined(&key.combined())
+            .map_err(|error| cache_io_error("purge storage-bin cache object", error))
+    }
+
+    async fn update_meta(
+        &'static self,
+        key: &pingora::cache::CacheKey,
+        meta: &CacheMeta,
+        _trace: &pingora::cache::trace::SpanHandle,
+    ) -> pingora::Result<bool> {
+        let Some(object) = self.lookup_object_by_combined(&key.combined())? else {
+            return Ok(false);
+        };
+        let (internal_meta, response_header) = meta.serialize()?;
+        Ok(self
+            .put_object(
+                PingoraStoreKey::from_cache_key_and_meta(key, meta, &self.cache_tag_headers),
+                internal_meta,
+                response_header,
+                object.body,
+            )?
+            .is_some())
+    }
+
+    fn support_streaming_partial_write(&self) -> bool {
+        false
+    }
+
+    fn as_any(&self) -> &(dyn std::any::Any + Send + Sync + 'static) {
+        self
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
 impl Storage for PingoraTieredStorage {
     async fn lookup(
         &'static self,
@@ -5623,6 +5700,53 @@ impl pingora::cache::storage::HandleMiss for PingoraDiskMissHandler {
             return Ok(MissFinishType::Created(0));
         };
         this.cleanup_temp();
+        Ok(MissFinishType::Created(created))
+    }
+}
+
+#[cfg(feature = "proxy")]
+struct StorageBinMissHandler {
+    storage: &'static StorageBinDiskStorage,
+    store_key: PingoraStoreKey,
+    serialized_meta: (Vec<u8>, Vec<u8>),
+    body: Vec<u8>,
+    max_object_bytes: u64,
+    exceeded_limit: bool,
+}
+
+#[cfg(feature = "proxy")]
+#[async_trait]
+impl pingora::cache::storage::HandleMiss for StorageBinMissHandler {
+    async fn write_body(&mut self, data: Bytes, _eof: bool) -> pingora::Result<()> {
+        if self.exceeded_limit {
+            return Ok(());
+        }
+
+        let next_len = (self.body.len() as u64).saturating_add(data.len() as u64);
+        if next_len > self.max_object_bytes {
+            self.exceeded_limit = true;
+            self.body.clear();
+            return Ok(());
+        }
+        self.body.extend_from_slice(&data);
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> pingora::Result<MissFinishType> {
+        if self.exceeded_limit {
+            return Ok(MissFinishType::Created(0));
+        }
+
+        let body = Arc::<[u8]>::from(self.body);
+        let Some(created) = self.storage.put_object(
+            self.store_key,
+            self.serialized_meta.0,
+            self.serialized_meta.1,
+            body,
+        )?
+        else {
+            return Ok(MissFinishType::Created(0));
+        };
         Ok(MissFinishType::Created(created))
     }
 }
@@ -7350,6 +7474,60 @@ mod tests {
         );
         assert!(storage.stats().unwrap().entries < 3);
         assert!(storage.stats().unwrap().activity.evictions > 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_implements_pingora_storage() {
+        use pingora::cache::Storage;
+
+        let root = unique_test_cache_dir("storage-bin-storage-trait");
+        let storage = Box::leak(Box::new(
+            super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+                backend: CacheDiskBackend::StorageBin,
+                path: root.clone(),
+                max_size_bytes: ByteSize::from_bytes(2048),
+                max_object_bytes: ByteSize::from_bytes(512),
+                cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+                storage_bin: CacheDiskStorageBinConfig {
+                    bin_size_bytes: ByteSize::from_bytes(1024),
+                    preallocate: false,
+                    max_open_bins: 4,
+                },
+            })
+            .unwrap(),
+        ));
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/trait.webp", "vhost");
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        let mut miss = block_on(storage.get_miss_handler(&key, &meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"trait-"), false)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"body"), true)).unwrap();
+        let finish = block_on(miss.finish()).unwrap();
+        assert!(matches!(
+            finish,
+            pingora::cache::storage::MissFinishType::Created(10)
+        ));
+
+        let (_meta, mut hit) = block_on(storage.lookup(&key, &span)).unwrap().unwrap();
+        assert_eq!(
+            block_on(hit.read_body()).unwrap(),
+            Some(Bytes::from_static(b"trait-body"))
+        );
+        assert_eq!(block_on(hit.read_body()).unwrap(), None);
+        assert!(block_on(storage.update_meta(&key, &pingora_meta("max-age=120"), &span)).unwrap());
+        assert!(
+            block_on(storage.purge(
+                &key.to_compact(),
+                pingora::cache::PurgeType::Invalidation,
+                &span
+            ))
+            .unwrap()
+        );
+        assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
 
         std::fs::remove_dir_all(root).unwrap();
     }

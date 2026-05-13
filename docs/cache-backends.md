@@ -209,10 +209,11 @@ internal cache implementation.
   by filesystem cache objects. Writes must match the allocated object length,
   reads are bounded by the recorded location, and `preallocate = true` expands
   new bin files to the configured bin size before object bytes are committed.
-- The initial storage-bin backend prototype can encode, allocate, store, read,
-  purge, and release objects through the manifest/bin/free-map primitives, but
-  it is still isolated from live Pingora cache traffic until restart recovery,
-  eviction parity, and the full `Storage` implementation are complete.
+- The storage-bin backend prototype can encode, allocate, store, read, purge,
+  and release objects through the manifest/bin/free-map primitives. Restart
+  recovery, eviction parity, and the Pingora `Storage` implementation are in
+  place, while the live cache factory still fails closed until the remaining
+  runtime wiring and production-smoke coverage are complete.
 - A root-local `.fluxheim-storage-bin-index-v1` records each combined cache key
   and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
   validates each referenced object by parsing the v5 cache object bytes, rebuilds

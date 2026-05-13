@@ -21,6 +21,10 @@ Released: in progress
   `cache.disk.backend` selector. The current filesystem backend remains the
   default and `storage-bin` is recognized but fails closed until the allocator
   and durable index are implemented.
+- Added the isolated storage-bin cache storage prototype with manifest/bin
+  files, durable object index recovery, free-range reuse, LRU eviction parity,
+  purge-index synchronization, and Pingora `Storage` trait support while live
+  runtime selection remains fail-closed.
 
 ## 1.2.1 - Local Static Cache Follow-Up
 
