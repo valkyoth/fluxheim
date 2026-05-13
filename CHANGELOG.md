@@ -35,6 +35,9 @@ Released: in progress
   cache stats and aggregate Prometheus gauges.
 - Fixed same-key storage-bin rewrites so revalidation or replacement can reuse
   the previous object's range instead of refusing an otherwise admissible write.
+- Added a best-effort storage-bin index flush on clean storage teardown so the
+  debounce path reduces write amplification without dropping fresh cache entries
+  during normal shutdown.
 
 ## 1.2.1 - Local Static Cache Follow-Up
 

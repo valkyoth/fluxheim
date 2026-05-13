@@ -2765,6 +2765,33 @@ impl StorageBinDiskStorage {
         write_storage_bin_index_from_objects(&self.layout, &self.objects)
     }
 
+    fn flush_storage_bin_index_if_dirty(&self) -> std::io::Result<bool> {
+        {
+            let mut state = self
+                .index_state
+                .lock()
+                .map_err(|_| std::io::Error::other("storage-bin index state lock poisoned"))?;
+            if !state.dirty {
+                return Ok(false);
+            }
+            state.dirty = false;
+        }
+
+        if let Err(error) = self.write_index() {
+            if let Ok(mut state) = self.index_state.lock() {
+                state.dirty = true;
+            }
+            return Err(error);
+        }
+
+        if let Ok(mut state) = self.index_state.lock()
+            && !state.dirty
+        {
+            state.scheduled = false;
+        }
+        Ok(true)
+    }
+
     #[cfg(test)]
     fn storage_bin_index_flags(&self) -> (bool, bool) {
         match self.index_state.lock() {
@@ -2827,6 +2854,18 @@ impl StorageBinDiskStorage {
             .lock()
             .map_err(|_| std::io::Error::other("storage-bin free map lock poisoned"))?;
         free_map.release(location)
+    }
+}
+
+#[cfg(feature = "proxy")]
+impl Drop for StorageBinDiskStorage {
+    fn drop(&mut self) {
+        if let Err(error) = self.flush_storage_bin_index_if_dirty() {
+            log::warn!(
+                "failed to flush storage-bin cache index for {} during shutdown: {error}",
+                self.layout.root.display()
+            );
+        }
     }
 }
 
@@ -8380,6 +8419,50 @@ mod tests {
             3
         );
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_flushes_pending_index_on_drop() {
+        let root = unique_test_cache_dir("storage-bin-index-drop-flush");
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        let storage = super::StorageBinDiskStorage::from_plan(plan).unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/drop.webp", "vhost");
+        let meta = pingora_meta("max-age=60");
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        storage
+            .put_object(
+                store_key,
+                internal_meta,
+                response_header,
+                Arc::from(&b"drop-body"[..]),
+            )
+            .unwrap();
+        assert_eq!(storage.storage_bin_index_flags(), (true, true));
+
+        drop(storage);
+
+        let entries = super::read_storage_bin_index(&layout).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].combined_key, key.combined());
         std::fs::remove_dir_all(root).unwrap();
     }
 
