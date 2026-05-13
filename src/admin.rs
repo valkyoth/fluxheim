@@ -4366,7 +4366,7 @@ mod tests {
         ));
         assert!(body.contains(r#""storage_tiers":2"#));
         assert!(body.contains(r#""memory":{"entries":0"#));
-        assert!(body.contains(r#""disk":{"entries":0"#));
+        assert!(body.contains(r#""disk":{"backend":"filesystem","entries":0"#));
 
         std::fs::remove_dir_all(cache_path).unwrap();
     }
