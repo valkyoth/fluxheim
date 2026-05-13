@@ -202,6 +202,10 @@ internal cache implementation.
   data files, with 16-digit hexadecimal bin ids. Object metadata will point to
   `(bin_id, offset, len)` locations that must fit entirely within a single bin;
   oversized objects remain rejected by the existing per-object cache limit.
+- The allocator model uses first-fit free-range reuse within bounded bins and
+  refuses allocations once the configured disk-cache byte budget is exhausted.
+  Free ranges are merged after release so evictions can make space without
+  growing the number of bin files.
 - Optional cache encryption at rest is planned for the `1.2.x` cache line after
   the storage-bin format is defined. It should remain disabled by default and
   support both small-deployment local key sources and OpenBao Transit/KMS-backed

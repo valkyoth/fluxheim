@@ -1,5 +1,5 @@
 #[cfg(feature = "proxy")]
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::Write as _;
 #[cfg(feature = "proxy")]
 use std::path::Path;
@@ -222,6 +222,200 @@ impl StorageBinObjectLocation {
             ));
         }
         Ok(self)
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct StorageBinFreeRange {
+    pub offset: u64,
+    pub len: u64,
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone)]
+pub struct StorageBinFreeMap {
+    bin_size_bytes: u64,
+    max_size_bytes: u64,
+    next_bin_id: u64,
+    free: BTreeMap<u64, Vec<StorageBinFreeRange>>,
+}
+
+#[cfg(feature = "proxy")]
+impl StorageBinFreeMap {
+    pub fn new(layout: &StorageBinLayoutPlan) -> Self {
+        Self {
+            bin_size_bytes: layout.bin_size_bytes.as_u64(),
+            max_size_bytes: layout.max_size_bytes.as_u64(),
+            next_bin_id: 0,
+            free: BTreeMap::new(),
+        }
+    }
+
+    pub fn allocate(&mut self, len: u64) -> std::io::Result<Option<StorageBinObjectLocation>> {
+        if len == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin allocation length must be greater than zero",
+            ));
+        }
+        if len > self.bin_size_bytes {
+            return Ok(None);
+        }
+
+        if let Some(location) = self.allocate_from_free_ranges(len)? {
+            return Ok(Some(location));
+        }
+
+        let Some(capacity) = self.bin_capacity(self.next_bin_id) else {
+            return Ok(None);
+        };
+        if len > capacity {
+            return Ok(None);
+        }
+
+        let bin_id = self.next_bin_id;
+        self.next_bin_id = self.next_bin_id.saturating_add(1);
+        let remaining = capacity.saturating_sub(len);
+        if remaining > 0 {
+            self.insert_free_range(
+                bin_id,
+                StorageBinFreeRange {
+                    offset: len,
+                    len: remaining,
+                },
+            )?;
+        }
+        Ok(Some(StorageBinObjectLocation {
+            bin_id,
+            offset: 0,
+            len,
+        }))
+    }
+
+    pub fn release(&mut self, location: StorageBinObjectLocation) -> std::io::Result<()> {
+        location.validate(ByteSize::from_bytes(self.bin_size_bytes))?;
+        let Some(capacity) = self.bin_capacity(location.bin_id) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin release references a bin outside the configured cache budget",
+            ));
+        };
+        let end = location.offset.saturating_add(location.len);
+        if end > capacity {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin release exceeds the bin capacity",
+            ));
+        }
+        self.insert_free_range(
+            location.bin_id,
+            StorageBinFreeRange {
+                offset: location.offset,
+                len: location.len,
+            },
+        )
+    }
+
+    pub fn free_ranges(&self, bin_id: u64) -> &[StorageBinFreeRange] {
+        self.free.get(&bin_id).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    fn allocate_from_free_ranges(
+        &mut self,
+        len: u64,
+    ) -> std::io::Result<Option<StorageBinObjectLocation>> {
+        let mut selected = None;
+        for (bin_id, ranges) in &self.free {
+            if let Some(index) = ranges.iter().position(|range| range.len >= len) {
+                selected = Some((*bin_id, index));
+                break;
+            }
+        }
+
+        let Some((bin_id, index)) = selected else {
+            return Ok(None);
+        };
+        let ranges = self.free.get_mut(&bin_id).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "storage-bin free range disappeared during allocation",
+            )
+        })?;
+        let range = ranges[index];
+        let location = StorageBinObjectLocation {
+            bin_id,
+            offset: range.offset,
+            len,
+        };
+        if range.len == len {
+            ranges.remove(index);
+        } else {
+            ranges[index] = StorageBinFreeRange {
+                offset: range.offset.saturating_add(len),
+                len: range.len.saturating_sub(len),
+            };
+        }
+        if ranges.is_empty() {
+            self.free.remove(&bin_id);
+        }
+        Ok(Some(location))
+    }
+
+    fn insert_free_range(
+        &mut self,
+        bin_id: u64,
+        range: StorageBinFreeRange,
+    ) -> std::io::Result<()> {
+        if range.len == 0 {
+            return Ok(());
+        }
+        let Some(capacity) = self.bin_capacity(bin_id) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin free range references a bin outside the configured cache budget",
+            ));
+        };
+        let end = range.offset.checked_add(range.len).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin free range overflows",
+            )
+        })?;
+        if end > capacity {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin free range exceeds the bin capacity",
+            ));
+        }
+
+        let ranges = self.free.entry(bin_id).or_default();
+        ranges.push(range);
+        ranges.sort_by_key(|range| range.offset);
+        let mut merged: Vec<StorageBinFreeRange> = Vec::with_capacity(ranges.len());
+        for range in ranges.drain(..) {
+            if let Some(last) = merged.last_mut() {
+                let last_end = last.offset.saturating_add(last.len);
+                if range.offset <= last_end {
+                    let range_end = range.offset.saturating_add(range.len);
+                    last.len = range_end.saturating_sub(last.offset).max(last.len);
+                    continue;
+                }
+            }
+            merged.push(range);
+        }
+        *ranges = merged;
+        Ok(())
+    }
+
+    fn bin_capacity(&self, bin_id: u64) -> Option<u64> {
+        let start = bin_id.checked_mul(self.bin_size_bytes)?;
+        if start >= self.max_size_bytes {
+            return None;
+        }
+        Some(self.bin_size_bytes.min(self.max_size_bytes - start))
     }
 }
 
@@ -5684,6 +5878,95 @@ mod tests {
             .validate(ByteSize::from_bytes(64))
             .is_err()
         );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_free_map_allocates_and_reuses_ranges() {
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: PathBuf::from("/var/cache/fluxheim/example.test"),
+            max_size_bytes: ByteSize::from_bytes(192),
+            max_object_bytes: ByteSize::from_bytes(64),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        let mut free_map = super::StorageBinFreeMap::new(&layout);
+
+        let first = free_map.allocate(24).unwrap().unwrap();
+        let second = free_map.allocate(24).unwrap().unwrap();
+        free_map.release(first).unwrap();
+        let reused = free_map.allocate(16).unwrap().unwrap();
+
+        assert_eq!(
+            first,
+            super::StorageBinObjectLocation {
+                bin_id: 0,
+                offset: 0,
+                len: 24,
+            }
+        );
+        assert_eq!(
+            second,
+            super::StorageBinObjectLocation {
+                bin_id: 0,
+                offset: 24,
+                len: 24,
+            }
+        );
+        assert_eq!(
+            reused,
+            super::StorageBinObjectLocation {
+                bin_id: 0,
+                offset: 0,
+                len: 16,
+            }
+        );
+        assert_eq!(
+            free_map.free_ranges(0),
+            &[
+                super::StorageBinFreeRange { offset: 16, len: 8 },
+                super::StorageBinFreeRange {
+                    offset: 48,
+                    len: 16
+                },
+            ]
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_free_map_honors_global_cache_budget() {
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: PathBuf::from("/var/cache/fluxheim/example.test"),
+            max_size_bytes: ByteSize::from_bytes(96),
+            max_object_bytes: ByteSize::from_bytes(64),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(64),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        let mut free_map = super::StorageBinFreeMap::new(&layout);
+
+        assert_eq!(free_map.allocate(64).unwrap().unwrap().bin_id, 0);
+        assert_eq!(
+            free_map.allocate(32).unwrap().unwrap(),
+            super::StorageBinObjectLocation {
+                bin_id: 1,
+                offset: 0,
+                len: 32,
+            }
+        );
+        assert!(free_map.allocate(1).unwrap().is_none());
     }
 
     #[test]
