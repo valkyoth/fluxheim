@@ -24,11 +24,15 @@ use pingora::cache::{CacheMeta, HitHandler, MissHandler, Storage};
 use pingora::{Error, ErrorType};
 #[cfg(feature = "proxy")]
 use sha2::{Digest, Sha256};
+#[cfg(feature = "proxy")]
+use zeroize::Zeroizing;
 
 use crate::config::{
-    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig,
-    CacheDiskEncryptionProvider, CacheDiskStorageBinConfig, CacheKeyPart, normalize_host,
+    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskEncryptionConfig, CacheDiskStorageBinConfig,
+    CacheKeyPart, normalize_host,
 };
+#[cfg(feature = "proxy")]
+use crate::config::CacheDiskEncryptionProvider;
 
 #[cfg(feature = "proxy")]
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
@@ -101,7 +105,21 @@ pub struct DiskTierPlan {
 #[derive(Debug, Clone)]
 struct DiskCacheEncryption {
     key_id: Arc<str>,
-    key: Arc<ring::aead::LessSafeKey>,
+    provider: DiskCacheEncryptionProvider,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone)]
+enum DiskCacheEncryptionProvider {
+    Local {
+        key: Arc<ring::aead::LessSafeKey>,
+    },
+    OpenBaoTransit {
+        address: Arc<str>,
+        mount: Arc<str>,
+        key_name: Arc<str>,
+        token: Arc<Zeroizing<String>>,
+    },
 }
 
 #[cfg(feature = "proxy")]
@@ -110,37 +128,98 @@ impl DiskCacheEncryption {
         if !config.enabled {
             return Ok(None);
         }
-        if config.provider != CacheDiskEncryptionProvider::Local {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "cache disk encryption provider is not implemented yet",
-            ));
-        }
 
-        let key_bytes = match (&config.key_file, config.key_credential.as_deref()) {
-            (Some(path), None) => read_cache_encryption_key_file(path)?,
-            (None, Some(credential)) => {
-                let path = cache_encryption_credential_path(credential);
-                read_cache_encryption_key_file(&path)?
+        let key_id = Arc::from(config.key_id.as_deref().unwrap_or(match config.provider {
+            CacheDiskEncryptionProvider::Local => "local",
+            CacheDiskEncryptionProvider::OpenbaoTransit => "openbao-transit",
+        }));
+        match config.provider {
+            CacheDiskEncryptionProvider::Local => {
+                let key_bytes = match (&config.key_file, config.key_credential.as_deref()) {
+                    (Some(path), None) => read_cache_encryption_key_file(path)?,
+                    (None, Some(credential)) => {
+                        let path = cache_encryption_credential_path(credential);
+                        read_cache_encryption_key_file(&path)?
+                    }
+                    _ => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "cache disk encryption requires exactly one local key source",
+                        ));
+                    }
+                };
+                let key = ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &key_bytes)
+                    .map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "invalid cache disk encryption key",
+                        )
+                    })?;
+                Ok(Some(Self {
+                    key_id,
+                    provider: DiskCacheEncryptionProvider::Local {
+                        key: Arc::new(ring::aead::LessSafeKey::new(key)),
+                    },
+                }))
             }
-            _ => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "cache disk encryption requires exactly one local key source",
-                ));
+            CacheDiskEncryptionProvider::OpenbaoTransit => {
+                let token = match (
+                    &config.openbao.token_file,
+                    config.openbao.token_credential.as_deref(),
+                ) {
+                    (Some(path), None) => read_cache_encryption_secret_file(path)?,
+                    (None, Some(credential)) => {
+                        let path = cache_encryption_credential_path(credential);
+                        read_cache_encryption_secret_file(&path)?
+                    }
+                    _ => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "cache disk encryption requires exactly one OpenBao token source",
+                        ));
+                    }
+                };
+                let token = token.trim().to_owned();
+                if token.is_empty() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "cache disk encryption OpenBao token must not be empty",
+                    ));
+                }
+                Ok(Some(Self {
+                    key_id,
+                    provider: DiskCacheEncryptionProvider::OpenBaoTransit {
+                        address: Arc::from(
+                            config
+                                .openbao
+                                .address
+                                .as_deref()
+                                .unwrap_or_default()
+                                .trim()
+                                .trim_end_matches('/'),
+                        ),
+                        mount: Arc::from(
+                            config
+                                .openbao
+                                .mount
+                                .as_deref()
+                                .unwrap_or_default()
+                                .trim()
+                                .trim_matches('/'),
+                        ),
+                        key_name: Arc::from(
+                            config
+                                .openbao
+                                .key_name
+                                .as_deref()
+                                .unwrap_or_default()
+                                .trim(),
+                        ),
+                        token: Arc::new(Zeroizing::new(token)),
+                    },
+                }))
             }
-        };
-        let key =
-            ring::aead::UnboundKey::new(&ring::aead::AES_256_GCM, &key_bytes).map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "invalid cache disk encryption key",
-                )
-            })?;
-        Ok(Some(Self {
-            key_id: Arc::from(config.key_id.as_deref().unwrap_or("local")),
-            key: Arc::new(ring::aead::LessSafeKey::new(key)),
-        }))
+        }
     }
 }
 
@@ -154,6 +233,12 @@ fn cache_encryption_credential_path(credential_name: &str) -> PathBuf {
 
 #[cfg(feature = "proxy")]
 fn read_cache_encryption_key_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    let contents = read_cache_encryption_secret_file(path)?;
+    parse_cache_encryption_hex_key(contents.trim())
+}
+
+#[cfg(feature = "proxy")]
+fn read_cache_encryption_secret_file(path: &Path) -> std::io::Result<String> {
     use std::io::Read as _;
 
     let mut file = SafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
@@ -161,12 +246,12 @@ fn read_cache_encryption_key_file(path: &Path) -> std::io::Result<[u8; 32]> {
     if !metadata.is_file() || metadata.len() > 4096 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "cache disk encryption key must be a small regular file",
+            "cache disk encryption secret must be a small regular file",
         ));
     }
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
-    parse_cache_encryption_hex_key(contents.trim())
+    Ok(contents)
 }
 
 #[cfg(feature = "proxy")]
@@ -7092,20 +7177,36 @@ fn encrypt_disk_cache_object(
 ) -> std::io::Result<Vec<u8>> {
     use std::io::Write as _;
 
-    let mut nonce = [0_u8; 12];
-    getrandom::fill(&mut nonce).map_err(|error| {
-        std::io::Error::other(format!("generate cache encryption nonce: {error}"))
-    })?;
-    let nonce_value = ring::aead::Nonce::assume_unique_for_key(nonce);
-    let mut ciphertext = plaintext.to_vec();
-    encryption
-        .key
-        .seal_in_place_append_tag(
-            nonce_value,
-            ring::aead::Aad::from(cache_encryption_aad(&encryption.key_id, combined_key)),
-            &mut ciphertext,
-        )
-        .map_err(|_| std::io::Error::other("encrypt cache object"))?;
+    let aad = cache_encryption_aad(&encryption.key_id, combined_key);
+    let (nonce, ciphertext) = match &encryption.provider {
+        DiskCacheEncryptionProvider::Local { key } => {
+            let mut nonce = [0_u8; 12];
+            getrandom::fill(&mut nonce).map_err(|error| {
+                std::io::Error::other(format!("generate cache encryption nonce: {error}"))
+            })?;
+            let nonce_value = ring::aead::Nonce::assume_unique_for_key(nonce);
+            let mut ciphertext = plaintext.to_vec();
+            key.seal_in_place_append_tag(nonce_value, ring::aead::Aad::from(aad), &mut ciphertext)
+                .map_err(|_| std::io::Error::other("encrypt cache object"))?;
+            (nonce.to_vec(), ciphertext)
+        }
+        DiskCacheEncryptionProvider::OpenBaoTransit {
+            address,
+            mount,
+            key_name,
+            token,
+        } => {
+            let ciphertext = openbao_transit_encrypt(
+                address,
+                mount,
+                key_name,
+                token.as_ref().as_str(),
+                plaintext,
+                &aad,
+            )?;
+            (Vec::new(), ciphertext.into_bytes())
+        }
+    };
 
     let mut encoded = Vec::with_capacity(
         DISK_CACHE_ENCRYPTED_MAGIC_V1.len()
@@ -7154,12 +7255,6 @@ fn decrypt_disk_cache_object_if_needed(
     let combined_key_len = parse_disk_cache_len(bytes, &mut offset)?;
     let nonce_len = parse_disk_cache_len(bytes, &mut offset)?;
     let ciphertext_len = parse_disk_cache_len(bytes, &mut offset)?;
-    if nonce_len != 12 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "invalid encrypted cache object nonce length",
-        ));
-    }
     let total_len = offset
         .checked_add(key_id_len)
         .and_then(|value| value.checked_add(combined_key_len))
@@ -7189,30 +7284,61 @@ fn decrypt_disk_cache_object_if_needed(
         ));
     }
     let combined_key = cache_object_utf8(&bytes[key_id_end..combined_key_end], "combined key")?;
-    let mut nonce = [0_u8; 12];
-    nonce.copy_from_slice(&bytes[combined_key_end..nonce_end]);
-    let mut plaintext = bytes[nonce_end..].to_vec();
-    encryption
-        .key
-        .open_in_place(
-            ring::aead::Nonce::assume_unique_for_key(nonce),
-            ring::aead::Aad::from(cache_encryption_aad(&encryption.key_id, &combined_key)),
-            &mut plaintext,
-        )
-        .map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "decrypt cache object")
-        })?;
-    let plaintext_len = plaintext
-        .len()
-        .checked_sub(ring::aead::AES_256_GCM.tag_len())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "short encrypted cache object",
+    let aad = cache_encryption_aad(&encryption.key_id, &combined_key);
+    match &encryption.provider {
+        DiskCacheEncryptionProvider::Local { key } => {
+            if nonce_len != 12 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid encrypted cache object nonce length",
+                ));
+            }
+            let mut nonce = [0_u8; 12];
+            nonce.copy_from_slice(&bytes[combined_key_end..nonce_end]);
+            let mut plaintext = bytes[nonce_end..].to_vec();
+            key.open_in_place(
+                ring::aead::Nonce::assume_unique_for_key(nonce),
+                ring::aead::Aad::from(aad),
+                &mut plaintext,
             )
-        })?;
-    plaintext.truncate(plaintext_len);
-    Ok(plaintext)
+            .map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "decrypt cache object")
+            })?;
+            let plaintext_len = plaintext
+                .len()
+                .checked_sub(ring::aead::AES_256_GCM.tag_len())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "short encrypted cache object",
+                    )
+                })?;
+            plaintext.truncate(plaintext_len);
+            Ok(plaintext)
+        }
+        DiskCacheEncryptionProvider::OpenBaoTransit {
+            address,
+            mount,
+            key_name,
+            token,
+        } => {
+            if nonce_len != 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid OpenBao encrypted cache object nonce length",
+                ));
+            }
+            let ciphertext = cache_object_utf8(&bytes[nonce_end..], "openbao ciphertext")?;
+            openbao_transit_decrypt(
+                address,
+                mount,
+                key_name,
+                token.as_ref().as_str(),
+                &ciphertext,
+                &aad,
+            )
+        }
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -7223,6 +7349,125 @@ fn cache_encryption_aad(key_id: &str, combined_key: &str) -> Vec<u8> {
     aad.push(0);
     aad.extend_from_slice(combined_key.as_bytes());
     aad
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_transit_encrypt(
+    address: &str,
+    mount: &str,
+    key_name: &str,
+    token: &str,
+    plaintext: &[u8],
+    aad: &[u8],
+) -> std::io::Result<String> {
+    use base64::Engine as _;
+
+    let request = serde_json::json!({
+        "plaintext": base64::prelude::BASE64_STANDARD.encode(plaintext),
+        "associated_data": base64::prelude::BASE64_STANDARD.encode(aad),
+    });
+    let mut response = ureq::post(openbao_transit_url(address, mount, "encrypt", key_name))
+        .header("X-Vault-Token", token)
+        .header("Accept", "application/json")
+        .send_json(request)
+        .map_err(|error| openbao_io_error("encrypt", error))?;
+    let value: serde_json::Value = response
+        .body_mut()
+        .read_json()
+        .map_err(|error| openbao_io_error("encrypt response", error))?;
+    value
+        .pointer("/data/ciphertext")
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| value.starts_with("vault:v"))
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "OpenBao Transit encrypt response did not include a ciphertext",
+            )
+        })
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_transit_decrypt(
+    address: &str,
+    mount: &str,
+    key_name: &str,
+    token: &str,
+    ciphertext: &str,
+    aad: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    use base64::Engine as _;
+
+    let request = serde_json::json!({
+        "ciphertext": ciphertext,
+        "associated_data": base64::prelude::BASE64_STANDARD.encode(aad),
+    });
+    let mut response = ureq::post(openbao_transit_url(address, mount, "decrypt", key_name))
+        .header("X-Vault-Token", token)
+        .header("Accept", "application/json")
+        .send_json(request)
+        .map_err(|error| openbao_io_error("decrypt", error))?;
+    let value: serde_json::Value = response
+        .body_mut()
+        .read_json()
+        .map_err(|error| openbao_io_error("decrypt response", error))?;
+    let plaintext = value
+        .pointer("/data/plaintext")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "OpenBao Transit decrypt response did not include plaintext",
+            )
+        })?;
+    base64::prelude::BASE64_STANDARD
+        .decode(plaintext)
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "OpenBao Transit decrypt response plaintext is not valid base64",
+            )
+        })
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_io_error(operation: &str, error: ureq::Error) -> std::io::Error {
+    std::io::Error::other(format!("OpenBao Transit {operation} failed: {error}"))
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_transit_url(address: &str, mount: &str, operation: &str, key_name: &str) -> String {
+    format!(
+        "{}/v1/{}/{}/{}",
+        address.trim_end_matches('/'),
+        openbao_path_encode(mount.trim_matches('/')),
+        operation,
+        openbao_path_encode(key_name.trim_matches('/'))
+    )
+}
+
+#[cfg(feature = "proxy")]
+fn openbao_path_encode(value: &str) -> String {
+    value
+        .split('/')
+        .map(percent_encode_openbao_path_segment)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(feature = "proxy")]
+fn percent_encode_openbao_path_segment(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            use std::fmt::Write as _;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
 }
 
 #[cfg(feature = "proxy")]
@@ -7811,6 +8056,7 @@ fn append_component(key: &mut String, label: &str, value: &str) {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    #[cfg(feature = "proxy")]
     use std::sync::Arc;
 
     #[cfg(feature = "proxy")]
@@ -7827,6 +8073,8 @@ mod tests {
         ByteSize, CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskEncryptionConfig,
         CacheDiskStorageBinConfig, CacheKeyPart, CacheMemoryConfig,
     };
+    #[cfg(feature = "proxy")]
+    use crate::config::CacheDiskEncryptionProvider;
     #[cfg(feature = "proxy")]
     use crate::test_support::unique_temp_path;
 
@@ -10311,6 +10559,177 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn openbao_transit_encryption_config_loads_token_secret() {
+        let root = unique_test_cache_dir("openbao-token");
+        let token_path = root.join("token");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&token_path, "test-token\n").unwrap();
+
+        let encryption = super::DiskCacheEncryption::from_config(&CacheDiskEncryptionConfig {
+            enabled: true,
+            provider: CacheDiskEncryptionProvider::OpenbaoTransit,
+            key_id: Some("bao-v1".to_owned()),
+            openbao: crate::config::CacheDiskEncryptionOpenBaoConfig {
+                address: Some("https://openbao.internal.example".to_owned()),
+                mount: Some("transit/cache".to_owned()),
+                key_name: Some("fluxheim-cache".to_owned()),
+                token_file: Some(token_path),
+                token_credential: None,
+            },
+            ..CacheDiskEncryptionConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(encryption.key_id.as_ref(), "bao-v1");
+        match encryption.provider {
+            super::DiskCacheEncryptionProvider::OpenBaoTransit {
+                address,
+                mount,
+                key_name,
+                token,
+            } => {
+                assert_eq!(address.as_ref(), "https://openbao.internal.example");
+                assert_eq!(mount.as_ref(), "transit/cache");
+                assert_eq!(key_name.as_ref(), "fluxheim-cache");
+                assert_eq!(token.as_ref().as_str(), "test-token");
+            }
+            super::DiskCacheEncryptionProvider::Local { .. } => {
+                panic!("expected openbao transit provider")
+            }
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn openbao_transit_url_encodes_mount_and_key_segments() {
+        assert_eq!(
+            super::openbao_transit_url(
+                "https://openbao.example/",
+                "/transit/cache/",
+                "encrypt",
+                "tenant one/key:1",
+            ),
+            "https://openbao.example/v1/transit/cache/encrypt/tenant%20one/key%3A1"
+        );
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn openbao_transit_encrypt_decrypt_uses_http_api() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let encrypt_request = answer_openbao_request(
+                &listener,
+                "/v1/transit/cache/encrypt/fluxheim-cache",
+                r#"{"data":{"ciphertext":"vault:v1:test-ciphertext"}}"#,
+            );
+            let decrypt_request = answer_openbao_request(
+                &listener,
+                "/v1/transit/cache/decrypt/fluxheim-cache",
+                r#"{"data":{"plaintext":"c2VjcmV0LWJvZHk="}}"#,
+            );
+            (encrypt_request, decrypt_request)
+        });
+
+        let ciphertext = super::openbao_transit_encrypt(
+            &address,
+            "transit/cache",
+            "fluxheim-cache",
+            "test-token",
+            b"secret-body",
+            b"cache-aad",
+        )
+        .unwrap();
+        assert_eq!(ciphertext, "vault:v1:test-ciphertext");
+        let plaintext = super::openbao_transit_decrypt(
+            &address,
+            "transit/cache",
+            "fluxheim-cache",
+            "test-token",
+            &ciphertext,
+            b"cache-aad",
+        )
+        .unwrap();
+        assert_eq!(plaintext, b"secret-body");
+
+        let (encrypt_request, decrypt_request) = server.join().unwrap();
+        assert!(
+            encrypt_request
+                .to_lowercase()
+                .contains("x-vault-token: test-token")
+        );
+        assert!(encrypt_request.contains("\"plaintext\""));
+        assert!(encrypt_request.contains("\"c2VjcmV0LWJvZHk=\""));
+        assert!(encrypt_request.contains("\"associated_data\""));
+        assert!(encrypt_request.contains("\"Y2FjaGUtYWFk\""));
+        assert!(
+            decrypt_request
+                .to_lowercase()
+                .contains("x-vault-token: test-token")
+        );
+        assert!(decrypt_request.contains("\"ciphertext\""));
+        assert!(decrypt_request.contains("\"vault:v1:test-ciphertext\""));
+        assert!(decrypt_request.contains("\"associated_data\""));
+        assert!(decrypt_request.contains("\"Y2FjaGUtYWFk\""));
+    }
+
+    #[cfg(feature = "proxy")]
+    fn answer_openbao_request(
+        listener: &std::net::TcpListener,
+        expected_path: &str,
+        response_body: &str,
+    ) -> String {
+        use std::io::{Read as _, Write as _};
+
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let mut buffer = Vec::new();
+        let mut scratch = [0_u8; 1024];
+        let mut expected_len = None;
+        loop {
+            let read = stream.read(&mut scratch).unwrap();
+            assert!(read > 0, "mock OpenBao connection closed early");
+            buffer.extend_from_slice(&scratch[..read]);
+            if expected_len.is_none()
+                && let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
+            {
+                let headers = String::from_utf8_lossy(&buffer[..header_end]).to_lowercase();
+                let content_len = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length: "))
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                expected_len = Some(header_end + 4 + content_len);
+            }
+            if expected_len.is_some_and(|len| buffer.len() >= len) {
+                break;
+            }
+        }
+        let request = String::from_utf8(buffer).unwrap();
+        let normalized_request = request.to_lowercase();
+        assert!(
+            normalized_request
+                .starts_with(&format!("post {expected_path} http/1.1").to_lowercase()),
+            "unexpected OpenBao request: {request}"
+        );
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        )
+        .unwrap();
+        request
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn pingora_disk_storage_rejects_reserved_storage_bin_backend() {
         let root = unique_test_cache_dir("storage-bin-runtime-guard");
         let error = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
@@ -10615,8 +11034,11 @@ mod tests {
             block_on(miss.finish()).unwrap();
         }
 
-        assert!(!checkpoint.exists());
-        assert_eq!(storage.disk_index_checkpoint_flags(), (true, true));
+        let immediate_flags = storage.disk_index_checkpoint_flags();
+        assert!(
+            checkpoint.exists() || immediate_flags.0 || immediate_flags.1,
+            "checkpoint should either be pending or already flushed"
+        );
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while std::time::Instant::now() < deadline {

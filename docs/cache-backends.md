@@ -238,12 +238,13 @@ internal cache implementation.
   Prometheus aggregate gauges. These are the first operational signals for
   fragmentation and space amplification under high-churn workloads.
 - Optional cache encryption at rest is part of the `1.2.x` cache line after
-  the storage-bin format is defined. It remains disabled by default. The first
-  provider is local-key AES-256-GCM object encryption using a safe key file or
-  systemd/container credential. OpenBao Transit/KMS configuration is validated
-  as the regulated-deployment provider shape, but enabled OpenBao runtime key
-  operations fail closed until that provider is implemented. Encrypted objects
-  bind the configured key id and combined cache key as authenticated data.
+  the storage-bin format is defined. It remains disabled by default. The local
+  provider uses AES-256-GCM object encryption with a safe key file or
+  systemd/container credential. The OpenBao Transit provider keeps key material
+  outside Fluxheim, calls Transit encrypt/decrypt over HTTPS or loopback HTTP,
+  and stores only the returned Transit ciphertext in the cache backend.
+  Encrypted objects bind the configured key id and combined cache key as
+  authenticated data.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
   startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint

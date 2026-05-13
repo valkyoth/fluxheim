@@ -607,7 +607,7 @@ algorithm = "aes-256-gcm"
 # key_file = "/run/secrets/fluxheim-cache-key"
 # key_credential = "fluxheim-cache-key"
 
-# Optional provider shape for later OpenBao Transit/KMS-backed deployments:
+# Optional OpenBao Transit provider for external key custody:
 # provider = "openbao-transit"
 #
 # [cache.disk.encryption.openbao]
@@ -655,12 +655,15 @@ as authenticated data, so objects cannot be silently swapped between cache
 keys. Local cache encryption is intended for cache-at-rest protection; it does
 not encrypt memory cache contents.
 
-`provider = "openbao-transit"` reserves the OpenBao Transit/KMS integration
-shape for regulated deployments that need centralized key custody and rotation.
-The provider configuration validates HTTPS endpoints, loopback-only cleartext
-endpoints, safe mount/key names, and file/credential token sources, but enabled
-OpenBao runtime encryption remains a follow-up after the local-key provider.
-The default local-key provider does not require OpenBao.
+`provider = "openbao-transit"` uses OpenBao Transit for regulated deployments
+that need centralized key custody and rotation. Fluxheim calls the Transit
+`encrypt` and `decrypt` endpoints for disk cache objects and stores only the
+returned `vault:v...` ciphertext in the filesystem or storage-bin backend. The
+OpenBao endpoint must be HTTPS unless it is loopback HTTP, and the token must
+come from exactly one safe `token_file` or `token_credential` source. The
+configured key id plus combined cache key are passed as associated data, so a
+stored ciphertext is bound to the cache object identity. The default local-key
+provider does not require OpenBao.
 
 `local_static` is disabled by default. When set to `true`, the same cache
 policy may also store local `[web]`, `[vhosts.web]`, and route-scoped

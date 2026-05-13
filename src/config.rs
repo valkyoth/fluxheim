@@ -4413,11 +4413,6 @@ impl CacheDiskEncryptionConfig {
                     });
                 }
                 self.openbao.validate_enabled(scope)?;
-                return Err(ConfigError::InvalidCacheEncryptionPolicy {
-                    scope,
-                    field: "disk.encryption.provider",
-                    reason: "openbao-transit runtime encryption is not implemented yet",
-                });
             }
         }
 
@@ -9929,7 +9924,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_enabled_cache_disk_encryption_openbao_transit_until_runtime_provider_exists() {
+    fn accepts_cache_disk_encryption_openbao_transit_provider() {
         let root = unique_temp_path("config-cache-encryption-openbao");
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
@@ -9960,14 +9955,7 @@ mod tests {
             config.cache.disk.encryption.provider,
             CacheDiskEncryptionProvider::OpenbaoTransit
         );
-        assert_eq!(
-            config.validate(),
-            Err(ConfigError::InvalidCacheEncryptionPolicy {
-                scope: "cache",
-                field: "disk.encryption.provider",
-                reason: "openbao-transit runtime encryption is not implemented yet",
-            })
-        );
+        assert_eq!(config.validate(), Ok(()));
 
         let _ = std::fs::remove_dir_all(root);
     }

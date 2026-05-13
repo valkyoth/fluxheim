@@ -33,6 +33,7 @@ exceptions = [
     # TLS root stores can carry reviewed data licenses. Keep exceptions narrow;
     # do not globally allow CDLA-Permissive-2.0 for code.
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
 ]
 
 [licenses.private]

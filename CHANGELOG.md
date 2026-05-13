@@ -24,9 +24,10 @@ Released: in progress
   be loaded from a safe file path or a systemd/container credential, and
   encrypted cache objects authenticate the configured key id plus combined cache
   key as associated data.
-- Added OpenBao Transit/KMS configuration validation as the provider shape for
-  regulated deployments, while failing closed if operators enable the provider
-  before runtime OpenBao key operations are implemented.
+- Added OpenBao Transit runtime encryption for disk cache objects. Fluxheim can
+  call OpenBao Transit over HTTPS, load the token from a safe file or
+  systemd/container credential, and store only the Transit ciphertext in the
+  filesystem or storage-bin cache backend.
 
 ## 1.2.2 - Storage-Bin Disk Cache Follow-Up
 

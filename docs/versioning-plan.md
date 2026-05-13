@@ -806,11 +806,11 @@ Focused cache-only follow-up releases after 1.2:
   designed alongside the storage-bin format. The default remains unencrypted and
   does not require OpenBao. The first implemented provider is a local file or
   systemd/container credential key source for small deployments. The OpenBao
-  Transit/KMS configuration shape is reserved and validated for regulated
-  deployments that need centralized key custody, key versioning, and rotation,
-  but runtime OpenBao key operations fail closed until implemented. The cache
-  object format records key id/version, nonce, ciphertext length, and
-  authenticated-data scope so objects cannot be swapped between cache keys.
+  Transit provider supports regulated deployments that need centralized key
+  custody, key versioning, and rotation while storing only Transit ciphertext in
+  the cache backend. The cache object format records key id/version, nonce or
+  Transit ciphertext marker, ciphertext length, and authenticated-data scope so
+  objects cannot be swapped between cache keys.
 - `1.2.4`: distributed cache metadata and peer-fill. This release has one job:
   decide and implement the first safe multi-node cache coherence model for
   clustered deployments, including peer-fill limits, failure behavior, metrics,
@@ -1488,7 +1488,7 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.2.2`: focused slab/bin cache storage backend, if it proves safe enough
   after `1.2`.
 - `v1.2.3`: focused optional cache encryption at rest with local-key support
-  and validated OpenBao Transit/KMS provider configuration.
+  and OpenBao Transit provider support.
 - `v1.2.4`: focused distributed cache metadata and peer-fill release.
 - `v1.2.5`: optional cache-only follow-up if production testing finds one more
   cache blocker before `1.3`; likely candidates include proper Pingora-path

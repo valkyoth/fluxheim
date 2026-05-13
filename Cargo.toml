@@ -17,15 +17,18 @@ default = [
 ]
 proxy = [
     "dep:async-trait",
+    "dep:base64",
     "dep:bytes",
     "dep:getrandom",
     "dep:http",
     "dep:pingora",
     "dep:ring",
     "dep:rustix",
+    "dep:serde_json",
     "dep:sha2",
     "dep:subtle",
     "dep:tokio",
+    "dep:ureq",
     "dep:zeroize",
 ]
 load-balancer = ["proxy", "pingora/lb"]
@@ -112,6 +115,7 @@ tokio = { version = "1.52.3", default-features = false, features = ["rt", "time"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", optional = true }
 toml = "1.1.2"
+ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
 x509-parser = { version = "0.18.1", default-features = false, optional = true }
 zeroize = { version = "1.8.2", features = ["derive"], optional = true }
 
