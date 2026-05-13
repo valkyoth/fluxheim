@@ -1862,6 +1862,228 @@ pub struct PingoraDiskStorage {
 }
 
 #[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug)]
+pub struct StorageBinDiskStorage {
+    layout: StorageBinLayoutPlan,
+    files: StorageBinFileSet,
+    free_map: Mutex<StorageBinFreeMap>,
+    objects: RwLock<HashMap<String, StorageBinObjectEntry>>,
+    purge_index: CachePurgeIndex,
+    max_size_bytes: ByteSize,
+    max_object_bytes: ByteSize,
+    activity: CacheActivityCounters,
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone)]
+struct StorageBinObjectEntry {
+    location: StorageBinObjectLocation,
+    size: u64,
+    accessed: std::time::SystemTime,
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+impl StorageBinDiskStorage {
+    pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
+        Self::from_plan_with_activity(plan, CacheActivityCounters::new("disk"))
+    }
+
+    pub fn from_plan_with_metric_scope(
+        plan: DiskTierPlan,
+        vhost: &str,
+        route: Option<&str>,
+    ) -> std::io::Result<Self> {
+        Self::from_plan_with_activity(
+            plan,
+            CacheActivityCounters::new_with_metric_scope("disk", vhost, route),
+        )
+    }
+
+    fn from_plan_with_activity(
+        plan: DiskTierPlan,
+        activity: CacheActivityCounters,
+    ) -> std::io::Result<Self> {
+        if plan.backend != CacheDiskBackend::StorageBin {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "StorageBinDiskStorage requires cache.disk.backend = \"storage-bin\"",
+            ));
+        }
+        let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "storage-bin layout requires storage-bin disk backend",
+            )
+        })?;
+        let root = prepare_disk_cache_root(&layout.root)?;
+        layout = StorageBinLayoutPlan {
+            root: root.clone(),
+            manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
+            data_dir: root.join(STORAGE_BIN_DATA_DIR),
+            ..layout
+        };
+        prepare_storage_bin_layout(&layout)?;
+        Ok(Self {
+            free_map: Mutex::new(StorageBinFreeMap::new(&layout)),
+            files: StorageBinFileSet::new(layout.clone()),
+            layout,
+            objects: RwLock::new(HashMap::new()),
+            purge_index: CachePurgeIndex::new(),
+            max_size_bytes: plan.max_size_bytes,
+            max_object_bytes: plan.max_object_bytes,
+            activity,
+        })
+    }
+
+    pub fn stats(&self) -> std::io::Result<DiskCacheStats> {
+        let (entries, size_bytes) = match self.objects.read() {
+            Ok(objects) => (
+                objects.len() as u64,
+                objects.values().map(|entry| entry.size).sum(),
+            ),
+            Err(_) => (0, 0),
+        };
+        Ok(DiskCacheStats {
+            entries,
+            size_bytes,
+            max_size_bytes: self.max_size_bytes,
+            max_object_bytes: self.max_object_bytes,
+            purge_index_entries: self.purge_index.len() as u64,
+            purge_index_max_entries: self.purge_index.max_entries() as u64,
+            activity: self.activity.snapshot(),
+        })
+    }
+
+    fn put_object(
+        &self,
+        store_key: PingoraStoreKey,
+        internal_meta: Vec<u8>,
+        response_header: Vec<u8>,
+        body: Arc<[u8]>,
+    ) -> pingora::Result<Option<usize>> {
+        let object_bytes = pingora_object_weight(&internal_meta, &response_header, &body);
+        let header_overhead = disk_cache_header_overhead(&store_key);
+        let encoded_object_bytes = object_bytes.saturating_add(header_overhead);
+        if object_bytes > self.max_object_bytes.as_u64()
+            || header_overhead > DISK_CACHE_HEADER_OVERHEAD_LIMIT
+            || encoded_object_bytes > self.layout.bin_size_bytes.as_u64()
+        {
+            self.activity.store_refusal();
+            return Ok(None);
+        }
+
+        let encoded = encode_disk_cache_object(&store_key, &internal_meta, &response_header, &body)
+            .map_err(|error| cache_io_error("encode storage-bin cache object", error))?;
+        let encoded_len = encoded.len() as u64;
+        let location = {
+            let mut free_map = self.free_map.lock().map_err(|_| {
+                cache_io_error(
+                    "lock storage-bin free map",
+                    std::io::Error::other("storage-bin free map lock poisoned"),
+                )
+            })?;
+            match free_map
+                .allocate(encoded_len)
+                .map_err(|error| cache_io_error("allocate storage-bin object", error))?
+            {
+                Some(location) => location,
+                None => {
+                    self.activity.store_refusal();
+                    return Ok(None);
+                }
+            }
+        };
+
+        if let Err(error) = self.files.write_object(location, &encoded) {
+            let _ = self.release_location(location);
+            self.activity.store_refusal();
+            return Err(cache_io_error("write storage-bin cache object", error));
+        }
+
+        let previous = {
+            let mut objects = self.objects.write().map_err(|_| {
+                cache_io_error(
+                    "lock storage-bin object index",
+                    std::io::Error::other("storage-bin object index lock poisoned"),
+                )
+            })?;
+            objects.insert(
+                store_key.combined.clone(),
+                StorageBinObjectEntry {
+                    location,
+                    size: encoded_len,
+                    accessed: std::time::SystemTime::now(),
+                },
+            )
+        };
+        if let Some(previous) = previous {
+            let _ = self.release_location(previous.location);
+        }
+        self.purge_index.insert_with_path_and_tags(
+            store_key.combined,
+            store_key.primary,
+            store_key.user_tag,
+            store_key.index_path,
+            store_key.cache_tags,
+        );
+        self.activity.store();
+        Ok(Some(body.len()))
+    }
+
+    fn lookup_object_by_combined(
+        &self,
+        combined_key: &str,
+    ) -> pingora::Result<Option<PingoraStoredObject>> {
+        let entry = match self.objects.read() {
+            Ok(objects) => objects.get(combined_key).cloned(),
+            Err(_) => None,
+        };
+        let Some(entry) = entry else {
+            self.activity.miss();
+            return Ok(None);
+        };
+        let bytes = self
+            .files
+            .read_object(entry.location)
+            .map_err(|error| cache_io_error("read storage-bin cache object", error))?;
+        let object = parse_disk_cache_object(&bytes, self.max_object_bytes)
+            .map_err(|error| cache_io_error("parse storage-bin cache object", error))?;
+        if let Ok(mut objects) = self.objects.write()
+            && let Some(entry) = objects.get_mut(combined_key)
+        {
+            entry.accessed = std::time::SystemTime::now();
+        }
+        self.activity.hit();
+        Ok(Some(object))
+    }
+
+    pub fn purge_combined(&self, combined_key: &str) -> std::io::Result<bool> {
+        let removed = match self.objects.write() {
+            Ok(mut objects) => objects.remove(combined_key),
+            Err(_) => None,
+        };
+        let Some(entry) = removed else {
+            return Ok(false);
+        };
+        self.release_location(entry.location)?;
+        self.purge_index.remove_combined(combined_key);
+        self.activity.purge();
+        Ok(true)
+    }
+
+    fn release_location(&self, location: StorageBinObjectLocation) -> std::io::Result<()> {
+        let mut free_map = self
+            .free_map
+            .lock()
+            .map_err(|_| std::io::Error::other("storage-bin free map lock poisoned"))?;
+        free_map.release(location)
+    }
+}
+
+#[cfg(feature = "proxy")]
 impl PingoraDiskStorage {
     pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
         reject_unimplemented_disk_backend(plan.backend)?;
@@ -5021,29 +5243,59 @@ fn write_disk_cache_object(
     use std::io::Write as _;
 
     let mut file = create_new_disk_cache_file(path)?;
+    file.write_all(&encode_disk_cache_object(
+        store_key,
+        internal_meta,
+        response_header,
+        body,
+    )?)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+#[cfg(feature = "proxy")]
+fn encode_disk_cache_object(
+    store_key: &PingoraStoreKey,
+    internal_meta: &[u8],
+    response_header: &[u8],
+    body: &[u8],
+) -> std::io::Result<Vec<u8>> {
+    use std::io::Write as _;
+
     let encoded_cache_tags = encode_cache_tags(&store_key.cache_tags);
 
     let index_path = store_key.index_path.as_deref().unwrap_or_default();
 
-    file.write_all(DISK_CACHE_MAGIC_V5)?;
-    writeln!(file, "{}", store_key.combined.len())?;
-    writeln!(file, "{}", store_key.primary.len())?;
-    writeln!(file, "{}", store_key.user_tag.len())?;
-    writeln!(file, "{}", encoded_cache_tags.len())?;
-    writeln!(file, "{}", index_path.len())?;
-    writeln!(file, "{}", internal_meta.len())?;
-    writeln!(file, "{}", response_header.len())?;
-    writeln!(file, "{}", body.len())?;
-    file.write_all(store_key.combined.as_bytes())?;
-    file.write_all(store_key.primary.as_bytes())?;
-    file.write_all(store_key.user_tag.as_bytes())?;
-    file.write_all(encoded_cache_tags.as_bytes())?;
-    file.write_all(index_path.as_bytes())?;
-    file.write_all(internal_meta)?;
-    file.write_all(response_header)?;
-    file.write_all(body)?;
-    file.sync_all()?;
-    Ok(())
+    let mut encoded = Vec::with_capacity(
+        DISK_CACHE_MAGIC_V5.len()
+            + 128
+            + store_key.combined.len()
+            + store_key.primary.len()
+            + store_key.user_tag.len()
+            + encoded_cache_tags.len()
+            + index_path.len()
+            + internal_meta.len()
+            + response_header.len()
+            + body.len(),
+    );
+    encoded.write_all(DISK_CACHE_MAGIC_V5)?;
+    writeln!(encoded, "{}", store_key.combined.len())?;
+    writeln!(encoded, "{}", store_key.primary.len())?;
+    writeln!(encoded, "{}", store_key.user_tag.len())?;
+    writeln!(encoded, "{}", encoded_cache_tags.len())?;
+    writeln!(encoded, "{}", index_path.len())?;
+    writeln!(encoded, "{}", internal_meta.len())?;
+    writeln!(encoded, "{}", response_header.len())?;
+    writeln!(encoded, "{}", body.len())?;
+    encoded.write_all(store_key.combined.as_bytes())?;
+    encoded.write_all(store_key.primary.as_bytes())?;
+    encoded.write_all(store_key.user_tag.as_bytes())?;
+    encoded.write_all(encoded_cache_tags.as_bytes())?;
+    encoded.write_all(index_path.as_bytes())?;
+    encoded.write_all(internal_meta)?;
+    encoded.write_all(response_header)?;
+    encoded.write_all(body)?;
+    Ok(encoded)
 }
 
 #[cfg(feature = "proxy")]
@@ -5592,6 +5844,7 @@ fn append_component(key: &mut String, label: &str, value: &str) {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[cfg(feature = "proxy")]
     use bytes::Bytes;
@@ -6418,6 +6671,103 @@ mod tests {
             .unwrap();
 
         assert_eq!(std::fs::metadata(bin_path).unwrap().len(), 64);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_round_trips_object() {
+        let root = unique_test_cache_dir("storage-bin-storage-round-trip");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/asset.webp", "vhost");
+        let meta = pingora_meta("max-age=60");
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+
+        assert_eq!(
+            storage
+                .put_object(
+                    store_key,
+                    internal_meta,
+                    response_header,
+                    Arc::from(&b"storage-bin-body"[..]),
+                )
+                .unwrap(),
+            Some("storage-bin-body".len())
+        );
+        let object = storage
+            .lookup_object_by_combined(&key.combined())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(object.body.as_ref(), b"storage-bin-body");
+        assert_eq!(storage.stats().unwrap().entries, 1);
+        assert_eq!(storage.stats().unwrap().activity.stores, 1);
+        assert_eq!(storage.stats().unwrap().activity.hits, 1);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_purges_and_reuses_ranges() {
+        let root = unique_test_cache_dir("storage-bin-storage-purge");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/purge.webp", "vhost");
+        let meta = pingora_meta("max-age=60");
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+
+        storage
+            .put_object(
+                store_key,
+                internal_meta,
+                response_header,
+                Arc::from(&b"purge-body"[..]),
+            )
+            .unwrap();
+
+        assert!(storage.purge_combined(&key.combined()).unwrap());
+        assert!(
+            storage
+                .lookup_object_by_combined(&key.combined())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(storage.stats().unwrap().entries, 0);
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -8770,6 +9120,35 @@ mod tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn encoded_disk_cache_object_parses_as_v5_object() {
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/asset.webp", "vhost");
+        let meta = pingora_meta("max-age=60");
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+
+        let encoded = super::encode_disk_cache_object(
+            &store_key,
+            &internal_meta,
+            &response_header,
+            b"cache-body",
+        )
+        .unwrap();
+        let object = super::parse_disk_cache_object(&encoded, ByteSize::from_bytes(1024)).unwrap();
+
+        assert_eq!(
+            object.combined_key.as_deref(),
+            Some(key.combined().as_str())
+        );
+        assert_eq!(object.primary_key.as_deref(), Some(key.primary().as_str()));
+        assert_eq!(object.body.as_ref(), b"cache-body");
     }
 
     #[cfg(feature = "proxy")]

@@ -209,6 +209,10 @@ internal cache implementation.
   by filesystem cache objects. Writes must match the allocated object length,
   reads are bounded by the recorded location, and `preallocate = true` expands
   new bin files to the configured bin size before object bytes are committed.
+- The initial storage-bin backend prototype can encode, allocate, store, read,
+  purge, and release objects through the manifest/bin/free-map primitives, but
+  it is still isolated from live Pingora cache traffic until restart recovery,
+  eviction parity, and the full `Storage` implementation are complete.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without
