@@ -151,7 +151,7 @@ fi
 
 %changelog
 * Tue May 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.2-1
-- Start focused storage-bin disk cache follow-up.
+- Focused storage-bin disk cache backend with runtime selection, smoke coverage, pressure stats, and tail-bin reclamation.
 
 * Tue May 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.1-1
 - Focused local/static vhost cache follow-up.
