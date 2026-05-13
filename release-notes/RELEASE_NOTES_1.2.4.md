@@ -23,6 +23,8 @@ is implemented and tested.
 - Added strict peer-origin validation. Peers must use explicit HTTP(S)
   `host:port` origins, cannot include userinfo/query/fragment, and non-loopback
   HTTP requires `allow_insecure_http = true`.
+- Added aggregate Prometheus gauges for peer-fill enabled policies, configured
+  peers, and maximum configured peer-fill concurrency.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 

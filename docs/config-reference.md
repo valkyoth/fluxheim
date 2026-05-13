@@ -742,7 +742,10 @@ networks or trusted in-cluster transport. `max_concurrent_requests` is bounded
 to 1-1024 and `fail_open = true` means peer-fill failure should fall back to the
 normal origin path rather than failing the user request once runtime peer fill
 is implemented. `examples/cache-peer-fill.toml` shows the focused validated
-fixture.
+fixture. Metrics builds expose aggregate peer-fill configuration through
+`fluxheim_cache_peer_fill_enabled_policies`,
+`fluxheim_cache_peer_fill_peers`, and
+`fluxheim_cache_peer_fill_max_concurrent_requests`.
 
 For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key

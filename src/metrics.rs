@@ -17,6 +17,9 @@ static CACHE_MEMORY_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_DISK_TIERS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_PEER_FILL_ENABLED_POLICIES: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_PEER_FILL_PEERS: OnceLock<IntGauge> = OnceLock::new();
+static CACHE_PEER_FILL_MAX_CONCURRENT_REQUESTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_ENTRIES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_WEIGHTED_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_MEMORY_MAX_SIZE_BYTES: OnceLock<IntGauge> = OnceLock::new();
@@ -60,6 +63,9 @@ pub fn init() -> Result<(), prometheus::Error> {
     cache_disk_tiers()?;
     cache_lock_enabled_policies()?;
     cache_lock_wait_timeout_max_seconds()?;
+    cache_peer_fill_enabled_policies()?;
+    cache_peer_fill_peers()?;
+    cache_peer_fill_max_concurrent_requests()?;
     cache_memory_entries()?;
     cache_memory_weighted_size_bytes()?;
     cache_memory_max_size_bytes()?;
@@ -101,6 +107,15 @@ pub fn record_config(config: &crate::config::Config) {
     set_gauge(
         cache_lock_wait_timeout_max_seconds(),
         stats.lock_wait_timeout_max_secs,
+    );
+    set_gauge(
+        cache_peer_fill_enabled_policies(),
+        stats.peer_fill_enabled_policies,
+    );
+    set_gauge(cache_peer_fill_peers(), stats.peer_fill_peers);
+    set_gauge(
+        cache_peer_fill_max_concurrent_requests(),
+        stats.peer_fill_max_concurrent_requests,
     );
 }
 
@@ -291,6 +306,9 @@ struct CacheConfigStats {
     disk_tiers: u64,
     lock_enabled_policies: u64,
     lock_wait_timeout_max_secs: u64,
+    peer_fill_enabled_policies: u64,
+    peer_fill_peers: u64,
+    peer_fill_max_concurrent_requests: u64,
 }
 
 fn cache_config_stats(config: &crate::config::Config) -> CacheConfigStats {
@@ -338,6 +356,15 @@ fn accumulate_cache_policy(
         stats.lock_wait_timeout_max_secs = stats
             .lock_wait_timeout_max_secs
             .max(cache.lock.wait_timeout_secs);
+    }
+    if cache.peer_fill.enabled {
+        stats.peer_fill_enabled_policies = stats.peer_fill_enabled_policies.saturating_add(1);
+        stats.peer_fill_peers = stats
+            .peer_fill_peers
+            .saturating_add(cache.peer_fill.peers.len() as u64);
+        stats.peer_fill_max_concurrent_requests = stats
+            .peer_fill_max_concurrent_requests
+            .max(cache.peer_fill.max_concurrent_requests as u64);
     }
     if cache.memory.enabled && cache.disk.enabled {
         if vhost_scope {
@@ -523,6 +550,30 @@ fn cache_lock_wait_timeout_max_seconds() -> Result<&'static IntGauge, prometheus
         &CACHE_LOCK_WAIT_TIMEOUT_MAX_SECONDS,
         "fluxheim_cache_lock_wait_timeout_max_seconds",
         "Maximum configured Fluxheim cache request-collapsing wait timeout across lock-enabled cache policies.",
+    )
+}
+
+fn cache_peer_fill_enabled_policies() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_PEER_FILL_ENABLED_POLICIES,
+        "fluxheim_cache_peer_fill_enabled_policies",
+        "Configured Fluxheim cache policies with distributed peer fill enabled.",
+    )
+}
+
+fn cache_peer_fill_peers() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_PEER_FILL_PEERS,
+        "fluxheim_cache_peer_fill_peers",
+        "Configured Fluxheim cache peer-fill peers across enabled cache policies.",
+    )
+}
+
+fn cache_peer_fill_max_concurrent_requests() -> Result<&'static IntGauge, prometheus::Error> {
+    int_gauge(
+        &CACHE_PEER_FILL_MAX_CONCURRENT_REQUESTS,
+        "fluxheim_cache_peer_fill_max_concurrent_requests",
+        "Maximum configured Fluxheim cache peer-fill concurrency across enabled cache policies.",
     )
 }
 
@@ -1055,9 +1106,9 @@ mod tests {
     use prometheus::Encoder;
 
     use crate::config::{
-        CacheConfig, CacheDiskConfig, CacheMemoryConfig, Config, ProxyConfig, RouteConfig,
-        VhostAcmeChallengeConfig, VhostConfig, VhostHeaderPolicyConfig, VhostRedirectConfig,
-        VhostTlsConfig, WebConfig,
+        CacheConfig, CacheDiskConfig, CacheMemoryConfig, CachePeerConfig, CachePeerFillConfig,
+        Config, ProxyConfig, RouteConfig, VhostAcmeChallengeConfig, VhostConfig,
+        VhostHeaderPolicyConfig, VhostRedirectConfig, VhostTlsConfig, WebConfig,
     };
 
     #[cfg(all(feature = "proxy", feature = "cache"))]
@@ -1156,6 +1207,9 @@ mod tests {
         assert!(output.contains("fluxheim_cache_disk_tiers 1"));
         assert!(output.contains("fluxheim_cache_lock_enabled_policies 2"));
         assert!(output.contains("fluxheim_cache_lock_wait_timeout_max_seconds 30"));
+        assert!(output.contains("fluxheim_cache_peer_fill_enabled_policies 2"));
+        assert!(output.contains("fluxheim_cache_peer_fill_peers 3"));
+        assert!(output.contains("fluxheim_cache_peer_fill_max_concurrent_requests 128"));
         assert!(!output.contains("cache_key"));
         assert!(!output.contains("path="));
     }
@@ -1406,6 +1460,9 @@ mod tests {
         assert_eq!(stats.disk_tiers, 1);
         assert_eq!(stats.lock_enabled_policies, 2);
         assert_eq!(stats.lock_wait_timeout_max_secs, 30);
+        assert_eq!(stats.peer_fill_enabled_policies, 2);
+        assert_eq!(stats.peer_fill_peers, 3);
+        assert_eq!(stats.peer_fill_max_concurrent_requests, 128);
     }
 
     #[test]
@@ -1447,6 +1504,21 @@ mod tests {
                         enabled: true,
                         ..CacheDiskConfig::default()
                     },
+                    peer_fill: CachePeerFillConfig {
+                        enabled: true,
+                        peers: vec![
+                            CachePeerConfig {
+                                name: "cache-a".to_owned(),
+                                base_url: "https://cache-a.example:8443".to_owned(),
+                            },
+                            CachePeerConfig {
+                                name: "cache-b".to_owned(),
+                                base_url: "https://cache-b.example:8443".to_owned(),
+                            },
+                        ],
+                        max_concurrent_requests: 128,
+                        ..CachePeerFillConfig::default()
+                    },
                     ..CacheConfig::default()
                 },
                 headers: VhostHeaderPolicyConfig::default(),
@@ -1474,6 +1546,14 @@ mod tests {
                 memory: CacheMemoryConfig {
                     enabled: true,
                     ..CacheMemoryConfig::default()
+                },
+                peer_fill: CachePeerFillConfig {
+                    enabled: true,
+                    peers: vec![CachePeerConfig {
+                        name: "route-cache".to_owned(),
+                        base_url: "https://route-cache.example:8443".to_owned(),
+                    }],
+                    ..CachePeerFillConfig::default()
                 },
                 ..CacheConfig::default()
             }),

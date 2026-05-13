@@ -22,6 +22,8 @@ Released: in progress
   safe peer-origin validation for future peer-fill runtime support.
 - Added a focused `examples/cache-peer-fill.toml` fixture and CI validation for
   the peer-fill configuration shape.
+- Added aggregate Prometheus gauges for peer-fill enabled policies, configured
+  peers, and maximum configured peer-fill concurrency.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

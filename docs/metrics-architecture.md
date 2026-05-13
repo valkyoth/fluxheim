@@ -93,6 +93,9 @@ Current cache baseline:
 - `fluxheim_cache_disk_tiers`
 - `fluxheim_cache_lock_enabled_policies`
 - `fluxheim_cache_lock_wait_timeout_max_seconds`
+- `fluxheim_cache_peer_fill_enabled_policies`
+- `fluxheim_cache_peer_fill_peers`
+- `fluxheim_cache_peer_fill_max_concurrent_requests`
 - `fluxheim_cache_activity_total{tier,event}`
 - `fluxheim_cache_activity_scope_total{scope,vhost,route,tier,event}`
 - `fluxheim_cache_operation_duration_seconds{scope,vhost,route,phase,operation}`

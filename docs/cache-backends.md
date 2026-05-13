@@ -260,7 +260,8 @@ internal cache implementation.
   policy, bounds peers/timeouts/object size/concurrency, and validates peer
   origins before runtime peer retrieval is enabled. The example
   `examples/cache-peer-fill.toml` shows the current config shape for
-  cache-cluster planning.
+  cache-cluster planning. Metrics builds expose aggregate peer-fill policy,
+  peer-count, and concurrency gauges for rollout checks.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
   startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint
@@ -411,6 +412,9 @@ real storage tier, so stampede-protection coverage is visible without cache
   key or path labels. `fluxheim_cache_lock_wait_timeout_max_seconds` reports the
 largest configured request-collapsing wait timeout across lock-enabled cache
 policies, giving dashboards a low-cardinality timeout budget signal.
+`fluxheim_cache_peer_fill_enabled_policies`, `fluxheim_cache_peer_fill_peers`,
+and `fluxheim_cache_peer_fill_max_concurrent_requests` expose the aggregate
+distributed-cache peer-fill rollout shape without peer names or URLs.
 `fluxheim_cache_operation_duration_seconds{scope,vhost,route,phase,operation}`
 records Pingora cache lookup and cache-lock wait durations as bounded
 histograms, so operators can distinguish slow storage reads from stampede wait
