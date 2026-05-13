@@ -213,6 +213,10 @@ internal cache implementation.
   purge, and release objects through the manifest/bin/free-map primitives, but
   it is still isolated from live Pingora cache traffic until restart recovery,
   eviction parity, and the full `Storage` implementation are complete.
+- A root-local `.fluxheim-storage-bin-index-v1` records each combined cache key
+  and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
+  validates each referenced object by parsing the v5 cache object bytes, rebuilds
+  the purge index, and reconstructs free ranges from the occupied locations.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without

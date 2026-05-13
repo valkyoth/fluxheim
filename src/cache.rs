@@ -58,6 +58,10 @@ const STORAGE_BIN_MANIFEST_MAGIC_V1: &str = "FLUXHEIM-STORAGE-BIN-v1";
 #[cfg(feature = "proxy")]
 const STORAGE_BIN_MANIFEST_FILENAME: &str = ".fluxheim-storage-bin-v1";
 #[cfg(feature = "proxy")]
+const STORAGE_BIN_INDEX_MAGIC_V1: &str = "FLUXHEIM-STORAGE-BIN-INDEX-v1";
+#[cfg(feature = "proxy")]
+const STORAGE_BIN_INDEX_FILENAME: &str = ".fluxheim-storage-bin-index-v1";
+#[cfg(feature = "proxy")]
 const STORAGE_BIN_DATA_DIR: &str = "bins";
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAGS_PER_OBJECT: usize = 64;
@@ -335,6 +339,15 @@ pub struct StorageBinFreeMap {
 }
 
 #[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct StorageBinIndexEntry {
+    combined_key: String,
+    location: StorageBinObjectLocation,
+    accessed: std::time::SystemTime,
+}
+
+#[cfg(feature = "proxy")]
 impl StorageBinFreeMap {
     pub fn new(layout: &StorageBinLayoutPlan) -> Self {
         Self {
@@ -343,6 +356,72 @@ impl StorageBinFreeMap {
             next_bin_id: 0,
             free: BTreeMap::new(),
         }
+    }
+
+    fn from_occupied(
+        layout: &StorageBinLayoutPlan,
+        entries: &[StorageBinIndexEntry],
+    ) -> std::io::Result<Self> {
+        let mut map = Self::new(layout);
+        let mut occupied = BTreeMap::<u64, Vec<StorageBinFreeRange>>::new();
+        for entry in entries {
+            let location = entry.location.validate(layout.bin_size_bytes)?;
+            let Some(capacity) = map.bin_capacity(location.bin_id) else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "storage-bin index references a bin outside the configured cache budget",
+                ));
+            };
+            if location.offset.saturating_add(location.len) > capacity {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "storage-bin index object exceeds bin capacity",
+                ));
+            }
+            occupied
+                .entry(location.bin_id)
+                .or_default()
+                .push(StorageBinFreeRange {
+                    offset: location.offset,
+                    len: location.len,
+                });
+            map.next_bin_id = map.next_bin_id.max(location.bin_id.saturating_add(1));
+        }
+
+        for (bin_id, ranges) in occupied {
+            let capacity = map.bin_capacity(bin_id).unwrap_or(0);
+            let mut ranges = ranges;
+            ranges.sort_by_key(|range| range.offset);
+            let mut cursor = 0_u64;
+            for range in ranges {
+                if range.offset < cursor {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "storage-bin index contains overlapping object ranges",
+                    ));
+                }
+                if range.offset > cursor {
+                    map.insert_free_range(
+                        bin_id,
+                        StorageBinFreeRange {
+                            offset: cursor,
+                            len: range.offset - cursor,
+                        },
+                    )?;
+                }
+                cursor = range.offset.saturating_add(range.len);
+            }
+            if cursor < capacity {
+                map.insert_free_range(
+                    bin_id,
+                    StorageBinFreeRange {
+                        offset: cursor,
+                        len: capacity - cursor,
+                    },
+                )?;
+            }
+        }
+        Ok(map)
     }
 
     pub fn allocate(&mut self, len: u64) -> std::io::Result<Option<StorageBinObjectLocation>> {
@@ -1926,12 +2005,51 @@ impl StorageBinDiskStorage {
             ..layout
         };
         prepare_storage_bin_layout(&layout)?;
+        let recovered_entries = read_storage_bin_index(&layout)?;
+        let mut recovered_objects = HashMap::new();
+        let recovered_purge_index = CachePurgeIndex::new();
+        let mut valid_entries = Vec::new();
+        for entry in recovered_entries {
+            let object =
+                match read_storage_bin_index_entry_object(&layout, plan.max_object_bytes, &entry) {
+                    Ok(object) => object,
+                    Err(_) => continue,
+                };
+            if object.combined_key.as_deref() != Some(entry.combined_key.as_str()) {
+                continue;
+            }
+            if let Some(primary_key) = object.primary_key.clone() {
+                let user_tag = object.user_tag.unwrap_or_default();
+                let path = object
+                    .index_path
+                    .or_else(|| cache_primary_component(&primary_key, "path"));
+                recovered_purge_index.insert_with_path_and_tags(
+                    entry.combined_key.clone(),
+                    primary_key,
+                    user_tag,
+                    path,
+                    object.cache_tags,
+                );
+            }
+            recovered_objects.insert(
+                entry.combined_key.clone(),
+                StorageBinObjectEntry {
+                    location: entry.location,
+                    size: entry.location.len,
+                    accessed: entry.accessed,
+                },
+            );
+            valid_entries.push(entry);
+        }
+        if !valid_entries.is_empty() {
+            write_storage_bin_index(&layout, &valid_entries)?;
+        }
         Ok(Self {
-            free_map: Mutex::new(StorageBinFreeMap::new(&layout)),
+            free_map: Mutex::new(StorageBinFreeMap::from_occupied(&layout, &valid_entries)?),
             files: StorageBinFileSet::new(layout.clone()),
             layout,
-            objects: RwLock::new(HashMap::new()),
-            purge_index: CachePurgeIndex::new(),
+            objects: RwLock::new(recovered_objects),
+            purge_index: recovered_purge_index,
             max_size_bytes: plan.max_size_bytes,
             max_object_bytes: plan.max_object_bytes,
             activity,
@@ -2022,6 +2140,8 @@ impl StorageBinDiskStorage {
         if let Some(previous) = previous {
             let _ = self.release_location(previous.location);
         }
+        self.write_index()
+            .map_err(|error| cache_io_error("write storage-bin index", error))?;
         self.purge_index.insert_with_path_and_tags(
             store_key.combined,
             store_key.primary,
@@ -2070,8 +2190,24 @@ impl StorageBinDiskStorage {
         };
         self.release_location(entry.location)?;
         self.purge_index.remove_combined(combined_key);
+        self.write_index()?;
         self.activity.purge();
         Ok(true)
+    }
+
+    fn write_index(&self) -> std::io::Result<()> {
+        let entries = match self.objects.read() {
+            Ok(objects) => objects
+                .iter()
+                .map(|(combined_key, entry)| StorageBinIndexEntry {
+                    combined_key: combined_key.clone(),
+                    location: entry.location,
+                    accessed: entry.accessed,
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => Vec::new(),
+        };
+        write_storage_bin_index(&self.layout, &entries)
     }
 
     fn release_location(&self, location: StorageBinObjectLocation) -> std::io::Result<()> {
@@ -3445,6 +3581,231 @@ fn storage_bin_manifest_temp_path(parent: &Path) -> std::io::Result<PathBuf> {
         std::process::id(),
         encoded
     )))
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn storage_bin_index_path(root: &Path) -> PathBuf {
+    root.join(STORAGE_BIN_INDEX_FILENAME)
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn read_storage_bin_index(
+    layout: &StorageBinLayoutPlan,
+) -> std::io::Result<Vec<StorageBinIndexEntry>> {
+    use std::io::Read as _;
+
+    let path = storage_bin_index_path(&layout.root);
+    if cache_path_contains_symlink(&layout.root, &path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "storage-bin index path contains symlink: {}",
+                path.display()
+            ),
+        ));
+    }
+    let canonical = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    if !canonical.starts_with(&layout.root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin index escaped root: {}", canonical.display()),
+        ));
+    }
+
+    // lgtm[rs/path-injection] path is derived from a validated storage-bin root
+    // and opened through NOFOLLOW helpers after canonical root containment checks.
+    let mut file = SafeDiskCachePath::from_path(canonical).open_existing_file()?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    parse_storage_bin_index(layout, &contents)
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn parse_storage_bin_index(
+    layout: &StorageBinLayoutPlan,
+    contents: &str,
+) -> std::io::Result<Vec<StorageBinIndexEntry>> {
+    let mut lines = contents.lines();
+    match lines.next() {
+        Some(STORAGE_BIN_INDEX_MAGIC_V1) => {}
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index magic",
+            ));
+        }
+    }
+    let mut entries = Vec::new();
+    for line in lines {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != 5 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index line",
+            ));
+        }
+        let combined_key = storage_bin_hex_decode_string(fields[0])?;
+        let location = StorageBinObjectLocation {
+            bin_id: parse_storage_bin_index_u64(fields[1], "bin id")?,
+            offset: parse_storage_bin_index_u64(fields[2], "offset")?,
+            len: parse_storage_bin_index_u64(fields[3], "length")?,
+        }
+        .validate(layout.bin_size_bytes)?;
+        entries.push(StorageBinIndexEntry {
+            combined_key,
+            location,
+            accessed: unix_secs_system_time(parse_storage_bin_index_u64(fields[4], "accessed")?),
+        });
+    }
+    Ok(entries)
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn write_storage_bin_index(
+    layout: &StorageBinLayoutPlan,
+    entries: &[StorageBinIndexEntry],
+) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let path = storage_bin_index_path(&layout.root);
+    if !path.starts_with(&layout.root) || cache_path_contains_symlink(&layout.root, &path)? {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin index path is unsafe: {}", path.display()),
+        ));
+    }
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("storage-bin index path has no parent: {}", path.display()),
+        )
+    })?;
+    let temp_path = storage_bin_index_temp_path(parent)?;
+    let path = SafeDiskCachePath::from_path(path);
+    let temp_path = SafeDiskCachePath::from_path(temp_path);
+    let write_result = (|| {
+        let mut file = create_new_disk_cache_file(temp_path.as_path())?;
+        writeln!(file, "{STORAGE_BIN_INDEX_MAGIC_V1}")?;
+        let mut entries = entries.to_vec();
+        entries.sort_by(|left, right| left.combined_key.cmp(&right.combined_key));
+        for entry in entries {
+            entry.location.validate(layout.bin_size_bytes)?;
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}",
+                storage_bin_hex_encode(entry.combined_key.as_bytes()),
+                entry.location.bin_id,
+                entry.location.offset,
+                entry.location.len,
+                system_time_unix_secs(entry.accessed).unwrap_or(0)
+            )?;
+        }
+        file.sync_all()?;
+        path.rename_from(&temp_path)
+    })();
+    if write_result.is_err() {
+        let _ = temp_path.remove_file();
+    }
+    write_result
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn read_storage_bin_index_entry_object(
+    layout: &StorageBinLayoutPlan,
+    max_object_bytes: ByteSize,
+    entry: &StorageBinIndexEntry,
+) -> std::io::Result<PingoraStoredObject> {
+    let files = StorageBinFileSet::new(layout.clone());
+    let bytes = files.read_object(entry.location)?;
+    parse_disk_cache_object(&bytes, max_object_bytes)
+}
+
+#[cfg(feature = "proxy")]
+#[cfg_attr(not(test), allow(dead_code))]
+fn storage_bin_index_temp_path(parent: &Path) -> std::io::Result<PathBuf> {
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|error| {
+        std::io::Error::other(format!("generate storage-bin index temp nonce: {error}"))
+    })?;
+    let mut encoded = String::with_capacity(nonce.len() * 2);
+    for byte in nonce {
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    Ok(parent.join(format!(
+        ".fluxheim-storage-bin-index.{}.{}.tmp",
+        std::process::id(),
+        encoded
+    )))
+}
+
+#[cfg(feature = "proxy")]
+fn parse_storage_bin_index_u64(value: &str, field: &str) -> std::io::Result<u64> {
+    value.parse::<u64>().map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("invalid storage-bin index {field}: {error}"),
+        )
+    })
+}
+
+#[cfg(feature = "proxy")]
+fn storage_bin_hex_encode(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    encoded
+}
+
+#[cfg(feature = "proxy")]
+fn storage_bin_hex_decode_string(value: &str) -> std::io::Result<String> {
+    if !value.len().is_multiple_of(2) || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid storage-bin index hex key",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for chunk in value.as_bytes().chunks_exact(2) {
+        let high = storage_bin_hex_nibble(chunk[0]).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index hex key",
+            )
+        })?;
+        let low = storage_bin_hex_nibble(chunk[1]).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid storage-bin index hex key",
+            )
+        })?;
+        bytes.push((high << 4) | low);
+    }
+    String::from_utf8(bytes).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("storage-bin index key is not utf-8: {error}"),
+        )
+    })
+}
+
+#[cfg(feature = "proxy")]
+fn storage_bin_hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(feature = "proxy")]
@@ -6721,6 +7082,86 @@ mod tests {
         assert_eq!(storage.stats().unwrap().activity.stores, 1);
         assert_eq!(storage.stats().unwrap().activity.hits, 1);
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_index_round_trips_locations() {
+        let root = unique_test_cache_dir("storage-bin-index-round-trip");
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let layout = super::StorageBinLayoutPlan::from_disk_plan(&plan).unwrap();
+        super::prepare_storage_bin_layout(&layout).unwrap();
+        let entries = vec![super::StorageBinIndexEntry {
+            combined_key: "vhost\tkey".to_owned(),
+            location: super::StorageBinObjectLocation {
+                bin_id: 1,
+                offset: 32,
+                len: 64,
+            },
+            accessed: std::time::UNIX_EPOCH + std::time::Duration::from_secs(42),
+        }];
+
+        super::write_storage_bin_index(&layout, &entries).unwrap();
+        let decoded = super::read_storage_bin_index(&layout).unwrap();
+
+        assert_eq!(decoded, entries);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_recovers_objects_after_restart() {
+        let root = unique_test_cache_dir("storage-bin-storage-restart");
+        let plan = super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        };
+        let storage = super::StorageBinDiskStorage::from_plan(plan.clone()).unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/restart.webp", "vhost");
+        let meta = pingora_meta("max-age=60");
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        storage
+            .put_object(
+                store_key,
+                internal_meta,
+                response_header,
+                Arc::from(&b"restart-body"[..]),
+            )
+            .unwrap();
+
+        let recovered = super::StorageBinDiskStorage::from_plan(plan).unwrap();
+        let object = recovered
+            .lookup_object_by_combined(&key.combined())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(object.body.as_ref(), b"restart-body");
+        assert_eq!(recovered.stats().unwrap().entries, 1);
         std::fs::remove_dir_all(root).unwrap();
     }
 
