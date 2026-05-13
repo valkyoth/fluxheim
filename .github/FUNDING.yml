@@ -1,3 +1,4 @@
-# These are supported funding model platforms
+# .github/FUNDING.yml
 
-github: eldryoth
+github: [eldryoth]
+thanks_dev: "u/gh/eldryoth"
