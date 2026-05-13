@@ -37,6 +37,9 @@ FLUXHEIM_SMOKE_SKIP_CORE_MATRIX=1 scripts/smoke_1_0_core.sh
 echo "stable release gate: 1.2 cache smoke"
 scripts/smoke_proxy_cache.sh
 
+echo "stable release gate: 1.2 storage-bin cache smoke"
+scripts/smoke_storage_bin_cache.sh
+
 echo "stable release gate: 1.2 observability smoke"
 scripts/smoke_observability_local.sh
 
