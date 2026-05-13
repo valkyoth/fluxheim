@@ -11,9 +11,21 @@ behavior when the change improves security or project direction.
 
 No unreleased changes yet.
 
-## 1.2.3 - Optional Cache Encryption Follow-Up
+## 1.2.4 - Distributed Cache Peer-Fill Follow-Up
 
 Released: in progress
+
+### Added
+
+- Started the `1.2.4` distributed cache line with `[cache.peer_fill]` policy
+  configuration, bounded peer lists, explicit timeouts, fail-open behavior, and
+  safe peer-origin validation for future peer-fill runtime support.
+- Added a focused `examples/cache-peer-fill.toml` fixture and CI validation for
+  the peer-fill configuration shape.
+
+## 1.2.3 - Optional Cache Encryption Follow-Up
+
+Released: 2026-05-13
 
 ### Added
 

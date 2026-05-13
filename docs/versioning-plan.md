@@ -816,7 +816,10 @@ Focused cache-only follow-up releases after 1.2:
 - `1.2.4`: distributed cache metadata and peer-fill. This release has one job:
   decide and implement the first safe multi-node cache coherence model for
   clustered deployments, including peer-fill limits, failure behavior, metrics,
-  and clear isolation between vhosts/routes.
+  and clear isolation between vhosts/routes. The first slice adds the
+  `[cache.peer_fill]` config contract with bounded peer lists, explicit
+  timeouts, fail-open behavior, and safe peer-origin validation before runtime
+  fetch behavior is enabled.
 - `1.2.5`: reserved only if production 1.2 testing exposes one more
   cache-specific gap that should close before the 1.3 line starts. Candidate
   work includes proper Pingora-path partial streaming/slice range fill,

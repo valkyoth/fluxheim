@@ -707,6 +707,43 @@ bounded predictor entry ages out of its LRU table. Fluxheim-specific custom
 policy reasons are intentionally skipped so settings such as `min_uses`,
 configured request bypasses, and explicit response-header refusal policies stay
 controlled by Fluxheim's own policy counters.
+
+`[cache.peer_fill]`, `[vhosts.cache.peer_fill]`, and route-scoped
+`peer_fill` configure the distributed-cache peer-fill contract used by the
+`1.2.4` line. Peer fill is disabled by default and currently requires the
+owning cache policy to be enabled. The configuration is intentionally strict so
+runtime peer retrieval can stay bounded:
+
+```toml
+[cache.peer_fill]
+enabled = true
+connect_timeout_secs = 2
+read_timeout_secs = 10
+max_object_bytes = "32MiB"
+max_concurrent_requests = 64
+allow_insecure_http = false
+fail_open = true
+
+[[cache.peer_fill.peers]]
+name = "edge-a"
+base_url = "https://edge-a.internal.example:8443"
+
+[[cache.peer_fill.peers]]
+name = "edge-b"
+base_url = "https://edge-b.internal.example:8443"
+```
+
+`peers` must contain between 1 and 32 entries when peer fill is enabled.
+Peer names are short ASCII identifiers. Peer `base_url` values must be
+HTTP(S) origins with an explicit `host:port`, no userinfo, no query or
+fragment, and no path beyond `/`. Plain HTTP is accepted only for loopback
+peers unless `allow_insecure_http = true`, which is intended for private test
+networks or trusted in-cluster transport. `max_concurrent_requests` is bounded
+to 1-1024 and `fail_open = true` means peer-fill failure should fall back to the
+normal origin path rather than failing the user request once runtime peer fill
+is implemented. `examples/cache-peer-fill.toml` shows the focused validated
+fixture.
+
 For offline debugging, `fluxheim cache-key --host example.com --path
 /assets/app.js` previews the vhost/route cache policy and generated cache key
 without contacting the upstream. `cache-key` can fail closed with

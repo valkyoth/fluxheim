@@ -346,8 +346,11 @@ traffic. `examples/cache-encryption-local.toml` and
 encryption policies for local-key and OpenBao-backed deployments. See
 `docs/cache-encryption.md` for key setup, OpenBao policy, rotation notes, and
 local smoke tests.
-`1.2.4` is planned for distributed cache metadata/peer-fill, and an optional
-`1.2.5` only if production testing finds one more cache blocker. `1.3` is the
+The active `1.2.4` line starts distributed cache metadata and peer-fill with a
+bounded `[cache.peer_fill]` policy and validated peer-origin configuration.
+`examples/cache-peer-fill.toml` shows the current config shape. An optional
+`1.2.5` is reserved only if production testing finds one more cache blocker.
+`1.3` is the
 load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
 extensibility release, covering nginx-Lua-style hooks and VCL-like cache policy
 hooks through one sandboxed runtime.

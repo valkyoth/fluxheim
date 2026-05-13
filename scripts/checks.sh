@@ -115,6 +115,7 @@ cargo run --quiet -- --check-config --config examples/acme-actalis.toml >/dev/nu
 cargo run --quiet -- --check-config --config examples/cache-storage-bin.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/cache-encryption-local.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/cache-encryption-openbao.toml >/dev/null
+cargo run --quiet -- --check-config --config examples/cache-peer-fill.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/tls-modern.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/tls-intermediate.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
