@@ -2077,6 +2077,10 @@ impl StorageBinDiskStorage {
         })
     }
 
+    pub fn reset_activity(&self) {
+        self.activity.reset();
+    }
+
     fn put_object(
         &self,
         store_key: PingoraStoreKey,
@@ -2266,6 +2270,404 @@ impl StorageBinDiskStorage {
         }
         self.activity.hit();
         Ok(Some(object))
+    }
+
+    fn object_for_combined_without_activity(
+        &self,
+        combined_key: &str,
+    ) -> pingora::Result<Option<PingoraStoredObject>> {
+        let entry = match self.objects.read() {
+            Ok(objects) => objects.get(combined_key).cloned(),
+            Err(_) => None,
+        };
+        let Some(entry) = entry else {
+            return Ok(None);
+        };
+        self.read_object_entry(entry).map(Some)
+    }
+
+    fn read_object_entry(
+        &self,
+        entry: StorageBinObjectEntry,
+    ) -> pingora::Result<PingoraStoredObject> {
+        let bytes = self
+            .files
+            .read_object(entry.location)
+            .map_err(|error| cache_io_error("read storage-bin cache object", error))?;
+        parse_disk_cache_object(&bytes, self.max_object_bytes)
+            .map_err(|error| cache_io_error("parse storage-bin cache object", error))
+    }
+
+    pub fn inspect_cache_key(
+        &self,
+        key: &pingora::cache::CacheKey,
+    ) -> pingora::Result<Option<CacheObjectMetadata>> {
+        let Some(object) = self.lookup_object_by_combined(&key.combined())? else {
+            return Ok(None);
+        };
+        let purge_indexed = self.purge_index.contains_combined(&key.combined());
+        cache_object_metadata(CacheObjectTier::Disk, purge_indexed, &object)
+    }
+
+    pub fn purge_cache_key(&self, key: &pingora::cache::CacheKey) -> std::io::Result<bool> {
+        let primary = key.primary();
+        let combined = key.combined();
+        let mut keys = self.purge_index.combined_keys_for_primary(primary.as_str());
+        if !keys.iter().any(|candidate| candidate == &combined) {
+            keys.push(combined.clone());
+        }
+        let mut indexed = keys.iter().cloned().collect::<HashSet<_>>();
+
+        let objects = match self.objects.read() {
+            Ok(objects) => objects
+                .iter()
+                .map(|(combined_key, entry)| (combined_key.clone(), entry.clone()))
+                .collect::<Vec<_>>(),
+            Err(_) => Vec::new(),
+        };
+        for (candidate_key, entry) in objects {
+            if !indexed.insert(candidate_key.clone()) {
+                continue;
+            }
+            let Ok(object) = self.read_object_entry(entry) else {
+                continue;
+            };
+            if object.primary_key.as_deref() == Some(primary.as_str()) || candidate_key == combined
+            {
+                keys.push(candidate_key);
+            }
+        }
+
+        let mut purged = false;
+        for key in keys {
+            purged |= self.purge_combined(&key)?;
+        }
+        Ok(purged)
+    }
+
+    pub fn purge_indexed_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let entries = self
+            .indexed_entries_for_user_tag(user_tag, limit.saturating_add(1))
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries = self.indexed_entries_for_user_tag(user_tag, limit.saturating_add(1))?;
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
+    pub fn purge_indexed_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let entries = self
+            .indexed_entries_for_path_prefix(user_tag, path_prefix, limit.saturating_add(1))
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries =
+            self.indexed_entries_for_path_prefix(user_tag, path_prefix, limit.saturating_add(1))?;
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
+    pub fn purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let entries = self
+            .indexed_entries_for_path_pattern(user_tag, path_pattern, limit.saturating_add(1))
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries =
+            self.indexed_entries_for_path_pattern(user_tag, path_pattern, limit.saturating_add(1))?;
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
+    pub fn purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let entries = self
+            .indexed_entries_for_cache_tag(user_tag, cache_tag, limit.saturating_add(1))
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.purge_indexed_entries(entries, limit)
+    }
+
+    pub fn soft_purge_indexed_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let entries =
+            self.indexed_entries_for_cache_tag(user_tag, cache_tag, limit.saturating_add(1))?;
+        self.soft_purge_indexed_entries(entries, limit)
+    }
+
+    pub fn purge_indexed_stale_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+        dry_run: bool,
+    ) -> pingora::Result<CacheStalePurgeResult> {
+        let mut entries = self.indexed_entries_for_user_tag(user_tag, limit.saturating_add(1))?;
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let now = std::time::SystemTime::now();
+        let scanned = entries.len();
+        let mut stale = 0;
+        let mut purged = 0;
+        let mut deferred_fresh_keys = Vec::new();
+
+        for entry in &entries {
+            let Some(object) = self.object_for_combined_without_activity(&entry.combined_key)?
+            else {
+                self.purge_index.remove_combined(&entry.combined_key);
+                continue;
+            };
+            let meta = CacheMeta::deserialize(&object.internal_meta, &object.response_header)?;
+            if meta.is_fresh(now) {
+                if truncated && !dry_run {
+                    deferred_fresh_keys.push(entry.combined_key.clone());
+                }
+                continue;
+            }
+            stale += 1;
+            if dry_run {
+                continue;
+            }
+            if self
+                .purge_combined(&entry.combined_key)
+                .map_err(|error| cache_io_error("purge stale storage-bin cache object", error))?
+            {
+                purged += 1;
+            }
+        }
+        if truncated && !dry_run {
+            self.purge_index
+                .move_combined_keys_to_back(&deferred_fresh_keys);
+        }
+
+        Ok(CacheStalePurgeResult {
+            scanned,
+            stale,
+            purged,
+            truncated,
+        })
+    }
+
+    fn purge_indexed_entries(
+        &self,
+        mut entries: Vec<CachePurgeIndexEntry>,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            if self.purge_combined(&entry.combined_key)? {
+                purged += 1;
+            }
+        }
+
+        Ok(CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        })
+    }
+
+    fn indexed_entries_for_user_tag(
+        &self,
+        user_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<Vec<CachePurgeIndexEntry>> {
+        if user_tag.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.indexed_entries_matching(
+            self.purge_index.entries_for_user_tag(user_tag, limit),
+            limit,
+            |entry| entry.user_tag == user_tag,
+        )
+    }
+
+    fn indexed_entries_for_path_prefix(
+        &self,
+        user_tag: &str,
+        path_prefix: &str,
+        limit: usize,
+    ) -> pingora::Result<Vec<CachePurgeIndexEntry>> {
+        if user_tag.is_empty() || path_prefix.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.indexed_entries_matching(
+            self.purge_index
+                .entries_for_user_tag_path_prefix(user_tag, path_prefix, limit),
+            limit,
+            |entry| {
+                entry.user_tag == user_tag
+                    && entry
+                        .path
+                        .as_deref()
+                        .is_some_and(|path| path.starts_with(path_prefix))
+            },
+        )
+    }
+
+    fn indexed_entries_for_path_pattern(
+        &self,
+        user_tag: &str,
+        path_pattern: &str,
+        limit: usize,
+    ) -> pingora::Result<Vec<CachePurgeIndexEntry>> {
+        if user_tag.is_empty() || path_pattern.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.indexed_entries_matching(
+            self.purge_index
+                .entries_for_user_tag_path_pattern(user_tag, path_pattern, limit),
+            limit,
+            |entry| {
+                entry.user_tag == user_tag
+                    && entry
+                        .path
+                        .as_deref()
+                        .is_some_and(|path| cache_path_wildcard_matches(path_pattern, path))
+            },
+        )
+    }
+
+    fn indexed_entries_for_cache_tag(
+        &self,
+        user_tag: &str,
+        cache_tag: &str,
+        limit: usize,
+    ) -> pingora::Result<Vec<CachePurgeIndexEntry>> {
+        if user_tag.is_empty() || cache_tag.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.indexed_entries_matching(
+            self.purge_index
+                .entries_for_user_tag_cache_tag(user_tag, cache_tag, limit),
+            limit,
+            |entry| {
+                entry.user_tag == user_tag && entry.cache_tags.iter().any(|tag| tag == cache_tag)
+            },
+        )
+    }
+
+    fn indexed_entries_matching(
+        &self,
+        mut entries: Vec<CachePurgeIndexEntry>,
+        limit: usize,
+        matches: impl Fn(&CachePurgeIndexEntry) -> bool,
+    ) -> pingora::Result<Vec<CachePurgeIndexEntry>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut seen = entries
+            .iter()
+            .map(|entry| entry.combined_key.clone())
+            .collect::<HashSet<_>>();
+        let objects = match self.objects.read() {
+            Ok(objects) => objects
+                .iter()
+                .map(|(combined_key, entry)| (combined_key.clone(), entry.clone()))
+                .collect::<Vec<_>>(),
+            Err(_) => Vec::new(),
+        };
+        for (combined_key, object_entry) in objects {
+            if entries.len() >= limit || seen.contains(&combined_key) {
+                continue;
+            }
+            let object = match self.read_object_entry(object_entry) {
+                Ok(object) => object,
+                Err(_) => continue,
+            };
+            let Some(entry) = cache_purge_entry_from_stored_object(&combined_key, &object) else {
+                continue;
+            };
+            if !matches(&entry) {
+                continue;
+            }
+            seen.insert(entry.combined_key.clone());
+            entries.push(entry);
+        }
+        Ok(entries)
+    }
+
+    fn soft_purge_indexed_entries(
+        &self,
+        mut entries: Vec<CachePurgeIndexEntry>,
+        limit: usize,
+    ) -> pingora::Result<CacheIndexedPurgeResult> {
+        let truncated = entries.len() > limit;
+        entries.truncate(limit);
+
+        let mut purged = 0;
+        for entry in &entries {
+            let Some(object) = self.object_for_combined_without_activity(&entry.combined_key)?
+            else {
+                self.purge_index.remove_combined(&entry.combined_key);
+                continue;
+            };
+            let meta = stale_cache_meta(&object.internal_meta, &object.response_header)?;
+            let (internal_meta, response_header) = meta.serialize()?;
+            let store_key = PingoraStoreKey {
+                combined: object
+                    .combined_key
+                    .unwrap_or_else(|| entry.combined_key.clone()),
+                primary: object.primary_key.unwrap_or_default(),
+                user_tag: object.user_tag.unwrap_or_default(),
+                index_path: entry.path.clone(),
+                cache_tags: object.cache_tags.clone(),
+            };
+            if self
+                .put_object(store_key, internal_meta, response_header, object.body)?
+                .is_some()
+            {
+                purged += 1;
+            }
+        }
+
+        Ok(CacheIndexedPurgeResult {
+            matched: entries.len(),
+            purged,
+            truncated,
+        })
     }
 
     pub fn purge_combined(&self, combined_key: &str) -> std::io::Result<bool> {
@@ -7528,6 +7930,92 @@ mod tests {
             .unwrap()
         );
         assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_supports_indexed_management() {
+        let root = unique_test_cache_dir("storage-bin-storage-indexed-management");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+        let meta = pingora_meta("max-age=60");
+
+        let asset_key = pingora::cache::CacheKey::new("fluxheim-test", "/assets/a.webp", "vhost");
+        let mut asset_store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &asset_key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        asset_store_key.index_path = Some("/assets/a.webp".to_owned());
+        asset_store_key.cache_tags = vec!["blue".to_owned()];
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        storage
+            .put_object(
+                asset_store_key,
+                internal_meta,
+                response_header,
+                Arc::from(&b"asset-body"[..]),
+            )
+            .unwrap();
+
+        assert!(
+            storage
+                .inspect_cache_key(&asset_key)
+                .unwrap()
+                .is_some_and(|metadata| metadata.purge_indexed)
+        );
+        let result = storage
+            .purge_indexed_path_pattern("vhost", "/assets/*.webp", 8)
+            .unwrap();
+        assert_eq!(result.matched, 1);
+        assert_eq!(result.purged, 1);
+
+        let tagged_key = pingora::cache::CacheKey::new("fluxheim-test", "/images/b.webp", "vhost");
+        let mut tagged_store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &tagged_key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        tagged_store_key.index_path = Some("/images/b.webp".to_owned());
+        tagged_store_key.cache_tags = vec!["green".to_owned()];
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+        storage
+            .put_object(
+                tagged_store_key,
+                internal_meta,
+                response_header,
+                Arc::from(&b"tagged-body"[..]),
+            )
+            .unwrap();
+
+        let result = storage
+            .soft_purge_indexed_cache_tag("vhost", "green", 8)
+            .unwrap();
+        assert_eq!(result.matched, 1);
+        assert_eq!(result.purged, 1);
+        let result = storage
+            .purge_indexed_stale_user_tag("vhost", 8, false)
+            .unwrap();
+        assert_eq!(result.scanned, 1);
+        assert_eq!(result.stale, 1);
+        assert_eq!(result.purged, 1);
+        assert_eq!(storage.stats().unwrap().entries, 0);
+
+        storage.reset_activity();
+        assert_eq!(storage.stats().unwrap().activity.purges, 0);
 
         std::fs::remove_dir_all(root).unwrap();
     }

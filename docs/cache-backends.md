@@ -227,6 +227,10 @@ internal cache implementation.
   objects until the projected encoded-byte total fits under
   `cache.disk.max_size_bytes`, releases their bin ranges, removes purge-index
   metadata, and persists the updated storage-bin index.
+- Storage-bin management hooks mirror the filesystem tier: stats, activity
+  reset, cache-key inspection, exact purge, indexed hard/soft purge by user tag,
+  path prefix/pattern, or cache tag, and stale-object purge all operate through
+  the durable storage-bin object index plus the in-memory purge index.
 - Optional cache encryption at rest is planned for the `1.2.x` cache line after
   the storage-bin format is defined. It should remain disabled by default and
   support both small-deployment local key sources and OpenBao Transit/KMS-backed

@@ -25,6 +25,9 @@ Released: in progress
   files, durable object index recovery, free-range reuse, LRU eviction parity,
   purge-index synchronization, and Pingora `Storage` trait support while live
   runtime selection remains fail-closed.
+- Added storage-bin management parity for runtime stats, activity reset, cache
+  inspection, exact purge, indexed hard/soft purge, and stale-object purge so
+  the backend has the same operational hooks needed by the filesystem tier.
 
 ## 1.2.1 - Local Static Cache Follow-Up
 
