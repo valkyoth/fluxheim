@@ -128,6 +128,9 @@ pub enum CliCommand {
         systemd_dropin_dir: PathBuf,
     },
 
+    /// Generate a 256-bit hex key for local disk cache encryption.
+    CacheKeygen,
+
     /// Warm configured cache paths through a running local Fluxheim listener.
     CacheWarm {
         /// Local Fluxheim HTTP listener to connect to. Defaults to the first server.listen address.
@@ -576,6 +579,7 @@ fn run_command(
             secrets_dir: secrets_dir.clone(),
             systemd_dropin_dir: systemd_dropin_dir.clone(),
         }),
+        CliCommand::CacheKeygen => run_cache_keygen_command(),
         CliCommand::CacheWarm {
             listen,
             host,
@@ -721,6 +725,23 @@ fn run_command(
             expect_serve_stale_while_revalidate: *expect_serve_stale_while_revalidate,
         }),
     }
+}
+
+fn run_cache_keygen_command() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut key = [0_u8; 32];
+    getrandom::fill(&mut key)?;
+    println!("{}", hex_encode_lower(&key));
+    Ok(())
+}
+
+fn hex_encode_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(HEX[(byte >> 4) as usize]));
+        encoded.push(char::from(HEX[(byte & 0x0f) as usize]));
+    }
+    encoded
 }
 
 #[derive(Debug)]
@@ -3431,6 +3452,19 @@ mod tests {
 
     use super::run_from_args;
     use crate::test_support::{safe_child_path, unique_temp_path};
+
+    #[test]
+    fn cache_keygen_hex_encoder_is_lowercase() {
+        assert_eq!(
+            super::hex_encode_lower(&[0x00, 0x0f, 0x10, 0xab, 0xff]),
+            "000f10abff"
+        );
+    }
+
+    #[test]
+    fn cache_keygen_command_succeeds() {
+        run_from_args(["fluxheim", "cache-keygen"]).unwrap();
+    }
 
     #[test]
     fn check_tls_storage_accepts_secure_files() {

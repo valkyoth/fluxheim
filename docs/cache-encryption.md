@@ -44,10 +44,7 @@ Create the key as a root-owned secret:
 
 ```bash
 install -d -m 0700 -o root -g root /etc/fluxheim/secrets
-python3 - <<'PY' | install -m 0600 -o root -g root /dev/stdin /etc/fluxheim/secrets/fluxheim-cache-key
-import secrets
-print(secrets.token_hex(32))
-PY
+fluxheim cache-keygen | install -m 0600 -o root -g root /dev/stdin /etc/fluxheim/secrets/fluxheim-cache-key
 ```
 
 For systemd, expose it to Fluxheim with a drop-in:

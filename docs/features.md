@@ -58,6 +58,14 @@ require a new Pingora TLS integration rather than a Fluxheim feature toggle.
 Use `scripts/validate-tls-backends.sh` to validate the supported TLS backends on
 the current machine.
 
+## Cache Encryption Key Utility
+
+`fluxheim cache-keygen` is available in every build profile. It prints one
+random 256-bit lowercase hex key suitable for
+`[cache.disk.encryption] provider = "local"`. The command does not write files
+itself; pipe it into the operator's preferred secret manager, systemd
+credential source, or container secret.
+
 ## ACME Client Wiring
 
 `acme` contains the config, storage, challenge, certificate observation, and
