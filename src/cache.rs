@@ -7360,11 +7360,9 @@ fn openbao_transit_encrypt(
     plaintext: &[u8],
     aad: &[u8],
 ) -> std::io::Result<String> {
-    use base64::Engine as _;
-
     let request = serde_json::json!({
-        "plaintext": base64::prelude::BASE64_STANDARD.encode(plaintext),
-        "associated_data": base64::prelude::BASE64_STANDARD.encode(aad),
+        "plaintext": base64_standard_encode(plaintext)?,
+        "associated_data": base64_standard_encode(aad)?,
     });
     let mut response = ureq::post(openbao_transit_url(address, mount, "encrypt", key_name))
         .header("X-Vault-Token", token)
@@ -7397,11 +7395,9 @@ fn openbao_transit_decrypt(
     ciphertext: &str,
     aad: &[u8],
 ) -> std::io::Result<Vec<u8>> {
-    use base64::Engine as _;
-
     let request = serde_json::json!({
         "ciphertext": ciphertext,
-        "associated_data": base64::prelude::BASE64_STANDARD.encode(aad),
+        "associated_data": base64_standard_encode(aad)?,
     });
     let mut response = ureq::post(openbao_transit_url(address, mount, "decrypt", key_name))
         .header("X-Vault-Token", token)
@@ -7421,14 +7417,24 @@ fn openbao_transit_decrypt(
                 "OpenBao Transit decrypt response did not include plaintext",
             )
         })?;
-    base64::prelude::BASE64_STANDARD
-        .decode(plaintext)
+    base64_ng::STANDARD
+        .decode_vec(plaintext.as_bytes())
         .map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "OpenBao Transit decrypt response plaintext is not valid base64",
             )
         })
+}
+
+#[cfg(feature = "proxy")]
+fn base64_standard_encode(input: &[u8]) -> std::io::Result<String> {
+    base64_ng::STANDARD.encode_string(input).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("base64 encode failed: {error}"),
+        )
+    })
 }
 
 #[cfg(feature = "proxy")]

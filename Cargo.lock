@@ -281,6 +281,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64-ng"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e7e6754cd20d14cf5b024343f2f8dae5692209749676b157898b984b185023a"
+
+[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -986,7 +992,7 @@ version = "1.2.3"
 dependencies = [
  "arc-swap",
  "async-trait",
- "base64",
+ "base64-ng",
  "bytes",
  "chrono",
  "clap",

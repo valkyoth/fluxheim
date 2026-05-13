@@ -1460,22 +1460,21 @@ fn decode_eab_hmac_key(
     issuer: &str,
     value: &str,
 ) -> Result<Zeroizing<Vec<u8>>, AcmeInstantClientError> {
-    use base64::Engine as _;
-    use base64::prelude::{BASE64_STANDARD, BASE64_STANDARD_NO_PAD};
-    use base64::prelude::{BASE64_URL_SAFE, BASE64_URL_SAFE_NO_PAD};
-
-    for decoder in [
-        BASE64_URL_SAFE_NO_PAD,
-        BASE64_URL_SAFE,
-        BASE64_STANDARD_NO_PAD,
-        BASE64_STANDARD,
-    ] {
-        if let Ok(decoded) = decoder.decode(value)
-            && !decoded.is_empty()
-            && decoded.len() as u64 <= MAX_EAB_SECRET_BYTES
-        {
-            return Ok(Zeroizing::new(decoded));
-        }
+    if let Some(decoded) =
+        decoded_eab_hmac_key(base64_ng::URL_SAFE_NO_PAD.decode_vec(value.as_bytes()))
+    {
+        return Ok(decoded);
+    }
+    if let Some(decoded) = decoded_eab_hmac_key(base64_ng::URL_SAFE.decode_vec(value.as_bytes())) {
+        return Ok(decoded);
+    }
+    if let Some(decoded) =
+        decoded_eab_hmac_key(base64_ng::STANDARD_NO_PAD.decode_vec(value.as_bytes()))
+    {
+        return Ok(decoded);
+    }
+    if let Some(decoded) = decoded_eab_hmac_key(base64_ng::STANDARD.decode_vec(value.as_bytes())) {
+        return Ok(decoded);
     }
 
     Err(
@@ -1484,6 +1483,18 @@ fn decode_eab_hmac_key(
             message: "expected non-empty base64 or base64url encoded key".to_owned(),
         },
     )
+}
+
+#[cfg(feature = "acme-client")]
+fn decoded_eab_hmac_key(
+    decoded: Result<Vec<u8>, base64_ng::DecodeError>,
+) -> Option<Zeroizing<Vec<u8>>> {
+    match decoded {
+        Ok(decoded) if !decoded.is_empty() && decoded.len() as u64 <= MAX_EAB_SECRET_BYTES => {
+            Some(Zeroizing::new(decoded))
+        }
+        _ => None,
+    }
 }
 
 fn validate_certificate_pem(contents: &[u8]) -> Result<(), AcmeCertificateInstallError> {
