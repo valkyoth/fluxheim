@@ -249,6 +249,9 @@ internal cache implementation.
   OpenBao Transit smoke path for this provider; the script starts a dev OpenBao
   container, enables Transit, creates a cache key, and verifies a Fluxheim
   proxy-cache `MISS` followed by `HIT` without plaintext cache storage.
+  `examples/cache-encryption-local.toml` and
+  `examples/cache-encryption-openbao.toml` are validated example policies for
+  local-key and OpenBao-backed storage-bin cache encryption.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
   startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint

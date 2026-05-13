@@ -341,7 +341,9 @@ Both providers are opt-in and default deployments do not need OpenBao. For
 developer validation, `examples/podman-compose-openbao.yml` starts a local
 OpenBao dev server and `scripts/smoke_openbao_cache_encryption.sh` verifies
 Transit-backed encrypted proxy-cache storage with real `MISS` then `HIT`
-traffic.
+traffic. `examples/cache-encryption-local.toml` and
+`examples/cache-encryption-openbao.toml` show copyable storage-bin cache
+encryption policies for local-key and OpenBao-backed deployments.
 `1.2.4` is planned for distributed cache metadata/peer-fill, and an optional
 `1.2.5` only if production testing finds one more cache blocker. `1.3` is the
 load-balancer/proxy parity line. Wasm is planned as a shared `1.4`

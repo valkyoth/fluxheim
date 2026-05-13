@@ -8982,6 +8982,76 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     #[test]
+    fn storage_bin_disk_storage_encrypts_local_key_objects() {
+        let root = unique_test_cache_dir("storage-bin-encrypted-storage");
+        let key_path = root.join("cache-key.hex");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            &key_path,
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\n",
+        )
+        .unwrap();
+        let storage_root = root.join("objects");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: storage_root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+            encryption: CacheDiskEncryptionConfig {
+                enabled: true,
+                key_id: Some("storage-bin-test-key-v1".to_owned()),
+                key_file: Some(key_path),
+                ..CacheDiskEncryptionConfig::default()
+            },
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/encrypted-bin.webp", "vhost");
+        let meta = pingora_meta("max-age=60");
+        let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+            &key,
+            &meta,
+            &super::default_cache_tag_headers_for_storage(),
+        );
+        let (internal_meta, response_header) = meta.serialize().unwrap();
+
+        storage
+            .put_object(
+                store_key,
+                internal_meta,
+                response_header,
+                Arc::from(&b"storage-bin-secret-body"[..]),
+            )
+            .unwrap();
+
+        let bin_bytes = std::fs::read(storage.layout.bin_path(0)).unwrap();
+        assert!(
+            bin_bytes
+                .windows(super::DISK_CACHE_ENCRYPTED_MAGIC_V1.len())
+                .any(|window| window == super::DISK_CACHE_ENCRYPTED_MAGIC_V1)
+        );
+        assert!(
+            !bin_bytes
+                .windows(b"storage-bin-secret-body".len())
+                .any(|window| window == b"storage-bin-secret-body")
+        );
+
+        let object = storage
+            .lookup_object_by_combined(&key.combined())
+            .unwrap()
+            .unwrap();
+        assert_eq!(object.body.as_ref(), b"storage-bin-secret-body");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
     fn storage_bin_disk_storage_rewrites_same_key_in_full_bin() {
         let root = unique_test_cache_dir("storage-bin-storage-rewrite");
         let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {

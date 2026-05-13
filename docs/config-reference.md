@@ -673,6 +673,9 @@ Fluxheim, verifies `MISS` then `HIT`, and checks that the stored cache object
 contains OpenBao `vault:v...` ciphertext rather than the plaintext response
 body. It is intentionally optional because normal CI should not depend on a
 local Podman/OpenBao runtime.
+`examples/cache-encryption-local.toml` and
+`examples/cache-encryption-openbao.toml` provide full example policies using
+the storage-bin backend with local-key and OpenBao Transit encryption.
 
 `local_static` is disabled by default. When set to `true`, the same cache
 policy may also store local `[web]`, `[vhosts.web]`, and route-scoped

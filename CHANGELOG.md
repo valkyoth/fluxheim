@@ -31,6 +31,8 @@ Released: in progress
 - Added optional Podman/OpenBao developer validation with a dev-mode OpenBao
   compose file and an end-to-end smoke script that verifies Transit-backed
   encrypted proxy-cache storage.
+- Added focused local-key and OpenBao Transit encrypted cache example configs
+  and CI validation for both.
 
 ## 1.2.2 - Storage-Bin Disk Cache Follow-Up
 

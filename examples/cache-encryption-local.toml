@@ -1,0 +1,47 @@
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "encrypted-cache.example.test"
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[proxy]
+upstreams = ["127.0.0.1:3000"]
+
+[cache]
+enabled = true
+status_header = "X-Cache-Status"
+content_types = ["image/*"]
+extensions = ["avif", "gif", "jpg", "png", "svg", "webp"]
+max_object_bytes = "16MiB"
+
+[cache.memory]
+enabled = false
+
+[cache.disk]
+enabled = true
+backend = "storage-bin"
+path = "cache/encrypted-local"
+max_size_bytes = "10GiB"
+
+[cache.disk.storage_bin]
+bin_size_bytes = "128MiB"
+preallocate = false
+max_open_bins = 8
+
+[cache.disk.encryption]
+enabled = true
+provider = "local"
+algorithm = "aes-256-gcm"
+key_id = "local-cache-v1"
+key_credential = "fluxheim-cache-key"
+
+[[vhosts]]
+name = "encrypted-cache.example.test"
+hosts = ["encrypted-cache.example.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:3000"]
+upstream_tls = false
