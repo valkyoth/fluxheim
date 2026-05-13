@@ -296,7 +296,7 @@ for doc in README.md CHANGELOG.md ROADMAP.md SECURITY.md; do
         install -Dm0644 "$doc" "${INSTALL_ROOT}/usr/share/doc/fluxheim/$doc"
     fi
 done
-for doc in RELEASE_NOTES_*.md; do
+for doc in release-notes/RELEASE_NOTES_*.md; do
     if [ -f "$doc" ]; then
         install -Dm0644 "$doc" "${INSTALL_ROOT}/usr/share/doc/fluxheim/$doc"
     fi

@@ -124,8 +124,8 @@ Planned image tags after release validation:
 
 ## RPM Packaging
 
-The release includes [packaging/rpm/fluxheim.spec](packaging/rpm/fluxheim.spec)
-and [packaging/rpm/fluxheim.tmpfiles](packaging/rpm/fluxheim.tmpfiles).
+The release includes [packaging/rpm/fluxheim.spec](../packaging/rpm/fluxheim.spec)
+and [packaging/rpm/fluxheim.tmpfiles](../packaging/rpm/fluxheim.tmpfiles).
 
 The spec expects a source tarball plus a vendored Cargo dependency tarball, then
 builds with `cargo --offline`:

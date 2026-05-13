@@ -128,7 +128,7 @@ fi
 
 %files
 %license LICENSE
-%doc README.md CHANGELOG.md ROADMAP.md RELEASE_NOTES_*.md docs examples
+%doc README.md CHANGELOG.md ROADMAP.md release-notes docs examples
 %{_docdir}/fluxheim/systemd/actalis-eab.conf
 %{_docdir}/fluxheim/systemd/actalis-eab-acme.conf
 %{_bindir}/fluxheim

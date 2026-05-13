@@ -10,7 +10,7 @@ reuse them through the commands below:
 RELEASE_VERSION=1.2.0
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
-RELEASE_NOTES="RELEASE_NOTES_${RELEASE_VERSION}.md"
+RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
 DIST_NAME="fluxheim-${RELEASE_VERSION}-linux-x86_64"
 ```
 
@@ -98,8 +98,8 @@ Create the release bundle:
 ```bash
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "${RELEASE_NOTES}" "dist/${DIST_NAME}/"
-cp -r docs examples packaging "dist/${DIST_NAME}/"
+cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
+cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
 tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
 sha256sum "dist/${DIST_NAME}.tar.gz"
 ```

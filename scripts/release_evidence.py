@@ -24,7 +24,7 @@ SAFE_RELEASE_VERSION = re.compile(r"^[0-9]+(?:\.[0-9]+){2}(?:[-+][0-9A-Za-z._-]+
 SOURCE_ARCHIVES = ("tar.gz", "zip")
 FULL_IMAGE_VARIANTS = ("wolfi", "alpine", "suse-micro", "debian")
 CACHE_IMAGE_VARIANTS = ("cache-wolfi", "cache-alpine", "cache-suse-micro", "cache-debian")
-DIST_COPY_DIRS = ("docs", "examples", "packaging")
+DIST_COPY_DIRS = ("docs", "examples", "packaging", "release-notes")
 DIST_COPY_FILES = ("README.md", "LICENSE", "CHANGELOG.md")
 
 
@@ -221,9 +221,6 @@ def build_release_archive(
     shutil.copy2(root / "target" / "release" / "fluxheim", output_dir / "fluxheim")  # lgtm[py/path-injection] fixed source and destination under git root
     for filename in DIST_COPY_FILES:
         shutil.copy2(root / filename, output_dir / filename)  # lgtm[py/path-injection] filename comes from fixed allowlist
-    release_notes = root / f"RELEASE_NOTES_{version}.md"
-    if release_notes.exists():  # lgtm[py/path-injection] version is regex-limited to release-safe characters
-        shutil.copy2(release_notes, output_dir / release_notes.name)  # lgtm[py/path-injection] release notes path is repo-root plus validated version
     for dirname in DIST_COPY_DIRS:
         destination = output_dir / dirname
         if destination.exists():  # lgtm[py/path-injection] dirname is from fixed allowlist
