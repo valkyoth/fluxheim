@@ -25,7 +25,10 @@ use pingora::{Error, ErrorType};
 #[cfg(feature = "proxy")]
 use sha2::{Digest, Sha256};
 
-use crate::config::{ByteSize, CacheConfig, CacheKeyPart, normalize_host};
+use crate::config::{
+    ByteSize, CacheConfig, CacheDiskBackend, CacheDiskStorageBinConfig, CacheKeyPart,
+    normalize_host,
+};
 
 #[cfg(feature = "proxy")]
 const DISK_CACHE_HEADER_OVERHEAD_LIMIT: u64 = 8192;
@@ -73,10 +76,12 @@ pub struct MemoryTierPlan {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DiskTierPlan {
+    pub backend: CacheDiskBackend,
     pub path: PathBuf,
     pub max_size_bytes: ByteSize,
     pub max_object_bytes: ByteSize,
     pub cache_tag_headers: Vec<String>,
+    pub storage_bin: CacheDiskStorageBinConfig,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1344,6 +1349,7 @@ pub struct PingoraDiskStorage {
 #[cfg(feature = "proxy")]
 impl PingoraDiskStorage {
     pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
+        reject_unimplemented_disk_backend(plan.backend)?;
         Self::new_with_cache_tag_headers(
             plan.path,
             plan.max_size_bytes,
@@ -1357,6 +1363,7 @@ impl PingoraDiskStorage {
         vhost: &str,
         route: Option<&str>,
     ) -> std::io::Result<Self> {
+        reject_unimplemented_disk_backend(plan.backend)?;
         Self::new_with_metric_scope(
             plan.path,
             plan.max_size_bytes,
@@ -2519,6 +2526,17 @@ impl PingoraDiskStorage {
 }
 
 #[cfg(feature = "proxy")]
+fn reject_unimplemented_disk_backend(backend: CacheDiskBackend) -> std::io::Result<()> {
+    match backend {
+        CacheDiskBackend::Filesystem => Ok(()),
+        CacheDiskBackend::StorageBin => Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "cache.disk.backend = \"storage-bin\" is recognized but not implemented yet",
+        )),
+    }
+}
+
+#[cfg(feature = "proxy")]
 #[derive(Debug, Default)]
 struct DiskIndexCheckpointState {
     dirty: bool,
@@ -3547,10 +3565,12 @@ pub fn storage_plan(config: &CacheConfig) -> CacheStoragePlan {
         .enabled
         .then(|| {
             config.disk.path.as_ref().map(|path| DiskTierPlan {
+                backend: config.disk.backend,
                 path: path.clone(),
                 max_size_bytes: config.disk.max_size_bytes,
                 max_object_bytes: config.max_object_bytes,
                 cache_tag_headers: config.tag_headers.clone(),
+                storage_bin: config.disk.storage_bin.clone(),
             })
         })
         .flatten();
@@ -4864,7 +4884,10 @@ mod tests {
         StaticCacheRequest, eligible_image_request, image_cache_key,
         memory_image_cache_from_config, static_cache_key, storage_plan,
     };
-    use crate::config::{ByteSize, CacheConfig, CacheDiskConfig, CacheKeyPart, CacheMemoryConfig};
+    use crate::config::{
+        ByteSize, CacheConfig, CacheDiskBackend, CacheDiskConfig, CacheDiskStorageBinConfig,
+        CacheKeyPart, CacheMemoryConfig,
+    };
     #[cfg(feature = "proxy")]
     use crate::test_support::unique_temp_path;
 
@@ -5343,12 +5366,44 @@ mod tests {
         assert_eq!(
             plan.disk.unwrap(),
             super::DiskTierPlan {
+                backend: CacheDiskBackend::Filesystem,
                 path: PathBuf::from("/var/cache/fluxheim/example.test"),
                 max_size_bytes: ByteSize::from_bytes(8 * 1024 * 1024 * 1024),
                 max_object_bytes: ByteSize::from_bytes(64 * 1024 * 1024),
                 cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+                storage_bin: CacheDiskStorageBinConfig::default(),
             }
         );
+    }
+
+    #[test]
+    fn storage_plan_preserves_reserved_storage_bin_options() {
+        let config = CacheConfig {
+            enabled: true,
+            max_object_bytes: ByteSize::from_bytes(32 * 1024 * 1024),
+            disk: CacheDiskConfig {
+                enabled: true,
+                backend: CacheDiskBackend::StorageBin,
+                path: Some(PathBuf::from("/var/cache/fluxheim/example.test")),
+                max_size_bytes: ByteSize::from_bytes(1024 * 1024 * 1024),
+                storage_bin: CacheDiskStorageBinConfig {
+                    bin_size_bytes: ByteSize::from_bytes(512 * 1024 * 1024),
+                    preallocate: true,
+                    max_open_bins: 4,
+                },
+            },
+            ..CacheConfig::default()
+        };
+
+        let plan = storage_plan(&config).disk.unwrap();
+
+        assert_eq!(plan.backend, CacheDiskBackend::StorageBin);
+        assert_eq!(
+            plan.storage_bin.bin_size_bytes,
+            ByteSize::from_bytes(512 * 1024 * 1024)
+        );
+        assert!(plan.storage_bin.preallocate);
+        assert_eq!(plan.storage_bin.max_open_bins, 4);
     }
 
     #[test]
@@ -6295,10 +6350,12 @@ mod tests {
 
         let root = unique_test_cache_dir("round-trip");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-key", "vhost");
@@ -6326,6 +6383,24 @@ mod tests {
         assert_eq!(storage.stats().unwrap().entries, 1);
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn pingora_disk_storage_rejects_reserved_storage_bin_backend() {
+        let root = unique_test_cache_dir("storage-bin-runtime-guard");
+        let error = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(1024),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+        assert!(!root.exists());
     }
 
     #[cfg(feature = "proxy")]
@@ -6401,10 +6476,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-persistent-index");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-index-key", "vhost-a");
@@ -6420,10 +6497,12 @@ mod tests {
         assert_eq!(writer.purge_index.len(), 1);
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 1);
@@ -6450,17 +6529,21 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-shared-index");
         let vhost = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let route = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -6478,10 +6561,12 @@ mod tests {
         block_on(vhost_miss.finish()).unwrap();
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 2);
@@ -6506,10 +6591,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-index-checkpoint");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "checkpoint-key", "vhost-a");
@@ -6526,10 +6613,12 @@ mod tests {
         super::write_disk_index_checkpoint(writer.root(), writer.disk_index.entries()).unwrap();
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
 
@@ -6548,10 +6637,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-index-checkpoint-debounce");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(8192),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let checkpoint = super::disk_index_checkpoint_path(storage.root());
@@ -6596,10 +6687,12 @@ mod tests {
         let previous_scan_cap = 8_usize;
         let root = unique_test_cache_dir("disk-start-over-previous-entry-cap");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(65536),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -6623,10 +6716,12 @@ mod tests {
         super::write_disk_index_checkpoint(writer.root(), truncated_checkpoint).unwrap();
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(65536),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
 
@@ -6644,10 +6739,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-start-budget-reconcile");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(65536),
             max_object_bytes: ByteSize::from_bytes(4096),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let span = pingora::cache::trace::Span::inactive().handle();
@@ -6664,10 +6761,12 @@ mod tests {
         }
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(4096),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
 
@@ -6682,10 +6781,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-index-corrupt");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "checkpoint-key", "vhost-a");
@@ -6703,10 +6804,12 @@ mod tests {
         .unwrap();
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
 
@@ -6724,10 +6827,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-persistent-path-index");
         let writer = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let config = enabled_cache();
@@ -6778,10 +6883,12 @@ mod tests {
         assert_eq!(writer.purge_index.len(), 3);
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 3);
@@ -6816,10 +6923,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-purge-live-scan");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let config = enabled_cache();
@@ -6865,10 +6974,12 @@ mod tests {
     fn pingora_disk_storage_rebuilds_tag_index_from_v4_objects() {
         let root = unique_test_cache_dir("disk-v4-compat-index");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "legacy-v4-key", "vhost-a");
@@ -6893,10 +7004,12 @@ mod tests {
         );
 
         let rebuilt = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         assert_eq!(rebuilt.purge_index.len(), 1);
@@ -6924,10 +7037,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-soft-purge");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-soft-key", "vhost-a");
@@ -6978,10 +7093,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-stale-purge");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale", "vhost-a");
@@ -7030,10 +7147,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-stale-purge-advance");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let fresh_first =
@@ -7119,10 +7238,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-stale-purge-dry-run");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let stale_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-stale-dry", "vhost-a");
@@ -7162,10 +7283,12 @@ mod tests {
 
         let root = unique_test_cache_dir("disk-vary-purge");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let base_key = pingora::cache::CacheKey::new("fluxheim-test", "disk-vary-key", "vhost");
@@ -7211,10 +7334,12 @@ mod tests {
 
         let root = unique_test_cache_dir("oversized");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(8),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "disk-oversized-key", "vhost");
@@ -7243,10 +7368,12 @@ mod tests {
 
         let root = unique_test_cache_dir("oversized-key-metadata");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(32 * 1024),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let user_tag = "v".repeat((super::DISK_CACHE_HEADER_OVERHEAD_LIMIT + 1) as usize);
@@ -7314,10 +7441,12 @@ mod tests {
 
         let root = unique_test_cache_dir("paths");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new(
@@ -7358,10 +7487,12 @@ mod tests {
         let outside = unique_test_cache_dir("symlink-shard-outside");
         std::fs::create_dir_all(&outside).unwrap();
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write", "vhost");
@@ -7392,10 +7523,12 @@ mod tests {
         let outside = unique_test_cache_dir("symlink-object-outside");
         std::fs::create_dir_all(&outside).unwrap();
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-read", "vhost");
@@ -7423,10 +7556,12 @@ mod tests {
         let outside = unique_test_cache_dir("symlink-object-write-outside");
         std::fs::create_dir_all(&outside).unwrap();
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "symlink-write-target", "vhost");
@@ -7457,10 +7592,12 @@ mod tests {
 
         let root = unique_test_cache_dir("symlink-inside-root");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "inside-symlink", "vhost");
@@ -7492,10 +7629,12 @@ mod tests {
         std::os::unix::fs::symlink(&outside, &root).unwrap();
 
         let error = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap_err();
 
@@ -7514,10 +7653,12 @@ mod tests {
         let root = linked_parent.join("cache");
 
         let error = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap_err();
 
@@ -7623,10 +7764,12 @@ mod tests {
 
         let root = unique_test_cache_dir("eviction");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(512),
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost");
@@ -7663,10 +7806,12 @@ mod tests {
 
         let root = unique_test_cache_dir("purge-index-prune");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(2048),
             max_object_bytes: ByteSize::from_bytes(1024),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let key = pingora::cache::CacheKey::new("fluxheim-test", "object", "vhost");
@@ -7692,10 +7837,12 @@ mod tests {
 
         let root = unique_test_cache_dir("lru-eviction");
         let storage = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(720),
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let first = pingora::cache::CacheKey::new("fluxheim-test", "first", "vhost");
@@ -7739,10 +7886,12 @@ mod tests {
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let disk = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let storage = super::pingora_tiered_storage_from_parts(memory, disk);
@@ -7782,10 +7931,12 @@ mod tests {
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
         });
         let disk = super::pingora_disk_storage_from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::Filesystem,
             path: root.clone(),
             max_size_bytes: ByteSize::from_bytes(4096),
             max_object_bytes: ByteSize::from_bytes(512),
             cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig::default(),
         })
         .unwrap();
         let storage = super::pingora_tiered_storage_from_parts(memory, disk);
