@@ -19,7 +19,6 @@ proxy = [
     "dep:async-trait",
     "dep:base64",
     "dep:bytes",
-    "dep:getrandom",
     "dep:http",
     "dep:pingora",
     "dep:ring",
@@ -64,7 +63,7 @@ acme-client = [
 ]
 metrics = ["dep:prometheus"]
 metrics-otlp = ["metrics", "dep:serde_json"]
-otel-tracing = ["proxy", "dep:getrandom"]
+otel-tracing = ["proxy"]
 otel-otlp = ["otel-tracing", "dep:serde_json"]
 privacy-mode = ["proxy", "web"]
 security = []
@@ -94,7 +93,7 @@ bytes = { version = "1.11.1", optional = true }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"], optional = true }
 clap = { version = "4.6.1", features = ["derive", "env"] }
 env_logger = "0.11.10"
-getrandom = { version = "0.4.2", optional = true }
+getrandom = "0.4.2"
 httpdate = { version = "1.0.3", optional = true }
 http = { version = "1.4.0", optional = true }
 instant-acme = { version = "0.8.5", default-features = false, optional = true }
