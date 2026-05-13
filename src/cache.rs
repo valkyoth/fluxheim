@@ -2111,6 +2111,22 @@ impl StorageBinDiskStorage {
             self.activity.store_refusal();
             return Ok(None);
         }
+
+        let replaced = {
+            let mut objects = self.objects.write().map_err(|_| {
+                cache_io_error(
+                    "lock storage-bin object index",
+                    std::io::Error::other("storage-bin object index lock poisoned"),
+                )
+            })?;
+            objects.remove(&store_key.combined)
+        };
+        if let Some(previous) = replaced {
+            let _ = self.release_location(previous.location);
+            self.purge_index.remove_combined(&store_key.combined);
+            self.schedule_storage_bin_index();
+        }
+
         let location = {
             let mut free_map = self.free_map.lock().map_err(|_| {
                 cache_io_error(
@@ -2136,7 +2152,7 @@ impl StorageBinDiskStorage {
             return Err(cache_io_error("write storage-bin cache object", error));
         }
 
-        let previous = {
+        {
             let mut objects = self.objects.write().map_err(|_| {
                 cache_io_error(
                     "lock storage-bin object index",
@@ -2152,9 +2168,6 @@ impl StorageBinDiskStorage {
                 },
             )
         };
-        if let Some(previous) = previous {
-            let _ = self.release_location(previous.location);
-        }
         self.schedule_storage_bin_index();
         self.purge_index.insert_with_path_and_tags(
             store_key.combined,
@@ -8101,6 +8114,57 @@ mod tests {
         assert_eq!(storage.stats().unwrap().entries, 1);
         assert_eq!(storage.stats().unwrap().activity.stores, 1);
         assert_eq!(storage.stats().unwrap().activity.hits, 1);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_rewrites_same_key_in_full_bin() {
+        let root = unique_test_cache_dir("storage-bin-storage-rewrite");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(2048),
+            max_object_bytes: ByteSize::from_bytes(1800),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(2048),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+        let key = pingora::cache::CacheKey::new("fluxheim-test", "/rewrite.webp", "vhost");
+
+        for body_byte in [b'a', b'b'] {
+            let meta = pingora_meta("max-age=60");
+            let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+                &key,
+                &meta,
+                &super::default_cache_tag_headers_for_storage(),
+            );
+            let (internal_meta, response_header) = meta.serialize().unwrap();
+            assert_eq!(
+                storage
+                    .put_object(
+                        store_key,
+                        internal_meta,
+                        response_header,
+                        Arc::from(vec![body_byte; 1300].into_boxed_slice()),
+                    )
+                    .unwrap(),
+                Some(1300)
+            );
+        }
+
+        let object = storage
+            .lookup_object_by_combined(&key.combined())
+            .unwrap()
+            .unwrap();
+        assert_eq!(object.body.as_ref(), vec![b'b'; 1300].as_slice());
+        assert_eq!(storage.stats().unwrap().entries, 1);
+        assert_eq!(storage.stats().unwrap().activity.stores, 2);
 
         std::fs::remove_dir_all(root).unwrap();
     }
