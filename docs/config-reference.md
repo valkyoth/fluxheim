@@ -675,7 +675,8 @@ body. It is intentionally optional because normal CI should not depend on a
 local Podman/OpenBao runtime.
 `examples/cache-encryption-local.toml` and
 `examples/cache-encryption-openbao.toml` provide full example policies using
-the storage-bin backend with local-key and OpenBao Transit encryption.
+the storage-bin backend with local-key and OpenBao Transit encryption. See
+`docs/cache-encryption.md` for key setup and rotation guidance.
 
 `local_static` is disabled by default. When set to `true`, the same cache
 policy may also store local `[web]`, `[vhosts.web]`, and route-scoped

@@ -810,7 +810,9 @@ Focused cache-only follow-up releases after 1.2:
   custody, key versioning, and rotation while storing only Transit ciphertext in
   the cache backend. The cache object format records key id/version, nonce or
   Transit ciphertext marker, ciphertext length, and authenticated-data scope so
-  objects cannot be swapped between cache keys.
+  objects cannot be swapped between cache keys. The release includes validated
+  local-key and OpenBao example configs, local-key release-gate smoke coverage,
+  and an optional Podman/OpenBao Transit smoke path.
 - `1.2.4`: distributed cache metadata and peer-fill. This release has one job:
   decide and implement the first safe multi-node cache coherence model for
   clustered deployments, including peer-fill limits, failure behavior, metrics,

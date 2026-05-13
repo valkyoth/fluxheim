@@ -151,7 +151,7 @@ fi
 
 %changelog
 * Wed May 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.3-1
-- Focused optional disk cache encryption follow-up with local-key AES-GCM cache object support.
+- Focused optional disk cache encryption follow-up with local-key AES-GCM and OpenBao Transit support.
 
 * Tue May 12 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.2-1
 - Focused storage-bin disk cache backend with runtime selection, smoke coverage, pressure stats, and tail-bin reclamation.

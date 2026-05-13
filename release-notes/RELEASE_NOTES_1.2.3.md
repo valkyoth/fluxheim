@@ -34,6 +34,8 @@ where Fluxheim should store only Transit ciphertext in the cache backend.
   Transit-backed proxy-cache `MISS` then `HIT` behavior and confirm that stored
   cache objects contain `vault:v...` ciphertext rather than plaintext response
   bodies.
+- Added `docs/cache-encryption.md` with local-key setup, OpenBao policy,
+  rotation guidance, and smoke-test commands.
 
 ## Known Limits
 

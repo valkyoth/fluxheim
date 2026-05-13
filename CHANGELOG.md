@@ -35,6 +35,8 @@ Released: in progress
   and CI validation for both.
 - Added release-gate smoke coverage for local-key encrypted storage-bin cache
   traffic.
+- Added cache-encryption operations documentation covering local-key setup,
+  OpenBao policy, rotation behavior, and smoke-test commands.
 
 ## 1.2.2 - Storage-Bin Disk Cache Follow-Up
 

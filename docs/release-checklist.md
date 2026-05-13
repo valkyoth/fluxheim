@@ -204,8 +204,10 @@ scripts/smoke_1_0_core.sh
   hashed, and compared through a vetted constant-time equality primitive.
   Keep new long-lived credentials in `zeroize`/`ZeroizeOnDrop` types, and use
   `subtle` for any equality check involving authentication tokens, signing
-  secrets, or derived verifiers. Do not classify normal cache object bodies as
-  secrets unless a future module explicitly stores private user data.
+  secrets, or derived verifiers. Disk cache encryption keys and OpenBao tokens
+  are long-lived credentials and must follow this policy. Do not classify
+  normal cache object bodies as secrets unless a future module explicitly stores
+  private user data.
 - Third-party unsafe inventory. Before a stable release, run `cargo-geiger` as
   an informational dependency review and record unexpected changes in the
   release notes. Do not treat every dependency-level unsafe finding as an
