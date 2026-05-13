@@ -207,8 +207,17 @@ if [ "$count" != "1" ]; then
     exit 1
 fi
 
+i=0
+until [ -f "$TMP_DIR/cache/.fluxheim-storage-bin-index-v1" ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 50 ]; then
+        echo "storage-bin cache smoke failed: timed out waiting for index write" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
 test -f "$TMP_DIR/cache/.fluxheim-storage-bin-v1"
-test -f "$TMP_DIR/cache/.fluxheim-storage-bin-index-v1"
 find "$TMP_DIR/cache/bins" -type f -name '*.fhbin' | grep -q .
 
 echo "storage-bin cache smoke passed"

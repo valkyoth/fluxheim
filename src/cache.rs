@@ -1947,7 +1947,8 @@ pub struct StorageBinDiskStorage {
     layout: StorageBinLayoutPlan,
     files: StorageBinFileSet,
     free_map: Mutex<StorageBinFreeMap>,
-    objects: RwLock<HashMap<String, StorageBinObjectEntry>>,
+    objects: Arc<RwLock<HashMap<String, StorageBinObjectEntry>>>,
+    index_state: Arc<Mutex<DiskIndexCheckpointState>>,
     purge_index: CachePurgeIndex,
     max_size_bytes: ByteSize,
     max_object_bytes: ByteSize,
@@ -2049,7 +2050,8 @@ impl StorageBinDiskStorage {
             free_map: Mutex::new(StorageBinFreeMap::from_occupied(&layout, &valid_entries)?),
             files: StorageBinFileSet::new(layout.clone()),
             layout,
-            objects: RwLock::new(recovered_objects),
+            objects: Arc::new(RwLock::new(recovered_objects)),
+            index_state: Arc::new(Mutex::new(DiskIndexCheckpointState::default())),
             purge_index: recovered_purge_index,
             max_size_bytes: plan.max_size_bytes,
             max_object_bytes: plan.max_object_bytes,
@@ -2153,8 +2155,7 @@ impl StorageBinDiskStorage {
         if let Some(previous) = previous {
             let _ = self.release_location(previous.location);
         }
-        self.write_index()
-            .map_err(|error| cache_io_error("write storage-bin index", error))?;
+        self.schedule_storage_bin_index();
         self.purge_index.insert_with_path_and_tags(
             store_key.combined,
             store_key.primary,
@@ -2241,7 +2242,7 @@ impl StorageBinDiskStorage {
             self.purge_index.remove_combined(&combined_key);
             self.activity.eviction();
         }
-        self.write_index()?;
+        self.schedule_storage_bin_index();
         Ok(true)
     }
 
@@ -2680,24 +2681,69 @@ impl StorageBinDiskStorage {
         };
         self.release_location(entry.location)?;
         self.purge_index.remove_combined(combined_key);
-        self.write_index()?;
+        self.schedule_storage_bin_index();
         self.activity.purge();
         Ok(true)
     }
 
     fn write_index(&self) -> std::io::Result<()> {
-        let entries = match self.objects.read() {
-            Ok(objects) => objects
-                .iter()
-                .map(|(combined_key, entry)| StorageBinIndexEntry {
-                    combined_key: combined_key.clone(),
-                    location: entry.location,
-                    accessed: entry.accessed,
-                })
-                .collect::<Vec<_>>(),
-            Err(_) => Vec::new(),
+        write_storage_bin_index_from_objects(&self.layout, &self.objects)
+    }
+
+    #[cfg(test)]
+    fn storage_bin_index_flags(&self) -> (bool, bool) {
+        match self.index_state.lock() {
+            Ok(state) => (state.dirty, state.scheduled),
+            Err(_) => (false, false),
+        }
+    }
+
+    fn schedule_storage_bin_index(&self) {
+        let mut state = match self.index_state.lock() {
+            Ok(state) => state,
+            Err(_) => return,
         };
-        write_storage_bin_index(&self.layout, &entries)
+        state.dirty = true;
+        if state.scheduled {
+            return;
+        }
+        state.scheduled = true;
+
+        let layout = self.layout.clone();
+        let objects = Arc::clone(&self.objects);
+        let index_state = Arc::clone(&self.index_state);
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(DISK_CACHE_INDEX_CHECKPOINT_DEBOUNCE);
+                {
+                    let mut state = match index_state.lock() {
+                        Ok(state) => state,
+                        Err(_) => return,
+                    };
+                    if !state.dirty {
+                        state.scheduled = false;
+                        return;
+                    }
+                    state.dirty = false;
+                }
+
+                if let Err(error) = write_storage_bin_index_from_objects(&layout, &objects) {
+                    log::warn!(
+                        "failed to write storage-bin cache index for {}: {error}",
+                        layout.root.display()
+                    );
+                }
+
+                let mut state = match index_state.lock() {
+                    Ok(state) => state,
+                    Err(_) => return,
+                };
+                if !state.dirty {
+                    state.scheduled = false;
+                    return;
+                }
+            }
+        });
     }
 
     fn release_location(&self, location: StorageBinObjectLocation) -> std::io::Result<()> {
@@ -4463,6 +4509,25 @@ fn write_storage_bin_index(
         let _ = temp_path.remove_file();
     }
     write_result
+}
+
+#[cfg(feature = "proxy")]
+fn write_storage_bin_index_from_objects(
+    layout: &StorageBinLayoutPlan,
+    objects: &RwLock<HashMap<String, StorageBinObjectEntry>>,
+) -> std::io::Result<()> {
+    let entries = match objects.read() {
+        Ok(objects) => objects
+            .iter()
+            .map(|(combined_key, entry)| StorageBinIndexEntry {
+                combined_key: combined_key.clone(),
+                location: entry.location,
+                accessed: entry.accessed,
+            })
+            .collect::<Vec<_>>(),
+        Err(_) => Vec::new(),
+    };
+    write_storage_bin_index(layout, &entries)
 }
 
 #[cfg(feature = "proxy")]
@@ -8108,6 +8173,7 @@ mod tests {
                 Arc::from(&b"restart-body"[..]),
             )
             .unwrap();
+        storage.write_index().unwrap();
 
         let recovered = super::StorageBinDiskStorage::from_plan(plan).unwrap();
         let object = recovered
@@ -8117,6 +8183,64 @@ mod tests {
 
         assert_eq!(object.body.as_ref(), b"restart-body");
         assert_eq!(recovered.stats().unwrap().entries, 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn storage_bin_disk_storage_debounces_index_after_insert_burst() {
+        let root = unique_test_cache_dir("storage-bin-index-debounce");
+        let storage = super::StorageBinDiskStorage::from_plan(super::DiskTierPlan {
+            backend: CacheDiskBackend::StorageBin,
+            path: root.clone(),
+            max_size_bytes: ByteSize::from_bytes(4096),
+            max_object_bytes: ByteSize::from_bytes(512),
+            cache_tag_headers: super::default_cache_tag_headers_for_storage(),
+            storage_bin: CacheDiskStorageBinConfig {
+                bin_size_bytes: ByteSize::from_bytes(1024),
+                preallocate: false,
+                max_open_bins: 4,
+            },
+        })
+        .unwrap();
+        let index_path = super::storage_bin_index_path(&root);
+        let meta = pingora_meta("max-age=60");
+
+        for name in ["first", "second", "third"] {
+            let key = pingora::cache::CacheKey::new("fluxheim-test", name, "vhost");
+            let store_key = super::PingoraStoreKey::from_cache_key_and_meta(
+                &key,
+                &meta,
+                &super::default_cache_tag_headers_for_storage(),
+            );
+            let (internal_meta, response_header) = meta.serialize().unwrap();
+            storage
+                .put_object(
+                    store_key,
+                    internal_meta,
+                    response_header,
+                    Arc::from(&b"body"[..]),
+                )
+                .unwrap();
+        }
+
+        assert!(!index_path.exists());
+        assert_eq!(storage.storage_bin_index_flags(), (true, true));
+        for _ in 0..20 {
+            if index_path.exists() && storage.storage_bin_index_flags() == (false, false) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(index_path.exists());
+        assert_eq!(storage.storage_bin_index_flags(), (false, false));
+        assert_eq!(
+            super::read_storage_bin_index(&storage.layout)
+                .unwrap()
+                .len(),
+            3
+        );
+
         std::fs::remove_dir_all(root).unwrap();
     }
 

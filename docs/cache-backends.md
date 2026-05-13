@@ -213,6 +213,10 @@ internal cache implementation.
   and its `(bin_id, offset, len)` location. On startup Fluxheim reads the index,
   validates each referenced object by parsing the v5 cache object bytes, rebuilds
   the purge index, and reconstructs free ranges from the occupied locations.
+- Storage-bin index writes are debounced after insert, eviction, and purge
+  bursts. A crash can drop the newest cache entries from the durable index, but
+  the affected bin ranges are then treated as free on restart rather than
+  becoming unbounded orphaned files.
 - The allocator model uses first-fit free-range reuse within bounded bins and
   refuses allocations once the configured disk-cache byte budget is exhausted.
   Free ranges are merged after release so evictions can make space without

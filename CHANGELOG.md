@@ -27,6 +27,9 @@ Released: in progress
 - Added storage-bin management parity for runtime stats, activity reset, cache
   inspection, exact purge, indexed hard/soft purge, and stale-object purge so
   the backend has the same operational hooks needed by the filesystem tier.
+- Debounced storage-bin index writes after insert, eviction, and purge bursts
+  so high-cardinality cache fills do not rewrite the full durable index once per
+  object.
 
 ## 1.2.1 - Local Static Cache Follow-Up
 
