@@ -30,6 +30,9 @@ Released: in progress
 - Added the first peer-safe runtime primitive for distributed cache fill:
   proxy-cache requests carrying `Cache-Control: only-if-cached` are now served
   from a fresh local cached object or receive `504` without contacting origin.
+- Added outbound peer-fill on proxy-cache misses. Fluxheim now asks configured
+  peers for `only-if-cached` hits before going to origin, stores valid peer
+  hits locally, and respects `fail_open` when no peer can satisfy the request.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

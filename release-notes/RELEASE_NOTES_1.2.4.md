@@ -31,15 +31,18 @@ is implemented and tested.
 - Added the first runtime primitive for safe peer fill: proxy-cache requests
   with `Cache-Control: only-if-cached` return a fresh local cache hit or a
   `504` miss response without contacting the origin backend.
+- Added outbound peer-fill on proxy-cache misses. Fluxheim asks configured peers
+  for `only-if-cached` hits, strips sensitive client headers from peer
+  requests, stores valid peer hits locally, and falls back to origin only when
+  `fail_open` allows it.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 
 ## Known Limits
 
-- This release line now has the cache-only serving primitive needed for safe
-  peer fill. Runtime outbound peer fetch, peer-fill metrics, and operational
-  cache-cluster smoke coverage are expected to land in later `1.2.4` slices
-  before tagging.
+- This release line now has the cache-only serving primitive and outbound peer
+  fetch. Peer-fill-specific metrics and operational cache-cluster smoke coverage
+  are expected to land in later `1.2.4` slices before tagging.
 - Peer base URLs intentionally require an explicit port for now to avoid
   ambiguity in private cache clusters.
 

@@ -3437,6 +3437,145 @@ impl ProxyHttp for FluxProxy {
     }
 
     #[cfg(feature = "cache")]
+    async fn proxy_upstream_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> Result<bool>
+    where
+        Self::CTX: Send + Sync,
+    {
+        let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+        let vhost_index = ctx
+            .vhost_index
+            .unwrap_or_else(|| state.vhost_index(request_host(session)));
+        let vhost = state.vhost(vhost_index);
+        let cache = selected_cache_config(vhost, ctx);
+        if !cache.peer_fill.enabled || session.req_header().method.as_str() != "GET" {
+            return Ok(true);
+        }
+        let Some(storage) = selected_cache_storage(vhost, ctx) else {
+            return Ok(true);
+        };
+        if !session.cache.enabled() {
+            return Ok(true);
+        }
+
+        let cache_key = session.cache.cache_key().clone();
+        let peer_fill = cache.peer_fill.clone();
+        let request = peer_fill_request_from_header(session.req_header());
+        let response_headers = selected_response_headers(vhost, ctx);
+        let max_body_bytes = peer_fill
+            .max_object_bytes
+            .unwrap_or(cache.max_object_bytes)
+            .as_u64()
+            .min(cache.max_object_bytes.as_u64());
+
+        for peer in &peer_fill.peers {
+            let peer = peer.clone();
+            let peer_name = peer.name.clone();
+            let request = request.clone();
+            let peer_fill_for_request = peer_fill.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                fetch_peer_fill_response(&peer, &peer_fill_for_request, &request, max_body_bytes)
+            })
+            .await
+            .map_err(|error| {
+                Error::because(
+                    ErrorType::InternalError,
+                    "peer fill worker task failed",
+                    error,
+                )
+            })?;
+
+            let response = match result {
+                Ok(Some(response)) => response,
+                Ok(None) => continue,
+                Err(error) => {
+                    log::warn!("peer fill from {peer_name} failed: {error}");
+                    continue;
+                }
+            };
+
+            if response.status != 200 {
+                continue;
+            }
+
+            let mut response_header = response.to_response_header()?;
+            if let Some(header) = cache.status_header.as_deref() {
+                response_header.remove_header(header);
+            }
+            if let Some(header) = cache.status_reason_header.as_deref() {
+                response_header.remove_header(header);
+            }
+            if response_cache_admission_rejection(&response_header, cache).is_some() {
+                continue;
+            }
+            let Some(ttl_secs) = cache_response_fresh_ttl_secs(cache, &response_header) else {
+                continue;
+            };
+            let now = std::time::SystemTime::now();
+            let fresh_until = now
+                .checked_add(std::time::Duration::from_secs(u64::from(ttl_secs)))
+                .unwrap_or(now);
+            let meta = CacheMeta::new(
+                fresh_until,
+                now,
+                cache.stale_while_revalidate_secs.unwrap_or(0),
+                cache.stale_if_error_secs.unwrap_or(0),
+                response_header.clone(),
+            );
+            let trace = pingora::cache::trace::Span::inactive().handle();
+            let mut miss = storage.get_miss_handler(&cache_key, &meta, &trace).await?;
+            miss.write_body(response.body.clone(), true).await?;
+            let _ = miss.finish().await?;
+
+            response_header.remove_header("age");
+            response_header.insert_header("age", "0")?;
+            response_header.remove_header("content-length");
+            response_header.insert_header("content-length", response.body.len().to_string())?;
+            insert_cache_status_headers(
+                &mut response_header,
+                cache,
+                Some(CacheStatusOverride {
+                    status: "PEER-HIT",
+                    reason: None,
+                }),
+                CachePhase::Hit,
+            )?;
+            crate::headers::apply_response_policy(&mut response_header, response_headers)?;
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "peer-fill");
+            ctx.cache_observed_phase = Some(CachePhase::Hit);
+            ctx.response_body_bytes_seen = response.body.len() as u64;
+            session
+                .write_response_header(Box::new(response_header), response.body.is_empty())
+                .await?;
+            if !response.body.is_empty() {
+                session
+                    .write_response_body(Some(response.body.clone()), true)
+                    .await?;
+            }
+            return Ok(false);
+        }
+
+        if peer_fill.fail_open {
+            Ok(true)
+        } else {
+            respond_proxy_cache_only_miss(
+                session,
+                ctx,
+                cache,
+                response_headers,
+                "peer-fill-miss",
+                Some("MISS"),
+            )
+            .await?;
+            Ok(false)
+        }
+    }
+
+    #[cfg(feature = "cache")]
     async fn upstream_response_filter(
         &self,
         session: &mut Session,
@@ -4103,6 +4242,155 @@ async fn lookup_proxy_cache_only_object(
 }
 
 #[cfg(feature = "cache")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PeerFillRequest {
+    uri_path_and_query: String,
+    host: Option<String>,
+    headers: Vec<(&'static str, String)>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PeerFillResponse {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Bytes,
+}
+
+#[cfg(feature = "cache")]
+impl PeerFillResponse {
+    fn to_response_header(&self) -> Result<ResponseHeader> {
+        let mut response = ResponseHeader::build(self.status, Some(self.headers.len()))?;
+        for (name, value) in &self.headers {
+            if peer_fill_hop_by_hop_header(name) {
+                continue;
+            }
+            response.append_header(name.clone(), value.clone())?;
+        }
+        response.remove_header("content-length");
+        response.insert_header("content-length", self.body.len().to_string())?;
+        Ok(response)
+    }
+}
+
+#[cfg(feature = "cache")]
+fn peer_fill_request_from_header(request: &RequestHeader) -> PeerFillRequest {
+    let mut headers = Vec::new();
+    for name in ["accept", "accept-encoding", "accept-language"] {
+        for value in request_header_values(request, name) {
+            headers.push((name, value.to_owned()));
+        }
+    }
+    PeerFillRequest {
+        uri_path_and_query: request
+            .uri
+            .path_and_query()
+            .map(|value| value.as_str().to_owned())
+            .unwrap_or_else(|| request.uri.path().to_owned()),
+        host: request_host_header(request).map(ToOwned::to_owned),
+        headers,
+    }
+}
+
+#[cfg(feature = "cache")]
+fn fetch_peer_fill_response(
+    peer: &crate::config::CachePeerConfig,
+    peer_fill: &crate::config::CachePeerFillConfig,
+    request: &PeerFillRequest,
+    max_body_bytes: u64,
+) -> std::io::Result<Option<PeerFillResponse>> {
+    let url = peer_fill_url(&peer.base_url, &request.uri_path_and_query)?;
+    let timeout = std::time::Duration::from_secs(
+        peer_fill
+            .connect_timeout_secs
+            .saturating_add(peer_fill.read_timeout_secs),
+    );
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut builder = agent
+        .get(&url)
+        .header("cache-control", "only-if-cached")
+        .header("x-fluxheim-peer-fill", "1");
+    if let Some(host) = request.host.as_deref() {
+        builder = builder.header("host", host);
+    }
+    for (name, value) in &request.headers {
+        builder = builder.header(*name, value.as_str());
+    }
+
+    let mut response = builder.call().map_err(peer_fill_io_error)?;
+    if response.status().as_u16() == 504 {
+        return Ok(None);
+    }
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect::<Vec<_>>();
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(max_body_bytes.saturating_add(1))
+        .read_to_vec()
+        .map_err(peer_fill_io_error)?;
+    if body.len() as u64 > max_body_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "peer fill response exceeds configured object limit",
+        ));
+    }
+
+    Ok(Some(PeerFillResponse {
+        status,
+        headers,
+        body: Bytes::from(body),
+    }))
+}
+
+#[cfg(feature = "cache")]
+fn peer_fill_url(base_url: &str, path_and_query: &str) -> std::io::Result<String> {
+    let base_url = base_url.trim_end_matches('/');
+    if path_and_query.starts_with('/') {
+        Ok(format!("{base_url}{path_and_query}"))
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "peer fill request path must be absolute",
+        ))
+    }
+}
+
+#[cfg(feature = "cache")]
+fn peer_fill_io_error(error: ureq::Error) -> std::io::Error {
+    std::io::Error::other(error.to_string())
+}
+
+#[cfg(feature = "cache")]
+fn peer_fill_hop_by_hop_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    )
+}
+
+#[cfg(feature = "cache")]
 async fn respond_proxy_cache_only_miss(
     session: &mut Session,
     ctx: &mut RequestContext,
@@ -4429,7 +4717,7 @@ async fn serve_static_file_maybe_cached(
         )
         .await;
     }
-    let Some(ttl_secs) = static_cache_fresh_ttl_secs(cache, &store_response) else {
+    let Some(ttl_secs) = cache_response_fresh_ttl_secs(cache, &store_response) else {
         ctx.response_body_bytes_seen = plan.response_body_bytes;
         return crate::web::serve_static_file_with_body_and_cache_headers(
             session,
@@ -4675,8 +4963,8 @@ fn static_cached_body_for_plan(
     }
 }
 
-#[cfg(all(feature = "web", feature = "cache"))]
-fn static_cache_fresh_ttl_secs(
+#[cfg(feature = "cache")]
+fn cache_response_fresh_ttl_secs(
     cache: &crate::config::CacheConfig,
     response: &ResponseHeader,
 ) -> Option<u32> {
@@ -4689,7 +4977,7 @@ fn static_cache_fresh_ttl_secs(
         .filter(|ttl| *ttl > 0)
 }
 
-#[cfg(all(feature = "web", feature = "cache"))]
+#[cfg(feature = "cache")]
 fn response_cache_control_max_age(response: &ResponseHeader) -> Option<u32> {
     response
         .headers
@@ -6266,6 +6554,8 @@ mod tests {
         https_redirect_location, redirect_authority, request_body_chunk_limit_status,
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
+    #[cfg(feature = "cache")]
+    use super::{PeerFillResponse, peer_fill_request_from_header, peer_fill_url};
     #[cfg(feature = "cache")]
     use super::{
         capture_revalidation_304_headers, request_cache_bypass, request_cache_bypass_reason,
@@ -9020,6 +9310,79 @@ mod tests {
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
         assert!(!request_cache_only_if_cached(&request));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_request_keeps_only_safe_negotiation_headers() {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.webp?v=1", None).unwrap();
+        request.insert_header("host", "site.example").unwrap();
+        request.insert_header("accept", "image/webp").unwrap();
+        request.insert_header("accept-encoding", "br").unwrap();
+        request.insert_header("accept-language", "en").unwrap();
+        request
+            .insert_header("authorization", "Bearer secret")
+            .unwrap();
+        request.insert_header("cookie", "session=private").unwrap();
+
+        let peer_request = peer_fill_request_from_header(&request);
+
+        assert_eq!(peer_request.uri_path_and_query, "/img/logo.webp?v=1");
+        assert_eq!(peer_request.host.as_deref(), Some("site.example"));
+        assert_eq!(
+            peer_request.headers,
+            vec![
+                ("accept", "image/webp".to_owned()),
+                ("accept-encoding", "br".to_owned()),
+                ("accept-language", "en".to_owned()),
+            ]
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_url_requires_absolute_request_path() {
+        assert_eq!(
+            peer_fill_url("https://edge.example:8443/", "/img/logo.webp?v=1")
+                .unwrap()
+                .as_str(),
+            "https://edge.example:8443/img/logo.webp?v=1"
+        );
+        assert!(peer_fill_url("https://edge.example:8443", "relative").is_err());
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_response_header_strips_hop_by_hop_headers() {
+        let response = PeerFillResponse {
+            status: 200,
+            headers: vec![
+                ("content-type".to_owned(), "image/webp".to_owned()),
+                ("connection".to_owned(), "close".to_owned()),
+                ("transfer-encoding".to_owned(), "chunked".to_owned()),
+            ],
+            body: Bytes::from_static(b"body"),
+        };
+
+        let header = response.to_response_header().unwrap();
+        assert_eq!(header.status.as_u16(), 200);
+        assert_eq!(
+            header
+                .headers
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("image/webp")
+        );
+        assert_eq!(
+            header
+                .headers
+                .get("content-length")
+                .and_then(|value| value.to_str().ok()),
+            Some("4")
+        );
+        assert!(!header.headers.contains_key("connection"));
+        assert!(!header.headers.contains_key("transfer-encoding"));
     }
 
     #[cfg(feature = "cache")]

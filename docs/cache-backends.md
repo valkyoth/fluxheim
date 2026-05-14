@@ -262,7 +262,11 @@ internal cache implementation.
   primitive, proxy-cache requests with `Cache-Control: only-if-cached` are
   served only from a fresh local cache object; misses, stale objects, bypassed
   policies, or ineligible methods return `504` and do not contact origin. This
-  gives outbound peer fill a safe no-origin endpoint. The example
+  gives outbound peer fill a safe no-origin endpoint. On a local proxy-cache
+  miss, Fluxheim can ask configured peers for that no-origin endpoint before
+  falling back to origin according to `fail_open`; peer hits are stored locally
+  and peer requests forward only host plus safe negotiation headers rather than
+  client credentials. The example
   `examples/cache-peer-fill.toml` shows the current config shape for
   cache-cluster planning. Metrics builds expose aggregate peer-fill policy,
   peer-count, and concurrency gauges for rollout checks.
