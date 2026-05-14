@@ -24,7 +24,8 @@ Useful reduced builds:
 ```bash
 cargo build --no-default-features --features proxy
 cargo build --no-default-features --features web
-cargo build --no-default-features --features profile-load-balancer
+cargo build --no-default-features --features profile-cache-edge
+cargo build --no-default-features --features profile-proxy-edge
 cargo build --no-default-features --features profile-privacy
 ```
 

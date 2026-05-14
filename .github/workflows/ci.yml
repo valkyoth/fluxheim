@@ -56,6 +56,11 @@ jobs:
           scripts/validate-features.sh profile-core
           scripts/validate-features.sh profile-core,acme-client
           scripts/validate-features.sh profile-load-balancer
+          scripts/validate-features.sh profile-full
+          scripts/validate-features.sh profile-web-server
+          scripts/validate-features.sh profile-cache-edge
+          scripts/validate-features.sh profile-proxy-edge
+          scripts/validate-features.sh profile-load-balancer-edge
           scripts/validate-features.sh profile-privacy
           if scripts/validate-features.sh profile-privacy,metrics; then
             echo "profile-privacy,metrics unexpectedly passed feature validation" >&2
@@ -77,6 +82,12 @@ jobs:
         run: |
           cargo clippy --no-default-features --features proxy,tls-rustls,acme --all-targets -- -D warnings
           cargo clippy --no-default-features --features proxy,tls-rustls,acme-client --all-targets -- -D warnings
+          cargo clippy --no-default-features --features tls-rustls --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-full --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-web-server --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-cache-edge --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-proxy-edge --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
           cargo clippy --no-default-features --features proxy,web,tls-rustls,privacy-mode --all-targets -- -D warnings
           cargo clippy --no-default-features --features web --all-targets -- -D warnings
 
@@ -105,8 +116,14 @@ jobs:
           cargo check --no-default-features --features profile-reverse-proxy
           cargo check --no-default-features --features profile-cache-server
           cargo check --no-default-features --features profile-load-balancer
+          cargo check --no-default-features --features profile-full
+          cargo check --no-default-features --features profile-web-server
+          cargo check --no-default-features --features profile-cache-edge
+          cargo check --no-default-features --features profile-proxy-edge
+          cargo check --no-default-features --features profile-load-balancer-edge
           cargo check --no-default-features --features profile-observability
           cargo check --no-default-features --features profile-privacy
+          cargo check --no-default-features --features tls-rustls
           cargo test --no-default-features --features proxy,metrics
           cargo test --no-default-features --features proxy,tls-rustls,acme
           cargo test --no-default-features --features proxy,tls-rustls,acme-client
@@ -128,6 +145,12 @@ jobs:
           cargo run --quiet -- --check-config --config examples/tls-intermediate.toml
           cargo run --quiet -- --check-config --config examples/privacy.toml
           cargo run --quiet -- --check-config --config examples/container/fluxheim.toml
+          cargo run --quiet -- --check-config --config packaging/container/fluxheim.toml
+          cargo run --quiet --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp -- --check-config --config packaging/container/fluxheim.toml
+          cargo run --quiet --no-default-features --features profile-web-server,acme-client -- --check-config --config packaging/container/fluxheim.toml
+          cargo run --quiet --no-default-features --features profile-cache-edge,acme-client -- --validate-config --config packaging/container/cache.toml
+          cargo run --quiet --no-default-features --features profile-proxy-edge,acme-client -- --validate-config --config packaging/container/proxy.toml
+          cargo run --quiet --no-default-features --features profile-load-balancer-edge,acme-client -- --validate-config --config packaging/container/proxy.toml
           cargo run --quiet -- --check-config --config examples/conf.d
           cargo run --quiet -- --check-config --config examples/gateway-1-0
           cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml

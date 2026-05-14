@@ -1,0 +1,55 @@
+[server]
+listen = ["0.0.0.0:8080"]
+default_vhost = "default"
+trusted_proxies = []
+
+[server.process]
+daemon = false
+pid_file = "/run/fluxheim/fluxheim.pid"
+upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+grace_period_seconds = 2
+graceful_shutdown_timeout_seconds = 5
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[logging.access]
+enabled = true
+include_host = true
+include_path = true
+request_id = true
+request_id_header = "x-request-id"
+
+[headers.request]
+enabled = true
+strip_inbound_client_ip_headers = true
+x_forwarded_for = "replace"
+x_real_ip = true
+x_forwarded_host = true
+x_forwarded_proto = true
+forwarded = false
+remove = ["x-powered-by"]
+
+[headers.response]
+enabled = true
+x_content_type_options = "nosniff"
+x_frame_options = "DENY"
+referrer_policy = "no-referrer"
+remove = ["x-powered-by"]
+
+[tls]
+enabled = false
+backend = "rustls"
+
+[proxy]
+upstreams = ["127.0.0.1:3000"]
+
+[[vhosts]]
+name = "default"
+hosts = ["localhost", "127.0.0.1", "example.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:3000"]
+upstream_tls = false

@@ -65,12 +65,14 @@ if [ "$skip_builds" -eq 1 ]; then
   - not collected (--skip-builds)"
 else
     target="$(rustc -vV | sed -n 's/^host: //p')"
-    for profile in full cache; do
+    for profile in full cache proxy; do
         dist_name="fluxheim-${version}-${profile}-${target}"
         if [ "$profile" = full ]; then
-            cargo build --release --locked
+            cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+        elif [ "$profile" = cache ]; then
+            cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client
         else
-            cargo build --release --locked --no-default-features --features profile-cache-server
+            cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client
         fi
         rm -rf "dist/$dist_name"
         mkdir -p "dist/$dist_name"
@@ -121,7 +123,7 @@ else
         container_lines="
   - not collected (podman/docker not installed)"
     else
-        for variant in wolfi alpine suse-micro debian cache-wolfi cache-alpine cache-suse-micro cache-debian; do
+        for variant in wolfi alpine suse-micro debian cache-wolfi cache-alpine cache-suse-micro cache-debian proxy-wolfi proxy-alpine proxy-suse-micro proxy-debian; do
             image="ghcr.io/valkyoth/fluxheim:${tag}-${variant}"
             "$tool" pull "$image" >/dev/null
             digest="$("$tool" inspect "$image" --format '{{index .RepoDigests 0}}')"

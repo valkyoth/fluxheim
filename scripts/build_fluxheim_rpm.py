@@ -26,7 +26,9 @@ OS_CONTAINERS = {
     "ubi-10": "registry.access.redhat.com/ubi10/ubi:latest",
 }
 
-DEFAULT_RPM_FEATURES = "profile-observability,acme-client"
+DEFAULT_RPM_FEATURES = (
+    "profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"
+)
 SAFE_VERSION_TAG = re.compile(r"^(latest|v?[0-9]+(?:\.[0-9A-Za-z_+]+)*)$")
 SAFE_RPM_RELEASE = re.compile(r"^[0-9][0-9A-Za-z._+~]*$")
 SAFE_FEATURES = re.compile(r"^(default|[A-Za-z0-9_-]+(?:,[A-Za-z0-9_-]+)*)$")

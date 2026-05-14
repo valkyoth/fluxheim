@@ -1,9 +1,9 @@
 # Production Readiness
 
-Fluxheim has a stable `1.1` certificate-operations release on top of the `1.0`
-gateway foundation. This page states what the released line supports, what the
-active `1.2` operations and cache milestone must prove, and what operators
-should verify before using a build beyond local testing.
+Fluxheim has a stable `1.3` shared ingress and TLS feature split on top of the
+`1.2` cache/operations line, the `1.1` certificate-operations line, and the
+`1.0` gateway foundation. This page states what each released line supports and
+what operators should verify before using a build beyond local testing.
 
 ## 0.5 Basic-Sites Preview
 
@@ -82,9 +82,8 @@ not part of the `1.0` stable support promise:
 - WireGuard/Sentinel Mesh or clustered state.
 
 Treat these as design or incubator work until a later versioning-plan milestone
-promotes them. Some of these items have since been promoted in `1.1` or are
-being promoted in the active `1.2` line; use the sections below for the current
-support promise.
+promotes them. Some of these items have since been promoted in `1.1`, `1.2`, or
+`1.3`; use the sections below for the current support promise.
 
 ## Stable 1.1 Certificate Operations
 
@@ -108,10 +107,10 @@ store deploy hooks, and full zero-downtime reload through the later snapshot
 model are not part of the first `1.1` promise unless they are explicitly
 promoted with tests and release evidence.
 
-## Active 1.2 Operations And Cache Target
+## Stable 1.2 Operations And Cache
 
-The `1.2` line is the active cache-server and operations-hardening milestone.
-It is intended to promote:
+The `1.2` line is the cache-server and operations-hardening milestone. It
+promotes:
 
 - vhost and route-scoped proxy cache policies with memory, disk, and tiered
   storage;
@@ -134,15 +133,42 @@ It is intended to promote:
   require an explicit `trusted_tls_terminator` declaration until first-class
   admin TLS/mTLS lands;
 - release-gate coverage for proxy cache, local observability smoke suites, and
-  the published full/default, cache, and load-balancer container feature
-  profiles.
+  the published full/default, cache, and proxy container feature profiles.
 
-Before calling `1.2` stable, release evidence must include the stable gate,
-cache behavior smokes, and observability smokes. Bounded single-range caching,
-the storage-bin disk backend, distributed cache peer fill, and fixed-slice range
-composition are now covered by focused `1.2.x` releases. Varnish-style ban
-expressions and WASM cache hooks remain future work unless explicitly promoted
-with tests and release evidence.
+Release evidence for the `1.2` line includes the stable gate, cache behavior
+smokes, observability smokes, and focused follow-up checks. Bounded
+single-range caching, the storage-bin disk backend, optional encrypted cache at
+rest, distributed cache peer fill, and fixed-slice range composition are covered
+by focused `1.2.x` releases. Varnish-style ban expressions and WASM cache hooks
+remain future work unless explicitly promoted with tests and release evidence.
+
+## Stable 1.3 Split Profiles
+
+The `1.3.0` line starts the shared ingress/TLS feature-graph split. It does not
+make the future PHP, advanced proxy, load-balancer, or WASM milestones stable;
+instead it gives operators and packagers cleaner binaries and container images
+for the modules that are already supported.
+
+The `1.3.0` support promise includes:
+
+- shared `ingress` and `tls` feature boundaries so TLS, ACME, proxy, cache, web,
+  and future load-balancer modules can compose without every focused build
+  compiling every application module;
+- focused profile aliases: `profile-full`, `profile-web-server`,
+  `profile-cache-edge`, `profile-proxy-edge`, and
+  `profile-load-balancer-edge`;
+- official full/default, cache-edge, and proxy-edge container image variants;
+- TLS and ACME support in focused cache and proxy builds without requiring local
+  static web-serving config in those images;
+- runtime config guardrails that reject enabled static web config when the
+  binary was compiled without `web`, and reject enabled cache config when the
+  binary was compiled without `cache`;
+- full native and RPM packages that keep the broad production feature set for
+  operators who prefer one complete binary.
+
+The load-balancer edge profile is compile- and config-validated in `1.3.0` so
+the feature graph is ready for `1.5`, but it is not a production
+load-balancing support promise yet.
 
 ## Operator Checks
 
@@ -153,9 +179,11 @@ root:
 scripts/stable_release_gate.sh check
 ```
 
-For `1.2` candidates, this gate also runs the proxy cache and local
-observability smoke suites, and verifies the published container feature
-profiles against the packaged container config.
+For `1.3` candidates, this gate also runs the proxy cache and local
+observability smoke suites, and verifies the published full, cache-edge, and
+proxy-edge container feature profiles against their packaged container configs.
+The load-balancer edge profile is compile/config validated only until the `1.5`
+load-balancer milestone promotes runtime load-balancing behavior.
 
 For a release candidate, also run the deeper optional checks that fit the
 deployment:

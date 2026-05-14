@@ -252,7 +252,7 @@ write_config "node-a" "$NODE_A_PORT" "$TMP_DIR/node-a-cache" "$NODE_A_METRICS" "
 write_config "node-b" "$NODE_B_PORT" "$TMP_DIR/node-b-cache" "" ""
 write_config "node-c" "$NODE_C_PORT" "$TMP_DIR/node-c-cache" "" "$NODE_C_PEER_FILL"
 
-cargo build --quiet --no-default-features --features profile-cache-server,metrics
+cargo build --quiet --no-default-features --features profile-cache-edge,metrics
 
 python3 "$TMP_DIR/origin.py" "$ORIGIN_PORT" >"$TMP_DIR/origin.log" 2>&1 &
 ORIGIN_PID=$!

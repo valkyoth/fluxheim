@@ -455,6 +455,12 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
+    #[cfg(all(
+        feature = "tls-rustls",
+        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    ))]
+    crate::tls::install_rustls_crypto_provider();
+
     let cli = Cli::parse_from(args);
 
     if let Some(command) = &cli.command {
@@ -502,14 +508,98 @@ where
     crate::runtime::run(config)
 }
 
+fn validate_compiled_module_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[cfg(all(feature = "web", feature = "cache"))]
+    let _ = config;
+    #[cfg(not(feature = "web"))]
+    validate_web_module_absent(config)?;
+    #[cfg(not(feature = "cache"))]
+    validate_cache_module_absent(config)?;
+    Ok(())
+}
+
+#[cfg(not(feature = "web"))]
+fn validate_web_module_absent(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if config.web.enabled() {
+        return Err(
+            "web module not compiled; remove [web] root config or build with the `web` feature"
+                .into(),
+        );
+    }
+    for vhost in &config.vhosts {
+        if vhost.web.enabled() {
+            return Err(format!(
+                "web module not compiled; remove [vhosts.web] root config for vhost {:?} or build with the `web` feature",
+                vhost.name
+            )
+            .into());
+        }
+        for route in &vhost.routes {
+            if route
+                .web
+                .as_ref()
+                .is_some_and(crate::config::WebConfig::enabled)
+            {
+                return Err(format!(
+                    "web module not compiled; remove [vhosts.routes.web] config for vhost {:?} route {:?} or build with the `web` feature",
+                    vhost.name, route.name
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "cache"))]
+fn validate_cache_module_absent(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if cache_policy_requires_module(&config.cache) {
+        return Err("cache module not compiled; remove enabled [cache] config or build with the `cache` feature".into());
+    }
+    for vhost in &config.vhosts {
+        if cache_policy_requires_module(&vhost.cache) {
+            return Err(format!(
+                "cache module not compiled; remove enabled [vhosts.cache] config for vhost {:?} or build with the `cache` feature",
+                vhost.name
+            )
+            .into());
+        }
+        for route in &vhost.routes {
+            if route
+                .cache
+                .as_ref()
+                .is_some_and(cache_policy_requires_module)
+            {
+                return Err(format!(
+                    "cache module not compiled; remove enabled [vhosts.routes.cache] config for vhost {:?} route {:?} or build with the `cache` feature",
+                    vhost.name, route.name
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "cache"))]
+fn cache_policy_requires_module(config: &crate::config::CacheConfig) -> bool {
+    config.enabled
+        || config.local_static
+        || config.memory.enabled
+        || config.disk.enabled
+        || config.peer_fill.enabled
+}
+
 #[cfg(feature = "proxy")]
 fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    validate_compiled_module_config(config)?;
     crate::proxy::FluxProxy::from_config(config)?;
     Ok(())
 }
 
 #[cfg(all(feature = "web", not(feature = "proxy")))]
 fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    validate_compiled_module_config(config)?;
     validate_web_runtime_config("global web", &config.web)?;
     for vhost in &config.vhosts {
         validate_web_runtime_config(&format!("vhost {:?} web", vhost.name), &vhost.web)?;
@@ -536,7 +626,8 @@ fn validate_web_runtime_config(
 }
 
 #[cfg(not(any(feature = "proxy", feature = "web")))]
-fn validate_runtime_config(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    validate_compiled_module_config(config)?;
     Ok(())
 }
 
@@ -4911,6 +5002,41 @@ mod tests {
         assert!(error.to_string().contains("cache feature"));
     }
 
+    #[cfg(all(feature = "proxy", not(feature = "web")))]
+    #[test]
+    fn validate_config_rejects_web_config_when_web_module_is_absent() {
+        let dir = TestDir::new("cli-no-web-module");
+        let root = dir.dir("public", 0o755);
+        let config = dir.web_module_config("web-disabled.toml", &root);
+
+        let error = run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "--validate-config",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("web module not compiled"));
+    }
+
+    #[cfg(all(feature = "proxy", not(feature = "cache")))]
+    #[test]
+    fn validate_config_rejects_enabled_cache_when_cache_module_is_absent() {
+        let dir = TestDir::new("cli-no-cache-module");
+        let config = dir.cache_module_config("cache-disabled.toml");
+
+        let error = run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "--validate-config",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cache module not compiled"));
+    }
+
     struct TestDir {
         path: PathBuf,
     }
@@ -5027,6 +5153,48 @@ mod tests {
                     "#,
                     root.display()
                 ),
+            )
+            .expect("write config");
+            path
+        }
+
+        #[cfg(all(feature = "proxy", not(feature = "web")))]
+        fn web_module_config(&self, name: &str, root: &Path) -> PathBuf {
+            let path = safe_child_path(&self.path, name);
+            fs::write(
+                &path,
+                format!(
+                    r#"
+                    [[vhosts]]
+                    name = "web-disabled"
+                    hosts = ["web-disabled.test"]
+
+                    [vhosts.web]
+                    root = "{}"
+                    "#,
+                    root.display()
+                ),
+            )
+            .expect("write config");
+            path
+        }
+
+        #[cfg(all(feature = "proxy", not(feature = "cache")))]
+        fn cache_module_config(&self, name: &str) -> PathBuf {
+            let path = safe_child_path(&self.path, name);
+            fs::write(
+                &path,
+                r#"
+                [[vhosts]]
+                name = "cache-disabled"
+                hosts = ["cache-disabled.test"]
+
+                [vhosts.cache]
+                enabled = true
+
+                [vhosts.cache.memory]
+                enabled = true
+                "#,
             )
             .expect("write config");
             path

@@ -578,11 +578,281 @@ Exit criteria:
 - Container migration docs include a validated HTTP-only first-issuance flow,
   HTTPS enablement flow, and SNI verification checklist.
 
-### 1.3 - Load Balancer
+### 1.3.0 - Shared Ingress And TLS Feature Split
 
-Goal: graduate Pingora load balancing to stable while covering the migration
-surface operators expect from HAProxy and nginx-style HTTP upstreams, and while
-exposing Pingora's native load-balancing primitives in a safe Fluxheim config.
+Goal: make Fluxheim's module boundaries honest before PHP, advanced proxy, and
+load-balancer features add more code on top. TLS, ACME, admin/config
+validation, metrics, and runtime ingress are shared capabilities; static web,
+cache, reverse proxy, and load balancing should not be pulled into focused
+builds unless the operator selected them.
+
+Stable scope:
+
+- Introduce an explicit shared ingress/runtime feature boundary.
+- Make `tls`, `tls-rustls`, `tls-openssl`, `tls-boringssl`, `tls-s2n`, `acme`,
+  and `acme-client` depend on shared ingress/TLS primitives rather than
+  implicitly selecting the generic `proxy` feature.
+- Keep exactly one TLS backend selectable at a time.
+- Keep ACME certificate loading and renewal usable for every TLS-capable
+  focused profile.
+- Split profile aliases into honest deployment profiles:
+  - `profile-full`;
+  - `profile-web-server`;
+  - `profile-cache-edge`;
+  - `profile-proxy-edge`;
+  - `profile-load-balancer-edge`;
+  - `profile-observability`;
+  - `profile-privacy`.
+- Keep compatibility aliases for older profile names where practical, but mark
+  them transitional.
+- Update container image profiles to follow the focused model:
+  - `full`;
+  - `cache`;
+  - `proxy`.
+- The `cache` image is TLS/ACME-capable but does not compile local static
+  webserver behavior unless `web` is selected.
+- The `proxy` image is TLS/ACME-capable but does not compile static web, cache,
+  or load-balancer behavior unless selected.
+- The `profile-web-server` and `profile-load-balancer-edge` feature aliases
+  compile and validate, but official web-only and load-balancer images are not
+  published as normal `1.3.0` tag outputs.
+- The load-balancer image profile is prepared and manually dispatchable for
+  pre-`1.5` testing, but normal tag publishing skips it until the `1.5`
+  load-balancer line.
+- Config validation must produce clear disabled-module errors such as
+  "web module not compiled", "cache module not compiled", or
+  "load-balancer module not compiled".
+- CI must build and test the focused profiles and prove unrelated modules are
+  absent from the feature set.
+- Release docs and image tags must explain the difference between the published
+  `full`, `cache`, and `proxy` images plus the prepared-but-gated
+  `load-balancer` image profile.
+
+Exit criteria:
+
+- `cargo check --no-default-features --features profile-web-server`
+  succeeds.
+- `cargo check --no-default-features --features profile-cache-edge`
+  succeeds.
+- `cargo check --no-default-features --features profile-proxy-edge`
+  succeeds.
+- `cargo check --no-default-features --features profile-load-balancer-edge`
+  succeeds.
+- TLS/ACME config validates in each TLS-capable focused profile.
+- Static web config is rejected cleanly when `web` is not compiled.
+- Cache config is rejected cleanly when `cache` is not compiled.
+- Load-balancer config is rejected cleanly when `load-balancer` is not
+  compiled.
+- Image workflow publishes focused images from the new profile names.
+
+### 1.3.1 - PHP Application Server
+
+Goal: add production-compatible PHP support without making PHP part of the
+default Fluxheim threat model. The stable `1.3.1` target is a `php-fpm`
+FastCGI bridge for WordPress-style, front-controller, and legacy PHP
+deployments. Embedded Rust PHP integrations remain follow-up `1.3.x` work
+behind separate compile-time features.
+
+Stable scope for `1.3.1`:
+
+- Compile-time `php` base module and `php-fpm` runtime module.
+- `php` remains absent from default, cache, privacy, and normal proxy builds.
+- Per-vhost and per-route PHP enablement.
+- PHP-FPM over Unix socket and explicit TCP endpoints.
+- `index.php` and WordPress-style front-controller support.
+- Safe `.php` script resolution under a configured PHP root.
+- Static fallback must never serve PHP source when PHP is enabled and a PHP
+  route fails.
+- Strict CGI/FastCGI param allow-list, including `SCRIPT_FILENAME`,
+  `SCRIPT_NAME`, `DOCUMENT_ROOT`, `REQUEST_METHOD`, `QUERY_STRING`,
+  `REQUEST_URI`, `SERVER_NAME`, `SERVER_PORT`, and `SERVER_PROTOCOL`.
+- `PATH_INFO` disabled by default, with strict opt-in split rules.
+- Request body limits, streaming body accounting, connect/read/write timeouts,
+  and response header byte limits.
+- Strict parsing of PHP-generated status and headers.
+- Sanitized, size-limited PHP STDERR logging and PHP metrics.
+- WordPress and minimal PHP-FPM example configs.
+
+Follow-up `1.3.x` PHP runtime plan:
+
+- `1.3.2`: php-fpm hardening and production compatibility fixes.
+- `1.3.3`: embedded Rust PHP/Turbine-style integration if the source, license,
+  API, isolation, reload, and concurrency model pass review.
+- `1.3.4`: pure-Rust PHP interpreter experiment behind `php-phprs`, beta or
+  test-only until compatibility and maintenance are proven.
+
+Compile-time feature shape stays:
+
+```toml
+php = []
+php-fpm = ["php", "dep:fastcgi-client"]
+php-turbine = ["php"]
+php-phprs = ["php", "dep:phprs"]
+```
+
+Only one PHP runtime feature may be selected in one binary. Add compile-time
+guards for incompatible runtime combinations.
+
+Exit criteria:
+
+- `--features web,php-fpm` release build passes.
+- Default, cache, privacy, and load-balancer profiles prove PHP is absent
+  unless explicitly selected.
+- PHP source files are never served as static fallback.
+- Traversal, symlink escape, missing script, directory script, malformed
+  FastCGI response, timeout, oversized body, and STDERR-size tests pass.
+- WordPress-style front-controller routing is smoke tested against php-fpm.
+- Config validation makes unsafe PHP roots, sockets, and runtime combinations
+  actionable.
+
+### 1.4 - Advanced Proxy
+
+Feature-graph prerequisite:
+
+- `1.4` proxy images should compile the HTTP proxy and shared ingress/TLS
+  surface without static web, local static cache, or load-balancer code unless
+  explicitly selected.
+
+Goal: make Fluxheim's HTTP and stream proxy layer migration-friendly for
+HAProxy and NGINX operators before expanding the load-balancer surface. This
+release should cover reverse-proxy behavior, connection management,
+backpressure, buffering, protocol bridging, and operator visibility that apply
+even when a route targets one upstream.
+
+Stable scope:
+
+- Compile-time proxy surface stays modular; advanced proxy capabilities remain
+  available through explicit `proxy` subfeatures where they add dependencies
+  or attack surface.
+- Per-vhost and per-route upstream connection controls:
+  - max in-flight requests/connections for a route or upstream target;
+  - bounded request queue with queue timeout, max depth, overflow action, and
+    low-cardinality queue metrics;
+  - optional priority classes derived from safe request attributes such as
+    route, method, authenticated policy result, or configured header allow-list;
+  - async backpressure so slow or saturated upstreams do not force unbounded
+    buffering inside Fluxheim.
+- Upstream keepalive and connection-pool tuning beyond the existing global
+  pool size:
+  - per-route pool limits;
+  - idle timeout;
+  - maximum reuse count or lifetime;
+  - clear behavior when upstream closes an idle pooled connection.
+- NGINX-style proxy buffering controls:
+  - request buffering on/off;
+  - response buffering on/off;
+  - header buffer size and response body buffer limits;
+  - spill-to-disk policy if implemented, with safe temp-path validation and
+    privacy-mode rejection;
+  - streaming passthrough mode for long-lived or large responses.
+- Safer large-payload proxying:
+  - explicit memory budget per proxied stream;
+  - cancellation on downstream disconnect;
+  - bounded body-copy buffers;
+  - documented zero-copy strategy. Kernel zero-copy should be pursued only
+    where the Rust/Pingora/Tokio stack can expose it safely; otherwise the
+    stable goal is bounded-copy streaming, not unsafe shortcuts.
+- Protocol translation:
+  - client HTTP/2 to upstream HTTP/1.1 controls;
+  - client HTTP/1.1 to upstream HTTP/2 where Pingora support is stable;
+  - future HTTP/3 ingress may map to HTTP/1.1 or HTTP/2 upstreams, but QUIC
+    itself remains a separate protocol milestone.
+- WebSocket and upgrade handling parity with explicit timeout and header
+  behavior.
+- gRPC/gRPC-Web proxy compatibility where it fits Fluxheim's HTTP/2 stack,
+  including body-size, timeout, and status/trailer handling.
+- NGINX-style request mirroring for HTTP routes with strict limits:
+  - mirror body on/off;
+  - mirror timeout;
+  - no effect on primary response;
+  - low-cardinality metrics for mirror success/failure.
+- External auth request integration may stay in the existing auth-request
+  design, but `1.4` should make it proxy-route complete: timeout, header
+  forwarding, allowed response headers, deny status, and metrics.
+- PROXY protocol support:
+  - accept Proxy Protocol v1/v2 on configured listeners;
+  - send Proxy Protocol to upstreams on configured routes;
+  - validate trust boundaries before restoring client identity.
+- TCP stream proxy foundation:
+  - compile-time feature separate from HTTP proxy if needed;
+  - safe listener and upstream config;
+  - byte counters, idle timeout, connect timeout, and max connection limits;
+  - no HTTP header/cache/admin behavior on stream routes.
+- UDP proxy foundation if it can be bounded safely:
+  - session table with TTL and max entries;
+  - per-source and global rate/byte limits;
+  - explicit DNS/gaming/IoT examples only after smoke tests;
+  - no claim of load balancing until the `1.5` load-balancer line owns
+    multi-upstream UDP policy.
+- Richer proxy variables for logging, headers, and future Wasm inputs:
+  - upstream connect time, first-byte time, response time, selected target,
+    retry count, queue time, TLS protocol/cipher, request ID, vhost, route,
+    cache phase, and protocol.
+  - variables must be bounded, typed, redacted where needed, and forbidden from
+    creating high-cardinality metric labels by default.
+- Variable-based structured logging:
+  - configured log fields from a typed allow-list;
+  - JSON output and existing access-log privacy controls;
+  - no raw query/cookie/authorization values unless explicitly enabled.
+- Local operational socket:
+  - Unix-domain socket for fast local status and counters, similar in spirit to
+    HAProxy's stats socket;
+  - root/service-owner permissions, strict path validation, no network bind by
+    default;
+  - read-only status first, with any mutating commands deferred or separately
+    authorized.
+- Regex-based request/response header and URI rewrite rules using Rust's
+  memory-safe regex engine:
+  - route-scoped allow-list of operations;
+  - replacement output length limits;
+  - deterministic failure behavior;
+  - no arbitrary code execution.
+
+Out of scope for `1.4`:
+
+- Load-balancer pool algorithms, active health checks, backup/drain/slow-start,
+  redispatch, and sticky sessions. Those belong to `1.5`.
+- Direct Server Return as a stable HTTP proxy feature. DSR is a layer-4/network
+  topology feature and should be evaluated in the `1.5` load-balancer or later
+  stream-proxy line after Linux routing, source-address, and observability
+  constraints are documented.
+- Cache engine work already completed in `1.2.x`, except where proxy buffering
+  and streaming behavior must integrate correctly with cache admission.
+
+Exit criteria:
+
+- HAProxy/NGINX migration fixtures cover queue limits, queue timeout,
+  backpressure, request/response buffering, upstream keepalive, WebSocket,
+  gRPC, request mirroring, PROXY protocol receive/send, external auth request,
+  variable logging, and TCP stream proxy basics.
+- Memory usage remains bounded under slow client, slow upstream, large upload,
+  large download, and upstream stall tests.
+- Queue, pool, buffering, mirror, stream, and protocol-translation metrics are
+  available when metrics are enabled and stay low-cardinality.
+- Privacy-mode rejects incompatible logging, temp-file buffering, stream
+  identity restoration, or payload-retaining features.
+- Config validation catches unsafe temp paths, impossible queue settings,
+  invalid regex rewrites, unsupported protocol combinations, and unsafe PROXY
+  protocol trust boundaries.
+
+### 1.5 - Load Balancer
+
+Feature-graph prerequisite:
+
+- `1.5` load-balancer images should compile load-balancer, shared ingress/TLS,
+  ACME, metrics, and security modules without static web, local static cache,
+  or generic single-upstream reverse-proxy-only code unless explicitly
+  selected. The load balancer may reuse shared proxy transport abstractions
+  internally, but the public feature name and image profile must not pull in
+  unrelated webserver behavior.
+
+Goal: graduate Fluxheim's load balancer to an enterprise-grade traffic
+management layer. The target is HAProxy/nginx migration parity plus the
+operator primitives people expect from F5 BIG-IP LTM: rich pool metadata,
+health/performance monitors, persistence, adaptive recovery behavior, and
+programmable traffic decisions. Palo Alto-style security expectations should be
+represented as clear policy integration points around the load balancer, not as
+a claim that Fluxheim is a full next-generation firewall in `1.5`.
 
 Stable scope:
 
@@ -590,29 +860,66 @@ Stable scope:
 - Named upstream pools that can be selected globally, per vhost, or per route,
   so one vhost can proxy normal app traffic and route-specific traffic to
   different backend sets.
+- Separate L4 and L7 load-balancing modes:
+  - HTTP/1.1 and HTTP/2 request-aware pools;
+  - gRPC-aware HTTP/2 pools where trailers/status handling is preserved;
+  - TCP stream pools built on the `1.4` stream-proxy foundation;
+  - UDP session pools only if the `1.4` UDP proxy foundation proves bounded
+    and observable;
+  - HTTP/3/QUIC remains a later protocol milestone unless the QUIC ingress
+    stack is already stable before `1.5`.
 - Multiple upstreams per pool with safe address validation and per-upstream
   metadata: name, address, weight, backup, disabled/down, drain/maintenance,
-  max in-flight requests or connections, and optional slow-start after recovery.
+  max in-flight requests or connections, max queue, priority group, manual
+  resume, warm-up/slow-start after recovery, administrative tags, and optional
+  per-upstream TLS/SNI settings.
 - Weighted round-robin stable default.
-- Additional selection policies needed for common HAProxy/nginx migrations and
-  Pingora parity:
+- Selection policies needed for common HAProxy/nginx/F5 migrations and Pingora
+  parity:
+  - weighted round-robin;
   - least-connections / least-in-flight;
+  - least-time / EWMA latency-aware selection when metrics are trustworthy;
+  - power-of-two-choices for lower herd effects than naive least-connections;
   - source-IP hash;
   - generic hash by a bounded key template such as host, path, header, or
     request ID;
   - consistent hash / Ketama for cache-stateful upstreams;
-  - random and power-of-two-choices where Pingora support and tests are strong
-    enough.
+  - bounded-load consistent hashing so overloaded nodes can be skipped without
+    remapping the whole ring;
+  - random where it is useful for large homogeneous pools;
+  - priority-group selection for F5-style preferred/fallback groups.
+- Session persistence:
+  - cookie persistence with signed/opaque cookies;
+  - source-address persistence with TTL and table-size limits;
+  - header-based persistence from a configured allow-list;
+  - TLS session/client-certificate persistence only after privacy/security
+    review;
+  - persistence must be visible, bounded, purgeable, and incompatible with
+    privacy-mode unless a no-retention policy is configured.
 - Active health checks:
   - TCP connect checks;
+  - TLS handshake checks with SNI and verification controls;
   - HTTP checks with method, path, expected status range, expected response
     header/body substring, Host header, and upstream TLS/SNI where configured;
+  - HTTP/2 and gRPC health checks where protocol support is stable;
+  - UDP checks only with explicit send/expect patterns and timeout limits;
   - interval, timeout, consecutive success/failure thresholds, initial state,
-    and parallel check controls.
+    jitter, parallel check controls, manual resume, and per-pool/per-member
+    overrides.
+- Adaptive health/performance monitors:
+  - track latency, error rate, queue time, and in-flight load;
+  - support optional adaptive thresholds for least-time and circuit breakers;
+  - make every automatic ejection explainable through admin status and logs.
 - Passive health observation from real proxy traffic: connection failures,
   upstream timeout/error classes, selected HTTP status classes, bounded
   error-limit windows, and configurable actions such as mark-down,
-  fast-recheck, or temporary ejection.
+  fast-recheck, temporary ejection, or circuit-open state.
+- Circuit breaking and adaptive concurrency:
+  - per-pool and per-member circuit state;
+  - half-open probe limits;
+  - cooldown windows;
+  - optional adaptive concurrency inspired by queue/latency feedback, with
+    minimum/maximum bounds and metrics.
 - Retry and redispatch controls:
   - bounded retries for connection failures and selected HTTP status codes;
   - redispatch to a different healthy upstream after configured retry counts;
@@ -620,49 +927,99 @@ Stable scope:
     unless explicitly allowed.
 - Upstream TLS/SNI and certificate verification controls aligned with the
   existing proxy TLS surface.
+- Client mTLS and upstream mTLS policy integration:
+  - route/pool decisions can use verified client-certificate attributes only
+    from the typed identity layer;
+  - upstream client certificates are configured through safe secret paths or
+    future secret-store providers;
+  - mTLS failures emit security events without exposing certificate secrets.
 - Per-upstream and per-pool timeout/keepalive controls, including connect,
   read, send, idle keepalive, and reuse-pool sizing.
+- Request queuing and overload behavior should integrate with the `1.4`
+  advanced proxy queue/backpressure layer:
+  - per-pool and per-member queue size;
+  - priority groups/classes;
+  - queue timeout;
+  - shed/503/backup-pool overflow actions;
+  - queue-time metrics and logs.
 - Clear all-nodes-down behavior with configurable fail status, optional static
   error page integration, and no accidental fallback to an unrelated pool.
+- Dynamic runtime operations:
+  - admin/API ability to drain, disable, enable, force-down, or manually resume
+    a pool member when admin is enabled;
+  - safe persistence of dynamic state only after the config/snapshot model is
+    clear;
+  - no unauthenticated or plaintext remote mutation.
+- Security and policy integrations:
+  - edge rate limits per vhost/route/pool/member using token-bucket or
+    leaky-bucket algorithms;
+  - reputation/Geo/IP-set decisions as inputs from the future trusted-client
+    identity layer, never from untrusted headers;
+  - TLS fingerprint signals such as JA3/JA4-like fingerprints if rustls/boring
+    expose enough ClientHello detail safely;
+  - WAF-lite/body inspection stays a separate WAF module, but load-balancer
+    routing should be able to consume an allow/deny/risk decision from WAF,
+    auth-request, or future Wasm policy.
+- Programmability:
+  - `1.5` defines stable load-balancer hook points and typed context for future
+    iRules-like Wasm policy;
+  - actual Wasm execution belongs to the shared `1.6` runtime so Fluxheim does
+    not grow one-off scripting engines;
+  - hooks should cover pool selection, persistence-key choice, request deny,
+    header mutation, mirror/shadow target choice, and circuit/policy metadata.
 - Load-balancer observability:
   - Prometheus and OpenTelemetry counters/histograms for selected upstream,
     health transitions, retries, redispatches, ejections, all-down responses,
-    in-flight requests, and latency;
+    in-flight requests, queue time, selected algorithm, circuit state,
+    persistence hits/misses, slow-start state, and latency;
   - admin status for each pool/upstream with health state, active traffic,
-    last error, and drain/maintenance state.
+    queue depth, last error, last transition, circuit state, persistence table
+    size, and drain/maintenance state;
+  - optional local Unix-socket status from the `1.4` proxy operations layer.
 - Runtime/reload behavior:
   - config validation catches duplicate upstream names, invalid weights,
     impossible thresholds, and unsafe hash/header keys;
   - graceful reload keeps serving with the old pool until the new pool is
     validated;
-  - health-check background services are included in reload impact
-    classification.
+  - health-check background services, persistence tables, and dynamic pool
+    state are included in reload impact classification.
 - Migration docs mapping common HAProxy and nginx upstream concepts to Fluxheim
-  config.
+  config, plus F5-style monitors, persistence, priority groups, and iRules
+  equivalents to Fluxheim config or future Wasm hooks.
 
 Beta scope:
 
-- Sticky sessions through cookie/header persistence if there is a safe,
-  bounded design that does not conflict with privacy mode.
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Pingora's service-discovery interface when it can be tested reliably.
-- Least-time / EWMA latency-aware selection if the metrics and failure-mode
-  tests are strong enough.
 - Weighted random two-choice as a distributed-load-balancer policy.
-- Per-upstream queueing if it can be bounded and made visible to operators.
+- Direct Server Return / transparent proxying after Linux routing, source
+  address, NAT/SNAT, and observability constraints are documented and tested.
+- Cross-node persistence-table replication.
+- Global server load balancing (GSLB) / DNS-based traffic steering.
+- Deep packet inspection and App-ID-like classification. This is a security
+  platform feature, not a basic load-balancer feature; treat it as WAF/security
+  policy integration unless a separate design exists.
+- Live traffic visualizer UI. Metrics and admin API are stable first; a UI can
+  layer on top later.
 
 Exit criteria:
 
 - `--features proxy,load-balancer` release build passes.
 - Health check transitions are tested.
-- Failover, retry, redispatch, all-down, backup, drain, and slow-start
-  behavior are documented and smoke tested.
+- Failover, retry, redispatch, all-down, backup, priority group, drain,
+  manual-resume, slow-start, circuit breaking, adaptive health, persistence,
+  and queue-overflow behavior are documented and smoke tested.
 - Load-balancer metrics are available when `metrics` is enabled.
 - OpenTelemetry attributes use low-cardinality pool/upstream names only and do
   not expose raw URLs, headers, cookies, or request bodies.
 - HAProxy/nginx migration fixtures cover weighted round-robin, backup servers,
   least-connections, hash/consistent-hash routing, health-check failure,
   redispatch, and all-down behavior.
+- F5-style migration fixtures cover monitor-driven down/up transitions,
+  priority groups, persistence, manual drain/resume, slow-start, and
+  iRules-equivalent hook-point documentation.
+- Security integration tests prove rate limits, mTLS identity inputs, and
+  reputation/Geo/IP-set decisions fail closed at trust boundaries.
 
 ### Cache Maturity Follow-Ups
 
@@ -907,7 +1264,7 @@ Exit criteria:
 - Purge endpoints require admin protection and remove all stored `Vary`
   variants for the selected cache identity.
 
-### 1.4 - WASM Extensibility
+### 1.6 - WASM Extensibility
 
 Goal: add one shared sandboxed extension runtime for nginx-Lua-style operator
 logic and VCL-like cache policy decisions, instead of creating separate
@@ -961,7 +1318,7 @@ Exit criteria:
   cache hook ABI with typed inputs, configured output limits, and explicit
   operator opt-in per vhost or route.
 
-### 1.5 - Compression Pack
+### 1.7 - Compression Pack
 
 Goal: add safe, opt-in response compression without blocking request workers or
 breaking cache correctness.
@@ -991,7 +1348,7 @@ Exit criteria:
 - Downstream disconnects cancel or stop compression work.
 - Default and `privacy-mode` builds prove compression is absent.
 
-### 1.6 - Media Transform Pack
+### 1.8 - Media Transform Pack
 
 Goal: add safe, opt-in image transformation for static and proxied image
 responses.
@@ -1024,7 +1381,7 @@ Exit criteria:
   format, dimensions, quality, and `Accept` bucket.
 - `privacy-mode` rejects incompatible transform/cache combinations.
 
-### 1.7 - Advanced Certificate Automation
+### 1.9 - Advanced Certificate Automation
 
 Goal: extend the `1.1` certificate lifecycle with provider-specific and
 zero-downtime automation that is too broad for the first ACME release.
@@ -1047,7 +1404,7 @@ Exit criteria:
 - Private key storage permissions are validated.
 - Tests cover renewal scheduling and reload classification.
 
-### 1.8 - Privacy And Security Profiles
+### 1.10 - Privacy And Security Profiles
 
 Goal: provide explicit security/privacy build profiles.
 
@@ -1072,7 +1429,7 @@ Exit criteria:
 - Forwarded IP headers are stripped in privacy mode.
 - WAF is dry-run capable and redacts secrets before beta promotion.
 
-### 1.9 - Cloudflare Origin Pack
+### 1.11 - Cloudflare Origin Pack
 
 Goal: support Cloudflare as a verified trusted peer.
 
@@ -1088,7 +1445,7 @@ Stable scope:
 Beta scope:
 
 - AOP/mTLS automation.
-- Origin CA automation if not stabilized in `1.7`.
+- Origin CA automation if not stabilized in `1.9`.
 
 Exit criteria:
 
@@ -1096,7 +1453,7 @@ Exit criteria:
 - API tokens are never logged.
 - AOP mode clearly distinguishes global, zone-level, and per-hostname trust.
 
-### 1.9a - Trusted Client Identity Layer
+### 1.12 - Trusted Client Identity Layer
 
 Goal: make restored client identity safe, auditable, and reusable across load
 balancers, private gateways, and provider packs.
@@ -1129,7 +1486,7 @@ Exit criteria:
 - Privacy builds reject real-client restoration and IP enrichment unless a
   no-retention design is implemented.
 
-### 1.10 - Advanced Metrics And Logging
+### 1.13 - Advanced Metrics And Logging
 
 Goal: add richer observability without hurting the request path.
 
@@ -1165,7 +1522,7 @@ Exit criteria:
 - Sensitive span attributes are redacted.
 - OpenTelemetry features are absent from default and privacy builds.
 
-### 1.11 - Traffic Policy And Safety Pack
+### 1.14 - Traffic Policy And Safety Pack
 
 Goal: add declarative redirect/rewrite policy plus controlled release-safety
 tools for operators who need to test new backends without changing
@@ -1201,7 +1558,7 @@ Exit criteria:
 - Mirroring is incompatible with `privacy-mode`.
 - Tests cover cancellation, timeout, sampling, and redaction behavior.
 
-### 1.12 - External Authorization And Identity-Aware Routing
+### 1.15 - External Authorization And Identity-Aware Routing
 
 Goal: enforce access decisions through a trusted authorization service first,
 then add native identity verification and claim-aware routing.
@@ -1259,7 +1616,7 @@ Exit criteria:
   wrong-audience tokens.
 - Signed-link tokens and decoded claims are redacted from logs and errors.
 
-### 1.13 - Cluster State
+### 1.16 - Cluster State
 
 Goal: let Fluxheim nodes share selected operational and security state without
 requiring external infrastructure for the first useful cases.
@@ -1287,7 +1644,7 @@ Exit criteria:
 - Global rate limits document whether they are `local_only`, `eventual`, or
   `strict`.
 
-### 1.14 - AI Gateway
+### 1.17 - AI Gateway
 
 Goal: add AI-aware proxy controls for cost, safety, and cacheability where
 operators explicitly opt in.
@@ -1319,7 +1676,7 @@ Exit criteria:
 - Tests cover token budgets, provider metadata parsing, redaction, cache
   isolation, and default/privacy build absence.
 
-### 1.15 - Sentinel Mesh
+### 1.18 - Sentinel Mesh
 
 Goal: graduate the encrypted gateway-to-backend tunnel design into a supported
 small-cluster routing module.
@@ -1344,7 +1701,7 @@ Exit criteria:
 - Rootless Podman smoke coverage exists for the supported transport.
 - Mesh code is absent from default and privacy builds.
 
-### 1.16 - Optional Host Sandbox Module
+### 1.19 - Optional Host Sandbox Module
 
 Goal: provide an opt-in in-process Linux sandbox for deployments that cannot
 rely only on systemd or container runtime policy.
@@ -1374,21 +1731,23 @@ Exit criteria:
   `1.0` boundary; in-process seccomp/Landlock is an additional hardening layer,
   not a replacement for least-privilege deployment.
 
-### 2.0 - Dynamic Runtime Boundary
+### 2.0 - Remaining Dynamic Runtime Boundary
 
-Goal: add application-server features only after a deliberate major boundary.
+Goal: add non-PHP dynamic runtime features only after a deliberate major
+boundary. PHP has moved into the `1.3.x` line because FastCGI/PHP-FPM support
+is the highest-priority adoption blocker, but other process-execution runtimes
+still need a separate threat-model boundary.
 
 Candidate scope:
 
-- PHP-FPM FastCGI bridge.
-- Turbine integration if a safe library/sidecar model is proven.
 - Perl CGI with process isolation.
 
 Reason for 2.0:
 
-Dynamic runtimes change Fluxheim from a proxy/static server into an application
-execution host. That is a larger threat-model change than cache, load balancing,
-or certificate automation.
+Arbitrary CGI and other process-launch runtimes change Fluxheim from a
+proxy/static/PHP-FPM gateway into a broader application execution host. That is
+a larger threat-model change than cache, load balancing, or certificate
+automation.
 
 Exit criteria:
 
@@ -1466,10 +1825,62 @@ Modules such as `load-balancer`, `acme`, `metrics`, `admin`,
 PHP, CGI, and legacy HTTP should be selected explicitly until their target
 release graduates them.
 
+The `1.3.0` feature graph starts splitting shared ingress/TLS from feature
+families that happen to use it. `tls-rustls` no longer selects the full proxy
+module by itself, and focused cache/proxy image profiles no longer compile
+local static web serving. The current shared building blocks are:
+
+```toml
+ingress = ["dep:pingora", "dep:tokio", "dep:bytes", "dep:http"]
+proxy = ["ingress", ...]
+web = [...]
+cache = [...]
+load-balancer = ["proxy", ...] # transitional until the 1.5 load-balancer line
+tls = ["ingress", "dep:rustix"]
+tls-rustls = ["tls", "pingora/rustls", "dep:rustls", "rustls/ring"]
+acme = ["tls", ...]
+```
+
+The contract should not change: TLS and ACME are ingress capabilities, not
+webserver capabilities.
+
 Grouped builds should be exposed as Cargo feature aliases, not a custom
 `--group` flag. The initial profile aliases are `profile-core`,
 `profile-static-site`, `profile-reverse-proxy`, `profile-cache-server`,
 `profile-load-balancer`, `profile-observability`, and `profile-privacy`.
+
+The first focused profile aliases are:
+
+- `profile-web-server`: static/local web serving with TLS. In the initial
+  `1.3.0` split this still selects the shared proxy runtime because static
+  serving has not yet been separated from that ingress service.
+- `profile-cache-edge`: cache server with TLS/ACME and proxy-cache transport,
+  but no local static webserver behavior unless `web` is also selected.
+- `profile-proxy-edge`: reverse proxy with TLS/ACME and advanced proxy
+  controls, but no static web/cache/LB unless selected.
+- `profile-load-balancer-edge`: load balancer with TLS/ACME and observability,
+  but no static web/cache or single-upstream proxy extras unless selected.
+- `profile-full`: convenience all-in profile for operators who want one binary
+  with every stable production module.
+
+Container image profiles follow the same names where the release line publishes
+them:
+
+- `full`: all stable production modules.
+- `cache`: focused cache edge, TLS-capable, no local webserver by default.
+- `proxy`: focused reverse proxy, TLS-capable.
+- `load-balancer`: focused load balancer, TLS-capable; prepared and manually
+  dispatchable in `1.3.0`, normally published once the `1.5` line promotes the
+  runtime behavior.
+
+The `profile-web-server` feature alias exists for native/custom builds. A
+separate official web-only image can be added with the PHP line if it becomes
+useful for operators.
+
+Each focused image must have CI checks proving that unrelated modules are
+absent from the binary feature set. Runtime config validation should reject
+disabled module config with actionable errors such as "web module not compiled"
+or "load-balancer module not compiled".
 
 Package scripts that accept a raw `--features` value should run
 `scripts/validate-features.sh` before Cargo. This catches unsupported feature
@@ -1509,8 +1920,13 @@ the exception while the cache server is being completed as a focused sequence:
   objects before `1.3`.
 - `v1.2.6`: focused fixed-slice range-cache composition follow-up before
   `1.3`.
-- `v1.3.1`: fixes for load balancer.
-- `v1.4.1`: fixes for the shared Wasm extensibility runtime.
+- `v1.3.1`: `php-fpm` FastCGI bridge.
+- `v1.3.2`: focused php-fpm hardening and compatibility fixes.
+- `v1.3.3`: embedded Rust PHP/Turbine-style integration if review passes.
+- `v1.3.4`: pure-Rust PHP interpreter experiment behind `php-phprs`.
+- `v1.4.1`: fixes for advanced proxy parity.
+- `v1.5.1`: fixes for load balancer.
+- `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 
 ## Changelog Shape
 

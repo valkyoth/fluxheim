@@ -24,6 +24,21 @@ expand_fluxheim_feature() {
         profile-load-balancer)
             echo "proxy,web,cache,load-balancer,tls-rustls,security"
             ;;
+        profile-full)
+            echo "proxy,web,cache,load-balancer,tls-rustls,security"
+            ;;
+        profile-web-server)
+            echo "proxy,web,tls-rustls,security"
+            ;;
+        profile-cache-edge)
+            echo "proxy,cache,tls-rustls,security"
+            ;;
+        profile-proxy-edge)
+            echo "proxy,tls-rustls,security"
+            ;;
+        profile-load-balancer-edge)
+            echo "proxy,load-balancer,tls-rustls,security"
+            ;;
         profile-observability)
             echo "proxy,web,cache,tls-rustls,security,metrics,metrics-otlp,otel-tracing,otel-otlp"
             ;;

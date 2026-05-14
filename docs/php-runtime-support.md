@@ -7,14 +7,15 @@ be opt-in at compile time and opt-in per vhost.
 
 ## Current Recommendation
 
-Use this order for future evaluation:
+Use this order for implementation and evaluation:
 
-1. `php-turbine`: preferred direction if Turbine has an auditable Rust/library
-   interface, compatible licensing, active maintenance, and a security model
-   that works inside Fluxheim.
-2. `php-fpm`: stable backwards-compatible path for real PHP applications today.
-   This should be the first production-compatible implementation if Turbine is
-   not ready as an embeddable library.
+1. `php-fpm`: stable backwards-compatible path for real PHP applications today.
+   This is the `1.3.1` production-compatible implementation target after the
+   `1.3.0` ingress/TLS feature-graph split.
+2. `php-turbine`: embedded Rust/library or managed-sidecar direction if
+   Turbine has an auditable API, compatible licensing, active maintenance, and
+   a security model that works inside Fluxheim. This belongs in a later `1.3.x`
+   release after `php-fpm`.
 3. `php-phprs`: experimental pure-Rust interpreter path. Useful for research,
    tests, and long-term optionality, not for production PHP hosting yet.
 
@@ -40,6 +41,19 @@ Only one PHP runtime feature may be selected in one binary. Fluxheim should add
 `compile_error!` guards for combinations such as `php-turbine + php-fpm`.
 
 The default feature set must not include `php`.
+
+Release order:
+
+- `1.3.0`: shared ingress/TLS feature-graph split and focused image/profile
+  cleanup.
+- `1.3.1`: `php-fpm` FastCGI bridge, WordPress-style front-controller support,
+  and production smoke tests.
+- `1.3.2`: focused php-fpm hardening and compatibility fixes found during
+  production tests.
+- `1.3.3`: `php-turbine` review and first integration if the library/sidecar
+  model is safe enough.
+- `1.3.4`: `php-phprs` pure-Rust interpreter experiment, test-only or beta
+  unless compatibility and maintenance are proven.
 
 ## Config Shape
 

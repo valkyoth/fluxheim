@@ -23,6 +23,7 @@ before Cargo starts compiling Pingora.
 | `proxy` | Yes | Pingora proxy runtime and upstream forwarding. |
 | `web` | Yes | Static file resolver and static response planning. |
 | `cache` | Yes | Image cache module. Runtime caching still requires config. |
+| `ingress` | Yes, through `proxy`/TLS profiles | Shared Pingora/Tokio ingress primitives used by proxy, TLS, and ACME-capable focused builds. |
 | `tls-rustls` | Yes | rustls TLS backend. |
 | `security` | Yes | Security and release hardening helpers. |
 
@@ -36,6 +37,7 @@ before Cargo starts compiling Pingora.
 | `otel-tracing` | No | W3C `traceparent` propagation and access-log trace ID correlation. |
 | `otel-otlp` | No | Optional OTLP/HTTP JSON trace export to a local collector or Jaeger endpoint. |
 | `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 and rustls TLS-ALPN-01 challenge serving, and the renewal executor contract. |
+| `acme-client` | No | Live ACME account/order HTTP client and background renewal service. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 
@@ -89,13 +91,30 @@ feature aliases for common deployment shapes.
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
+| `profile-full` | `profile-load-balancer` | All stable production modules. |
+| `profile-web-server` | `proxy`, `web`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
+| `profile-cache-edge` | `proxy`, `cache`, `tls-rustls`, `security` | Cache edge without local static web serving. |
+| `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
+| `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
 
 Examples:
 
 ```bash
-cargo build --no-default-features --features profile-load-balancer
+cargo build --no-default-features --features profile-full
+cargo build --no-default-features --features profile-cache-edge
+cargo build --no-default-features --features profile-proxy-edge
 cargo build --no-default-features --features profile-privacy
 ```
+
+Focused image profile status:
+
+- TLS and ACME are shared ingress capabilities, not implicit static webserver
+  capabilities.
+- The `cache` and `proxy` focused profiles compile without local static web
+  serving.
+- Compatibility aliases may keep the older broad behavior, but published
+  focused images are `full`, `cache`, and `proxy`. The `load-balancer` profile
+  is prepared for the `1.5` line and can be included manually before then.
 
 ## Incompatible Combinations
 

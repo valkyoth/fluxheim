@@ -7,7 +7,7 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.2.6
+RELEASE_VERSION=1.3.0
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
@@ -44,11 +44,11 @@ For stable or release-candidate builds, prefer the stable gate:
 scripts/stable_release_gate.sh release
 ```
 
-For the `1.2` line this stable gate includes the proxy cache and local
+For the `1.3` line this stable gate includes the proxy cache and local
 observability smoke suites, plus compile and packaged-config checks for the
-published full/default, cache, and load-balancer container image profiles. That
-keeps cache, Prometheus/OpenTelemetry basics, and image feature wiring covered
-by the same command used for release evidence.
+published full/default, cache, and proxy container image profiles. That keeps
+cache, Prometheus/OpenTelemetry basics, and focused image feature wiring
+covered by the same command used for release evidence.
 
 If `cargo audit` reports a known upstream advisory that cannot be fixed in this
 repository yet, record it explicitly in the release notes with the package,
@@ -88,10 +88,10 @@ Pushing the tag starts the container image workflow.
 
 ## 4. Build The Binary Release Asset
 
-Build the full/default release binary:
+Build the full production release binary:
 
 ```bash
-cargo build --release --locked
+cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 ```
 
 Create the release bundle:
@@ -109,7 +109,7 @@ For the cache-focused binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-cache-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-cache-server
+cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
@@ -119,7 +119,21 @@ tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
 sha256sum "dist/${DIST_NAME}.tar.gz"
 ```
 
-Record both binary checksums.
+For the proxy-focused binary profile, rebuild with:
+
+```bash
+DIST_NAME="fluxheim-${RELEASE_VERSION}-proxy-${TARGET}"
+cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client
+rm -rf "dist/${DIST_NAME}"
+mkdir -p "dist/${DIST_NAME}"
+cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
+cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
+tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
+sha256sum "dist/${DIST_NAME}.tar.gz"
+```
+
+Record all binary checksums.
 
 Generate SBOMs for the tagged source tree:
 
@@ -205,7 +219,11 @@ for image in \
   "${TAG}-cache-wolfi" \
   "${TAG}-cache-alpine" \
   "${TAG}-cache-suse-micro" \
-  "${TAG}-cache-debian"
+  "${TAG}-cache-debian" \
+  "${TAG}-proxy-wolfi" \
+  "${TAG}-proxy-alpine" \
+  "${TAG}-proxy-suse-micro" \
+  "${TAG}-proxy-debian"
 do
   podman pull "ghcr.io/valkyoth/fluxheim:${image}"
   podman inspect "ghcr.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'
@@ -213,7 +231,7 @@ done
 ```
 
 If Docker Hub publishing is enabled, repeat the same pull/inspect process for
-the Docker Hub tags. For `v1.3.x` and newer tags, also collect the
+the Docker Hub tags. For `v1.5.x` and newer tags, also collect the
 `load-balancer` image profile digests, for example
 `${TAG}-load-balancer-wolfi`.
 

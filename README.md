@@ -22,11 +22,12 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current stable line is
-`1.2.x`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+[Pingora](https://github.com/cloudflare/pingora). The current stable release is
+`1.3.0`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
-operation, production proxy-cache controls, and Prometheus/OpenTelemetry
-operations support.
+operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
+support, and the first focused image/profile split for full, cache-edge, and
+proxy-edge deployments.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -182,7 +183,7 @@ For managed certificate issuance, see
 [`examples/acme-http-01.toml`](examples/acme-http-01.toml). For an issuer that
 requires External Account Binding, see
 [`examples/acme-actalis.toml`](examples/acme-actalis.toml).
-Packaged `1.2.x` builds include `acme-init` for guided issuer bootstrap:
+Packaged `1.3.x` builds include `acme-init` for guided issuer bootstrap:
 
 ```bash
 sudo fluxheim acme-init actalis
@@ -203,11 +204,23 @@ Recommended profile features:
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
+| `profile-full` | `profile-load-balancer` | All stable production modules. |
+| `profile-web-server` | `proxy`, `web`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
+| `profile-cache-edge` | `proxy`, `cache`, `tls-rustls`, `security` | Cache edge without local static web serving. |
+| `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
+| `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
+
+Fluxheim 1.3 starts the focused image split. The `profile-cache-edge` and
+`profile-proxy-edge` aliases are TLS/ACME-capable without compiling local
+static web serving. `profile-cache-server` and `profile-load-balancer` remain
+compatibility aliases for operators who want the older convenience bundles.
 
 Example grouped build:
 
 ```bash
-cargo build --no-default-features --features profile-load-balancer
+cargo build --no-default-features --features profile-full
+cargo build --no-default-features --features profile-cache-edge
+cargo build --no-default-features --features profile-proxy-edge
 ```
 
 Manual feature selection also works:
@@ -255,10 +268,10 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Stable: 1.2 Operations And Cache
+## Current Stable: 1.3 Split Profiles
 
 Fluxheim does not treat every planned idea as stable. The current stable line is
-`1.2.x`, which means:
+`1.3.x`, which means:
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -280,6 +293,10 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
 - `1.2.6` adds opt-in fixed-slice range-cache composition, including
   open-ended, suffix, and multipart byte-range responses from compatible cached
   slices.
+- `1.3.0` starts the shared ingress/TLS feature-graph split and focused
+  container/build profiles. Full packages still include the broad production
+  feature set, while cache-edge and proxy-edge builds can use TLS and managed
+  ACME without compiling unrelated static-web or cache modules.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -287,10 +304,12 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next major lines are planned separately: `1.3` for load-balancer/proxy parity
-and `1.4` for shared Wasm extensibility covering nginx-Lua-style hooks and
-VCL-like cache policy hooks. See [Versioning Plan](docs/versioning-plan.md) and
-[Roadmap](ROADMAP.md) for the full release ladder.
+Next lines are planned separately: `1.3.1+` for PHP/FastCGI application serving
+and PHP runtime follow-ups, `1.4` for advanced proxy parity, `1.5` for
+load-balancer parity, and `1.6` for shared Wasm extensibility covering
+nginx-Lua-style hooks and VCL-like cache policy hooks. See
+[Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
+full release ladder.
 
 ## Documentation
 

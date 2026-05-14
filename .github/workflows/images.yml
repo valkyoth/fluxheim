@@ -18,8 +18,8 @@ on:
         type: boolean
       config:
         description: Config file copied into /etc/fluxheim/fluxheim.toml.
-        required: true
-        default: packaging/default/fluxheim.toml
+        required: false
+        default: ""
       runtime_uid:
         description: Runtime UID inside the image. Keep 65532 unless intentionally publishing a root image.
         required: true
@@ -55,13 +55,20 @@ jobs:
         profile:
           - name: full
             tag: ""
-            features: profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+            features: profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+            config: packaging/container/fluxheim.toml
           - name: cache
             tag: cache
-            features: profile-cache-server,acme-client
+            features: profile-cache-edge,acme-client
+            config: packaging/container/cache.toml
+          - name: proxy
+            tag: proxy
+            features: profile-proxy-edge,acme-client
+            config: packaging/container/proxy.toml
           - name: load-balancer
             tag: load-balancer
-            features: proxy,web,load-balancer,tls-rustls,security,acme-client
+            features: profile-load-balancer-edge,acme-client
+            config: packaging/container/proxy.toml
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -78,13 +85,13 @@ jobs:
           set -euo pipefail
           build="true"
           if [[ "${PROFILE}" == "load-balancer" ]]; then
-            if [[ ! "${GITHUB_REF_NAME}" =~ ^v1\.3 && "${INCLUDE_LOAD_BALANCER}" != "true" ]]; then
+            if [[ ! "${GITHUB_REF_NAME}" =~ ^v1\.5 && "${INCLUDE_LOAD_BALANCER}" != "true" ]]; then
               build="false"
             fi
           fi
           echo "build=${build}" >> "${GITHUB_OUTPUT}"
           if [[ "${build}" == "false" ]]; then
-            echo "Skipping ${PROFILE} image profile until a v1.3 tag or manual include_load_balancer=true run."
+            echo "Skipping ${PROFILE} image profile until a v1.5 tag or manual include_load_balancer=true run."
           fi
 
       - name: Checkout repository
@@ -212,7 +219,7 @@ jobs:
           push: true
           build-args: |
             FLUXHEIM_FEATURES=${{ inputs.features || matrix.profile.features }}
-            FLUXHEIM_CONFIG=${{ inputs.config || 'packaging/default/fluxheim.toml' }}
+            FLUXHEIM_CONFIG=${{ inputs.config || matrix.profile.config }}
             FLUXHEIM_RUNTIME_UID=${{ inputs.runtime_uid || '65532' }}
             FLUXHEIM_RUNTIME_GID=${{ inputs.runtime_gid || '65532' }}
           labels: |

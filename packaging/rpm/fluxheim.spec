@@ -1,4 +1,4 @@
-%global fluxheim_features profile-observability,acme-client
+%global fluxheim_features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 %global rust_min_version 1.95
 %bcond_without tests
 
@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.2.6
+Version:        1.3.0
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -15,7 +15,7 @@ URL:            https://github.com/valkyoth/fluxheim
 Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
 # Create with:
 #   cargo vendor vendor > /tmp/fluxheim-cargo-config.toml
-#   tar -czf fluxheim-1.2.6-vendor.tar.gz vendor
+#   tar -czf fluxheim-1.3.0-vendor.tar.gz vendor
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        fluxheim.tmpfiles
 Source3:        fluxheim.service
@@ -47,10 +47,10 @@ Requires(pre):   shadow-utils
 Requires:       ca-certificates
 
 %description
-Fluxheim is a modular Rust edge server built on Pingora. The 1.2 release builds
-on the stable gateway and ACME foundation with cache-server operations,
-Prometheus metrics, and OpenTelemetry export support compiled into the packaged
-native build.
+Fluxheim is a modular Rust edge server built on Pingora. The 1.3 release starts
+the shared ingress/TLS feature split while keeping the packaged native build on
+the full production feature set: proxy, static web serving, cache, load
+balancing, managed ACME, Prometheus metrics, and OpenTelemetry export support.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -150,6 +150,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu May 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.0-1
+- Shared ingress/TLS feature split with focused cache and proxy build profiles.
+
 * Thu May 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.6-1
 - Focused slice-cache follow-up with bounded range composition, suffix/open-ended ranges, and multipart byte-range responses.
 

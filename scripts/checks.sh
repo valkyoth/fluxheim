@@ -71,6 +71,12 @@ cargo fmt --all --check
 scripts/validate-release-metadata.sh
 perl scripts/check-doc-links.pl
 cargo clippy --all-targets -- -D warnings
+cargo clippy --no-default-features --features tls-rustls --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-full --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-web-server --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-cache-edge --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-proxy-edge --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
 cargo test
 cargo test --no-default-features --features proxy,load-balancer
 cargo test --no-default-features --features proxy,cache
@@ -83,11 +89,17 @@ cargo check --no-default-features --features profile-static-site
 cargo check --no-default-features --features profile-reverse-proxy
 cargo check --no-default-features --features profile-cache-server
 cargo check --no-default-features --features profile-load-balancer
+cargo check --no-default-features --features profile-full
+cargo check --no-default-features --features profile-web-server
+cargo check --no-default-features --features profile-cache-edge
+cargo check --no-default-features --features profile-proxy-edge
+cargo check --no-default-features --features profile-load-balancer-edge
 cargo check --no-default-features --features profile-observability
 cargo check --no-default-features --features profile-privacy
-cargo check --no-default-features --features profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-cargo check --no-default-features --features profile-cache-server,acme-client
-cargo check --no-default-features --features proxy,web,load-balancer,tls-rustls,security,acme-client
+cargo check --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo check --no-default-features --features profile-cache-edge,acme-client
+cargo check --no-default-features --features profile-proxy-edge,acme-client
+cargo check --no-default-features --features profile-load-balancer-edge,acme-client
 expect_cargo_check_failure "privacy-mode" "privacy-mode cannot be combined with the cache feature"
 expect_cargo_check_failure_no_defaults "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
 expect_feature_validation_failure "profile-privacy,metrics" "privacy-mode cannot be combined with metrics"
@@ -121,9 +133,11 @@ cargo run --quiet -- --check-config --config examples/tls-intermediate.toml >/de
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/container/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config packaging/container/fluxheim.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp -- --check-config --config packaging/container/fluxheim.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-cache-server,acme-client -- --check-config --config packaging/container/fluxheim.toml >/dev/null
-cargo run --quiet --no-default-features --features proxy,web,load-balancer,tls-rustls,security,acme-client -- --check-config --config packaging/container/fluxheim.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp -- --check-config --config packaging/container/fluxheim.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-web-server,acme-client -- --check-config --config packaging/container/fluxheim.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-cache-edge,acme-client -- --validate-config --config packaging/container/cache.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-proxy-edge,acme-client -- --validate-config --config packaging/container/proxy.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-load-balancer-edge,acme-client -- --validate-config --config packaging/container/proxy.toml >/dev/null
 cargo run --quiet -- --check-config --config packaging/default/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/conf.d >/dev/null
 cargo run --quiet -- --check-config --config examples/gateway-1-0 >/dev/null

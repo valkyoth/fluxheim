@@ -21,7 +21,9 @@ Feature-reduced builds keep the binary small and reduce dependency surface:
 ```bash
 cargo build --release --no-default-features --features proxy
 cargo build --release --no-default-features --features proxy,load-balancer
-cargo build --release --no-default-features --features profile-load-balancer
+cargo build --release --no-default-features --features profile-full
+cargo build --release --no-default-features --features profile-cache-edge
+cargo build --release --no-default-features --features profile-proxy-edge
 ```
 
 The default build enables `proxy`, `web`, `cache`, `tls-rustls`, and
@@ -29,6 +31,9 @@ The default build enables `proxy`, `web`, `cache`, `tls-rustls`, and
 grouped build profiles as normal feature aliases such as `profile-core`,
 `profile-static-site`, `profile-reverse-proxy`, `profile-cache-server`,
 `profile-load-balancer`, `profile-observability`, and `profile-privacy`.
+Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
+`profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`, and
+`profile-load-balancer-edge`.
 
 TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
 `tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls` is the default and
@@ -37,11 +42,11 @@ recommended backend.
 See [Feature Matrix](features.md) for the complete feature/profile list.
 
 Fluxheim's production RPM intentionally compiles
-`profile-observability,acme-client` for the `1.2.x` line. That keeps the normal
-gateway/cache surface available while including the managed ACME issuer,
-renewal CLI, background renewal service, Prometheus metrics, and OpenTelemetry
-export support that operators expect from packaged builds. Custom source builds
-can still omit `acme-client` or observability features when they are not needed.
+`profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp` for the
+`1.3.x` line. That keeps the normal packaged binary broad while the container
+and tarball release assets also provide focused cache/proxy builds. Custom
+source builds can still omit `acme-client`, load-balancer, cache, web, or
+observability features when they are not needed.
 
 For package scripts or custom CI that accept user-provided feature strings, run
 the feature preflight before invoking Cargo:
@@ -157,20 +162,25 @@ By default, the bundled Containerfiles compile the full production image
 profile:
 
 ```text
-profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 ```
 
 That default image includes proxying, static serving, cache, load balancing,
 rustls TLS, managed ACME, Prometheus metrics, and OpenTelemetry export support.
 Published releases also build smaller focused profiles:
 
-- `cache`: `profile-cache-server,acme-client`
-- `load-balancer`: `proxy,web,load-balancer,tls-rustls,security,acme-client`
+- `cache`: `profile-cache-edge,acme-client`
+- `proxy`: `profile-proxy-edge,acme-client`
+- `load-balancer`: `profile-load-balancer-edge,acme-client`
 
-The load-balancer image does not need the cache module. It does include `web`
-so the packaged default site, static fallback/error-page support, and common
-HTTP-01 deployment shapes keep working. Override `FLUXHEIM_FEATURES` only when
-you intentionally want a custom image.
+These focused profiles use TLS/ACME as shared ingress capabilities. The
+`cache` image is TLS-capable and omits local static web serving. The `proxy`
+image is TLS-capable and omits cache and static web serving. The
+`load-balancer` image is TLS-capable and omits cache and static web serving,
+but is only published automatically for the `1.5` load-balancer line. The
+focused images still reuse the shared proxy runtime internally until lower-level
+serving internals are split further. Override `FLUXHEIM_FEATURES` only when you
+intentionally want a custom image.
 
 Build a specific runtime variant:
 
@@ -185,8 +195,19 @@ Build the cache-focused profile locally:
 
 ```bash
 podman build \
-  --build-arg FLUXHEIM_FEATURES=profile-cache-server,acme-client \
+  --build-arg FLUXHEIM_FEATURES=profile-cache-edge,acme-client \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/cache.toml \
   -t fluxheim:cache-wolfi \
+  -f containers/Containerfile.wolfi .
+```
+
+Build the proxy-focused profile locally:
+
+```bash
+podman build \
+  --build-arg FLUXHEIM_FEATURES=profile-proxy-edge,acme-client \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/proxy.toml \
+  -t fluxheim:proxy-wolfi \
   -f containers/Containerfile.wolfi .
 ```
 
@@ -194,7 +215,8 @@ Build the future load-balancer profile locally:
 
 ```bash
 podman build \
-  --build-arg FLUXHEIM_FEATURES=proxy,web,load-balancer,tls-rustls,security,acme-client \
+  --build-arg FLUXHEIM_FEATURES=profile-load-balancer-edge,acme-client \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/proxy.toml \
   -t fluxheim:load-balancer-wolfi \
   -f containers/Containerfile.wolfi .
 ```
@@ -292,35 +314,38 @@ Required Docker Hub repository secrets:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.2.6-wolfi`, `v1.2.6-alpine`, `v1.2.6-suse-micro`, `v1.2.6-debian`
+- `v1.3.0-wolfi`, `v1.3.0-alpine`, `v1.3.0-suse-micro`, `v1.3.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.2.6`
-- `v1.2.6-base`
+- `v1.3.0`
+- `v1.3.0-base`
 - `latest`
 - `latest-base`
 
 The `-base` aliases are kept for compatibility with earlier release notes and
 automation. They point at the full/default image profile.
 
-The cache image profile publishes tags with a `cache` profile segment:
+The cache and proxy image profiles publish tags with a profile segment:
 
-- `v1.2.6-cache-wolfi`, `v1.2.6-cache-alpine`,
-  `v1.2.6-cache-suse-micro`, `v1.2.6-cache-debian`
-- `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-cache-alpine`, etc.
-- `latest-cache-wolfi`, `latest-cache-alpine`, etc. when run from the default
+- `v1.3.0-cache-wolfi`, `v1.3.0-cache-alpine`,
+  `v1.3.0-cache-suse-micro`, `v1.3.0-cache-debian`
+- `v1.3.0-proxy-wolfi`, `v1.3.0-proxy-alpine`,
+  `v1.3.0-proxy-suse-micro`, `v1.3.0-proxy-debian`
+- `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`, etc.
+- `latest-cache-wolfi`, `latest-proxy-wolfi`, etc. when run from the default
   branch
-- Wolfi short aliases: `v1.2.6-cache` and `latest-cache`
+- Wolfi short aliases: `v1.3.0-cache`, `v1.3.0-proxy`, `latest-cache`, and
+  `latest-proxy`
 
-The load-balancer image profile is prepared for the `1.3` line. It is skipped
-on normal pre-`1.3` tag pushes, but can be included in manual workflow runs by
+The load-balancer image profile is prepared for the `1.5` line. It is skipped
+on normal pre-`1.5` tag pushes, but can be included in manual workflow runs by
 setting `include_load_balancer=true`. Its tags follow the same shape, for
-example `v1.3.0-load-balancer-wolfi` and the Wolfi alias
-`v1.3.0-load-balancer`.
+example `v1.5.0-load-balancer-wolfi` and the Wolfi alias
+`v1.5.0-load-balancer`.
 
 The workflow defaults to `linux/amd64`. Use manual dispatch to test additional
 platforms, for example `linux/amd64,linux/arm64`, once every selected runtime
@@ -671,8 +696,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.2.6 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.2.6 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.3.0 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.3.0 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date

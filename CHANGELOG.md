@@ -11,6 +11,31 @@ behavior when the change improves security or project direction.
 
 No unreleased changes yet.
 
+## 1.3.0 - Shared Ingress And TLS Feature Split
+
+Released: in progress
+
+### Added
+
+- Started the shared ingress/TLS feature-graph split so TLS backends can be
+  compiled without implicitly enabling the full proxy module.
+- Added focused profile aliases for the next packaging line:
+  `profile-full`, `profile-web-server`, `profile-cache-edge`,
+  `profile-proxy-edge`, and `profile-load-balancer-edge`.
+- Added CI feature-policy, check, and clippy coverage for the focused
+  profiles.
+- Added runtime validation that rejects web or cache configuration when the
+  corresponding compile-time module is absent.
+
+### Changed
+
+- Container image builds now use focused feature profiles for `full`, `cache`,
+  and `proxy` images. The load-balancer image profile remains prepared but is
+  gated until the `1.5` load-balancer line unless manually requested.
+- Updated the roadmap so `1.3.1+` owns PHP support, `1.4` owns advanced proxy
+  parity, `1.5` owns enterprise load-balancer parity, and `1.6` owns shared
+  Wasm extensibility.
+
 ## 1.2.6 - Slice Cache Range Composition Follow-Up
 
 Released: in progress

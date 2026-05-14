@@ -26,22 +26,44 @@ visibility, and production Podman/ACME migration notes.
 
 The `1.2.1` follow-up added focused opt-in local/static vhost caching so local
 `[vhosts.web]` files and route-scoped web actions can use the same cache policy
-model as proxied static content when operators explicitly enable it. The active
-`1.2.2` line is slab/bin disk storage. Its first slice reserves
-`cache.disk.backend = "storage-bin"` with the allocator, durable index, and
-runtime backend selection in place. `1.2.3` adds optional cache encryption at
-rest, including local-key and OpenBao Transit key providers plus an optional
-Podman/OpenBao Transit smoke path, without forcing OpenBao on normal
-deployments. After that, the
-cache-only sequence is `1.2.4` for distributed cache metadata/peer-fill,
-`1.2.5` for exact bounded range caching, and `1.2.6` for fixed-slice range
-composition. `1.3` is planned as the load-balancer
-stabilization release. Its target is
-HAProxy/nginx-style migration coverage on top of Pingora's load-balancing
-primitives: named upstream pools, weighted round-robin, least-connections,
-hash/consistent-hash policies, active/passive health checks, retry/redispatch,
-backup/drain/slow-start behavior, and Prometheus/OpenTelemetry/admin
-visibility. `1.4` is planned as the shared Wasm extensibility release for
+model as proxied static content when operators explicitly enable it. The
+`1.2.2` line added slab/bin disk storage through
+`cache.disk.backend = "storage-bin"` with allocator, durable index, and runtime
+backend selection. `1.2.3` added optional cache encryption at rest, including
+local-key and OpenBao Transit key providers plus an optional Podman/OpenBao
+Transit smoke path, without forcing OpenBao on normal deployments. `1.2.4`
+added distributed cache metadata and peer-fill, `1.2.5` added exact bounded
+range caching, and `1.2.6` added fixed-slice range composition.
+
+`1.3.0` starts the shared ingress/TLS feature-graph split so focused images can
+be honest and TLS-capable without dragging in unrelated web, proxy, cache, or
+load-balancer modules. `1.3.1+` is planned as the PHP
+application-server line. Its first stable target is a secure `php-fpm`
+FastCGI bridge for WordPress-style and legacy PHP deployments, with PHP
+remaining disabled by default and selected only through explicit compile-time
+features and per-vhost config. Later `1.3.x` releases are reserved for the
+other PHP runtime lines: embedded Rust PHP/Turbine-style integration if it
+passes the security and licensing review, and pure-Rust PHP interpreter
+experiments behind separate feature gates.
+`1.4` is planned as the advanced proxy parity release. Its target is
+HAProxy/nginx-style reverse-proxy migration coverage that is not fundamentally
+load-balancing: queue/backpressure controls, upstream keepalive pool tuning,
+proxy buffering and streaming controls, protocol translation, stream/TCP/UDP
+proxy foundations, PROXY protocol support, request mirroring, richer variables,
+structured logging, and local Unix-socket operational visibility. `1.5` is
+planned as the enterprise load-balancer stabilization release. Its target is
+HAProxy/nginx/F5-style pool and traffic-distribution coverage on top of
+Pingora's load-balancing primitives: named upstream pools, weighted
+round-robin, least-connections, least-time/adaptive policies, power-of-two
+choices, bounded-load consistent hashing, active/passive/adaptive health
+checks, circuit breakers, retry/redispatch, backup/drain/slow-start behavior,
+session persistence, mTLS/TLS policy controls, and
+Prometheus/OpenTelemetry/admin visibility. Palo Alto-style security asks are
+tracked as policy integrations around the load balancer: rate limits,
+reputation/Geo decisions, TLS fingerprint signals, and future WAF/App-ID-like
+classification hooks without turning the `1.5` release into a full firewall.
+`1.6` is planned as the shared Wasm
+extensibility release for
 nginx-Lua-style request/response hooks and VCL-like cache policy hooks through
 one sandboxed runtime. Sentinel Mesh/WireGuard, advanced certificate
 automation, and larger application-server features remain later minor releases
@@ -55,6 +77,16 @@ deployments.
 Operational and admin tooling follows once the public TLS and certificate
 lifecycle surface is configurable and tested.
 
+Before the next feature lines grow further, Fluxheim needs a focused
+feature-graph cleanup: shared ingress, TLS, ACME, admin/config validation, and
+observability should be independent building blocks, while `web`, `cache`,
+`proxy`, and `load-balancer` should compile only their own behavior. Today,
+some profile aliases still pull in convenience modules such as `web` for cache
+or load-balancer images. The target is focused images and feature aliases:
+`full`, `web`, `cache`, `proxy`, and `load-balancer`, all TLS-capable where
+that makes sense, with CI checks proving unrelated modules are absent unless an
+operator explicitly compiles them in.
+
 Future differentiating features should lean into infrastructure problems that
 are hard to solve safely with external glue: cluster-wide state, identity-aware
 routing, AI-aware request controls, traffic mirroring, and encrypted
@@ -62,10 +94,12 @@ inter-node transport. These are not `1.0` items. Each one needs an explicit
 compile-time feature, a documented threat model, redaction/privacy rules, and
 failure-mode tests before it can move from research to beta.
 
-PHP execution is explicitly post-MVP application-server work. It must stay
-disabled by default and compile only through opt-in feature flags because PHP
-support changes Fluxheim's threat model from static/proxy serving to dynamic
-code execution.
+PHP execution is the next application-server milestone after the `1.3.0`
+ingress/TLS split. It must stay disabled by default and compile only through
+opt-in feature flags because PHP support changes Fluxheim's threat model from
+static/proxy serving to dynamic code execution. The `1.3.1` path is
+`php-fpm`/FastCGI first; embedded or pure-Rust PHP runtimes are planned as later
+`1.3.x` feature-gated follow-ups after review.
 
 Legacy Perl CGI execution is also post-MVP application-server work. It should
 be modeled as a separate opt-in compile feature from PHP, disabled per vhost by
@@ -1443,7 +1477,7 @@ without parsing text fixtures for every module.
 24. **Future WASM Extensibility**
    - Architecture and security plan documented in
      [WASM Extensibility](docs/wasm-extensibility.md).
-   - Target release: `1.4` as one shared extension runtime, not a partial
+   - Target release: `1.6` as one shared extension runtime, not a partial
      cache-only `1.2.x` implementation.
    - WASM support must be optional, compile-time gated, and disabled by
      default. Planned features:

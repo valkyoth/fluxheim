@@ -19,7 +19,7 @@ COPY packaging/systemd ./packaging/systemd
 COPY src ./src
 COPY scripts/validate-features.sh scripts/feature-policy.sh ./scripts/
 
-ARG FLUXHEIM_FEATURES=profile-load-balancer,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+ARG FLUXHEIM_FEATURES=profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 RUN if [ "${FLUXHEIM_FEATURES}" = "default" ]; then \
         cargo build --locked --release; \
     else \

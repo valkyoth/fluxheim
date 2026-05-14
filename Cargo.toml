@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.2.6"
+version = "1.3.0"
 edition = "2024"
 rust-version = "1.95"
 license = "EUPL-1.2"
@@ -15,18 +15,21 @@ default = [
     "tls-rustls",
     "security",
 ]
-proxy = [
-    "dep:async-trait",
-    "dep:base64-ng",
+ingress = [
     "dep:bytes",
     "dep:http",
     "dep:pingora",
+    "dep:tokio",
+]
+proxy = [
+    "ingress",
+    "dep:async-trait",
+    "dep:base64-ng",
     "dep:ring",
     "dep:rustix",
     "dep:serde_json",
     "dep:sha2",
     "dep:subtle",
-    "dep:tokio",
     "dep:ureq",
     "dep:zeroize",
 ]
@@ -39,11 +42,11 @@ web = [
     "dep:mime_guess",
     "dep:percent-encoding",
 ]
-tls = ["dep:rustix"]
-tls-rustls = ["tls", "proxy", "pingora/rustls", "dep:rustls", "rustls/ring"]
-tls-openssl = ["tls", "proxy", "pingora/openssl"]
-tls-boringssl = ["tls", "proxy", "pingora/boringssl"]
-tls-s2n = ["tls", "proxy", "pingora/s2n"]
+tls = ["ingress", "dep:rustix"]
+tls-rustls = ["tls", "pingora/rustls", "dep:rustls", "rustls/ring"]
+tls-openssl = ["tls", "pingora/openssl"]
+tls-boringssl = ["tls", "pingora/boringssl"]
+tls-s2n = ["tls", "pingora/s2n"]
 acme = [
     "tls",
     "dep:instant-acme",
@@ -84,6 +87,13 @@ profile-load-balancer = [
 ]
 profile-observability = ["profile-core", "metrics", "metrics-otlp", "otel-tracing", "otel-otlp"]
 profile-privacy = ["proxy", "web", "tls-rustls", "privacy-mode", "security"]
+profile-full = [
+    "profile-load-balancer",
+]
+profile-web-server = ["proxy", "web", "tls-rustls", "security"]
+profile-cache-edge = ["proxy", "cache", "tls-rustls", "security"]
+profile-proxy-edge = ["proxy", "tls-rustls", "security"]
+profile-load-balancer-edge = ["proxy", "load-balancer", "tls-rustls", "security"]
 
 [dependencies]
 arc-swap = "1.9.1"

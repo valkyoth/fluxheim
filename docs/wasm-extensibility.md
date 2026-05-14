@@ -1,6 +1,6 @@
 # WASM Extensibility
 
-Status: planned `1.4` optional module family.
+Status: planned `1.6` optional module family.
 
 Planned Cargo features:
 
