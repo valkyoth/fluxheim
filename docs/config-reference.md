@@ -646,10 +646,38 @@ media files, and resumable downloads where clients repeatedly request the same
 byte window. Fluxheim only admits matching upstream `206 Partial Content`
 responses whose `Content-Range` and `Content-Length` match the requested range;
 unkeyed upstream `206` responses are rejected from the normal full-object cache
-to avoid poisoning complete-object entries. `range.max_bytes` must be greater
-than zero and no larger than `cache.max_object_bytes`. Requests with
-`If-Range`, suffix ranges, open-ended ranges, or multiple ranges are left on the
-normal non-range-specific path.
+to avoid poisoning complete-object entries. Without slice caching,
+`range.max_bytes` must be greater than zero and no larger than
+`cache.max_object_bytes`.
+
+`[cache.range.slice]` enables the `1.2.6` fixed-slice range cache. Fluxheim
+normalizes client ranges into fixed-size slices, stores each slice under a
+slice-specific key, and can compose fresh compatible slices into single-range,
+open-ended, suffix, or `multipart/byteranges` responses. Missing slices can be
+filled from origin with bounded single-slice `Range` requests when
+`fill_missing = true`; concurrent fills for the same slice key are collapsed.
+Slice fill rejects responses unless `206`, `Content-Range`, `Content-Length`,
+content type, object length, and validators are compatible. `If-Range` requests
+are served from slices only when the cached `ETag` or `Last-Modified` matches;
+otherwise Fluxheim falls back to the normal proxy path. Exact admin purges also
+remove indexed slices for the same request path.
+
+```toml
+[cache.range]
+enabled = true
+max_bytes = "128MiB"
+
+[cache.range.slice]
+enabled = true
+size_bytes = "1MiB"
+max_slices = 128
+fill_missing = true
+```
+
+When `range.slice.enabled = true`, `range.max_bytes` may be larger than
+`cache.max_object_bytes`, but `range.slice.size_bytes` must not exceed
+`cache.max_object_bytes`, and `range.max_bytes` must not exceed
+`range.slice.size_bytes * range.slice.max_slices`.
 
 `cache.disk.backend` defaults to `filesystem`, the stable complete-object disk
 backend used by `1.2.0` and `1.2.1`. `storage-bin` selects the focused `1.2.2`

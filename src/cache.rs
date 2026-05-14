@@ -1506,6 +1506,21 @@ impl CachePurgeIndex {
         })
     }
 
+    pub fn entries_for_user_tag_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> Vec<CachePurgeIndexEntry> {
+        if user_tag.is_empty() || path_exact.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        self.entries_matching(limit, |entry| {
+            entry.user_tag == user_tag
+                && entry.path.as_deref().is_some_and(|path| path == path_exact)
+        })
+    }
+
     pub fn entries_for_user_tag_path_pattern(
         &self,
         user_tag: &str,
@@ -1809,6 +1824,17 @@ impl PingoraMemoryStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn purge_indexed_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> CacheIndexedPurgeResult {
+        let entries =
+            self.indexed_entries_for_path_exact(user_tag, path_exact, limit.saturating_add(1));
+        self.purge_indexed_entries(entries, limit)
+    }
+
     pub fn soft_purge_indexed_path_prefix(
         &self,
         user_tag: &str,
@@ -1979,6 +2005,26 @@ impl PingoraMemoryStorage {
                         .path
                         .as_deref()
                         .is_some_and(|path| path.starts_with(path_prefix))
+            },
+        )
+    }
+
+    fn indexed_entries_for_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> Vec<CachePurgeIndexEntry> {
+        if user_tag.is_empty() || path_exact.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        self.indexed_entries_matching(
+            self.purge_index
+                .entries_for_user_tag_path_exact(user_tag, path_exact, limit),
+            limit,
+            |entry| {
+                entry.user_tag == user_tag
+                    && entry.path.as_deref().is_some_and(|path| path == path_exact)
             },
         )
     }
@@ -2696,6 +2742,18 @@ impl StorageBinDiskStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn purge_indexed_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let entries = self
+            .indexed_entries_for_path_exact(user_tag, path_exact, limit.saturating_add(1))
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        self.purge_indexed_entries(entries, limit)
+    }
+
     pub fn soft_purge_indexed_path_prefix(
         &self,
         user_tag: &str,
@@ -2862,6 +2920,26 @@ impl StorageBinDiskStorage {
                         .path
                         .as_deref()
                         .is_some_and(|path| path.starts_with(path_prefix))
+            },
+        )
+    }
+
+    fn indexed_entries_for_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> pingora::Result<Vec<CachePurgeIndexEntry>> {
+        if user_tag.is_empty() || path_exact.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.indexed_entries_matching(
+            self.purge_index
+                .entries_for_user_tag_path_exact(user_tag, path_exact, limit),
+            limit,
+            |entry| {
+                entry.user_tag == user_tag
+                    && entry.path.as_deref().is_some_and(|path| path == path_exact)
             },
         )
     }
@@ -3261,6 +3339,22 @@ impl PingoraDiskStorageBackend {
             }
             Self::StorageBin(storage) => {
                 storage.purge_indexed_path_prefix(user_tag, path_prefix, limit)
+            }
+        }
+    }
+
+    pub fn purge_indexed_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        match self {
+            Self::Filesystem(storage) => {
+                storage.purge_indexed_path_exact(user_tag, path_exact, limit)
+            }
+            Self::StorageBin(storage) => {
+                storage.purge_indexed_path_exact(user_tag, path_exact, limit)
             }
         }
     }
@@ -3670,6 +3764,17 @@ impl PingoraDiskStorage {
         self.purge_indexed_entries(entries, limit)
     }
 
+    pub fn purge_indexed_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> std::io::Result<CacheIndexedPurgeResult> {
+        let entries =
+            self.indexed_entries_for_path_exact(user_tag, path_exact, limit.saturating_add(1))?;
+        self.purge_indexed_entries(entries, limit)
+    }
+
     pub fn soft_purge_indexed_path_prefix(
         &self,
         user_tag: &str,
@@ -3842,6 +3947,26 @@ impl PingoraDiskStorage {
                         .path
                         .as_deref()
                         .is_some_and(|path| path.starts_with(path_prefix))
+            },
+        )
+    }
+
+    fn indexed_entries_for_path_exact(
+        &self,
+        user_tag: &str,
+        path_exact: &str,
+        limit: usize,
+    ) -> std::io::Result<Vec<CachePurgeIndexEntry>> {
+        if user_tag.is_empty() || path_exact.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        self.indexed_entries_matching(
+            self.purge_index
+                .entries_for_user_tag_path_exact(user_tag, path_exact, limit),
+            limit,
+            |entry| {
+                entry.user_tag == user_tag
+                    && entry.path.as_deref().is_some_and(|path| path == path_exact)
             },
         )
     }

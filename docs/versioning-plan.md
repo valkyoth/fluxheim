@@ -831,8 +831,11 @@ Focused cache-only follow-up releases after 1.2:
   admits only matching upstream `206` responses with correct `Content-Range`
   and `Content-Length`. It also rejects unkeyed upstream `206` responses from
   the full-object cache so partial responses cannot poison complete-object
-  entries. Full multi-slice assembly can still live in a later media-edge line
-  if production needs Varnish-style range composition.
+  entries.
+- `1.2.6`: focused fixed-slice range-cache follow-up. This release adds
+  opt-in slice composition for large proxy-cache objects, including bounded,
+  open-ended, suffix, and multipart byte-range responses from fresh compatible
+  slices, plus bounded missing-slice fill and per-slice request collapsing.
 
 Cross-cutting packaging follow-up for the next suitable `1.2.x` or `1.3`
 release: add proper manual pages for native deployments, including
@@ -1504,6 +1507,8 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.2.4`: focused distributed cache metadata and peer-fill release.
 - `v1.2.5`: focused bounded range-cache follow-up for large proxy-cache
   objects before `1.3`.
+- `v1.2.6`: focused fixed-slice range-cache composition follow-up before
+  `1.3`.
 - `v1.3.1`: fixes for load balancer.
 - `v1.4.1`: fixes for the shared Wasm extensibility runtime.
 

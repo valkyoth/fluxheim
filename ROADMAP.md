@@ -33,9 +33,9 @@ runtime backend selection in place. `1.2.3` adds optional cache encryption at
 rest, including local-key and OpenBao Transit key providers plus an optional
 Podman/OpenBao Transit smoke path, without forcing OpenBao on normal
 deployments. After that, the
-cache-only sequence is `1.2.4` for distributed cache metadata/peer-fill, and an
-optional `1.2.5` only if production testing finds one more cache-specific
-blocker. `1.3` is planned as the load-balancer
+cache-only sequence is `1.2.4` for distributed cache metadata/peer-fill,
+`1.2.5` for exact bounded range caching, and `1.2.6` for fixed-slice range
+composition. `1.3` is planned as the load-balancer
 stabilization release. Its target is
 HAProxy/nginx-style migration coverage on top of Pingora's load-balancing
 primitives: named upstream pools, weighted round-robin, least-connections,

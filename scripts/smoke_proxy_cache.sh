@@ -75,6 +75,7 @@ from urllib.parse import parse_qs, urlparse
 
 BODY = b"0123456789abcdef"
 PARTIAL_BODY = b"abcdefghijklmnopqrstuvwxyz0123456789"
+SLICE_BODY = b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 VARY_BODIES = {
     "de": b"vary-de",
     "en": b"vary-en",
@@ -158,6 +159,46 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-range", f"bytes */{len(PARTIAL_BODY)}")
             self.send_header("content-length", "0")
             self.end_headers()
+            return
+
+        if parsed.path == "/slice.bin":
+            record_path(parsed.path)
+            range_header = self.headers.get("range")
+            if not range_header or not range_header.startswith("bytes=") or "," in range_header:
+                self.send_response(200)
+                self.send_header("content-type", "image/png")
+                self.send_header("content-length", str(len(SLICE_BODY)))
+                self.send_header("cache-control", "public, max-age=120")
+                self.send_header("etag", '"cache-smoke-slice"')
+                self.send_header("last-modified", LAST_MODIFIED)
+                self.end_headers()
+                self.wfile.write(SLICE_BODY)
+                return
+            start_text, end_text = range_header.removeprefix("bytes=").split("-", 1)
+            if start_text == "":
+                requested = int(end_text)
+                start = max(0, len(SLICE_BODY) - requested)
+                end = len(SLICE_BODY) - 1
+            else:
+                start = int(start_text)
+                end = len(SLICE_BODY) - 1 if end_text == "" else int(end_text)
+            if start >= len(SLICE_BODY) or end < start:
+                self.send_response(416)
+                self.send_header("content-range", f"bytes */{len(SLICE_BODY)}")
+                self.send_header("content-length", "0")
+                self.end_headers()
+                return
+            end = min(end, len(SLICE_BODY) - 1)
+            body = SLICE_BODY[start:end + 1]
+            self.send_response(206)
+            self.send_header("content-type", "image/png")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("content-range", f"bytes {start}-{end}/{len(SLICE_BODY)}")
+            self.send_header("cache-control", "public, max-age=120")
+            self.send_header("etag", '"cache-smoke-slice"')
+            self.send_header("last-modified", LAST_MODIFIED)
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         if self.path == "/vary.png" or self.path == "/warm-vary.png":
@@ -470,6 +511,42 @@ path = "$TMP_DIR/cache"
 max_size_bytes = "32MiB"
 
 [[vhosts.routes]]
+name = "slice-range"
+path_exact = "/slice.bin"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_PORT"]
+upstream_tls = false
+
+[vhosts.routes.cache]
+enabled = true
+status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
+key_namespace = "cache-route-slice-v1"
+extensions = ["bin"]
+content_types = ["image/png"]
+max_object_bytes = "1MiB"
+
+[vhosts.routes.cache.range]
+enabled = true
+max_bytes = "64B"
+
+[vhosts.routes.cache.range.slice]
+enabled = true
+size_bytes = "8B"
+max_slices = 8
+fill_missing = true
+
+[vhosts.routes.cache.memory]
+enabled = true
+max_size_bytes = "16MiB"
+
+[vhosts.routes.cache.disk]
+enabled = true
+path = "$TMP_DIR/cache"
+max_size_bytes = "32MiB"
+
+[[vhosts.routes]]
 name = "swr"
 path_exact = "/swr.png"
 
@@ -670,6 +747,12 @@ modified_since_mismatch_headers="$TMP_DIR/modified-since-mismatch.headers"
 range_headers="$TMP_DIR/range.headers"
 partial_range_first_headers="$TMP_DIR/partial-range-first.headers"
 partial_range_second_headers="$TMP_DIR/partial-range-second.headers"
+slice_first_headers="$TMP_DIR/slice-first.headers"
+slice_second_headers="$TMP_DIR/slice-second.headers"
+slice_open_headers="$TMP_DIR/slice-open.headers"
+slice_suffix_headers="$TMP_DIR/slice-suffix.headers"
+slice_multi_headers="$TMP_DIR/slice-multi.headers"
+slice_if_range_headers="$TMP_DIR/slice-if-range.headers"
 if_range_match_headers="$TMP_DIR/if-range-match.headers"
 if_range_mismatch_headers="$TMP_DIR/if-range-mismatch.headers"
 if_range_date_match_headers="$TMP_DIR/if-range-date-match.headers"
@@ -692,6 +775,8 @@ restart_headers="$TMP_DIR/restart.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
 partial_range_body="$TMP_DIR/partial-range-body.bin"
+slice_body="$TMP_DIR/slice-body.bin"
+slice_multi_body="$TMP_DIR/slice-multi-body.bin"
 if_range_match_body="$TMP_DIR/if-range-match-body.bin"
 if_range_mismatch_body="$TMP_DIR/if-range-mismatch-body.bin"
 if_range_date_match_body="$TMP_DIR/if-range-date-match-body.bin"
@@ -1152,6 +1237,158 @@ partial_range_origin_count=$(
 )
 if [ "$partial_range_origin_count" != "1" ]; then
     echo "proxy cache smoke failed: bounded range did not collapse repeated origin reads, count=$partial_range_origin_count" >&2
+    exit 1
+fi
+
+slice_first_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$slice_first_headers" -o "$slice_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=4-21" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/slice.bin"
+)
+if [ "$slice_first_status" != "206" ]; then
+    echo "proxy cache smoke failed: first slice range returned $slice_first_status instead of 206" >&2
+    cat "$slice_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: MISS' "$slice_first_headers"; then
+    echo "proxy cache smoke failed: first slice range was not a cache MISS" >&2
+    cat "$slice_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: slice-fill' "$slice_first_headers"; then
+    echo "proxy cache smoke failed: first slice range missed slice-fill reason" >&2
+    cat "$slice_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 4-21/62' "$slice_first_headers"; then
+    echo "proxy cache smoke failed: first slice range missed expected Content-Range" >&2
+    cat "$slice_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$slice_body")" != "456789abcdefghijkl" ]; then
+    echo "proxy cache smoke failed: first slice range body mismatch" >&2
+    exit 1
+fi
+
+slice_second_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$slice_second_headers" -o "$slice_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=4-21" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/slice.bin"
+)
+if [ "$slice_second_status" != "206" ]; then
+    echo "proxy cache smoke failed: second slice range returned $slice_second_status instead of 206" >&2
+    cat "$slice_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$slice_second_headers"; then
+    echo "proxy cache smoke failed: second slice range was not a cache HIT" >&2
+    cat "$slice_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: slice' "$slice_second_headers"; then
+    echo "proxy cache smoke failed: second slice range missed slice reason" >&2
+    cat "$slice_second_headers" >&2
+    exit 1
+fi
+
+slice_open_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$slice_open_headers" -o "$slice_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=58-" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/slice.bin"
+)
+if [ "$slice_open_status" != "206" ]; then
+    echo "proxy cache smoke failed: open-ended slice range returned $slice_open_status instead of 206" >&2
+    cat "$slice_open_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 58-61/62' "$slice_open_headers"; then
+    echo "proxy cache smoke failed: open-ended slice range missed expected Content-Range" >&2
+    cat "$slice_open_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$slice_body")" != "WXYZ" ]; then
+    echo "proxy cache smoke failed: open-ended slice range body mismatch" >&2
+    exit 1
+fi
+
+slice_suffix_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$slice_suffix_headers" -o "$slice_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=-5" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/slice.bin"
+)
+if [ "$slice_suffix_status" != "206" ]; then
+    echo "proxy cache smoke failed: suffix slice range returned $slice_suffix_status instead of 206" >&2
+    cat "$slice_suffix_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 57-61/62' "$slice_suffix_headers"; then
+    echo "proxy cache smoke failed: suffix slice range missed expected Content-Range" >&2
+    cat "$slice_suffix_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$slice_body")" != "VWXYZ" ]; then
+    echo "proxy cache smoke failed: suffix slice range body mismatch" >&2
+    exit 1
+fi
+
+slice_multi_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$slice_multi_headers" -o "$slice_multi_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=0-3,10-12" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/slice.bin"
+)
+if [ "$slice_multi_status" != "206" ]; then
+    echo "proxy cache smoke failed: multi slice range returned $slice_multi_status instead of 206" >&2
+    cat "$slice_multi_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-type: multipart/byteranges;' "$slice_multi_headers"; then
+    echo "proxy cache smoke failed: multi slice range was not multipart/byteranges" >&2
+    cat "$slice_multi_headers" >&2
+    exit 1
+fi
+if ! grep -q 'Content-Range: bytes 0-3/62' "$slice_multi_body" \
+    || ! grep -q 'Content-Range: bytes 10-12/62' "$slice_multi_body" \
+    || ! grep -q '0123' "$slice_multi_body" \
+    || ! grep -q 'abc' "$slice_multi_body"; then
+    echo "proxy cache smoke failed: multi slice body missing expected parts" >&2
+    cat "$slice_multi_body" >&2
+    exit 1
+fi
+
+slice_if_range_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$slice_if_range_headers" -o "$slice_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=8-15" \
+        -H 'If-Range: "cache-smoke-slice"' \
+        "http://127.0.0.1:$FLUXHEIM_PORT/slice.bin"
+)
+if [ "$slice_if_range_status" != "206" ]; then
+    echo "proxy cache smoke failed: slice If-Range match returned $slice_if_range_status instead of 206" >&2
+    cat "$slice_if_range_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$slice_if_range_headers"; then
+    echo "proxy cache smoke failed: slice If-Range match was not served as a cache HIT" >&2
+    cat "$slice_if_range_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-reason: slice' "$slice_if_range_headers"; then
+    echo "proxy cache smoke failed: slice If-Range match missed slice reason" >&2
+    cat "$slice_if_range_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 8-15/62' "$slice_if_range_headers"; then
+    echo "proxy cache smoke failed: slice If-Range match missed expected Content-Range" >&2
+    cat "$slice_if_range_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$slice_body")" != "89abcdef" ]; then
+    echo "proxy cache smoke failed: slice If-Range match body mismatch" >&2
     exit 1
 fi
 

@@ -277,6 +277,9 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
 - `1.2.4` adds distributed cache peer fill with safe `only-if-cached` peer
   fetches and bounded fail-open/fail-closed behavior.
 - `1.2.5` adds opt-in bounded range caching for large proxy-cache objects.
+- `1.2.6` adds opt-in fixed-slice range-cache composition, including
+  open-ended, suffix, and multipart byte-range responses from compatible cached
+  slices.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

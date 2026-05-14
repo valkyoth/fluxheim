@@ -139,9 +139,9 @@ It is intended to promote:
 
 Before calling `1.2` stable, release evidence must include the stable gate,
 cache behavior smokes, and observability smokes. Bounded single-range caching,
-the storage-bin disk backend, and distributed cache peer fill are now covered
-by focused `1.2.x` releases. Multi-slice range composition, Varnish-style ban
-expressions, and WASM cache hooks remain future work unless explicitly promoted
+the storage-bin disk backend, distributed cache peer fill, and fixed-slice range
+composition are now covered by focused `1.2.x` releases. Varnish-style ban
+expressions and WASM cache hooks remain future work unless explicitly promoted
 with tests and release evidence.
 
 ## Operator Checks

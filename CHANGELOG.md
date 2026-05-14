@@ -11,6 +11,37 @@ behavior when the change improves security or project direction.
 
 No unreleased changes yet.
 
+## 1.2.6 - Slice Cache Range Composition Follow-Up
+
+Released: in progress
+
+### Added
+
+- Added opt-in `[cache.range.slice]`, `[vhosts.cache.range.slice]`, and
+  route-scoped slice-cache policy for Varnish-style fixed-slice range
+  composition.
+- Added normalized slice cache keys so arbitrary client ranges can be served
+  from compatible fixed-size cached slices without colliding with complete
+  objects or exact `1.2.5` range entries.
+- Added bounded missing-slice fill from origin. Fluxheim fetches only normalized
+  single-slice `Range` requests, validates `206`, `Content-Range`,
+  `Content-Length`, `ETag`/`Last-Modified`, total length, and content type, and
+  collapses concurrent fills for the same slice key.
+- Added composed responses for bounded ranges, open-ended ranges, suffix
+  ranges, and multipart multi-range requests when all required slices are
+  fresh and validator-compatible.
+- Added end-to-end proxy-cache smoke coverage for slice fill, slice hit,
+  open-ended range, suffix range, multipart range composition, and cached
+  slice `If-Range` matches.
+
+### Changed
+
+- `range.max_bytes` may exceed `cache.max_object_bytes` when
+  `range.slice.enabled = true`; individual `range.slice.size_bytes` values
+  remain bounded by `cache.max_object_bytes`.
+- Exact admin purges now also remove slice entries for the same indexed path
+  when slice caching is enabled.
+
 ## 1.2.5 - Bounded Range Cache Follow-Up
 
 Released: in progress

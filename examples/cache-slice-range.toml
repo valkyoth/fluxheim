@@ -1,0 +1,59 @@
+[server]
+listen = ["127.0.0.1:8080"]
+default_vhost = "slice-cache.example.test"
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[cache]
+enabled = true
+status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
+allow_client_cache_refresh = false
+key_namespace = "slice-cache-example-v1"
+key_parts = ["method", "host", "path", "query"]
+default_status_ttl_secs = 300
+content_types = ["application/octet-stream", "image/*", "video/*"]
+image_extensions = ["bin", "iso", "mp4", "webp"]
+methods = ["GET"]
+max_object_bytes = "2MiB"
+
+[cache.range]
+enabled = true
+max_bytes = "128MiB"
+
+[cache.range.slice]
+enabled = true
+size_bytes = "1MiB"
+max_slices = 128
+fill_missing = true
+
+[cache.memory]
+enabled = true
+max_size_bytes = "512MiB"
+
+[cache.disk]
+enabled = true
+backend = "storage-bin"
+path = "cache/slice-range"
+max_size_bytes = "20GiB"
+
+[cache.disk.storage_bin]
+bin_size_bytes = "256MiB"
+preallocate = false
+max_open_bins = 16
+
+[cache.lock]
+enabled = true
+age_timeout_secs = 30
+wait_timeout_secs = 30
+
+[[vhosts]]
+name = "slice-cache.example.test"
+hosts = ["slice-cache.example.test"]
+
+[vhosts.proxy]
+upstreams = ["127.0.0.1:3000"]
+upstream_tls = false

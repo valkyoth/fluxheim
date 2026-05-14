@@ -354,10 +354,16 @@ internal cache implementation.
   redirects or error statuses without an explicit TTL are rejected from shared
   cache admission.
   Pingora's cache pipeline injects `Age` on stored-response hits and applies
-  downstream conditional/range handling when cache is enabled. The release smoke
-  suite verifies proxy cache HIT behavior, cached-hit `Age`, cached
-  `Last-Modified` preservation, conditional `304`, byte-range `206`,
-  `If-Range` match/mismatch behavior, cache-status HIT headers on cached
+  downstream conditional/range handling when cache is enabled. Fluxheim also has
+  an opt-in fixed-slice range cache for large proxy objects. Slice caching
+  stores normalized byte slices, validates object identity with total length and
+  validators, fills missing slices from origin with bounded single-slice range
+  requests, collapses concurrent fills for the same slice, and composes fresh
+  slices into bounded, open-ended, suffix, or multipart byte-range responses.
+  The release smoke suite verifies proxy cache HIT behavior, cached-hit `Age`,
+  cached `Last-Modified` preservation, conditional `304`, byte-range `206`,
+  slice fill/hit composition, open-ended and suffix slice ranges, multipart
+  slice responses, `If-Range` match/mismatch behavior, cache-status HIT headers on cached
   conditional/range responses, validator-based upstream revalidation from an
   origin `304`, persisted validator metadata after that revalidation,
   stale-object refresh from an origin `200`, stale-while-revalidate serving
@@ -839,7 +845,8 @@ A production adapter must:
   client refresh bypass, Pingora `Vary` variance keys with unsafe/sensitive
   `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, `image/*`
   origin response admission for proxied image cache, opt-in bounded proxy
-  `Range` caching for safe single byte windows, and end-to-end smoke
+  `Range` caching for safe single byte windows, opt-in fixed-slice range
+  composition for bounded/open-ended/suffix/multipart ranges, and end-to-end smoke
   coverage for cached HIT `Age`, conditional `304`, byte-range `206`,
   `If-Range` match/mismatch behavior, validator-based upstream revalidation
   from origin `304`, stale-object refresh from origin `200`,

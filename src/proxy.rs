@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 #[cfg(feature = "cache")]
 use std::time::Duration;
-#[cfg(not(feature = "privacy-mode"))]
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
@@ -1347,18 +1346,43 @@ impl ProxySnapshot {
                 )
             })?;
         let cache_key = key.combined();
-        let memory_purged = route_cache
+        let mut memory_purged = route_cache
             .and_then(|cache| cache.pingora_memory_storage)
             .or(vhost
                 .pingora_memory_storage
                 .filter(|_| route_cache.is_none()))
             .is_some_and(|storage| storage.purge_cache_key(&key));
-        let disk_purged = route_cache
+        let mut disk_purged = route_cache
             .and_then(|cache| cache.pingora_disk_storage)
             .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
             .map(|storage| storage.purge_cache_key(&key))
             .transpose()?
             .unwrap_or(false);
+        if cache_config.range.enabled && cache_config.range.slice.enabled {
+            let slice_limit = usize::try_from(cache_config.range.slice.max_slices)
+                .unwrap_or(usize::MAX.saturating_sub(4))
+                .saturating_add(4);
+            if let Some(storage) = route_cache
+                .and_then(|cache| cache.pingora_memory_storage)
+                .or(vhost
+                    .pingora_memory_storage
+                    .filter(|_| route_cache.is_none()))
+            {
+                memory_purged |= storage
+                    .purge_indexed_path_exact(user_tag, request.path, slice_limit)
+                    .purged
+                    > 0;
+            }
+            if let Some(storage) = route_cache
+                .and_then(|cache| cache.pingora_disk_storage)
+                .or(vhost.pingora_disk_storage.filter(|_| route_cache.is_none()))
+            {
+                disk_purged |= storage
+                    .purge_indexed_path_exact(user_tag, request.path, slice_limit)?
+                    .purged
+                    > 0;
+            }
+        }
         Ok(CachePurgeResult {
             vhost: vhost.name.clone(),
             route: route_cache.map(|cache| cache.name.clone()),
@@ -3163,6 +3187,79 @@ impl CacheRangeRequest {
 }
 
 #[cfg(feature = "cache")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CacheClientRange {
+    Bounded { start: u64, end: u64 },
+    OpenEnded { start: u64 },
+    Suffix { len: u64 },
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CacheSliceRangeRequest {
+    ranges: Vec<CacheClientRange>,
+    if_range: Option<String>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CacheSliceBounds {
+    start: u64,
+    end: u64,
+}
+
+#[cfg(feature = "cache")]
+impl CacheSliceBounds {
+    fn len(self) -> u64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    fn range_request(self) -> CacheRangeRequest {
+        CacheRangeRequest {
+            start: self.start,
+            end: self.end,
+        }
+    }
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CacheContentRange {
+    start: u64,
+    end: u64,
+    total: Option<u64>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Debug)]
+struct CacheSliceObject {
+    bounds: CacheSliceBounds,
+    total: u64,
+    body: Bytes,
+    meta: CacheMeta,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CacheSliceIdentity {
+    total: u64,
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+#[cfg(feature = "cache")]
+struct SliceFillPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+#[cfg(feature = "cache")]
+impl Drop for SliceFillPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(feature = "cache")]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct Revalidation304Headers {
     last_modified: Vec<::http::HeaderValue>,
@@ -3258,6 +3355,10 @@ impl ProxyHttp for FluxProxy {
                 }
                 RuntimeRouteAction::Proxy(_) => {
                     #[cfg(feature = "cache")]
+                    if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
+                        return Ok(true);
+                    }
+                    #[cfg(feature = "cache")]
                     if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
                     }
@@ -3281,6 +3382,10 @@ impl ProxyHttp for FluxProxy {
         #[cfg(feature = "web")]
         {
             let Some(web) = &vhost.web else {
+                #[cfg(feature = "cache")]
+                if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
+                    return Ok(true);
+                }
                 #[cfg(feature = "cache")]
                 if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                     return Ok(true);
@@ -3361,6 +3466,10 @@ impl ProxyHttp for FluxProxy {
                 }
                 Ok(ResolveResult::NotFound) => {
                     #[cfg(feature = "cache")]
+                    if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
+                        return Ok(true);
+                    }
+                    #[cfg(feature = "cache")]
                     if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
                     }
@@ -3378,6 +3487,10 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(not(feature = "web"))]
         {
+            #[cfg(feature = "cache")]
+            if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
+                return Ok(true);
+            }
             #[cfg(feature = "cache")]
             if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                 return Ok(true);
@@ -4376,6 +4489,955 @@ async fn lookup_proxy_cache_only_object(
                 hit.finish(storage, &cache_key, trace).await?;
                 Ok(None)
             }
+        }
+    }
+}
+
+#[cfg(feature = "cache")]
+async fn respond_proxy_slice_cache_request(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    state: &ProxyRuntimeState,
+    vhost_index: usize,
+) -> Result<bool> {
+    let vhost = state.vhost(vhost_index);
+    let cache = selected_cache_config(vhost, ctx);
+    if !cache.range.enabled || !cache.range.slice.enabled {
+        return Ok(false);
+    }
+    let Some(slice_request) = selected_cache_slice_range_request(session.req_header(), cache)
+    else {
+        return Ok(false);
+    };
+    if let Some(reason) = request_cache_bypass_reason(session.req_header(), cache) {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, ctx.route_index, "bypass");
+        ctx.cache_status_override = Some(CacheStatusOverride {
+            status: "BYPASS",
+            reason: Some(reason),
+        });
+        return Ok(false);
+    }
+    let Some(storage) = selected_cache_storage(vhost, ctx) else {
+        return Ok(false);
+    };
+    let Some(base_key) = state.pingora_image_cache_key_for_request_header(
+        session.req_header(),
+        vhost_index,
+        ctx.route_index,
+    ) else {
+        return Ok(false);
+    };
+    if cache_pass_should_bypass(cache_pass_counter(), cache, &base_key.combined()) {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, ctx.route_index, "pass");
+        ctx.cache_status_override = Some(CacheStatusOverride {
+            status: "BYPASS",
+            reason: Some(CACHE_PASS_REASON),
+        });
+        return Ok(false);
+    }
+
+    let proxy = selected_runtime_proxy(vhost, ctx);
+    let response_headers = selected_response_headers(vhost, ctx);
+    let Some(response) = proxy_slice_cache_response(
+        session.req_header(),
+        storage,
+        base_key,
+        cache,
+        proxy,
+        ctx.route_index.map(|index| vhost.route(index)),
+        slice_request,
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+
+    let mut response_header = response.header;
+    insert_cache_status_headers(
+        &mut response_header,
+        cache,
+        Some(CacheStatusOverride {
+            status: if response.filled { "MISS" } else { "HIT" },
+            reason: Some(if response.filled {
+                "slice-fill"
+            } else {
+                "slice"
+            }),
+        }),
+        CachePhase::Hit,
+    )?;
+    crate::headers::apply_response_policy(&mut response_header, response_headers)?;
+    #[cfg(feature = "metrics")]
+    record_cache_policy_activity(
+        vhost,
+        ctx.route_index,
+        if response.filled {
+            "slice_fill"
+        } else {
+            "slice_hit"
+        },
+    );
+    ctx.cache_observed_phase = Some(CachePhase::Hit);
+    ctx.response_body_bytes_seen = response.body.len() as u64;
+    session
+        .write_response_header(Box::new(response_header), response.body.is_empty())
+        .await?;
+    if !response.body.is_empty() {
+        session
+            .write_response_body(Some(response.body), true)
+            .await?;
+    }
+    Ok(true)
+}
+
+#[cfg(feature = "cache")]
+struct CacheSliceComposedResponse {
+    header: ResponseHeader,
+    body: Bytes,
+    filled: bool,
+}
+
+#[cfg(feature = "cache")]
+async fn proxy_slice_cache_response(
+    request: &RequestHeader,
+    storage: &'static (dyn pingora::cache::Storage + Sync),
+    base_key: PingoraCacheKey,
+    cache: &crate::config::CacheConfig,
+    proxy: &RuntimeProxy,
+    route: Option<&RuntimeRoute>,
+    slice_request: CacheSliceRangeRequest,
+) -> Result<Option<CacheSliceComposedResponse>> {
+    let trace = pingora::cache::trace::Span::inactive().handle();
+    let fill_context = CacheSliceFillContext {
+        request,
+        storage,
+        cache,
+        proxy,
+        route,
+        trace: &trace,
+    };
+    let slice_size = cache.range.slice.size_bytes.as_u64();
+    let Some((total, first_slice, first_filled)) =
+        discover_slice_total(&fill_context, base_key.clone(), slice_size).await?
+    else {
+        return Ok(None);
+    };
+
+    let Some(ranges) = resolve_client_slice_ranges(&slice_request.ranges, total) else {
+        return Ok(Some(slice_416_response(total)?));
+    };
+    if ranges.is_empty() {
+        return Ok(Some(slice_416_response(total)?));
+    }
+    if !slice_request_within_policy(&ranges, cache, slice_size) {
+        return Ok(None);
+    }
+
+    let first_identity = slice_identity(&first_slice);
+    if let Some(if_range) = slice_request.if_range.as_deref()
+        && !if_range_matches_slice_identity(if_range, &first_identity)
+    {
+        return Ok(None);
+    }
+
+    let mut filled = first_filled;
+    let mut slices = HashMap::<(u64, u64), CacheSliceObject>::new();
+    slices.insert(
+        (first_slice.bounds.start, first_slice.bounds.end),
+        first_slice,
+    );
+    for bounds in required_slice_bounds(&ranges, slice_size, total) {
+        if slices.contains_key(&(bounds.start, bounds.end)) {
+            continue;
+        }
+        let Some(slice) = lookup_or_fill_slice(&fill_context, base_key.clone(), bounds).await?
+        else {
+            return Ok(None);
+        };
+        filled |= slice.filled;
+        if slice_identity(&slice.object) != first_identity {
+            return Ok(None);
+        }
+        slices.insert((bounds.start, bounds.end), slice.object);
+    }
+
+    compose_slice_response(&ranges, &slices, &first_identity, filled)
+}
+
+#[cfg(feature = "cache")]
+struct CacheSliceLookupResult {
+    object: CacheSliceObject,
+    filled: bool,
+}
+
+#[cfg(feature = "cache")]
+struct CacheSliceFillContext<'a> {
+    request: &'a RequestHeader,
+    storage: &'static (dyn pingora::cache::Storage + Sync),
+    cache: &'a crate::config::CacheConfig,
+    proxy: &'a RuntimeProxy,
+    route: Option<&'a RuntimeRoute>,
+    trace: &'a pingora::cache::trace::SpanHandle,
+}
+
+#[cfg(feature = "cache")]
+async fn discover_slice_total(
+    context: &CacheSliceFillContext<'_>,
+    base_key: PingoraCacheKey,
+    slice_size: u64,
+) -> Result<Option<(u64, CacheSliceObject, bool)>> {
+    let bounds = CacheSliceBounds {
+        start: 0,
+        end: slice_size.saturating_sub(1),
+    };
+    let Some(result) = lookup_or_fill_slice(context, base_key, bounds).await? else {
+        return Ok(None);
+    };
+    Ok(Some((result.object.total, result.object, result.filled)))
+}
+
+#[cfg(feature = "cache")]
+async fn lookup_or_fill_slice(
+    context: &CacheSliceFillContext<'_>,
+    base_key: PingoraCacheKey,
+    bounds: CacheSliceBounds,
+) -> Result<Option<CacheSliceLookupResult>> {
+    let slice_key = slice_cache_key(base_key.clone(), bounds.range_request())?;
+    if let Some(object) = lookup_cached_slice(
+        context.storage,
+        slice_key.clone(),
+        context.request,
+        context.cache,
+        context.trace,
+    )
+    .await?
+    {
+        return Ok(Some(CacheSliceLookupResult {
+            object,
+            filled: false,
+        }));
+    }
+    if !context.cache.range.slice.fill_missing {
+        return Ok(None);
+    }
+
+    let Some(_permit) = acquire_slice_fill_permit(slice_key.combined()) else {
+        return wait_for_cached_slice(
+            context.storage,
+            slice_key,
+            context.request,
+            context.cache,
+            context.trace,
+        )
+        .await;
+    };
+    if let Some(object) = lookup_cached_slice(
+        context.storage,
+        slice_key.clone(),
+        context.request,
+        context.cache,
+        context.trace,
+    )
+    .await?
+    {
+        return Ok(Some(CacheSliceLookupResult {
+            object,
+            filled: false,
+        }));
+    }
+
+    let Some(object) = fetch_and_store_slice(context, slice_key, bounds).await? else {
+        return Ok(None);
+    };
+    Ok(Some(CacheSliceLookupResult {
+        object,
+        filled: true,
+    }))
+}
+
+#[cfg(feature = "cache")]
+async fn wait_for_cached_slice(
+    storage: &'static (dyn pingora::cache::Storage + Sync),
+    slice_key: PingoraCacheKey,
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+    trace: &pingora::cache::trace::SpanHandle,
+) -> Result<Option<CacheSliceLookupResult>> {
+    let timeout = std::time::Duration::from_secs(cache.lock.wait_timeout_secs.max(1));
+    let deadline = Instant::now() + timeout;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        if let Some(object) =
+            lookup_cached_slice(storage, slice_key.clone(), request, cache, trace).await?
+        {
+            return Ok(Some(CacheSliceLookupResult {
+                object,
+                filled: false,
+            }));
+        }
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+    }
+}
+
+#[cfg(feature = "cache")]
+async fn lookup_cached_slice(
+    storage: &'static (dyn pingora::cache::Storage + Sync),
+    slice_key: PingoraCacheKey,
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+    trace: &pingora::cache::trace::SpanHandle,
+) -> Result<Option<CacheSliceObject>> {
+    let Some((meta, hit, resolved_key)) =
+        lookup_proxy_cache_only_object(storage, slice_key, request, cache, trace).await?
+    else {
+        return Ok(None);
+    };
+    if !meta.is_fresh(std::time::SystemTime::now()) {
+        hit.finish(storage, &resolved_key, trace).await?;
+        return Ok(None);
+    }
+    let max_body_bytes = cache.range.slice.size_bytes.as_u64();
+    let body = read_cache_hit_body(hit, storage, &resolved_key, trace, max_body_bytes).await?;
+    slice_object_from_meta_body(meta, body).map(Some)
+}
+
+#[cfg(feature = "cache")]
+async fn fetch_and_store_slice(
+    context: &CacheSliceFillContext<'_>,
+    slice_key: PingoraCacheKey,
+    bounds: CacheSliceBounds,
+) -> Result<Option<CacheSliceObject>> {
+    let max_body_bytes = context.cache.range.slice.size_bytes.as_u64();
+    let response = match fetch_origin_slice(
+        context.request,
+        context.proxy,
+        context.route,
+        bounds,
+        max_body_bytes,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            log::warn!("slice cache origin fetch failed: {error}");
+            return Ok(None);
+        }
+    };
+    if response.status == StatusCode::RANGE_NOT_SATISFIABLE {
+        return Ok(None);
+    }
+    let mut header = response.to_response_header()?;
+    ignore_origin_cache_headers(&mut header, context.cache, CachePhase::Miss);
+    apply_cache_status_ttl(&mut header, context.cache, CachePhase::Miss)?;
+    if range_response_cache_admission_rejection(&header, Some(bounds.range_request())).is_some()
+        || response_range_cache_admission_rejection(&header, context.cache).is_some()
+        || response_has_non_identity_encoding(&header)
+    {
+        return Ok(None);
+    }
+    let Some(ttl_secs) = cache_response_fresh_ttl_secs(context.cache, &header) else {
+        return Ok(None);
+    };
+    let now = std::time::SystemTime::now();
+    let fresh_until = now
+        .checked_add(std::time::Duration::from_secs(u64::from(ttl_secs)))
+        .unwrap_or(now);
+    let meta = CacheMeta::new(
+        fresh_until,
+        now,
+        context.cache.stale_while_revalidate_secs.unwrap_or(0),
+        context.cache.stale_if_error_secs.unwrap_or(0),
+        header,
+    );
+    let body = response.body;
+    let mut miss = context
+        .storage
+        .get_miss_handler(&slice_key, &meta, context.trace)
+        .await?;
+    miss.write_body(body.clone(), true).await?;
+    let _ = miss.finish().await?;
+    let object = slice_object_from_meta_body(meta, body)?;
+    Ok(Some(object))
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Debug)]
+struct CacheSliceOriginResponse {
+    status: StatusCode,
+    headers: Vec<(String, String)>,
+    body: Bytes,
+}
+
+#[cfg(feature = "cache")]
+impl CacheSliceOriginResponse {
+    fn to_response_header(&self) -> Result<ResponseHeader> {
+        let mut response = ResponseHeader::build(self.status, Some(self.headers.len()))?;
+        for (name, value) in &self.headers {
+            if peer_fill_hop_by_hop_header(name) {
+                continue;
+            }
+            response.append_header(name.clone(), value.clone())?;
+        }
+        response.remove_header("content-length");
+        response.insert_header("content-length", self.body.len().to_string())?;
+        Ok(response)
+    }
+}
+
+#[cfg(feature = "cache")]
+async fn fetch_origin_slice(
+    request: &RequestHeader,
+    proxy: &RuntimeProxy,
+    route: Option<&RuntimeRoute>,
+    bounds: CacheSliceBounds,
+    max_body_bytes: u64,
+) -> std::io::Result<CacheSliceOriginResponse> {
+    let proxy = proxy.clone();
+    let request = origin_slice_request_from_header(request, route, bounds)?;
+    tokio::task::spawn_blocking(move || {
+        let url = origin_slice_url(&proxy.config, &request.path_and_query)?;
+        let timeout = std::time::Duration::from_secs(
+            proxy
+                .config
+                .connect_timeout_secs
+                .unwrap_or(10)
+                .saturating_add(proxy.config.read_timeout_secs.unwrap_or(30)),
+        );
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .max_redirects(0)
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut builder = agent
+            .get(&url)
+            .header("range", bounds.range_request().component())
+            .header("accept-encoding", "identity");
+        if let Some(host) = request.host.as_deref() {
+            builder = builder.header("host", host);
+        }
+        let mut response = builder.call().map_err(peer_fill_io_error)?;
+        let status = StatusCode::from_u16(response.status().as_u16()).map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+        })?;
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .to_str()
+                    .ok()
+                    .map(|value| (name.as_str().to_owned(), value.to_owned()))
+            })
+            .collect::<Vec<_>>();
+        let body = response
+            .body_mut()
+            .with_config()
+            .limit(max_body_bytes.saturating_add(1))
+            .read_to_vec()
+            .map_err(peer_fill_io_error)?;
+        if body.len() as u64 > max_body_bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "origin slice exceeds configured slice size",
+            ));
+        }
+        Ok(CacheSliceOriginResponse {
+            status,
+            headers,
+            body: Bytes::from(body),
+        })
+    })
+    .await
+    .map_err(|error| std::io::Error::other(error.to_string()))?
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Debug)]
+struct OriginSliceRequest {
+    path_and_query: String,
+    host: Option<String>,
+}
+
+#[cfg(feature = "cache")]
+fn origin_slice_request_from_header(
+    request: &RequestHeader,
+    route: Option<&RuntimeRoute>,
+    _bounds: CacheSliceBounds,
+) -> std::io::Result<OriginSliceRequest> {
+    let path_and_query = route
+        .and_then(|route| route_rewritten_path_and_query(request, route))
+        .or_else(|| {
+            request
+                .uri
+                .path_and_query()
+                .map(|value| value.as_str().to_owned())
+        })
+        .unwrap_or_else(|| request.uri.path().to_owned());
+    if !path_and_query.starts_with('/') || path_and_query.chars().any(char::is_control) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "origin slice path must be absolute and printable",
+        ));
+    }
+    Ok(OriginSliceRequest {
+        path_and_query,
+        host: request_host_header(request).map(ToOwned::to_owned),
+    })
+}
+
+#[cfg(feature = "cache")]
+fn origin_slice_url(proxy: &ProxyConfig, path_and_query: &str) -> std::io::Result<String> {
+    let scheme = if proxy.upstream_tls { "https" } else { "http" };
+    if !path_and_query.starts_with('/') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "origin slice request path must be absolute",
+        ));
+    }
+    Ok(format!(
+        "{scheme}://{}{}",
+        proxy.primary_upstream(),
+        path_and_query
+    ))
+}
+
+#[cfg(feature = "cache")]
+fn selected_cache_slice_range_request(
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<CacheSliceRangeRequest> {
+    if !cache.range.enabled || !cache.range.slice.enabled || request.method.as_str() != "GET" {
+        return None;
+    }
+    let mut values = request_header_values(request, "range");
+    let range = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    let if_range = request_header_values_joined(request, "if-range");
+    parse_cache_client_ranges(range).map(|ranges| CacheSliceRangeRequest { ranges, if_range })
+}
+
+#[cfg(feature = "cache")]
+fn parse_cache_client_ranges(value: &str) -> Option<Vec<CacheClientRange>> {
+    let value = value.trim();
+    let value = value.strip_prefix("bytes=")?;
+    let mut ranges = Vec::new();
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            return None;
+        }
+        let (start, end) = part.split_once('-')?;
+        if start.is_empty() {
+            let len = end.parse::<u64>().ok()?;
+            if len == 0 {
+                return None;
+            }
+            ranges.push(CacheClientRange::Suffix { len });
+        } else if end.is_empty() {
+            ranges.push(CacheClientRange::OpenEnded {
+                start: start.parse::<u64>().ok()?,
+            });
+        } else {
+            let start = start.parse::<u64>().ok()?;
+            let end = end.parse::<u64>().ok()?;
+            if end < start {
+                return None;
+            }
+            ranges.push(CacheClientRange::Bounded { start, end });
+        }
+    }
+    (!ranges.is_empty()).then_some(ranges)
+}
+
+#[cfg(feature = "cache")]
+fn resolve_client_slice_ranges(
+    ranges: &[CacheClientRange],
+    total: u64,
+) -> Option<Vec<CacheSliceBounds>> {
+    if total == 0 {
+        return Some(Vec::new());
+    }
+    let last = total.saturating_sub(1);
+    let mut resolved = Vec::new();
+    for range in ranges {
+        match *range {
+            CacheClientRange::Bounded { start, end } => {
+                if start > last {
+                    continue;
+                }
+                resolved.push(CacheSliceBounds {
+                    start,
+                    end: end.min(last),
+                });
+            }
+            CacheClientRange::OpenEnded { start } => {
+                if start > last {
+                    continue;
+                }
+                resolved.push(CacheSliceBounds { start, end: last });
+            }
+            CacheClientRange::Suffix { len } => {
+                if len == 0 {
+                    continue;
+                }
+                resolved.push(CacheSliceBounds {
+                    start: total.saturating_sub(len),
+                    end: last,
+                });
+            }
+        }
+    }
+    Some(resolved)
+}
+
+#[cfg(feature = "cache")]
+fn slice_request_within_policy(
+    ranges: &[CacheSliceBounds],
+    cache: &crate::config::CacheConfig,
+    slice_size: u64,
+) -> bool {
+    let requested_bytes = ranges
+        .iter()
+        .try_fold(0_u64, |sum, range| sum.checked_add(range.len()));
+    let Some(requested_bytes) = requested_bytes else {
+        return false;
+    };
+    if requested_bytes > cache.range.max_bytes.as_u64() {
+        return false;
+    }
+    let slices = required_slice_bounds(ranges, slice_size, u64::MAX);
+    !slices.is_empty() && slices.len() <= cache.range.slice.max_slices as usize
+}
+
+#[cfg(feature = "cache")]
+fn required_slice_bounds(
+    ranges: &[CacheSliceBounds],
+    slice_size: u64,
+    total: u64,
+) -> Vec<CacheSliceBounds> {
+    let mut slices = Vec::new();
+    let last = total.saturating_sub(1);
+    for range in ranges {
+        let mut start = (range.start / slice_size).saturating_mul(slice_size);
+        while start <= range.end && start <= last {
+            let end = start.saturating_add(slice_size.saturating_sub(1)).min(last);
+            let slice = CacheSliceBounds { start, end };
+            if !slices.contains(&slice) {
+                slices.push(slice);
+            }
+            let Some(next) = start.checked_add(slice_size) else {
+                break;
+            };
+            start = next;
+        }
+    }
+    slices.sort_by_key(|slice| slice.start);
+    slices
+}
+
+#[cfg(feature = "cache")]
+fn slice_cache_key(mut base: PingoraCacheKey, range: CacheRangeRequest) -> Result<PingoraCacheKey> {
+    let namespace = base.namespace().to_vec();
+    let user_tag = base.user_tag.clone();
+    let Some(primary) = base.primary_key_str() else {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "cache slice key requires utf-8 primary key material",
+        );
+    };
+    let mut primary = primary.to_owned();
+    append_cache_key_component(&mut primary, "slice", &range.component());
+    base = PingoraCacheKey::new(namespace, primary, user_tag);
+    Ok(base)
+}
+
+#[cfg(feature = "cache")]
+fn slice_object_from_meta_body(meta: CacheMeta, body: Bytes) -> Result<CacheSliceObject> {
+    let Some(content_range) = response_content_range(meta.headers()) else {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "cached slice is missing Content-Range metadata",
+        );
+    };
+    let Some(total) = content_range.total else {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "cached slice is missing complete object length",
+        );
+    };
+    let bounds = CacheSliceBounds {
+        start: content_range.start,
+        end: content_range.end,
+    };
+    if body.len() as u64 != bounds.len() {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "cached slice body length does not match Content-Range",
+        );
+    }
+    Ok(CacheSliceObject {
+        bounds,
+        total,
+        body,
+        meta,
+    })
+}
+
+#[cfg(feature = "cache")]
+fn response_content_range(headers: &::http::HeaderMap) -> Option<CacheContentRange> {
+    headers
+        .get_all("content-range")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(parse_content_range)
+}
+
+#[cfg(feature = "cache")]
+fn parse_content_range(value: &str) -> Option<CacheContentRange> {
+    let value = value.trim();
+    let rest = value.strip_prefix("bytes ")?;
+    if let Some(total) = rest.strip_prefix("*/") {
+        return Some(CacheContentRange {
+            start: 0,
+            end: 0,
+            total: total.parse::<u64>().ok(),
+        });
+    }
+    let (range, complete_len) = rest.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    if end < start {
+        return None;
+    }
+    let total = if complete_len == "*" {
+        None
+    } else {
+        Some(complete_len.parse::<u64>().ok()?)
+    };
+    Some(CacheContentRange { start, end, total })
+}
+
+#[cfg(feature = "cache")]
+fn slice_identity(slice: &CacheSliceObject) -> CacheSliceIdentity {
+    CacheSliceIdentity {
+        total: slice.total,
+        etag: first_header_value(slice.meta.headers(), "etag"),
+        last_modified: first_header_value(slice.meta.headers(), "last-modified"),
+    }
+}
+
+#[cfg(feature = "cache")]
+fn first_header_value(headers: &::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .next()
+        .map(ToOwned::to_owned)
+}
+
+#[cfg(feature = "cache")]
+fn if_range_matches_slice_identity(if_range: &str, identity: &CacheSliceIdentity) -> bool {
+    let if_range = if_range.trim();
+    identity.etag.as_deref() == Some(if_range)
+        || identity.last_modified.as_deref() == Some(if_range)
+}
+
+#[cfg(feature = "cache")]
+fn response_has_non_identity_encoding(response: &ResponseHeader) -> bool {
+    response
+        .headers
+        .get_all("content-encoding")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| !value.trim().eq_ignore_ascii_case("identity"))
+}
+
+#[cfg(feature = "cache")]
+fn compose_slice_response(
+    ranges: &[CacheSliceBounds],
+    slices: &HashMap<(u64, u64), CacheSliceObject>,
+    identity: &CacheSliceIdentity,
+    filled: bool,
+) -> Result<Option<CacheSliceComposedResponse>> {
+    let Some(first_slice) = slices.values().min_by_key(|slice| slice.bounds.start) else {
+        return Ok(None);
+    };
+    if ranges.len() == 1 {
+        let range = ranges[0];
+        let body = compose_single_slice_body(range, slices)?;
+        let mut response = first_slice.meta.response_header_copy();
+        response.status = StatusCode::PARTIAL_CONTENT;
+        response.remove_header("content-range");
+        response.insert_header(
+            "content-range",
+            format!("bytes {}-{}/{}", range.start, range.end, identity.total),
+        )?;
+        response.remove_header("content-length");
+        response.insert_header("content-length", body.len().to_string())?;
+        response.remove_header("age");
+        response.insert_header("age", max_slice_age_secs(slices).to_string())?;
+        return Ok(Some(CacheSliceComposedResponse {
+            header: response,
+            body,
+            filled,
+        }));
+    }
+
+    let boundary = format!("fluxheim-slice-{}", identity.total);
+    let body = compose_multipart_slice_body(ranges, slices, identity.total, &boundary)?;
+    let mut response = first_slice.meta.response_header_copy();
+    response.status = StatusCode::PARTIAL_CONTENT;
+    response.remove_header("content-range");
+    response.remove_header("content-type");
+    response.insert_header(
+        "content-type",
+        format!("multipart/byteranges; boundary={boundary}"),
+    )?;
+    response.remove_header("content-length");
+    response.insert_header("content-length", body.len().to_string())?;
+    response.remove_header("age");
+    response.insert_header("age", max_slice_age_secs(slices).to_string())?;
+    Ok(Some(CacheSliceComposedResponse {
+        header: response,
+        body,
+        filled,
+    }))
+}
+
+#[cfg(feature = "cache")]
+fn compose_single_slice_body(
+    range: CacheSliceBounds,
+    slices: &HashMap<(u64, u64), CacheSliceObject>,
+) -> Result<Bytes> {
+    let mut body = Vec::with_capacity(usize::try_from(range.len()).unwrap_or(usize::MAX));
+    for slice in slices_for_range(range, slices) {
+        append_slice_overlap(&mut body, range, slice)?;
+    }
+    Ok(Bytes::from(body))
+}
+
+#[cfg(feature = "cache")]
+fn compose_multipart_slice_body(
+    ranges: &[CacheSliceBounds],
+    slices: &HashMap<(u64, u64), CacheSliceObject>,
+    total: u64,
+    boundary: &str,
+) -> Result<Bytes> {
+    let content_type = slices
+        .values()
+        .find_map(|slice| first_header_value(slice.meta.headers(), "content-type"))
+        .unwrap_or_else(|| "application/octet-stream".to_owned());
+    let mut body = Vec::new();
+    for range in ranges {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(format!("Content-Type: {content_type}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!(
+                "Content-Range: bytes {}-{}/{}\r\n\r\n",
+                range.start, range.end, total
+            )
+            .as_bytes(),
+        );
+        for slice in slices_for_range(*range, slices) {
+            append_slice_overlap(&mut body, *range, slice)?;
+        }
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Ok(Bytes::from(body))
+}
+
+#[cfg(feature = "cache")]
+fn slices_for_range(
+    range: CacheSliceBounds,
+    slices: &HashMap<(u64, u64), CacheSliceObject>,
+) -> Vec<&CacheSliceObject> {
+    let mut selected = slices
+        .values()
+        .filter(|slice| slice.bounds.start <= range.end && slice.bounds.end >= range.start)
+        .collect::<Vec<_>>();
+    selected.sort_by_key(|slice| slice.bounds.start);
+    selected
+}
+
+#[cfg(feature = "cache")]
+fn append_slice_overlap(
+    body: &mut Vec<u8>,
+    range: CacheSliceBounds,
+    slice: &CacheSliceObject,
+) -> Result<()> {
+    let start = range.start.max(slice.bounds.start);
+    let end = range.end.min(slice.bounds.end);
+    if end < start {
+        return Ok(());
+    }
+    let offset = usize::try_from(start.saturating_sub(slice.bounds.start))
+        .map_err(|_| Error::new_str("slice offset exceeds platform size"))?;
+    let len = usize::try_from(end.saturating_sub(start).saturating_add(1))
+        .map_err(|_| Error::new_str("slice length exceeds platform size"))?;
+    let end_offset = offset.saturating_add(len);
+    if end_offset > slice.body.len() {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "slice overlap exceeds body length",
+        );
+    }
+    body.extend_from_slice(&slice.body[offset..end_offset]);
+    Ok(())
+}
+
+#[cfg(feature = "cache")]
+fn max_slice_age_secs(slices: &HashMap<(u64, u64), CacheSliceObject>) -> u64 {
+    slices
+        .values()
+        .map(|slice| slice.meta.age().as_secs())
+        .max()
+        .unwrap_or(0)
+}
+
+#[cfg(feature = "cache")]
+fn slice_416_response(total: u64) -> Result<CacheSliceComposedResponse> {
+    let mut response = ResponseHeader::build(StatusCode::RANGE_NOT_SATISFIABLE, Some(2))?;
+    response.insert_header("content-range", format!("bytes */{total}"))?;
+    response.insert_header("content-length", "0")?;
+    Ok(CacheSliceComposedResponse {
+        header: response,
+        body: Bytes::new(),
+        filled: false,
+    })
+}
+
+#[cfg(feature = "cache")]
+fn acquire_slice_fill_permit(key: String) -> Option<SliceFillPermit> {
+    static SLICE_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
+        OnceLock::new();
+    let counter = {
+        let mut counters = SLICE_FILL_CONCURRENCY
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        counters
+            .entry(key)
+            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+            .clone()
+    };
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        if current >= 1 {
+            return None;
+        }
+        match counter.compare_exchange_weak(current, 1, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Some(SliceFillPermit { counter }),
+            Err(observed) => current = observed,
         }
     }
 }
@@ -6737,7 +7799,7 @@ fn response_header_values<'a>(
         .filter_map(|value| value.to_str().ok())
 }
 
-#[cfg(feature = "web")]
+#[cfg(any(feature = "web", feature = "cache"))]
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
     let mut values = request_header_values(request, name);
     let first = values.next()?.to_owned();
@@ -6910,16 +7972,18 @@ mod tests {
     use super::CacheRangeRequest;
     #[cfg(feature = "cache")]
     use super::{
-        CACHE_PASS_REASON, CacheStaleEvent, CacheStatusOverride, MAX_VARY_FIELDS, VaryCachePolicy,
-        apply_cache_status_ttl, cache_min_uses_allows_store, cache_pass_record_cacheable,
-        cache_pass_record_uncacheable, cache_pass_should_bypass, cache_request_participated,
-        cache_should_serve_stale, cache_stale_status_allows, cache_status_header_value,
-        cache_status_reason_header_value, cache_vary_policy, ignore_origin_cache_headers,
-        lookup_proxy_cache_only_object, parse_bounded_single_range, range_cache_key,
+        CACHE_PASS_REASON, CacheClientRange, CacheSliceBounds, CacheStaleEvent,
+        CacheStatusOverride, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
+        cache_min_uses_allows_store, cache_pass_record_cacheable, cache_pass_record_uncacheable,
+        cache_pass_should_bypass, cache_request_participated, cache_should_serve_stale,
+        cache_stale_status_allows, cache_status_header_value, cache_status_reason_header_value,
+        cache_vary_policy, ignore_origin_cache_headers, lookup_proxy_cache_only_object,
+        parse_bounded_single_range, parse_cache_client_ranges, range_cache_key,
         range_response_cache_admission_rejection, read_cache_hit_body, remaining_fresh_ttl_secs,
-        response_age_secs, response_cache_admission_rejection, response_vary_variance,
-        selected_cache_range_request, strip_cache_response_headers, vary_cache_policy,
-        vary_request_hash,
+        required_slice_bounds, resolve_client_slice_ranges, response_age_secs,
+        response_cache_admission_rejection, response_vary_variance, selected_cache_range_request,
+        slice_cache_key, slice_request_within_policy, strip_cache_response_headers,
+        vary_cache_policy, vary_request_hash,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -8095,6 +9159,7 @@ mod tests {
                     range: crate::config::CacheRangeConfig {
                         enabled: true,
                         max_bytes: ByteSize::from_bytes(1024),
+                        ..crate::config::CacheRangeConfig::default()
                     },
                     memory: crate::config::CacheMemoryConfig {
                         enabled: true,
@@ -8982,6 +10047,108 @@ mod tests {
         assert_eq!(result.path, "/img/logo.png");
         assert_eq!(result.query.as_deref(), Some("v=1"));
         assert!(block_on(storage.lookup(&key, &span)).unwrap().is_none());
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn purge_image_cache_removes_slice_cache_entries_for_same_path() {
+        use bytes::Bytes;
+        use pingora::cache::Storage;
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(4096),
+                    },
+                    range: crate::config::CacheRangeConfig {
+                        enabled: true,
+                        max_bytes: ByteSize::from_bytes(1024),
+                        slice: crate::config::CacheRangeSliceConfig {
+                            enabled: true,
+                            size_bytes: ByteSize::from_bytes(512),
+                            max_slices: 4,
+                            fill_missing: true,
+                        },
+                    },
+                    max_object_bytes: ByteSize::from_bytes(1024),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let storage = vhost.pingora_memory_storage.unwrap();
+        let cache_request = crate::cache::CacheRequest {
+            method: "GET",
+            host: Some("cached.example"),
+            path: "/media/video.png",
+            query: None,
+        };
+        let base_key = crate::cache::pingora_image_cache_key(
+            "fluxheim-image-v1",
+            &vhost.cache,
+            &cache_request,
+            &vhost.name,
+        )
+        .unwrap();
+        let first_slice =
+            slice_cache_key(base_key.clone(), CacheRangeRequest { start: 0, end: 511 }).unwrap();
+        let second_slice = slice_cache_key(
+            base_key,
+            CacheRangeRequest {
+                start: 512,
+                end: 1023,
+            },
+        )
+        .unwrap();
+        let span = pingora::cache::trace::Span::inactive().handle();
+        let meta = pingora_meta("max-age=60");
+
+        for key in [&first_slice, &second_slice] {
+            let mut miss = block_on(storage.get_miss_handler(key, &meta, &span)).unwrap();
+            block_on(miss.write_body(Bytes::from_static(b"slice"), true)).unwrap();
+            block_on(miss.finish()).unwrap();
+            assert!(block_on(storage.lookup(key, &span)).unwrap().is_some());
+        }
+
+        let result = proxy
+            .purge_image_cache(CachePurgeRequest {
+                vhost: Some("cached"),
+                route: None,
+                host: "cached.example",
+                method: "GET",
+                path: "/media/video.png",
+                query: None,
+            })
+            .unwrap();
+
+        assert!(result.memory_purged);
+        assert!(
+            block_on(storage.lookup(&first_slice, &span))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            block_on(storage.lookup(&second_slice, &span))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -10891,6 +12058,7 @@ mod tests {
             range: crate::config::CacheRangeConfig {
                 enabled: true,
                 max_bytes: ByteSize::from_bytes(16),
+                ..crate::config::CacheRangeConfig::default()
             },
             ..CacheConfig::default()
         };
@@ -10921,6 +12089,93 @@ mod tests {
         let mut head = pingora::http::RequestHeader::build("HEAD", b"/video.bin", None).unwrap();
         head.append_header("range", "bytes=0-15").unwrap();
         assert_eq!(selected_cache_range_request(&head, &cache), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn slice_range_parser_accepts_bounded_open_suffix_and_multi_ranges() {
+        assert_eq!(
+            parse_cache_client_ranges("bytes=0-9, 20-, -5"),
+            Some(vec![
+                CacheClientRange::Bounded { start: 0, end: 9 },
+                CacheClientRange::OpenEnded { start: 20 },
+                CacheClientRange::Suffix { len: 5 },
+            ])
+        );
+        assert_eq!(parse_cache_client_ranges("bytes=10-5"), None);
+        assert_eq!(parse_cache_client_ranges("bytes=-0"), None);
+        assert_eq!(parse_cache_client_ranges("items=0-5"), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn slice_ranges_resolve_against_known_total_and_skip_unsatisfied_parts() {
+        let ranges = vec![
+            CacheClientRange::Bounded { start: 2, end: 8 },
+            CacheClientRange::OpenEnded { start: 8 },
+            CacheClientRange::Suffix { len: 4 },
+            CacheClientRange::Bounded { start: 20, end: 30 },
+        ];
+        assert_eq!(
+            resolve_client_slice_ranges(&ranges, 12),
+            Some(vec![
+                CacheSliceBounds { start: 2, end: 8 },
+                CacheSliceBounds { start: 8, end: 11 },
+                CacheSliceBounds { start: 8, end: 11 },
+            ])
+        );
+        assert_eq!(resolve_client_slice_ranges(&ranges, 0), Some(Vec::new()));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn slice_planner_normalizes_to_fixed_slice_boundaries() {
+        let ranges = vec![
+            CacheSliceBounds { start: 3, end: 18 },
+            CacheSliceBounds { start: 30, end: 31 },
+        ];
+        assert_eq!(
+            required_slice_bounds(&ranges, 8, 32),
+            vec![
+                CacheSliceBounds { start: 0, end: 7 },
+                CacheSliceBounds { start: 8, end: 15 },
+                CacheSliceBounds { start: 16, end: 23 },
+                CacheSliceBounds { start: 24, end: 31 },
+            ]
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn slice_policy_bounds_assembled_bytes_and_slice_count() {
+        let cache = CacheConfig {
+            range: crate::config::CacheRangeConfig {
+                enabled: true,
+                max_bytes: ByteSize::from_bytes(16),
+                slice: crate::config::CacheRangeSliceConfig {
+                    enabled: true,
+                    size_bytes: ByteSize::from_bytes(8),
+                    max_slices: 2,
+                    fill_missing: true,
+                },
+            },
+            ..CacheConfig::default()
+        };
+        assert!(slice_request_within_policy(
+            &[CacheSliceBounds { start: 0, end: 15 }],
+            &cache,
+            8
+        ));
+        assert!(!slice_request_within_policy(
+            &[CacheSliceBounds { start: 0, end: 16 }],
+            &cache,
+            8
+        ));
+        assert!(!slice_request_within_policy(
+            &[CacheSliceBounds { start: 0, end: 23 }],
+            &cache,
+            8
+        ));
     }
 
     #[cfg(feature = "cache")]
