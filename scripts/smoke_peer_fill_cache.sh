@@ -72,6 +72,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 BODY = b"peer-fill-body"
+VARY_DE_BODY = b"peer-fill-vary-de"
+VARY_EN_BODY = b"peer-fill-vary-en"
 COUNTS = {}
 COUNTS_LOCK = threading.Lock()
 
@@ -110,6 +112,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("content-length", str(len(body)))
             self.send_header("cache-control", "public, max-age=120")
             self.send_header("etag", '"peer-fill-uncached-origin"')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if parsed.path == "/vary.webp":
+            record_path(parsed.path)
+            language = self.headers.get("accept-language", "")
+            body = VARY_DE_BODY if "de" in language.lower() else VARY_EN_BODY
+            self.send_response(200)
+            self.send_header("content-type", "image/webp")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=120")
+            self.send_header("vary", "Accept-Language")
+            self.send_header("etag", '"peer-fill-vary"')
             self.end_headers()
             self.wfile.write(body)
             return
@@ -271,10 +287,18 @@ b_miss_headers=$(mktemp "$TMP_DIR/b-miss-headers.XXXXXX")
 b_hit_headers=$(mktemp "$TMP_DIR/b-hit-headers.XXXXXX")
 a_peer_headers=$(mktemp "$TMP_DIR/a-peer-headers.XXXXXX")
 a_hit_headers=$(mktemp "$TMP_DIR/a-hit-headers.XXXXXX")
+vary_b_headers=$(mktemp "$TMP_DIR/vary-b-headers.XXXXXX")
+vary_a_peer_headers=$(mktemp "$TMP_DIR/vary-a-peer-headers.XXXXXX")
+vary_a_hit_headers=$(mktemp "$TMP_DIR/vary-a-hit-headers.XXXXXX")
+vary_a_fail_headers=$(mktemp "$TMP_DIR/vary-a-fail-headers.XXXXXX")
 fail_closed_headers=$(mktemp "$TMP_DIR/fail-closed-headers.XXXXXX")
 b_body=$(mktemp "$TMP_DIR/b-body.XXXXXX")
 a_peer_body=$(mktemp "$TMP_DIR/a-peer-body.XXXXXX")
 a_hit_body=$(mktemp "$TMP_DIR/a-hit-body.XXXXXX")
+vary_b_body=$(mktemp "$TMP_DIR/vary-b-body.XXXXXX")
+vary_a_peer_body=$(mktemp "$TMP_DIR/vary-a-peer-body.XXXXXX")
+vary_a_hit_body=$(mktemp "$TMP_DIR/vary-a-hit-body.XXXXXX")
+vary_a_fail_body=$(mktemp "$TMP_DIR/vary-a-fail-body.XXXXXX")
 fail_closed_body=$(mktemp "$TMP_DIR/fail-closed-body.XXXXXX")
 metrics_body=$(mktemp "$TMP_DIR/metrics.XXXXXX")
 
@@ -320,6 +344,37 @@ if [ -z "$local_age" ] || [ "$local_age" -lt "$peer_age" ]; then
     exit 1
 fi
 
+curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_b_headers" -o "$vary_b_body" \
+    -H "Host: cache.test" -H "Accept-Language: de" \
+    "http://127.0.0.1:${NODE_B_PORT}/vary.webp"
+grep -qi '^x-cache-status: MISS' "$vary_b_headers"
+if ! grep -q '^peer-fill-vary-de$' "$vary_b_body"; then
+    echo "peer-fill cache smoke failed: node B vary warm returned unexpected body" >&2
+    exit 1
+fi
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_a_peer_headers" -o "$vary_a_peer_body" \
+    -H "Host: cache.test" -H "Accept-Language: de" \
+    "http://127.0.0.1:${NODE_A_PORT}/vary.webp"
+grep -qi '^x-cache-status: PEER-HIT' "$vary_a_peer_headers"
+cmp "$vary_b_body" "$vary_a_peer_body" >/dev/null
+
+curl -sS --max-time "$CURL_MAX_TIME" -D "$vary_a_hit_headers" -o "$vary_a_hit_body" \
+    -H "Host: cache.test" -H "Accept-Language: de" \
+    "http://127.0.0.1:${NODE_A_PORT}/vary.webp"
+grep -qi '^x-cache-status: HIT' "$vary_a_hit_headers"
+cmp "$vary_b_body" "$vary_a_hit_body" >/dev/null
+
+vary_fail_status=$(curl -sS --max-time "$CURL_MAX_TIME" -w '%{http_code}' \
+    -D "$vary_a_fail_headers" -o "$vary_a_fail_body" \
+    -H "Host: cache.test" -H "Accept-Language: en" \
+    "http://127.0.0.1:${NODE_A_PORT}/vary.webp")
+if [ "$vary_fail_status" != "504" ]; then
+    echo "peer-fill cache smoke failed: expected 504 for missing vary variant, got $vary_fail_status" >&2
+    exit 1
+fi
+grep -qi '^x-cache-status: MISS' "$vary_a_fail_headers"
+
 fail_closed_status=$(curl -sS --max-time "$CURL_MAX_TIME" -w '%{http_code}' \
     -D "$fail_closed_headers" -o "$fail_closed_body" \
     -H "Host: cache.test" "http://127.0.0.1:${NODE_A_PORT}/uncached.webp")
@@ -333,6 +388,12 @@ grep -qi '^x-cache-reason: peer-fill-miss' "$fail_closed_headers"
 uncached_origin_count=$(curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__count?path=/uncached.webp")
 if [ "$uncached_origin_count" != "0" ]; then
     echo "peer-fill cache smoke failed: fail-closed peer miss contacted origin $uncached_origin_count times" >&2
+    exit 1
+fi
+
+vary_origin_count=$(curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__count?path=/vary.webp")
+if [ "$vary_origin_count" != "1" ]; then
+    echo "peer-fill cache smoke failed: expected one origin fetch for vary warm only, got $vary_origin_count" >&2
     exit 1
 fi
 

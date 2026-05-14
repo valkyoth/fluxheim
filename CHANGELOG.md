@@ -43,6 +43,8 @@ Released: in progress
   policy so configured peer-fill limits now bound active outbound peer fetches.
 - Preserved peer response `Age` during peer-fill admission so a peer hit stores
   only its remaining freshness instead of extending the origin TTL.
+- Stored peer-fill hits under the correct `Vary` variance key so subsequent
+  local hits preserve negotiated variants.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

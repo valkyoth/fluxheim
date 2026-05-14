@@ -47,6 +47,8 @@ activity metrics, and a two-node smoke test for the peer-fill path.
 - Preserved peer response `Age` during peer-fill admission. Peer-filled objects
   are stored with their remaining freshness and downstream `PEER-HIT` responses
   report the peer age rather than resetting freshness to zero.
+- Stored peer-fill hits under the correct `Vary` variance key and extended the
+  peer-fill smoke to prove variant-specific peer hits and local post-fill hits.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 

@@ -3565,7 +3565,7 @@ impl ProxyHttp for FluxProxy {
             let fresh_until = now
                 .checked_add(std::time::Duration::from_secs(u64::from(ttl_secs)))
                 .unwrap_or(now);
-            let meta = CacheMeta::new(
+            let mut meta = CacheMeta::new(
                 fresh_until,
                 created_at,
                 cache.stale_while_revalidate_secs.unwrap_or(0),
@@ -3573,7 +3573,15 @@ impl ProxyHttp for FluxProxy {
                 response_header.clone(),
             );
             let trace = pingora::cache::trace::Span::inactive().handle();
-            let mut miss = storage.get_miss_handler(&cache_key, &meta, &trace).await?;
+            let mut store_key = cache_key.clone();
+            if let Some(variance) = response_vary_variance(&meta, session.req_header(), cache) {
+                meta.set_variance(variance);
+                if let Some((_base_meta, base_hit)) = storage.lookup(&cache_key, &trace).await? {
+                    base_hit.finish(storage, &cache_key, &trace).await?;
+                    store_key.set_variance_key(variance);
+                }
+            }
+            let mut miss = storage.get_miss_handler(&store_key, &meta, &trace).await?;
             miss.write_body(response.body.clone(), true).await?;
             let _ = miss.finish().await?;
 
@@ -5096,6 +5104,19 @@ fn response_age_secs(response: &ResponseHeader) -> u64 {
         .filter_map(|value| value.to_str().ok())
         .find_map(|value| value.trim().parse::<u64>().ok())
         .unwrap_or(0)
+}
+
+#[cfg(feature = "cache")]
+fn response_vary_variance(
+    meta: &CacheMeta,
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<HashBinary> {
+    if let VaryCachePolicy::Fields(fields) = cache_vary_policy(meta.headers(), cache) {
+        Some(vary_request_hash(&fields, request))
+    } else {
+        None
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -6666,8 +6687,8 @@ mod tests {
         cache_should_serve_stale, cache_stale_status_allows, cache_status_header_value,
         cache_status_reason_header_value, cache_vary_policy, ignore_origin_cache_headers,
         lookup_proxy_cache_only_object, read_cache_hit_body, remaining_fresh_ttl_secs,
-        response_age_secs, response_cache_admission_rejection, strip_cache_response_headers,
-        vary_cache_policy, vary_request_hash,
+        response_age_secs, response_cache_admission_rejection, response_vary_variance,
+        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -9435,6 +9456,37 @@ mod tests {
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
         assert!(!request_cache_only_if_cached(&request));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_store_metadata_records_response_vary_variance() {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.webp", None).unwrap();
+        request.insert_header("accept-language", "de").unwrap();
+        let fields = vec!["accept-language".to_owned()];
+        let expected = vary_request_hash(&fields, &request);
+
+        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        response
+            .insert_header("cache-control", "public, max-age=120")
+            .unwrap();
+        response
+            .insert_header("content-type", "image/webp")
+            .unwrap();
+        response.insert_header("vary", "Accept-Language").unwrap();
+        let meta = pingora::cache::CacheMeta::new(
+            std::time::SystemTime::now(),
+            std::time::SystemTime::now(),
+            0,
+            0,
+            response,
+        );
+
+        assert_eq!(
+            response_vary_variance(&meta, &request, &CacheConfig::default()),
+            Some(expected)
+        );
     }
 
     #[cfg(feature = "cache")]

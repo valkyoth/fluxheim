@@ -275,6 +275,8 @@ internal cache implementation.
   enforced per vhost or route cache policy for active outbound peer fetches.
   Peer response `Age` is preserved during admission, so a peer-filled object
   stores only its remaining freshness instead of extending the origin TTL.
+  Peer-filled responses with `Vary` are stored under the matching variant key,
+  so later local hits preserve negotiated variants.
   Metrics builds expose aggregate peer-fill policy, peer-count, and concurrency
   gauges for rollout checks.
 - New disk cache objects use the v5 object header, which stores the combined
