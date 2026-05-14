@@ -741,8 +741,11 @@ peers unless `allow_insecure_http = true`, which is intended for private test
 networks or trusted in-cluster transport. `max_concurrent_requests` is bounded
 to 1-1024 and `fail_open = true` means peer-fill failure should fall back to the
 normal origin path rather than failing the user request once runtime peer fill
-is implemented. `examples/cache-peer-fill.toml` shows the focused validated
-fixture. Metrics builds expose aggregate peer-fill configuration through
+is implemented. The first runtime primitive is available now: proxy-cache
+requests with `Cache-Control: only-if-cached` are answered only from a fresh
+local cache object and otherwise return `504` without contacting origin.
+`examples/cache-peer-fill.toml` shows the focused validated fixture. Metrics
+builds expose aggregate peer-fill configuration through
 `fluxheim_cache_peer_fill_enabled_policies`,
 `fluxheim_cache_peer_fill_peers`, and
 `fluxheim_cache_peer_fill_max_concurrent_requests`.

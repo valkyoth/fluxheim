@@ -27,6 +27,9 @@ Released: in progress
 - Added `cache-key` and `cache-lookup` preview fields and fail-closed
   expectation flags for selected peer-fill policy shape.
 - Added peer-fill policy coverage to protected admin cache-status JSON.
+- Added the first peer-safe runtime primitive for distributed cache fill:
+  proxy-cache requests carrying `Cache-Control: only-if-cached` are now served
+  from a fresh local cached object or receive `504` without contacting origin.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

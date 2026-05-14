@@ -819,7 +819,10 @@ Focused cache-only follow-up releases after 1.2:
   and clear isolation between vhosts/routes. The first slice adds the
   `[cache.peer_fill]` config contract with bounded peer lists, explicit
   timeouts, fail-open behavior, and safe peer-origin validation before runtime
-  fetch behavior is enabled.
+  fetch behavior is enabled. The next runtime slice adds the safe
+  `Cache-Control: only-if-cached` local-cache response path so peer fill can ask
+  another node for a fresh cached object without causing that node to contact
+  origin.
 - `1.2.5`: reserved only if production 1.2 testing exposes one more
   cache-specific gap that should close before the 1.3 line starts. Candidate
   work includes proper Pingora-path partial streaming/slice range fill,

@@ -28,14 +28,18 @@ is implemented and tested.
 - Added `cache-key` and `cache-lookup` output plus expectation flags for
   selected peer-fill policy shape.
 - Added peer-fill policy coverage to protected admin cache-status JSON.
+- Added the first runtime primitive for safe peer fill: proxy-cache requests
+  with `Cache-Control: only-if-cached` return a fresh local cache hit or a
+  `504` miss response without contacting the origin backend.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 
 ## Known Limits
 
-- This release line starts with the peer-fill config contract. Runtime peer
-  fetch, peer-fill metrics, and operational cache-cluster smoke coverage are
-  expected to land in later `1.2.4` slices before tagging.
+- This release line now has the cache-only serving primitive needed for safe
+  peer fill. Runtime outbound peer fetch, peer-fill metrics, and operational
+  cache-cluster smoke coverage are expected to land in later `1.2.4` slices
+  before tagging.
 - Peer base URLs intentionally require an explicit port for now to avoid
   ambiguity in private cache clusters.
 

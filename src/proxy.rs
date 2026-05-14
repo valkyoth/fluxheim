@@ -64,6 +64,8 @@ const CACHE_PREDICTOR_SHARDS: usize = 16;
 #[cfg(feature = "cache")]
 const REVALIDATION_VARY_CHANGED_REASON: &str = "revalidation-vary-changed";
 #[cfg(feature = "cache")]
+const CACHE_ONLY_RESPONSE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+#[cfg(feature = "cache")]
 type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 
 #[derive(Clone)]
@@ -3215,7 +3217,13 @@ impl ProxyHttp for FluxProxy {
                     respond_route_redirect(session, redirect, &route.response_headers).await?;
                     return Ok(true);
                 }
-                RuntimeRouteAction::Proxy(_) => return Ok(false),
+                RuntimeRouteAction::Proxy(_) => {
+                    #[cfg(feature = "cache")]
+                    if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
+                        return Ok(true);
+                    }
+                    return Ok(false);
+                }
                 #[cfg(feature = "acme")]
                 RuntimeRouteAction::AcmeHttp01(store) => {
                     respond_acme_http_01_challenge(session, ctx, store, route).await?;
@@ -3234,6 +3242,10 @@ impl ProxyHttp for FluxProxy {
         #[cfg(feature = "web")]
         {
             let Some(web) = &vhost.web else {
+                #[cfg(feature = "cache")]
+                if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
+                    return Ok(true);
+                }
                 return Ok(false);
             };
 
@@ -3308,7 +3320,13 @@ impl ProxyHttp for FluxProxy {
                         .await?;
                     Ok(true)
                 }
-                Ok(ResolveResult::NotFound) => Ok(false),
+                Ok(ResolveResult::NotFound) => {
+                    #[cfg(feature = "cache")]
+                    if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
+                        return Ok(true);
+                    }
+                    Ok(false)
+                }
                 Err(error) => {
                     log::error!("static file resolver failed: {error}");
                     session
@@ -3321,6 +3339,10 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(not(feature = "web"))]
         {
+            #[cfg(feature = "cache")]
+            if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
+                return Ok(true);
+            }
             Ok(false)
         }
     }
@@ -3884,6 +3906,247 @@ fn request_host(session: &Session) -> Option<&str> {
     request_host_header(session.req_header())
 }
 
+#[cfg(feature = "cache")]
+async fn respond_proxy_cache_only_request(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    state: &ProxyRuntimeState,
+    vhost_index: usize,
+) -> Result<bool> {
+    if !request_cache_only_if_cached(session.req_header()) {
+        return Ok(false);
+    }
+
+    let vhost = state.vhost(vhost_index);
+    let cache = selected_cache_config(vhost, ctx);
+    let response_headers = selected_response_headers(vhost, ctx);
+
+    if session.req_header().method.as_str() != "GET" {
+        respond_proxy_cache_only_miss(
+            session,
+            ctx,
+            cache,
+            response_headers,
+            "method-ineligible",
+            Some("BYPASS"),
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    let Some(storage) = selected_cache_storage(vhost, ctx) else {
+        respond_proxy_cache_only_miss(
+            session,
+            ctx,
+            cache,
+            response_headers,
+            "storage-unavailable",
+            Some("BYPASS"),
+        )
+        .await?;
+        return Ok(true);
+    };
+
+    if let Some(reason) = request_cache_bypass_reason(session.req_header(), cache) {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, ctx.route_index, "bypass");
+        respond_proxy_cache_only_miss(
+            session,
+            ctx,
+            cache,
+            response_headers,
+            reason,
+            Some("BYPASS"),
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    let Some(cache_key) = state.pingora_image_cache_key_for_request_header(
+        session.req_header(),
+        vhost_index,
+        ctx.route_index,
+    ) else {
+        respond_proxy_cache_only_miss(
+            session,
+            ctx,
+            cache,
+            response_headers,
+            "cache-key-unavailable",
+            Some("MISS"),
+        )
+        .await?;
+        return Ok(true);
+    };
+
+    if cache_pass_should_bypass(cache_pass_counter(), cache, &cache_key.combined()) {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, ctx.route_index, "pass");
+        respond_proxy_cache_only_miss(
+            session,
+            ctx,
+            cache,
+            response_headers,
+            CACHE_PASS_REASON,
+            Some("BYPASS"),
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    let trace = pingora::cache::trace::Span::inactive().handle();
+    let Some((meta, hit, cache_key)) =
+        lookup_proxy_cache_only_object(storage, cache_key, session.req_header(), cache, &trace)
+            .await?
+    else {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, ctx.route_index, "miss");
+        respond_proxy_cache_only_miss(
+            session,
+            ctx,
+            cache,
+            response_headers,
+            "only-if-cached-miss",
+            Some("MISS"),
+        )
+        .await?;
+        return Ok(true);
+    };
+
+    if !meta.is_fresh(std::time::SystemTime::now()) {
+        #[cfg(feature = "metrics")]
+        record_cache_policy_activity(vhost, ctx.route_index, "stale");
+        hit.finish(storage, &cache_key, &trace).await?;
+        respond_proxy_cache_only_miss(
+            session,
+            ctx,
+            cache,
+            response_headers,
+            "only-if-cached-stale",
+            Some("STALE"),
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    let max_body_bytes = cache
+        .max_object_bytes
+        .as_u64()
+        .min(CACHE_ONLY_RESPONSE_MAX_BYTES);
+    let body = read_cache_hit_body(hit, storage, &cache_key, &trace, max_body_bytes).await?;
+    let body_len = body.len();
+    let mut response = meta.response_header_copy();
+    response.remove_header("age");
+    response.insert_header("age", meta.age().as_secs().to_string())?;
+    response.remove_header("content-length");
+    response.insert_header("content-length", body_len.to_string())?;
+    insert_cache_status_headers(
+        &mut response,
+        cache,
+        Some(CacheStatusOverride {
+            status: "HIT",
+            reason: None,
+        }),
+        CachePhase::Hit,
+    )?;
+    crate::headers::apply_response_policy(&mut response, response_headers)?;
+    #[cfg(feature = "metrics")]
+    record_cache_policy_activity(vhost, ctx.route_index, "hit");
+    ctx.cache_observed_phase = Some(CachePhase::Hit);
+    ctx.response_body_bytes_seen = body_len as u64;
+    session
+        .write_response_header(Box::new(response), body.is_empty())
+        .await?;
+    if !body.is_empty() {
+        session.write_response_body(Some(body), true).await?;
+    }
+    Ok(true)
+}
+
+#[cfg(feature = "cache")]
+async fn lookup_proxy_cache_only_object(
+    storage: &'static (dyn pingora::cache::Storage + Sync),
+    mut cache_key: PingoraCacheKey,
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+    trace: &pingora::cache::trace::SpanHandle,
+) -> Result<Option<(CacheMeta, HitHandler, PingoraCacheKey)>> {
+    let Some((meta, hit)) = storage.lookup(&cache_key, trace).await? else {
+        return Ok(None);
+    };
+
+    match cache_vary_policy(meta.headers(), cache) {
+        VaryCachePolicy::None => Ok(Some((meta, hit, cache_key))),
+        VaryCachePolicy::Uncacheable(_) => {
+            hit.finish(storage, &cache_key, trace).await?;
+            Ok(None)
+        }
+        VaryCachePolicy::Fields(fields) => {
+            let variance = vary_request_hash(&fields, request);
+            if meta.variance() == Some(variance) {
+                return Ok(Some((meta, hit, cache_key)));
+            }
+
+            hit.finish(storage, &cache_key, trace).await?;
+            cache_key.set_variance_key(variance);
+            let Some((meta, hit)) = storage.lookup(&cache_key, trace).await? else {
+                return Ok(None);
+            };
+            if meta.variance() == Some(variance) {
+                Ok(Some((meta, hit, cache_key)))
+            } else {
+                hit.finish(storage, &cache_key, trace).await?;
+                Ok(None)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "cache")]
+async fn respond_proxy_cache_only_miss(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    cache: &crate::config::CacheConfig,
+    response_headers: &crate::config::ResponseHeaderPolicyConfig,
+    reason: &'static str,
+    status: Option<&'static str>,
+) -> Result<()> {
+    let body = Bytes::from_static(b"cache miss");
+    let mut response = ResponseHeader::build(504, Some(6))?;
+    response.insert_header("content-type", "text/plain; charset=utf-8")?;
+    response.insert_header("cache-control", "no-store")?;
+    response.insert_header("content-length", body.len().to_string())?;
+    insert_cache_status_headers(
+        &mut response,
+        cache,
+        Some(CacheStatusOverride {
+            status: status.unwrap_or("MISS"),
+            reason: Some(reason),
+        }),
+        CachePhase::Miss,
+    )?;
+    crate::headers::apply_response_policy(&mut response, response_headers)?;
+    ctx.cache_observed_phase = Some(CachePhase::Miss);
+    ctx.response_body_bytes_seen = body.len() as u64;
+    session
+        .write_response_header(Box::new(response), false)
+        .await?;
+    session.write_response_body(Some(body), true).await
+}
+
+#[cfg(feature = "cache")]
+fn request_cache_only_if_cached(request: &RequestHeader) -> bool {
+    request_header_values(request, "cache-control").any(|value| {
+        value.split(',').any(|directive| {
+            directive
+                .trim()
+                .split_once('=')
+                .map_or(directive.trim(), |(name, _)| name.trim())
+                .eq_ignore_ascii_case("only-if-cached")
+        })
+    })
+}
+
 fn downstream_tls(session: &Session) -> bool {
     session
         .digest()
@@ -4096,7 +4359,14 @@ async fn serve_static_file_maybe_cached(
         #[cfg(feature = "metrics")]
         record_cache_policy_activity(vhost, route_index, "hit");
         let age_secs = meta.age().as_secs();
-        let body = read_cache_hit_body(hit, storage, &cache_key, &trace).await?;
+        let body = read_cache_hit_body(
+            hit,
+            storage,
+            &cache_key,
+            &trace,
+            crate::web::MAX_STATIC_BUFFERED_BODY_BYTES,
+        )
+        .await?;
         if body.len() as u64 == file.len {
             let body = static_cached_body_for_plan(&body, plan)?;
             let mut headers = cache_headers(Some("HIT"), None);
@@ -4358,20 +4628,21 @@ fn static_route_request_path_from_parts(request_path: &str, route: &RuntimeRoute
     }
 }
 
-#[cfg(all(feature = "web", feature = "cache"))]
+#[cfg(feature = "cache")]
 async fn read_cache_hit_body(
     mut hit: HitHandler,
     storage: &'static (dyn pingora::cache::Storage + Sync),
     key: &PingoraCacheKey,
     trace: &pingora::cache::trace::SpanHandle,
+    max_body_bytes: u64,
 ) -> Result<Bytes> {
     let mut body = bytes::BytesMut::new();
     while let Some(chunk) = hit.read_body().await? {
         body.extend_from_slice(&chunk);
-        if body.len() as u64 > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
+        if body.len() as u64 > max_body_bytes {
             return Error::e_explain(
                 ErrorType::InternalError,
-                "cached static body exceeds buffered response limit",
+                "cached body exceeds buffered response limit",
             );
         }
     }
@@ -4465,6 +4736,17 @@ fn selected_cache_config<'a>(
         .and_then(|route_index| vhost.route(route_index).cache.as_ref())
         .map(|cache| &cache.config)
         .unwrap_or(&vhost.cache)
+}
+
+#[cfg(feature = "cache")]
+fn selected_cache_storage(
+    vhost: &RuntimeVhost,
+    ctx: &RequestContext,
+) -> Option<&'static (dyn pingora::cache::Storage + Sync)> {
+    ctx.route_index
+        .and_then(|route_index| vhost.route(route_index).cache.as_ref())
+        .and_then(RuntimeRouteCache::storage)
+        .or_else(|| vhost_cache_storage(vhost))
 }
 
 #[cfg(all(feature = "cache", feature = "metrics"))]
@@ -5974,8 +6256,8 @@ mod tests {
         cache_pass_record_uncacheable, cache_pass_should_bypass, cache_request_participated,
         cache_should_serve_stale, cache_stale_status_allows, cache_status_header_value,
         cache_status_reason_header_value, cache_vary_policy, ignore_origin_cache_headers,
-        response_cache_admission_rejection, strip_cache_response_headers, vary_cache_policy,
-        vary_request_hash,
+        lookup_proxy_cache_only_object, read_cache_hit_body, response_cache_admission_rejection,
+        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -5987,8 +6269,8 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{
         capture_revalidation_304_headers, request_cache_bypass, request_cache_bypass_reason,
-        request_cache_revalidation_requested, response_with_revalidation_304_headers,
-        revalidation_304_vary_changed,
+        request_cache_only_if_cached, request_cache_revalidation_requested,
+        response_with_revalidation_304_headers, revalidation_304_vary_changed,
     };
 
     #[test]
@@ -7273,6 +7555,112 @@ mod tests {
         );
         assert!(object.created_unix_secs.is_some());
         assert!(object.fresh_until_unix_secs.is_some());
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn proxy_cache_only_lookup_respects_vary_variants() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    max_object_bytes: ByteSize::from_bytes(512),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
+        let vhost = snapshot.state.vhost(vhost_index);
+        let storage =
+            vhost.pingora_memory_storage.unwrap() as &'static (dyn pingora::cache::Storage + Sync);
+        let span = pingora::cache::trace::Span::inactive().handle();
+
+        let mut gzip_request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        gzip_request
+            .insert_header("host", "cached.example")
+            .unwrap();
+        gzip_request
+            .insert_header("accept-encoding", "gzip")
+            .unwrap();
+        let gzip_key = snapshot
+            .state
+            .pingora_image_cache_key_for_request_header(&gzip_request, vhost_index, None)
+            .unwrap();
+        let gzip_variance = vary_request_hash(&["accept-encoding".to_owned()], &gzip_request);
+        let mut gzip_meta = pingora_meta("max-age=60");
+        gzip_meta
+            .response_header_mut()
+            .insert_header("vary", "accept-encoding")
+            .unwrap();
+        gzip_meta.set_variance(gzip_variance);
+
+        let mut miss = block_on(storage.get_miss_handler(&gzip_key, &gzip_meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"gzip-body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let mut br_request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        br_request.insert_header("host", "cached.example").unwrap();
+        br_request.insert_header("accept-encoding", "br").unwrap();
+        let br_key = snapshot
+            .state
+            .pingora_image_cache_key_for_request_header(&br_request, vhost_index, None)
+            .unwrap();
+        assert!(
+            block_on(lookup_proxy_cache_only_object(
+                storage,
+                br_key.clone(),
+                &br_request,
+                &vhost.cache,
+                &span
+            ))
+            .unwrap()
+            .is_none()
+        );
+
+        let mut br_store_key = br_key.clone();
+        let br_variance = vary_request_hash(&["accept-encoding".to_owned()], &br_request);
+        br_store_key.set_variance_key(br_variance);
+        let mut br_meta = pingora_meta("max-age=60");
+        br_meta
+            .response_header_mut()
+            .insert_header("vary", "accept-encoding")
+            .unwrap();
+        br_meta.set_variance(br_variance);
+        let mut miss = block_on(storage.get_miss_handler(&br_store_key, &br_meta, &span)).unwrap();
+        block_on(miss.write_body(Bytes::from_static(b"br-body"), true)).unwrap();
+        block_on(miss.finish()).unwrap();
+
+        let (meta, hit, key) = block_on(lookup_proxy_cache_only_object(
+            storage,
+            br_key,
+            &br_request,
+            &vhost.cache,
+            &span,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(meta.variance(), Some(br_variance));
+        let body = block_on(read_cache_hit_body(hit, storage, &key, &span, 512)).unwrap();
+        assert_eq!(body, Bytes::from_static(b"br-body"));
     }
 
     #[cfg(feature = "cache")]
@@ -8599,6 +8987,39 @@ mod tests {
             &request,
             &CacheConfig::default()
         ));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_only_if_cached_detects_cache_control_directive() {
+        for value in [
+            "only-if-cached",
+            "public, only-if-cached",
+            "max-age=60, Only-If-Cached",
+            "only-if-cached=true",
+        ] {
+            let mut request =
+                pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+            request.insert_header("cache-control", value).unwrap();
+            assert!(request_cache_only_if_cached(&request), "{value}");
+        }
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        request
+            .append_header("cache-control", "public, max-age=60")
+            .unwrap();
+        request
+            .append_header("cache-control", "only-if-cached")
+            .unwrap();
+        assert!(request_cache_only_if_cached(&request));
+
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        request
+            .insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        assert!(!request_cache_only_if_cached(&request));
     }
 
     #[cfg(feature = "cache")]
