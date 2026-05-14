@@ -278,10 +278,17 @@ if [ "$origin_count" != "1" ]; then
     exit 1
 fi
 
+sleep 1
+
 curl -sS --max-time "$CURL_MAX_TIME" -D "$a_peer_headers" -o "$a_peer_body" \
     -H "Host: cache.test" "http://127.0.0.1:${NODE_A_PORT}/asset.webp"
 grep -qi '^x-cache-status: PEER-HIT' "$a_peer_headers"
 cmp "$b_body" "$a_peer_body" >/dev/null
+peer_age=$(awk 'tolower($1) == "age:" {gsub("\r", "", $2); print $2; exit}' "$a_peer_headers")
+if [ -z "$peer_age" ] || [ "$peer_age" -lt 1 ]; then
+    echo "peer-fill cache smoke failed: expected peer-hit age >= 1, got ${peer_age:-missing}" >&2
+    exit 1
+fi
 
 origin_count=$(curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__count?path=/asset.webp")
 if [ "$origin_count" != "1" ]; then
@@ -293,6 +300,11 @@ curl -sS --max-time "$CURL_MAX_TIME" -D "$a_hit_headers" -o "$a_hit_body" \
     -H "Host: cache.test" "http://127.0.0.1:${NODE_A_PORT}/asset.webp"
 grep -qi '^x-cache-status: HIT' "$a_hit_headers"
 cmp "$b_body" "$a_hit_body" >/dev/null
+local_age=$(awk 'tolower($1) == "age:" {gsub("\r", "", $2); print $2; exit}' "$a_hit_headers")
+if [ -z "$local_age" ] || [ "$local_age" -lt "$peer_age" ]; then
+    echo "peer-fill cache smoke failed: expected local hit age >= peer age $peer_age, got ${local_age:-missing}" >&2
+    exit 1
+fi
 
 curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${METRICS_PORT}/metrics" > "$metrics_body"
 grep -q 'fluxheim_cache_activity_total{event="peer_fill_hit",tier="policy"}' "$metrics_body"
