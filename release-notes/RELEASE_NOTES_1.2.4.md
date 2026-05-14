@@ -9,17 +9,17 @@
 
 ## Summary
 
-Fluxheim `1.2.4` focuses on distributed cache metadata and peer-fill. The first
-slice adds the configuration contract for safe peer-fill clusters while keeping
-the existing single-node cache behavior unchanged until runtime peer retrieval
-is implemented and tested.
+Fluxheim `1.2.4` focuses on distributed cache metadata and peer-fill. It adds a
+bounded peer-fill policy, safe cache-only serving on peer nodes, outbound
+peer-fill on local proxy-cache misses, local storage of valid peer hits,
+activity metrics, and a two-node smoke test for the peer-fill path.
 
 ## Highlights
 
 - Added `[cache.peer_fill]`, `[vhosts.cache.peer_fill]`, and
   route-scoped `peer_fill` policy configuration.
 - Added bounded peer-list, timeout, object-size, concurrency, and fail-open
-  settings for future peer-fill runtime behavior.
+  settings for peer-fill runtime behavior.
 - Added strict peer-origin validation. Peers must use explicit HTTP(S)
   `host:port` origins, cannot include userinfo/query/fragment, and non-loopback
   HTTP requires `allow_insecure_http = true`.
