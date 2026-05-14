@@ -45,9 +45,13 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 - Managed ACME certificate issuance and renewal for HTTP-01 and rustls
   TLS-ALPN-01 builds.
 - Route-level static, proxy, and redirect actions.
-- Route-scoped proxy cache policies with memory, disk, and tiered storage,
-  status headers, hard/soft indexed purge endpoints, stale cleanup, and cache
-  warming.
+- Route-scoped proxy cache policies with memory, disk, and tiered storage.
+- Cache operations for hit/miss status headers, cache locks, stale serving,
+  cache warming, protected purge/status endpoints, and deploy-time key/lookup
+  assertions.
+- Optional local static-file caching, storage-bin disk cache, encrypted disk
+  cache, peer fill, and bounded range caching for large proxy-cache objects.
+- Prometheus metrics and OpenTelemetry metrics/tracing export profiles.
 - Optional global HTTP-to-HTTPS redirect with safe Host validation.
 - External ACME HTTP-01 challenge forwarding helper.
 - Secure request/response header policy, including `Server: fluxheim` by
@@ -253,127 +257,37 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 ## Current Stable: 1.2 Operations And Cache
 
-Fluxheim does not treat every planned feature as part of the stable core. The
-`1.0` release established the first gateway-ready baseline for representative
-real multi-site configs. The `1.1` release added production certificate
-operations on top of that baseline. The `1.2.0` release completes the first
-production proxy-cache and observability baseline.
+Fluxheim does not treat every planned idea as stable. The current stable line is
+`1.2.x`, which means:
 
-Included in `1.0`: route-level exact/prefix/fallback matching, route actions
-for proxy/static/redirects, route prefix stripping, per-route body limits,
-upstream connect/read/send timeout knobs, websocket-safe upgrade smoke coverage
-for `/chat/`-style routes, custom upstream error pages, secure static aliases
-with optional directory listing, cleartext ACME challenge exceptions, safe
-dynamic request-header templates for common proxy migrations, SNI certificate
-selection for the default rustls TLS backend and callback-capable TLS backends,
-and native systemd deployment files for manually compiled binaries. Direct proxy
-upstream DNS names are resolved per request and resolution failures return
-upstream errors instead of panicking the worker, which covers local Podman
-service names for the non-LB gateway path.
+- `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
+  proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
+  rootless container operation.
+- `1.1` is the certificate operations line: TLS policy profiles, multi-cert
+  rustls SNI, managed ACME issuance/renewal, EAB-capable issuers, file-backed
+  secrets, `acme-init`, and packaged renewal units.
+- `1.2.0` is the cache and observability baseline: vhost/route cache policy,
+  memory/disk/tiered cache, cache locks, stale serving, purge/status endpoints,
+  cache warm/key/lookup tooling, Prometheus metrics, and OpenTelemetry export
+  profiles.
+- `1.2.1` adds opt-in local static-file caching through `local_static = true`.
+- `1.2.2` adds the storage-bin disk cache backend for larger high-churn caches.
+- `1.2.3` adds optional disk cache encryption with local keys or OpenBao
+  Transit.
+- `1.2.4` adds distributed cache peer fill with safe `only-if-cached` peer
+  fetches and bounded fail-open/fail-closed behavior.
+- `1.2.5` adds opt-in bounded range caching for large proxy-cache objects.
 
-Added in `1.1`: named TLS policy profiles, minimum protocol and ALPN controls,
-multi-certificate rustls SNI, managed ACME issuance and renewal for HTTP-01 and
-rustls TLS-ALPN-01 builds, Actalis and Google Trust Services EAB-capable issuer
-configuration, file-backed secret support for containers/systemd credentials,
-safe ACME storage, guided `acme-init` bootstrap, and packaged
-`fluxheim-acme.service` / `fluxheim-acme.timer` units for deployments that
-prefer external renewal scheduling.
+Detailed cache behavior, config examples, operational limits, and smoke-test
+coverage are documented in [Cache Backends](docs/cache-backends.md),
+[Cache Encryption](docs/cache-encryption.md),
+[Config Reference](docs/config-reference.md), and
+[Production Readiness](docs/production-readiness.md).
 
-Added in `1.2.0`: route/vhost scoped proxy-cache policies, memory and disk
-cache tiers, cache locks for request collapsing, protected purge/status
-operations, opt-in cacheability predictors, cache warm/lookup/key tooling,
-cache policy metrics, OTLP metrics export, and end-to-end proxy cache smoke
-coverage for hit `Age`, conditional `304`/`200` validator match and mismatch
-behavior from `ETag` and `Last-Modified`, byte ranges including ETag/date
-`If-Range`, cache-status assertions on cached conditional/range responses,
-intentional HEAD storage bypass that does not poison cached GET bodies,
-validator-based upstream revalidation and refresh, stale-while-revalidate,
-stale-if-error serving, cache-lock request collapsing, `Vary` variants, disk
-hits after restart, configured request bypass policies, input-file and
-negative-cache warming, admin exact/bulk purge, stale dry-run, vhost
-prefix/tag/wildcard purges, route-scoped purge after process restart, client
-refresh revalidation, and debug bypass reasons.
-
-The `1.2.0` release also adds bounded Prometheus purge counters for each admin
-purge shape, cache activity counters for disk hits and scoped purge events,
-policy bypasses, client refresh revalidation, allowed stale serving, aggregate
-memory/disk pressure gauges, and OpenTelemetry export smoke coverage. Strict
-host-routing rejections emit a low-cardinality Prometheus counter and security
-warning log for missing, invalid, or unknown host identity. Admin
-authentication failures and lockouts emit bounded Prometheus counters and
-security logs for alerting on control-plane guessing attempts.
-
-`cache-lookup` supports deploy-script assertions for object presence, storage
-tier, HTTP status, stored body size, stored fresh TTL, stored cache tags, stored
-header names and exact header values, exact object count,
-cache-lock/predictor/tier layout, stale-serving eligibility, selected cache
-scope/vhost/route, internal namespace, operator key namespace, user tag,
-cache-lock wait timeout, negative policy reasons, purge-index reachability, and
-fresh/stale/expired state. The `1.2.0` cache baseline includes the documented
-proxy revalidation metadata behavior, full disk-cache startup scans with
-checkpoint merging, debounced checkpoint writes, purge-index pruning on
-eviction, bounded background stale cleanup, and aggregate memory/disk pressure
-metrics.
-
-The `1.2.1` cache follow-up adds explicit `local_static = true` cache-policy
-opt-in for local `[vhosts.web]` files and route-scoped web actions. Local
-static cache keys include canonical file identity metadata so updated files
-produce new cache entries, and memory storage is preferred when both memory and
-disk tiers are configured to avoid duplicating site files on disk. Cache
-inspection and exact purge tooling uses the same local static key when the
-request resolves to a local file. After that,
-cache work continues as focused cache-only releases. The `1.2.2` line added
-slab/bin disk storage. The storage-bin backend now has manifest/bin files,
-durable object index recovery, free-range reuse, LRU eviction parity, and
-Pingora `Storage` trait support, plus runtime backend selection. It also
-reports allocated bin bytes, reusable free bytes, free range count, largest free
-range, and bin-file count through admin cache stats and Prometheus aggregate
-gauges. Clean shutdown flushes a pending debounced storage-bin index, and purge
-or eviction can reclaim fully-free tail bin files without moving live objects.
-Production smoke coverage now verifies live proxy `MISS` then `HIT` behavior
-and bin/index creation before treating it as the recommended disk backend.
-`examples/cache-storage-bin.toml` shows a focused storage-bin cache policy.
-The active `1.2.3` line adds optional cache encryption at rest. Local-key
-AES-256-GCM encryption can wrap disk cache objects using a safe file or
-systemd/container credential, while OpenBao Transit can keep cache encryption
-keys under external custody and return only Transit ciphertext for storage.
-Both providers are opt-in and default deployments do not need OpenBao. For
-developer validation, `examples/podman-compose-openbao.yml` starts a local
-OpenBao dev server and `scripts/smoke_openbao_cache_encryption.sh` verifies
-Transit-backed encrypted proxy-cache storage with real `MISS` then `HIT`
-traffic. `examples/cache-encryption-local.toml` and
-`examples/cache-encryption-openbao.toml` show copyable storage-bin cache
-encryption policies for local-key and OpenBao-backed deployments. See
-`docs/cache-encryption.md` for key setup, OpenBao policy, rotation notes, and
-local smoke tests.
-The `1.2.4` line starts distributed cache metadata and peer-fill with a
-bounded `[cache.peer_fill]` policy and validated peer-origin configuration.
-The first runtime primitive is also in place: proxy-cache requests with
-`Cache-Control: only-if-cached` are satisfied from a fresh local cached object
-or receive `504` without touching origin, which avoids peer-fill origin
-amplification. Local proxy-cache misses can now ask configured peers for that
-safe no-origin response, store valid peer hits locally, and fall back to origin
-only when `fail_open` allows it. `examples/cache-peer-fill.toml` shows the
-current config shape, and `scripts/smoke_peer_fill_cache.sh` verifies the
-multi-node `PEER-HIT` path, local post-fill hits, `Vary` variants, peer `Age`,
-and fail-open/fail-closed behavior before release. The `1.2.5` line closes the
-large-file cache gap with opt-in bounded `Range` caching for safe single
-`bytes=start-end` proxy requests. Range responses are stored under a
-range-specific key and only admitted when upstream returns matching `206`,
-`Content-Range`, and `Content-Length` metadata; unkeyed upstream `206`
-responses are rejected from the full-object cache. `If-Range`, suffix,
-open-ended, and multi-range requests stay on the normal path. `1.3` is the
-load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
-extensibility release, covering nginx-Lua-style hooks and VCL-like cache policy
-hooks through one sandboxed runtime.
-
-Later releases continue with compression, media transforms, advanced
-certificate automation, privacy/security profiles, Cloudflare origin support,
-observability, auth, cluster state, AI-aware controls, Sentinel Mesh, PHP/CGI
-boundaries, and media-edge work.
-
-See [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for
-the full release ladder.
+Next major lines are planned separately: `1.3` for load-balancer/proxy parity
+and `1.4` for shared Wasm extensibility covering nginx-Lua-style hooks and
+VCL-like cache policy hooks. See [Versioning Plan](docs/versioning-plan.md) and
+[Roadmap](ROADMAP.md) for the full release ladder.
 
 ## Documentation
 
@@ -383,11 +297,13 @@ the full release ladder.
 - [Release Runbook](docs/release-runbook.md)
 - [Release Checklist](docs/release-checklist.md)
 - [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
+- [Production Readiness](docs/production-readiness.md)
 - [Feature Matrix](docs/features.md)
 - [Config Reference](docs/config-reference.md)
 - [Gateway Recipes](docs/gateway-recipes.md)
 - [GitHub Repository Setup](docs/github-setup.md)
 - [Cache Backends](docs/cache-backends.md)
+- [Cache Encryption](docs/cache-encryption.md)
 - [Image Filter](docs/image-filter.md)
 - [Programmable Media Edge](docs/programmable-media-edge.md)
 - [Certificate Renewal And Reload](docs/certificate-renewal.md)

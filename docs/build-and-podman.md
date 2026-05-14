@@ -292,15 +292,15 @@ Required Docker Hub repository secrets:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.2.0-wolfi`, `v1.2.0-alpine`, `v1.2.0-suse-micro`, `v1.2.0-debian`
+- `v1.2.5-wolfi`, `v1.2.5-alpine`, `v1.2.5-suse-micro`, `v1.2.5-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.2.0`
-- `v1.2.0-base`
+- `v1.2.5`
+- `v1.2.5-base`
 - `latest`
 - `latest-base`
 
@@ -309,12 +309,12 @@ automation. They point at the full/default image profile.
 
 The cache image profile publishes tags with a `cache` profile segment:
 
-- `v1.2.0-cache-wolfi`, `v1.2.0-cache-alpine`,
-  `v1.2.0-cache-suse-micro`, `v1.2.0-cache-debian`
+- `v1.2.5-cache-wolfi`, `v1.2.5-cache-alpine`,
+  `v1.2.5-cache-suse-micro`, `v1.2.5-cache-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-cache-alpine`, etc.
 - `latest-cache-wolfi`, `latest-cache-alpine`, etc. when run from the default
   branch
-- Wolfi short aliases: `v1.2.0-cache` and `latest-cache`
+- Wolfi short aliases: `v1.2.5-cache` and `latest-cache`
 
 The load-balancer image profile is prepared for the `1.3` line. It is skipped
 on normal pre-`1.3` tag pushes, but can be included in manual workflow runs by
@@ -671,8 +671,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.2.0 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.2.0 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.2.5 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.2.5 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date

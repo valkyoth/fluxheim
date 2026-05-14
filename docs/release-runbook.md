@@ -7,11 +7,12 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.2.0
+RELEASE_VERSION=1.2.5
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
-DIST_NAME="fluxheim-${RELEASE_VERSION}-linux-x86_64"
+TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+DIST_NAME="fluxheim-${RELEASE_VERSION}-full-${TARGET}"
 ```
 
 ## 1. Preflight
@@ -87,7 +88,7 @@ Pushing the tag starts the container image workflow.
 
 ## 4. Build The Binary Release Asset
 
-Build the release binary:
+Build the full/default release binary:
 
 ```bash
 cargo build --release --locked
@@ -104,7 +105,21 @@ tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
 sha256sum "dist/${DIST_NAME}.tar.gz"
 ```
 
-Record the binary checksum.
+For the cache-focused binary profile, rebuild with:
+
+```bash
+DIST_NAME="fluxheim-${RELEASE_VERSION}-cache-${TARGET}"
+cargo build --release --locked --no-default-features --features profile-cache-server
+rm -rf "dist/${DIST_NAME}"
+mkdir -p "dist/${DIST_NAME}"
+cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
+cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
+tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
+sha256sum "dist/${DIST_NAME}.tar.gz"
+```
+
+Record both binary checksums.
 
 Generate SBOMs for the tagged source tree:
 
