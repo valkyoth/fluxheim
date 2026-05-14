@@ -258,20 +258,19 @@ internal cache implementation.
 - The `1.2.4` distributed-cache line starts with a safe `[cache.peer_fill]`
   policy contract. Peer fill is disabled by default, requires an enabled cache
   policy, bounds peers/timeouts/object size/concurrency, and validates peer
-  origins before runtime peer retrieval is enabled. As the first runtime
-  primitive, proxy-cache requests with `Cache-Control: only-if-cached` are
-  served only from a fresh local cache object; misses, stale objects, bypassed
+  origins. Proxy-cache requests with `Cache-Control: only-if-cached` are served
+  only from a fresh local cache object; misses, stale objects, bypassed
   policies, or ineligible methods return `504` and do not contact origin. This
   gives outbound peer fill a safe no-origin endpoint. On a local proxy-cache
-  miss, Fluxheim can ask configured peers for that no-origin endpoint before
+  miss, Fluxheim asks configured peers for that no-origin endpoint before
   falling back to origin according to `fail_open`; peer hits are stored locally
   and peer requests forward only host plus safe negotiation headers rather than
   client credentials. The example
   `examples/cache-peer-fill.toml` shows the current config shape for
   cache-cluster planning. `scripts/smoke_peer_fill_cache.sh` runs a local
-  two-node smoke that proves node-to-node `PEER-HIT`, no extra origin fetch,
-  local post-fill `HIT`, fail-closed `504` without origin fetch, fail-open
-  origin fallback, and peer-fill metrics. The configured
+  multi-node smoke that proves node-to-node `PEER-HIT`, no extra origin fetch,
+  local post-fill `HIT`, `Vary` variants, fail-closed `504` without origin
+  fetch, fail-open origin fallback, and peer-fill metrics. The configured
   `peer_fill.max_concurrent_requests` budget is enforced per vhost or route
   cache policy for active outbound peer fetches.
   Peer response `Age` is preserved during admission, so a peer-filled object

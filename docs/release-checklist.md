@@ -363,6 +363,7 @@ cargo build --release --no-default-features --features proxy,metrics
 cargo build --release --no-default-features --features proxy,tls-rustls,acme
 cargo build --release --no-default-features --features profile-load-balancer
 cargo build --release --no-default-features --features profile-observability
+scripts/smoke_peer_fill_cache.sh
 scripts/smoke_observability_local.sh
 ```
 
