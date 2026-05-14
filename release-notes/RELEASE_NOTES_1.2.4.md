@@ -43,6 +43,9 @@ activity metrics, and a two-node smoke test for the peer-fill path.
 - Enforced `peer_fill.max_concurrent_requests` at runtime per vhost/route cache
   policy. If the peer-fill budget is saturated, Fluxheim follows `fail_open`:
   fallback to origin when allowed, or a bounded `504` miss response otherwise.
+- Preserved peer response `Age` during peer-fill admission. Peer-filled objects
+  are stored with their remaining freshness and downstream `PEER-HIT` responses
+  report the peer age rather than resetting freshness to zero.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 

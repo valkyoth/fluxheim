@@ -40,6 +40,8 @@ Released: in progress
   activity metrics before release.
 - Enforced `peer_fill.max_concurrent_requests` at runtime per vhost/route cache
   policy so configured peer-fill limits now bound active outbound peer fetches.
+- Preserved peer response `Age` during peer-fill admission so a peer hit stores
+  only its remaining freshness instead of extending the origin TTL.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

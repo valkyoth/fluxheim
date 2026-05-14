@@ -3552,16 +3552,22 @@ impl ProxyHttp for FluxProxy {
             if response_cache_admission_rejection(&response_header, cache).is_some() {
                 continue;
             }
-            let Some(ttl_secs) = cache_response_fresh_ttl_secs(cache, &response_header) else {
+            let peer_age_secs = response_age_secs(&response_header);
+            let Some(ttl_secs) = cache_response_fresh_ttl_secs(cache, &response_header)
+                .and_then(|ttl_secs| remaining_fresh_ttl_secs(ttl_secs, peer_age_secs))
+            else {
                 continue;
             };
             let now = std::time::SystemTime::now();
+            let created_at = now
+                .checked_sub(std::time::Duration::from_secs(peer_age_secs))
+                .unwrap_or(now);
             let fresh_until = now
                 .checked_add(std::time::Duration::from_secs(u64::from(ttl_secs)))
                 .unwrap_or(now);
             let meta = CacheMeta::new(
                 fresh_until,
-                now,
+                created_at,
                 cache.stale_while_revalidate_secs.unwrap_or(0),
                 cache.stale_if_error_secs.unwrap_or(0),
                 response_header.clone(),
@@ -3572,7 +3578,7 @@ impl ProxyHttp for FluxProxy {
             let _ = miss.finish().await?;
 
             response_header.remove_header("age");
-            response_header.insert_header("age", "0")?;
+            response_header.insert_header("age", peer_age_secs.to_string())?;
             response_header.remove_header("content-length");
             response_header.insert_header("content-length", response.body.len().to_string())?;
             insert_cache_status_headers(
@@ -5073,6 +5079,23 @@ fn cache_response_fresh_ttl_secs(
         .or(cache.default_status_ttl_secs)
         .or_else(|| response_cache_control_max_age(response))
         .filter(|ttl| *ttl > 0)
+}
+
+#[cfg(feature = "cache")]
+fn remaining_fresh_ttl_secs(ttl_secs: u32, age_secs: u64) -> Option<u32> {
+    let remaining = u64::from(ttl_secs).checked_sub(age_secs)?;
+    u32::try_from(remaining).ok().filter(|ttl| *ttl > 0)
+}
+
+#[cfg(feature = "cache")]
+fn response_age_secs(response: &ResponseHeader) -> u64 {
+    response
+        .headers
+        .get_all("age")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0)
 }
 
 #[cfg(feature = "cache")]
@@ -6642,8 +6665,9 @@ mod tests {
         cache_pass_record_uncacheable, cache_pass_should_bypass, cache_request_participated,
         cache_should_serve_stale, cache_stale_status_allows, cache_status_header_value,
         cache_status_reason_header_value, cache_vary_policy, ignore_origin_cache_headers,
-        lookup_proxy_cache_only_object, read_cache_hit_body, response_cache_admission_rejection,
-        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
+        lookup_proxy_cache_only_object, read_cache_hit_body, remaining_fresh_ttl_secs,
+        response_age_secs, response_cache_admission_rejection, strip_cache_response_headers,
+        vary_cache_policy, vary_request_hash,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -9411,6 +9435,23 @@ mod tests {
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
         assert!(!request_cache_only_if_cached(&request));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_ttl_accounting_subtracts_response_age() {
+        assert_eq!(remaining_fresh_ttl_secs(120, 0), Some(120));
+        assert_eq!(remaining_fresh_ttl_secs(120, 119), Some(1));
+        assert_eq!(remaining_fresh_ttl_secs(120, 120), None);
+        assert_eq!(remaining_fresh_ttl_secs(120, 121), None);
+
+        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        response.insert_header("age", "42").unwrap();
+        assert_eq!(response_age_secs(&response), 42);
+
+        let mut invalid = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        invalid.insert_header("age", "not-a-number").unwrap();
+        assert_eq!(response_age_secs(&invalid), 0);
     }
 
     #[cfg(feature = "cache")]
