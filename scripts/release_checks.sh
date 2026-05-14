@@ -9,6 +9,7 @@ sh scripts/smoke_load_balancer.sh
 sh scripts/smoke_proxy_cache.sh
 sh scripts/smoke_storage_bin_cache.sh
 sh scripts/smoke_cache_encryption_local.sh
+sh scripts/smoke_peer_fill_cache.sh
 sh scripts/smoke_observability_local.sh
 
 if [ "${FLUXHEIM_RELEASE_PODMAN:-0}" = "1" ]; then

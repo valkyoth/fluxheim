@@ -43,6 +43,9 @@ scripts/smoke_storage_bin_cache.sh
 echo "stable release gate: 1.2 local cache encryption smoke"
 scripts/smoke_cache_encryption_local.sh
 
+echo "stable release gate: 1.2 peer-fill cache smoke"
+scripts/smoke_peer_fill_cache.sh
+
 echo "stable release gate: 1.2 observability smoke"
 scripts/smoke_observability_local.sh
 

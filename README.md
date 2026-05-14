@@ -354,8 +354,9 @@ or receive `504` without touching origin, which avoids peer-fill origin
 amplification. Local proxy-cache misses can now ask configured peers for that
 safe no-origin response, store valid peer hits locally, and fall back to origin
 only when `fail_open` allows it. `examples/cache-peer-fill.toml` shows the
-current config shape. An optional `1.2.5` is reserved only if production
-testing finds one more cache blocker. `1.3` is the
+current config shape, and `scripts/smoke_peer_fill_cache.sh` verifies the
+two-node `PEER-HIT` path plus local post-fill hits before release. An optional
+`1.2.5` is reserved only if production testing finds one more cache blocker. `1.3` is the
 load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
 extensibility release, covering nginx-Lua-style hooks and VCL-like cache policy
 hooks through one sandboxed runtime.

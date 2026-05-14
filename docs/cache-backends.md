@@ -268,8 +268,10 @@ internal cache implementation.
   and peer requests forward only host plus safe negotiation headers rather than
   client credentials. The example
   `examples/cache-peer-fill.toml` shows the current config shape for
-  cache-cluster planning. Metrics builds expose aggregate peer-fill policy,
-  peer-count, and concurrency gauges for rollout checks.
+  cache-cluster planning. `scripts/smoke_peer_fill_cache.sh` runs a local
+  two-node smoke that proves node-to-node `PEER-HIT`, no extra origin fetch,
+  local post-fill `HIT`, and peer-fill metrics. Metrics builds expose aggregate
+  peer-fill policy, peer-count, and concurrency gauges for rollout checks.
 - New disk cache objects use the v5 object header, which stores the combined
   cache key, primary key, user tag, cache tags, and path-index metadata. On
   startup Fluxheim merges the root-local `.fluxheim-disk-index-v1` checkpoint

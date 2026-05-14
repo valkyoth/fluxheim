@@ -35,6 +35,9 @@ Released: in progress
   hits locally, and respects `fail_open` when no peer can satisfy the request.
 - Added bounded policy-level cache activity events for peer-fill hit, miss,
   error, fallback, and fail-closed outcomes.
+- Added `scripts/smoke_peer_fill_cache.sh` and wired it into CI/release gates
+  to prove node-to-node peer fill, local store after peer hit, and peer-fill
+  activity metrics before release.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

@@ -37,14 +37,16 @@ is implemented and tested.
   `fail_open` allows it.
 - Added low-cardinality peer-fill activity events for hit, miss, peer error,
   origin fallback, and fail-closed outcomes.
+- Added a local two-node peer-fill smoke test that warms node B, serves a node
+  A miss from node B as `PEER-HIT`, verifies the origin is not contacted again,
+  proves node A stores the peer response locally, and checks peer-fill metrics.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 
 ## Known Limits
 
 - This release line now has the cache-only serving primitive, outbound peer
-  fetch, and bounded peer-fill activity metrics. Operational cache-cluster smoke
-  coverage is expected to land in a later `1.2.4` slice before tagging.
+  fetch, bounded peer-fill activity metrics, and local two-node smoke coverage.
 - Peer base URLs intentionally require an explicit port for now to avoid
   ambiguity in private cache clusters.
 
