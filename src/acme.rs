@@ -1327,12 +1327,20 @@ fn http_01_challenge_urls(domains: &[String], tokens: &[String]) -> Vec<String> 
     let mut urls = Vec::new();
     for domain in domains {
         for token in tokens {
+            let token = redacted_http_01_token(token);
             urls.push(format!(
                 "http://{domain}/.well-known/acme-challenge/{token}"
             ));
         }
     }
     urls
+}
+
+fn redacted_http_01_token(token: &str) -> String {
+    if token.is_empty() {
+        return "<empty-token>".to_owned();
+    }
+    format!("<redacted:{}b>", token.len())
 }
 
 #[cfg(feature = "acme-client")]
@@ -3173,8 +3181,9 @@ mod tests {
 
         assert!(matches!(error, AcmeRenewalError::Client { .. }));
         assert!(error.to_string().contains(
-            "published_http_01=http://example.test/.well-known/acme-challenge/token_123"
+            "published_http_01=http://example.test/.well-known/acme-challenge/<redacted:9b>"
         ));
+        assert!(!error.to_string().contains("token_123"));
         assert_eq!(client.finalize_calls, 1);
         let store = AcmeHttp01ChallengeStore::new(&storage, "example");
         assert_eq!(store.load_key_authorization("token_123").unwrap(), None);
@@ -3192,10 +3201,12 @@ mod tests {
         );
 
         assert!(message.starts_with("authorization failed; published_http_01="));
-        assert!(message.contains("http://example.test/.well-known/acme-challenge/token-a"));
-        assert!(message.contains("http://example.test/.well-known/acme-challenge/token-b"));
-        assert!(message.contains("http://www.example.test/.well-known/acme-challenge/token-a"));
-        assert!(message.contains("http://www.example.test/.well-known/acme-challenge/token-b"));
+        assert!(message.contains("http://example.test/.well-known/acme-challenge/<redacted:7b>"));
+        assert!(
+            message.contains("http://www.example.test/.well-known/acme-challenge/<redacted:7b>")
+        );
+        assert!(!message.contains("token-a"));
+        assert!(!message.contains("token-b"));
     }
 
     #[test]

@@ -5615,12 +5615,12 @@ fn fetch_peer_fill_response(
 #[cfg(feature = "cache")]
 fn peer_fill_url(base_url: &str, path_and_query: &str) -> std::io::Result<String> {
     let base_url = base_url.trim_end_matches('/');
-    if path_and_query.starts_with('/') {
+    if safe_forward_path_and_query(path_and_query) {
         Ok(format!("{base_url}{path_and_query}"))
     } else {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "peer fill request path must be absolute",
+            "peer fill request path must be absolute and traversal-free",
         ))
     }
 }
@@ -7174,12 +7174,68 @@ fn route_rewritten_path_and_query(request: &RequestHeader, route: &RuntimeRoute)
     } else {
         format!("/{suffix}")
     };
-    if rewritten_path.chars().any(char::is_control) {
+    if !safe_forward_path(&rewritten_path) {
         return None;
     }
     match request.uri.query() {
         Some(query) => Some(format!("{rewritten_path}?{query}")),
         None => Some(rewritten_path),
+    }
+}
+
+fn safe_forward_path_and_query(path_and_query: &str) -> bool {
+    let path = path_and_query
+        .split_once('?')
+        .map_or(path_and_query, |(path, _)| path);
+    safe_forward_path(path)
+}
+
+fn safe_forward_path(path: &str) -> bool {
+    if !path.starts_with('/')
+        || path.chars().any(char::is_control)
+        || path.as_bytes().contains(&b'\\')
+    {
+        return false;
+    }
+
+    path.split('/').all(safe_forward_path_segment)
+}
+
+fn safe_forward_path_segment(segment: &str) -> bool {
+    if segment == ".." {
+        return false;
+    }
+
+    let Some(decoded) = percent_decode_path_segment(segment) else {
+        return false;
+    };
+    decoded != b".." && !decoded.iter().any(|byte| matches!(byte, b'/' | b'\\'))
+}
+
+fn percent_decode_path_segment(segment: &str) -> Option<Vec<u8>> {
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = *bytes.get(index + 1)?;
+            let low = *bytes.get(index + 2)?;
+            decoded.push((hex_value(high)? << 4) | hex_value(low)?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    Some(decoded)
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -8592,6 +8648,37 @@ mod tests {
         assert_eq!(
             route_rewritten_path_and_query(&request, &route).as_deref(),
             Some("/room?id=7")
+        );
+    }
+
+    #[test]
+    fn route_strip_prefix_rejects_traversal_suffixes() {
+        let route = super::RuntimeRoute {
+            matcher: super::RuntimeRouteMatcher::Prefix("/api/".to_owned()),
+            https_redirect_exempt: false,
+            strip_prefix: Some("/api/".to_owned()),
+            max_request_body_bytes: None,
+            action: super::RuntimeRouteAction::Proxy(
+                super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
+            ),
+            #[cfg(feature = "cache")]
+            cache: None,
+            request_headers: crate::config::RequestHeaderPolicyConfig::default(),
+            response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
+        };
+
+        let raw = pingora::http::RequestHeader::build("GET", b"/api/../admin", None).unwrap();
+        assert_eq!(route_rewritten_path_and_query(&raw, &route), None);
+
+        let encoded =
+            pingora::http::RequestHeader::build("GET", b"/api/%2e%2e/admin", None).unwrap();
+        assert_eq!(route_rewritten_path_and_query(&encoded, &route), None);
+
+        let encoded_separator =
+            pingora::http::RequestHeader::build("GET", b"/api/safe%2f..%2fadmin", None).unwrap();
+        assert_eq!(
+            route_rewritten_path_and_query(&encoded_separator, &route),
+            None
         );
     }
 
@@ -11017,6 +11104,9 @@ mod tests {
             "https://edge.example:8443/img/logo.webp?v=1"
         );
         assert!(peer_fill_url("https://edge.example:8443", "relative").is_err());
+        assert!(peer_fill_url("https://edge.example:8443", "/../admin").is_err());
+        assert!(peer_fill_url("https://edge.example:8443", "/%2e%2e/admin").is_err());
+        assert!(peer_fill_url("https://edge.example:8443", "/safe%2f..%2fadmin").is_err());
     }
 
     #[cfg(feature = "cache")]
