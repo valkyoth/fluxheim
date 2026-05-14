@@ -40,7 +40,8 @@ activity metrics, and a two-node smoke test for the peer-fill path.
 - Added a local two-node peer-fill smoke test that warms node B, serves a node
   A miss from node B as `PEER-HIT`, verifies the origin is not contacted again,
   proves node A stores the peer response locally, checks peer-fill metrics, and
-  verifies fail-closed peer misses return `504` without contacting origin.
+  verifies fail-closed peer misses return `504` without contacting origin while
+  fail-open peer misses fall back to origin.
 - Enforced `peer_fill.max_concurrent_requests` at runtime per vhost/route cache
   policy. If the peer-fill budget is saturated, Fluxheim follows `fail_open`:
   fallback to origin when allowed, or a bounded `504` miss response otherwise.

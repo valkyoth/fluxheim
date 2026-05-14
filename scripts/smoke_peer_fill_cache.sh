@@ -11,7 +11,7 @@ import socket
 
 sockets = []
 try:
-    for _ in range(4):
+    for _ in range(5):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -27,15 +27,17 @@ NODE_A_PORT=$1
 NODE_B_PORT=$2
 ORIGIN_PORT=$3
 METRICS_PORT=$4
+NODE_C_PORT=$5
 
 ORIGIN_PID=
 NODE_A_PID=
 NODE_B_PID=
+NODE_C_PID=
 
 cleanup() {
     status=$?
 
-    for pid in "$NODE_A_PID" "$NODE_B_PID" "$ORIGIN_PID"; do
+    for pid in "$NODE_A_PID" "$NODE_B_PID" "$NODE_C_PID" "$ORIGIN_PID"; do
         if [ -n "$pid" ]; then
             kill "$pid" 2>/dev/null || true
         fi
@@ -43,13 +45,13 @@ cleanup() {
 
     sleep 0.2
 
-    for pid in "$NODE_A_PID" "$NODE_B_PID" "$ORIGIN_PID"; do
+    for pid in "$NODE_A_PID" "$NODE_B_PID" "$NODE_C_PID" "$ORIGIN_PID"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -9 "$pid" 2>/dev/null || true
         fi
     done
 
-    for pid in "$NODE_A_PID" "$NODE_B_PID" "$ORIGIN_PID"; do
+    for pid in "$NODE_A_PID" "$NODE_B_PID" "$NODE_C_PID" "$ORIGIN_PID"; do
         if [ -n "$pid" ]; then
             wait "$pid" 2>/dev/null || true
         fi
@@ -63,7 +65,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$TMP_DIR/node-a-cache" "$TMP_DIR/node-b-cache" "$TMP_DIR/run"
+mkdir -p "$TMP_DIR/node-a-cache" "$TMP_DIR/node-b-cache" "$TMP_DIR/node-c-cache" "$TMP_DIR/run"
 
 cat > "$TMP_DIR/origin.py" <<'PY'
 import sys
@@ -231,8 +233,24 @@ name = \"node-b\"
 base_url = \"http://127.0.0.1:${NODE_B_PORT}\"
 "
 
+NODE_C_PEER_FILL="
+[vhosts.cache.peer_fill]
+enabled = true
+connect_timeout_secs = 2
+read_timeout_secs = 5
+max_object_bytes = \"256KiB\"
+max_concurrent_requests = 4
+allow_insecure_http = true
+fail_open = true
+
+[[vhosts.cache.peer_fill.peers]]
+name = \"node-b\"
+base_url = \"http://127.0.0.1:${NODE_B_PORT}\"
+"
+
 write_config "node-a" "$NODE_A_PORT" "$TMP_DIR/node-a-cache" "$NODE_A_METRICS" "$NODE_A_PEER_FILL"
 write_config "node-b" "$NODE_B_PORT" "$TMP_DIR/node-b-cache" "" ""
+write_config "node-c" "$NODE_C_PORT" "$TMP_DIR/node-c-cache" "" "$NODE_C_PEER_FILL"
 
 cargo build --quiet --no-default-features --features profile-cache-server,metrics
 
@@ -254,6 +272,9 @@ NODE_B_PID=$!
 
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/node-a.toml" >"$TMP_DIR/node-a.log" 2>&1 &
 NODE_A_PID=$!
+
+"$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/node-c.toml" >"$TMP_DIR/node-c.log" 2>&1 &
+NODE_C_PID=$!
 
 wait_for_port() {
     port=$1
@@ -281,6 +302,7 @@ PY
 
 wait_for_port "$NODE_B_PORT" "node B"
 wait_for_port "$NODE_A_PORT" "node A"
+wait_for_port "$NODE_C_PORT" "node C"
 wait_for_port "$METRICS_PORT" "node A metrics"
 
 b_miss_headers=$(mktemp "$TMP_DIR/b-miss-headers.XXXXXX")
@@ -292,6 +314,7 @@ vary_a_peer_headers=$(mktemp "$TMP_DIR/vary-a-peer-headers.XXXXXX")
 vary_a_hit_headers=$(mktemp "$TMP_DIR/vary-a-hit-headers.XXXXXX")
 vary_a_fail_headers=$(mktemp "$TMP_DIR/vary-a-fail-headers.XXXXXX")
 fail_closed_headers=$(mktemp "$TMP_DIR/fail-closed-headers.XXXXXX")
+fail_open_headers=$(mktemp "$TMP_DIR/fail-open-headers.XXXXXX")
 b_body=$(mktemp "$TMP_DIR/b-body.XXXXXX")
 a_peer_body=$(mktemp "$TMP_DIR/a-peer-body.XXXXXX")
 a_hit_body=$(mktemp "$TMP_DIR/a-hit-body.XXXXXX")
@@ -300,6 +323,7 @@ vary_a_peer_body=$(mktemp "$TMP_DIR/vary-a-peer-body.XXXXXX")
 vary_a_hit_body=$(mktemp "$TMP_DIR/vary-a-hit-body.XXXXXX")
 vary_a_fail_body=$(mktemp "$TMP_DIR/vary-a-fail-body.XXXXXX")
 fail_closed_body=$(mktemp "$TMP_DIR/fail-closed-body.XXXXXX")
+fail_open_body=$(mktemp "$TMP_DIR/fail-open-body.XXXXXX")
 metrics_body=$(mktemp "$TMP_DIR/metrics.XXXXXX")
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$b_miss_headers" -o "$b_body" \
@@ -388,6 +412,25 @@ grep -qi '^x-cache-reason: peer-fill-miss' "$fail_closed_headers"
 uncached_origin_count=$(curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__count?path=/uncached.webp")
 if [ "$uncached_origin_count" != "0" ]; then
     echo "peer-fill cache smoke failed: fail-closed peer miss contacted origin $uncached_origin_count times" >&2
+    exit 1
+fi
+
+fail_open_status=$(curl -sS --max-time "$CURL_MAX_TIME" -w '%{http_code}' \
+    -D "$fail_open_headers" -o "$fail_open_body" \
+    -H "Host: cache.test" "http://127.0.0.1:${NODE_C_PORT}/uncached.webp")
+if [ "$fail_open_status" != "200" ]; then
+    echo "peer-fill cache smoke failed: expected fail-open origin fallback 200, got $fail_open_status" >&2
+    exit 1
+fi
+grep -qi '^x-cache-status: MISS' "$fail_open_headers"
+if ! grep -q '^uncached-origin-body$' "$fail_open_body"; then
+    echo "peer-fill cache smoke failed: fail-open fallback returned unexpected body" >&2
+    exit 1
+fi
+
+uncached_origin_count=$(curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__count?path=/uncached.webp")
+if [ "$uncached_origin_count" != "1" ]; then
+    echo "peer-fill cache smoke failed: expected one origin fetch after fail-open fallback, got $uncached_origin_count" >&2
     exit 1
 fi
 

@@ -270,9 +270,10 @@ internal cache implementation.
   `examples/cache-peer-fill.toml` shows the current config shape for
   cache-cluster planning. `scripts/smoke_peer_fill_cache.sh` runs a local
   two-node smoke that proves node-to-node `PEER-HIT`, no extra origin fetch,
-  local post-fill `HIT`, fail-closed `504` without origin fetch, and peer-fill
-  metrics. The configured `peer_fill.max_concurrent_requests` budget is
-  enforced per vhost or route cache policy for active outbound peer fetches.
+  local post-fill `HIT`, fail-closed `504` without origin fetch, fail-open
+  origin fallback, and peer-fill metrics. The configured
+  `peer_fill.max_concurrent_requests` budget is enforced per vhost or route
+  cache policy for active outbound peer fetches.
   Peer response `Age` is preserved during admission, so a peer-filled object
   stores only its remaining freshness instead of extending the origin TTL.
   Peer-filled responses with `Vary` are stored under the matching variant key,
