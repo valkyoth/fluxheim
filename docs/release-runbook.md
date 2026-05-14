@@ -133,6 +133,20 @@ tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
 sha256sum "dist/${DIST_NAME}.tar.gz"
 ```
 
+For the PHP-FPM web binary profile, rebuild with:
+
+```bash
+DIST_NAME="fluxheim-${RELEASE_VERSION}-php-${TARGET}"
+cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client
+rm -rf "dist/${DIST_NAME}"
+mkdir -p "dist/${DIST_NAME}"
+cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
+cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
+tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
+sha256sum "dist/${DIST_NAME}.tar.gz"
+```
+
 Record all binary checksums.
 
 Generate SBOMs for the tagged source tree:

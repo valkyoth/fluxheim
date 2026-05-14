@@ -2509,6 +2509,8 @@ struct RuntimeVhost {
     load_balancer: Option<UpstreamLoadBalancer>,
     #[cfg(feature = "web")]
     web: Option<StaticFileServer>,
+    #[cfg(feature = "php-fpm")]
+    php: Option<RuntimePhp>,
     routes: Vec<RuntimeRoute>,
 }
 
@@ -2548,6 +2550,8 @@ impl std::fmt::Debug for RuntimeVhost {
 
         #[cfg(feature = "web")]
         debug.field("web", &self.web);
+        #[cfg(feature = "php-fpm")]
+        debug.field("php", &self.php);
         debug.field("routes", &self.routes);
 
         debug.finish()
@@ -2721,12 +2725,22 @@ enum RuntimeRouteAction {
     AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore),
     #[cfg(feature = "web")]
     Web(StaticFileServer),
+    #[cfg(feature = "php-fpm")]
+    Php(RuntimePhp),
 }
 
 #[derive(Debug, Clone)]
 struct RuntimeProxy {
     config: ProxyConfig,
     error_pages: Vec<RuntimeErrorPage>,
+}
+
+#[cfg(feature = "php-fpm")]
+#[derive(Debug, Clone)]
+struct RuntimePhp {
+    config: crate::config::PhpConfig,
+    root: std::path::PathBuf,
+    files: StaticFileServer,
 }
 
 #[cfg(feature = "web")]
@@ -2758,6 +2772,65 @@ impl RuntimeProxy {
 
     fn error_page(&self, status: u16) -> Option<&RuntimeErrorPage> {
         self.error_pages.iter().find(|page| page.status == status)
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl RuntimePhp {
+    fn from_config(
+        scope: impl std::fmt::Display,
+        config: &crate::config::PhpConfig,
+    ) -> io::Result<Option<Self>> {
+        if !config.enabled {
+            return Ok(None);
+        }
+        let scope = scope.to_string();
+        let root = config.root.as_ref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{scope}: enabled PHP requires php.root"),
+            )
+        })?;
+        let root_metadata = std::fs::symlink_metadata(root).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("{scope}: php root {}: {error}", root.display()),
+            )
+        })?;
+        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{scope}: php root is not a real directory: {}",
+                    root.display()
+                ),
+            ));
+        }
+        let root = root.canonicalize().map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("{scope}: php root {}: {error}", root.display()),
+            )
+        })?;
+        let files = StaticFileServer::from_config(&crate::config::WebConfig {
+            root: Some(root.clone()),
+            index_files: vec![config.index.clone()],
+            deny_dotfiles: true,
+            directory_listing: crate::config::DirectoryListingConfig::default(),
+            cache_control: "private, no-store".to_owned(),
+            expires: None,
+        })?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{scope}: enabled PHP requires php.root"),
+            )
+        })?;
+        Ok(Some(Self {
+            config: config.clone(),
+            root,
+            files,
+        }))
     }
 }
 
@@ -2845,6 +2918,32 @@ impl RuntimeRoute {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("route {:?} requires the web feature", route.name),
+                ));
+            }
+        } else if let Some(php) = &route.php {
+            #[cfg(feature = "php-fpm")]
+            {
+                let php = RuntimePhp::from_config(
+                    format!("vhost {vhost_name:?} route {:?} php", route.name),
+                    php,
+                )?
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "vhost {vhost_name:?} route {:?} PHP action requires php.enabled = true",
+                            route.name
+                        ),
+                    )
+                })?;
+                RuntimeRouteAction::Php(php)
+            }
+            #[cfg(not(feature = "php-fpm"))]
+            {
+                let _ = php;
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("route {:?} requires the php-fpm feature", route.name),
                 ));
             }
         } else {
@@ -3022,6 +3121,8 @@ impl RuntimeVhost {
             cache,
             #[cfg(feature = "web")]
             web: static_file_server_from_config("default web", &web)?,
+            #[cfg(feature = "php-fpm")]
+            php: None,
             routes: Vec::new(),
         })
     }
@@ -3092,6 +3193,8 @@ impl RuntimeVhost {
         let proxy_scope = format!("vhost {:?} proxy", vhost.name);
         #[cfg(feature = "web")]
         let web_scope = format!("vhost {:?} web", vhost.name);
+        #[cfg(feature = "php-fpm")]
+        let php_scope = format!("vhost {:?} php", vhost.name);
 
         Ok(Self {
             name: vhost.name.clone(),
@@ -3120,6 +3223,8 @@ impl RuntimeVhost {
             cache: vhost.cache.clone(),
             #[cfg(feature = "web")]
             web: static_file_server_from_config(web_scope, &vhost.web)?,
+            #[cfg(feature = "php-fpm")]
+            php: RuntimePhp::from_config(php_scope, &vhost.php)?,
             routes,
         })
     }
@@ -3377,7 +3482,47 @@ impl ProxyHttp for FluxProxy {
                     }
                     return Ok(false);
                 }
+                #[cfg(feature = "php-fpm")]
+                RuntimeRouteAction::Php(php) => {
+                    let request_path = route
+                        .strip_prefix
+                        .as_deref()
+                        .and_then(|_| route_rewritten_path_and_query(session.req_header(), route))
+                        .and_then(|path_and_query| {
+                            path_and_query
+                                .split_once('?')
+                                .map(|(path, _)| path.to_owned())
+                                .or(Some(path_and_query))
+                        });
+                    respond_php_request(
+                        session,
+                        ctx,
+                        vhost,
+                        &route.response_headers,
+                        php,
+                        false,
+                        request_path,
+                    )
+                    .await?;
+                    return Ok(true);
+                }
             }
+        }
+
+        #[cfg(feature = "php-fpm")]
+        if let Some(php) = &vhost.php
+            && respond_php_request(
+                session,
+                ctx,
+                vhost,
+                &vhost.response_headers,
+                php,
+                true,
+                None,
+            )
+            .await?
+        {
+            return Ok(true);
         }
 
         #[cfg(feature = "web")]
@@ -5712,6 +5857,513 @@ async fn respond_host_routing_rejection(
         .await
 }
 
+#[cfg(feature = "php-fpm")]
+const MAX_PHP_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(feature = "php-fpm")]
+const MAX_PHP_RESPONSE_HEADER_BYTES: usize = 64 * 1024;
+
+#[cfg(feature = "php-fpm")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct PhpScriptResolution {
+    file: crate::web::StaticFile,
+    script_name: String,
+    path_info: String,
+}
+
+#[cfg(feature = "php-fpm")]
+enum PhpResolveOutcome {
+    Execute(PhpScriptResolution),
+    Decline,
+    Forbidden,
+    NotFound,
+}
+
+#[cfg(feature = "php-fpm")]
+async fn respond_php_request(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    vhost: &RuntimeVhost,
+    response_headers: &crate::config::ResponseHeaderPolicyConfig,
+    php: &RuntimePhp,
+    decline_existing_static: bool,
+    request_path_override: Option<String>,
+) -> Result<bool> {
+    let request_path =
+        request_path_override.unwrap_or_else(|| session.req_header().uri.path().to_owned());
+    let query = session.req_header().uri.query().unwrap_or("").to_owned();
+    let request_uri = session
+        .req_header()
+        .uri
+        .path_and_query()
+        .map(|path_and_query| path_and_query.as_str().to_owned())
+        .unwrap_or_else(|| request_path.clone());
+    let method = session.req_header().method.as_str().to_owned();
+    let version = session.req_header().version;
+    let resolution = match resolve_php_script(php, &request_path, decline_existing_static) {
+        PhpResolveOutcome::Execute(resolution) => resolution,
+        PhpResolveOutcome::Decline => return Ok(false),
+        PhpResolveOutcome::Forbidden => {
+            session
+                .respond_error_with_body(403, Bytes::from_static(b"forbidden"))
+                .await?;
+            return Ok(true);
+        }
+        PhpResolveOutcome::NotFound => {
+            session
+                .respond_error_with_body(404, Bytes::from_static(b"not found"))
+                .await?;
+            return Ok(true);
+        }
+    };
+
+    let body_limit = php
+        .config
+        .max_request_body_bytes
+        .map(|bytes| bytes.as_u64())
+        .or(ctx.request_body_limit_bytes)
+        .unwrap_or(u64::MAX);
+    let request_body = read_php_request_body(session, ctx, body_limit).await?;
+    let content_type =
+        request_header_values_joined(session.req_header(), "content-type").unwrap_or_default();
+    let server_port = if downstream_tls(session) { 443 } else { 80 };
+    let remote = session.client_addr().and_then(|address| address.as_inet());
+    let remote_addr = remote
+        .map(|address| address.ip().to_string())
+        .unwrap_or_default();
+    let remote_port = remote.map(|address| address.port()).unwrap_or_default();
+    let document_root = php.root.to_string_lossy().to_string();
+    let script_filename = resolution.file.path.to_string_lossy().to_string();
+    let host = request_host(session).unwrap_or(vhost.name.as_str());
+
+    let mut params = fastcgi_client::Params::default()
+        .gateway_interface("CGI/1.1")
+        .server_software("fluxheim")
+        .server_protocol(http_version_cgi(version))
+        .request_method(method.clone())
+        .script_name(resolution.script_name.clone())
+        .script_filename(script_filename)
+        .query_string(query)
+        .request_uri(request_uri)
+        .document_root(document_root)
+        .document_uri(resolution.script_name.clone())
+        .remote_addr(remote_addr)
+        .remote_port(remote_port)
+        .server_addr("")
+        .server_port(server_port)
+        .server_name(host.to_owned())
+        .content_type(content_type)
+        .content_length(request_body.len());
+    if !resolution.path_info.is_empty() {
+        params = params.custom("PATH_INFO", resolution.path_info.clone());
+    }
+
+    let timeout = std::time::Duration::from_secs(php.config.request_timeout_secs);
+    let output = execute_php_fpm(&php.config.fpm, params, request_body, timeout)
+        .await
+        .map_err(|error| {
+            Error::because(ErrorType::HTTPStatus(502), "php-fpm request failed", error)
+        })?;
+    if let Some(stderr) = output.stderr.as_deref()
+        && !stderr.is_empty()
+    {
+        log::warn!("php-fpm stderr: {}", sanitized_php_stderr(stderr));
+    }
+    let stdout = output.stdout.unwrap_or_default();
+    let (mut response, body) = parse_php_response(&stdout).map_err(|error| {
+        Error::because(
+            ErrorType::HTTPStatus(502),
+            "php-fpm response was invalid",
+            error,
+        )
+    })?;
+    response.remove_header("content-length");
+    response.insert_header("content-length", body.len().to_string())?;
+    crate::headers::apply_response_policy(&mut response, response_headers)?;
+
+    let is_head = method == "HEAD";
+    ctx.response_body_bytes_seen = if is_head { 0 } else { body.len() as u64 };
+    session
+        .write_response_header(Box::new(response), is_head || body.is_empty())
+        .await?;
+    if !is_head && !body.is_empty() {
+        session
+            .write_response_body(Some(Bytes::from(body)), true)
+            .await?;
+    }
+    Ok(true)
+}
+
+#[cfg(feature = "php-fpm")]
+fn resolve_php_script(
+    php: &RuntimePhp,
+    request_path: &str,
+    decline_existing_static: bool,
+) -> PhpResolveOutcome {
+    let Some((script_name, path_info, explicit_php)) =
+        php_script_name_for_request(php, request_path)
+    else {
+        return PhpResolveOutcome::Forbidden;
+    };
+
+    if !explicit_php && let Ok(ResolveResult::Found(file)) = php.files.resolve(request_path) {
+        if let Some(script_name) = php_static_file_script_name(php, &file) {
+            return PhpResolveOutcome::Execute(PhpScriptResolution {
+                file,
+                script_name,
+                path_info,
+            });
+        }
+        if decline_existing_static {
+            return PhpResolveOutcome::Decline;
+        }
+    }
+
+    match php.files.resolve(&script_name) {
+        Ok(ResolveResult::Found(file)) => PhpResolveOutcome::Execute(PhpScriptResolution {
+            file,
+            script_name,
+            path_info,
+        }),
+        Ok(ResolveResult::Forbidden) => PhpResolveOutcome::Forbidden,
+        Ok(ResolveResult::NotFound | ResolveResult::DirectoryListing(_)) => {
+            PhpResolveOutcome::NotFound
+        }
+        Err(error) => {
+            log::warn!("php script resolver failed: {error}");
+            PhpResolveOutcome::NotFound
+        }
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_static_file_script_name(php: &RuntimePhp, file: &crate::web::StaticFile) -> Option<String> {
+    let relative = file.path.strip_prefix(&php.root).ok()?;
+    let mut script_name = String::new();
+    for component in relative.components() {
+        let std::path::Component::Normal(segment) = component else {
+            return None;
+        };
+        let segment = segment.to_str()?;
+        if segment.is_empty() || segment == "." || segment == ".." || segment.starts_with('.') {
+            return None;
+        }
+        script_name.push('/');
+        script_name.push_str(segment);
+    }
+    if script_name.is_empty() || !php_segment_has_allowed_extension(&script_name, php) {
+        return None;
+    }
+    Some(script_name)
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_script_name_for_request(
+    php: &RuntimePhp,
+    request_path: &str,
+) -> Option<(String, String, bool)> {
+    let decoded = percent_encoding::percent_decode_str(request_path)
+        .decode_utf8()
+        .ok()?;
+    if !decoded.starts_with('/') || decoded.contains('\0') {
+        return None;
+    }
+
+    let mut segments = Vec::new();
+    for segment in decoded.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." || segment.contains('\\') || segment.starts_with('.') {
+            return None;
+        }
+        segments.push(segment.to_owned());
+    }
+
+    if let Some((index, _)) = segments
+        .iter()
+        .enumerate()
+        .find(|(_, segment)| php_segment_has_allowed_extension(segment, php))
+    {
+        let script_name = format!("/{}", segments[..=index].join("/"));
+        let trailing = &segments[index + 1..];
+        if !trailing.is_empty() && php.config.path_info == crate::config::PhpPathInfoMode::Disabled
+        {
+            return None;
+        }
+        let path_info = if trailing.is_empty() {
+            String::new()
+        } else {
+            format!("/{}", trailing.join("/"))
+        };
+        return Some((script_name, path_info, true));
+    }
+
+    Some((format!("/{}", php.config.index), String::new(), false))
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_segment_has_allowed_extension(segment: &str, php: &RuntimePhp) -> bool {
+    segment.rsplit_once('.').is_some_and(|(_, extension)| {
+        php.config
+            .allowed_extensions
+            .iter()
+            .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+    })
+}
+
+#[cfg(feature = "php-fpm")]
+async fn read_php_request_body(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    limit_bytes: u64,
+) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = session.as_downstream_mut().read_request_body().await? {
+        if request_body_chunk_limit_status(
+            limit_bytes,
+            &mut ctx.request_body_bytes_seen,
+            chunk.len(),
+        )
+        .is_some()
+        {
+            return Error::e_explain(
+                ErrorType::HTTPStatus(413),
+                "PHP request body exceeds configured limit",
+            );
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+#[cfg(feature = "php-fpm")]
+async fn execute_php_fpm(
+    fpm: &crate::config::PhpFpmConfig,
+    params: fastcgi_client::Params<'_>,
+    body: Vec<u8>,
+    timeout: std::time::Duration,
+) -> io::Result<fastcgi_client::Response> {
+    if let Some(address) = fpm.tcp.as_deref() {
+        let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address))
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm connect timed out"))??;
+        execute_php_fpm_stream(stream, params, body, timeout).await
+    } else if let Some(socket) = fpm.socket.as_deref() {
+        #[cfg(unix)]
+        {
+            let stream = tokio::time::timeout(timeout, tokio::net::UnixStream::connect(socket))
+                .await
+                .map_err(|_| {
+                    io::Error::new(io::ErrorKind::TimedOut, "php-fpm socket connect timed out")
+                })??;
+            execute_php_fpm_stream(stream, params, body, timeout).await
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = socket;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "php-fpm Unix sockets are only supported on Unix",
+            ))
+        }
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php-fpm socket or tcp is required",
+        ))
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+async fn execute_php_fpm_stream<S>(
+    stream: S,
+    params: fastcgi_client::Params<'_>,
+    body: Vec<u8>,
+    timeout: std::time::Duration,
+) -> io::Result<fastcgi_client::Response>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let client = fastcgi_client::Client::new_tokio(stream);
+    let request = fastcgi_client::Request::new(params, fastcgi_client::io::Cursor::new(body));
+    tokio::time::timeout(timeout, client.execute_once(request))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm request timed out"))?
+        .map_err(|error| io::Error::other(error.to_string()))
+}
+
+#[cfg(feature = "php-fpm")]
+fn parse_php_response(stdout: &[u8]) -> io::Result<(ResponseHeader, Vec<u8>)> {
+    if stdout.len() > MAX_PHP_RESPONSE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response exceeds maximum buffered size",
+        ));
+    }
+    let (header_bytes, body) = split_php_response(stdout)?;
+    if header_bytes.len() > MAX_PHP_RESPONSE_HEADER_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response headers exceed maximum size",
+        ));
+    }
+
+    let mut status = 200;
+    let mut response = php_response_header(status)?;
+    for line in header_bytes.split(|byte| *byte == b'\n') {
+        let line = trim_ascii_cr(line);
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_first_colon() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "php-fpm response header is malformed",
+            ));
+        };
+        let name = trim_ascii(name);
+        let value = trim_ascii(value);
+        if !safe_php_header_name(name) || !safe_php_header_value(value) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "php-fpm response header contains unsafe bytes",
+            ));
+        }
+        if name.eq_ignore_ascii_case(b"status") {
+            status = parse_php_status(value)?;
+            response = php_response_header(status)?;
+            continue;
+        }
+        let name = std::str::from_utf8(name)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let value = std::str::from_utf8(value)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        response
+            .append_header(name.to_owned(), value.to_owned())
+            .map_err(|error| io::Error::other(error.to_string()))?;
+    }
+
+    Ok((response, body.to_vec()))
+}
+
+#[cfg(feature = "php-fpm")]
+fn http_version_cgi(version: http::Version) -> &'static str {
+    match version {
+        http::Version::HTTP_09 => "HTTP/0.9",
+        http::Version::HTTP_10 => "HTTP/1.0",
+        http::Version::HTTP_11 => "HTTP/1.1",
+        http::Version::HTTP_2 => "HTTP/2.0",
+        http::Version::HTTP_3 => "HTTP/3.0",
+        _ => "HTTP/1.1",
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_response_header(status: u16) -> io::Result<ResponseHeader> {
+    ResponseHeader::build(status, Some(8)).map_err(|error| io::Error::other(error.to_string()))
+}
+
+#[cfg(feature = "php-fpm")]
+fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
+    if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
+        return Ok((&stdout[..index], &stdout[index + 4..]));
+    }
+    if let Some(index) = stdout.windows(2).position(|window| window == b"\n\n") {
+        return Ok((&stdout[..index], &stdout[index + 2..]));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "php-fpm response is missing header terminator",
+    ))
+}
+
+#[cfg(feature = "php-fpm")]
+fn parse_php_status(value: &[u8]) -> io::Result<u16> {
+    let text = std::str::from_utf8(value)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let status = text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty PHP Status header"))?
+        .parse::<u16>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if !(100..=599).contains(&status) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PHP Status header is outside HTTP status range",
+        ));
+    }
+    Ok(status)
+}
+
+#[cfg(feature = "php-fpm")]
+fn trim_ascii_cr(value: &[u8]) -> &[u8] {
+    value.strip_suffix(b"\r").unwrap_or(value)
+}
+
+#[cfg(feature = "php-fpm")]
+fn trim_ascii(mut value: &[u8]) -> &[u8] {
+    while matches!(value.first(), Some(b' ' | b'\t')) {
+        value = &value[1..];
+    }
+    while matches!(value.last(), Some(b' ' | b'\t')) {
+        value = &value[..value.len() - 1];
+    }
+    value
+}
+
+#[cfg(feature = "php-fpm")]
+fn safe_php_header_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.iter().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+#[cfg(feature = "php-fpm")]
+fn safe_php_header_value(value: &[u8]) -> bool {
+    value.iter().all(|byte| !matches!(byte, b'\r' | b'\n' | 0))
+}
+
+#[cfg(feature = "php-fpm")]
+trait SplitFirstColon {
+    fn split_first_colon(&self) -> Option<(&[u8], &[u8])>;
+}
+
+#[cfg(feature = "php-fpm")]
+impl SplitFirstColon for [u8] {
+    fn split_first_colon(&self) -> Option<(&[u8], &[u8])> {
+        let index = self.iter().position(|byte| *byte == b':')?;
+        Some((&self[..index], &self[index + 1..]))
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn sanitized_php_stderr(stderr: &[u8]) -> String {
+    const MAX_LOGGED_STDERR: usize = 2048;
+    String::from_utf8_lossy(&stderr[..stderr.len().min(MAX_LOGGED_STDERR)])
+        .chars()
+        .map(|char| if char.is_control() { ' ' } else { char })
+        .collect()
+}
+
 #[cfg(feature = "web")]
 async fn serve_static_route(
     session: &mut Session,
@@ -8015,6 +8667,8 @@ fn approximate_request_header_bytes(request: &RequestHeader) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "php-fpm")]
+    use std::fs;
     use std::time::Duration;
 
     use bytes::Bytes;
@@ -8055,12 +8709,121 @@ mod tests {
         PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
         peer_fill_request_from_header, peer_fill_url,
     };
+    #[cfg(feature = "php-fpm")]
+    use super::{
+        PhpResolveOutcome, RuntimePhp, parse_php_response, php_script_name_for_request,
+        resolve_php_script,
+    };
     #[cfg(feature = "cache")]
     use super::{
         capture_revalidation_304_headers, request_cache_bypass, request_cache_bypass_reason,
         request_cache_only_if_cached, request_cache_revalidation_requested,
         response_with_revalidation_304_headers, revalidation_304_vary_changed,
     };
+
+    #[cfg(feature = "php-fpm")]
+    fn php_test_runtime(name: &str) -> RuntimePhp {
+        let root = unique_temp_path(name);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("index.php"), "<?php echo 'index';").unwrap();
+        fs::write(root.join("app.php"), "<?php echo 'app';").unwrap();
+        fs::write(root.join("style.css"), "body{}").unwrap();
+        fs::create_dir_all(root.join("blog")).unwrap();
+        fs::write(root.join("blog").join("index.php"), "<?php echo 'blog';").unwrap();
+        let config = crate::config::PhpConfig {
+            enabled: true,
+            root: Some(root.clone()),
+            fpm: crate::config::PhpFpmConfig {
+                tcp: Some("127.0.0.1:9000".to_owned()),
+                ..crate::config::PhpFpmConfig::default()
+            },
+            ..crate::config::PhpConfig::default()
+        };
+        let files = crate::web::StaticFileServer::from_config(&crate::config::WebConfig {
+            root: Some(root.clone()),
+            index_files: vec![config.index.clone()],
+            deny_dotfiles: true,
+            directory_listing: crate::config::DirectoryListingConfig::default(),
+            cache_control: "private, no-store".to_owned(),
+            expires: None,
+        })
+        .unwrap()
+        .unwrap();
+        RuntimePhp {
+            config,
+            root: root.canonicalize().unwrap(),
+            files,
+        }
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_script_resolution_accepts_direct_script_and_front_controller() {
+        let php = php_test_runtime("proxy-php-script-resolution");
+
+        let (script, path_info, explicit) = php_script_name_for_request(&php, "/app.php").unwrap();
+        assert_eq!(script, "/app.php");
+        assert_eq!(path_info, "");
+        assert!(explicit);
+
+        let (script, path_info, explicit) =
+            php_script_name_for_request(&php, "/missing/page").unwrap();
+        assert_eq!(script, "/index.php");
+        assert_eq!(path_info, "");
+        assert!(!explicit);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_script_resolution_rejects_traversal_and_disabled_path_info() {
+        let php = php_test_runtime("proxy-php-script-resolution-reject");
+
+        assert!(php_script_name_for_request(&php, "/../app.php").is_none());
+        assert!(php_script_name_for_request(&php, "/app.php/admin").is_none());
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_resolution_declines_static_assets_but_executes_directory_php_index() {
+        let php = php_test_runtime("proxy-php-existing-static");
+
+        assert!(matches!(
+            resolve_php_script(&php, "/style.css", true),
+            PhpResolveOutcome::Decline
+        ));
+        let PhpResolveOutcome::Execute(resolution) = resolve_php_script(&php, "/blog/", true)
+        else {
+            panic!("expected directory PHP index to execute");
+        };
+        assert_eq!(resolution.script_name, "/blog/index.php");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn parse_php_response_accepts_status_and_headers() {
+        let (response, body) =
+            parse_php_response(b"Status: 201 Created\r\nContent-Type: text/plain\r\n\r\nok")
+                .unwrap();
+
+        assert_eq!(response.status.as_u16(), 201);
+        assert_eq!(
+            response
+                .headers
+                .get("content-type")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "text/plain"
+        );
+        assert_eq!(body, b"ok");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn parse_php_response_rejects_header_injection() {
+        let error = parse_php_response(b"X-Test: ok\rbad\r\n\r\nbody").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
 
     #[test]
     fn routes_known_hosts() {
@@ -8087,6 +8850,7 @@ mod tests {
                     },
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8103,6 +8867,7 @@ mod tests {
                     },
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8128,6 +8893,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -8157,6 +8923,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -8195,6 +8962,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -8214,6 +8982,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -8248,6 +9017,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8261,6 +9031,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8305,6 +9076,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -8363,6 +9135,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8380,6 +9153,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8426,6 +9200,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8439,6 +9214,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8520,6 +9296,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: vec![
                     RouteConfig {
@@ -8536,6 +9313,7 @@ mod tests {
                         max_request_body_bytes: None,
                         proxy: None,
                         web: None,
+                        php: None,
                         cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
@@ -8554,6 +9332,7 @@ mod tests {
                         max_request_body_bytes: None,
                         redirect: None,
                         web: None,
+                        php: None,
                         cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
@@ -8572,6 +9351,7 @@ mod tests {
                         max_request_body_bytes: None,
                         redirect: None,
                         web: None,
+                        php: None,
                         cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
@@ -8590,6 +9370,7 @@ mod tests {
                         max_request_body_bytes: None,
                         redirect: None,
                         web: None,
+                        php: None,
                         cache: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
@@ -8807,6 +9588,7 @@ mod tests {
                         ..crate::config::ResponseHeaderPolicyOverlayConfig::default()
                     },
                 },
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -8899,6 +9681,7 @@ mod tests {
                         ..CacheConfig::default()
                     },
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8912,6 +9695,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -8973,6 +9757,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig {
                     root: Some(root.clone()),
                     ..WebConfig::default()
@@ -9030,6 +9815,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig {
                     root: Some(root.clone()),
                     ..WebConfig::default()
@@ -9084,6 +9870,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: vec![RouteConfig {
                     name: "assets".to_owned(),
@@ -9099,6 +9886,7 @@ mod tests {
                         ..ProxyConfig::default()
                     }),
                     web: None,
+                    php: None,
                     cache: Some(CacheConfig {
                         enabled: true,
                         memory: crate::config::CacheMemoryConfig {
@@ -9167,6 +9955,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: vec![RouteConfig {
                     name: "assets".to_owned(),
@@ -9182,6 +9971,7 @@ mod tests {
                         ..ProxyConfig::default()
                     }),
                     web: None,
+                    php: None,
                     cache: Some(CacheConfig {
                         enabled: true,
                         memory: crate::config::CacheMemoryConfig {
@@ -9259,6 +10049,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9306,6 +10097,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9374,6 +10166,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9453,6 +10246,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9564,6 +10358,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9640,6 +10435,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: vec![RouteConfig {
                     name: "assets".to_owned(),
@@ -9655,6 +10451,7 @@ mod tests {
                         ..ProxyConfig::default()
                     }),
                     web: None,
+                    php: None,
                     cache: Some(CacheConfig {
                         enabled: true,
                         disk: crate::config::CacheDiskConfig {
@@ -9737,6 +10534,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9798,6 +10596,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9855,6 +10654,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9895,6 +10695,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9938,6 +10739,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -9993,6 +10795,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -10040,6 +10843,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -10087,6 +10891,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -10173,6 +10978,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -10257,6 +11063,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: vec![RouteConfig {
                     name: "assets".to_owned(),
@@ -10272,6 +11079,7 @@ mod tests {
                         ..ProxyConfig::default()
                     }),
                     web: None,
+                    php: None,
                     cache: Some(CacheConfig {
                         enabled: true,
                         memory: crate::config::CacheMemoryConfig {
@@ -10359,6 +11167,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: vec![RouteConfig {
                     name: "assets".to_owned(),
@@ -10374,6 +11183,7 @@ mod tests {
                         ..ProxyConfig::default()
                     }),
                     web: None,
+                    php: None,
                     cache: Some(CacheConfig {
                         enabled: true,
                         disk: crate::config::CacheDiskConfig {
@@ -10526,6 +11336,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -10610,6 +11421,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -10684,6 +11496,7 @@ mod tests {
                     },
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -10700,6 +11513,7 @@ mod tests {
                     },
                     cache: CacheConfig::default(),
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },

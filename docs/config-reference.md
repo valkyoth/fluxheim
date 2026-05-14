@@ -1279,7 +1279,7 @@ the configured static or ACME-managed vhost certificate selected by SNI.
 
 ## Vhosts
 
-Vhosts bind hostnames to per-site web, proxy, TLS, cache, and header settings.
+Vhosts bind hostnames to per-site web, proxy, PHP-FPM, TLS, cache, and header settings.
 TOML uses `[[vhosts]]` to start a new vhost. Every `[vhosts.*]` table that
 follows belongs to that current vhost until the next `[[vhosts]]`.
 
@@ -1320,7 +1320,7 @@ left-most wildcard label is supported, for example `*.api.example.test`.
 
 Vhosts can also contain ordered route tables. Exact matches win first, then the
 longest prefix match, then one optional fallback route. A route must define one
-action: `redirect`, `proxy`, or `web`.
+action: `redirect`, `proxy`, `web`, or `php`.
 
 ```toml
 [[vhosts.routes]]
@@ -1374,6 +1374,25 @@ index_files = ["repo.html", "index.html"]
 [vhosts.routes.web.directory_listing]
 enabled = true
 exact_size = false
+
+[[vhosts.routes]]
+name = "php-app"
+path_prefix = "/app/"
+strip_prefix = "/app"
+max_request_body_bytes = "64MiB"
+
+[vhosts.routes.php]
+enabled = true
+runtime = "php-fpm"
+root = "/srv/sites/php.example.test/public"
+index = "index.php"
+allowed_extensions = ["php"]
+request_timeout_secs = 30
+max_request_body_bytes = "64MiB"
+path_info = "disabled"
+
+[vhosts.routes.php.fpm]
+tcp = "php-fpm:9000"
 
 [vhosts.acme_challenge]
 enabled = true

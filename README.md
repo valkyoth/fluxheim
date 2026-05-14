@@ -172,6 +172,7 @@ Individual module features:
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |
+| `php-fpm` | No | PHP-FPM FastCGI bridge for WordPress-style PHP applications. Implies `proxy` and `web`; not included in default/focused images. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `security` | Yes | Security helpers and release hardening checks. |
 | `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
@@ -225,6 +226,7 @@ Example grouped builds that match the official release artifacts:
 cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo build --no-default-features --features profile-cache-edge,acme-client
 cargo build --no-default-features --features profile-proxy-edge,acme-client
+cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 ```
 
 Manual feature selection also works:
@@ -232,6 +234,12 @@ Manual feature selection also works:
 ```bash
 cargo build --no-default-features --features proxy,web,tls-rustls,load-balancer
 ```
+
+PHP support starts in `1.3.1` with an explicit `php-fpm` module. A PHP build
+can serve normal static assets from the same root while routing missing paths
+and explicit `.php` scripts to php-fpm. See
+[`docs/php-runtime-support.md`](docs/php-runtime-support.md) and
+[`examples/php-fpm.toml`](examples/php-fpm.toml).
 
 TLS backends are mutually exclusive. Select exactly one backend when TLS is
 needed:

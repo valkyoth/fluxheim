@@ -77,6 +77,19 @@ orders through `instant-acme`, plus the runtime background renewal service. Keep
 `acme-client` enabled only in builds that perform certificate issuance or
 renewal.
 
+## PHP Runtime Modules
+
+`php-fpm` enables the `1.3.1` FastCGI bridge for PHP applications. It implies
+`proxy` and `web`, uses `fastcgi-client`, and must be selected explicitly:
+
+```bash
+cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
+```
+
+Only one PHP runtime feature may be selected in one binary. `php-turbine` and
+`php-phprs` are reserved feature gates for later `1.3.x` evaluation and do not
+add a production runtime yet.
+
 ## Profile Aliases
 
 Cargo does not have a separate `--group` flag. Fluxheim provides normal Cargo
@@ -103,6 +116,7 @@ Examples that match the official release artifacts:
 cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo build --no-default-features --features profile-cache-edge,acme-client
 cargo build --no-default-features --features profile-proxy-edge,acme-client
+cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 cargo build --no-default-features --features profile-privacy
 ```
 

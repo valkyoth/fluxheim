@@ -1,17 +1,16 @@
 # PHP Runtime Support
 
-PHP support is a future Fluxheim application-server milestone. It must not be
-part of the default binary. Each PHP runtime changes the security model from
-serving files and proxying HTTP to executing user code, so every PHP path must
-be opt-in at compile time and opt-in per vhost.
+Fluxheim `1.3.1` adds the first production-compatible PHP path through
+`php-fpm`. PHP is not part of the default binary. Each PHP runtime changes the
+security model from serving files and proxying HTTP to executing user code, so
+every PHP path is opt-in at compile time and opt-in per vhost or route.
 
 ## Current Recommendation
 
 Use this order for implementation and evaluation:
 
 1. `php-fpm`: stable backwards-compatible path for real PHP applications today.
-   This is the `1.3.1` production-compatible implementation target after the
-   `1.3.0` ingress/TLS feature-graph split.
+   This is implemented in `1.3.1`.
 2. `php-turbine`: embedded Rust/library or managed-sidecar direction if
    Turbine has an auditable API, compatible licensing, active maintenance, and
    a security model that works inside Fluxheim. This belongs in a later `1.3.x`
@@ -28,17 +27,17 @@ it as an embeddable recommended module.
 
 ## Compile-Time Features
 
-Planned feature flags:
+Implemented feature flags:
 
 ```toml
-php = []
+php = ["proxy", "web"]
+php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio"]
 php-turbine = ["php"]
-php-fpm = ["php", "dep:fastcgi-client"]
-php-phprs = ["php", "dep:phprs"]
+php-phprs = ["php"]
 ```
 
-Only one PHP runtime feature may be selected in one binary. Fluxheim should add
-`compile_error!` guards for combinations such as `php-turbine + php-fpm`.
+Only one PHP runtime feature may be selected in one binary. Fluxheim enforces
+this at compile time and in `scripts/validate-features.sh`.
 
 The default feature set must not include `php`.
 
@@ -47,7 +46,7 @@ Release order:
 - `1.3.0`: shared ingress/TLS feature-graph split and focused image/profile
   cleanup.
 - `1.3.1`: `php-fpm` FastCGI bridge, WordPress-style front-controller support,
-  and production smoke tests.
+  strict script resolution, and bounded request/response buffering.
 - `1.3.2`: focused php-fpm hardening and compatibility fixes found during
   production tests.
 - `1.3.3`: `php-turbine` review and first integration if the library/sidecar
@@ -57,7 +56,7 @@ Release order:
 
 ## Config Shape
 
-Initial typed TOML target:
+Minimal vhost TOML:
 
 ```toml
 [[vhosts]]
@@ -79,9 +78,11 @@ socket = "/run/php/php-fpm.sock"
 # tcp = "127.0.0.1:9000"
 ```
 
-The PHP handler should run before static fallback for `.php` paths. Static
-serving must never return PHP source when PHP is enabled and a PHP execution
-route fails.
+The PHP handler runs before static fallback. Existing non-PHP files under the
+PHP root are declined so the normal static server can serve assets. Missing
+paths use the configured front controller, normally `/index.php`. Explicit
+`.php` requests are executed through php-fpm. Static serving must never return
+PHP source when PHP execution fails.
 
 ## Security Requirements
 
@@ -121,16 +122,17 @@ This is the compatibility-first path. Fluxheim acts as a FastCGI client:
 1. Match an eligible PHP request from vhost config.
 2. Resolve and canonicalize the target script under the configured root.
 3. Build FastCGI params from a strict allow-list.
-4. Stream or bounded-buffer the request body to php-fpm.
+4. Bounded-buffer the request body to php-fpm.
 5. Parse FastCGI STDOUT into HTTP headers and body.
 6. Send PHP STDERR to sanitized logs and metrics.
 
 Prefer Unix sockets first for local/rootless deployments. TCP support is useful
 for separate php-fpm containers, but must require explicit config.
 
-Tests should include a rootless php-fpm container smoke test, path traversal
-tests, denied source fallback tests, malformed FastCGI response tests, timeout
-tests, and oversized body tests.
+Current tests cover config validation, traversal rejection, disabled `PATH_INFO`
+behavior, and malformed FastCGI response headers. Rootless php-fpm container
+smoke tests, timeout tests, and oversized body tests remain part of the `1.3.2`
+hardening pass.
 
 ### `php-turbine`
 

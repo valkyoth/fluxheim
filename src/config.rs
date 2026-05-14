@@ -3017,6 +3017,8 @@ pub struct VhostConfig {
     #[serde(default)]
     pub headers: VhostHeaderPolicyConfig,
     #[serde(default)]
+    pub php: PhpConfig,
+    #[serde(default)]
     pub web: WebConfig,
     #[serde(default)]
     pub routes: Vec<RouteConfig>,
@@ -3034,6 +3036,7 @@ impl VhostConfig {
         self.tls.resolve_relative_paths(base_dir);
         self.proxy.resolve_relative_paths(base_dir);
         self.cache.resolve_relative_paths(base_dir);
+        self.php.resolve_relative_paths(base_dir);
         self.web.resolve_relative_paths(base_dir);
         for route in &mut self.routes {
             route.resolve_relative_paths(base_dir);
@@ -3072,6 +3075,13 @@ impl VhostConfig {
             .map_err(|source| ConfigError::VhostSection {
                 vhost: self.name.clone(),
                 section: "headers",
+                source: Box::new(source),
+            })?;
+        self.php
+            .validate("vhosts.php")
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "php",
                 source: Box::new(source),
             })?;
         self.web
@@ -3150,6 +3160,8 @@ pub struct RouteConfig {
     #[serde(default)]
     pub web: Option<WebConfig>,
     #[serde(default)]
+    pub php: Option<PhpConfig>,
+    #[serde(default)]
     pub cache: Option<CacheConfig>,
     #[serde(default)]
     pub headers: VhostHeaderPolicyConfig,
@@ -3162,6 +3174,9 @@ impl RouteConfig {
         }
         if let Some(web) = &mut self.web {
             web.resolve_relative_paths(base_dir);
+        }
+        if let Some(php) = &mut self.php {
+            php.resolve_relative_paths(base_dir);
         }
         if let Some(cache) = &mut self.cache {
             cache.resolve_relative_paths(base_dir);
@@ -3234,7 +3249,8 @@ impl RouteConfig {
 
         let action_count = usize::from(self.redirect.is_some())
             + usize::from(self.proxy.is_some())
-            + usize::from(self.web.is_some());
+            + usize::from(self.web.is_some())
+            + usize::from(self.php.is_some());
         if action_count != 1 {
             return Err(ConfigError::InvalidRouteAction {
                 vhost: vhost.to_owned(),
@@ -3263,6 +3279,21 @@ impl RouteConfig {
                 source: Box::new(source),
             })?;
             if !web.enabled() {
+                return Err(ConfigError::InvalidRouteAction {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                });
+            }
+        }
+        if let Some(php) = &self.php {
+            php.validate("vhosts.routes.php")
+                .map_err(|source| ConfigError::RouteSection {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                    section: "php",
+                    source: Box::new(source),
+                })?;
+            if !php.enabled {
                 return Err(ConfigError::InvalidRouteAction {
                     vhost: vhost.to_owned(),
                     route: self.name.clone(),
@@ -3381,6 +3412,7 @@ impl VhostRedirectConfig {
             }),
             proxy: None,
             web: None,
+            php: None,
             cache: None,
             headers: VhostHeaderPolicyConfig::default(),
         })
@@ -3586,6 +3618,7 @@ impl VhostAcmeChallengeConfig {
                 ..ProxyConfig::default()
             }),
             web: None,
+            php: None,
             cache: None,
             headers: VhostHeaderPolicyConfig::default(),
         })
@@ -5137,6 +5170,189 @@ impl WebConfig {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhpConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub runtime: PhpRuntime,
+    #[serde(default)]
+    pub root: Option<PathBuf>,
+    #[serde(default = "default_php_index")]
+    pub index: String,
+    #[serde(default = "default_php_allowed_extensions")]
+    pub allowed_extensions: Vec<String>,
+    #[serde(default = "default_php_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+    #[serde(default)]
+    pub max_request_body_bytes: Option<ByteSize>,
+    #[serde(default)]
+    pub path_info: PhpPathInfoMode,
+    #[serde(default)]
+    pub fpm: PhpFpmConfig,
+}
+
+impl Default for PhpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            runtime: PhpRuntime::default(),
+            root: None,
+            index: default_php_index(),
+            allowed_extensions: default_php_allowed_extensions(),
+            request_timeout_secs: default_php_request_timeout_secs(),
+            max_request_body_bytes: None,
+            path_info: PhpPathInfoMode::default(),
+            fpm: PhpFpmConfig::default(),
+        }
+    }
+}
+
+impl PhpConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(root) = &mut self.root
+            && root.is_relative()
+        {
+            *root = base_dir.join(&root);
+        }
+        self.fpm.resolve_relative_paths(base_dir);
+    }
+
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        if !matches!(self.runtime, PhpRuntime::PhpFpm) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.runtime",
+                reason: "only php-fpm is supported in this release",
+            });
+        }
+
+        let root_field = format!("{scope}.root");
+        let Some(root) = &self.root else {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.root",
+                reason: "enabled PHP requires a root",
+            });
+        };
+        if root.as_os_str().is_empty() {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.root",
+                reason: "root cannot be empty",
+            });
+        }
+        validate_path(root_field.clone(), Some(root))?;
+        validate_non_world_writable_parent(root_field, Some(root))?;
+
+        validate_php_index(&self.index)?;
+        validate_php_extensions(&self.allowed_extensions)?;
+        validate_required_timeout_secs("php.request_timeout_secs", self.request_timeout_secs)?;
+        if self
+            .max_request_body_bytes
+            .is_some_and(|bytes| bytes.as_u64() == 0)
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.max_request_body_bytes",
+                reason: "must be greater than zero",
+            });
+        }
+
+        self.fpm.validate(scope)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PhpRuntime {
+    #[default]
+    #[serde(rename = "php-fpm")]
+    PhpFpm,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PhpPathInfoMode {
+    #[default]
+    #[serde(rename = "disabled")]
+    Disabled,
+    #[serde(rename = "strict")]
+    Strict,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhpFpmConfig {
+    #[serde(default)]
+    pub socket: Option<PathBuf>,
+    #[serde(default)]
+    pub tcp: Option<String>,
+    #[serde(default)]
+    pub connect_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub read_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub write_timeout_secs: Option<u64>,
+}
+
+impl PhpFpmConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(socket) = &mut self.socket
+            && socket.is_relative()
+        {
+            *socket = base_dir.join(&socket);
+        }
+    }
+
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        match (&self.socket, &self.tcp) {
+            (Some(_), Some(_)) => {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm",
+                    reason: "configure either socket or tcp, not both",
+                });
+            }
+            (None, None) => {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm",
+                    reason: "enabled PHP requires php-fpm socket or tcp",
+                });
+            }
+            _ => {}
+        }
+
+        if let Some(socket) = &self.socket {
+            let field = format!("{scope}.fpm.socket");
+            if socket.as_os_str().is_empty() {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.socket",
+                    reason: "socket cannot be empty",
+                });
+            }
+            validate_path(field.clone(), Some(socket))?;
+            validate_non_world_writable_parent(field, Some(socket))?;
+        }
+        if let Some(tcp) = &self.tcp
+            && !valid_authority(tcp)
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.tcp",
+                reason: "must be host:port or ip:port",
+            });
+        }
+
+        validate_optional_timeout_secs("php.fpm.connect_timeout_secs", self.connect_timeout_secs)?;
+        validate_optional_timeout_secs("php.fpm.read_timeout_secs", self.read_timeout_secs)?;
+        validate_optional_timeout_secs("php.fpm.write_timeout_secs", self.write_timeout_secs)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirectoryListingConfig {
@@ -5330,6 +5546,10 @@ pub enum ConfigError {
     TracingNotCompiled,
     OtlpTraceExportNotCompiled,
     InvalidTracingPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
+    InvalidPhpConfig {
         field: &'static str,
         reason: &'static str,
     },
@@ -5810,6 +6030,9 @@ impl Display for ConfigError {
                 "tracing.otlp.enabled requires building Fluxheim with the otel-otlp feature"
             ),
             Self::InvalidTracingPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
+            Self::InvalidPhpConfig { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
             }
             Self::PrivacyModeTracing => write!(
@@ -6706,6 +6929,18 @@ fn default_index_files() -> Vec<String> {
     vec!["index.html".to_owned()]
 }
 
+fn default_php_index() -> String {
+    "index.php".to_owned()
+}
+
+fn default_php_allowed_extensions() -> Vec<String> {
+    vec!["php".to_owned()]
+}
+
+fn default_php_request_timeout_secs() -> u64 {
+    30
+}
+
 fn default_static_cache_control() -> String {
     "public, max-age=60".to_owned()
 }
@@ -6962,6 +7197,13 @@ fn validate_optional_timeout_secs(
     Ok(())
 }
 
+fn validate_required_timeout_secs(field: &'static str, value: u64) -> Result<(), ConfigError> {
+    if value == 0 {
+        return Err(ConfigError::InvalidProxyTimeout { field });
+    }
+    Ok(())
+}
+
 fn validate_route_path(
     _field: &'static str,
     value: &str,
@@ -7100,6 +7342,47 @@ fn validate_optional_env(field: &'static str, env: Option<&str>) -> Result<(), C
 fn validate_optional_path(field: &'static str, path: Option<&Path>) -> Result<(), ConfigError> {
     if path.is_some_and(|path| path.as_os_str().is_empty()) {
         return Err(ConfigError::EmptyAdminPath { field });
+    }
+    Ok(())
+}
+
+fn validate_php_index(index: &str) -> Result<(), ConfigError> {
+    if index.trim().is_empty()
+        || index.contains('/')
+        || index.contains('\\')
+        || index == "."
+        || index == ".."
+        || !index.ends_with(".php")
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.index",
+            reason: "index must be a plain .php file name",
+        });
+    }
+    Ok(())
+}
+
+fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
+    if extensions.is_empty() {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.allowed_extensions",
+            reason: "at least one extension is required",
+        });
+    }
+    for extension in extensions {
+        if extension.trim().is_empty()
+            || extension.starts_with('.')
+            || extension.contains('/')
+            || extension.contains('\\')
+            || extension
+                .bytes()
+                .any(|byte| !(byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'))
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.allowed_extensions",
+                reason: "extensions must be plain extension names without dots or separators",
+            });
+        }
     }
     Ok(())
 }
@@ -9148,6 +9431,97 @@ mod tests {
             Err(ConfigError::InvalidLimit {
                 field: "server.limits.max_uri_bytes"
             })
+        );
+    }
+
+    #[test]
+    fn parses_php_fpm_vhost_config() {
+        let root = unique_temp_path("config-php-fpm-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            runtime = "php-fpm"
+            root = "{}"
+            index = "index.php"
+            allowed_extensions = ["php"]
+            request_timeout_secs = 30
+            max_request_body_bytes = "16MiB"
+            path_info = "disabled"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        config.validate().unwrap();
+        let php = &config.vhosts[0].php;
+        assert!(php.enabled);
+        assert_eq!(php.runtime, super::PhpRuntime::PhpFpm);
+        assert_eq!(php.root.as_deref(), Some(root.as_path()));
+        assert_eq!(php.allowed_extensions, ["php"]);
+        assert_eq!(php.fpm.tcp.as_deref(), Some("127.0.0.1:9000"));
+    }
+
+    #[test]
+    fn rejects_php_fpm_with_socket_and_tcp() {
+        let root = unique_temp_path("config-php-fpm-conflict-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            socket = "/run/php/php-fpm.sock"
+            tcp = "127.0.0.1:9000"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("configure either socket or tcp"), "{error}");
+    }
+
+    #[test]
+    fn rejects_php_extension_with_leading_dot() {
+        let root = unique_temp_path("config-php-extension-dot-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            allowed_extensions = [".php"]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("extensions must be plain extension names"),
+            "{error}"
         );
     }
 
@@ -11627,6 +12001,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -11673,6 +12048,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -12240,6 +12616,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -12253,6 +12630,7 @@ mod tests {
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
                     headers: VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
                     routes: Vec::new(),
                 },
@@ -12288,6 +12666,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],
@@ -12318,6 +12697,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
                 headers: VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],

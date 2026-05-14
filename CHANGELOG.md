@@ -9,16 +9,32 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+No unreleased changes yet.
+
+## 1.3.1 - PHP-FPM Runtime Support
+
+Released: in progress
+
+### Added
+
+- Added the `php-fpm` compile-time module for Fluxheim `1.3.1`, including
+  typed `[vhosts.php]` and `[vhosts.routes.php]` config, strict PHP script
+  resolution, WordPress-style front-controller dispatch, bounded FastCGI
+  request/response handling, and malformed PHP response-header rejection.
+- Added PHP runtime feature-policy checks so only one PHP runtime feature can
+  be selected in a binary.
+- Added `examples/php-fpm.toml` and PHP-FPM build/config documentation.
+
+## 1.3.0 - Shared Ingress And TLS Feature Split
+
+Released: in progress
+
 ### Changed
 
 - Documented the release-artifact ACME default: official RPMs, container
   images, and release tarballs include `acme-client` for full, cache, and proxy
   builds, while raw Cargo profile aliases remain ACME-optional for custom
   offline/static-certificate builds.
-
-## 1.3.0 - Shared Ingress And TLS Feature Split
-
-Released: in progress
 
 ### Added
 

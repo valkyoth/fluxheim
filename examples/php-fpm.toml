@@ -1,0 +1,46 @@
+[server]
+listen = ["0.0.0.0:80"]
+tls_listen = ["0.0.0.0:443"]
+default_vhost = "php.example.test"
+
+[tls]
+enabled = true
+backend = "rustls"
+
+[tls.acme]
+enabled = true
+storage = "/var/lib/fluxheim/acme"
+contact_email = "admin@example.test"
+challenge = "http-01"
+
+[[vhosts]]
+name = "php.example.test"
+hosts = ["php.example.test"]
+
+[vhosts.tls]
+enabled = true
+
+[vhosts.tls.acme]
+enabled = true
+domains = ["php.example.test"]
+
+[vhosts.php]
+enabled = true
+runtime = "php-fpm"
+root = "/srv/sites/php.example.test/public"
+index = "index.php"
+allowed_extensions = ["php"]
+request_timeout_secs = 30
+max_request_body_bytes = "64MiB"
+path_info = "disabled"
+
+[vhosts.php.fpm]
+# Use either a local Unix socket:
+socket = "/run/php/php-fpm.sock"
+# Or a container/network endpoint:
+# tcp = "php-fpm:9000"
+
+[vhosts.web]
+root = "/srv/sites/php.example.test/public"
+index_files = ["index.html", "index.php"]
+deny_dotfiles = true

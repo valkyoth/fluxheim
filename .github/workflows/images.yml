@@ -65,6 +65,10 @@ jobs:
             tag: proxy
             features: profile-proxy-edge,acme-client
             config: packaging/container/proxy.toml
+          - name: php
+            tag: php
+            features: profile-web-server,php-fpm,acme-client
+            config: packaging/container/php.toml
           - name: load-balancer
             tag: load-balancer
             features: profile-load-balancer-edge,acme-client

@@ -24,6 +24,7 @@ cargo build --release --no-default-features --features proxy,load-balancer
 cargo build --release --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo build --release --no-default-features --features profile-cache-edge,acme-client
 cargo build --release --no-default-features --features profile-proxy-edge,acme-client
+cargo build --release --no-default-features --features profile-web-server,php-fpm,acme-client
 ```
 
 The default build enables `proxy`, `web`, `cache`, `tls-rustls`, and
@@ -38,6 +39,10 @@ Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
 TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
 `tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls` is the default and
 recommended backend.
+
+PHP support starts with `php-fpm` in `1.3.1`. It is never compiled by default;
+build it explicitly with `profile-web-server,php-fpm` when Fluxheim should
+serve PHP applications through php-fpm.
 
 See [Feature Matrix](features.md) for the complete feature/profile list.
 
@@ -208,6 +213,16 @@ podman build \
   --build-arg FLUXHEIM_FEATURES=profile-proxy-edge,acme-client \
   --build-arg FLUXHEIM_CONFIG=packaging/container/proxy.toml \
   -t fluxheim:proxy-wolfi \
+  -f containers/Containerfile.wolfi .
+```
+
+Build a PHP-FPM-enabled web profile locally:
+
+```bash
+podman build \
+  --build-arg FLUXHEIM_FEATURES=profile-web-server,php-fpm,acme-client \
+  --build-arg FLUXHEIM_CONFIG=examples/php-fpm.toml \
+  -t fluxheim:php-fpm-wolfi \
   -f containers/Containerfile.wolfi .
 ```
 

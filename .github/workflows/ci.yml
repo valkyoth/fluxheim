@@ -87,6 +87,7 @@ jobs:
           cargo clippy --no-default-features --features profile-web-server --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-cache-edge --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-proxy-edge --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-web-server,php-fpm --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
           cargo clippy --no-default-features --features proxy,web,tls-rustls,privacy-mode --all-targets -- -D warnings
           cargo clippy --no-default-features --features web --all-targets -- -D warnings
@@ -120,6 +121,7 @@ jobs:
           cargo check --no-default-features --features profile-web-server
           cargo check --no-default-features --features profile-cache-edge
           cargo check --no-default-features --features profile-proxy-edge
+          cargo check --no-default-features --features profile-web-server,php-fpm
           cargo check --no-default-features --features profile-load-balancer-edge
           cargo check --no-default-features --features profile-observability
           cargo check --no-default-features --features profile-privacy
@@ -141,6 +143,7 @@ jobs:
           cargo run --quiet -- --check-config --config examples/cache-encryption-local.toml
           cargo run --quiet -- --check-config --config examples/cache-encryption-openbao.toml
           cargo run --quiet -- --check-config --config examples/cache-peer-fill.toml
+          cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config examples/php-fpm.toml
           cargo run --quiet -- --check-config --config examples/tls-modern.toml
           cargo run --quiet -- --check-config --config examples/tls-intermediate.toml
           cargo run --quiet -- --check-config --config examples/privacy.toml
@@ -150,6 +153,7 @@ jobs:
           cargo run --quiet --no-default-features --features profile-web-server,acme-client -- --check-config --config packaging/container/fluxheim.toml
           cargo run --quiet --no-default-features --features profile-cache-edge,acme-client -- --validate-config --config packaging/container/cache.toml
           cargo run --quiet --no-default-features --features profile-proxy-edge,acme-client -- --validate-config --config packaging/container/proxy.toml
+          cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config packaging/container/php.toml
           cargo run --quiet --no-default-features --features profile-load-balancer-edge,acme-client -- --validate-config --config packaging/container/proxy.toml
           cargo run --quiet -- --check-config --config examples/conf.d
           cargo run --quiet -- --check-config --config examples/gateway-1-0

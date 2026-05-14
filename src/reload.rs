@@ -206,6 +206,7 @@ mod tests {
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: Vec::new(),
             }],

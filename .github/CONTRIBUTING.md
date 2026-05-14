@@ -26,6 +26,7 @@ cargo build --no-default-features --features proxy
 cargo build --no-default-features --features web
 cargo build --no-default-features --features profile-cache-edge
 cargo build --no-default-features --features profile-proxy-edge
+cargo build --no-default-features --features profile-web-server,php-fpm
 cargo build --no-default-features --features profile-privacy
 ```
 

@@ -7,6 +7,8 @@ requested_features="${1:-}"
 features=""
 tls_count=0
 tls_selected=""
+php_count=0
+php_selected=""
 
 for feature in $(printf '%s' "$requested_features" | tr ',' ' '); do
     expanded="$(expand_fluxheim_feature "$feature")"
@@ -38,6 +40,22 @@ done
 
 if [ "$tls_count" -gt 1 ]; then
     echo "select only one Fluxheim TLS backend feature: tls-rustls, tls-openssl, tls-boringssl, or tls-s2n; selected $tls_selected" >&2
+    exit 1
+fi
+
+for runtime in $PHP_RUNTIMES; do
+    if contains_feature "$runtime"; then
+        php_count=$((php_count + 1))
+        if [ -n "$php_selected" ]; then
+            php_selected="$php_selected,$runtime"
+        else
+            php_selected="$runtime"
+        fi
+    fi
+done
+
+if [ "$php_count" -gt 1 ]; then
+    echo "select only one Fluxheim PHP runtime feature: php-fpm, php-turbine, or php-phprs; selected $php_selected" >&2
     exit 1
 fi
 

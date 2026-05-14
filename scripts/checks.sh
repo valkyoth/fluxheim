@@ -74,6 +74,7 @@ cargo clippy --all-targets -- -D warnings
 cargo clippy --no-default-features --features tls-rustls --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-full --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-web-server --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-web-server,php-fpm --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-cache-edge --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-proxy-edge --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
@@ -91,6 +92,7 @@ cargo check --no-default-features --features profile-cache-server
 cargo check --no-default-features --features profile-load-balancer
 cargo check --no-default-features --features profile-full
 cargo check --no-default-features --features profile-web-server
+cargo check --no-default-features --features profile-web-server,php-fpm
 cargo check --no-default-features --features profile-cache-edge
 cargo check --no-default-features --features profile-proxy-edge
 cargo check --no-default-features --features profile-load-balancer-edge
@@ -106,6 +108,7 @@ expect_feature_validation_failure "profile-privacy,metrics" "privacy-mode cannot
 expect_feature_validation_failure "profile-privacy,metrics-otlp" "privacy-mode cannot be combined with metrics-otlp"
 expect_feature_validation_failure "profile-privacy,otel-tracing" "privacy-mode cannot be combined with otel-tracing"
 expect_feature_validation_failure "profile-privacy,otel-otlp" "privacy-mode cannot be combined with otel-otlp"
+expect_feature_validation_failure "php-fpm,php-turbine" "select only one Fluxheim PHP runtime feature"
 expect_feature_validation_failure "profile-core,tls-openssl" "select only one Fluxheim TLS backend feature"
 expect_feature_validation_failure "tls-rustls,tls-openssl" "select only one Fluxheim TLS backend feature"
 cargo test --no-default-features --features proxy,metrics
@@ -128,6 +131,7 @@ cargo run --quiet -- --check-config --config examples/cache-storage-bin.toml >/d
 cargo run --quiet -- --check-config --config examples/cache-encryption-local.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/cache-encryption-openbao.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/cache-peer-fill.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config examples/php-fpm.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/tls-modern.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/tls-intermediate.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
@@ -137,6 +141,7 @@ cargo run --quiet --no-default-features --features profile-full,acme-client,metr
 cargo run --quiet --no-default-features --features profile-web-server,acme-client -- --check-config --config packaging/container/fluxheim.toml >/dev/null
 cargo run --quiet --no-default-features --features profile-cache-edge,acme-client -- --validate-config --config packaging/container/cache.toml >/dev/null
 cargo run --quiet --no-default-features --features profile-proxy-edge,acme-client -- --validate-config --config packaging/container/proxy.toml >/dev/null
+cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config packaging/container/php.toml >/dev/null
 cargo run --quiet --no-default-features --features profile-load-balancer-edge,acme-client -- --validate-config --config packaging/container/proxy.toml >/dev/null
 cargo run --quiet -- --check-config --config packaging/default/fluxheim.toml >/dev/null
 cargo run --quiet -- --check-config --config examples/conf.d >/dev/null

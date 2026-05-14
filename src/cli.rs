@@ -509,12 +509,14 @@ where
 }
 
 fn validate_compiled_module_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    #[cfg(all(feature = "web", feature = "cache"))]
+    #[cfg(all(feature = "web", feature = "cache", feature = "php-fpm"))]
     let _ = config;
     #[cfg(not(feature = "web"))]
     validate_web_module_absent(config)?;
     #[cfg(not(feature = "cache"))]
     validate_cache_module_absent(config)?;
+    #[cfg(not(feature = "php-fpm"))]
+    validate_php_module_absent(config)?;
     Ok(())
 }
 
@@ -588,6 +590,33 @@ fn cache_policy_requires_module(config: &crate::config::CacheConfig) -> bool {
         || config.memory.enabled
         || config.disk.enabled
         || config.peer_fill.enabled
+}
+
+#[cfg(not(feature = "php-fpm"))]
+fn validate_php_module_absent(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    for vhost in &config.vhosts {
+        if vhost.php.enabled() {
+            return Err(format!(
+                "php-fpm module not compiled; remove enabled [vhosts.php] config for vhost {:?} or build with the `php-fpm` feature",
+                vhost.name
+            )
+            .into());
+        }
+        for route in &vhost.routes {
+            if route
+                .php
+                .as_ref()
+                .is_some_and(crate::config::PhpConfig::enabled)
+            {
+                return Err(format!(
+                    "php-fpm module not compiled; remove enabled [vhosts.routes.php] config for vhost {:?} route {:?} or build with the `php-fpm` feature",
+                    vhost.name, route.name
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "proxy")]
@@ -5037,6 +5066,24 @@ mod tests {
         assert!(error.to_string().contains("cache module not compiled"));
     }
 
+    #[cfg(all(feature = "proxy", not(feature = "php-fpm")))]
+    #[test]
+    fn validate_config_rejects_enabled_php_when_php_module_is_absent() {
+        let dir = TestDir::new("cli-no-php-module");
+        let root = dir.dir("php-root", 0o755);
+        let config = dir.php_module_config("php-disabled.toml", &root);
+
+        let error = run_from_args([
+            "fluxheim",
+            "--config",
+            config.to_str().unwrap(),
+            "--validate-config",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("php-fpm module not compiled"));
+    }
+
     struct TestDir {
         path: PathBuf,
     }
@@ -5195,6 +5242,31 @@ mod tests {
                 [vhosts.cache.memory]
                 enabled = true
                 "#,
+            )
+            .expect("write config");
+            path
+        }
+
+        #[cfg(all(feature = "proxy", not(feature = "php-fpm")))]
+        fn php_module_config(&self, name: &str, root: &Path) -> PathBuf {
+            let path = safe_child_path(&self.path, name);
+            fs::write(
+                &path,
+                format!(
+                    r#"
+                    [[vhosts]]
+                    name = "php-disabled"
+                    hosts = ["php-disabled.test"]
+
+                    [vhosts.php]
+                    enabled = true
+                    root = "{}"
+
+                    [vhosts.php.fpm]
+                    tcp = "127.0.0.1:9000"
+                    "#,
+                    root.display()
+                ),
             )
             .expect("write config");
             path

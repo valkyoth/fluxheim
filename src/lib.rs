@@ -85,6 +85,13 @@ compile_error!(
     "privacy-mode cannot be combined with otel-otlp; zero-retention builds must not compile trace export"
 );
 
+#[cfg(any(
+    all(feature = "php-fpm", feature = "php-turbine"),
+    all(feature = "php-fpm", feature = "php-phprs"),
+    all(feature = "php-turbine", feature = "php-phprs"),
+))]
+compile_error!("select only one Fluxheim PHP runtime feature: php-fpm, php-turbine, or php-phprs");
+
 pub fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     cli::run_from_env()
 }

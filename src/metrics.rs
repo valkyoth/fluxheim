@@ -382,6 +382,7 @@ fn set_gauge(gauge: Result<&'static IntGauge, prometheus::Error>, value: u64) {
     }
 }
 
+#[cfg(all(feature = "proxy", feature = "cache"))]
 fn ratio_per_mille(value: u64, max: u64) -> u64 {
     if max == 0 {
         return 0;
@@ -1551,6 +1552,7 @@ mod tests {
                     ..CacheConfig::default()
                 },
                 headers: VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
                 routes: vec![cached_route(), uncached_route()],
             }],
@@ -1570,6 +1572,7 @@ mod tests {
             redirect: None,
             proxy: Some(ProxyConfig::default()),
             web: None,
+            php: None,
             cache: Some(CacheConfig {
                 enabled: true,
                 memory: CacheMemoryConfig {
@@ -1602,6 +1605,7 @@ mod tests {
             redirect: None,
             proxy: Some(ProxyConfig::default()),
             web: None,
+            php: None,
             cache: None,
             headers: VhostHeaderPolicyConfig::default(),
         }

@@ -170,6 +170,12 @@ The load-balancer edge profile is compile- and config-validated in `1.3.0` so
 the feature graph is ready for `1.5`, but it is not a production
 load-balancing support promise yet.
 
+The `1.3.1` support promise adds an opt-in `php-fpm` module for PHP
+applications. PHP remains outside default and focused cache/proxy builds. A
+PHP-FPM build is production-eligible only when php-fpm is isolated separately,
+the PHP root is trusted, request body limits are configured, and operators have
+validated their framework/application behavior with their php-fpm pool.
+
 ## Operator Checks
 
 Before using a Fluxheim build for a real site, run the stable gate from the repo
@@ -180,8 +186,9 @@ scripts/stable_release_gate.sh check
 ```
 
 For `1.3` candidates, this gate also runs the proxy cache and local
-observability smoke suites, and verifies the published full, cache-edge, and
-proxy-edge container feature profiles against their packaged container configs.
+observability smoke suites, and verifies the published full, cache-edge,
+proxy-edge, and PHP-FPM container feature profiles against their packaged
+container configs.
 The load-balancer edge profile is compile/config validated only until the `1.5`
 load-balancer milestone promotes runtime load-balancing behavior.
 
