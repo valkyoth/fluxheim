@@ -300,13 +300,17 @@ fn render_header_template(value: &str, context: &RequestHeaderTemplateContext) -
         };
         let variable = &after_open[..close];
         if let Some(value) = context.variable(variable) {
-            rendered.push_str(value);
+            push_header_template_variable(&mut rendered, value);
         }
         rest = &after_open[close + 1..];
     }
 
     rendered.push_str(rest);
     rendered
+}
+
+fn push_header_template_variable(rendered: &mut String, value: &str) {
+    rendered.extend(value.chars().filter(|character| !character.is_control()));
 }
 
 fn apply_response_mutations(
@@ -851,6 +855,36 @@ mod tests {
                 template
             );
         }
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn dynamic_header_rendering_strips_control_characters_from_variables() {
+        let context = RequestHeaderTemplateContext {
+            headers: ::http::HeaderMap::new(),
+            host: Some("example.test".to_owned()),
+            remote_addr: Some("203.0.113.10\r\nx-injected: true".to_owned()),
+            scheme: "https",
+            uri: "/chat/\r\nbad".to_owned(),
+            path: "/chat/\u{7f}bad".to_owned(),
+            query: "room=main\tadmin=false".to_owned(),
+            request_id: Some("req-123\nbad".to_owned()),
+        };
+
+        let rendered = render_header_template(
+            "{host} {remote_addr} {scheme} {uri} {path} {query} {request_id}",
+            &context,
+        );
+
+        assert_eq!(
+            rendered,
+            "example.test 203.0.113.10x-injected: true https /chat/bad /chat/bad room=mainadmin=false req-123bad"
+        );
+        assert!(
+            rendered
+                .bytes()
+                .all(|byte| !matches!(byte, 0x00..=0x1f | 0x7f))
+        );
     }
 
     #[cfg(not(feature = "privacy-mode"))]

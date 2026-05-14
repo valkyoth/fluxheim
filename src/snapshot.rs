@@ -75,6 +75,7 @@ impl SnapshotStore {
         message: Option<&str>,
     ) -> Result<ConfigSnapshot, SnapshotError> {
         self.validate_root()?;
+        self.ensure_store_capacity()?;
         config.validate().map_err(|error| {
             SnapshotError::Config(crate::config::ConfigLoadError::Validate(error))
         })?;
@@ -257,6 +258,39 @@ impl SnapshotStore {
         }
         ensure_real_directory(&configs_dir)?;
         self.ensure_configs_dir_under_root()?;
+        Ok(())
+    }
+
+    fn ensure_store_capacity(&self) -> Result<(), SnapshotError> {
+        if !self.safe_existing_root()? || !self.safe_existing_configs_dir()? {
+            return Ok(());
+        }
+
+        let mut snapshots = 0_usize;
+        for entry in fs::read_dir(self.configs_dir()).map_err(SnapshotError::Io)? {
+            let entry = entry.map_err(SnapshotError::Io)?;
+            let path = entry.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if stem.ends_with(".meta") {
+                continue;
+            }
+            snapshots = snapshots.saturating_add(1);
+            if snapshots >= MAX_SNAPSHOT_STORE_ENTRIES {
+                return Err(SnapshotError::Io(io::Error::new(
+                    io::ErrorKind::StorageFull,
+                    format!(
+                        "snapshot store {} reached the {} snapshot limit",
+                        self.root.display(),
+                        MAX_SNAPSHOT_STORE_ENTRIES
+                    ),
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -753,6 +787,44 @@ mod tests {
         assert!(
             matches!(error, SnapshotError::Io(error) if error.kind() == std::io::ErrorKind::InvalidData)
         );
+    }
+
+    #[test]
+    fn snapshot_config_rejects_full_snapshot_store_before_writing() {
+        let dir = TestDir::new("snapshot-capacity-before-write");
+        let store = SnapshotStore::new(dir.path());
+        let configs = dir.child("configs");
+        std::fs::create_dir(&configs).unwrap();
+        for index in 0..super::MAX_SNAPSHOT_STORE_ENTRIES {
+            std::fs::write(safe_child_path(&configs, &format!("s{index:04}.toml")), b"").unwrap();
+        }
+
+        let error = store
+            .snapshot_config(&Config::default(), Some("should not write"))
+            .unwrap_err();
+
+        assert!(
+            matches!(error, SnapshotError::Io(error) if error.kind() == std::io::ErrorKind::StorageFull)
+        );
+        let created_configs = std::fs::read_dir(&configs)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .ok()
+                    .and_then(|entry| {
+                        entry
+                            .path()
+                            .extension()
+                            .and_then(|value| value.to_str())
+                            .map(str::to_owned)
+                    })
+                    .as_deref()
+                    == Some("toml")
+            })
+            .count();
+        assert_eq!(created_configs, super::MAX_SNAPSHOT_STORE_ENTRIES);
+        assert!(store.current_id().unwrap().is_none());
     }
 
     #[test]
