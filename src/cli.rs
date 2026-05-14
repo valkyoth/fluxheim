@@ -2268,6 +2268,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_namespace,
         expect_key_namespace,
         expect_user_tag,
+        expect_peer_fill_enabled,
+        expect_peer_fill_peers,
+        expect_peer_fill_max_concurrent_requests,
     } = options;
     let _ = (
         config_path,
@@ -2291,6 +2294,9 @@ fn run_cache_key_command(options: CacheKeyOptions<'_>) -> Result<(), Box<dyn Err
         expect_namespace,
         expect_key_namespace,
         expect_user_tag,
+        expect_peer_fill_enabled,
+        expect_peer_fill_peers,
+        expect_peer_fill_max_concurrent_requests,
     );
     Err("cache-key requires the proxy and cache features".into())
 }
@@ -2333,6 +2339,9 @@ fn run_cache_lookup_command(
         expect_user_tag,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
+        expect_peer_fill_enabled,
+        expect_peer_fill_peers,
+        expect_peer_fill_max_concurrent_requests,
     } = options;
     let _ = (config_path, host, headers, method, path, query);
     let _ = (
@@ -2363,6 +2372,9 @@ fn run_cache_lookup_command(
         expect_user_tag,
         expect_serve_stale_if_error,
         expect_serve_stale_while_revalidate,
+        expect_peer_fill_enabled,
+        expect_peer_fill_peers,
+        expect_peer_fill_max_concurrent_requests,
     );
     Err("cache-lookup requires the proxy and cache features".into())
 }

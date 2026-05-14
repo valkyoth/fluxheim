@@ -7382,14 +7382,15 @@ mod tests {
     use super::{
         AdminConfig, AdminHealthConfig, AdminHealthResponseMode, AdminRemoteTransportMode,
         AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
-        CacheDiskEncryptionProvider, CacheKeyPart, CachePeerConfig, CachePeerFillConfig,
-        CachePurgerConfig, CacheStaleErrorKind, Config, ConfigError, ConfigLoadError,
-        HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig,
-        ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
-        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig,
-        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
-        valid_dynamic_header_variable, validate_dynamic_header_template,
+        CacheDiskEncryptionProvider, CacheKeyPart, CachePurgerConfig, CacheStaleErrorKind, Config,
+        ConfigError, ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig,
+        ProxyConfig, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
+        TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig,
+        VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host,
+        normalize_host_pattern, valid_dynamic_header_variable, validate_dynamic_header_template,
     };
+    #[cfg(feature = "cache")]
+    use super::{CachePeerConfig, CachePeerFillConfig};
     use crate::test_support::{safe_child_path, safe_relative_path, unique_temp_path};
     #[cfg(unix)]
     use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
@@ -9820,6 +9821,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "cache")]
     fn rejects_cache_peer_fill_without_enabled_cache_policy() {
         let config: Config = toml::from_str(
             r#"
@@ -9844,6 +9846,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "cache")]
     fn rejects_unsafe_cache_peer_fill_peers() {
         let config: Config = toml::from_str(
             r#"
