@@ -1,6 +1,15 @@
 # Fluxheim 1.3.0 Release Notes
 
-Status: draft.
+## Summary
+
+Fluxheim 1.3.0 is the shared ingress/TLS feature-graph split release. It makes
+the focused cache and proxy profiles TLS/ACME-capable without forcing unrelated
+application modules into those builds.
+
+- Release type: focused packaging and feature-boundary release
+- Compatibility: default and full builds remain broad production builds;
+  focused cache/proxy images are stricter by design
+- Primary area: Cargo feature graph, containers, packaging, and release docs
 
 ## Scope
 
