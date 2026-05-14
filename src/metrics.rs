@@ -1020,6 +1020,11 @@ fn cache_event_label(event: &str) -> &'static str {
         "bypass" => "bypass",
         "stale" => "stale",
         "revalidate" => "revalidate",
+        "peer_fill_hit" => "peer_fill_hit",
+        "peer_fill_miss" => "peer_fill_miss",
+        "peer_fill_error" => "peer_fill_error",
+        "peer_fill_fallback" => "peer_fill_fallback",
+        "peer_fill_fail_closed" => "peer_fill_fail_closed",
         _ => "other",
     }
 }
@@ -1273,6 +1278,11 @@ mod tests {
         record_cache_activity("policy", "bypass");
         record_cache_activity("policy", "stale");
         record_cache_activity("policy", "revalidate");
+        record_cache_activity("policy", "peer_fill_hit");
+        record_cache_activity("policy", "peer_fill_miss");
+        record_cache_activity("policy", "peer_fill_error");
+        record_cache_activity("policy", "peer_fill_fallback");
+        record_cache_activity("policy", "peer_fill_fail_closed");
         record_cache_activity("attacker-tier", "attacker-event");
 
         let metric_families = prometheus::gather();
@@ -1291,6 +1301,25 @@ mod tests {
         assert!(
             output.contains(r#"fluxheim_cache_activity_total{event="revalidate",tier="policy"}"#)
         );
+        assert!(
+            output
+                .contains(r#"fluxheim_cache_activity_total{event="peer_fill_hit",tier="policy"}"#)
+        );
+        assert!(
+            output
+                .contains(r#"fluxheim_cache_activity_total{event="peer_fill_miss",tier="policy"}"#)
+        );
+        assert!(
+            output.contains(
+                r#"fluxheim_cache_activity_total{event="peer_fill_error",tier="policy"}"#
+            )
+        );
+        assert!(output.contains(
+            r#"fluxheim_cache_activity_total{event="peer_fill_fallback",tier="policy"}"#
+        ));
+        assert!(output.contains(
+            r#"fluxheim_cache_activity_total{event="peer_fill_fail_closed",tier="policy"}"#
+        ));
         assert!(output.contains(r#"fluxheim_cache_activity_total{event="other",tier="other"}"#));
         assert!(!output.contains("attacker-tier"));
         assert!(!output.contains("attacker-event"));

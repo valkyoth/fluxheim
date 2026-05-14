@@ -35,14 +35,16 @@ is implemented and tested.
   for `only-if-cached` hits, strips sensitive client headers from peer
   requests, stores valid peer hits locally, and falls back to origin only when
   `fail_open` allows it.
+- Added low-cardinality peer-fill activity events for hit, miss, peer error,
+  origin fallback, and fail-closed outcomes.
 - Added `examples/cache-peer-fill.toml` as the focused validated fixture for
   the distributed-cache config shape.
 
 ## Known Limits
 
-- This release line now has the cache-only serving primitive and outbound peer
-  fetch. Peer-fill-specific metrics and operational cache-cluster smoke coverage
-  are expected to land in later `1.2.4` slices before tagging.
+- This release line now has the cache-only serving primitive, outbound peer
+  fetch, and bounded peer-fill activity metrics. Operational cache-cluster smoke
+  coverage is expected to land in a later `1.2.4` slice before tagging.
 - Peer base URLs intentionally require an explicit port for now to avoid
   ambiguity in private cache clusters.
 

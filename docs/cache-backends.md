@@ -423,6 +423,10 @@ policies, giving dashboards a low-cardinality timeout budget signal.
 `fluxheim_cache_peer_fill_enabled_policies`, `fluxheim_cache_peer_fill_peers`,
 and `fluxheim_cache_peer_fill_max_concurrent_requests` expose the aggregate
 distributed-cache peer-fill rollout shape without peer names or URLs.
+Policy-level cache activity events `peer_fill_hit`, `peer_fill_miss`,
+`peer_fill_error`, `peer_fill_fallback`, and `peer_fill_fail_closed` expose
+runtime peer-fill behavior with bounded labels and without peer names, URLs, or
+cache keys.
 The protected `GET /_fluxheim/cache/status` admin endpoint also reports
 peer-fill enabled policy counts, peer counts, maximum concurrency, and per-vhost
 or per-route peer-fill flags so operators can audit the selected policy shape

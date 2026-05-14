@@ -33,6 +33,8 @@ Released: in progress
 - Added outbound peer-fill on proxy-cache misses. Fluxheim now asks configured
   peers for `only-if-cached` hits before going to origin, stores valid peer
   hits locally, and respects `fail_open` when no peer can satisfy the request.
+- Added bounded policy-level cache activity events for peer-fill hit, miss,
+  error, fallback, and fail-closed outcomes.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

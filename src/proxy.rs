@@ -3490,9 +3490,15 @@ impl ProxyHttp for FluxProxy {
 
             let response = match result {
                 Ok(Some(response)) => response,
-                Ok(None) => continue,
+                Ok(None) => {
+                    #[cfg(feature = "metrics")]
+                    record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_miss");
+                    continue;
+                }
                 Err(error) => {
                     log::warn!("peer fill from {peer_name} failed: {error}");
+                    #[cfg(feature = "metrics")]
+                    record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_error");
                     continue;
                 }
             };
@@ -3545,7 +3551,7 @@ impl ProxyHttp for FluxProxy {
             )?;
             crate::headers::apply_response_policy(&mut response_header, response_headers)?;
             #[cfg(feature = "metrics")]
-            record_cache_policy_activity(vhost, ctx.route_index, "peer-fill");
+            record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_hit");
             ctx.cache_observed_phase = Some(CachePhase::Hit);
             ctx.response_body_bytes_seen = response.body.len() as u64;
             session
@@ -3560,8 +3566,12 @@ impl ProxyHttp for FluxProxy {
         }
 
         if peer_fill.fail_open {
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_fallback");
             Ok(true)
         } else {
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_fail_closed");
             respond_proxy_cache_only_miss(
                 session,
                 ctx,
