@@ -7183,6 +7183,7 @@ fn route_rewritten_path_and_query(request: &RequestHeader, route: &RuntimeRoute)
     }
 }
 
+#[cfg(feature = "cache")]
 fn safe_forward_path_and_query(path_and_query: &str) -> bool {
     let path = path_and_query
         .split_once('?')
