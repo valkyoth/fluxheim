@@ -211,16 +211,20 @@ Recommended profile features:
 | `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
 
 Fluxheim 1.3 starts the focused image split. The `profile-cache-edge` and
-`profile-proxy-edge` aliases are TLS/ACME-capable without compiling local
-static web serving. `profile-cache-server` and `profile-load-balancer` remain
-compatibility aliases for operators who want the older convenience bundles.
+`profile-proxy-edge` aliases are TLS-capable without compiling local static web
+serving. Official RPMs, container images, and release tarballs add
+`acme-client` to the full, cache, and proxy profiles by default because
+managed certificates are the normal production path. Custom source builds can
+still omit `acme-client` for fully offline or static-certificate deployments.
+`profile-cache-server` and `profile-load-balancer` remain compatibility aliases
+for operators who want the older convenience bundles.
 
-Example grouped build:
+Example grouped builds that match the official release artifacts:
 
 ```bash
-cargo build --no-default-features --features profile-full
-cargo build --no-default-features --features profile-cache-edge
-cargo build --no-default-features --features profile-proxy-edge
+cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --no-default-features --features profile-cache-edge,acme-client
+cargo build --no-default-features --features profile-proxy-edge,acme-client
 ```
 
 Manual feature selection also works:

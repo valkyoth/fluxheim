@@ -9,7 +9,12 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
-No unreleased changes yet.
+### Changed
+
+- Documented the release-artifact ACME default: official RPMs, container
+  images, and release tarballs include `acme-client` for full, cache, and proxy
+  builds, while raw Cargo profile aliases remain ACME-optional for custom
+  offline/static-certificate builds.
 
 ## 1.3.0 - Shared Ingress And TLS Feature Split
 

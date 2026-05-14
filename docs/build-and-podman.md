@@ -21,9 +21,9 @@ Feature-reduced builds keep the binary small and reduce dependency surface:
 ```bash
 cargo build --release --no-default-features --features proxy
 cargo build --release --no-default-features --features proxy,load-balancer
-cargo build --release --no-default-features --features profile-full
-cargo build --release --no-default-features --features profile-cache-edge
-cargo build --release --no-default-features --features profile-proxy-edge
+cargo build --release --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --release --no-default-features --features profile-cache-edge,acme-client
+cargo build --release --no-default-features --features profile-proxy-edge,acme-client
 ```
 
 The default build enables `proxy`, `web`, `cache`, `tls-rustls`, and

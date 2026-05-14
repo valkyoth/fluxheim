@@ -97,14 +97,18 @@ feature aliases for common deployment shapes.
 | `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
 | `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
 
-Examples:
+Examples that match the official release artifacts:
 
 ```bash
-cargo build --no-default-features --features profile-full
-cargo build --no-default-features --features profile-cache-edge
-cargo build --no-default-features --features profile-proxy-edge
+cargo build --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --no-default-features --features profile-cache-edge,acme-client
+cargo build --no-default-features --features profile-proxy-edge,acme-client
 cargo build --no-default-features --features profile-privacy
 ```
+
+The raw profile aliases do not force `acme-client`; that is intentional for
+offline or static-certificate custom builds. Official RPMs, images, and release
+tarballs add `acme-client` to the full, cache, and proxy profiles by default.
 
 Focused image profile status:
 
