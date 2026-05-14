@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 #[cfg(feature = "cache")]
 use std::time::Duration;
+#[cfg(any(not(feature = "privacy-mode"), feature = "cache"))]
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
