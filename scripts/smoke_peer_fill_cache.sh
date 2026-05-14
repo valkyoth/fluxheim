@@ -102,6 +102,18 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if parsed.path == "/uncached.webp":
+            record_path(parsed.path)
+            body = b"uncached-origin-body"
+            self.send_response(200)
+            self.send_header("content-type", "image/webp")
+            self.send_header("content-length", str(len(body)))
+            self.send_header("cache-control", "public, max-age=120")
+            self.send_header("etag", '"peer-fill-uncached-origin"')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if parsed.path != "/asset.webp":
             self.send_response(404)
             self.send_header("content-length", "0")
@@ -259,9 +271,11 @@ b_miss_headers=$(mktemp "$TMP_DIR/b-miss-headers.XXXXXX")
 b_hit_headers=$(mktemp "$TMP_DIR/b-hit-headers.XXXXXX")
 a_peer_headers=$(mktemp "$TMP_DIR/a-peer-headers.XXXXXX")
 a_hit_headers=$(mktemp "$TMP_DIR/a-hit-headers.XXXXXX")
+fail_closed_headers=$(mktemp "$TMP_DIR/fail-closed-headers.XXXXXX")
 b_body=$(mktemp "$TMP_DIR/b-body.XXXXXX")
 a_peer_body=$(mktemp "$TMP_DIR/a-peer-body.XXXXXX")
 a_hit_body=$(mktemp "$TMP_DIR/a-hit-body.XXXXXX")
+fail_closed_body=$(mktemp "$TMP_DIR/fail-closed-body.XXXXXX")
 metrics_body=$(mktemp "$TMP_DIR/metrics.XXXXXX")
 
 curl -sS --max-time "$CURL_MAX_TIME" -D "$b_miss_headers" -o "$b_body" \
@@ -306,7 +320,24 @@ if [ -z "$local_age" ] || [ "$local_age" -lt "$peer_age" ]; then
     exit 1
 fi
 
+fail_closed_status=$(curl -sS --max-time "$CURL_MAX_TIME" -w '%{http_code}' \
+    -D "$fail_closed_headers" -o "$fail_closed_body" \
+    -H "Host: cache.test" "http://127.0.0.1:${NODE_A_PORT}/uncached.webp")
+if [ "$fail_closed_status" != "504" ]; then
+    echo "peer-fill cache smoke failed: expected fail-closed 504 for peer miss, got $fail_closed_status" >&2
+    exit 1
+fi
+grep -qi '^x-cache-status: MISS' "$fail_closed_headers"
+grep -qi '^x-cache-reason: peer-fill-miss' "$fail_closed_headers"
+
+uncached_origin_count=$(curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${ORIGIN_PORT}/__count?path=/uncached.webp")
+if [ "$uncached_origin_count" != "0" ]; then
+    echo "peer-fill cache smoke failed: fail-closed peer miss contacted origin $uncached_origin_count times" >&2
+    exit 1
+fi
+
 curl -sSf --max-time "$CURL_MAX_TIME" "http://127.0.0.1:${METRICS_PORT}/metrics" > "$metrics_body"
 grep -q 'fluxheim_cache_activity_total{event="peer_fill_hit",tier="policy"}' "$metrics_body"
+grep -q 'fluxheim_cache_activity_total{event="peer_fill_fail_closed",tier="policy"}' "$metrics_body"
 
 echo "peer-fill cache smoke passed"
