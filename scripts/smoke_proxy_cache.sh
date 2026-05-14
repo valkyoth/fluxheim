@@ -74,6 +74,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 BODY = b"0123456789abcdef"
+PARTIAL_BODY = b"abcdefghijklmnopqrstuvwxyz0123456789"
 VARY_BODIES = {
     "de": b"vary-de",
     "en": b"vary-en",
@@ -135,6 +136,28 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("cache-control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+            return
+
+        if parsed.path == "/partial.bin":
+            record_path(parsed.path)
+            range_header = self.headers.get("range")
+            if range_header == "bytes=4-11":
+                body = PARTIAL_BODY[4:12]
+                self.send_response(206)
+                self.send_header("content-type", "image/png")
+                self.send_header("content-length", str(len(body)))
+                self.send_header("content-range", f"bytes 4-11/{len(PARTIAL_BODY)}")
+                self.send_header("cache-control", "public, max-age=120")
+                self.send_header("etag", '"cache-smoke-partial"')
+                self.send_header("last-modified", LAST_MODIFIED)
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            self.send_response(416)
+            self.send_header("content-range", f"bytes */{len(PARTIAL_BODY)}")
+            self.send_header("content-length", "0")
+            self.end_headers()
             return
 
         if self.path == "/vary.png" or self.path == "/warm-vary.png":
@@ -417,6 +440,36 @@ upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
 
 [[vhosts.routes]]
+name = "partial-range"
+path_exact = "/partial.bin"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_PORT"]
+upstream_tls = false
+
+[vhosts.routes.cache]
+enabled = true
+status_header = "X-Cache-Status"
+status_reason_header = "X-Cache-Reason"
+key_namespace = "cache-route-range-v1"
+extensions = ["bin"]
+content_types = ["image/png"]
+max_object_bytes = "1MiB"
+
+[vhosts.routes.cache.range]
+enabled = true
+max_bytes = "8KiB"
+
+[vhosts.routes.cache.memory]
+enabled = true
+max_size_bytes = "16MiB"
+
+[vhosts.routes.cache.disk]
+enabled = true
+path = "$TMP_DIR/cache"
+max_size_bytes = "32MiB"
+
+[[vhosts.routes]]
 name = "swr"
 path_exact = "/swr.png"
 
@@ -615,6 +668,8 @@ conditional_mismatch_headers="$TMP_DIR/conditional-mismatch.headers"
 modified_since_headers="$TMP_DIR/modified-since.headers"
 modified_since_mismatch_headers="$TMP_DIR/modified-since-mismatch.headers"
 range_headers="$TMP_DIR/range.headers"
+partial_range_first_headers="$TMP_DIR/partial-range-first.headers"
+partial_range_second_headers="$TMP_DIR/partial-range-second.headers"
 if_range_match_headers="$TMP_DIR/if-range-match.headers"
 if_range_mismatch_headers="$TMP_DIR/if-range-mismatch.headers"
 if_range_date_match_headers="$TMP_DIR/if-range-date-match.headers"
@@ -636,6 +691,7 @@ stale_error_second_headers="$TMP_DIR/stale-error-second.headers"
 restart_headers="$TMP_DIR/restart.headers"
 body="$TMP_DIR/body.bin"
 range_body="$TMP_DIR/range-body.bin"
+partial_range_body="$TMP_DIR/partial-range-body.bin"
 if_range_match_body="$TMP_DIR/if-range-match-body.bin"
 if_range_mismatch_body="$TMP_DIR/if-range-mismatch-body.bin"
 if_range_date_match_body="$TMP_DIR/if-range-date-match-body.bin"
@@ -1036,6 +1092,66 @@ if ! grep -qi "^last-modified: $LAST_MODIFIED" "$range_headers"; then
 fi
 if [ "$(cat "$range_body")" != "0123" ]; then
     echo "proxy cache smoke failed: cached range body mismatch" >&2
+    exit 1
+fi
+
+partial_range_first_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$partial_range_first_headers" -o "$partial_range_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=4-11" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/partial.bin"
+)
+if [ "$partial_range_first_status" != "206" ]; then
+    echo "proxy cache smoke failed: first bounded range returned $partial_range_first_status instead of 206" >&2
+    cat "$partial_range_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: MISS' "$partial_range_first_headers"; then
+    echo "proxy cache smoke failed: first bounded range was not a cache MISS" >&2
+    cat "$partial_range_first_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 4-11/36' "$partial_range_first_headers"; then
+    echo "proxy cache smoke failed: first bounded range missed expected Content-Range" >&2
+    cat "$partial_range_first_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$partial_range_body")" != "efghijkl" ]; then
+    echo "proxy cache smoke failed: first bounded range body mismatch" >&2
+    exit 1
+fi
+
+partial_range_second_status=$(
+    curl -sS --max-time "$CURL_MAX_TIME" -D "$partial_range_second_headers" -o "$partial_range_body" -w '%{http_code}' \
+        -H "Host: cache.test" \
+        -H "Range: bytes=4-11" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/partial.bin"
+)
+if [ "$partial_range_second_status" != "206" ]; then
+    echo "proxy cache smoke failed: second bounded range returned $partial_range_second_status instead of 206" >&2
+    cat "$partial_range_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^x-cache-status: HIT' "$partial_range_second_headers"; then
+    echo "proxy cache smoke failed: second bounded range was not a cache HIT" >&2
+    cat "$partial_range_second_headers" >&2
+    exit 1
+fi
+if ! grep -qi '^content-range: bytes 4-11/36' "$partial_range_second_headers"; then
+    echo "proxy cache smoke failed: cached bounded range missed expected Content-Range" >&2
+    cat "$partial_range_second_headers" >&2
+    exit 1
+fi
+if [ "$(cat "$partial_range_body")" != "efghijkl" ]; then
+    echo "proxy cache smoke failed: cached bounded range body mismatch" >&2
+    exit 1
+fi
+partial_range_origin_count=$(
+    curl -sS --max-time "$CURL_MAX_TIME" \
+        "http://127.0.0.1:$ORIGIN_PORT/__count?path=/partial.bin"
+)
+if [ "$partial_range_origin_count" != "1" ]; then
+    echo "proxy cache smoke failed: bounded range did not collapse repeated origin reads, count=$partial_range_origin_count" >&2
     exit 1
 fi
 

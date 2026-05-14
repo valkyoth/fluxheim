@@ -838,7 +838,8 @@ A production adapter must:
 - Implemented now: static validators/ranges/client refresh controls, proxied
   client refresh bypass, Pingora `Vary` variance keys with unsafe/sensitive
   `Vary` rejection, shared-cache refusal for `Set-Cookie` responses, `image/*`
-  origin response admission for proxied image cache, and end-to-end smoke
+  origin response admission for proxied image cache, opt-in bounded proxy
+  `Range` caching for safe single byte windows, and end-to-end smoke
   coverage for cached HIT `Age`, conditional `304`, byte-range `206`,
   `If-Range` match/mismatch behavior, validator-based upstream revalidation
   from origin `304`, stale-object refresh from origin `200`,

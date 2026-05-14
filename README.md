@@ -346,7 +346,7 @@ traffic. `examples/cache-encryption-local.toml` and
 encryption policies for local-key and OpenBao-backed deployments. See
 `docs/cache-encryption.md` for key setup, OpenBao policy, rotation notes, and
 local smoke tests.
-The active `1.2.4` line starts distributed cache metadata and peer-fill with a
+The `1.2.4` line starts distributed cache metadata and peer-fill with a
 bounded `[cache.peer_fill]` policy and validated peer-origin configuration.
 The first runtime primitive is also in place: proxy-cache requests with
 `Cache-Control: only-if-cached` are satisfied from a fresh local cached object
@@ -356,8 +356,13 @@ safe no-origin response, store valid peer hits locally, and fall back to origin
 only when `fail_open` allows it. `examples/cache-peer-fill.toml` shows the
 current config shape, and `scripts/smoke_peer_fill_cache.sh` verifies the
 multi-node `PEER-HIT` path, local post-fill hits, `Vary` variants, peer `Age`,
-and fail-open/fail-closed behavior before release. An optional `1.2.5` is
-reserved only if production testing finds one more cache blocker. `1.3` is the
+and fail-open/fail-closed behavior before release. The `1.2.5` line closes the
+large-file cache gap with opt-in bounded `Range` caching for safe single
+`bytes=start-end` proxy requests. Range responses are stored under a
+range-specific key and only admitted when upstream returns matching `206`,
+`Content-Range`, and `Content-Length` metadata; unkeyed upstream `206`
+responses are rejected from the full-object cache. `If-Range`, suffix,
+open-ended, and multi-range requests stay on the normal path. `1.3` is the
 load-balancer/proxy parity line. Wasm is planned as a shared `1.4`
 extensibility release, covering nginx-Lua-style hooks and VCL-like cache policy
 hooks through one sandboxed runtime.

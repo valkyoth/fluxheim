@@ -3638,6 +3638,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub pass_uncacheable_after: u32,
     #[serde(default)]
+    pub range: CacheRangeConfig,
+    #[serde(default)]
     pub status_ttls: BTreeMap<u16, u32>,
     #[serde(default)]
     pub default_status_ttl_secs: Option<u32>,
@@ -3695,6 +3697,7 @@ impl Default for CacheConfig {
             key_parts: default_cache_key_parts(),
             min_uses: default_cache_min_uses(),
             pass_uncacheable_after: 0,
+            range: CacheRangeConfig::default(),
             status_ttls: BTreeMap::new(),
             default_status_ttl_secs: None,
             stale_while_revalidate_secs: None,
@@ -3891,6 +3894,7 @@ impl CacheConfig {
             return Err(ConfigError::InvalidCacheMaxObjectBytes { scope });
         }
 
+        self.range.validate(scope, self.max_object_bytes)?;
         self.lock.validate(scope)?;
         self.predictor.validate(scope)?;
         self.peer_fill.validate(scope)?;
@@ -3914,6 +3918,48 @@ impl CacheConfig {
     pub fn has_enabled_tier(&self) -> bool {
         self.memory.enabled || self.disk.enabled
     }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CacheRangeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_cache_range_max_bytes")]
+    pub max_bytes: ByteSize,
+}
+
+impl Default for CacheRangeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_bytes: default_cache_range_max_bytes(),
+        }
+    }
+}
+
+impl CacheRangeConfig {
+    fn validate(&self, scope: &'static str, max_object_bytes: ByteSize) -> Result<(), ConfigError> {
+        if self.max_bytes.as_u64() == 0 {
+            return Err(ConfigError::InvalidCacheRangePolicy {
+                scope,
+                field: "range.max_bytes",
+                reason: "max bytes must be greater than zero",
+            });
+        }
+        if self.enabled && self.max_bytes > max_object_bytes {
+            return Err(ConfigError::InvalidCacheRangePolicy {
+                scope,
+                field: "range.max_bytes",
+                reason: "max bytes must not exceed max_object_bytes",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_cache_range_max_bytes() -> ByteSize {
+    ByteSize(8 * 1024 * 1024)
 }
 
 fn cache_sensitive_request_header(header: &str) -> bool {
@@ -5348,6 +5394,11 @@ pub enum ConfigError {
     InvalidCacheMinUses {
         scope: &'static str,
     },
+    InvalidCacheRangePolicy {
+        scope: &'static str,
+        field: &'static str,
+        reason: &'static str,
+    },
     InvalidCacheBypassQueryParam {
         scope: &'static str,
         param: String,
@@ -5892,6 +5943,11 @@ impl Display for ConfigError {
             Self::InvalidCacheMinUses { scope } => {
                 write!(formatter, "{scope}.min_uses must be greater than zero")
             }
+            Self::InvalidCacheRangePolicy {
+                scope,
+                field,
+                reason,
+            } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
             Self::InvalidCacheBypassQueryParam { scope, param } => write!(
                 formatter,
                 "{scope}.bypass_query_params must contain raw query parameter names without whitespace, controls, '&', '=', '#', '?', or ';', got {param:?}"
@@ -9038,6 +9094,10 @@ mod tests {
             methods = ["GET"]
             max_object_bytes = "4MiB"
 
+            [cache.range]
+            enabled = true
+            max_bytes = "1MiB"
+
             [cache.memory]
             enabled = true
             max_size_bytes = "1GiB"
@@ -9159,6 +9219,11 @@ mod tests {
         assert_eq!(
             config.cache.max_object_bytes,
             ByteSize::from_bytes(4 * 1024 * 1024)
+        );
+        assert!(config.cache.range.enabled);
+        assert_eq!(
+            config.cache.range.max_bytes,
+            ByteSize::from_bytes(1024 * 1024)
         );
         assert!(config.cache.memory.enabled);
         assert_eq!(
@@ -9574,6 +9639,50 @@ mod tests {
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidCacheMinUses { scope: "cache" })
+        );
+    }
+
+    #[test]
+    fn rejects_zero_cache_range_max_bytes() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache.range]
+            max_bytes = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheRangePolicy {
+                scope: "cache",
+                field: "range.max_bytes",
+                reason: "max bytes must be greater than zero",
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_cache_range_larger_than_cache_object_limit() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            max_object_bytes = "1MiB"
+
+            [cache.range]
+            enabled = true
+            max_bytes = "2MiB"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheRangePolicy {
+                scope: "cache",
+                field: "range.max_bytes",
+                reason: "max bytes must not exceed max_object_bytes",
+            })
         );
     }
 

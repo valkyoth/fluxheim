@@ -584,6 +584,10 @@ extensions = ["avif", "css", "gif", "ico", "jpg", "js", "png", "svg", "webp", "w
 methods = ["GET", "HEAD"]
 max_object_bytes = "32MiB"
 
+[cache.range]
+enabled = false
+max_bytes = "8MiB"
+
 [cache.memory]
 enabled = false
 max_size_bytes = "1GiB"
@@ -634,6 +638,19 @@ Fluxheim also rejects disk cache roots whose nearest existing parent is
 group- or world-writable, such as creating a cache root directly below `/tmp`; use a
 dedicated cache directory such as `/var/cache/fluxheim` or a pre-created private
 runtime directory.
+
+`[cache.range]` is disabled by default. When enabled, Fluxheim can cache safe
+bounded single `Range: bytes=start-end` proxy responses under a range-specific
+cache key. This is intended for large object workloads such as package mirrors,
+media files, and resumable downloads where clients repeatedly request the same
+byte window. Fluxheim only admits matching upstream `206 Partial Content`
+responses whose `Content-Range` and `Content-Length` match the requested range;
+unkeyed upstream `206` responses are rejected from the normal full-object cache
+to avoid poisoning complete-object entries. `range.max_bytes` must be greater
+than zero and no larger than `cache.max_object_bytes`. Requests with
+`If-Range`, suffix ranges, open-ended ranges, or multiple ranges are left on the
+normal non-range-specific path.
+
 `cache.disk.backend` defaults to `filesystem`, the stable complete-object disk
 backend used by `1.2.0` and `1.2.1`. `storage-bin` selects the focused `1.2.2`
 slab/bin disk backend, which stores objects inside bounded `.fhbin` data files

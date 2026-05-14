@@ -11,6 +11,30 @@ behavior when the change improves security or project direction.
 
 No unreleased changes yet.
 
+## 1.2.5 - Bounded Range Cache Follow-Up
+
+Released: in progress
+
+### Added
+
+- Added opt-in `[cache.range]`, `[vhosts.cache.range]`, and route-scoped
+  cache range policy for safe bounded single `Range: bytes=start-end` proxy
+  requests.
+- Added range-specific proxy cache keys so repeated partial downloads can be
+  served from cache without colliding with complete-object entries.
+- Added range-cache admission checks that only store upstream `206 Partial
+  Content` responses when `Content-Range` and `Content-Length` match the
+  requested byte window.
+
+### Changed
+
+- Upstream `206 Partial Content` responses are now rejected from normal
+  full-object cache admission unless the request is participating in the
+  opt-in range-cache path.
+- Documented the `1.2.5` large-file cache behavior in the README, config
+  reference, cache backend notes, production-readiness notes, and versioning
+  plan.
+
 ## 1.2.4 - Distributed Cache Peer-Fill Follow-Up
 
 Released: in progress

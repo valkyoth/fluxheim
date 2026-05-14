@@ -30,6 +30,8 @@ use pingora::cache::predictor::{CacheablePredictor, Predictor};
 use pingora::http::RequestHeader;
 use pingora::http::ResponseHeader;
 use pingora::prelude::{HttpPeer, Result};
+#[cfg(feature = "cache")]
+use pingora::proxy::RangeType;
 use pingora::proxy::{FailToProxy, ProxyHttp, Session};
 use pingora::{Error, ErrorType};
 #[cfg(feature = "cache")]
@@ -2313,7 +2315,18 @@ impl ProxyRuntimeState {
         {
             return Some(key);
         }
-        self.pingora_image_cache_key_for_request_header(request, vhost_index, route_index)
+        let key =
+            self.pingora_image_cache_key_for_request_header(request, vhost_index, route_index)?;
+        let vhost = self.vhost(vhost_index);
+        let cache_config = route_index
+            .and_then(|index| vhost.route(index).cache.as_ref())
+            .map(|cache| &cache.config)
+            .unwrap_or(&vhost.cache);
+        if let Some(range) = selected_cache_range_request(request, cache_config) {
+            range_cache_key(key, range).ok()
+        } else {
+            Some(key)
+        }
     }
 
     #[cfg(all(feature = "cache", feature = "web"))]
@@ -3119,6 +3132,8 @@ pub struct RequestContext {
     #[cfg(feature = "cache")]
     cache_observed_phase: Option<CachePhase>,
     #[cfg(feature = "cache")]
+    cache_range: Option<CacheRangeRequest>,
+    #[cfg(feature = "cache")]
     revalidation_304_headers: Option<Revalidation304Headers>,
 }
 
@@ -3127,6 +3142,24 @@ pub struct RequestContext {
 struct CacheStatusOverride {
     status: &'static str,
     reason: Option<&'static str>,
+}
+
+#[cfg(feature = "cache")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CacheRangeRequest {
+    start: u64,
+    end: u64,
+}
+
+#[cfg(feature = "cache")]
+impl CacheRangeRequest {
+    fn len(self) -> u64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    fn component(self) -> String {
+        format!("bytes={}-{}", self.start, self.end)
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -3439,7 +3472,14 @@ impl ProxyHttp for FluxProxy {
             trusted_proxy,
             downstream_tls,
             request_id,
-        )
+        )?;
+
+        #[cfg(feature = "cache")]
+        if let Some(range) = ctx.cache_range {
+            upstream_request.insert_header("range", range.component())?;
+        }
+
+        Ok(())
     }
 
     #[cfg(feature = "cache")]
@@ -3849,6 +3889,8 @@ impl ProxyHttp for FluxProxy {
             return Ok(());
         }
 
+        ctx.cache_range = selected_cache_range_request(session.req_header(), cache_config);
+
         let storage = route_cache
             .and_then(RuntimeRouteCache::storage)
             .or_else(|| {
@@ -3899,9 +3941,13 @@ impl ProxyHttp for FluxProxy {
             cache_lock,
             Some(cache_option_overrides),
         );
+        let max_file_size_bytes = ctx
+            .cache_range
+            .map(|_| cache_config.range.max_bytes)
+            .unwrap_or(cache_config.max_object_bytes);
         session
             .cache
-            .set_max_file_size_bytes(cache_config.max_object_bytes.as_usize());
+            .set_max_file_size_bytes(max_file_size_bytes.as_usize());
         Ok(())
     }
 
@@ -3921,7 +3967,7 @@ impl ProxyHttp for FluxProxy {
         let vhost_index = ctx
             .vhost_index
             .unwrap_or_else(|| state.vhost_index(request_host(session)));
-        state
+        let mut cache_key = state
             .pingora_image_cache_key_for_request_header(
                 session.req_header(),
                 vhost_index,
@@ -3932,7 +3978,11 @@ impl ProxyHttp for FluxProxy {
                     ErrorType::InternalError,
                     "cache key callback called for a non-cacheable request",
                 )
-            })
+            })?;
+        if let Some(range) = ctx.cache_range {
+            cache_key = range_cache_key(cache_key, range)?;
+        }
+        Ok(cache_key)
     }
 
     #[cfg(feature = "cache")]
@@ -3967,7 +4017,17 @@ impl ProxyHttp for FluxProxy {
             response
         };
 
-        if let Some(reason) = response_cache_admission_rejection(response, cache) {
+        if let Some(reason) = range_response_cache_admission_rejection(response, ctx.cache_range) {
+            cache_pass_record_uncacheable(cache_pass_counter(), cache, &cache_key);
+            return Ok(RespCacheable::Uncacheable(NoCacheReason::Custom(reason)));
+        }
+
+        let admission_rejection = if ctx.cache_range.is_some() {
+            response_range_cache_admission_rejection(response, cache)
+        } else {
+            response_cache_admission_rejection(response, cache)
+        };
+        if let Some(reason) = admission_rejection {
             cache_pass_record_uncacheable(cache_pass_counter(), cache, &cache_key);
             return Ok(RespCacheable::Uncacheable(NoCacheReason::Custom(reason)));
         }
@@ -3999,6 +4059,26 @@ impl ProxyHttp for FluxProxy {
             )));
         }
         Ok(decision)
+    }
+
+    #[cfg(feature = "cache")]
+    fn range_header_filter(
+        &self,
+        session: &mut Session,
+        response: &mut ResponseHeader,
+        ctx: &mut Self::CTX,
+    ) -> RangeType {
+        let Some(cached_range) = ctx.cache_range else {
+            return pingora::proxy::range_header_filter(session.req_header(), response, None);
+        };
+
+        if response.status != StatusCode::PARTIAL_CONTENT {
+            return pingora::proxy::range_header_filter(session.req_header(), response, None);
+        }
+        let Ok(end) = usize::try_from(cached_range.len()) else {
+            return RangeType::Invalid;
+        };
+        RangeType::Single(0..end)
     }
 
     #[cfg(feature = "cache")]
@@ -5073,6 +5153,127 @@ fn static_cached_body_for_plan(
             Ok(cached.slice(start..end))
         }
     }
+}
+
+#[cfg(feature = "cache")]
+fn selected_cache_range_request(
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<CacheRangeRequest> {
+    if !cache.range.enabled || request.method.as_str() != "GET" {
+        return None;
+    }
+    let mut values = request_header_values(request, "range");
+    let range = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    if request_header_values(request, "if-range").next().is_some() {
+        return None;
+    }
+    let parsed = parse_bounded_single_range(range)?;
+    (parsed.len() <= cache.range.max_bytes.as_u64()).then_some(parsed)
+}
+
+#[cfg(feature = "cache")]
+fn parse_bounded_single_range(range: &str) -> Option<CacheRangeRequest> {
+    let range = range.trim();
+    let range = range.strip_prefix("bytes=")?;
+    if range.contains(',') {
+        return None;
+    }
+    let (start, end) = range.split_once('-')?;
+    if start.is_empty() || end.is_empty() {
+        return None;
+    }
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    if end < start {
+        return None;
+    }
+    Some(CacheRangeRequest { start, end })
+}
+
+#[cfg(feature = "cache")]
+fn range_cache_key(mut base: PingoraCacheKey, range: CacheRangeRequest) -> Result<PingoraCacheKey> {
+    let namespace = base.namespace().to_vec();
+    let user_tag = base.user_tag.clone();
+    let Some(primary) = base.primary_key_str() else {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "cache range key requires utf-8 primary key material",
+        );
+    };
+    let mut primary = primary.to_owned();
+    append_cache_key_component(&mut primary, "range", &range.component());
+    base = PingoraCacheKey::new(namespace, primary, user_tag);
+    Ok(base)
+}
+
+#[cfg(feature = "cache")]
+fn append_cache_key_component(key: &mut String, label: &str, value: &str) {
+    use std::fmt::Write as _;
+    let _ = write!(key, "{label}:{}:{value};", value.len());
+}
+
+#[cfg(feature = "cache")]
+fn range_response_cache_admission_rejection(
+    response: &ResponseHeader,
+    range: Option<CacheRangeRequest>,
+) -> Option<&'static str> {
+    match range {
+        Some(range) => {
+            if response.status != StatusCode::PARTIAL_CONTENT {
+                return Some("range-cache-non-partial");
+            }
+            if !content_range_matches(response, range) {
+                return Some("range-cache-content-range");
+            }
+            if !content_length_matches_range(response, range) {
+                return Some("range-cache-content-length");
+            }
+            None
+        }
+        None if response.status == StatusCode::PARTIAL_CONTENT => Some("range-response"),
+        None => None,
+    }
+}
+
+#[cfg(feature = "cache")]
+fn content_range_matches(response: &ResponseHeader, expected: CacheRangeRequest) -> bool {
+    response
+        .headers
+        .get_all("content-range")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| {
+            parse_content_range_bounds(value)
+                .is_some_and(|range| range.start == expected.start && range.end == expected.end)
+        })
+}
+
+#[cfg(feature = "cache")]
+fn parse_content_range_bounds(value: &str) -> Option<CacheRangeRequest> {
+    let value = value.trim();
+    let rest = value.strip_prefix("bytes ")?;
+    let (range, _complete_len) = rest.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    if end < start {
+        return None;
+    }
+    Some(CacheRangeRequest { start, end })
+}
+
+#[cfg(feature = "cache")]
+fn content_length_matches_range(response: &ResponseHeader, expected: CacheRangeRequest) -> bool {
+    response
+        .headers
+        .get_all("content-length")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.trim().parse::<u64>().ok() == Some(expected.len()))
 }
 
 #[cfg(feature = "cache")]
@@ -6292,6 +6493,32 @@ fn response_cache_admission_rejection(
         };
     }
 
+    response_cache_header_policy_rejection(response, cache)
+}
+
+#[cfg(feature = "cache")]
+fn response_range_cache_admission_rejection(
+    response: &ResponseHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<&'static str> {
+    let headers = &response.headers;
+    if !response_content_type_is_cacheable(headers, cache) {
+        return if headers.contains_key("content-type") {
+            Some("content-type-not-cacheable")
+        } else {
+            Some("content-type-missing")
+        };
+    }
+
+    response_cache_header_policy_rejection(response, cache)
+}
+
+#[cfg(feature = "cache")]
+fn response_cache_header_policy_rejection(
+    response: &ResponseHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<&'static str> {
+    let headers = &response.headers;
     if headers.contains_key("set-cookie") {
         return Some("set-cookie");
     }
@@ -6680,15 +6907,19 @@ mod tests {
     use crate::test_support::unique_temp_path;
 
     #[cfg(feature = "cache")]
+    use super::CacheRangeRequest;
+    #[cfg(feature = "cache")]
     use super::{
         CACHE_PASS_REASON, CacheStaleEvent, CacheStatusOverride, MAX_VARY_FIELDS, VaryCachePolicy,
         apply_cache_status_ttl, cache_min_uses_allows_store, cache_pass_record_cacheable,
         cache_pass_record_uncacheable, cache_pass_should_bypass, cache_request_participated,
         cache_should_serve_stale, cache_stale_status_allows, cache_status_header_value,
         cache_status_reason_header_value, cache_vary_policy, ignore_origin_cache_headers,
-        lookup_proxy_cache_only_object, read_cache_hit_body, remaining_fresh_ttl_secs,
+        lookup_proxy_cache_only_object, parse_bounded_single_range, range_cache_key,
+        range_response_cache_admission_rejection, read_cache_hit_body, remaining_fresh_ttl_secs,
         response_age_secs, response_cache_admission_rejection, response_vary_variance,
-        strip_cache_response_headers, vary_cache_policy, vary_request_hash,
+        selected_cache_range_request, strip_cache_response_headers, vary_cache_policy,
+        vary_request_hash,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -7845,6 +8076,59 @@ mod tests {
         );
         assert!(preview.primary_hash.is_some());
         assert_eq!(preview.combined_hash, preview.primary_hash);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn cache_key_preview_reports_selected_range_key() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "cached".to_owned(),
+                hosts: vec!["cached.example".to_owned()],
+                max_request_body_bytes: None,
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig {
+                    enabled: true,
+                    range: crate::config::CacheRangeConfig {
+                        enabled: true,
+                        max_bytes: ByteSize::from_bytes(1024),
+                    },
+                    memory: crate::config::CacheMemoryConfig {
+                        enabled: true,
+                        max_size_bytes: ByteSize::from_bytes(2048),
+                    },
+                    image_extensions: vec!["bin".to_owned()],
+                    max_object_bytes: ByteSize::from_bytes(2048),
+                    ..CacheConfig::default()
+                },
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/video.bin", None).unwrap();
+        request.insert_header("host", "cached.example").unwrap();
+        request.insert_header("range", "bytes=4-11").unwrap();
+
+        let preview = proxy
+            .snapshot()
+            .pingora_image_cache_key_preview_for_request_header(&request);
+
+        assert!(preview.eligible);
+        assert_eq!(preview.scope, super::CacheKeyPreviewScope::Vhost);
+        assert_eq!(preview.user_tag.as_deref(), Some("cached"));
+        assert!(
+            preview
+                .primary_key
+                .as_deref()
+                .is_some_and(|primary| primary.ends_with("range:10:bytes=4-11;"))
+        );
     }
 
     #[cfg(feature = "cache")]
@@ -10571,6 +10855,170 @@ mod tests {
         assert_eq!(
             cache_vary_policy(&response.headers, &cache),
             VaryCachePolicy::Fields(vec!["accept-encoding".to_owned()])
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn bounded_range_parser_accepts_safe_single_ranges() {
+        assert_eq!(
+            parse_bounded_single_range("bytes=0-1023"),
+            Some(CacheRangeRequest {
+                start: 0,
+                end: 1023,
+            })
+        );
+        assert_eq!(
+            parse_bounded_single_range(" bytes=12-12 "),
+            Some(CacheRangeRequest { start: 12, end: 12 })
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn bounded_range_parser_rejects_ambiguous_or_unbounded_ranges() {
+        assert_eq!(parse_bounded_single_range("bytes=0-1023,2048-4095"), None);
+        assert_eq!(parse_bounded_single_range("bytes=0-"), None);
+        assert_eq!(parse_bounded_single_range("bytes=-1024"), None);
+        assert_eq!(parse_bounded_single_range("bytes=20-10"), None);
+        assert_eq!(parse_bounded_single_range("items=0-10"), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn selected_cache_range_request_requires_opt_in_get_and_size_bound() {
+        let cache = CacheConfig {
+            range: crate::config::CacheRangeConfig {
+                enabled: true,
+                max_bytes: ByteSize::from_bytes(16),
+            },
+            ..CacheConfig::default()
+        };
+        let mut request = pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        request.append_header("range", "bytes=0-15").unwrap();
+        assert_eq!(
+            selected_cache_range_request(&request, &cache),
+            Some(CacheRangeRequest { start: 0, end: 15 })
+        );
+
+        let mut too_large =
+            pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        too_large.append_header("range", "bytes=0-16").unwrap();
+        assert_eq!(selected_cache_range_request(&too_large, &cache), None);
+
+        let mut repeated = pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        repeated.append_header("range", "bytes=0-15").unwrap();
+        repeated.append_header("range", "bytes=16-31").unwrap();
+        assert_eq!(selected_cache_range_request(&repeated, &cache), None);
+
+        let mut if_range = pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        if_range.append_header("range", "bytes=0-15").unwrap();
+        if_range
+            .append_header("if-range", "\"strong-validator\"")
+            .unwrap();
+        assert_eq!(selected_cache_range_request(&if_range, &cache), None);
+
+        let mut head = pingora::http::RequestHeader::build("HEAD", b"/video.bin", None).unwrap();
+        head.append_header("range", "bytes=0-15").unwrap();
+        assert_eq!(selected_cache_range_request(&head, &cache), None);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn range_cache_key_extends_primary_key_and_preserves_user_tag() {
+        let base = pingora::cache::CacheKey::new(
+            "fluxheim-cache-v1",
+            "method:3:GET;host:11:example.test;path:10:/video.bin;",
+            "vhost-a",
+        );
+
+        let key = range_cache_key(
+            base,
+            CacheRangeRequest {
+                start: 0,
+                end: 1023,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(key.namespace_str(), Some("fluxheim-cache-v1"));
+        assert_eq!(key.user_tag, "vhost-a");
+        assert!(
+            key.primary_key_str()
+                .is_some_and(|primary| primary.ends_with("range:12:bytes=0-1023;"))
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn range_cache_admission_rejects_unkeyed_partial_responses() {
+        let mut response = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        response
+            .insert_header("content-range", "bytes 0-15/1024")
+            .unwrap();
+        response.insert_header("content-length", "16").unwrap();
+
+        assert_eq!(
+            range_response_cache_admission_rejection(&response, None),
+            Some("range-response")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn range_cache_admission_accepts_matching_partial_response() {
+        let mut response = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        response
+            .insert_header("content-range", "bytes 0-15/1024")
+            .unwrap();
+        response.insert_header("content-length", "16").unwrap();
+
+        assert_eq!(
+            range_response_cache_admission_rejection(
+                &response,
+                Some(CacheRangeRequest { start: 0, end: 15 }),
+            ),
+            None
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn range_cache_admission_rejects_mismatched_partial_metadata() {
+        let mut ok_status = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        ok_status.insert_header("content-length", "16").unwrap();
+        assert_eq!(
+            range_response_cache_admission_rejection(
+                &ok_status,
+                Some(CacheRangeRequest { start: 0, end: 15 }),
+            ),
+            Some("range-cache-non-partial")
+        );
+
+        let mut bad_range = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        bad_range
+            .insert_header("content-range", "bytes 16-31/1024")
+            .unwrap();
+        bad_range.insert_header("content-length", "16").unwrap();
+        assert_eq!(
+            range_response_cache_admission_rejection(
+                &bad_range,
+                Some(CacheRangeRequest { start: 0, end: 15 }),
+            ),
+            Some("range-cache-content-range")
+        );
+
+        let mut bad_length = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        bad_length
+            .insert_header("content-range", "bytes 0-15/1024")
+            .unwrap();
+        bad_length.insert_header("content-length", "17").unwrap();
+        assert_eq!(
+            range_response_cache_admission_rejection(
+                &bad_length,
+                Some(CacheRangeRequest { start: 0, end: 15 }),
+            ),
+            Some("range-cache-content-length")
         );
     }
 

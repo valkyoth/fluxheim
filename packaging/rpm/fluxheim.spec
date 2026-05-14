@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.2.4
+Version:        1.2.5
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -15,7 +15,7 @@ URL:            https://github.com/valkyoth/fluxheim
 Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
 # Create with:
 #   cargo vendor vendor > /tmp/fluxheim-cargo-config.toml
-#   tar -czf fluxheim-1.2.4-vendor.tar.gz vendor
+#   tar -czf fluxheim-1.2.5-vendor.tar.gz vendor
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        fluxheim.tmpfiles
 Source3:        fluxheim.service
@@ -150,6 +150,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu May 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.5-1
+- Focused bounded range-cache follow-up for large proxy-cache objects.
+
 * Wed May 13 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.2.4-1
 - Focused distributed cache metadata and peer-fill follow-up.
 

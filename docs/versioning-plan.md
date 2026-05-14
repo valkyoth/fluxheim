@@ -448,11 +448,11 @@ Stable scope:
     preserves changed `Last-Modified` values from origin `304 Not Modified`
     responses and protects changed `Vary` values by refusing the revalidation
     metadata update until variance re-keying can move into the Pingora path;
-  - large-object range and slice behavior stays in the stable-cache review for
-    1.2 only as a safety concern: current behavior must be explicit, bounded,
-    and tested. A larger reader-visible partial write or slice-fill design
-    should use the proper Pingora cache path and move to the optional cache
-    follow-up slot if production testing proves it is required before 1.3;
+  - large-object range behavior is handled by explicit opt-in bounded
+    range-cache policy in `1.2.5`: safe single `bytes=start-end` requests get a
+    range-specific cache key and only matching upstream `206` metadata is
+    admitted. A larger reader-visible multi-slice composition design can move
+    to the later media-edge line if production needs it;
   - cache manager/loader hardening beyond the current startup purge-index
     rebuild and stale purger: full deterministic startup scans now prevent
     checkpoint orphans, startup enforces the disk-size budget before serving,
@@ -825,12 +825,14 @@ Focused cache-only follow-up releases after 1.2:
   valid peer hits locally, applies `fail_open` to decide whether a peer miss
   falls back to origin, preserves peer `Age`, stores `Vary` variants correctly,
   and is covered by a local multi-node smoke test.
-- `1.2.5`: reserved only if production 1.2 testing exposes one more
-  cache-specific gap that should close before the 1.3 line starts. Candidate
-  work includes proper Pingora-path partial streaming/slice range fill,
-  HEAD-to-GET cache-key conversion with safe body handling, cache import/export
-  workflows for mirrors, or bounded metadata ban predicates. If no such blocker
-  appears, skip `1.2.5` and move to `1.3`.
+- `1.2.5`: focused bounded range-cache follow-up for large proxy-cache objects.
+  This release adds opt-in caching for safe single `Range: bytes=start-end`
+  proxy requests, stores range responses under range-specific cache keys, and
+  admits only matching upstream `206` responses with correct `Content-Range`
+  and `Content-Length`. It also rejects unkeyed upstream `206` responses from
+  the full-object cache so partial responses cannot poison complete-object
+  entries. Full multi-slice assembly can still live in a later media-edge line
+  if production needs Varnish-style range composition.
 
 Cross-cutting packaging follow-up for the next suitable `1.2.x` or `1.3`
 release: add proper manual pages for native deployments, including
@@ -1500,10 +1502,8 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.2.3`: focused optional cache encryption at rest with local-key support
   and OpenBao Transit provider support.
 - `v1.2.4`: focused distributed cache metadata and peer-fill release.
-- `v1.2.5`: optional cache-only follow-up if production testing finds one more
-  cache blocker before `1.3`; likely candidates include proper Pingora-path
-  partial streaming/slice range fill, HEAD-to-GET cache parity, cache
-  import/export, or bounded metadata ban predicates.
+- `v1.2.5`: focused bounded range-cache follow-up for large proxy-cache
+  objects before `1.3`.
 - `v1.3.1`: fixes for load balancer.
 - `v1.4.1`: fixes for the shared Wasm extensibility runtime.
 
