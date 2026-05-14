@@ -38,6 +38,8 @@ Released: in progress
 - Added `scripts/smoke_peer_fill_cache.sh` and wired it into CI/release gates
   to prove node-to-node peer fill, local store after peer hit, and peer-fill
   activity metrics before release.
+- Enforced `peer_fill.max_concurrent_requests` at runtime per vhost/route cache
+  policy so configured peer-fill limits now bound active outbound peer fetches.
 
 ## 1.2.3 - Optional Cache Encryption Follow-Up
 

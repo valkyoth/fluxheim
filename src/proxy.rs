@@ -3,7 +3,11 @@ use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 #[cfg(feature = "cache")]
+use std::sync::Mutex;
+#[cfg(feature = "cache")]
 use std::sync::OnceLock;
+#[cfg(feature = "cache")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 #[cfg(feature = "cache")]
 use std::time::Duration;
@@ -67,6 +71,8 @@ const REVALIDATION_VARY_CHANGED_REASON: &str = "revalidation-vary-changed";
 const CACHE_ONLY_RESPONSE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg(feature = "cache")]
 type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
+#[cfg(feature = "cache")]
+static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct FluxProxy {
@@ -3463,6 +3469,35 @@ impl ProxyHttp for FluxProxy {
 
         let cache_key = session.cache.cache_key().clone();
         let peer_fill = cache.peer_fill.clone();
+        let Some(_peer_fill_permit) = acquire_peer_fill_concurrency_permit(
+            peer_fill_concurrency_key(&vhost.name, ctx.route_index),
+            peer_fill.max_concurrent_requests,
+        ) else {
+            log::warn!(
+                "peer fill concurrency limit reached for vhost {} route {:?}",
+                vhost.name,
+                ctx.route_index
+            );
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_error");
+            if peer_fill.fail_open {
+                #[cfg(feature = "metrics")]
+                record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_fallback");
+                return Ok(true);
+            }
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "peer_fill_fail_closed");
+            respond_proxy_cache_only_miss(
+                session,
+                ctx,
+                cache,
+                selected_response_headers(vhost, ctx),
+                "peer-fill-concurrency-limit",
+                Some("MISS"),
+            )
+            .await?;
+            return Ok(false);
+        };
         let request = peer_fill_request_from_header(session.req_header());
         let response_headers = selected_response_headers(vhost, ctx);
         let max_body_bytes = peer_fill
@@ -4247,6 +4282,59 @@ async fn lookup_proxy_cache_only_object(
                 hit.finish(storage, &cache_key, trace).await?;
                 Ok(None)
             }
+        }
+    }
+}
+
+#[cfg(feature = "cache")]
+struct PeerFillConcurrencyPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+#[cfg(feature = "cache")]
+impl Drop for PeerFillConcurrencyPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(feature = "cache")]
+fn peer_fill_concurrency_key(vhost_name: &str, route_index: Option<usize>) -> String {
+    match route_index {
+        Some(route_index) => format!("vhost:{vhost_name}:route:{route_index}"),
+        None => format!("vhost:{vhost_name}:route:_"),
+    }
+}
+
+#[cfg(feature = "cache")]
+fn acquire_peer_fill_concurrency_permit(
+    key: String,
+    max_concurrent_requests: usize,
+) -> Option<PeerFillConcurrencyPermit> {
+    let counter = {
+        let mut counters = PEER_FILL_CONCURRENCY
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        counters
+            .entry(key)
+            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+            .clone()
+    };
+
+    let mut current = counter.load(Ordering::Acquire);
+    loop {
+        if current >= max_concurrent_requests {
+            return None;
+        }
+        match counter.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return Some(PeerFillConcurrencyPermit { counter }),
+            Err(observed) => current = observed,
         }
     }
 }
@@ -6565,7 +6653,10 @@ mod tests {
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "cache")]
-    use super::{PeerFillResponse, peer_fill_request_from_header, peer_fill_url};
+    use super::{
+        PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
+        peer_fill_request_from_header, peer_fill_url,
+    };
     #[cfg(feature = "cache")]
     use super::{
         capture_revalidation_304_headers, request_cache_bypass, request_cache_bypass_reason,
@@ -9320,6 +9411,27 @@ mod tests {
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
         assert!(!request_cache_only_if_cached(&request));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_concurrency_permit_respects_policy_limit() {
+        let key = peer_fill_concurrency_key("concurrency.test", Some(7));
+        let first =
+            acquire_peer_fill_concurrency_permit(key.clone(), 1).expect("first permit available");
+
+        assert!(acquire_peer_fill_concurrency_permit(key.clone(), 1).is_none());
+
+        drop(first);
+
+        let second =
+            acquire_peer_fill_concurrency_permit(key.clone(), 1).expect("permit released on drop");
+        drop(second);
+
+        let route_key = peer_fill_concurrency_key("concurrency.test", Some(8));
+        let route_permit = acquire_peer_fill_concurrency_permit(route_key, 1)
+            .expect("different route has separate concurrency budget");
+        drop(route_permit);
     }
 
     #[cfg(feature = "cache")]

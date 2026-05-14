@@ -740,10 +740,13 @@ fragment, and no path beyond `/`. Plain HTTP is accepted only for loopback
 peers unless `allow_insecure_http = true`, which is intended for private test
 networks or trusted in-cluster transport. `max_concurrent_requests` is bounded
 to 1-1024 and `fail_open = true` means peer-fill failure should fall back to the
-normal origin path rather than failing the user request once runtime peer fill
-is implemented. The first runtime primitive is available now: proxy-cache
-requests with `Cache-Control: only-if-cached` are answered only from a fresh
-local cache object and otherwise return `504` without contacting origin.
+normal origin path rather than failing the user request. `max_concurrent_requests`
+is enforced per vhost or route cache policy for active outbound peer-fill
+fetches. If that limit is saturated, Fluxheim follows `fail_open`: fallback to
+origin when allowed, or a bounded `504` miss response otherwise. The first
+runtime primitive is available now:
+proxy-cache requests with `Cache-Control: only-if-cached` are answered only from
+a fresh local cache object and otherwise return `504` without contacting origin.
 Outbound peer fill uses the same safe request mode on local proxy-cache misses,
 stores valid peer hits locally, and falls back to origin only when `fail_open`
 is true. Peer requests include the original host plus safe negotiation headers
