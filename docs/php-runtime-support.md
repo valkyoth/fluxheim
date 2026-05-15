@@ -99,6 +99,12 @@ eligible:
 - Set `SCRIPT_NAME`, `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `REQUEST_METHOD`,
   `QUERY_STRING`, `REQUEST_URI`, `SERVER_NAME`, `SERVER_PORT`, and
   `SERVER_PROTOCOL` explicitly.
+- Translate safe inbound HTTP headers to CGI `HTTP_*` params, including
+  `HTTP_HOST`, while dropping `Proxy` to avoid HTTPoxy exposure.
+- Set TLS-related CGI context (`HTTPS` and `REQUEST_SCHEME`) from the
+  downstream connection state.
+- Set `REDIRECT_STATUS=200` for php-fpm compatibility with common PHP
+  hardening defaults.
 - Treat `PATH_INFO` as disabled by default; enable only with strict path split
   rules.
 - Enforce global and PHP-specific request body limits for both declared and
@@ -130,9 +136,9 @@ Prefer Unix sockets first for local/rootless deployments. TCP support is useful
 for separate php-fpm containers, but must require explicit config.
 
 Current tests cover config validation, traversal rejection, disabled `PATH_INFO`
-behavior, and malformed FastCGI response headers. Rootless php-fpm container
-smoke tests, timeout tests, and oversized body tests remain part of the `1.3.2`
-hardening pass.
+behavior, safe CGI header translation with HTTPoxy mitigation, and malformed
+FastCGI response headers. Rootless php-fpm container smoke tests, timeout tests,
+and oversized body tests remain part of the `1.3.2` hardening pass.
 
 ### `php-turbine`
 

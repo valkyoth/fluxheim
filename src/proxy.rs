@@ -5861,6 +5861,8 @@ async fn respond_host_routing_rejection(
 const MAX_PHP_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 #[cfg(feature = "php-fpm")]
 const MAX_PHP_RESPONSE_HEADER_BYTES: usize = 64 * 1024;
+#[cfg(feature = "php-fpm")]
+const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 
 #[cfg(feature = "php-fpm")]
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -5925,7 +5927,9 @@ async fn respond_php_request(
     let request_body = read_php_request_body(session, ctx, body_limit).await?;
     let content_type =
         request_header_values_joined(session.req_header(), "content-type").unwrap_or_default();
-    let server_port = if downstream_tls(session) { 443 } else { 80 };
+    let is_tls = downstream_tls(session);
+    let request_scheme = if is_tls { "https" } else { "http" };
+    let server_port = if is_tls { 443 } else { 80 };
     let remote = session.client_addr().and_then(|address| address.as_inet());
     let remote_addr = remote
         .map(|address| address.ip().to_string())
@@ -5952,9 +5956,19 @@ async fn respond_php_request(
         .server_port(server_port)
         .server_name(host.to_owned())
         .content_type(content_type)
-        .content_length(request_body.len());
+        .content_length(request_body.len())
+        .custom("REQUEST_SCHEME", request_scheme)
+        .custom("HTTPS", if is_tls { "on" } else { "off" })
+        .custom("REDIRECT_STATUS", "200");
+    add_php_request_header_params(&mut params, session.req_header());
     if !resolution.path_info.is_empty() {
         params = params.custom("PATH_INFO", resolution.path_info.clone());
+        let path_translated = php
+            .root
+            .join(resolution.path_info.trim_start_matches('/'))
+            .to_string_lossy()
+            .to_string();
+        params = params.custom("PATH_TRANSLATED", path_translated);
     }
 
     let timeout = std::time::Duration::from_secs(php.config.request_timeout_secs);
@@ -6109,6 +6123,67 @@ fn php_segment_has_allowed_extension(segment: &str, php: &RuntimePhp) -> bool {
             .iter()
             .any(|allowed| extension.eq_ignore_ascii_case(allowed))
     })
+}
+
+#[cfg(feature = "php-fpm")]
+fn add_php_request_header_params(params: &mut fastcgi_client::Params<'_>, request: &RequestHeader) {
+    let mut translated = std::collections::BTreeMap::<String, String>::new();
+    for (name, value) in &request.headers {
+        let Some(param_name) = php_header_param_name(name.as_str()) else {
+            continue;
+        };
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        if !safe_php_param_value(value) {
+            continue;
+        }
+        translated
+            .entry(param_name)
+            .and_modify(|existing| {
+                existing.push_str(", ");
+                existing.push_str(value);
+            })
+            .or_insert_with(|| value.to_owned());
+    }
+
+    for (name, value) in translated {
+        params.insert(name.into(), value.into());
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_header_param_name(name: &str) -> Option<String> {
+    if name.eq_ignore_ascii_case("proxy")
+        || name.eq_ignore_ascii_case("content-type")
+        || name.eq_ignore_ascii_case("content-length")
+    {
+        return None;
+    }
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return None;
+    }
+
+    let mut param = String::with_capacity("HTTP_".len() + name.len());
+    param.push_str("HTTP_");
+    for byte in name.bytes() {
+        if byte == b'-' {
+            param.push('_');
+        } else {
+            param.push((byte as char).to_ascii_uppercase());
+        }
+    }
+    Some(param)
+}
+
+#[cfg(feature = "php-fpm")]
+fn safe_php_param_value(value: &str) -> bool {
+    value.len() <= MAX_PHP_PARAM_VALUE_BYTES
+        && value.bytes().all(|byte| !matches!(byte, 0..=31 | 127))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -8711,8 +8786,8 @@ mod tests {
     };
     #[cfg(feature = "php-fpm")]
     use super::{
-        PhpResolveOutcome, RuntimePhp, parse_php_response, php_script_name_for_request,
-        resolve_php_script,
+        PhpResolveOutcome, RuntimePhp, add_php_request_header_params, parse_php_response,
+        php_header_param_name, php_script_name_for_request, resolve_php_script,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -8796,6 +8871,47 @@ mod tests {
             panic!("expected directory PHP index to execute");
         };
         assert_eq!(resolution.script_name, "/blog/index.php");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_header_param_translation_adds_common_headers_and_drops_httpoxy_proxy() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        request.insert_header("x-forwarded-proto", "https").unwrap();
+        request
+            .insert_header("proxy", "http://attacker.invalid")
+            .unwrap();
+        request
+            .insert_header("content-type", "application/json")
+            .unwrap();
+
+        let mut params = fastcgi_client::Params::default();
+        add_php_request_header_params(&mut params, &request);
+
+        assert_eq!(
+            params.get("HTTP_HOST").map(|value| value.as_ref()),
+            Some("example.test")
+        );
+        assert_eq!(
+            params
+                .get("HTTP_X_FORWARDED_PROTO")
+                .map(|value| value.as_ref()),
+            Some("https")
+        );
+        assert!(!params.contains_key("HTTP_PROXY"));
+        assert!(!params.contains_key("HTTP_CONTENT_TYPE"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_header_param_name_is_bounded_and_predictable() {
+        assert_eq!(
+            php_header_param_name("x-request-id").as_deref(),
+            Some("HTTP_X_REQUEST_ID")
+        );
+        assert_eq!(php_header_param_name("proxy"), None);
+        assert_eq!(php_header_param_name("content-length"), None);
     }
 
     #[cfg(feature = "php-fpm")]
