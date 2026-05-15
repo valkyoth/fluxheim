@@ -2385,17 +2385,11 @@ impl StorageBinDiskStorage {
             );
             valid_entries.push(entry);
         }
-        if !valid_entries.is_empty() {
-            write_storage_bin_index(&layout, &valid_entries).map_err(|error| {
-                std::io::Error::new(
-                    error.kind(),
-                    format!(
-                        "storage-bin index {}: {error}",
-                        storage_bin_index_path(&layout.root).display()
-                    ),
-                )
-            })?;
-        }
+        // Loading storage must not rewrite the index. Commands such as
+        // --validate-config or acme-renew may be run by an operator as root,
+        // while the service itself runs as the fluxheim user. Rewriting here
+        // can leave the index owned by the wrong user and break the next
+        // service start. The next cache mutation writes a compact index.
         let free_map =
             StorageBinFreeMap::from_occupied(&layout, &valid_entries).map_err(|error| {
                 std::io::Error::new(

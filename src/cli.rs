@@ -3062,7 +3062,7 @@ fn run_acme_renew_command(
 
     let config = Config::load(config_path)?;
     config.validate()?;
-    validate_runtime_config(&config)?;
+    validate_compiled_module_config(&config)?;
 
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
