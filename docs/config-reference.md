@@ -481,9 +481,12 @@ Every `upstreams` entry must be an authority such as
 `upstreams` is the preferred proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple
 configs, but do not set both fields in the same proxy block. Fluxheim rejects
-that as ambiguous. When `upstreams` is present, Fluxheim uses the first entry
-as the primary upstream in builds without `load-balancer`, and uses the full
-list for the Pingora load-balancer path when compiled with `load-balancer`.
+that as ambiguous. A single `upstreams = ["host:port"]` entry behaves like a
+normal single proxy target in all builds and is resolved when requests are
+proxied, so a missing backend does not prevent the gateway from starting. Two
+or more entries activate the Pingora load-balancer path in builds compiled with
+`load-balancer`; those entries may be resolved by load-balancer setup and health
+checking.
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
 optional. They map to the upstream connection timeout, upstream response/read
 timeout, and upstream request-body/write timeout.
