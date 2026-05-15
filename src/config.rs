@@ -247,7 +247,7 @@ impl Config {
         for vhost in &self.vhosts {
             vhost.validate()?;
             vhost
-                .validate_tls(&self.tls)
+                .validate_tls(&self.tls, self.vhost_has_shared_managed_acme_source(vhost))
                 .map_err(|source| ConfigError::VhostSection {
                     vhost: vhost.name.clone(),
                     section: "tls",
@@ -284,6 +284,55 @@ impl Config {
 
         Ok(())
     }
+
+    #[cfg(feature = "acme")]
+    fn vhost_has_shared_managed_acme_source(&self, vhost: &VhostConfig) -> bool {
+        if !self.tls.acme.enabled || self.tls.acme.storage.is_none() {
+            return false;
+        }
+        if vhost.tls.certificate.is_some() || vhost.tls.acme.enabled {
+            return false;
+        }
+        let hosts = vhost
+            .hosts
+            .iter()
+            .filter(|host| !host.starts_with("*."))
+            .filter_map(|host| normalize_host(host))
+            .collect::<Vec<_>>();
+        if hosts.is_empty() {
+            return false;
+        }
+
+        self.vhosts.iter().any(|candidate| {
+            candidate.name != vhost.name
+                && candidate.tls.enabled
+                && candidate.tls.acme.enabled
+                && managed_acme_domains_for_vhost(candidate)
+                    .is_some_and(|domains| hosts.iter().all(|host| domains.contains(host)))
+        })
+    }
+
+    #[cfg(not(feature = "acme"))]
+    fn vhost_has_shared_managed_acme_source(&self, _vhost: &VhostConfig) -> bool {
+        false
+    }
+}
+
+#[cfg(feature = "acme")]
+fn managed_acme_domains_for_vhost(
+    vhost: &VhostConfig,
+) -> Option<std::collections::HashSet<String>> {
+    let domains = if vhost.tls.acme.domains.is_empty() {
+        &vhost.hosts
+    } else {
+        &vhost.tls.acme.domains
+    };
+    let domains = domains
+        .iter()
+        .filter(|domain| !domain.starts_with("*."))
+        .filter_map(|domain| normalize_host(domain))
+        .collect::<std::collections::HashSet<_>>();
+    (!domains.is_empty()).then_some(domains)
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -3132,8 +3181,17 @@ impl VhostConfig {
         Ok(())
     }
 
-    fn validate_tls(&self, global_tls: &TlsConfig) -> Result<(), ConfigError> {
-        self.tls.validate("vhosts.tls", &self.hosts, global_tls)
+    fn validate_tls(
+        &self,
+        global_tls: &TlsConfig,
+        has_shared_certificate_source: bool,
+    ) -> Result<(), ConfigError> {
+        self.tls.validate(
+            "vhosts.tls",
+            &self.hosts,
+            global_tls,
+            has_shared_certificate_source,
+        )
     }
 }
 
@@ -3442,12 +3500,17 @@ impl VhostTlsConfig {
         scope: &'static str,
         vhost_hosts: &[String],
         global_tls: &TlsConfig,
+        has_shared_certificate_source: bool,
     ) -> Result<(), ConfigError> {
         if let Some(certificate) = &self.certificate {
             certificate.validate(scope)?;
         }
 
-        if self.enabled && self.certificate.is_none() && !self.acme.enabled {
+        if self.enabled
+            && self.certificate.is_none()
+            && !self.acme.enabled
+            && !has_shared_certificate_source
+        {
             return Err(ConfigError::TlsEnabledWithoutCertificateSource { scope });
         }
 
@@ -9386,6 +9449,44 @@ mod tests {
 
             [vhosts.tls.acme]
             enabled = true
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+    }
+
+    #[cfg(feature = "acme")]
+    #[test]
+    fn accepts_tls_alias_vhost_covered_by_managed_acme_san() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.acme]
+            enabled = true
+            storage = "/var/lib/fluxheim/acme"
+            contact_email = "admin@example.test"
+
+            [[vhosts]]
+            name = "apex"
+            hosts = ["example.test"]
+
+            [vhosts.tls]
+            enabled = true
+
+            [vhosts.tls.acme]
+            enabled = true
+            domains = ["example.test", "www.example.test"]
+
+            [[vhosts]]
+            name = "www"
+            hosts = ["www.example.test"]
+
+            [vhosts.tls]
+            enabled = true
+
+            [vhosts.redirect]
+            enabled = true
+            to = "https://example.test{uri}"
             "#,
         )
         .unwrap();

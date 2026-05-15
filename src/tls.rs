@@ -414,12 +414,17 @@ fn managed_acme_certificate_source(
     config: &Config,
     vhost: &crate::config::VhostConfig,
 ) -> Option<StaticCertificateConfig> {
-    if !config.tls.acme.enabled || !vhost.tls.acme.enabled {
+    if !config.tls.acme.enabled {
         return None;
     }
 
     let storage = config.tls.acme.storage.as_ref()?;
-    let paths = crate::acme::managed_certificate_paths(storage, &vhost.name);
+    let owner = if vhost.tls.acme.enabled {
+        vhost.name.as_str()
+    } else {
+        shared_managed_acme_certificate_owner(config, vhost)?
+    };
+    let paths = crate::acme::managed_certificate_paths(storage, owner);
     Some(StaticCertificateConfig {
         cert_path: paths.cert_path,
         key_path: paths.key_path,
@@ -432,6 +437,51 @@ fn managed_acme_certificate_source(
     _vhost: &crate::config::VhostConfig,
 ) -> Option<StaticCertificateConfig> {
     None
+}
+
+#[cfg(feature = "acme")]
+fn shared_managed_acme_certificate_owner<'a>(
+    config: &'a Config,
+    vhost: &crate::config::VhostConfig,
+) -> Option<&'a str> {
+    let hosts = vhost
+        .hosts
+        .iter()
+        .filter(|host| !host.starts_with("*."))
+        .filter_map(|host| normalize_host(host))
+        .collect::<Vec<_>>();
+    if hosts.is_empty() {
+        return None;
+    }
+
+    config
+        .vhosts
+        .iter()
+        .find(|candidate| {
+            candidate.name != vhost.name
+                && candidate.tls.enabled
+                && candidate.tls.acme.enabled
+                && managed_acme_domains_for_vhost(candidate)
+                    .is_some_and(|domains| hosts.iter().all(|host| domains.contains(host)))
+        })
+        .map(|candidate| candidate.name.as_str())
+}
+
+#[cfg(feature = "acme")]
+fn managed_acme_domains_for_vhost(
+    vhost: &crate::config::VhostConfig,
+) -> Option<std::collections::HashSet<String>> {
+    let domains = if vhost.tls.acme.domains.is_empty() {
+        &vhost.hosts
+    } else {
+        &vhost.tls.acme.domains
+    };
+    let domains = domains
+        .iter()
+        .filter(|domain| !domain.starts_with("*."))
+        .filter_map(|domain| normalize_host(domain))
+        .collect::<std::collections::HashSet<_>>();
+    (!domains.is_empty()).then_some(domains)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1366,8 +1416,28 @@ mod tests {
                         acme: crate::config::VhostAcmeConfig {
                             enabled: true,
                             issuer: None,
-                            domains: Vec::new(),
+                            domains: vec![
+                                "default.example.test".to_owned(),
+                                "www.default.example.test".to_owned(),
+                            ],
                         },
+                        ..VhostTlsConfig::default()
+                    },
+                    proxy: ProxyConfig::default(),
+                    cache: CacheConfig::default(),
+                    headers: VhostHeaderPolicyConfig::default(),
+                    php: crate::config::PhpConfig::default(),
+                    web: WebConfig::default(),
+                    routes: Vec::new(),
+                },
+                VhostConfig {
+                    name: "www-default".to_owned(),
+                    hosts: vec!["www.default.example.test".to_owned()],
+                    max_request_body_bytes: None,
+                    acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                    redirect: crate::config::VhostRedirectConfig::default(),
+                    tls: VhostTlsConfig {
+                        enabled: true,
                         ..VhostTlsConfig::default()
                     },
                     proxy: ProxyConfig::default(),
@@ -1410,8 +1480,15 @@ mod tests {
         assert_eq!(
             selector.certificate_for_sni(None),
             &StaticCertificateConfig {
-                cert_path: default_paths.cert_path,
-                key_path: default_paths.key_path,
+                cert_path: default_paths.cert_path.clone(),
+                key_path: default_paths.key_path.clone(),
+            }
+        );
+        assert_eq!(
+            selector.certificate_for_sni(Some("www.default.example.test")),
+            &StaticCertificateConfig {
+                cert_path: default_paths.cert_path.clone(),
+                key_path: default_paths.key_path.clone(),
             }
         );
         assert_eq!(
