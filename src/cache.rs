@@ -5385,20 +5385,23 @@ fn cache_path_contains_symlink(root: &Path, path: &Path) -> std::io::Result<bool
         }
     }
 
-    let expected = root.join(relative);
-    let mut current = expected.as_path();
-    loop {
-        match current.canonicalize() {
-            Ok(canonical) => return Ok(canonical != current),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                let Some(parent) = current.parent() else {
-                    return Ok(false);
-                };
-                current = parent;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(std::io::Error::new(
+                    error.kind(),
+                    format!("inspect cache path {}: {error}", current.display()),
+                ));
             }
-            Err(error) => return Err(error),
         }
     }
+
+    Ok(false)
 }
 
 #[cfg(feature = "proxy")]
@@ -8865,6 +8868,19 @@ mod tests {
         assert_eq!(reused, written);
         assert!(root.join(".fluxheim-storage-bin-v1").is_file());
         assert!(root.join("bins").is_dir());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(feature = "proxy")]
+    #[test]
+    fn cache_path_symlink_check_allows_missing_storage_bin_index() {
+        let root = unique_test_cache_dir("storage-bin-missing-index-path");
+        std::fs::create_dir_all(&root).unwrap();
+        let index_path = root.join(".fluxheim-storage-bin-index-v1");
+
+        assert!(!index_path.exists());
+        assert!(!super::cache_path_contains_symlink(&root, &index_path).unwrap());
 
         std::fs::remove_dir_all(root).unwrap();
     }
