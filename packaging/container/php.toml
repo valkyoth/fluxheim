@@ -32,6 +32,7 @@ index = "index.php"
 allowed_extensions = ["php"]
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
+max_response_bytes = "64MiB"
 
 [vhosts.php.fpm]
 tcp = "php-fpm:9000"

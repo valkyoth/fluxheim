@@ -2,19 +2,19 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::sync::Arc;
 #[cfg(feature = "cache")]
 use std::sync::Mutex;
 #[cfg(feature = "cache")]
 use std::sync::OnceLock;
 #[cfg(feature = "cache")]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
 #[cfg(feature = "cache")]
 use std::time::Duration;
 #[cfg(any(not(feature = "privacy-mode"), feature = "cache"))]
 use std::time::Instant;
 
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use bytes::Bytes;
 #[cfg(feature = "cache")]
@@ -79,7 +79,7 @@ static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>>
 #[derive(Clone)]
 pub struct FluxProxy {
     state: Arc<ArcSwap<ProxyRuntimeState>>,
-    health_reporter: Arc<RwLock<Option<Arc<dyn ProxyHealthReporter>>>>,
+    health_reporter: Arc<ArcSwapOption<Box<dyn ProxyHealthReporter>>>,
 }
 
 impl std::fmt::Debug for FluxProxy {
@@ -106,6 +106,15 @@ impl ProxyHealthSignal {
 
 pub trait ProxyHealthReporter: Send + Sync + 'static {
     fn record_proxy_health_signal(&self, signal: ProxyHealthSignal);
+}
+
+impl<T> ProxyHealthReporter for Arc<T>
+where
+    T: ProxyHealthReporter + ?Sized,
+{
+    fn record_proxy_health_signal(&self, signal: ProxyHealthSignal) {
+        (**self).record_proxy_health_signal(signal);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +202,7 @@ impl FluxProxy {
             state: Arc::new(ArcSwap::from_pointee(ProxyRuntimeState::from_config(
                 config,
             )?)),
-            health_reporter: Arc::new(RwLock::new(None)),
+            health_reporter: Arc::new(ArcSwapOption::empty()),
         })
     }
 
@@ -214,21 +223,12 @@ impl FluxProxy {
     }
 
     pub fn set_health_reporter(&self, reporter: Arc<dyn ProxyHealthReporter>) {
-        let mut current = self.health_reporter.write().unwrap_or_else(|poisoned| {
-            log::error!("proxy health reporter write lock poisoned; recovering state");
-            poisoned.into_inner()
-        });
-        *current = Some(reporter);
+        self.health_reporter
+            .store(Some(Arc::new(Box::new(reporter))));
     }
 
     pub(crate) fn has_health_reporter(&self) -> bool {
-        self.health_reporter
-            .read()
-            .unwrap_or_else(|poisoned| {
-                log::error!("proxy health reporter read lock poisoned; recovering state");
-                poisoned.into_inner()
-            })
-            .is_some()
+        self.health_reporter.load_full().is_some()
     }
 
     fn report_proxy_health_signal(&self, signal: ProxyHealthSignal, ctx: &mut RequestContext) {
@@ -237,14 +237,7 @@ impl FluxProxy {
         }
         ctx.health_signal_recorded = true;
 
-        let reporter = self
-            .health_reporter
-            .read()
-            .unwrap_or_else(|poisoned| {
-                log::error!("proxy health reporter read lock poisoned; recovering state");
-                poisoned.into_inner()
-            })
-            .clone();
+        let reporter = self.health_reporter.load_full();
         if let Some(reporter) = reporter {
             reporter.record_proxy_health_signal(signal);
         }
@@ -2147,7 +2140,7 @@ impl FluxProxy {
         })?;
         let proxy = Self {
             state: Arc::new(ArcSwap::from_pointee(state)),
-            health_reporter: Arc::new(RwLock::new(None)),
+            health_reporter: Arc::new(ArcSwapOption::empty()),
         };
 
         Ok((proxy, services))
@@ -5858,8 +5851,6 @@ async fn respond_host_routing_rejection(
 }
 
 #[cfg(feature = "php-fpm")]
-const MAX_PHP_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
-#[cfg(feature = "php-fpm")]
 const MAX_PHP_RESPONSE_HEADER_BYTES: usize = 64 * 1024;
 #[cfg(feature = "php-fpm")]
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
@@ -5983,13 +5974,14 @@ async fn respond_php_request(
         log::warn!("php-fpm stderr: {}", sanitized_php_stderr(stderr));
     }
     let stdout = output.stdout.unwrap_or_default();
-    let (mut response, body) = parse_php_response(&stdout).map_err(|error| {
-        Error::because(
-            ErrorType::HTTPStatus(502),
-            "php-fpm response was invalid",
-            error,
-        )
-    })?;
+    let (mut response, body) = parse_php_response(&stdout, php.config.max_response_bytes.as_u64())
+        .map_err(|error| {
+            Error::because(
+                ErrorType::HTTPStatus(502),
+                "php-fpm response was invalid",
+                error,
+            )
+        })?;
     response.remove_header("content-length");
     response.insert_header("content-length", body.len().to_string())?;
     crate::headers::apply_response_policy(&mut response, response_headers)?;
@@ -6268,8 +6260,11 @@ where
 }
 
 #[cfg(feature = "php-fpm")]
-fn parse_php_response(stdout: &[u8]) -> io::Result<(ResponseHeader, Vec<u8>)> {
-    if stdout.len() > MAX_PHP_RESPONSE_BYTES {
+fn parse_php_response(
+    stdout: &[u8],
+    max_response_bytes: u64,
+) -> io::Result<(ResponseHeader, Vec<u8>)> {
+    if stdout.len() as u64 > max_response_bytes {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "php-fpm response exceeds maximum buffered size",
@@ -8917,9 +8912,11 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn parse_php_response_accepts_status_and_headers() {
-        let (response, body) =
-            parse_php_response(b"Status: 201 Created\r\nContent-Type: text/plain\r\n\r\nok")
-                .unwrap();
+        let (response, body) = parse_php_response(
+            b"Status: 201 Created\r\nContent-Type: text/plain\r\n\r\nok",
+            64 * 1024 * 1024,
+        )
+        .unwrap();
 
         assert_eq!(response.status.as_u16(), 201);
         assert_eq!(
@@ -8937,7 +8934,15 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn parse_php_response_rejects_header_injection() {
-        let error = parse_php_response(b"X-Test: ok\rbad\r\n\r\nbody").unwrap_err();
+        let error =
+            parse_php_response(b"X-Test: ok\rbad\r\n\r\nbody", 64 * 1024 * 1024).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn parse_php_response_enforces_configured_size_limit() {
+        let error = parse_php_response(b"Content-Type: text/plain\r\n\r\nbody", 8).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 

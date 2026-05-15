@@ -5187,6 +5187,8 @@ pub struct PhpConfig {
     pub request_timeout_secs: u64,
     #[serde(default)]
     pub max_request_body_bytes: Option<ByteSize>,
+    #[serde(default = "default_php_max_response_bytes")]
+    pub max_response_bytes: ByteSize,
     #[serde(default)]
     pub path_info: PhpPathInfoMode,
     #[serde(default)]
@@ -5203,6 +5205,7 @@ impl Default for PhpConfig {
             allowed_extensions: default_php_allowed_extensions(),
             request_timeout_secs: default_php_request_timeout_secs(),
             max_request_body_bytes: None,
+            max_response_bytes: default_php_max_response_bytes(),
             path_info: PhpPathInfoMode::default(),
             fpm: PhpFpmConfig::default(),
         }
@@ -5260,6 +5263,12 @@ impl PhpConfig {
         {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.max_request_body_bytes",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.max_response_bytes.as_u64() == 0 {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.max_response_bytes",
                 reason: "must be greater than zero",
             });
         }
@@ -6939,6 +6948,10 @@ fn default_php_allowed_extensions() -> Vec<String> {
 
 fn default_php_request_timeout_secs() -> u64 {
     30
+}
+
+fn default_php_max_response_bytes() -> ByteSize {
+    ByteSize::from_bytes(64 * 1024 * 1024)
 }
 
 fn default_static_cache_control() -> String {
@@ -9452,6 +9465,7 @@ mod tests {
             allowed_extensions = ["php"]
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
+            max_response_bytes = "8MiB"
             path_info = "disabled"
 
             [vhosts.php.fpm]
@@ -9467,7 +9481,38 @@ mod tests {
         assert_eq!(php.runtime, super::PhpRuntime::PhpFpm);
         assert_eq!(php.root.as_deref(), Some(root.as_path()));
         assert_eq!(php.allowed_extensions, ["php"]);
+        assert_eq!(
+            php.max_request_body_bytes.unwrap().as_u64(),
+            16 * 1024 * 1024
+        );
+        assert_eq!(php.max_response_bytes.as_u64(), 8 * 1024 * 1024);
         assert_eq!(php.fpm.tcp.as_deref(), Some("127.0.0.1:9000"));
+    }
+
+    #[test]
+    fn rejects_zero_php_response_limit() {
+        let root = unique_temp_path("config-php-zero-response-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            max_response_bytes = 0
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.max_response_bytes"), "{error}");
     }
 
     #[test]

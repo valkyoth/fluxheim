@@ -667,8 +667,8 @@ Stable scope for `1.3.1`:
   `SCRIPT_NAME`, `DOCUMENT_ROOT`, `REQUEST_METHOD`, `QUERY_STRING`,
   `REQUEST_URI`, `SERVER_NAME`, `SERVER_PORT`, and `SERVER_PROTOCOL`.
 - `PATH_INFO` disabled by default, with strict opt-in split rules.
-- Request body limits, streaming body accounting, connect/read/write timeouts,
-  and response header byte limits.
+- Request body limits, configurable response byte limits, streaming body
+  accounting, connect/read/write timeouts, and response header byte limits.
 - Strict parsing of PHP-generated status and headers.
 - Sanitized, size-limited PHP STDERR logging and PHP metrics.
 - WordPress and minimal PHP-FPM example configs.

@@ -1185,6 +1185,12 @@ fn install_certificate_files(
 ) -> Result<(), AcmeCertificateInstallError> {
     let directory = certificate_directory(paths)?;
     ensure_safe_directory(&directory, owner)?;
+    #[cfg(unix)]
+    let directory_fd = open_safe_certificate_directory(&directory)?;
+    #[cfg(unix)]
+    let directory_fd = Some(&directory_fd);
+    #[cfg(not(unix))]
+    let directory_fd: Option<&CertificateDirectoryFd> = None;
 
     let cert_tmp = directory.join(".fullchain.pem.tmp");
     let key_tmp = directory.join(".privkey.pem.tmp");
@@ -1194,48 +1200,109 @@ fn install_certificate_files(
     let mut key_backed_up = false;
 
     let result = (|| {
-        write_new_file(&cert_tmp, fullchain_pem, 0o644, owner)?;
-        write_new_file(&key_tmp, private_key_pem, 0o600, owner)?;
+        write_new_file(
+            &directory,
+            &cert_tmp,
+            fullchain_pem,
+            0o644,
+            owner,
+            directory_fd,
+        )?;
+        write_new_file(
+            &directory,
+            &key_tmp,
+            private_key_pem,
+            0o600,
+            owner,
+            directory_fd,
+        )?;
         ensure_safe_destination(&paths.cert_path)?;
         ensure_safe_destination(&paths.key_path)?;
-        cert_backed_up = backup_existing_file(&paths.cert_path, &cert_backup)?;
-        key_backed_up = backup_existing_file(&paths.key_path, &key_backup)?;
-        fs::rename(&cert_tmp, &paths.cert_path).map_err(|error| {
-            AcmeCertificateInstallError::Io {
-                path: paths.cert_path.clone(),
-                error,
-            }
-        })?;
-        if let Err(error) = fs::rename(&key_tmp, &paths.key_path) {
+        cert_backed_up =
+            backup_existing_file(&directory, &paths.cert_path, &cert_backup, directory_fd)?;
+        key_backed_up =
+            backup_existing_file(&directory, &paths.key_path, &key_backup, directory_fd)?;
+        rename_certificate_file(&directory, &cert_tmp, &paths.cert_path, directory_fd)?;
+        if let Err(error) =
+            rename_certificate_file(&directory, &key_tmp, &paths.key_path, directory_fd)
+        {
             if cert_backed_up {
-                let _ = restore_backup(&cert_backup, &paths.cert_path);
+                let _ = restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd);
             }
-            return Err(AcmeCertificateInstallError::Io {
-                path: paths.key_path.clone(),
-                error,
-            });
+            return Err(error);
         }
-        cleanup_backup(&cert_backup)?;
-        cleanup_backup(&key_backup)?;
-        sync_directory(&directory)?;
+        cleanup_backup(&directory, &cert_backup, directory_fd)?;
+        cleanup_backup(&directory, &key_backup, directory_fd)?;
+        sync_directory(&directory, directory_fd)?;
         Ok(())
     })();
 
     if result.is_err() {
-        let _ = fs::remove_file(&cert_tmp);
-        let _ = fs::remove_file(&key_tmp);
+        let _ = cleanup_backup(&directory, &cert_tmp, directory_fd);
+        let _ = cleanup_backup(&directory, &key_tmp, directory_fd);
         if cert_backed_up {
-            let _ = restore_backup(&cert_backup, &paths.cert_path);
+            let _ = restore_backup(&directory, &cert_backup, &paths.cert_path, directory_fd);
         }
         if key_backed_up {
-            let _ = restore_backup(&key_backup, &paths.key_path);
+            let _ = restore_backup(&directory, &key_backup, &paths.key_path, directory_fd);
         }
     }
 
     result
 }
 
-fn backup_existing_file(path: &Path, backup: &Path) -> Result<bool, AcmeCertificateInstallError> {
+#[cfg(unix)]
+type CertificateDirectoryFd = rustix::fd::OwnedFd;
+
+#[cfg(not(unix))]
+type CertificateDirectoryFd = ();
+
+fn backup_existing_file(
+    directory: &Path,
+    path: &Path,
+    backup: &Path,
+    directory_fd: Option<&CertificateDirectoryFd>,
+) -> Result<bool, AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        let path_name = certificate_file_name_in_directory(directory, path)?;
+        let backup_name = certificate_file_name_in_directory(directory, backup)?;
+        match rustix::fs::statat(
+            directory_fd,
+            path_name,
+            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+        ) {
+            Ok(stat) if !rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file() => {
+                return Err(AcmeCertificateInstallError::UnsafePath {
+                    path: path.to_path_buf(),
+                    message: "destination is not a real file".to_owned(),
+                });
+            }
+            Ok(_) => {
+                ensure_backup_slot_is_empty(directory, backup, Some(directory_fd))?;
+                rustix::fs::linkat(
+                    directory_fd,
+                    path_name,
+                    directory_fd,
+                    backup_name,
+                    rustix::fs::AtFlags::empty(),
+                )
+                .map_err(|error| AcmeCertificateInstallError::Io {
+                    path: backup.to_path_buf(),
+                    error: error.into(),
+                })?;
+                return Ok(true);
+            }
+            Err(error) if error == rustix::io::Errno::NOENT => return Ok(false),
+            Err(error) => {
+                return Err(AcmeCertificateInstallError::Io {
+                    path: path.to_path_buf(),
+                    error: error.into(),
+                });
+            }
+        }
+    }
+
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             Err(AcmeCertificateInstallError::UnsafePath {
@@ -1244,7 +1311,7 @@ fn backup_existing_file(path: &Path, backup: &Path) -> Result<bool, AcmeCertific
             })
         }
         Ok(_) => {
-            ensure_backup_slot_is_empty(backup)?;
+            ensure_backup_slot_is_empty(directory, backup, None)?;
             fs::hard_link(path, backup).map_err(|error| AcmeCertificateInstallError::Io {
                 path: backup.to_path_buf(),
                 error,
@@ -1259,7 +1326,27 @@ fn backup_existing_file(path: &Path, backup: &Path) -> Result<bool, AcmeCertific
     }
 }
 
-fn ensure_backup_slot_is_empty(path: &Path) -> Result<(), AcmeCertificateInstallError> {
+fn ensure_backup_slot_is_empty(
+    directory: &Path,
+    path: &Path,
+    directory_fd: Option<&CertificateDirectoryFd>,
+) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        let name = certificate_file_name_in_directory(directory, path)?;
+        return match rustix::fs::statat(directory_fd, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
+                path: path.to_path_buf(),
+                message: "backup path already exists".to_owned(),
+            }),
+            Err(error) if error == rustix::io::Errno::NOENT => Ok(()),
+            Err(error) => Err(AcmeCertificateInstallError::Io {
+                path: path.to_path_buf(),
+                error: error.into(),
+            }),
+        };
+    }
+
     match fs::symlink_metadata(path) {
         Ok(_) => Err(AcmeCertificateInstallError::UnsafePath {
             path: path.to_path_buf(),
@@ -1273,7 +1360,24 @@ fn ensure_backup_slot_is_empty(path: &Path) -> Result<(), AcmeCertificateInstall
     }
 }
 
-fn cleanup_backup(path: &Path) -> Result<(), AcmeCertificateInstallError> {
+fn cleanup_backup(
+    directory: &Path,
+    path: &Path,
+    directory_fd: Option<&CertificateDirectoryFd>,
+) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        let name = certificate_file_name_in_directory(directory, path)?;
+        return match rustix::fs::unlinkat(directory_fd, name, rustix::fs::AtFlags::empty()) {
+            Ok(()) => Ok(()),
+            Err(error) if error == rustix::io::Errno::NOENT => Ok(()),
+            Err(error) => Err(AcmeCertificateInstallError::Io {
+                path: path.to_path_buf(),
+                error: error.into(),
+            }),
+        };
+    }
+
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -1284,7 +1388,35 @@ fn cleanup_backup(path: &Path) -> Result<(), AcmeCertificateInstallError> {
     }
 }
 
-fn restore_backup(backup: &Path, destination: &Path) -> io::Result<()> {
+fn restore_backup(
+    directory: &Path,
+    backup: &Path,
+    destination: &Path,
+    directory_fd: Option<&CertificateDirectoryFd>,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        let backup_name = certificate_file_name_in_directory(directory, backup)
+            .map_err(acme_install_error_to_io_error)?;
+        let destination_name = certificate_file_name_in_directory(directory, destination)
+            .map_err(acme_install_error_to_io_error)?;
+        return match rustix::fs::statat(
+            directory_fd,
+            backup_name,
+            rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+        ) {
+            Ok(stat) if !rustix::fs::FileType::from_raw_mode(stat.st_mode).is_file() => Err(
+                io::Error::new(io::ErrorKind::InvalidData, "backup is not a regular file"),
+            ),
+            Ok(_) => {
+                rustix::fs::renameat(directory_fd, backup_name, directory_fd, destination_name)
+                    .map_err(Into::into)
+            }
+            Err(error) if error == rustix::io::Errno::NOENT => Ok(()),
+            Err(error) => Err(error.into()),
+        };
+    }
+
     match fs::symlink_metadata(backup) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(
             io::Error::new(io::ErrorKind::InvalidData, "backup is not a regular file"),
@@ -1292,6 +1424,13 @@ fn restore_backup(backup: &Path, destination: &Path) -> io::Result<()> {
         Ok(_) => fs::rename(backup, destination),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+fn acme_install_error_to_io_error(error: AcmeCertificateInstallError) -> io::Error {
+    match error {
+        AcmeCertificateInstallError::Io { error, .. } => error,
+        other => io::Error::new(io::ErrorKind::InvalidInput, other.to_string()),
     }
 }
 
@@ -1807,17 +1946,49 @@ fn reject_existing_symlink_in_path(path: &Path) -> Result<(), AcmeCertificateIns
 }
 
 fn write_new_file(
+    directory: &Path,
     path: &Path,
     contents: &[u8],
     mode: u32,
     owner: ManagedCertificateOwner,
+    directory_fd: Option<&CertificateDirectoryFd>,
 ) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        let name = certificate_file_name_in_directory(directory, path)?;
+        let fd = rustix::fs::openat(
+            directory_fd,
+            name,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::from_raw_mode(mode),
+        )
+        .map_err(|error| AcmeCertificateInstallError::Io {
+            path: path.to_path_buf(),
+            error: error.into(),
+        })?;
+        let mut file = fs::File::from(fd);
+        apply_owner_to_file(&file, path, owner)?;
+        file.write_all(contents)
+            .and_then(|()| file.sync_all())
+            .map_err(|error| AcmeCertificateInstallError::Io {
+                path: path.to_path_buf(),
+                error,
+            })?;
+        return Ok(());
+    }
+
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
+        const O_NOFOLLOW: i32 = 0o400000;
         options.mode(mode);
+        options.custom_flags(O_NOFOLLOW);
     }
 
     let mut file = options
@@ -1837,6 +2008,97 @@ fn write_new_file(
             path: path.to_path_buf(),
             error,
         })
+}
+
+#[cfg(unix)]
+fn open_safe_certificate_directory(
+    directory: &Path,
+) -> Result<rustix::fd::OwnedFd, AcmeCertificateInstallError> {
+    #[cfg(target_os = "linux")]
+    {
+        match rustix::fs::openat2(
+            rustix::fs::CWD,
+            directory,
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+            rustix::fs::ResolveFlags::NO_SYMLINKS | rustix::fs::ResolveFlags::NO_MAGICLINKS,
+        ) {
+            Ok(fd) => return Ok(fd),
+            Err(error) if matches!(error, rustix::io::Errno::NOSYS | rustix::io::Errno::INVAL) => {}
+            Err(error) => {
+                return Err(AcmeCertificateInstallError::Io {
+                    path: directory.to_path_buf(),
+                    error: error.into(),
+                });
+            }
+        }
+    }
+
+    rustix::fs::openat(
+        rustix::fs::CWD,
+        directory,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| AcmeCertificateInstallError::Io {
+        path: directory.to_path_buf(),
+        error: error.into(),
+    })
+}
+
+#[cfg(unix)]
+fn certificate_file_name_in_directory<'a>(
+    directory: &Path,
+    path: &'a Path,
+) -> Result<&'a str, AcmeCertificateInstallError> {
+    if path.parent() != Some(directory) {
+        return Err(AcmeCertificateInstallError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "certificate file operation must stay within managed directory".to_owned(),
+        });
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty() && !name.contains('/'))
+        .ok_or_else(|| AcmeCertificateInstallError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "certificate path must end in a safe file name".to_owned(),
+        })
+}
+
+fn rename_certificate_file(
+    directory: &Path,
+    source: &Path,
+    destination: &Path,
+    #[cfg_attr(not(unix), allow(unused_variables))] directory_fd: Option<&CertificateDirectoryFd>,
+) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    {
+        let directory_fd = directory_fd.ok_or_else(|| AcmeCertificateInstallError::UnsafePath {
+            path: directory.to_path_buf(),
+            message: "managed certificate directory fd is unavailable".to_owned(),
+        })?;
+        let source_name = certificate_file_name_in_directory(directory, source)?;
+        let destination_name = certificate_file_name_in_directory(directory, destination)?;
+        return rustix::fs::renameat(directory_fd, source_name, directory_fd, destination_name)
+            .map_err(|error| AcmeCertificateInstallError::Io {
+                path: destination.to_path_buf(),
+                error: error.into(),
+            });
+    }
+
+    #[cfg(not(unix))]
+    {
+        fs::rename(source, destination).map_err(|error| AcmeCertificateInstallError::Io {
+            path: destination.to_path_buf(),
+            error,
+        })
+    }
 }
 
 fn ensure_safe_account_directory(directory: &Path) -> Result<(), AcmeAccountStoreError> {
@@ -1988,7 +2250,18 @@ fn write_challenge_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
-fn sync_directory(path: &Path) -> Result<(), AcmeCertificateInstallError> {
+fn sync_directory(
+    path: &Path,
+    directory_fd: Option<&CertificateDirectoryFd>,
+) -> Result<(), AcmeCertificateInstallError> {
+    #[cfg(unix)]
+    if let Some(directory_fd) = directory_fd {
+        return rustix::fs::fsync(directory_fd).map_err(|error| AcmeCertificateInstallError::Io {
+            path: path.to_path_buf(),
+            error: error.into(),
+        });
+    }
+
     let directory = fs::File::open(path).map_err(|error| AcmeCertificateInstallError::Io {
         path: path.to_path_buf(),
         error,

@@ -1389,6 +1389,7 @@ index = "index.php"
 allowed_extensions = ["php"]
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
+max_response_bytes = "64MiB"
 path_info = "disabled"
 
 [vhosts.routes.php.fpm]
@@ -1416,6 +1417,11 @@ body limit for uploads handled by that route. Proxy actions accept
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs`; route
 proxy timeout values override the vhost/global proxy timeout values because the
 route owns its own proxy action.
+
+For PHP actions, `max_request_body_bytes` bounds the buffered request sent to
+php-fpm and `max_response_bytes` bounds the buffered FastCGI response returned
+from php-fpm. `max_response_bytes` defaults to `64MiB`; set a smaller value on
+memory-constrained or high-assurance edge nodes.
 
 `[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache
 policy for that matched route only. Routes without a cache block continue to use
