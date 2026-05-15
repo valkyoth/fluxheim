@@ -2333,10 +2333,15 @@ impl StorageBinDiskStorage {
             )
         })?;
         let recovered_entries = read_storage_bin_index(&layout).map_err(|error| {
+            let hint = if error.kind() == std::io::ErrorKind::PermissionDenied {
+                "; ensure the cache directory, storage-bin index, and bin files are owned and readable/writable by the Fluxheim runtime user"
+            } else {
+                ""
+            };
             std::io::Error::new(
                 error.kind(),
                 format!(
-                    "storage-bin index {}: {error}",
+                    "storage-bin index {}: {error}{hint}",
                     storage_bin_index_path(&layout.root).display()
                 ),
             )
