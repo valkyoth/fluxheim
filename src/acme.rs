@@ -2026,7 +2026,7 @@ fn open_safe_certificate_directory(
             rustix::fs::ResolveFlags::NO_SYMLINKS | rustix::fs::ResolveFlags::NO_MAGICLINKS,
         ) {
             Ok(fd) => return Ok(fd),
-            Err(error) if matches!(error, rustix::io::Errno::NOSYS | rustix::io::Errno::INVAL) => {}
+            Err(rustix::io::Errno::NOSYS | rustix::io::Errno::INVAL) => {}
             Err(error) => {
                 return Err(AcmeCertificateInstallError::Io {
                     path: directory.to_path_buf(),
@@ -2085,11 +2085,12 @@ fn rename_certificate_file(
         })?;
         let source_name = certificate_file_name_in_directory(directory, source)?;
         let destination_name = certificate_file_name_in_directory(directory, destination)?;
-        return rustix::fs::renameat(directory_fd, source_name, directory_fd, destination_name)
-            .map_err(|error| AcmeCertificateInstallError::Io {
+        rustix::fs::renameat(directory_fd, source_name, directory_fd, destination_name).map_err(
+            |error| AcmeCertificateInstallError::Io {
                 path: destination.to_path_buf(),
                 error: error.into(),
-            });
+            },
+        )
     }
 
     #[cfg(not(unix))]
