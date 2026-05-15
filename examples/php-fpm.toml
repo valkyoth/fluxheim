@@ -35,10 +35,10 @@ max_request_body_bytes = "64MiB"
 path_info = "disabled"
 
 [vhosts.php.fpm]
-# Use either a local Unix socket:
-socket = "/run/php/php-fpm.sock"
-# Or a container/network endpoint:
-# tcp = "php-fpm:9000"
+# Use either a container/network endpoint:
+tcp = "php-fpm:9000"
+# Or a local Unix socket with hardened ownership/permissions:
+# socket = "/run/php/php-fpm.sock"
 
 [vhosts.web]
 root = "/srv/sites/php.example.test/public"

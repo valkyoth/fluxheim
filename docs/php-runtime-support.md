@@ -74,8 +74,8 @@ max_request_body_bytes = "16MiB"
 path_info = "disabled"
 
 [vhosts.php.fpm]
-socket = "/run/php/php-fpm.sock"
-# tcp = "127.0.0.1:9000"
+tcp = "127.0.0.1:9000"
+# socket = "/run/php/php-fpm.sock"
 ```
 
 The PHP handler runs before static fallback. Existing non-PHP files under the
