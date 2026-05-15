@@ -140,6 +140,21 @@ behavior, safe CGI header translation with HTTPoxy mitigation, and malformed
 FastCGI response headers. Rootless php-fpm container smoke tests, timeout tests,
 and oversized body tests remain part of the `1.3.2` hardening pass.
 
+Planned `1.3.2` php-fpm hardening:
+
+- Connection pooling to php-fpm with idle pruning.
+- True streaming request and response bodies.
+- Chunked upload disk-spooling before php-fpm dispatch.
+- Custom FastCGI params in config.
+- Path mapping for separate Fluxheim/php-fpm container filesystem roots.
+- `X-Accel-Redirect` / `X-Sendfile` support.
+- php-fpm upstream load balancing and failover.
+- PHP-specific Prometheus/OpenTelemetry metrics.
+- FastCGI cache-specific convenience config.
+- FastCGI multiplexing, authorizer, and filter-role review. These are not
+  needed for normal PHP-FPM web serving, but should be explicitly unsupported
+  or implemented if enterprise users need them.
+
 ### `php-turbine`
 
 Treat Turbine as the preferred direction only after review. The first evaluation

@@ -676,6 +676,21 @@ Stable scope for `1.3.1`:
 Follow-up `1.3.x` PHP runtime plan:
 
 - `1.3.2`: php-fpm hardening and production compatibility fixes.
+  - Connection pooling to php-fpm with idle pruning.
+  - True streaming request and response bodies.
+  - Chunked upload disk-spooling so large uploads do not require full RAM
+    buffering before php-fpm receives `CONTENT_LENGTH`.
+  - Custom FastCGI params in config.
+  - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
+  - `X-Accel-Redirect` / `X-Sendfile` support for PHP-assisted static
+    offload.
+  - php-fpm upstream load balancing and failover.
+  - PHP-specific Prometheus/OpenTelemetry metrics.
+  - FastCGI cache-specific convenience config on top of Fluxheim's cache
+    engine.
+  - FastCGI multiplexing, authorizer, and filter-role review. These are not
+    required for normal PHP-FPM web serving, but should be documented
+    explicitly as unsupported or implemented if enterprise users need them.
 - `1.3.3`: embedded Rust PHP/Turbine-style integration if the source, license,
   API, isolation, reload, and concurrency model pass review.
 - `1.3.4`: pure-Rust PHP interpreter experiment behind `php-phprs`, beta or
