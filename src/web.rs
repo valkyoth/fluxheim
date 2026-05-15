@@ -58,7 +58,12 @@ impl StaticFileServer {
                     format!("web root does not exist: {}", root.display()),
                 ));
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("web root {}: {error}", root.display()),
+                ));
+            }
         };
         if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
             return Err(io::Error::new(
@@ -67,7 +72,12 @@ impl StaticFileServer {
             ));
         }
 
-        let root = root.canonicalize()?;
+        let root = root.canonicalize().map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("web root {}: {error}", root.display()),
+            )
+        })?;
         if !root.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,

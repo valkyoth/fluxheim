@@ -2164,7 +2164,10 @@ impl ProxyRuntimeState {
                 config.headers.clone(),
                 config.web.clone(),
                 load_balancer("default", &config.proxy)?,
-            )?;
+            )
+            .map_err(|error| {
+                io::Error::new(error.kind(), format!("default vhost runtime: {error}"))
+            })?;
             vhosts.push(runtime);
         } else {
             for configured in &config.vhosts {
@@ -2174,7 +2177,13 @@ impl ProxyRuntimeState {
                     configured,
                     &config.headers,
                     load_balancer(&configured.name, &configured.proxy)?,
-                )?;
+                )
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("vhost {:?} runtime: {error}", configured.name),
+                    )
+                })?;
                 for host in &runtime.hosts {
                     if let Some(suffix) = host.strip_prefix("*.") {
                         wildcard_hosts.push(WildcardHost {
@@ -2209,7 +2218,8 @@ impl ProxyRuntimeState {
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
-            trace_exporter: crate::otel_otlp::TraceExporter::from_config(&config.tracing.otlp)?,
+            trace_exporter: crate::otel_otlp::TraceExporter::from_config(&config.tracing.otlp)
+                .map_err(|error| io::Error::new(error.kind(), format!("tracing.otlp: {error}")))?,
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -2227,12 +2237,21 @@ impl ProxyRuntimeState {
                 config.cache.clone(),
                 config.headers.clone(),
                 config.web.clone(),
-            )?;
+            )
+            .map_err(|error| {
+                io::Error::new(error.kind(), format!("default vhost runtime: {error}"))
+            })?;
             vhosts.push(runtime);
         } else {
             for configured in &config.vhosts {
                 let index = vhosts.len();
-                let runtime = RuntimeVhost::from_config(config, configured, &config.headers)?;
+                let runtime = RuntimeVhost::from_config(config, configured, &config.headers)
+                    .map_err(|error| {
+                        io::Error::new(
+                            error.kind(),
+                            format!("vhost {:?} runtime: {error}", configured.name),
+                        )
+                    })?;
                 for host in &runtime.hosts {
                     if let Some(suffix) = host.strip_prefix("*.") {
                         wildcard_hosts.push(WildcardHost {
@@ -2267,7 +2286,8 @@ impl ProxyRuntimeState {
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
-            trace_exporter: crate::otel_otlp::TraceExporter::from_config(&config.tracing.otlp)?,
+            trace_exporter: crate::otel_otlp::TraceExporter::from_config(&config.tracing.otlp)
+                .map_err(|error| io::Error::new(error.kind(), format!("tracing.otlp: {error}")))?,
             #[cfg(not(feature = "privacy-mode"))]
             access_log: config.logging.access.clone(),
         })
@@ -2812,7 +2832,8 @@ impl RuntimePhp {
             directory_listing: crate::config::DirectoryListingConfig::default(),
             cache_control: "private, no-store".to_owned(),
             expires: None,
-        })?
+        })
+        .map_err(|error| io::Error::new(error.kind(), format!("{scope}: {error}")))?
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -8824,6 +8845,34 @@ mod tests {
             root: root.canonicalize().unwrap(),
             files,
         }
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_runtime_reports_scope_and_path_for_unreadable_root() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let parent = unique_temp_path("proxy-php-unreadable-root");
+        let root = parent.join("public");
+        fs::create_dir_all(&root).unwrap();
+        let original_permissions = fs::metadata(&parent).unwrap().permissions();
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let config = crate::config::PhpConfig {
+            enabled: true,
+            root: Some(root.clone()),
+            fpm: crate::config::PhpFpmConfig {
+                tcp: Some("127.0.0.1:9000".to_owned()),
+                ..crate::config::PhpFpmConfig::default()
+            },
+            ..crate::config::PhpConfig::default()
+        };
+
+        let result = RuntimePhp::from_config("vhost \"fluxheim.test\" php", &config);
+        fs::set_permissions(&parent, original_permissions).unwrap();
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("vhost \"fluxheim.test\" php"), "{error}");
+        assert!(error.contains(&root.display().to_string()), "{error}");
     }
 
     #[cfg(feature = "php-fpm")]

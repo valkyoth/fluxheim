@@ -77,6 +77,10 @@ jobs:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+      QUAY_NAMESPACE: ${{ vars.QUAY_NAMESPACE || github.repository_owner }}
+      QUAY_REPOSITORY: ${{ vars.QUAY_REPOSITORY || github.event.repository.name }}
       INCLUDE_LOAD_BALANCER: ${{ inputs.include_load_balancer || false }}
 
     steps:
@@ -125,6 +129,14 @@ jobs:
           registry: docker.io
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Log in to Quay
+        if: ${{ steps.profile.outputs.build == 'true' && env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
+        uses: docker/login-action@v4
+        with:
+          registry: quay.io
+          username: ${{ env.QUAY_USERNAME }}
+          password: ${{ env.QUAY_TOKEN }}
 
       - name: Prepare tags
         if: ${{ steps.profile.outputs.build == 'true' }}
@@ -201,6 +213,35 @@ jobs:
                   tags+=(
                     "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest"
                     "docker.io/${GITHUB_REPOSITORY_OWNER}/fluxheim:latest-base"
+                  )
+                fi
+              fi
+            fi
+          fi
+
+          if [[ -n "${QUAY_USERNAME}" ]]; then
+            tags+=(
+              "quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:${version}-${variant_suffix}"
+              "quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:sha-${sha_suffix}"
+            )
+            if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+              tags+=("quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:latest-${variant_suffix}")
+            fi
+            if [[ "${VARIANT}" == "wolfi" ]]; then
+              if [[ -n "${PROFILE_TAG}" ]]; then
+                tags+=("quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:${version}-${PROFILE_TAG}")
+                if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+                  tags+=("quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:latest-${PROFILE_TAG}")
+                fi
+              else
+                tags+=(
+                  "quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:${version}"
+                  "quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:${version}-base"
+                )
+                if [[ "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
+                  tags+=(
+                    "quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:latest"
+                    "quay.io/${QUAY_NAMESPACE}/${QUAY_REPOSITORY}:latest-base"
                   )
                 fi
               fi
