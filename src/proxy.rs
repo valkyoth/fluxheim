@@ -2643,7 +2643,13 @@ impl RuntimeRouteCache {
                 config,
                 vhost_name,
                 Some(name),
-            )?;
+            )
+            .map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("vhost {vhost_name:?} route {name:?} cache.disk: {error}"),
+                )
+            })?;
         let pingora_tiered_storage = pingora_memory_storage
             .zip(pingora_disk_storage)
             .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
@@ -3092,7 +3098,10 @@ impl RuntimeVhost {
         let pingora_disk_storage =
             crate::cache::pingora_disk_storage_backend_from_config_with_metric_scope(
                 &cache, "default", None,
-            )?;
+            )
+            .map_err(|error| {
+                io::Error::new(error.kind(), format!("default vhost cache.disk: {error}"))
+            })?;
         #[cfg(feature = "cache")]
         let pingora_tiered_storage = pingora_memory_storage
             .zip(pingora_disk_storage)
@@ -3174,7 +3183,13 @@ impl RuntimeVhost {
                 .chain(vhost.routes.iter().cloned())
                 .chain(vhost.redirect.route_config())
                 .map(|route| RuntimeRoute::from_config(&vhost.name, &route, &route_base_headers))
-                .collect::<io::Result<Vec<_>>>()?,
+                .collect::<io::Result<Vec<_>>>()
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("vhost {:?} routes: {error}", vhost.name),
+                    )
+                })?,
         );
         #[cfg(feature = "cache")]
         let pingora_memory_storage =
@@ -3189,7 +3204,13 @@ impl RuntimeVhost {
                 &vhost.cache,
                 &vhost.name,
                 None,
-            )?;
+            )
+            .map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("vhost {:?} cache.disk: {error}", vhost.name),
+                )
+            })?;
         #[cfg(feature = "cache")]
         let pingora_tiered_storage = pingora_memory_storage
             .zip(pingora_disk_storage)
