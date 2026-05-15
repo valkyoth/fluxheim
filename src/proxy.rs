@@ -11672,6 +11672,9 @@ mod tests {
     #[cfg(feature = "load-balancer")]
     #[test]
     fn builds_load_balancer_background_services_for_configured_pools() {
+        #[cfg(feature = "tls-rustls")]
+        crate::tls::install_rustls_crypto_provider();
+
         let config = Config {
             vhosts: vec![
                 VhostConfig {
@@ -11682,7 +11685,7 @@ mod tests {
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
-                        upstreams: vec!["127.0.0.1:3001".to_owned()],
+                        upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
@@ -11699,7 +11702,7 @@ mod tests {
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
-                        upstreams: vec!["127.0.0.1:3002".to_owned()],
+                        upstreams: vec!["127.0.0.1:3003".to_owned(), "127.0.0.1:3004".to_owned()],
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),

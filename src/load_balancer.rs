@@ -80,7 +80,7 @@ impl UpstreamLoadBalancer {
 }
 
 fn configured_load_balancer(config: &ProxyConfig) -> io::Result<Option<LoadBalancer<RoundRobin>>> {
-    if config.upstreams.is_empty() {
+    if config.upstreams.len() < 2 {
         return Ok(None);
     }
 
@@ -112,8 +112,14 @@ mod tests {
 
     use super::UpstreamLoadBalancer;
 
+    fn install_test_crypto_provider() {
+        #[cfg(feature = "tls-rustls")]
+        crate::tls::install_rustls_crypto_provider();
+    }
+
     #[test]
     fn builds_round_robin_from_proxy_upstreams() {
+        install_test_crypto_provider();
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
             upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
             load_balance: LoadBalanceConfig {
@@ -131,8 +137,9 @@ mod tests {
 
     #[test]
     fn configures_pingora_tcp_health_check() {
+        install_test_crypto_provider();
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
-            upstreams: vec!["127.0.0.1:3000".to_owned()],
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
             load_balance: LoadBalanceConfig {
                 health_check: LoadBalanceHealthCheckConfig {
                     enabled: true,
@@ -157,24 +164,32 @@ mod tests {
 
     #[test]
     fn builds_background_service_and_shared_selector() {
+        install_test_crypto_provider();
         let (balancer, _service) = UpstreamLoadBalancer::background_service_from_proxy_config(
             "test",
             &ProxyConfig {
-                upstreams: vec!["127.0.0.1:3000".to_owned()],
+                upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
                 ..ProxyConfig::default()
             },
         )
         .unwrap()
         .unwrap();
 
-        assert_eq!(balancer.backend_count(), 1);
+        assert_eq!(balancer.backend_count(), 2);
         assert!(balancer.select().is_some());
     }
 
     #[test]
-    fn stays_disabled_without_proxy_upstreams() {
-        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig::default()).unwrap();
+    fn stays_disabled_without_load_balanced_upstreams() {
+        let without_upstreams =
+            UpstreamLoadBalancer::from_proxy_config(&ProxyConfig::default()).unwrap();
+        let single_upstream = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["missing-container.test:3000".to_owned()],
+            ..ProxyConfig::default()
+        })
+        .unwrap();
 
-        assert!(balancer.is_none());
+        assert!(without_upstreams.is_none());
+        assert!(single_upstream.is_none());
     }
 }
