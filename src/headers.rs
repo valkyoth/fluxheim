@@ -25,12 +25,19 @@ pub fn apply_upstream_request_policy(
     policy: &RequestHeaderPolicyConfig,
     client_addr: Option<&SocketAddr>,
     trusted_proxy: bool,
+    trusted_proxy_matcher: Option<&dyn Fn(IpAddr) -> bool>,
     downstream_tls: bool,
     request_id: Option<&str>,
 ) -> pingora::Result<()> {
     #[cfg(feature = "privacy-mode")]
     {
-        let _ = (client_addr, trusted_proxy, downstream_tls, request_id);
+        let _ = (
+            client_addr,
+            trusted_proxy,
+            trusted_proxy_matcher,
+            downstream_tls,
+            request_id,
+        );
         apply_privacy_upstream_request_policy(request, policy, request_id)
     }
 
@@ -41,6 +48,7 @@ pub fn apply_upstream_request_policy(
             policy,
             client_addr,
             trusted_proxy,
+            trusted_proxy_matcher,
             downstream_tls,
             request_id,
         )
@@ -71,6 +79,7 @@ fn apply_standard_upstream_request_policy(
     policy: &RequestHeaderPolicyConfig,
     client_addr: Option<&SocketAddr>,
     trusted_proxy: bool,
+    trusted_proxy_matcher: Option<&dyn Fn(IpAddr) -> bool>,
     downstream_tls: bool,
     request_id: Option<&str>,
 ) -> pingora::Result<()> {
@@ -100,22 +109,31 @@ fn apply_standard_upstream_request_policy(
         }
     }
 
+    let effective_client_ip = client_addr.map(|client_addr| {
+        effective_client_ip(
+            client_addr.ip(),
+            trusted_proxy,
+            original_x_forwarded_for.as_deref(),
+            trusted_proxy_matcher,
+        )
+    });
+
     if policy.x_real_ip {
-        if let Some(client_addr) = client_addr {
-            request.insert_header("x-real-ip", client_addr.ip().to_string())?;
+        if let Some(client_ip) = effective_client_ip {
+            request.insert_header("x-real-ip", client_ip.to_string())?;
         } else {
             request.remove_header("x-real-ip");
         }
     }
 
-    if let Some(client_addr) = client_addr {
+    if let Some(client_ip) = effective_client_ip {
         apply_x_forwarded_for(
             request,
             policy.x_forwarded_for,
             trusted_proxy
                 .then_some(original_x_forwarded_for.as_deref())
                 .flatten(),
-            client_addr.ip(),
+            client_ip,
         )?;
     } else if matches!(policy.x_forwarded_for, ForwardedClientIpHeaderMode::Replace) {
         request.remove_header("x-forwarded-for");
@@ -134,22 +152,18 @@ fn apply_standard_upstream_request_policy(
     }
 
     if policy.forwarded
-        && let Some(client_addr) = client_addr
+        && let Some(client_ip) = effective_client_ip
     {
         request.insert_header(
             "forwarded",
-            build_forwarded_header(client_addr.ip(), original_host.as_deref(), proto),
+            build_forwarded_header(client_ip, original_host.as_deref(), proto),
         )?;
     }
 
     let unset = policy.effective_unset();
     let set = policy.effective_set();
-    let context = RequestHeaderTemplateContext::new(
-        request,
-        client_addr.map(SocketAddr::ip),
-        downstream_tls,
-        request_id,
-    );
+    let context =
+        RequestHeaderTemplateContext::new(request, effective_client_ip, downstream_tls, request_id);
     apply_request_mutations(request, &unset, &set, &policy.append, &context)?;
     Ok(())
 }
@@ -359,6 +373,54 @@ fn apply_x_forwarded_for(
     }
 
     Ok(())
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+fn effective_client_ip(
+    direct_ip: IpAddr,
+    trusted_direct_peer: bool,
+    original_x_forwarded_for: Option<&str>,
+    trusted_proxy_matcher: Option<&dyn Fn(IpAddr) -> bool>,
+) -> IpAddr {
+    if !trusted_direct_peer {
+        return direct_ip;
+    }
+
+    let Some(original_x_forwarded_for) = original_x_forwarded_for else {
+        return direct_ip;
+    };
+    let Some(trusted_proxy_matcher) = trusted_proxy_matcher else {
+        return direct_ip;
+    };
+
+    let mut last_valid_hop = None;
+    for hop in original_x_forwarded_for
+        .split(',')
+        .rev()
+        .filter_map(parse_x_forwarded_for_ip)
+    {
+        last_valid_hop.get_or_insert(hop);
+        if !trusted_proxy_matcher(hop) {
+            return hop;
+        }
+    }
+
+    last_valid_hop.unwrap_or(direct_ip)
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+fn parse_x_forwarded_for_ip(value: &str) -> Option<IpAddr> {
+    let value = value.trim().trim_matches('"');
+    if value.is_empty() {
+        return None;
+    }
+    if let Some(value) = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+    {
+        return value.parse().ok();
+    }
+    value.parse().ok()
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -607,8 +669,16 @@ mod tests {
         request.insert_header("x-real-ip", "198.51.100.9").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            None,
+            true,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             request
@@ -646,8 +716,16 @@ mod tests {
         request.insert_header("host", "example.test").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            None,
+            true,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             request
@@ -680,8 +758,16 @@ mod tests {
             .unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            None,
+            true,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             request
@@ -735,6 +821,7 @@ mod tests {
             &policy,
             Some(&client_addr),
             false,
+            None,
             true,
             Some("req-123"),
         )
@@ -913,8 +1000,16 @@ mod tests {
         request.insert_header("x-debug", "1").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            None,
+            true,
+            None,
+        )
+        .unwrap();
 
         assert!(request.headers.get("x-powered-by").is_none());
         assert!(request.headers.get("x-debug").is_none());
@@ -947,8 +1042,16 @@ mod tests {
         request.insert_header("upgrade", "websocket").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            None,
+            true,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             request
@@ -987,8 +1090,16 @@ mod tests {
             .unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), true, false, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            true,
+            None,
+            false,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             request
@@ -996,6 +1107,74 @@ mod tests {
                 .get("x-forwarded-for")
                 .and_then(|value| value.to_str().ok()),
             Some("198.51.100.9, 203.0.113.10")
+        );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn trusted_proxy_recursively_restores_forwarded_client_ip() {
+        let policy = crate::config::RequestHeaderPolicyConfig {
+            strip_inbound_client_ip_headers: false,
+            x_real_ip: true,
+            forwarded: true,
+            set: std::collections::BTreeMap::from([(
+                "x-template-remote".to_owned(),
+                "{remote_addr}".to_owned(),
+            )]),
+            ..crate::config::RequestHeaderPolicyConfig::default()
+        };
+        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(4)).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        request
+            .insert_header("x-forwarded-for", "198.51.100.9, 203.0.113.10")
+            .unwrap();
+        let client_addr = SocketAddr::from((Ipv4Addr::new(10, 89, 0, 254), 53210));
+        let matcher = |address: IpAddr| match address {
+            IpAddr::V4(address) => {
+                address == Ipv4Addr::new(10, 89, 0, 254)
+                    || address == Ipv4Addr::new(203, 0, 113, 10)
+            }
+            IpAddr::V6(_) => false,
+        };
+
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            true,
+            Some(&matcher),
+            true,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            request
+                .headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok()),
+            Some("198.51.100.9")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-forwarded-for")
+                .and_then(|value| value.to_str().ok()),
+            Some("198.51.100.9")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("forwarded")
+                .and_then(|value| value.to_str().ok()),
+            Some("for=198.51.100.9;host=\"example.test\";proto=https")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-template-remote")
+                .and_then(|value| value.to_str().ok()),
+            Some("198.51.100.9")
         );
     }
 
@@ -1018,6 +1197,7 @@ mod tests {
             &policy,
             Some(&client_addr),
             false,
+            None,
             false,
             None,
         )
@@ -1043,8 +1223,16 @@ mod tests {
         request.insert_header("host", "example.test").unwrap();
         let client_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 53210);
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            None,
+            true,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             request
@@ -1078,8 +1266,16 @@ mod tests {
             .unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
-        apply_upstream_request_policy(&mut request, &policy, Some(&client_addr), false, true, None)
-            .unwrap();
+        apply_upstream_request_policy(
+            &mut request,
+            &policy,
+            Some(&client_addr),
+            false,
+            None,
+            true,
+            None,
+        )
+        .unwrap();
 
         assert!(request.headers.get("x-forwarded-for").is_none());
         assert!(request.headers.get("x-real-ip").is_none());

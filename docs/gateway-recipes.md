@@ -40,7 +40,11 @@ referrer_policy = "no-referrer"
 ```
 
 Use `trusted_proxies` only for proxies you actually control. When it is empty,
-Fluxheim uses the direct peer address for generated client-IP headers.
+Fluxheim uses the direct peer address for generated client-IP headers. When the
+direct peer is trusted, Fluxheim treats `X-Forwarded-For` like nginx
+`real_ip_recursive on`: trusted hops are skipped from the right and generated
+`X-Real-IP`, `X-Forwarded-For`, `Forwarded`, and `{remote_addr}` values use the
+restored client address.
 
 ## Cleartext Challenge Exception And HTTPS Redirect
 

@@ -97,12 +97,11 @@ Notes:
   main file, set top-level `include_conf_d = true`; alternatively point
   `--config` at the config directory so visible `.toml` files are loaded in
   sorted order.
-- `trusted_proxies` should contain only direct peers whose forwarded client-IP
-  headers are allowed to influence routing/log context.
-- In `1.0`, trusted proxy support is intentionally explicit and CIDR-based.
-  Later trusted-client identity work should keep the direct socket peer,
-  restored client IP, and forwarding chain as separate request-context values
-  rather than replacing one with the other.
+- `trusted_proxies` should contain only peers you operate, such as a container
+  gateway, Cloudflare, or a trusted edge proxy. When the direct peer is trusted,
+  Fluxheim walks `X-Forwarded-For` from right to left and restores the last
+  non-trusted hop for generated client-IP headers, equivalent to nginx
+  `real_ip_recursive on`.
 - `[server.process]` maps safe process settings into Pingora's `ServerConf`.
   Changes to these values require a process upgrade, not a live snapshot
   reload. Keep `threads` conservative in containers because Pingora allocates
@@ -371,8 +370,11 @@ add = { x-content-source = "fluxheim" }
 ```
 
 `x_forwarded_for` values: `off`, `replace`, `append`. `x_real_ip = true`
-emits `X-Real-IP` from the observed client address. In privacy builds it
-defaults off and client-IP forwarding remains stripped.
+emits `X-Real-IP` from the effective client address. If the direct peer matches
+`server.trusted_proxies`, Fluxheim recursively restores that address from the
+trusted `X-Forwarded-For` chain before writing `X-Real-IP`, `X-Forwarded-For`,
+`Forwarded`, or `{remote_addr}` templates. In privacy builds it defaults off and
+client-IP forwarding remains stripped.
 
 Request header values can use a small safe dynamic template set:
 

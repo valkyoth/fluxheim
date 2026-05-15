@@ -3743,6 +3743,7 @@ impl ProxyHttp for FluxProxy {
         let trusted_proxy = client_addr
             .map(|addr| state.trusted_proxy(addr.ip()))
             .unwrap_or(false);
+        let trusted_proxy_matcher = |address| state.trusted_proxy(address);
         #[cfg(not(feature = "privacy-mode"))]
         if let Some(request_id) = ctx.request_id.as_deref() {
             upstream_request
@@ -3764,6 +3765,7 @@ impl ProxyHttp for FluxProxy {
             request_headers,
             client_addr,
             trusted_proxy,
+            Some(&trusted_proxy_matcher),
             downstream_tls,
             request_id,
         )?;
