@@ -34,6 +34,17 @@ may provide the fallback through either `[vhosts.tls.certificate]` or
 static or ACME-managed source; Fluxheim selects the matching certificate by SNI
 during the downstream TLS handshake.
 
+Managed ACME certificates may be absent during first issuance. Reloadable SNI
+TLS backends, including the default rustls build, treat missing
+Fluxheim-managed ACME certificate files as pending instead of refusing startup.
+HTTP-01 challenge routes and the cleartext listener can still serve the issuer
+validation request, while HTTPS handshakes for that pending SNI either use an
+available fallback certificate or fail until the certificate files are issued.
+After the background ACME worker installs the files, Fluxheim reloads the
+downstream SNI certificate resolver so new handshakes can use them without a
+process restart. Static certificate paths remain fail-closed: a missing
+operator-owned certificate is still a configuration/runtime error.
+
 ## Storage Permissions
 
 Fluxheim has a runtime storage checker for operator-owned certificates and ACME
@@ -294,6 +305,13 @@ After successful renewal, Fluxheim reloads the downstream SNI certificate
 resolver or callback so new handshakes can use the freshly installed files
 without restarting. If a TLS backend or listener shape cannot provide a reload
 handle, Fluxheim logs that a restart or process reload is required.
+
+This reload happens inside the long-running Fluxheim process. A separate manual
+`fluxheim acme-renew` or one-shot companion container can write the certificate
+files, but it cannot directly mutate an already-running gateway unless the
+service manager also triggers a reload/restart or a future admin reload hook is
+used. The integrated background automation is the zero-downtime path for simple
+single-process deployments.
 
 Production packages include a companion ACME operating mode while keeping the
 integrated background worker for simple installs. In this model,

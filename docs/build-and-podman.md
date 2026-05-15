@@ -545,9 +545,12 @@ gateway does not also run the background renewal loop.
 ### Container ACME First Issuance
 
 For HTTP-01 ACME, the CA must be able to reach Fluxheim on public port `80`.
-During first issuance, run Fluxheim with the HTTP listener enabled, keep
-`server.tls_listen` commented out, and keep `[server.https_redirect]` disabled
-until certificates exist.
+During first issuance, run Fluxheim with the HTTP listener enabled. Modern
+rustls-based builds can also keep `server.tls_listen` enabled while
+Fluxheim-managed ACME certificate files are missing; those certificates are
+treated as pending until issuance succeeds. Keep `[server.https_redirect]`
+disabled until the public HTTP-01 challenge path works, otherwise ordinary
+browser traffic may be redirected to HTTPS before a certificate is available.
 
 Example container main config shape for first issuance:
 
@@ -556,7 +559,8 @@ include_conf_d = true
 
 [server]
 listen = ["0.0.0.0:8080"]
-# tls_listen = ["0.0.0.0:8443"]
+# Optional during first issuance on reloadable SNI TLS backends:
+tls_listen = ["0.0.0.0:8443"]
 default_vhost = "example.com"
 
 [server.https_redirect]
@@ -612,7 +616,9 @@ podman run --rm \
   --validate-config
 ```
 
-Then start Fluxheim on HTTP only, replacing any existing gateway on port `80`:
+Then start Fluxheim, replacing any existing gateway on the published ports. If
+you kept `server.tls_listen` enabled, also publish `443:8443`; otherwise publish
+only `80:8080` for the first issuance step:
 
 ```bash
 podman run -d \
@@ -620,6 +626,7 @@ podman run -d \
   --network gateway_net \
   --restart always \
   -p 80:8080 \
+  -p 443:8443 \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
   -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
   -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
@@ -652,7 +659,8 @@ podman run --rm \
   acme-renew
 ```
 
-After every configured ACME target has renewed, enable HTTPS in the main config:
+If you kept `server.tls_listen` disabled for the first run, enable HTTPS in the
+main config after every configured ACME target has renewed:
 
 ```toml
 [server]

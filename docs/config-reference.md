@@ -1132,6 +1132,13 @@ Fluxheim reloads downstream SNI certificate objects so new handshakes can use
 the renewed files without a restart when the selected TLS backend exposes a
 reloadable resolver or callback.
 
+For reloadable SNI TLS backends, including the default rustls backend, missing
+Fluxheim-managed ACME certificate files are a pending issuance state rather than
+a startup failure. This lets operators add a new `[vhosts.tls.acme]` vhost while
+keeping port `80` online for HTTP-01. Static certificates are different: if a
+vhost points at operator-owned `cert_path`/`key_path` files, those files must
+exist and pass storage checks before the listener starts.
+
 You can also invoke the renewal command explicitly:
 
 ```bash
@@ -1172,8 +1179,9 @@ ACME-managed or static fallback certificate for the listener. DNS-01 remains
 future work because provider integrations need explicit secret handling and
 record-cleanup behavior.
 See [examples/acme-http-01.toml](../examples/acme-http-01.toml) for a minimal
-HTTP-01 managed-certificate config that can be used for first issuance before
-enabling a public HTTPS listener. See
+HTTP-01 managed-certificate config. It can be used for first issuance with a
+public HTTP listener only, or with a rustls SNI HTTPS listener whose managed
+certificate is still pending. See
 [examples/acme-actalis.toml](../examples/acme-actalis.toml) for the same flow
 with file-backed External Account Binding secrets.
 

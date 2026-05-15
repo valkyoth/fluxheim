@@ -176,6 +176,13 @@ PHP-FPM build is production-eligible only when php-fpm is isolated separately,
 the PHP root is trusted, request body limits are configured, and operators have
 validated their framework/application behavior with their php-fpm pool.
 
+The same line also supports pending Fluxheim-managed ACME certificates during
+first issuance on reloadable SNI TLS backends. This lets operators add a new
+ACME vhost without taking existing HTTPS sites down: HTTP-01 can validate on
+port `80`, and the background renewal worker reloads the SNI certificate set
+after the certificate files are installed. Static certificate paths remain
+fail-closed.
+
 ## Operator Checks
 
 Before using a Fluxheim build for a real site, run the stable gate from the repo

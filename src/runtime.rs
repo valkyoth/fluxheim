@@ -752,6 +752,70 @@ mod tests {
         resolver.reload().unwrap();
 
         assert_eq!(resolver.certificates.load().len(), 1);
+        assert!(resolver.certificates.load()[0].is_some());
+    }
+
+    #[cfg(all(
+        feature = "tls-rustls",
+        feature = "acme",
+        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    ))]
+    #[test]
+    fn rustls_sni_resolver_allows_pending_managed_acme_certificates() {
+        let acme_storage = unique_temp_path("runtime-pending-acme-certificates");
+        std::fs::create_dir_all(&acme_storage).unwrap();
+        let default_certificate = crate::config::StaticCertificateConfig {
+            cert_path: std::path::PathBuf::from("tests/fixtures/tls/localhost-cert.pem"),
+            key_path: std::path::PathBuf::from("tests/fixtures/tls/localhost-key.pem"),
+        };
+        let config = crate::config::Config {
+            server: crate::config::ServerConfig {
+                default_vhost: Some("default".to_owned()),
+                ..crate::config::ServerConfig::default()
+            },
+            tls: crate::config::TlsConfig {
+                enabled: true,
+                certificates: vec![default_certificate],
+                acme: crate::config::AcmeConfig {
+                    enabled: true,
+                    storage: Some(acme_storage.clone()),
+                    ..crate::config::AcmeConfig::default()
+                },
+                ..crate::config::TlsConfig::default()
+            },
+            vhosts: vec![crate::config::VhostConfig {
+                name: "new-site".to_owned(),
+                hosts: vec!["new-site.example.test".to_owned()],
+                max_request_body_bytes: None,
+                tls: crate::config::VhostTlsConfig {
+                    enabled: true,
+                    acme: crate::config::VhostAcmeConfig {
+                        enabled: true,
+                        issuer: None,
+                        domains: Vec::new(),
+                    },
+                    ..crate::config::VhostTlsConfig::default()
+                },
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                proxy: crate::config::ProxyConfig::default(),
+                cache: crate::config::CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: crate::config::WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..crate::config::Config::default()
+        };
+        let selector = crate::tls::DownstreamCertificateSelector::from_config(&config).unwrap();
+
+        let resolver = super::RustlsSniCertificateResolver::new(&selector, &config.tls).unwrap();
+
+        assert_eq!(resolver.certificates.load().len(), 2);
+        assert!(resolver.certificates.load()[0].is_some());
+        assert!(resolver.certificates.load()[1].is_none());
+
+        std::fs::remove_dir_all(acme_storage).unwrap();
     }
 }
 
@@ -1187,7 +1251,7 @@ where
 ))]
 struct RustlsSniCertificateResolver {
     selector: crate::tls::DownstreamCertificateSelector,
-    certificates: arc_swap::ArcSwap<Vec<std::sync::Arc<rustls::sign::CertifiedKey>>>,
+    certificates: arc_swap::ArcSwap<Vec<Option<std::sync::Arc<rustls::sign::CertifiedKey>>>>,
     #[cfg(feature = "acme")]
     tls_alpn_01_store: Option<crate::acme::AcmeTlsAlpn01ChallengeStore>,
 }
@@ -1218,10 +1282,7 @@ impl RustlsSniCertificateResolver {
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         #[cfg(not(feature = "acme"))]
         let _ = tls;
-        let mut certificates = Vec::with_capacity(selector.certificates().len());
-        for certificate in selector.certificates() {
-            certificates.push(std::sync::Arc::new(load_rustls_certified_key(certificate)?));
-        }
+        let certificates = load_rustls_certified_keys(selector)?;
         #[cfg(feature = "acme")]
         let tls_alpn_01_store = if rustls_acme_tls_alpn_enabled(tls) {
             tls.acme
@@ -1242,10 +1303,7 @@ impl RustlsSniCertificateResolver {
 
     #[cfg_attr(not(feature = "acme-client"), allow(dead_code))]
     fn reload(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut certificates = Vec::with_capacity(self.selector.certificates().len());
-        for certificate in self.selector.certificates() {
-            certificates.push(std::sync::Arc::new(load_rustls_certified_key(certificate)?));
-        }
+        let certificates = load_rustls_certified_keys(&self.selector)?;
         self.certificates.store(std::sync::Arc::new(certificates));
         Ok(())
     }
@@ -1269,7 +1327,12 @@ impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
         let index = self
             .selector
             .certificate_index_for_sni(client_hello.server_name());
-        self.certificates.load().get(index).cloned()
+        let certificates = self.certificates.load();
+        certificates.get(index).and_then(Clone::clone).or_else(|| {
+            certificates
+                .get(self.selector.default_certificate_index())
+                .and_then(Clone::clone)
+        })
     }
 }
 
@@ -1344,6 +1407,33 @@ fn load_rustls_certified_key(
     feature = "tls-rustls",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
+fn load_rustls_certified_keys(
+    selector: &crate::tls::DownstreamCertificateSelector,
+) -> Result<Vec<Option<std::sync::Arc<rustls::sign::CertifiedKey>>>, Box<dyn Error + Send + Sync>> {
+    let mut certificates = Vec::with_capacity(selector.certificates().len());
+    for (index, certificate) in selector.certificates().iter().enumerate() {
+        if selector.certificate_is_managed_acme(index) && certificate_paths_are_absent(certificate)?
+        {
+            log::warn!(
+                "managed ACME certificate is pending issuance; cert={} key={}",
+                certificate.cert_path.display(),
+                certificate.key_path.display()
+            );
+            certificates.push(None);
+            continue;
+        }
+        certificates.push(Some(std::sync::Arc::new(load_rustls_certified_key(
+            certificate,
+        )?)));
+    }
+    Ok(certificates)
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
 fn load_rustls_certified_key_from_paths(
     cert_path: &Path,
     key_path: &Path,
@@ -1369,7 +1459,7 @@ fn load_rustls_certified_key_from_paths(
 ))]
 struct SniCertificateCallback {
     selector: crate::tls::DownstreamCertificateSelector,
-    certificates: arc_swap::ArcSwap<Vec<CallbackCertificate>>,
+    certificates: arc_swap::ArcSwap<Vec<Option<CallbackCertificate>>>,
 }
 
 #[cfg(all(
@@ -1380,11 +1470,7 @@ impl SniCertificateCallback {
     fn new(
         selector: &crate::tls::DownstreamCertificateSelector,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let mut certificates = Vec::with_capacity(selector.certificates().len());
-        for certificate in selector.certificates() {
-            let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
-            certificates.push(CallbackCertificate::load(cert_path, key_path)?);
-        }
+        let certificates = load_callback_certificates(selector)?;
 
         Ok(Self {
             selector: selector.clone(),
@@ -1393,14 +1479,35 @@ impl SniCertificateCallback {
     }
 
     fn reload(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut certificates = Vec::with_capacity(self.selector.certificates().len());
-        for certificate in self.selector.certificates() {
-            let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
-            certificates.push(CallbackCertificate::load(cert_path, key_path)?);
-        }
+        let certificates = load_callback_certificates(&self.selector)?;
         self.certificates.store(std::sync::Arc::new(certificates));
         Ok(())
     }
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+fn load_callback_certificates(
+    selector: &crate::tls::DownstreamCertificateSelector,
+) -> Result<Vec<Option<CallbackCertificate>>, Box<dyn Error + Send + Sync>> {
+    let mut certificates = Vec::with_capacity(selector.certificates().len());
+    for (index, certificate) in selector.certificates().iter().enumerate() {
+        if selector.certificate_is_managed_acme(index) && certificate_paths_are_absent(certificate)?
+        {
+            log::warn!(
+                "managed ACME certificate is pending issuance; cert={} key={}",
+                certificate.cert_path.display(),
+                certificate.key_path.display()
+            );
+            certificates.push(None);
+            continue;
+        }
+        let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
+        certificates.push(Some(CallbackCertificate::load(cert_path, key_path)?));
+    }
+    Ok(certificates)
 }
 
 #[cfg(all(
@@ -1421,7 +1528,15 @@ impl pingora::listeners::TlsAccept for SniCertificateCallback {
         let sni = ssl.servername(pingora::tls::ssl::NameType::HOST_NAME);
         let index = self.selector.certificate_index_for_sni(sni);
         let certificates = self.certificates.load();
-        let Some(certificate) = certificates.get(index) else {
+        let Some(certificate) = certificates
+            .get(index)
+            .and_then(Option::as_ref)
+            .or_else(|| {
+                certificates
+                    .get(self.selector.default_certificate_index())
+                    .and_then(Option::as_ref)
+            })
+        else {
             log::error!("downstream SNI certificate index {index} was not loaded");
             return;
         };
@@ -1526,6 +1641,20 @@ fn downstream_certificate_paths(
         .ok_or("TLS private key path must be valid UTF-8 for Pingora")?;
 
     Ok((cert_path, key_path))
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(
+        feature = "tls-rustls",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    )
+))]
+fn certificate_paths_are_absent(
+    certificate: &crate::config::StaticCertificateConfig,
+) -> std::io::Result<bool> {
+    Ok(!certificate.cert_path.try_exists()? && !certificate.key_path.try_exists()?)
 }
 
 #[cfg(all(

@@ -297,18 +297,23 @@ pub fn recommended_acme_storage_mode() -> u32 {
     ACME_STORAGE_MODE
 }
 
-pub fn default_downstream_certificate(config: &Config) -> Option<StaticCertificateConfig> {
+pub fn default_downstream_certificate(config: &Config) -> Option<DownstreamCertificateSource> {
     config
         .tls
         .certificates
         .first()
         .cloned()
+        .map(|certificate| DownstreamCertificateSource {
+            certificate,
+            managed_acme: false,
+        })
         .or_else(|| default_vhost_certificate_source(config))
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DownstreamCertificateSelector {
     certificates: Vec<StaticCertificateConfig>,
+    managed_acme: Vec<bool>,
     default_index: usize,
     exact_hosts: std::collections::HashMap<String, usize>,
     wildcard_hosts: Vec<WildcardCertificate>,
@@ -318,7 +323,8 @@ impl DownstreamCertificateSelector {
     pub fn from_config(config: &Config) -> Option<Self> {
         let default = default_downstream_certificate(config)?;
         let mut selector = Self {
-            certificates: vec![default],
+            certificates: vec![default.certificate],
+            managed_acme: vec![default.managed_acme],
             default_index: 0,
             exact_hosts: std::collections::HashMap::new(),
             wildcard_hosts: Vec::new(),
@@ -334,12 +340,16 @@ impl DownstreamCertificateSelector {
             let certificate_index = selector
                 .certificates
                 .iter()
-                .position(|existing| existing == &certificate)
+                .position(|existing| existing == &certificate.certificate)
                 .unwrap_or_else(|| {
                     let index = selector.certificates.len();
-                    selector.certificates.push(certificate);
+                    selector.certificates.push(certificate.certificate.clone());
+                    selector.managed_acme.push(certificate.managed_acme);
                     index
                 });
+            if !certificate.managed_acme {
+                selector.managed_acme[certificate_index] = false;
+            }
 
             for host in vhost.normalized_hosts() {
                 if let Some(suffix) = host.strip_prefix("*.") {
@@ -368,6 +378,14 @@ impl DownstreamCertificateSelector {
         &self.certificates
     }
 
+    pub fn certificate_is_managed_acme(&self, index: usize) -> bool {
+        self.managed_acme.get(index).copied().unwrap_or(false)
+    }
+
+    pub fn default_certificate_index(&self) -> usize {
+        self.default_index
+    }
+
     pub fn certificate_index_for_sni(&self, sni: Option<&str>) -> usize {
         let Some(host) = sni.and_then(normalize_host) else {
             return self.default_index;
@@ -389,7 +407,13 @@ impl DownstreamCertificateSelector {
     }
 }
 
-fn default_vhost_certificate_source(config: &Config) -> Option<StaticCertificateConfig> {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct DownstreamCertificateSource {
+    pub certificate: StaticCertificateConfig,
+    pub managed_acme: bool,
+}
+
+fn default_vhost_certificate_source(config: &Config) -> Option<DownstreamCertificateSource> {
     let default_vhost = config.server.default_vhost.as_ref()?;
     config
         .vhosts
@@ -401,19 +425,21 @@ fn default_vhost_certificate_source(config: &Config) -> Option<StaticCertificate
 fn vhost_certificate_source(
     config: &Config,
     vhost: &crate::config::VhostConfig,
-) -> Option<StaticCertificateConfig> {
-    vhost
-        .tls
-        .certificate
-        .clone()
-        .or_else(|| managed_acme_certificate_source(config, vhost))
+) -> Option<DownstreamCertificateSource> {
+    if let Some(certificate) = vhost.tls.certificate.clone() {
+        return Some(DownstreamCertificateSource {
+            certificate,
+            managed_acme: false,
+        });
+    }
+    managed_acme_certificate_source(config, vhost)
 }
 
 #[cfg(feature = "acme")]
 fn managed_acme_certificate_source(
     config: &Config,
     vhost: &crate::config::VhostConfig,
-) -> Option<StaticCertificateConfig> {
+) -> Option<DownstreamCertificateSource> {
     if !config.tls.acme.enabled {
         return None;
     }
@@ -425,9 +451,12 @@ fn managed_acme_certificate_source(
         shared_managed_acme_certificate_owner(config, vhost)?
     };
     let paths = crate::acme::managed_certificate_paths(storage, owner);
-    Some(StaticCertificateConfig {
-        cert_path: paths.cert_path,
-        key_path: paths.key_path,
+    Some(DownstreamCertificateSource {
+        certificate: StaticCertificateConfig {
+            cert_path: paths.cert_path,
+            key_path: paths.key_path,
+        },
+        managed_acme: true,
     })
 }
 
@@ -435,7 +464,7 @@ fn managed_acme_certificate_source(
 fn managed_acme_certificate_source(
     _config: &Config,
     _vhost: &crate::config::VhostConfig,
-) -> Option<StaticCertificateConfig> {
+) -> Option<DownstreamCertificateSource> {
     None
 }
 
