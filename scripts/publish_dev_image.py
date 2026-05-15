@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 
@@ -15,6 +16,16 @@ REF = "main"
 def run(command: list[str]) -> None:
     print("+ " + " ".join(command), flush=True)
     subprocess.run(command, check=True)
+
+
+def run_capture(command: list[str]) -> str:
+    print("+ " + " ".join(command), flush=True)
+    completed = subprocess.run(command, check=True, text=True, capture_output=True)
+    if completed.stdout:
+        print(completed.stdout, end="")
+    if completed.stderr:
+        print(completed.stderr, end="", file=sys.stderr)
+    return completed.stdout + completed.stderr
 
 
 def main() -> int:
@@ -29,7 +40,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        run(
+        output = run_capture(
             [
                 "gh",
                 "workflow",
@@ -44,7 +55,11 @@ def main() -> int:
             ]
         )
         if args.watch:
-            run(["gh", "run", "watch"])
+            match = re.search(r"/actions/runs/([0-9]+)", output)
+            if not match:
+                print("error: could not find workflow run id in gh output", file=sys.stderr)
+                return 1
+            run(["gh", "run", "watch", match.group(1), "--exit-status"])
     except FileNotFoundError:
         print("error: GitHub CLI `gh` is required", file=sys.stderr)
         return 127

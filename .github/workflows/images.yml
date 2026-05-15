@@ -46,7 +46,7 @@ env:
 
 jobs:
   images:
-    if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && inputs.publish_dev_wolfi == false) }}
+    if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_dev_wolfi != 'true') }}
     name: Build and publish ${{ matrix.profile.name }} ${{ matrix.variant }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -286,7 +286,7 @@ jobs:
 
   quay-dev-wolfi:
     name: Build and publish Quay dev-wolfi
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_dev_wolfi == true }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish_dev_wolfi == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
