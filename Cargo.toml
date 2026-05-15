@@ -94,6 +94,15 @@ profile-privacy = ["proxy", "web", "tls-rustls", "privacy-mode", "security"]
 profile-full = [
     "profile-load-balancer",
 ]
+profile-development = [
+    "profile-full",
+    "php-fpm",
+    "acme-client",
+    "metrics",
+    "metrics-otlp",
+    "otel-tracing",
+    "otel-otlp",
+]
 profile-web-server = ["proxy", "web", "tls-rustls", "security"]
 profile-cache-edge = ["proxy", "cache", "tls-rustls", "security"]
 profile-proxy-edge = ["proxy", "tls-rustls", "security"]

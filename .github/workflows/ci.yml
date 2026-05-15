@@ -57,6 +57,7 @@ jobs:
           scripts/validate-features.sh profile-core,acme-client
           scripts/validate-features.sh profile-load-balancer
           scripts/validate-features.sh profile-full
+          scripts/validate-features.sh profile-development
           scripts/validate-features.sh profile-web-server
           scripts/validate-features.sh profile-cache-edge
           scripts/validate-features.sh profile-proxy-edge
@@ -118,6 +119,7 @@ jobs:
           cargo check --no-default-features --features profile-cache-server
           cargo check --no-default-features --features profile-load-balancer
           cargo check --no-default-features --features profile-full
+          cargo check --no-default-features --features profile-development
           cargo check --no-default-features --features profile-web-server
           cargo check --no-default-features --features profile-cache-edge
           cargo check --no-default-features --features profile-proxy-edge

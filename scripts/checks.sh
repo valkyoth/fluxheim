@@ -91,6 +91,7 @@ cargo check --no-default-features --features profile-reverse-proxy
 cargo check --no-default-features --features profile-cache-server
 cargo check --no-default-features --features profile-load-balancer
 cargo check --no-default-features --features profile-full
+cargo check --no-default-features --features profile-development
 cargo check --no-default-features --features profile-web-server
 cargo check --no-default-features --features profile-web-server,php-fpm
 cargo check --no-default-features --features profile-cache-edge

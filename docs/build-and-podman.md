@@ -34,7 +34,10 @@ grouped build profiles as normal feature aliases such as `profile-core`,
 `profile-load-balancer`, `profile-observability`, and `profile-privacy`.
 Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
 `profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`, and
-`profile-load-balancer-edge`.
+`profile-load-balancer-edge`. `profile-development` is a broad development
+profile with all compatible production modules enabled: full proxy/web/cache
+and load-balancer support, PHP-FPM, ACME, Prometheus, OTLP metrics, and OTel
+tracing.
 
 TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
 `tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls` is the default and
@@ -187,6 +190,10 @@ focused images still reuse the shared proxy runtime internally until lower-level
 serving internals are split further. Override `FLUXHEIM_FEATURES` only when you
 intentionally want a custom image.
 
+Pushes to the default branch also publish a Quay-only development image tagged
+`quay.io/<namespace>/<repository>:dev-wolfi`. Release images remain tag-driven;
+the development image is intentionally not mirrored to GHCR or Docker Hub.
+
 Build a specific runtime variant:
 
 ```bash
@@ -223,6 +230,16 @@ podman build \
   --build-arg FLUXHEIM_FEATURES=profile-web-server,php-fpm,acme-client \
   --build-arg FLUXHEIM_CONFIG=examples/php-fpm.toml \
   -t fluxheim:php-fpm-wolfi \
+  -f containers/Containerfile.wolfi .
+```
+
+Build the development Wolfi profile locally:
+
+```bash
+podman build \
+  --build-arg FLUXHEIM_FEATURES=profile-development \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/fluxheim.toml \
+  -t fluxheim:dev-wolfi \
   -f containers/Containerfile.wolfi .
 ```
 

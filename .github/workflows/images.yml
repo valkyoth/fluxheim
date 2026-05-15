@@ -29,6 +29,8 @@ on:
         required: true
         default: "65532"
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -41,6 +43,7 @@ env:
 
 jobs:
   images:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
     name: Build and publish ${{ matrix.profile.name }} ${{ matrix.variant }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -275,3 +278,56 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
           tags: ${{ steps.tags.outputs.tags }}
+
+  quay-dev-wolfi:
+    name: Build and publish Quay dev-wolfi
+    if: ${{ github.event_name == 'push' && github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_TOKEN: ${{ secrets.QUAY_TOKEN }}
+      QUAY_NAMESPACE: ${{ vars.QUAY_NAMESPACE || github.repository_owner }}
+      QUAY_REPOSITORY: ${{ vars.QUAY_REPOSITORY || github.event.repository.name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Quay
+        if: ${{ env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
+        uses: docker/login-action@v4
+        with:
+          registry: quay.io
+          username: ${{ env.QUAY_USERNAME }}
+          password: ${{ env.QUAY_TOKEN }}
+
+      - name: Build and publish dev-wolfi
+        if: ${{ env.QUAY_USERNAME != '' && env.QUAY_TOKEN != '' }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: containers/Containerfile.wolfi
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            FLUXHEIM_FEATURES=profile-development
+            FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
+            FLUXHEIM_RUNTIME_UID=65532
+            FLUXHEIM_RUNTIME_GID=65532
+          labels: |
+            org.opencontainers.image.title=Fluxheim Development
+            org.opencontainers.image.description=Fluxheim development image with all compatible production features enabled
+            org.opencontainers.image.licenses=EUPL-1.2
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=dev
+          tags: |
+            quay.io/${{ env.QUAY_NAMESPACE }}/${{ env.QUAY_REPOSITORY }}:dev-wolfi
+
+      - name: Skip Quay publish
+        if: ${{ env.QUAY_USERNAME == '' || env.QUAY_TOKEN == '' }}
+        run: echo "Skipping dev-wolfi publish because QUAY_USERNAME or QUAY_TOKEN is not configured."

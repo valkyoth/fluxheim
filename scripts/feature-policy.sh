@@ -28,6 +28,9 @@ expand_fluxheim_feature() {
         profile-full)
             echo "proxy,web,cache,load-balancer,tls-rustls,security"
             ;;
+        profile-development)
+            echo "proxy,web,cache,load-balancer,tls-rustls,security,php-fpm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"
+            ;;
         profile-web-server)
             echo "proxy,web,tls-rustls,security"
             ;;
