@@ -190,12 +190,17 @@ focused images still reuse the shared proxy runtime internally until lower-level
 serving internals are split further. Override `FLUXHEIM_FEATURES` only when you
 intentionally want a custom image.
 
-Pushes to the default branch also publish a Quay-only development image tagged
-`quay.io/<namespace>/<repository>:dev-wolfi` plus an immutable
-`dev-<short-sha>-wolfi` tag. Release images remain tag-driven; the development
-image is intentionally not mirrored to GHCR or Docker Hub. The workflow only
-publishes from the default branch, not from pull requests, so registry secrets
-are not exposed to forked PR builds.
+Release images remain tag-driven. When a development container is useful,
+manually trigger the Quay-only development image build:
+
+```bash
+scripts/publish_dev_image.py --watch
+```
+
+That workflow publishes `quay.io/<namespace>/<repository>:dev-wolfi` plus an
+immutable `dev-<short-sha>-wolfi` tag from `main`. The development image is
+intentionally not mirrored to GHCR or Docker Hub, and it does not publish from
+pull requests, so registry secrets are not exposed to forked PR builds.
 
 Build a specific runtime variant:
 

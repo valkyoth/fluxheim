@@ -16,6 +16,11 @@ on:
         required: true
         default: false
         type: boolean
+      publish_dev_wolfi:
+        description: Publish the Quay-only development Wolfi image from main.
+        required: true
+        default: false
+        type: boolean
       config:
         description: Config file copied into /etc/fluxheim/fluxheim.toml.
         required: false
@@ -29,8 +34,6 @@ on:
         required: true
         default: "65532"
   push:
-    branches:
-      - main
     tags:
       - "v*"
 
@@ -43,7 +46,7 @@ env:
 
 jobs:
   images:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
+    if: ${{ (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && !inputs.publish_dev_wolfi) }}
     name: Build and publish ${{ matrix.profile.name }} ${{ matrix.variant }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -283,7 +286,7 @@ jobs:
 
   quay-dev-wolfi:
     name: Build and publish Quay dev-wolfi
-    if: ${{ github.event_name == 'push' && github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_dev_wolfi }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
