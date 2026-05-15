@@ -2302,22 +2302,45 @@ impl StorageBinDiskStorage {
                 "StorageBinDiskStorage requires cache.disk.backend = \"storage-bin\"",
             ));
         }
-        let encryption = DiskCacheEncryption::from_config(&plan.encryption)?;
+        let encryption = DiskCacheEncryption::from_config(&plan.encryption).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("storage-bin {} encryption: {error}", plan.path.display()),
+            )
+        })?;
         let mut layout = StorageBinLayoutPlan::from_disk_plan(&plan).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "storage-bin layout requires storage-bin disk backend",
             )
         })?;
-        let root = prepare_disk_cache_root(&layout.root)?;
+        let root = prepare_disk_cache_root(&layout.root).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("storage-bin root {}: {error}", layout.root.display()),
+            )
+        })?;
         layout = StorageBinLayoutPlan {
             root: root.clone(),
             manifest_path: root.join(STORAGE_BIN_MANIFEST_FILENAME),
             data_dir: root.join(STORAGE_BIN_DATA_DIR),
             ..layout
         };
-        prepare_storage_bin_layout(&layout)?;
-        let recovered_entries = read_storage_bin_index(&layout)?;
+        prepare_storage_bin_layout(&layout).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("storage-bin layout {}: {error}", layout.root.display()),
+            )
+        })?;
+        let recovered_entries = read_storage_bin_index(&layout).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "storage-bin index {}: {error}",
+                    storage_bin_index_path(&layout.root).display()
+                ),
+            )
+        })?;
         let mut recovered_objects = HashMap::new();
         let recovered_purge_index = CachePurgeIndex::new();
         let mut valid_entries = Vec::new();
@@ -2358,10 +2381,25 @@ impl StorageBinDiskStorage {
             valid_entries.push(entry);
         }
         if !valid_entries.is_empty() {
-            write_storage_bin_index(&layout, &valid_entries)?;
+            write_storage_bin_index(&layout, &valid_entries).map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!(
+                        "storage-bin index {}: {error}",
+                        storage_bin_index_path(&layout.root).display()
+                    ),
+                )
+            })?;
         }
+        let free_map =
+            StorageBinFreeMap::from_occupied(&layout, &valid_entries).map_err(|error| {
+                std::io::Error::new(
+                    error.kind(),
+                    format!("storage-bin free map {}: {error}", layout.root.display()),
+                )
+            })?;
         Ok(Self {
-            free_map: Mutex::new(StorageBinFreeMap::from_occupied(&layout, &valid_entries)?),
+            free_map: Mutex::new(free_map),
             files: StorageBinFileSet::new(layout.clone()),
             layout,
             objects: Arc::new(RwLock::new(recovered_objects)),
@@ -3482,7 +3520,12 @@ impl PingoraDiskStorageBackend {
 impl PingoraDiskStorage {
     pub fn from_plan(plan: DiskTierPlan) -> std::io::Result<Self> {
         reject_unimplemented_disk_backend(plan.backend)?;
-        let encryption = DiskCacheEncryption::from_config(&plan.encryption)?;
+        let encryption = DiskCacheEncryption::from_config(&plan.encryption).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("disk cache {} encryption: {error}", plan.path.display()),
+            )
+        })?;
         Self::new_with_cache_tag_headers_and_encryption(
             plan.path,
             plan.max_size_bytes,
@@ -3498,7 +3541,12 @@ impl PingoraDiskStorage {
         route: Option<&str>,
     ) -> std::io::Result<Self> {
         reject_unimplemented_disk_backend(plan.backend)?;
-        let encryption = DiskCacheEncryption::from_config(&plan.encryption)?;
+        let encryption = DiskCacheEncryption::from_config(&plan.encryption).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("disk cache {} encryption: {error}", plan.path.display()),
+            )
+        })?;
         Self::new_with_metric_scope(
             plan.path,
             plan.max_size_bytes,
@@ -3582,11 +3630,22 @@ impl PingoraDiskStorage {
         encryption: Option<DiskCacheEncryption>,
         activity: CacheActivityCounters,
     ) -> std::io::Result<Self> {
-        let root = prepare_disk_cache_root(&root)?;
+        let root = prepare_disk_cache_root(&root).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("disk cache root {}: {error}", root.display()),
+            )
+        })?;
         cleanup_stale_disk_cache_temp_files(
             &root,
             std::time::Duration::from_secs(DISK_CACHE_TEMP_FILE_STALE_SECS),
-        )?;
+        )
+        .map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("disk cache temp cleanup {}: {error}", root.display()),
+            )
+        })?;
         let storage = Self {
             root,
             purge_index: CachePurgeIndex::new(),
@@ -3598,7 +3657,15 @@ impl PingoraDiskStorage {
             encryption,
             activity,
         };
-        storage.rebuild_disk_indexes()?;
+        storage.rebuild_disk_indexes().map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "disk cache index rebuild {}: {error}",
+                    storage.root.display()
+                ),
+            )
+        })?;
         Ok(storage)
     }
 
