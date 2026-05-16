@@ -5996,6 +5996,7 @@ async fn respond_php_request(
         .custom("HTTPS", if is_tls { "on" } else { "off" })
         .custom("REDIRECT_STATUS", "200");
     add_php_request_header_params(&mut params, session.req_header());
+    add_php_host_param(&mut params, host);
     if !resolution.path_info.is_empty() {
         params = params.custom("PATH_INFO", resolution.path_info.clone());
         let path_translated = php
@@ -6185,6 +6186,13 @@ fn add_php_request_header_params(params: &mut fastcgi_client::Params<'_>, reques
 
     for (name, value) in translated {
         params.insert(name.into(), value.into());
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn add_php_host_param(params: &mut fastcgi_client::Params<'_>, host: &str) {
+    if safe_php_param_value(host) {
+        params.insert("HTTP_HOST".into(), host.to_owned().into());
     }
 }
 
@@ -8825,8 +8833,8 @@ mod tests {
     };
     #[cfg(feature = "php-fpm")]
     use super::{
-        PhpResolveOutcome, RuntimePhp, add_php_request_header_params, parse_php_response,
-        php_header_param_name, php_script_name_for_request, resolve_php_script,
+        PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
+        parse_php_response, php_header_param_name, php_script_name_for_request, resolve_php_script,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -8968,6 +8976,22 @@ mod tests {
         );
         assert!(!params.contains_key("HTTP_PROXY"));
         assert!(!params.contains_key("HTTP_CONTENT_TYPE"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_host_param_uses_resolved_request_host_without_literal_host_header() {
+        let request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        let mut params = fastcgi_client::Params::default();
+
+        add_php_request_header_params(&mut params, &request);
+        assert!(!params.contains_key("HTTP_HOST"));
+
+        add_php_host_param(&mut params, "example.test");
+        assert_eq!(
+            params.get("HTTP_HOST").map(|value| value.as_ref()),
+            Some("example.test")
+        );
     }
 
     #[cfg(feature = "php-fpm")]
