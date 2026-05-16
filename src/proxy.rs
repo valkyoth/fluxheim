@@ -27,7 +27,9 @@ use pingora::cache::key::{CacheHashKey, HashBinary};
 use pingora::cache::lock::CacheKeyLockImpl;
 #[cfg(feature = "cache")]
 use pingora::cache::predictor::{CacheablePredictor, Predictor};
-use pingora::http::{RequestHeader, ResponseHeader, StatusCode};
+#[cfg(any(feature = "cache", feature = "php-fpm"))]
+use pingora::http::StatusCode;
+use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::prelude::{HttpPeer, Result};
 #[cfg(feature = "cache")]
 use pingora::proxy::RangeType;
