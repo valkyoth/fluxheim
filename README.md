@@ -23,11 +23,11 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.3.0`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.3.1`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
-support, and the first focused image/profile split for full, cache-edge, and
-proxy-edge deployments.
+support, focused full/cache-edge/proxy-edge image profiles, and opt-in
+PHP-FPM application serving for WordPress-style deployments.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -45,6 +45,9 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 - Multi-certificate SNI selection on the default rustls TLS backend.
 - Managed ACME certificate issuance and renewal for HTTP-01 and rustls
   TLS-ALPN-01 builds.
+- Opt-in PHP-FPM serving for WordPress-style front-controller applications,
+  including strict script resolution, bounded FastCGI request/response handling,
+  and browser-validated login/admin flows.
 - Route-level static, proxy, and redirect actions.
 - Route-scoped proxy cache policies with memory, disk, and tiered storage.
 - Cache operations for hit/miss status headers, cache locks, stale serving,
@@ -311,6 +314,9 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
   container/build profiles. Full packages still include the broad production
   feature set, while cache-edge and proxy-edge builds can use TLS and managed
   ACME without compiling unrelated static-web or cache modules.
+- `1.3.1` adds opt-in PHP-FPM application serving, WordPress-style
+  front-controller support, and browser-tested WordPress proxy/PHP cookie
+  compatibility fixes.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -318,8 +324,8 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next lines are planned separately: `1.3.1` for PHP/FastCGI application serving,
-`1.3.2` for a local ACME companion-agent workflow plus release-page config
+Next lines are planned separately: `1.3.2` for a local ACME companion-agent
+workflow plus release-page config
 tester binaries for diagnosing configs when containers fail to start, later
 `1.3.x` releases for PHP runtime follow-ups, `1.4` for advanced proxy parity,
 `1.5` for load-balancer parity, and `1.6` for shared Wasm extensibility

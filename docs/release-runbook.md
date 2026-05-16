@@ -7,7 +7,7 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.3.0
+RELEASE_VERSION=1.3.1
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
@@ -237,7 +237,11 @@ for image in \
   "${TAG}-proxy-wolfi" \
   "${TAG}-proxy-alpine" \
   "${TAG}-proxy-suse-micro" \
-  "${TAG}-proxy-debian"
+  "${TAG}-proxy-debian" \
+  "${TAG}-php-wolfi" \
+  "${TAG}-php-alpine" \
+  "${TAG}-php-suse-micro" \
+  "${TAG}-php-debian"
 do
   podman pull "ghcr.io/valkyoth/fluxheim:${image}"
   podman inspect "ghcr.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'
@@ -245,7 +249,8 @@ done
 ```
 
 If Docker Hub publishing is enabled, repeat the same pull/inspect process for
-the Docker Hub tags. For `v1.5.x` and newer tags, also collect the
+the Docker Hub tags. If Quay publishing is enabled, repeat it for the Quay
+release tags as well. For `v1.5.x` and newer tags, also collect the
 `load-balancer` image profile digests, for example
 `${TAG}-load-balancer-wolfi`.
 
@@ -277,6 +282,14 @@ The release notes should end with concrete evidence, not placeholders:
   - Cache Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
   - Cache SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
   - Cache Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Proxy Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Proxy Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Proxy SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Proxy Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - PHP Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - PHP Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - PHP SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - PHP Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
 - Tag signature:
   - `Good "git" signature for ...`
 ```

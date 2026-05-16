@@ -46,7 +46,8 @@ Release order:
 - `1.3.0`: shared ingress/TLS feature-graph split and focused image/profile
   cleanup.
 - `1.3.1`: `php-fpm` FastCGI bridge, WordPress-style front-controller support,
-  strict script resolution, and bounded request/response buffering.
+  strict script resolution, bounded request/response buffering, split-cookie
+  normalization, and browser-validated WordPress login/admin flows.
 - `1.3.2`: focused php-fpm hardening and compatibility fixes found during
   production tests.
 - `1.3.3`: `php-turbine` review and first integration if the library/sidecar
@@ -84,6 +85,11 @@ PHP root are declined so the normal static server can serve assets. Missing
 paths use the configured front controller, normally `/index.php`. Explicit
 `.php` requests are executed through php-fpm. Static serving must never return
 PHP source when PHP execution fails.
+
+Fluxheim normalizes multiple inbound `Cookie` header lines into one CGI
+`HTTP_COOKIE` value before calling php-fpm. This matters for WordPress and other
+PHP applications behind HTTP/2 or intermediaries that split cookies across
+multiple header fields.
 
 ## Security Requirements
 

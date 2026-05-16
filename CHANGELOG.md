@@ -24,6 +24,23 @@ Released: in progress
 - Added PHP runtime feature-policy checks so only one PHP runtime feature can
   be selected in a binary.
 - Added `examples/php-fpm.toml` and PHP-FPM build/config documentation.
+- Added a hardened browser WordPress login probe for reproducing real browser
+  login/admin cookie behavior during gateway testing.
+
+### Changed
+
+- Updated the release line to use `base64-ng 0.8.0`, `aws-lc-rs 1.17.0`,
+  `aws-lc-sys 0.41.0`, and `winnow 1.0.3`; `prometheus` remains pinned for
+  Pingora compatibility.
+- Hardened cache `Vary` request hashing with length-prefixed components instead
+  of sentinel delimiters.
+
+### Fixed
+
+- Normalized split `Cookie` headers before proxying upstream and before
+  generating PHP-FPM `HTTP_COOKIE`, fixing WordPress browser login flows over
+  HTTP/2 and intermediaries that split cookies.
+- Cleaned up test/runtime error propagation reported by the final pentest pass.
 
 ## 1.3.0 - Shared Ingress And TLS Feature Split
 

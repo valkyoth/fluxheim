@@ -190,8 +190,8 @@ fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew
 `--all` is accepted as a backward-compatible alias for `--force-renew`, but it
 prints a deprecation warning and should not be used in new automation.
 
-The official `1.1.x` RPM and container images include `acme-client` by default.
-If you compile from source with a custom feature list, include it explicitly:
+Official RPM and container release assets include `acme-client` by default. If
+you compile from source with a custom feature list, include it explicitly:
 
 ```bash
 cargo build --release --locked --no-default-features --features profile-core,acme-client

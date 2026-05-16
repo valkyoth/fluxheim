@@ -27,6 +27,26 @@ of default, cache, proxy, and privacy builds.
 - Added `examples/php-fpm.toml` and PHP runtime documentation.
 - Added feature-policy checks that reject multiple PHP runtime features in one
   binary.
+- Normalized split browser `Cookie` headers for both reverse-proxy upstreams
+  and PHP-FPM `HTTP_COOKIE`, fixing WordPress login/admin flows seen behind
+  HTTP/2 and container gateways.
+- Added a hardened `scripts/browser_wordpress_login_probe.mjs` helper for
+  capturing browser-level WordPress login behavior when curl succeeds but a
+  real browser does not.
+- Hardened cache `Vary` request hashing with length-prefixed components.
+- Updated compatible Rust dependencies, keeping `prometheus` pinned where
+  Pingora compatibility requires it.
+- Completed a final pentest/code-scanning cleanup pass for the 1.3.1 release
+  candidate.
+
+## Validation Notes
+
+The 1.3.1 release candidate was validated with:
+
+- PHP-FPM WordPress install, login, plugin add/delete, and theme add flows.
+- Reverse-proxy WordPress login/admin flows in the dev Wolfi image.
+- CodeQL/code scanning clean after script hardening.
+- Automated pentest clean except for accepted Pingora dependency findings.
 
 ## Build
 
@@ -36,6 +56,10 @@ PHP-FPM is not compiled by default. Build it explicitly:
 cargo build --release --locked --no-default-features \
   --features profile-web-server,php-fpm,acme-client
 ```
+
+The broad full profile remains non-PHP by default. Use the PHP-FPM feature set
+above, or the PHP-focused container/build profile, when the deployment should
+serve PHP applications directly.
 
 ## Checksums And Signatures
 

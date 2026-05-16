@@ -150,6 +150,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat May 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.1-1
+- PHP-FPM runtime support and WordPress compatibility follow-up.
+- Keep the full RPM on the broad non-PHP production profile; PHP builds remain
+  explicit via feature/profile selection.
+
 * Thu May 14 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.0-1
 - Shared ingress/TLS feature split with focused cache and proxy build profiles.
 

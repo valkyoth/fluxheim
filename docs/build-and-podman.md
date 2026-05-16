@@ -179,12 +179,15 @@ Published releases also build smaller focused profiles:
 
 - `cache`: `profile-cache-edge,acme-client`
 - `proxy`: `profile-proxy-edge,acme-client`
+- `php`: `profile-web-server,php-fpm,acme-client`
 - `load-balancer`: `profile-load-balancer-edge,acme-client`
 
 These focused profiles use TLS/ACME as shared ingress capabilities. The
 `cache` image is TLS-capable and omits local static web serving. The `proxy`
-image is TLS-capable and omits cache and static web serving. The
-`load-balancer` image is TLS-capable and omits cache and static web serving,
+image is TLS-capable and omits cache and static web serving. The `php` image is
+TLS-capable, includes static web serving and PHP-FPM support, and omits cache
+and proxy-edge extras. The `load-balancer` image is TLS-capable and omits cache
+and static web serving,
 but is only published automatically for the `1.5` load-balancer line. The
 focused images still reuse the shared proxy runtime internally until lower-level
 serving internals are split further. Override `FLUXHEIM_FEATURES` only when you
@@ -346,23 +349,31 @@ and pushes tags to:
 
 - `ghcr.io/<owner>/fluxheim`
 - `docker.io/<owner>/fluxheim`, when Docker Hub secrets are configured
+- `quay.io/<namespace>/<repository>`, when Quay secrets are configured
 
-Required Docker Hub repository secrets:
+Optional Docker Hub repository secrets:
 
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
 
+Optional Quay repository secrets and variables:
+
+- `QUAY_USERNAME`
+- `QUAY_TOKEN`
+- `QUAY_NAMESPACE`
+- `QUAY_REPOSITORY`
+
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.3.0-wolfi`, `v1.3.0-alpine`, `v1.3.0-suse-micro`, `v1.3.0-debian`
+- `v1.3.1-wolfi`, `v1.3.1-alpine`, `v1.3.1-suse-micro`, `v1.3.1-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.3.0`
-- `v1.3.0-base`
+- `v1.3.1`
+- `v1.3.1-base`
 - `latest`
 - `latest-base`
 
@@ -371,15 +382,18 @@ automation. They point at the full/default image profile.
 
 The cache and proxy image profiles publish tags with a profile segment:
 
-- `v1.3.0-cache-wolfi`, `v1.3.0-cache-alpine`,
-  `v1.3.0-cache-suse-micro`, `v1.3.0-cache-debian`
-- `v1.3.0-proxy-wolfi`, `v1.3.0-proxy-alpine`,
-  `v1.3.0-proxy-suse-micro`, `v1.3.0-proxy-debian`
-- `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`, etc.
-- `latest-cache-wolfi`, `latest-proxy-wolfi`, etc. when run from the default
-  branch
-- Wolfi short aliases: `v1.3.0-cache`, `v1.3.0-proxy`, `latest-cache`, and
-  `latest-proxy`
+- `v1.3.1-cache-wolfi`, `v1.3.1-cache-alpine`,
+  `v1.3.1-cache-suse-micro`, `v1.3.1-cache-debian`
+- `v1.3.1-proxy-wolfi`, `v1.3.1-proxy-alpine`,
+  `v1.3.1-proxy-suse-micro`, `v1.3.1-proxy-debian`
+- `v1.3.1-php-wolfi`, `v1.3.1-php-alpine`,
+  `v1.3.1-php-suse-micro`, `v1.3.1-php-debian`
+- `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
+  `sha-<short-sha>-php-wolfi`, etc.
+- `latest-cache-wolfi`, `latest-proxy-wolfi`, `latest-php-wolfi`, etc. when
+  run from the default branch
+- Wolfi short aliases: `v1.3.1-cache`, `v1.3.1-proxy`, `v1.3.1-php`,
+  `latest-cache`, `latest-proxy`, and `latest-php`
 
 The load-balancer image profile is prepared for the `1.5` line. It is skipped
 on normal pre-`1.5` tag pushes, but can be included in manual workflow runs by
@@ -744,8 +758,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.3.0 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.3.0 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.3.1 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.3.1 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date

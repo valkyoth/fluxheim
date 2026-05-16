@@ -175,6 +175,11 @@ applications. PHP remains outside default and focused cache/proxy builds. A
 PHP-FPM build is production-eligible only when php-fpm is isolated separately,
 the PHP root is trusted, request body limits are configured, and operators have
 validated their framework/application behavior with their php-fpm pool.
+WordPress install, login, admin, plugin, and theme flows have release-candidate
+coverage for both direct PHP-FPM serving and reverse-proxy gateway deployments.
+The same release also normalizes split browser `Cookie` headers before proxying
+or generating PHP-FPM `HTTP_COOKIE`, matching the behavior WordPress expects
+behind HTTP/2 and container gateways.
 
 The same line also supports pending Fluxheim-managed ACME certificates during
 first issuance on reloadable SNI TLS backends. This lets operators add a new

@@ -673,6 +673,10 @@ Stable scope for `1.3.1`:
 - Strict parsing of PHP-generated status and headers.
 - Sanitized, size-limited PHP STDERR logging and PHP metrics.
 - WordPress and minimal PHP-FPM example configs.
+- Browser-validated WordPress install, login, admin, plugin, and theme flows
+  for direct PHP-FPM serving and reverse-proxy gateway deployments.
+- Split `Cookie` header normalization for proxy upstreams and PHP-FPM
+  `HTTP_COOKIE`.
 
 ### 1.3.2 - ACME Companion Agent And Config Tester
 
