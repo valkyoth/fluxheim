@@ -2854,11 +2854,26 @@ impl Default for ProxyConfig {
 }
 
 impl ProxyConfig {
-    pub fn primary_upstream(&self) -> &str {
+    pub fn disabled() -> Self {
+        Self {
+            upstream: None,
+            ..Self::default()
+        }
+    }
+
+    pub fn has_configured_upstream(&self) -> bool {
+        self.upstream.is_some() || !self.upstreams.is_empty()
+    }
+
+    pub fn configured_primary_upstream(&self) -> Option<&str> {
         self.upstreams
             .first()
             .map(String::as_str)
             .or(self.upstream.as_deref())
+    }
+
+    pub fn primary_upstream(&self) -> &str {
+        self.configured_primary_upstream()
             .unwrap_or(DEFAULT_UPSTREAM)
     }
 
@@ -3059,7 +3074,7 @@ pub struct VhostConfig {
     pub acme_challenge: VhostAcmeChallengeConfig,
     #[serde(default)]
     pub redirect: VhostRedirectConfig,
-    #[serde(default)]
+    #[serde(default = "disabled_proxy_config")]
     pub proxy: ProxyConfig,
     #[serde(default)]
     pub cache: CacheConfig,
@@ -6915,6 +6930,10 @@ fn default_upstream() -> String {
     "127.0.0.1:3000".to_owned()
 }
 
+fn disabled_proxy_config() -> ProxyConfig {
+    ProxyConfig::disabled()
+}
+
 fn default_lb_max_iterations() -> usize {
     256
 }
@@ -8161,6 +8180,24 @@ mod tests {
             config.validate(),
             Err(ConfigError::ConflictingProxyUpstreams)
         );
+    }
+
+    #[test]
+    fn vhost_without_proxy_does_not_inherit_legacy_default_upstream() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "static"
+            hosts = ["static.example.test"]
+
+            [vhosts.web]
+            root = "/srv/static"
+            "#,
+        )
+        .unwrap();
+
+        assert!(!config.vhosts[0].proxy.has_configured_upstream());
+        assert_eq!(config.proxy.primary_upstream(), "127.0.0.1:3000");
     }
 
     #[test]

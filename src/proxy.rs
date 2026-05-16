@@ -2749,6 +2749,7 @@ enum RuntimeRouteAction {
 
 #[derive(Debug, Clone)]
 struct RuntimeProxy {
+    enabled: bool,
     config: ProxyConfig,
     error_pages: Vec<RuntimeErrorPage>,
 }
@@ -2783,6 +2784,7 @@ impl RuntimeProxy {
             .map(|error_page| RuntimeErrorPage::from_config(scope, error_page))
             .collect::<io::Result<Vec<_>>>()?;
         Ok(Self {
+            enabled: config.has_configured_upstream(),
             config: config.clone(),
             error_pages,
         })
@@ -2911,6 +2913,15 @@ impl RuntimeRoute {
         let action = if let Some(redirect) = &route.redirect {
             RuntimeRouteAction::Redirect(redirect.clone())
         } else if let Some(proxy) = &route.proxy {
+            if !proxy.has_configured_upstream() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "vhost {vhost_name:?} route {:?} proxy requires upstream or upstreams",
+                        route.name
+                    ),
+                ));
+            }
             let proxy_scope = format!("vhost {vhost_name:?} route {:?} proxy", route.name);
             RuntimeRouteAction::Proxy(RuntimeProxy::from_config(proxy, &proxy_scope)?)
         } else if let Some(web) = &route.web {
@@ -3494,6 +3505,15 @@ impl ProxyHttp for FluxProxy {
                     return Ok(true);
                 }
                 RuntimeRouteAction::Proxy(_) => {
+                    if !selected_runtime_proxy(vhost, ctx).enabled {
+                        session
+                            .respond_error_with_body(
+                                502,
+                                Bytes::from_static(b"proxy upstream not configured"),
+                            )
+                            .await?;
+                        return Ok(true);
+                    }
                     #[cfg(feature = "cache")]
                     if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
@@ -3514,7 +3534,7 @@ impl ProxyHttp for FluxProxy {
                     if serve_static_route(session, ctx, vhost, route_index, web, route).await? {
                         return Ok(true);
                     }
-                    return Ok(false);
+                    return continue_to_proxy_or_not_found(session, vhost, ctx).await;
                 }
                 #[cfg(feature = "php-fpm")]
                 RuntimeRouteAction::Php(php) => {
@@ -3570,12 +3590,12 @@ impl ProxyHttp for FluxProxy {
                 if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                     return Ok(true);
                 }
-                return Ok(false);
+                return continue_to_proxy_or_not_found(session, vhost, ctx).await;
             };
 
             let method = session.req_header().method.as_str().to_owned();
             if method != "GET" && method != "HEAD" {
-                return Ok(false);
+                return continue_to_proxy_or_not_found(session, vhost, ctx).await;
             }
 
             match web.resolve(session.req_header().uri.path()) {
@@ -3653,7 +3673,7 @@ impl ProxyHttp for FluxProxy {
                     if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
                     }
-                    Ok(false)
+                    continue_to_proxy_or_not_found(session, vhost, ctx).await
                 }
                 Err(error) => {
                     log::error!("static file resolver failed: {error}");
@@ -3675,7 +3695,7 @@ impl ProxyHttp for FluxProxy {
             if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                 return Ok(true);
             }
-            Ok(false)
+            continue_to_proxy_or_not_found(session, vhost, ctx).await
         }
     }
 
@@ -3699,7 +3719,13 @@ impl ProxyHttp for FluxProxy {
             return Ok(Box::new(peer));
         }
 
-        let peer = http_peer_for_proxy(proxy.config.primary_upstream(), &proxy.config)?;
+        let upstream = proxy.config.configured_primary_upstream().ok_or_else(|| {
+            Error::explain(
+                ErrorType::ConnectError,
+                "proxy upstream is not configured for selected vhost or route",
+            )
+        })?;
+        let peer = http_peer_for_proxy(upstream, &proxy.config)?;
 
         Ok(Box::new(peer))
     }
@@ -7184,6 +7210,19 @@ fn selected_runtime_proxy<'a>(vhost: &'a RuntimeVhost, ctx: &RequestContext) -> 
             _ => None,
         })
         .unwrap_or(&vhost.proxy)
+}
+
+async fn continue_to_proxy_or_not_found(
+    session: &mut Session,
+    vhost: &RuntimeVhost,
+    ctx: &RequestContext,
+) -> Result<bool> {
+    if selected_runtime_proxy(vhost, ctx).enabled {
+        Ok(false)
+    } else {
+        session.respond_error(404).await?;
+        Ok(true)
+    }
 }
 
 fn selected_response_headers<'a>(
