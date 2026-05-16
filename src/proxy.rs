@@ -3796,6 +3796,7 @@ impl ProxyHttp for FluxProxy {
             downstream_tls,
             request_id,
         )?;
+        normalize_cookie_headers(upstream_request)?;
 
         #[cfg(feature = "cache")]
         if let Some(range) = ctx.cache_range {
@@ -7214,6 +7215,26 @@ fn selected_runtime_proxy<'a>(vhost: &'a RuntimeVhost, ctx: &RequestContext) -> 
         .unwrap_or(&vhost.proxy)
 }
 
+fn normalize_cookie_headers(request: &mut RequestHeader) -> Result<()> {
+    let cookies = request
+        .headers
+        .get_all("cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    if cookies.len() <= 1 {
+        return Ok(());
+    }
+
+    request.remove_header("cookie");
+    request.insert_header("cookie", cookies.join("; "))?;
+    Ok(())
+}
+
 async fn continue_to_proxy_or_not_found(
     session: &mut Session,
     vhost: &RuntimeVhost,
@@ -8864,8 +8885,9 @@ mod tests {
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
         FluxProxy, HostRoutingRejectReason, count_response_body_chunk, http_peer_for_proxy,
-        https_redirect_location, redirect_authority, request_body_chunk_limit_status,
-        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
+        https_redirect_location, normalize_cookie_headers, redirect_authority,
+        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
+        route_rewritten_path_and_query,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -8883,6 +8905,59 @@ mod tests {
         request_cache_only_if_cached, request_cache_revalidation_requested,
         response_with_revalidation_304_headers, revalidation_304_vary_changed,
     };
+
+    #[test]
+    fn normalizes_split_cookie_headers_for_upstream_http1() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
+        request
+            .append_header("cookie", "wordpress_logged_in=abc")
+            .unwrap();
+        request
+            .append_header("cookie", "wordpress_sec=def")
+            .unwrap();
+        request
+            .append_header("cookie", "wordpress_test_cookie=WP%20Cookie%20check")
+            .unwrap();
+
+        normalize_cookie_headers(&mut request).unwrap();
+
+        let cookies = request
+            .headers
+            .get_all("cookie")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            cookies,
+            [
+                "wordpress_logged_in=abc; wordpress_sec=def; wordpress_test_cookie=WP%20Cookie%20check"
+            ]
+        );
+    }
+
+    #[test]
+    fn leaves_single_cookie_header_unchanged() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
+        request
+            .insert_header(
+                "cookie",
+                "wordpress_logged_in=abc; wordpress_sec=def; wordpress_test_cookie=1",
+            )
+            .unwrap();
+
+        normalize_cookie_headers(&mut request).unwrap();
+
+        let cookies = request
+            .headers
+            .get_all("cookie")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            cookies,
+            ["wordpress_logged_in=abc; wordpress_sec=def; wordpress_test_cookie=1"]
+        );
+    }
 
     #[cfg(feature = "php-fpm")]
     fn php_test_runtime(name: &str) -> RuntimePhp {
