@@ -6206,7 +6206,11 @@ fn add_php_request_header_params(params: &mut fastcgi_client::Params<'_>, reques
         translated
             .entry(param_name)
             .and_modify(|existing| {
-                existing.push_str(", ");
+                if name.as_str().eq_ignore_ascii_case("cookie") {
+                    existing.push_str("; ");
+                } else {
+                    existing.push_str(", ");
+                }
                 existing.push_str(value);
             })
             .or_insert_with(|| value.to_owned());
@@ -9092,6 +9096,31 @@ mod tests {
         );
         assert!(!params.contains_key("HTTP_PROXY"));
         assert!(!params.contains_key("HTTP_CONTENT_TYPE"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_header_param_translation_joins_split_cookie_headers_with_semicolon() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        request
+            .append_header("cookie", "wordpress_logged_in=abc")
+            .unwrap();
+        request
+            .append_header("cookie", "wordpress_sec=def")
+            .unwrap();
+        request
+            .append_header("cookie", "wordpress_test_cookie=WP%20Cookie%20check")
+            .unwrap();
+
+        let mut params = fastcgi_client::Params::default();
+        add_php_request_header_params(&mut params, &request);
+
+        assert_eq!(
+            params.get("HTTP_COOKIE").map(|value| value.as_ref()),
+            Some(
+                "wordpress_logged_in=abc; wordpress_sec=def; wordpress_test_cookie=WP%20Cookie%20check",
+            )
+        );
     }
 
     #[cfg(feature = "php-fpm")]
