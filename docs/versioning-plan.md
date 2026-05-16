@@ -829,6 +829,11 @@ Stable scope:
 - Compile-time proxy surface stays modular; advanced proxy capabilities remain
   available through explicit `proxy` subfeatures where they add dependencies
   or attack surface.
+- New proxy dependencies must be deliberate and profile-gated. Prefer small
+  in-tree policy implementations for bounded Fluxheim-specific behavior such
+  as queue policy, rewrite validation, typed variables, and overload decisions;
+  keep mature protocol/TLS/runtime crates for transport machinery unless a
+  later dependency-reduction milestone proves an in-tree replacement safer.
 - Per-vhost and per-route upstream connection controls:
   - max in-flight requests/connections for a route or upstream target;
   - bounded request queue with queue timeout, max depth, overflow action, and
@@ -962,6 +967,12 @@ a claim that Fluxheim is a full next-generation firewall in `1.5`.
 Stable scope:
 
 - Compile-time `load-balancer` module.
+- Load-balancer additions should minimize dependency surface while preserving
+  migration parity. Selection algorithms, persistence tables, circuit state,
+  and policy evaluation are good candidates for in-tree Fluxheim
+  implementations; protocol, TLS, async runtime, and cryptographic machinery
+  should remain on reviewed mature crates until a far-future transport/core
+  replacement line exists.
 - Named upstream pools that can be selected globally, per vhost, or per route,
   so one vhost can proxy normal app traffic and route-specific traffic to
   different backend sets.
@@ -1860,6 +1871,44 @@ Exit criteria:
 - Process isolation is tested.
 - Source files are never served as static fallback.
 - Rootless Podman examples exist for every runtime.
+
+### Future - Dependency Reduction And Sovereign Core
+
+Goal: after the main web, cache, PHP, proxy, load-balancer, and extension
+surfaces are stable, reduce long-term dependency risk by moving bounded
+Fluxheim-specific logic in-tree and hiding large external engines behind
+Fluxheim-owned interfaces.
+
+This is a far-future hardening track, not a reason to delay feature parity.
+During `1.4` and `1.5`, new code should still be designed with this direction
+in mind: keep dependency additions feature-gated, avoid exposing third-party
+types in Fluxheim's public config/runtime boundaries, and prefer small local
+implementations where the behavior is narrow and security-reviewable.
+
+Good candidates:
+
+- load-balancer selection algorithms and persistence tables;
+- queue, overload, and circuit-breaker policy;
+- cache indexing helpers and bounded metadata structures;
+- header, rewrite, and variable evaluation helpers;
+- release/build helper scripts where shell/Python dependencies can shrink.
+
+Poor candidates until much later:
+
+- TLS and cryptographic primitives;
+- HTTP/2, HTTP/3, QUIC, and complex protocol state machines;
+- async runtime internals;
+- compression codecs and media/container parsers;
+- mature parser libraries where replacement bugs would become security bugs.
+
+Exit criteria before replacing a mature dependency:
+
+- the replacement has fuzz/property tests where applicable;
+- security behavior is documented and covered by malformed-input tests;
+- performance and memory bounds match or improve the previous implementation;
+- release notes explain the dependency removal and migration risk;
+- the old implementation remains available behind a temporary feature gate when
+  rollback risk is high.
 
 ### 2.1 - Programmable Media Edge
 

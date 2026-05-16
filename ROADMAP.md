@@ -100,6 +100,17 @@ inter-node transport. These are not `1.0` items. Each one needs an explicit
 compile-time feature, a documented threat model, redaction/privacy rules, and
 failure-mode tests before it can move from research to beta.
 
+Farther down the line, Fluxheim should also grow a dependency-reduction track:
+once the major web, cache, PHP, proxy, load-balancer, and extension surfaces are
+stable, move bounded Fluxheim-specific logic in-tree and keep large external
+engines behind Fluxheim-owned interfaces. This must not compromise feature
+parity or security. In the `1.4` and `1.5` work, prefer small local
+implementations for queue policy, load-balancer algorithms, persistence state,
+rewrite helpers, and typed variable evaluation when they are easy to review;
+keep mature crates for TLS, cryptography, complex protocol state machines,
+async runtime behavior, compression, and parsers until a later milestone can
+prove a replacement safer.
+
 PHP execution is the next application-server milestone after the `1.3.0`
 ingress/TLS split. It must stay disabled by default and compile only through
 opt-in feature flags because PHP support changes Fluxheim's threat model from

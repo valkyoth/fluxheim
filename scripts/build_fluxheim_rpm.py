@@ -257,9 +257,9 @@ if [ "$BUILD_TYPE" = "native" ]; then
 fi
 scripts/validate-features.sh "$FEATURES"
 if [ "$FEATURES" = "default" ]; then
-    cargo build --release --locked
+    cargo build --release --locked --bin fluxheim --bin fluxheim-acme
 else
-    cargo build --release --locked --no-default-features --features "$FEATURES"
+    cargo build --release --locked --no-default-features --features "$FEATURES" --bin fluxheim --bin fluxheim-acme
 fi
 
 echo "--- Staging files ---"
@@ -282,6 +282,7 @@ mkdir -p \
     "${INSTALL_ROOT}/var/log/fluxheim"
 
 install -Dm0755 target/release/fluxheim "${INSTALL_ROOT}/usr/bin/fluxheim"
+install -Dm0755 target/release/fluxheim-acme "${INSTALL_ROOT}/usr/bin/fluxheim-acme"
 install -Dm0644 packaging/default/fluxheim.toml "${INSTALL_ROOT}/etc/fluxheim/fluxheim.toml"
 install -Dm0644 packaging/default/index.html "${INSTALL_ROOT}/srv/fluxheim/index.html"
 install -Dm0644 packaging/rpm/fluxheim.tmpfiles "${INSTALL_ROOT}/usr/lib/tmpfiles.d/fluxheim.conf"
@@ -375,6 +376,7 @@ cp -a "${INSTALL_ROOT}/." %{buildroot}/
 %license /usr/share/licenses/fluxheim/LICENSE
 %doc /usr/share/doc/fluxheim/*
 /usr/bin/fluxheim
+/usr/bin/fluxheim-acme
 /usr/lib/tmpfiles.d/fluxheim.conf
 /usr/lib/sysusers.d/fluxheim.conf
 /usr/lib/systemd/system/fluxheim.service

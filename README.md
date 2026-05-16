@@ -1,5 +1,5 @@
 <p align="center">
-  <b>Memory-safe edge server and reverse proxy built on Pingora.</b><br>
+  <b>Memory-safe edge server, reverse proxy and caching server built on Pingora.</b><br>
   Modular by design. Secure by default. Ready for rootless containers.
 </p>
 
