@@ -539,9 +539,9 @@ Stable scope:
 - Production ACME companion operating mode:
   - Keep the `1.1` in-process ACME background worker for simple single-binary
     installs.
-  - Use the existing `fluxheim acme-init` and `fluxheim acme-renew` commands as
-    the first companion interface; split to a dedicated `fluxheim-acme` binary
-    only if packaging or operator ergonomics require it later.
+  - Add a dedicated `fluxheim-acme` binary or subprogram mode as the production
+    companion interface while keeping `fluxheim acme-init` and
+    `fluxheim acme-renew` compatibility for simple/manual workflows.
   - Ship `fluxheim-acme.service` as a one-shot unit and
     `fluxheim-acme.timer` for scheduled renewal. The main `fluxheim.service`
     remains the traffic-serving webserver and should not spawn long-lived child
@@ -551,8 +551,9 @@ Stable scope:
     `key_id_credential` and `hmac_key_credential` config fields so the same
     TOML works under the web service, ACME service, and container secrets.
   - Share only the configured ACME storage directory with the webserver. The
-    webserver continues to serve HTTP-01 challenge files and to reload
-    certificate handles after files change.
+    webserver continues to serve HTTP-01 challenge files and exposes only a
+    local protected certificate-reload control path for the companion after
+    files change.
   - Add an explicit `tls.acme.automation = "background" | "external"` config
     knob so production installs can prefer the service/timer model without
     losing the simple integrated mode.
@@ -673,9 +674,57 @@ Stable scope for `1.3.1`:
 - Sanitized, size-limited PHP STDERR logging and PHP metrics.
 - WordPress and minimal PHP-FPM example configs.
 
+### 1.3.2 - ACME Companion Agent And Zero-Downtime First Issuance
+
+Goal: make adding ACME-backed vhosts operationally smooth for existing
+multi-site gateways. A new vhost should be able to enter a pending certificate
+state, complete HTTP-01 issuance, and activate HTTPS without taking already
+serving vhosts down and without requiring operators to manually run a second
+restart after issuance.
+
+Stable scope for `1.3.2`:
+
+- Ship a dedicated `fluxheim-acme` companion binary or subprogram mode for
+  ACME lifecycle work.
+- Keep `fluxheim` focused on serving traffic, challenge paths, and certificate
+  handles; keep `fluxheim-acme` focused on account state, issuance, renewal
+  scheduling, EAB secret access, and certificate installation.
+- Add a local-only control channel, preferably a runtime-user owned Unix
+  socket, that lets the ACME companion request certificate reloads from the
+  running gateway after files are installed.
+- Keep the control API small and non-general-purpose:
+  - renew all due targets;
+  - renew one vhost/target;
+  - report target status;
+  - request certificate-handle reload;
+  - expose health/status for service managers.
+- Do not let the companion silently rewrite production config in the first
+  stable version. Assisted config generation can be a later command that writes
+  reviewed snippets or snapshots.
+- Preserve pending managed ACME certificate startup behavior for reloadable SNI
+  TLS backends, while keeping static certificate paths fail-closed.
+- Integrate with packaged systemd units and containers so external
+  `fluxheim-acme.service`/timer-style renewals can activate certs in the
+  running gateway without a full process restart.
+- Document first-issuance flows for native systemd, rootless Podman, and the
+  one-shot/manual CLI case.
+
+Exit criteria:
+
+- Adding a new ACME vhost with missing cert files does not break existing TLS
+  vhosts.
+- HTTP-01 validation can complete while the new SNI certificate is pending.
+- Successful companion-driven issuance reloads the running gateway certificate
+  resolver/callback without restarting the process.
+- Failed issuance leaves existing certificates and vhosts serving.
+- The local control channel is unavailable remotely by default and protected by
+  filesystem permissions or an equivalent local secret.
+- Logs and metrics expose `pending`, `renewed`, `failed`, and `reload_failed`
+  states without leaking EAB material, account keys, or ACME token secrets.
+
 Follow-up `1.3.x` PHP runtime plan:
 
-- `1.3.2`: php-fpm hardening and production compatibility fixes.
+- `1.3.3`: php-fpm hardening and production compatibility fixes.
   - Connection pooling to php-fpm with idle pruning.
   - True streaming request and response bodies.
   - Chunked upload disk-spooling so large uploads do not require full RAM
@@ -691,9 +740,9 @@ Follow-up `1.3.x` PHP runtime plan:
   - FastCGI multiplexing, authorizer, and filter-role review. These are not
     required for normal PHP-FPM web serving, but should be documented
     explicitly as unsupported or implemented if enterprise users need them.
-- `1.3.3`: embedded Rust PHP/Turbine-style integration if the source, license,
+- `1.3.4`: embedded Rust PHP/Turbine-style integration if the source, license,
   API, isolation, reload, and concurrency model pass review.
-- `1.3.4`: pure-Rust PHP interpreter experiment behind `php-phprs`, beta or
+- `1.3.5`: pure-Rust PHP interpreter experiment behind `php-phprs`, beta or
   test-only until compatibility and maintenance are proven.
 
 Compile-time feature shape stays:
@@ -1936,9 +1985,10 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.2.6`: focused fixed-slice range-cache composition follow-up before
   `1.3`.
 - `v1.3.1`: `php-fpm` FastCGI bridge.
-- `v1.3.2`: focused php-fpm hardening and compatibility fixes.
-- `v1.3.3`: embedded Rust PHP/Turbine-style integration if review passes.
-- `v1.3.4`: pure-Rust PHP interpreter experiment behind `php-phprs`.
+- `v1.3.2`: ACME companion agent and zero-downtime first-issuance activation.
+- `v1.3.3`: focused php-fpm hardening and compatibility fixes.
+- `v1.3.4`: embedded Rust PHP/Turbine-style integration if review passes.
+- `v1.3.5`: pure-Rust PHP interpreter experiment behind `php-phprs`.
 - `v1.4.1`: fixes for advanced proxy parity.
 - `v1.5.1`: fixes for load balancer.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.

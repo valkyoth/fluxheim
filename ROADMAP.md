@@ -41,10 +41,13 @@ load-balancer modules. `1.3.1+` is planned as the PHP
 application-server line. Its first stable target is a secure `php-fpm`
 FastCGI bridge for WordPress-style and legacy PHP deployments, with PHP
 remaining disabled by default and selected only through explicit compile-time
-features and per-vhost config. Later `1.3.x` releases are reserved for the
-other PHP runtime lines: embedded Rust PHP/Turbine-style integration if it
-passes the security and licensing review, and pure-Rust PHP interpreter
-experiments behind separate feature gates.
+features and per-vhost config. `1.3.2` is reserved for a focused ACME
+companion-agent improvement so adding a new managed-certificate vhost can move
+from pending issuance to active HTTPS without a second manual gateway restart.
+Later `1.3.x` releases continue the PHP runtime line: php-fpm production
+compatibility, embedded Rust PHP/Turbine-style integration if it passes the
+security and licensing review, and pure-Rust PHP interpreter experiments behind
+separate feature gates.
 `1.4` is planned as the advanced proxy parity release. Its target is
 HAProxy/nginx-style reverse-proxy migration coverage that is not fundamentally
 load-balancing: queue/backpressure controls, upstream keepalive pool tuning,
@@ -98,8 +101,10 @@ PHP execution is the next application-server milestone after the `1.3.0`
 ingress/TLS split. It must stay disabled by default and compile only through
 opt-in feature flags because PHP support changes Fluxheim's threat model from
 static/proxy serving to dynamic code execution. The `1.3.1` path is
-`php-fpm`/FastCGI first; embedded or pure-Rust PHP runtimes are planned as later
-`1.3.x` feature-gated follow-ups after review.
+`php-fpm`/FastCGI first. `1.3.2` is an operational detour for the
+`fluxheim-acme` companion-agent model and smooth zero-downtime first issuance.
+Embedded or pure-Rust PHP runtimes are planned as later `1.3.x` feature-gated
+follow-ups after review.
 
 Legacy Perl CGI execution is also post-MVP application-server work. It should
 be modeled as a separate opt-in compile feature from PHP, disabled per vhost by
@@ -570,13 +575,13 @@ without parsing text fixtures for every module.
     configured renewal interval.
   - Runtime certificate adoption after renewal. Implemented for reloadable
     downstream SNI resolvers/callbacks.
-  - Production ACME companion mode. Planned for the operations pack: keep the
-    integrated background worker for simple installs, but add a `fluxheim-acme`
+  - Production ACME companion mode. Scheduled for `1.3.2`: keep the integrated
+    background worker for simple installs, but add a `fluxheim-acme`
     command/binary plus `fluxheim-acme.service` and `fluxheim-acme.timer` for
     production renewals. The companion should run as the Fluxheim runtime user,
-    reuse the same ACME engine, share only the ACME storage directory, and let
-    the main webserver focus on serving traffic, HTTP-01 challenge files, and
-    reloading certificate handles.
+    reuse the same ACME engine, share only the ACME storage directory, and ask
+    the running webserver over a local-only control channel to reload
+    certificate handles after issuance.
    - Atomic certificate install and rollback on invalid renewed certificates.
      Implemented for the managed ACME install helper.
    - Runtime certificate/config reload with snapshot swapping for no downtime.
