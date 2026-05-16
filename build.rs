@@ -1,4 +1,6 @@
 fn main() {
+    emit_version_metadata();
+
     let tls_backends = [
         ("tls-rustls", "CARGO_FEATURE_TLS_RUSTLS"),
         ("tls-openssl", "CARGO_FEATURE_TLS_OPENSSL"),
@@ -28,6 +30,75 @@ fn main() {
             "privacy-mode cannot be combined with metrics; zero-retention builds must not compile request metrics",
         );
     }
+}
+
+fn emit_version_metadata() {
+    println!("cargo:rerun-if-env-changed=FLUXHEIM_BUILD_ID");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    println!("cargo:rerun-if-changed=.git/index");
+
+    let package_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "unknown".into());
+    let build_id = std::env::var("FLUXHEIM_BUILD_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| git_build_id(&package_version).unwrap_or_default());
+    let version = if build_id.is_empty() {
+        package_version
+    } else {
+        format!("{package_version} ({build_id})")
+    };
+
+    println!("cargo:rustc-env=FLUXHEIM_VERSION={version}");
+}
+
+fn git_build_id(package_version: &str) -> Option<String> {
+    let dirty = git_dirty();
+    let exact_tag = git_output(["describe", "--tags", "--exact-match", "HEAD"]);
+    if exact_tag.as_deref() == Some(&format!("v{package_version}")) && !dirty {
+        return None;
+    }
+
+    let commit = git_output(["rev-parse", "--short=8", "HEAD"])?;
+    let branch = git_output(["rev-parse", "--abbrev-ref", "HEAD"])
+        .filter(|branch| branch != "HEAD")
+        .or_else(|| git_output(["describe", "--tags", "--always", "HEAD"]))
+        .unwrap_or_else(|| "detached".to_owned());
+    let mut build_id = format!("{}-g{}", sanitize_build_id_segment(&branch), commit);
+    if dirty {
+        build_id.push_str("-dirty");
+    }
+    Some(build_id)
+}
+
+fn git_dirty() -> bool {
+    std::process::Command::new("git")
+        .args(["diff-index", "--quiet", "HEAD", "--"])
+        .status()
+        .map(|status| !status.success())
+        .unwrap_or(false)
+}
+
+fn git_output<const N: usize>(args: [&str; N]) -> Option<String> {
+    let output = std::process::Command::new("git").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn sanitize_build_id_segment(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 fn fail(message: &str) -> ! {

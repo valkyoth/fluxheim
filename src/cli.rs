@@ -14,7 +14,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use crate::config::Config;
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Fluxheim reverse proxy")]
+#[command(version = env!("FLUXHEIM_VERSION"), about = "Fluxheim reverse proxy")]
 pub struct Cli {
     /// Path to a Fluxheim TOML configuration file.
     #[arg(short, long, env = "FLUXHEIM_CONFIG")]
