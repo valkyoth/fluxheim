@@ -142,6 +142,33 @@ not covered by a typed field. The supported variables are intentionally small:
 validation, and rendered values still pass HTTP header validation before they
 are sent upstream.
 
+### Browser Login Probe For WordPress
+
+Some proxy bugs only show up in a real browser. One important example is
+HTTP/2 clients sending multiple `Cookie` header fields; an HTTP/2-to-HTTP/1.x
+gateway must forward those to classic backends as one semicolon-delimited
+`Cookie` header, not as a comma-delimited list.
+
+Use the browser probe when a WordPress login works with `curl` but loops in
+Chrome or another browser:
+
+```sh
+FLUXHEIM_BROWSER_BASE_URL=https://example.test \
+FLUXHEIM_BROWSER_USER=admin \
+FLUXHEIM_BROWSER_PASSWORD='change-me' \
+scripts/browser_wordpress_login_probe.mjs
+```
+
+The script launches local Chrome or Chromium through the DevTools protocol,
+submits the login form, checks for the admin dashboard, and writes artifacts to
+`/tmp/fluxheim-browser-wordpress-*`. Password values are redacted from request
+logs, but the captured HTML and cookie names are still operational debugging
+artifacts; keep them local and delete them after analysis.
+
+Set `FLUXHEIM_BROWSER_CHROME=/path/to/chrome` when Chrome is not in a standard
+location. The probe is intentionally not part of the normal release gate
+because it targets live sites and needs credentials.
+
 ## Websocket Or Long-Lived Route
 
 Fluxheim preserves `Connection: Upgrade` and `Upgrade` request headers by
