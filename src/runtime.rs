@@ -675,14 +675,15 @@ mod tests {
     }
 
     #[test]
-    fn opens_regular_log_file_for_append() {
+    fn opens_regular_log_file_for_append() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let path = unique_temp_path("runtime-log-append").with_extension("log");
         let _ = std::fs::remove_file(&path);
 
-        let file = open_log_file(&path, true).unwrap();
+        let file = open_log_file(&path, true)?;
 
-        assert!(file.metadata().unwrap().is_file());
+        assert!(file.metadata()?.is_file());
         let _ = std::fs::remove_file(&path);
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
@@ -733,7 +734,8 @@ mod tests {
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     #[test]
-    fn rustls_sni_resolver_can_reload_certificate_files() {
+    fn rustls_sni_resolver_can_reload_certificate_files()
+    -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let certificate = crate::config::StaticCertificateConfig {
             cert_path: std::path::PathBuf::from("tests/fixtures/tls/localhost-cert.pem"),
             key_path: std::path::PathBuf::from("tests/fixtures/tls/localhost-key.pem"),
@@ -746,13 +748,20 @@ mod tests {
             },
             ..crate::config::Config::default()
         };
-        let selector = crate::tls::DownstreamCertificateSelector::from_config(&config).unwrap();
-        let resolver = super::RustlsSniCertificateResolver::new(&selector, &config.tls).unwrap();
+        let selector =
+            crate::tls::DownstreamCertificateSelector::from_config(&config).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "expected downstream certificate selector",
+                )
+            })?;
+        let resolver = super::RustlsSniCertificateResolver::new(&selector, &config.tls)?;
 
-        resolver.reload().unwrap();
+        resolver.reload()?;
 
         assert_eq!(resolver.certificates.load().len(), 1);
         assert!(resolver.certificates.load()[0].is_some());
+        Ok(())
     }
 
     #[cfg(all(

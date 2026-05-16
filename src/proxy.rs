@@ -8640,19 +8640,24 @@ fn is_sensitive_vary_field(field: &str) -> bool {
 #[cfg(feature = "cache")]
 fn vary_request_hash(fields: &[String], request: &RequestHeader) -> HashBinary {
     let mut material = Vec::new();
-    material.extend_from_slice(b"fluxheim-vary-v1\0");
+    material.extend_from_slice(b"fluxheim-vary-v2");
 
     for field in fields {
-        material.extend_from_slice(field.as_bytes());
-        material.push(0);
+        append_vary_hash_component(&mut material, field.as_bytes());
+        let values = request.headers.get_all(field.as_str());
+        material.extend_from_slice(&(values.iter().count() as u32).to_le_bytes());
         for value in request.headers.get_all(field.as_str()).iter() {
-            material.extend_from_slice(value.as_bytes());
-            material.push(0);
+            append_vary_hash_component(&mut material, value.as_bytes());
         }
-        material.push(0xff);
     }
 
     pingora::cache::key::hash_key(material)
+}
+
+#[cfg(feature = "cache")]
+fn append_vary_hash_component(material: &mut Vec<u8>, bytes: &[u8]) {
+    material.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    material.extend_from_slice(bytes);
 }
 
 #[cfg(feature = "cache")]
