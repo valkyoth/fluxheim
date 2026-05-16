@@ -319,11 +319,11 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Production Readiness](docs/production-readiness.md).
 
 Next lines are planned separately: `1.3.1` for PHP/FastCGI application serving,
-`1.3.2` for a local ACME companion-agent workflow that can activate newly
-issued certificates in the running gateway, later `1.3.x` releases for PHP
-runtime follow-ups, `1.4` for advanced proxy parity, `1.5` for load-balancer
-parity, and `1.6` for shared Wasm extensibility covering nginx-Lua-style hooks
-and VCL-like cache policy hooks. See
+`1.3.2` for a local ACME companion-agent workflow plus release-page config
+tester binaries for diagnosing configs when containers fail to start, later
+`1.3.x` releases for PHP runtime follow-ups, `1.4` for advanced proxy parity,
+`1.5` for load-balancer parity, and `1.6` for shared Wasm extensibility
+covering nginx-Lua-style hooks and VCL-like cache policy hooks. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
 

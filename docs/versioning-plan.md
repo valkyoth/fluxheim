@@ -674,13 +674,16 @@ Stable scope for `1.3.1`:
 - Sanitized, size-limited PHP STDERR logging and PHP metrics.
 - WordPress and minimal PHP-FPM example configs.
 
-### 1.3.2 - ACME Companion Agent And Zero-Downtime First Issuance
+### 1.3.2 - ACME Companion Agent And Config Tester
 
 Goal: make adding ACME-backed vhosts operationally smooth for existing
 multi-site gateways. A new vhost should be able to enter a pending certificate
 state, complete HTTP-01 issuance, and activate HTTPS without taking already
 serving vhosts down and without requiring operators to manually run a second
-restart after issuance.
+restart after issuance. The same release should also make failed container
+startup easier to diagnose by shipping a small release-page config tester that
+can validate mounted configs even when the gateway container itself will not
+start.
 
 Stable scope for `1.3.2`:
 
@@ -708,6 +711,18 @@ Stable scope for `1.3.2`:
   running gateway without a full process restart.
 - Document first-issuance flows for native systemd, rootless Podman, and the
   one-shot/manual CLI case.
+- Publish a tiny `fluxheim-config-tester` release asset for every official
+  release profile, but do not install it into normal RPMs or runtime images by
+  default.
+- The tester must reuse Fluxheim's real config and runtime validation code
+  rather than maintaining a separate parser.
+- The tester must validate against the selected target profile, for example
+  `full`, `cache`, `proxy`, `web-php`, or future `load-balancer`, so operators
+  do not get false positives from a broader binary than the image they run.
+- Initial tester modes should cover config validation, runtime-path validation,
+  TLS/ACME storage checks, ACME target preview, upstream resolution checks, and
+  an `--explain` output mode that includes vhost/route/module context for
+  filesystem, DNS, and disabled-module failures.
 
 Exit criteria:
 
@@ -721,6 +736,11 @@ Exit criteria:
   filesystem permissions or an equivalent local secret.
 - Logs and metrics expose `pending`, `renewed`, `failed`, and `reload_failed`
   states without leaking EAB material, account keys, or ACME token secrets.
+- A downloaded `fluxheim-config-tester` can validate the same mounted config
+  paths/operators use for Podman/systemd and report actionable context when the
+  main gateway container cannot start.
+- Tester release assets are produced for the official release profiles and are
+  documented as diagnostics-only tools, not runtime dependencies.
 
 Follow-up `1.3.x` PHP runtime plan:
 
@@ -1985,7 +2005,8 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.2.6`: focused fixed-slice range-cache composition follow-up before
   `1.3`.
 - `v1.3.1`: `php-fpm` FastCGI bridge.
-- `v1.3.2`: ACME companion agent and zero-downtime first-issuance activation.
+- `v1.3.2`: ACME companion agent, zero-downtime first-issuance activation, and
+  release-page config tester binaries.
 - `v1.3.3`: focused php-fpm hardening and compatibility fixes.
 - `v1.3.4`: embedded Rust PHP/Turbine-style integration if review passes.
 - `v1.3.5`: pure-Rust PHP interpreter experiment behind `php-phprs`.

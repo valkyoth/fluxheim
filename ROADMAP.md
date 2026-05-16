@@ -41,9 +41,12 @@ load-balancer modules. `1.3.1+` is planned as the PHP
 application-server line. Its first stable target is a secure `php-fpm`
 FastCGI bridge for WordPress-style and legacy PHP deployments, with PHP
 remaining disabled by default and selected only through explicit compile-time
-features and per-vhost config. `1.3.2` is reserved for a focused ACME
-companion-agent improvement so adding a new managed-certificate vhost can move
-from pending issuance to active HTTPS without a second manual gateway restart.
+features and per-vhost config. `1.3.2` is reserved for focused operations
+improvements: an ACME companion-agent model so adding a new
+managed-certificate vhost can move from pending issuance to active HTTPS
+without a second manual gateway restart, plus downloadable
+`fluxheim-config-tester` release assets for diagnosing configs when a container
+cannot start.
 Later `1.3.x` releases continue the PHP runtime line: php-fpm production
 compatibility, embedded Rust PHP/Turbine-style integration if it passes the
 security and licensing review, and pure-Rust PHP interpreter experiments behind
@@ -102,7 +105,8 @@ ingress/TLS split. It must stay disabled by default and compile only through
 opt-in feature flags because PHP support changes Fluxheim's threat model from
 static/proxy serving to dynamic code execution. The `1.3.1` path is
 `php-fpm`/FastCGI first. `1.3.2` is an operational detour for the
-`fluxheim-acme` companion-agent model and smooth zero-downtime first issuance.
+`fluxheim-acme` companion-agent model, smooth zero-downtime first issuance, and
+release-page config tester binaries for host/container diagnostics.
 Embedded or pure-Rust PHP runtimes are planned as later `1.3.x` feature-gated
 follow-ups after review.
 
