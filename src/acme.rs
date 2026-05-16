@@ -931,6 +931,27 @@ pub async fn renew_due_instant_acme_targets(
 }
 
 #[cfg(feature = "acme-client")]
+pub async fn renew_selected_instant_acme_targets(
+    config: &Config,
+    now: SystemTime,
+    vhost_name: &str,
+    force_renew: bool,
+) -> Result<AcmeRenewalRun, AcmeRenewalError> {
+    let queue = if force_renew {
+        plan_renewal_queue(config, &[], now)
+    } else {
+        let observations = observe_configured_certificates(config);
+        plan_renewal_queue(config, &observations, now)
+    };
+    let selected_queue: Vec<AcmeRenewalItem> = queue
+        .into_iter()
+        .filter(|item| item.target.vhost_name == vhost_name)
+        .filter(|item| force_renew || item.due_now)
+        .collect();
+    execute_instant_acme_queue(config, &selected_queue).await
+}
+
+#[cfg(feature = "acme-client")]
 async fn execute_instant_acme_queue(
     config: &Config,
     queue: &[AcmeRenewalItem],
@@ -2991,6 +3012,35 @@ mod tests {
         assert_eq!(queue[0].due_at, now);
         assert!(queue[0].due_now);
         assert_eq!(queue[0].not_after, None);
+    }
+
+    #[cfg(feature = "acme-client")]
+    #[test]
+    fn selected_renewal_skips_not_due_target_without_network() {
+        let now = UNIX_EPOCH + Duration::from_secs(1_000);
+        let storage = crate::test_support::unique_temp_path("acme-selected-renewal");
+        let mut config =
+            acme_config_with_vhosts(vec![managed_vhost("example"), managed_vhost("other")]);
+        config.tls.acme.storage = Some(storage.clone());
+        for vhost in ["example", "other"] {
+            let paths = managed_certificate_paths(&storage, vhost);
+            std::fs::create_dir_all(paths.cert_path.parent().unwrap()).unwrap();
+            std::fs::write(&paths.cert_path, valid_leaf_certificate_pem()).unwrap();
+        }
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let run = runtime
+            .block_on(super::renew_selected_instant_acme_targets(
+                &config, now, "example", false,
+            ))
+            .unwrap();
+
+        assert_eq!(run.attempted, 0);
+        assert!(run.renewed.is_empty());
+        assert!(run.failed.is_empty());
     }
 
     #[test]

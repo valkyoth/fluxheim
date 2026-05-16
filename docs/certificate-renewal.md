@@ -337,10 +337,18 @@ Preview targets without contacting the issuer:
 sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
 ```
 
+Check due/missing/valid state before issuing:
+
+```bash
+sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml status
+sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml status --vhost example.com
+```
+
 Run renewal and request live certificate activation after successful issuance:
 
 ```bash
 sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
+sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew --vhost example.com
 ```
 
 Enable the packaged timer after ACME config and credentials are installed:

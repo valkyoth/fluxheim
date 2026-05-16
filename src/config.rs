@@ -7572,9 +7572,23 @@ fn validate_required_process_path(field: &'static str, path: &Path) -> Result<()
     if path.as_os_str().is_empty() {
         return Err(ConfigError::EmptyProcessPath { field });
     }
-    validate_path(field, Some(path))?;
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ConfigError::UnsafePath {
+            field: field.to_owned(),
+            path: path.to_path_buf(),
+        });
+    }
+    if path_existing_prefix_contains_symlink(path).unwrap_or(false) {
+        return Err(ConfigError::UnsafePath {
+            field: field.to_owned(),
+            path: path.to_path_buf(),
+        });
+    }
     #[cfg(unix)]
-    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true) {
+    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(false) {
         return Err(ConfigError::UnsafePath {
             field: field.to_owned(),
             path: path.to_path_buf(),
@@ -7938,6 +7952,17 @@ mod tests {
     #[cfg(unix)]
     use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
     use proptest::prelude::*;
+
+    fn secure_test_dir(label: &str) -> PathBuf {
+        let path = unique_temp_path(label);
+        fs::create_dir_all(&path).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        path
+    }
 
     #[test]
     fn default_config_is_valid() {
@@ -8978,7 +9003,8 @@ mod tests {
 
     #[test]
     fn parses_tls_acme_config_with_actalis_eab() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-actalis-acme");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls]
             enabled = true
@@ -8986,7 +9012,7 @@ mod tests {
 
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
             default_issuer = "actalis"
             challenge = "http-01"
@@ -9010,16 +9036,14 @@ mod tests {
             key_id_env = "FLUXHEIM_ACTALIS_EAB_KID"
             hmac_key_env = "FLUXHEIM_ACTALIS_EAB_HMAC_KEY"
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         assert!(config.tls.enabled);
         assert_eq!(config.tls.backend, super::TlsBackend::Rustls);
         assert!(config.tls.acme.enabled);
-        assert_eq!(
-            config.tls.acme.storage,
-            Some(PathBuf::from("/var/lib/fluxheim/acme"))
-        );
+        assert_eq!(config.tls.acme.storage, Some(storage));
         assert_eq!(config.tls.acme.default_issuer, "actalis");
         assert_eq!(config.tls.acme.challenge, super::AcmeChallenge::Http01);
         assert_eq!(
@@ -9033,7 +9057,8 @@ mod tests {
 
     #[test]
     fn accepts_tls_alpn_acme_with_rustls_tls_listener() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-tls-alpn-acme");
+        let config: Config = toml::from_str(&format!(
             r#"
             [server]
             tls_listen = ["127.0.0.1:8443"]
@@ -9048,11 +9073,12 @@ mod tests {
 
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
             challenge = "tls-alpn-01"
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         assert_eq!(config.tls.acme.challenge, super::AcmeChallenge::TlsAlpn01);
@@ -9061,7 +9087,8 @@ mod tests {
 
     #[test]
     fn rejects_tls_alpn_acme_without_tls_listener() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-tls-alpn-no-listener");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls]
             enabled = true
@@ -9069,11 +9096,12 @@ mod tests {
 
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
             challenge = "tls-alpn-01"
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         assert!(matches!(
@@ -9207,6 +9235,8 @@ mod tests {
     #[test]
     fn rejects_tls_certificate_paths_under_world_writable_parent() {
         let cert_path = unique_world_writable_child("config-tls-world-writable", "fullchain.pem");
+        let key_path =
+            safe_child_path(&secure_test_dir("config-tls-world-writable-key"), "key.pem");
         let config: Config = toml::from_str(&format!(
             r#"
             [tls]
@@ -9214,9 +9244,10 @@ mod tests {
 
             [[tls.certificates]]
             cert_path = "{}"
-            key_path = "/var/lib/fluxheim/key.pem"
+            key_path = "{}"
             "#,
-            cert_path.display()
+            cert_path.display(),
+            key_path.display()
         ))
         .unwrap();
 
@@ -9230,6 +9261,8 @@ mod tests {
     #[test]
     fn rejects_tls_certificate_paths_under_group_writable_parent() {
         let cert_path = unique_group_writable_child("config-tls-group-writable", "fullchain.pem");
+        let key_path =
+            safe_child_path(&secure_test_dir("config-tls-group-writable-key"), "key.pem");
         let config: Config = toml::from_str(&format!(
             r#"
             [tls]
@@ -9237,9 +9270,10 @@ mod tests {
 
             [[tls.certificates]]
             cert_path = "{}"
-            key_path = "/var/lib/fluxheim/key.pem"
+            key_path = "{}"
             "#,
-            cert_path.display()
+            cert_path.display(),
+            key_path.display()
         ))
         .unwrap();
 
@@ -9282,12 +9316,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_acme_eab_secret_paths_under_world_writable_parent() {
+        let storage = secure_test_dir("config-acme-eab-storage");
         let key_id_file = unique_world_writable_child("config-acme-eab-world-writable", "key-id");
         let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -9299,6 +9334,7 @@ mod tests {
             key_id_file = "{}"
             hmac_key_env = "FLUXHEIM_ACTALIS_EAB_HMAC_KEY"
             "#,
+            storage.display(),
             key_id_file.display()
         ))
         .unwrap();
@@ -9312,11 +9348,12 @@ mod tests {
 
     #[test]
     fn accepts_acme_eab_credential_sources() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-acme-eab-credentials");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -9328,7 +9365,8 @@ mod tests {
             key_id_credential = "actalis-eab-kid"
             hmac_key_credential = "actalis-eab-hmac-key"
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         let eab = config.tls.acme.issuers[0].eab.as_ref().unwrap();
@@ -9342,11 +9380,12 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_acme_eab_credential_source() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-acme-eab-unsafe-credential");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
             default_issuer = "actalis"
 
@@ -9358,7 +9397,8 @@ mod tests {
             key_id_credential = "../actalis-eab-kid"
             hmac_key_credential = "actalis-eab-hmac-key"
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         assert_eq!(
@@ -9493,11 +9533,12 @@ mod tests {
 
     #[test]
     fn accepts_vhost_acme_inheriting_exact_hosts() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-vhost-acme-exact-hosts");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
 
             [[vhosts]]
@@ -9510,7 +9551,8 @@ mod tests {
             [vhosts.tls.acme]
             enabled = true
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         config.validate().unwrap();
@@ -9519,11 +9561,12 @@ mod tests {
     #[cfg(feature = "acme")]
     #[test]
     fn accepts_tls_alias_vhost_covered_by_managed_acme_san() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-vhost-acme-san-alias");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
 
             [[vhosts]]
@@ -9546,9 +9589,10 @@ mod tests {
 
             [vhosts.redirect]
             enabled = true
-            to = "https://example.test{uri}"
+            to = "https://example.test{{uri}}"
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         config.validate().unwrap();
@@ -9556,11 +9600,12 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_vhost_acme_domains() {
-        let config: Config = toml::from_str(
+        let storage = secure_test_dir("config-vhost-acme-duplicate-domains");
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls.acme]
             enabled = true
-            storage = "/var/lib/fluxheim/acme"
+            storage = "{}"
             contact_email = "admin@example.test"
 
             [[vhosts]]
@@ -9574,7 +9619,8 @@ mod tests {
             enabled = true
             domains = ["Example.Test", "example.test"]
             "#,
-        )
+            storage.display()
+        ))
         .unwrap();
 
         assert_eq!(
@@ -11464,13 +11510,14 @@ mod tests {
 
     #[test]
     fn parses_admin_config_with_self_healing() {
-        let config: Config = toml::from_str(
+        let snapshot_store = secure_test_dir("config-admin-self-healing-snapshots");
+        let config: Config = toml::from_str(&format!(
             r#"
             [admin]
             enabled = true
             listen = "127.0.0.1:9090"
             token_env = "FLUXHEIM_ADMIN_TOKEN"
-            snapshot_store = "/var/lib/fluxheim/snapshots"
+            snapshot_store = "{}"
 
             [admin.transport]
             mode = "local_only"
@@ -11495,7 +11542,8 @@ mod tests {
             min_successful_checks = 2
             max_error_rate_per_mille = 50
             "#,
-        )
+            snapshot_store.display()
+        ))
         .unwrap();
 
         config.validate().unwrap();
@@ -11503,7 +11551,7 @@ mod tests {
         assert!(config.admin.self_healing.enabled);
         assert_eq!(
             config.admin.snapshot_store.as_deref(),
-            Some(Path::new("/var/lib/fluxheim/snapshots"))
+            Some(snapshot_store.as_path())
         );
         assert_eq!(
             config.admin.health.response,
@@ -11519,13 +11567,14 @@ mod tests {
 
     #[test]
     fn rejects_remote_unauthenticated_admin_health() {
+        let snapshot_store = secure_test_dir("config-admin-remote-health-snapshots");
         let config = Config {
             admin: AdminConfig {
                 enabled: true,
                 listen: "0.0.0.0:9090".to_owned(),
                 require_loopback: false,
                 token_env: Some("FLUXHEIM_ADMIN_TOKEN".to_owned()),
-                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                snapshot_store: Some(snapshot_store),
                 transport: AdminTransportConfig {
                     mode: AdminRemoteTransportMode::TrustedTlsTerminator,
                 },
@@ -11948,10 +11997,11 @@ mod tests {
 
     #[test]
     fn rejects_enabled_admin_without_auth() {
+        let snapshot_store = secure_test_dir("config-admin-missing-auth-snapshots");
         let config = Config {
             admin: AdminConfig {
                 enabled: true,
-                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                snapshot_store: Some(snapshot_store),
                 ..AdminConfig::default()
             },
             ..Config::default()
@@ -11979,12 +12029,13 @@ mod tests {
 
     #[test]
     fn rejects_remote_admin_listener_by_default() {
+        let snapshot_store = secure_test_dir("config-admin-remote-default-snapshots");
         let config = Config {
             admin: AdminConfig {
                 enabled: true,
                 listen: "0.0.0.0:9090".to_owned(),
                 token_env: Some("FLUXHEIM_ADMIN_TOKEN".to_owned()),
-                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                snapshot_store: Some(snapshot_store),
                 ..AdminConfig::default()
             },
             ..Config::default()
@@ -12000,13 +12051,14 @@ mod tests {
 
     #[test]
     fn rejects_remote_admin_without_trusted_tls_terminator() {
+        let snapshot_store = secure_test_dir("config-admin-remote-insecure-snapshots");
         let config = Config {
             admin: AdminConfig {
                 enabled: true,
                 listen: "0.0.0.0:9090".to_owned(),
                 require_loopback: false,
                 token_env: Some("FLUXHEIM_ADMIN_TOKEN".to_owned()),
-                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                snapshot_store: Some(snapshot_store),
                 ..AdminConfig::default()
             },
             ..Config::default()
@@ -12022,13 +12074,14 @@ mod tests {
 
     #[test]
     fn accepts_remote_admin_when_trusted_tls_terminator_is_explicit() {
+        let snapshot_store = secure_test_dir("config-admin-remote-trusted-snapshots");
         let config = Config {
             admin: AdminConfig {
                 enabled: true,
                 listen: "0.0.0.0:9090".to_owned(),
                 require_loopback: false,
                 token_env: Some("FLUXHEIM_ADMIN_TOKEN".to_owned()),
-                snapshot_store: Some(PathBuf::from("/var/lib/fluxheim/snapshots")),
+                snapshot_store: Some(snapshot_store),
                 transport: AdminTransportConfig {
                     mode: AdminRemoteTransportMode::TrustedTlsTerminator,
                 },
@@ -12220,6 +12273,7 @@ mod tests {
     #[cfg(feature = "acme")]
     #[test]
     fn accepts_tls_listener_with_default_vhost_acme_certificate_source() {
+        let storage = secure_test_dir("config-default-vhost-acme-source");
         let config = Config {
             server: ServerConfig {
                 tls_listen: vec!["127.0.0.1:8443".to_owned()],
@@ -12230,7 +12284,7 @@ mod tests {
                 enabled: true,
                 acme: super::AcmeConfig {
                     enabled: true,
-                    storage: Some(PathBuf::from("/var/lib/fluxheim/acme")),
+                    storage: Some(storage),
                     contact_email: Some("admin@example.test".to_owned()),
                     ..super::AcmeConfig::default()
                 },

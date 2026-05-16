@@ -28,6 +28,8 @@ Released: in progress
   `targets` commands backed by the existing ACME engine.
 - Added a local Unix-domain certificate reload socket so `fluxheim-acme renew`
   can activate renewed certificate handles in the running gateway.
+- Added `fluxheim-acme status` and `fluxheim-acme renew --vhost <name>` for
+  safer single-target first issuance and renewal operations.
 
 ### Changed
 

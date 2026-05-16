@@ -737,6 +737,8 @@ Implementation status:
   added.
 - Local Unix-domain certificate reload socket added for companion-driven
   certificate-handle reloads.
+- `fluxheim-acme status` and `fluxheim-acme renew --vhost <name>` added for
+  target status reporting and single-target renewal.
 - Release evidence packaging for separate config-tester artifacts started.
 
 Exit criteria:
