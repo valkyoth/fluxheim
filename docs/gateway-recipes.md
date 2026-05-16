@@ -165,9 +165,12 @@ submits the login form, checks for the admin dashboard, and writes artifacts to
 logs, but the captured HTML and cookie names are still operational debugging
 artifacts; keep them local and delete them after analysis.
 
-Set `FLUXHEIM_BROWSER_CHROME=/path/to/chrome` when Chrome is not in a standard
-location. The probe is intentionally not part of the normal release gate
-because it targets live sites and needs credentials.
+Set `FLUXHEIM_BROWSER_CHROME=chromium` or another supported browser name when
+more than one standard Chrome/Chromium binary is installed. The accepted names
+are `google-chrome`, `google-chrome-stable`, `chromium`, and
+`chromium-browser`; arbitrary executable paths are intentionally rejected. The
+probe is intentionally not part of the normal release gate because it targets
+live sites and needs credentials.
 
 ## Websocket Or Long-Lived Route
 

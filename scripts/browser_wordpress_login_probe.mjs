@@ -1,18 +1,28 @@
 #!/usr/bin/env node
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+const MAX_ARTIFACT_TEXT_BYTES = 2 * 1024 * 1024;
+const MAX_CAPTURED_EVENTS = 2_000;
+const MAX_WAIT_AFTER_SUBMIT_MS = 30_000;
+const CHROME_DEVTOOLS_PORT = 9222;
+
 async function main() {
-const baseUrl = env("FLUXHEIM_BROWSER_BASE_URL", "https://example.test").replace(/\/+$/, "");
+const baseUrl = validatedProbeBaseUrl(env("FLUXHEIM_BROWSER_BASE_URL", "https://example.test"));
 const username = requiredEnv("FLUXHEIM_BROWSER_USER");
 const password = requiredEnv("FLUXHEIM_BROWSER_PASSWORD");
-const chrome = env("FLUXHEIM_BROWSER_CHROME", findChrome());
-const artifactRoot = env("FLUXHEIM_BROWSER_ARTIFACT_DIR", tmpdir());
+const chrome = findChrome(env("FLUXHEIM_BROWSER_CHROME", ""));
+const artifactRoot = tmpdir();
 const keepProfile = env("FLUXHEIM_BROWSER_KEEP_PROFILE", "0") === "1";
-const waitAfterSubmitMs = Number(env("FLUXHEIM_BROWSER_WAIT_AFTER_SUBMIT_MS", "2500"));
+const waitAfterSubmitMs = boundedIntegerEnv(
+  "FLUXHEIM_BROWSER_WAIT_AFTER_SUBMIT_MS",
+  2500,
+  0,
+  MAX_WAIT_AFTER_SUBMIT_MS,
+);
 const loginPath = env(
   "FLUXHEIM_BROWSER_LOGIN_PATH",
   "/wp-login.php?redirect_to=%2Fwp-admin%2F&reauth=1",
@@ -22,7 +32,7 @@ const expectedText = env("FLUXHEIM_BROWSER_EXPECT_TEXT", "Dashboard");
 
 if (!chrome) {
   throw new Error(
-    "missing Chrome/Chromium. Set FLUXHEIM_BROWSER_CHROME=/path/to/chrome or install google-chrome/chromium.",
+    "missing Chrome/Chromium. Install google-chrome/chromium or set FLUXHEIM_BROWSER_CHROME to google-chrome, google-chrome-stable, chromium, or chromium-browser.",
   );
 }
 
@@ -41,7 +51,7 @@ const chromeProcess = spawn(chrome, [
   "--disable-sync",
   "--ignore-certificate-errors",
   "--remote-debugging-address=127.0.0.1",
-  "--remote-debugging-port=0",
+  `--remote-debugging-port=${CHROME_DEVTOOLS_PORT}`,
   `--user-data-dir=${profile}`,
   "about:blank",
 ], {
@@ -50,13 +60,12 @@ const chromeProcess = spawn(chrome, [
 
 let chromeStderr = "";
 chromeProcess.stderr.on("data", (chunk) => {
-  chromeStderr += chunk.toString();
+  chromeStderr = boundedAppend(chromeStderr, chunk.toString());
 });
 
 try {
-  const portFile = join(profile, "DevToolsActivePort");
-  const port = await waitForDevToolsPort(portFile);
-  const target = await createTarget(port, `${baseUrl}/`);
+  await waitForDevTools();
+  const target = await createTarget();
   const client = new CdpClient(target.webSocketDebuggerUrl);
   await client.open();
 
@@ -65,16 +74,16 @@ try {
   const cookieExtra = [];
 
   client.on("Runtime.exceptionThrown", (event) => {
-    events.push(`pageerror:${event.exceptionDetails?.text || "exception"}`);
+    boundedPush(events, `pageerror:${event.exceptionDetails?.text || "exception"}`);
   });
   client.on("Runtime.consoleAPICalled", (event) => {
     const args = (event.args || [])
       .map((arg) => arg.value ?? arg.description ?? "")
       .join(" ");
-    events.push(`console:${event.type}:${args}`);
+    boundedPush(events, `console:${event.type}:${args}`);
   });
   client.on("Network.loadingFailed", (event) => {
-    network.push(`failed:${event.requestId}:${event.errorText || ""}`);
+    boundedPush(network, `failed:${event.requestId}:${event.errorText || ""}`);
   });
   client.on("Network.requestWillBeSent", (event) => {
     if (!interestingUrl(event.request?.url)) {
@@ -82,7 +91,8 @@ try {
     }
     const post = sanitizePostData(event.request?.postData || "");
     const cookie = event.request?.headers?.Cookie || event.request?.headers?.cookie || "";
-    network.push(
+    boundedPush(
+      network,
       `request:${event.request?.method || ""}:${event.request?.url || ""}:post=${post}:cookie=${cookieNames(cookie)}`,
     );
   });
@@ -90,7 +100,8 @@ try {
     if (!interestingUrl(event.response?.url)) {
       return;
     }
-    network.push(
+    boundedPush(
+      network,
       `response:${event.response?.status || ""}:${event.response?.url || ""}:mime=${event.response?.mimeType || ""}`,
     );
   });
@@ -98,7 +109,8 @@ try {
     const headers = event.headers || {};
     const setCookie = headers["set-cookie"] || headers["Set-Cookie"] || "";
     if (setCookie || (event.blockedCookies || []).length > 0) {
-      cookieExtra.push(
+      boundedPush(
+        cookieExtra,
         `set-cookie=${setCookieNames(setCookie)}:blocked=${blockedCookieSummary(event.blockedCookies || [])}:raw=${sanitizeSetCookie(setCookie)}`,
       );
     }
@@ -118,7 +130,9 @@ try {
 
   const finalUrl = await evaluateValue(client, "window.location.href");
   const title = await evaluateValue(client, "document.title");
-  const html = await evaluateValue(client, "document.documentElement.outerHTML");
+  const html = truncateForArtifact(
+    await evaluateValue(client, "document.documentElement.outerHTML"),
+  );
   const cookies = await client.send("Network.getAllCookies");
   const cookieLines = (cookies.cookies || [])
     .filter((cookie) => cookie.domain.includes(new URL(baseUrl).hostname))
@@ -127,9 +141,12 @@ try {
   await writeFile(join(artifacts, "final-url.txt"), `${finalUrl}\n`);
   await writeFile(join(artifacts, "title.txt"), `${title}\n`);
   await writeFile(join(artifacts, "page.html"), html);
-  await writeFile(join(artifacts, "events.txt"), events.join("\n"));
-  await writeFile(join(artifacts, "network.txt"), network.join("\n"));
-  await writeFile(join(artifacts, "cookie-extra.txt"), cookieExtra.join("\n"));
+  await writeFile(join(artifacts, "events.txt"), truncateForArtifact(events.join("\n")));
+  await writeFile(join(artifacts, "network.txt"), truncateForArtifact(network.join("\n")));
+  await writeFile(
+    join(artifacts, "cookie-extra.txt"),
+    truncateForArtifact(cookieExtra.join("\n")),
+  );
   await writeFile(join(artifacts, "cookies.txt"), cookieLines.join("\n"));
 
   const ok = finalUrl.includes(expectedPath) && html.includes(expectedText);
@@ -169,13 +186,32 @@ function requiredEnv(name) {
   return value;
 }
 
-function findChrome() {
-  for (const path of [
-    "/usr/bin/google-chrome",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-  ]) {
+function boundedIntegerEnv(name, fallback, min, max) {
+  const raw = process.env[name];
+  if (!raw || !raw.trim()) {
+    return fallback;
+  }
+  const value = Number(raw.trim());
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return value;
+}
+
+function validatedProbeBaseUrl(value) {
+  const parsed = new URL(value);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("FLUXHEIM_BROWSER_BASE_URL must use http or https");
+  }
+  parsed.hash = "";
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+  parsed.search = "";
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+function findChrome(preference) {
+  const candidates = chromeCandidates(preference);
+  for (const path of candidates) {
     if (existsSync(path)) {
       return path;
     }
@@ -183,22 +219,49 @@ function findChrome() {
   return "";
 }
 
-async function waitForDevToolsPort(path) {
+function chromeCandidates(preference) {
+  if (!preference) {
+    return [
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+    ];
+  }
+  switch (preference) {
+    case "google-chrome":
+      return ["/usr/bin/google-chrome"];
+    case "google-chrome-stable":
+      return ["/usr/bin/google-chrome-stable"];
+    case "chromium":
+      return ["/usr/bin/chromium"];
+    case "chromium-browser":
+      return ["/usr/bin/chromium-browser"];
+    default:
+      throw new Error(
+        "FLUXHEIM_BROWSER_CHROME must be one of google-chrome, google-chrome-stable, chromium, or chromium-browser",
+      );
+  }
+}
+
+async function waitForDevTools() {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
-    if (existsSync(path)) {
-      const [port] = (await readFile(path, "utf8")).split(/\r?\n/);
-      if (port) {
-        return port;
-      }
+    const response = await fetch(`http://127.0.0.1:${CHROME_DEVTOOLS_PORT}/json/version`).catch(
+      () => null,
+    );
+    if (response?.ok) {
+      return;
     }
     await delay(100);
   }
   throw new Error("Chrome did not expose a DevTools port");
 }
 
-async function createTarget(port, url) {
-  const response = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, {
+async function createTarget() {
+  const endpoint = new URL(`http://127.0.0.1:${CHROME_DEVTOOLS_PORT}/json/new`);
+  endpoint.search = "about%3Ablank";
+  const response = await fetch(endpoint, {
     method: "PUT",
   });
   if (!response.ok) {
@@ -271,8 +334,30 @@ function blockedCookieSummary(blockedCookies) {
     .join("|");
 }
 
+function boundedPush(values, value) {
+  if (values.length < MAX_CAPTURED_EVENTS) {
+    values.push(value);
+  }
+}
+
+function boundedAppend(existing, next) {
+  return truncateForArtifact(`${existing}${next}`);
+}
+
+function truncateForArtifact(value) {
+  const text = String(value);
+  if (Buffer.byteLength(text, "utf8") <= MAX_ARTIFACT_TEXT_BYTES) {
+    return text;
+  }
+  return `${text.slice(0, MAX_ARTIFACT_TEXT_BYTES)}\n<truncated>\n`;
+}
+
 function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  const bounded = Math.min(
+    Math.max(Number.isFinite(ms) ? Math.trunc(ms) : 0, 0),
+    MAX_WAIT_AFTER_SUBMIT_MS,
+  );
+  return new Promise((resolve) => setTimeout(resolve, bounded));
 }
 
 class CdpClient {
