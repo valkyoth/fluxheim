@@ -6,8 +6,8 @@ hosts = ["www.meowmory.com"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/meowmory.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/meowmory.com/privkey.pem"
+cert_path = "tls/meowmory.com/fullchain.pem"
+key_path = "tls/meowmory.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -26,8 +26,8 @@ hosts = ["meowmory.com"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/meowmory.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/meowmory.com/privkey.pem"
+cert_path = "tls/meowmory.com/fullchain.pem"
+key_path = "tls/meowmory.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -56,8 +56,8 @@ hosts = ["www.ulyaoth.eu"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/ulyaoth.eu/fullchain.pem"
-key_path = "/etc/fluxheim/tls/ulyaoth.eu/privkey.pem"
+cert_path = "tls/ulyaoth.eu/fullchain.pem"
+key_path = "tls/ulyaoth.eu/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -77,8 +77,8 @@ max_request_body_bytes = "64MiB"
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/ulyaoth.eu/fullchain.pem"
-key_path = "/etc/fluxheim/tls/ulyaoth.eu/privkey.pem"
+cert_path = "tls/ulyaoth.eu/fullchain.pem"
+key_path = "tls/ulyaoth.eu/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -107,8 +107,8 @@ hosts = ["www.hashavatar.app"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/hashavatar.app/fullchain.pem"
-key_path = "/etc/fluxheim/tls/hashavatar.app/privkey.pem"
+cert_path = "tls/hashavatar.app/fullchain.pem"
+key_path = "tls/hashavatar.app/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -127,8 +127,8 @@ hosts = ["hashavatar.app"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/hashavatar.app/fullchain.pem"
-key_path = "/etc/fluxheim/tls/hashavatar.app/privkey.pem"
+cert_path = "tls/hashavatar.app/fullchain.pem"
+key_path = "tls/hashavatar.app/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true

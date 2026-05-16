@@ -9,7 +9,7 @@ backend = "rustls"
 
 [tls.acme]
 enabled = true
-storage = "/var/lib/fluxheim/acme"
+storage = "acme"
 contact_email = "admin@example.test"
 challenge = "http-01"
 

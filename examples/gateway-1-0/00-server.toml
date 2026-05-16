@@ -62,12 +62,12 @@ enabled = true
 backend = "rustls"
 
 [[tls.certificates]]
-cert_path = "/etc/fluxheim/tls/science.chat/fullchain.pem"
-key_path = "/etc/fluxheim/tls/science.chat/privkey.pem"
+cert_path = "tls/science.chat/fullchain.pem"
+key_path = "tls/science.chat/privkey.pem"
 
 [[tls.certificates]]
-cert_path = "/etc/fluxheim/tls/dev.pawalyze.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/dev.pawalyze.com/privkey.pem"
+cert_path = "tls/dev.pawalyze.com/fullchain.pem"
+key_path = "tls/dev.pawalyze.com/privkey.pem"
 
 [cache]
 enabled = false

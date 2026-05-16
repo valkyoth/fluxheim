@@ -28,8 +28,8 @@ cipher_suites = [
 ]
 
 [[tls.certificates]]
-cert_path = "/etc/fluxheim/tls/intermediate.example.test/fullchain.pem"
-key_path = "/etc/fluxheim/tls/intermediate.example.test/privkey.pem"
+cert_path = "tls/intermediate.example.test/fullchain.pem"
+key_path = "tls/intermediate.example.test/privkey.pem"
 
 [headers.response]
 enabled = true
@@ -52,8 +52,8 @@ hosts = ["intermediate.example.test"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/intermediate.example.test/fullchain.pem"
-key_path = "/etc/fluxheim/tls/intermediate.example.test/privkey.pem"
+cert_path = "tls/intermediate.example.test/fullchain.pem"
+key_path = "tls/intermediate.example.test/privkey.pem"
 
 [vhosts.proxy]
 upstreams = ["127.0.0.1:3000"]

@@ -6,7 +6,7 @@ enabled = true
 listen = "127.0.0.1:19090"
 require_loopback = true
 token_env = "FLUXHEIM_ADMIN_TOKEN"
-snapshot_store = "/var/lib/fluxheim/admin-example-snapshots"
+snapshot_store = "admin-example-snapshots"
 
 [admin.self_healing]
 enabled = true

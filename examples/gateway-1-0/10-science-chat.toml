@@ -6,8 +6,8 @@ hosts = ["www.science.chat"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/science.chat/fullchain.pem"
-key_path = "/etc/fluxheim/tls/science.chat/privkey.pem"
+cert_path = "tls/science.chat/fullchain.pem"
+key_path = "tls/science.chat/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -27,8 +27,8 @@ max_request_body_bytes = "512MiB"
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/science.chat/fullchain.pem"
-key_path = "/etc/fluxheim/tls/science.chat/privkey.pem"
+cert_path = "tls/science.chat/fullchain.pem"
+key_path = "tls/science.chat/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true

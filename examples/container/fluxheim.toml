@@ -75,12 +75,12 @@ enabled = true
 backend = "rustls"
 
 [[tls.certificates]]
-cert_path = "/etc/fluxheim/tls/fullchain.pem"
-key_path = "/etc/fluxheim/tls/key.pem"
+cert_path = "tls/fullchain.pem"
+key_path = "tls/key.pem"
 
 [tls.acme]
 enabled = false
-storage = "/var/lib/fluxheim/acme"
+storage = "acme"
 default_issuer = "letsencrypt"
 challenge = "http-01"
 
@@ -97,7 +97,7 @@ max_size_bytes = "1GiB"
 [cache.disk]
 backend = "filesystem"
 enabled = true
-path = "/var/cache/fluxheim"
+path = "cache"
 max_size_bytes = "10GiB"
 
 [[vhosts]]

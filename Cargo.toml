@@ -6,6 +6,7 @@ rust-version = "1.95"
 license = "EUPL-1.2"
 publish = false
 description = "A modular Pingora-based reverse proxy and static web server."
+default-run = "fluxheim"
 
 [features]
 default = [

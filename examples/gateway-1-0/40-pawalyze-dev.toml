@@ -7,8 +7,8 @@ max_request_body_bytes = "64MiB"
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/dev.pawalyze.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/dev.pawalyze.com/privkey.pem"
+cert_path = "tls/dev.pawalyze.com/fullchain.pem"
+key_path = "tls/dev.pawalyze.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -51,8 +51,8 @@ max_request_body_bytes = "64MiB"
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/messages.dev.pawalyze.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/messages.dev.pawalyze.com/privkey.pem"
+cert_path = "tls/messages.dev.pawalyze.com/fullchain.pem"
+key_path = "tls/messages.dev.pawalyze.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -88,8 +88,8 @@ max_request_body_bytes = "10MiB"
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/identity.dev.pawalyze.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/identity.dev.pawalyze.com/privkey.pem"
+cert_path = "tls/identity.dev.pawalyze.com/fullchain.pem"
+key_path = "tls/identity.dev.pawalyze.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -113,8 +113,8 @@ hosts = ["support.dev.pawalyze.com"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/support.dev.pawalyze.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/support.dev.pawalyze.com/privkey.pem"
+cert_path = "tls/support.dev.pawalyze.com/fullchain.pem"
+key_path = "tls/support.dev.pawalyze.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -135,8 +135,8 @@ hosts = ["account.dev.pawalyze.com"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/account.dev.pawalyze.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/account.dev.pawalyze.com/privkey.pem"
+cert_path = "tls/account.dev.pawalyze.com/fullchain.pem"
+key_path = "tls/account.dev.pawalyze.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
@@ -161,8 +161,8 @@ hosts = ["pawmins.dev.pawalyze.com"]
 enabled = true
 
 [vhosts.tls.certificate]
-cert_path = "/etc/fluxheim/tls/pawmins.dev.pawalyze.com/fullchain.pem"
-key_path = "/etc/fluxheim/tls/pawmins.dev.pawalyze.com/privkey.pem"
+cert_path = "tls/pawmins.dev.pawalyze.com/fullchain.pem"
+key_path = "tls/pawmins.dev.pawalyze.com/privkey.pem"
 
 [vhosts.acme_challenge]
 enabled = true
