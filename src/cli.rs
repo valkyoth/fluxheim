@@ -3056,7 +3056,7 @@ struct AcmeInitOptions {
 }
 
 #[cfg(feature = "acme-client")]
-fn run_acme_renew_command(
+pub fn run_acme_renew_command(
     config_path: Option<&std::path::Path>,
     force_renew: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -3163,7 +3163,7 @@ fn run_acme_renew_command(
 }
 
 #[cfg(not(feature = "acme-client"))]
-fn run_acme_renew_command(
+pub fn run_acme_renew_command(
     _config_path: Option<&std::path::Path>,
     _all: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {

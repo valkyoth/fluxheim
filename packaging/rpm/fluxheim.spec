@@ -74,10 +74,11 @@ EOF
 scripts/validate-features.sh "%{fluxheim_features}"
 export CARGO_HOME=%{_builddir}/%{name}-cargo-home
 export RUSTFLAGS="%{?build_rustflags}"
-cargo build --release --locked --offline --no-default-features --features "%{fluxheim_features}"
+cargo build --release --locked --offline --no-default-features --features "%{fluxheim_features}" --bin fluxheim --bin fluxheim-acme
 
 %install
 install -Dm0755 target/release/fluxheim %{buildroot}%{_bindir}/fluxheim
+install -Dm0755 target/release/fluxheim-acme %{buildroot}%{_bindir}/fluxheim-acme
 install -Dm0644 packaging/default/fluxheim.toml %{buildroot}%{_sysconfdir}/fluxheim/fluxheim.toml
 install -Dm0644 packaging/default/index.html %{buildroot}/srv/fluxheim/index.html
 install -Dm0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/fluxheim.conf
@@ -132,6 +133,7 @@ fi
 %{_docdir}/fluxheim/systemd/actalis-eab.conf
 %{_docdir}/fluxheim/systemd/actalis-eab-acme.conf
 %{_bindir}/fluxheim
+%{_bindir}/fluxheim-acme
 %{_tmpfilesdir}/fluxheim.conf
 %{_sysusersdir}/fluxheim.conf
 %{_unitdir}/fluxheim.service

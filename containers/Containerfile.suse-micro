@@ -38,6 +38,7 @@ RUN mkdir -p /etc/ssl/certs /etc/fluxheim /run/fluxheim /var/lib/fluxheim/acme /
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /usr/src/fluxheim/target/release/fluxheim /usr/local/bin/fluxheim
+COPY --from=builder /usr/src/fluxheim/target/release/fluxheim-acme /usr/local/bin/fluxheim-acme
 COPY ${FLUXHEIM_CONFIG} /etc/fluxheim/fluxheim.toml
 COPY packaging/default/index.html /srv/fluxheim/index.html
 

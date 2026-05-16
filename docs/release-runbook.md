@@ -91,7 +91,7 @@ Pushing the tag starts the container image workflow.
 Build the full production release binary:
 
 ```bash
-cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 ```
 
 Create the release bundle:
@@ -99,6 +99,7 @@ Create the release bundle:
 ```bash
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
 cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
 cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
 tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
@@ -109,10 +110,11 @@ For the cache-focused binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-cache-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
 cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
 cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
 tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
@@ -123,10 +125,11 @@ For the proxy-focused binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-proxy-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
 cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
 cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
 tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
@@ -137,10 +140,11 @@ For the PHP-FPM web binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-php-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
 cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
 cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
 tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"

@@ -437,6 +437,14 @@ Use `--profile full`, `--profile cache`, `--profile proxy`, or
 `--profile web-php` to match the release artifact or image profile you plan to
 run.
 
+Runtime images and RPMs do include `fluxheim-acme`, which is the ACME companion
+entry point for service-manager or container-scheduled renewal workflows:
+
+```bash
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
+```
+
 ## Volume Mapping
 
 Fluxheim containers use a small set of stable paths. Mount host directories to

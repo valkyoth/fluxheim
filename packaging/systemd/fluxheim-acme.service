@@ -10,7 +10,7 @@ User=fluxheim
 Group=fluxheim
 Environment=FLUXHEIM_CONFIG=/etc/fluxheim/fluxheim.toml
 EnvironmentFile=-/etc/sysconfig/fluxheim
-ExecStart=/usr/bin/fluxheim --config ${FLUXHEIM_CONFIG} acme-renew
+ExecStart=/usr/bin/fluxheim-acme --config ${FLUXHEIM_CONFIG} renew
 RuntimeDirectory=fluxheim
 RuntimeDirectoryMode=0750
 StateDirectory=fluxheim

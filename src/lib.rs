@@ -6,6 +6,7 @@
 
 #[cfg(feature = "acme")]
 pub mod acme;
+pub mod acme_companion;
 #[cfg(feature = "proxy")]
 pub mod admin;
 #[cfg(feature = "cache")]

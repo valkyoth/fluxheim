@@ -733,6 +733,8 @@ Implementation status:
 - Initial `fluxheim-config-tester` binary target added.
 - Initial profile validation, runtime-path validation, TLS storage checks, ACME
   target preview, upstream DNS resolution, and `--explain` output added.
+- Initial `fluxheim-acme` companion binary with `renew` and `targets` commands
+  added.
 - Release evidence packaging for separate config-tester artifacts started.
 
 Exit criteria:

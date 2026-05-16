@@ -24,11 +24,15 @@ Released: in progress
   `web-php`, `development`, and future `load-balancer` release profiles.
 - Added config tester modes for runtime-path validation, TLS storage checks,
   ACME target preview, upstream DNS resolution, and explain output.
+- Added the dedicated `fluxheim-acme` companion binary with `renew` and
+  `targets` commands backed by the existing ACME engine.
 
 ### Changed
 
 - Release evidence now builds separate config-tester artifacts per release
   profile instead of installing the tester into normal RPMs or runtime images.
+- RPMs and runtime images now include `fluxheim-acme` for external ACME
+  service/timer and container companion workflows.
 
 ## 1.3.1 - PHP-FPM Runtime Support
 

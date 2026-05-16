@@ -313,8 +313,8 @@ service manager also triggers a reload/restart or a future admin reload hook is
 used. The integrated background automation is the zero-downtime path for simple
 single-process deployments.
 
-Production packages include a companion ACME operating mode while keeping the
-integrated background worker for simple installs. In this model,
+Production packages include the `fluxheim-acme` companion binary while keeping
+the integrated background worker for simple installs. In this model,
 `fluxheim.service` stays focused on serving traffic and challenge files, while
 the one-shot `fluxheim-acme.service` and scheduled `fluxheim-acme.timer` run
 renewals as the Fluxheim runtime user. The companion command reuses the same
@@ -322,6 +322,12 @@ ACME engine and storage layout as `fluxheim acme-renew`, uses systemd
 credentials or container secrets for EAB material, and writes certificates below
 the configured `tls.acme.storage`. Set `tls.acme.automation = "external"` in
 this mode so the webserver does not also run the background renewal loop.
+
+Preview targets without contacting the issuer:
+
+```bash
+sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
+```
 
 Enable the packaged timer after ACME config and credentials are installed:
 

@@ -18,6 +18,10 @@ used to validate mounted configs without starting the gateway container.
   `development`, and future `load-balancer` profiles.
 - Added tester modes for runtime-path validation, TLS storage checks, ACME
   target preview, upstream DNS resolution, and `--explain` output.
+- Added the `fluxheim-acme` companion binary with `renew` and `targets`
+  commands.
+- Packaged `fluxheim-acme` into RPMs and runtime images for external
+  service/timer and container companion workflows.
 - Kept the tester out of normal RPM installation and runtime images; it is a
   release diagnostics artifact.
 

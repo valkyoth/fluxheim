@@ -38,6 +38,7 @@ RUN apk add --no-cache ca-certificates \
     && chown -R ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID} /etc/fluxheim /run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /var/log/fluxheim /srv/fluxheim
 
 COPY --from=builder /usr/src/fluxheim/target/release/fluxheim /usr/local/bin/fluxheim
+COPY --from=builder /usr/src/fluxheim/target/release/fluxheim-acme /usr/local/bin/fluxheim-acme
 COPY ${FLUXHEIM_CONFIG} /etc/fluxheim/fluxheim.toml
 COPY packaging/default/index.html /srv/fluxheim/index.html
 
