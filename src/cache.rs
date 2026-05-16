@@ -238,7 +238,7 @@ fn read_cache_encryption_key_file(path: &Path) -> std::io::Result<[u8; 32]> {
 }
 
 #[cfg(feature = "proxy")]
-fn read_cache_encryption_secret_file(path: &Path) -> std::io::Result<String> {
+fn read_cache_encryption_secret_file(path: &Path) -> std::io::Result<Zeroizing<String>> {
     use std::io::Read as _;
 
     let mut file = SafeDiskCachePath::from_path(path.to_path_buf()).open_existing_file()?;
@@ -249,7 +249,7 @@ fn read_cache_encryption_secret_file(path: &Path) -> std::io::Result<String> {
             "cache disk encryption secret must be a small regular file",
         ));
     }
-    let mut contents = String::new();
+    let mut contents = Zeroizing::new(String::new());
     file.read_to_string(&mut contents)?;
     Ok(contents)
 }

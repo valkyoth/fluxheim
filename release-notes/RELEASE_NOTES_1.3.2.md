@@ -32,6 +32,9 @@ used to validate mounted configs without starting the gateway container.
   service/timer and container companion workflows.
 - Kept the tester out of normal RPM installation and runtime images; it is a
   release diagnostics artifact.
+- Hardened ACME reload socket responses with a bounded read, kept ACME/cache
+  secret-file intermediates in zeroizing buffers, and capped Admin API JSON
+  response/error sizes.
 
 ## Build
 

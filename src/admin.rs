@@ -28,6 +28,8 @@ const MAX_ADMIN_TOKEN_BYTES: usize = 8 * 1024;
 const MAX_ADMIN_TOKEN_FILE_BYTES: u64 = MAX_ADMIN_TOKEN_BYTES as u64;
 const MAX_ADMIN_PATH_BYTES: usize = 2048;
 const MAX_ADMIN_QUERY_BYTES: usize = 16 * 1024;
+const MAX_ADMIN_JSON_RESPONSE_BYTES: usize = 1024 * 1024;
+const MAX_ADMIN_ERROR_MESSAGE_CHARS: usize = 4096;
 #[cfg(feature = "cache")]
 const MAX_CACHE_PURGE_HOST_BYTES: usize = 255;
 #[cfg(feature = "cache")]
@@ -2093,6 +2095,15 @@ fn digest_admin_token(token: &[u8]) -> [u8; 32] {
 }
 
 fn json_response(status: StatusCode, body: &[u8]) -> AdminResponse {
+    if body.len() > MAX_ADMIN_JSON_RESPONSE_BYTES {
+        return AdminResponse {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            content_type: "application/json",
+            body: br#"{"status":"error","error":"admin JSON response exceeded configured safety limit"}"#
+                .to_vec(),
+        };
+    }
+
     AdminResponse {
         status,
         content_type: "application/json",
@@ -2109,10 +2120,19 @@ fn empty_response(status: StatusCode) -> AdminResponse {
 }
 
 fn error_response(status: StatusCode, error: &str) -> AdminResponse {
+    let error = bounded_admin_error_message(error);
     json_response(
         status,
-        format!(r#"{{"status":"error","error":"{}"}}"#, json_escape(error)).as_bytes(),
+        format!(r#"{{"status":"error","error":"{}"}}"#, json_escape(&error)).as_bytes(),
     )
+}
+
+fn bounded_admin_error_message(error: &str) -> String {
+    let mut bounded: String = error.chars().take(MAX_ADMIN_ERROR_MESSAGE_CHARS).collect();
+    if error.chars().count() > MAX_ADMIN_ERROR_MESSAGE_CHARS {
+        bounded.push_str("...");
+    }
+    bounded
 }
 
 #[cfg(feature = "metrics")]
@@ -2889,8 +2909,8 @@ mod tests {
 
     use super::{
         AdminApp, AdminAuthThrottle, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
-        admin_services_from_config, authorized, constant_time_eq, read_bounded_secret_file,
-        read_secret_file,
+        admin_services_from_config, authorized, constant_time_eq, error_response, json_response,
+        read_bounded_secret_file, read_secret_file,
     };
     use crate::config::{
         AdminAuthThrottleConfig, AdminConfig, AdminHealthConfig, AdminHealthResponseMode,
@@ -2903,6 +2923,30 @@ mod tests {
     use crate::test_support::unique_temp_path;
     #[cfg(unix)]
     use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
+
+    #[test]
+    fn admin_json_response_is_size_bounded() {
+        let body = vec![b'x'; super::MAX_ADMIN_JSON_RESPONSE_BYTES + 1];
+        let response = json_response(StatusCode::OK, &body);
+
+        assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(
+            String::from_utf8(response.body)
+                .unwrap()
+                .contains("exceeded")
+        );
+    }
+
+    #[test]
+    fn admin_error_response_clamps_oversized_messages() {
+        let message = "x".repeat(super::MAX_ADMIN_ERROR_MESSAGE_CHARS + 128);
+        let response = error_response(StatusCode::BAD_REQUEST, &message);
+        let body = String::from_utf8(response.body).unwrap();
+
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert!(body.len() < message.len());
+        assert!(body.contains("..."));
+    }
 
     fn app() -> AdminApp {
         app_with_config(Config::default())

@@ -316,7 +316,9 @@ owns a local Unix-domain certificate reload socket at
 
 The socket accepts only the narrow `reload-certificates` operation and is
 created with owner-only permissions by the running gateway. It is intended for
-the same runtime user or container pod, not remote administration.
+the same runtime user or container pod, not remote administration. The
+companion reads the gateway response with a small fixed bound so a compromised
+or replaced local socket cannot grow companion memory without limit.
 
 Production packages include the `fluxheim-acme` companion binary while keeping
 the integrated background worker for simple installs. In this model,

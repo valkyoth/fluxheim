@@ -42,6 +42,12 @@ Released: in progress
   profile instead of installing the tester into normal RPMs or runtime images.
 - RPMs and runtime images now include `fluxheim-acme` for external ACME
   service/timer and container companion workflows.
+- Hardened `fluxheim-acme` certificate reload responses with a bounded socket
+  read.
+- Kept ACME and cache secret-file intermediates in zeroizing buffers and capped
+  ACME secret input files.
+- Capped Admin API JSON response and error-message sizes as a defense-in-depth
+  guard for authenticated control-plane responses.
 
 ## 1.3.1 - PHP-FPM Runtime Support
 

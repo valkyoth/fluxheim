@@ -8,6 +8,9 @@ use clap::{Parser, Subcommand};
 #[cfg(feature = "acme")]
 use crate::config::Config;
 
+#[cfg(all(feature = "acme-client", unix))]
+const MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES: u64 = 4096;
+
 #[derive(Debug, Parser)]
 #[command(
     version = env!("FLUXHEIM_VERSION"),
@@ -97,6 +100,7 @@ fn run_renew(
     vhost: Option<&str>,
     reload_after_renewal: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[cfg(feature = "tls-rustls")]
     crate::tls::install_rustls_crypto_provider();
 
     let config = load_validated_config(config_path)?;
@@ -173,7 +177,8 @@ fn request_certificate_reload(config: &Config) -> Result<(), Box<dyn Error + Sen
     let mut stream = std::os::unix::net::UnixStream::connect(path)?;
     stream.write_all(b"reload-certificates\n")?;
     let mut response = String::new();
-    stream.read_to_string(&mut response)?;
+    let mut limited = (&mut stream).take(MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES);
+    limited.read_to_string(&mut response)?;
     let response = response.trim();
     if response == "ok" {
         println!("certificate reload: ok");
@@ -327,8 +332,10 @@ fn print_status(
 mod tests {
     #[cfg(all(feature = "acme-client", unix))]
     use super::request_certificate_reload;
+    #[cfg(any(feature = "acme", feature = "acme-client"))]
     use super::run_from_args;
 
+    #[cfg(any(feature = "acme", feature = "acme-client"))]
     #[test]
     fn targets_requires_valid_config_path() {
         let error =
@@ -363,6 +370,45 @@ mod tests {
         config.server.process.certificate_reload_sock = socket;
 
         request_certificate_reload(&config).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[cfg(all(feature = "acme-client", unix))]
+    #[test]
+    fn certificate_reload_response_is_bounded() {
+        use std::io::{Read, Write};
+
+        let root =
+            std::env::temp_dir().join(format!("fh-acme-reload-bounded-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let socket = root.join("reload.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 64];
+            let bytes = stream.read(&mut buffer).unwrap();
+            assert_eq!(&buffer[..bytes], b"reload-certificates\n");
+            stream.write_all(b"not-ok").unwrap();
+            stream
+                .write_all(&vec![
+                    b'x';
+                    (super::MAX_CERTIFICATE_RELOAD_RESPONSE_BYTES as usize)
+                        * 2
+                ])
+                .unwrap();
+        });
+
+        let mut config = crate::config::Config::default();
+        config.server.process.certificate_reload_sock = socket;
+        let error = request_certificate_reload(&config).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("certificate reload request through"),
+            "{error}"
+        );
         handle.join().unwrap();
     }
 

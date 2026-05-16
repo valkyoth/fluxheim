@@ -1,5 +1,5 @@
 use std::error::Error;
-#[cfg(feature = "cache")]
+#[cfg(any(feature = "cache", feature = "acme-client"))]
 use std::io::Read;
 #[cfg(all(feature = "cache", not(feature = "acme-client")))]
 use std::io::Write as _;
@@ -10,6 +10,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+#[cfg(feature = "acme-client")]
+use zeroize::Zeroizing;
 
 use crate::config::Config;
 
@@ -3060,6 +3062,7 @@ pub fn run_acme_renew_command(
     config_path: Option<&std::path::Path>,
     force_renew: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    #[cfg(feature = "tls-rustls")]
     crate::tls::install_rustls_crypto_provider();
 
     let config = Config::load(config_path)?;
@@ -3441,15 +3444,22 @@ fn read_or_prompt_secret(
     path: Option<&Path>,
     prompt: &str,
     non_interactive: bool,
-) -> Result<String, Box<dyn Error + Send + Sync>> {
+) -> Result<Zeroizing<String>, Box<dyn Error + Send + Sync>> {
     if let Some(path) = path {
         validate_acme_init_output_path("secret input", path)?;
-        return Ok(std::fs::read_to_string(path)?.trim().to_owned());
+        let mut secret = Zeroizing::new(String::new());
+        let file = std::fs::File::open(path)?;
+        file.take(4097).read_to_string(&mut secret)?;
+        if secret.len() > 4096 {
+            return Err("ACME secret input file cannot exceed 4096 bytes".into());
+        }
+        return Ok(Zeroizing::new(secret.trim().to_owned()));
     }
     if non_interactive {
         return Err("EAB secret files are required with --non-interactive".into());
     }
-    Ok(rpassword::prompt_password(prompt)?.trim().to_owned())
+    let secret = Zeroizing::new(rpassword::prompt_password(prompt)?);
+    Ok(Zeroizing::new(secret.trim().to_owned()))
 }
 
 #[cfg(feature = "acme-client")]
