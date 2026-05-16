@@ -28,15 +28,10 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
 
-      - name: Cache Rust build output
-        uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-
       - name: Install security tools
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny,cargo-audit
+        run: |
+          cargo install --locked cargo-deny
+          cargo install --locked cargo-audit
 
       - name: Install SBOM tool
         run: cargo install --locked cargo-sbom --version 0.10.0
