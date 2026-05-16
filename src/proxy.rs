@@ -27,8 +27,7 @@ use pingora::cache::key::{CacheHashKey, HashBinary};
 use pingora::cache::lock::CacheKeyLockImpl;
 #[cfg(feature = "cache")]
 use pingora::cache::predictor::{CacheablePredictor, Predictor};
-use pingora::http::RequestHeader;
-use pingora::http::ResponseHeader;
+use pingora::http::{RequestHeader, ResponseHeader, StatusCode};
 use pingora::prelude::{HttpPeer, Result};
 #[cfg(feature = "cache")]
 use pingora::proxy::RangeType;
@@ -37,7 +36,7 @@ use pingora::{Error, ErrorType};
 #[cfg(feature = "cache")]
 use pingora::{
     cache::CacheMeta, cache::CacheOptionOverrides, cache::CachePhase, cache::ForcedFreshness,
-    cache::HitHandler, cache::NoCacheReason, cache::RespCacheable, http::StatusCode,
+    cache::HitHandler, cache::NoCacheReason, cache::RespCacheable,
 };
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -6353,7 +6352,8 @@ fn parse_php_response(
         }
         if name.eq_ignore_ascii_case(b"status") {
             status = parse_php_status(value)?;
-            response = php_response_header(status)?;
+            response.status = StatusCode::from_u16(status)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             continue;
         }
         let name = std::str::from_utf8(name)
@@ -9025,6 +9025,33 @@ mod tests {
             "text/plain"
         );
         assert_eq!(body, b"ok");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn parse_php_response_preserves_headers_before_status() {
+        let (response, body) = parse_php_response(
+            b"Set-Cookie: wordpress_test_cookie=WP%20Cookie%20check; path=/\r\nStatus: 302 Found\r\nLocation: /wp-admin/\r\n\r\n",
+            64 * 1024 * 1024,
+        )
+        .unwrap();
+
+        assert_eq!(response.status.as_u16(), 302);
+        assert_eq!(
+            response.headers.get("location").unwrap().to_str().unwrap(),
+            "/wp-admin/"
+        );
+        let cookies = response
+            .headers
+            .get_all("set-cookie")
+            .iter()
+            .collect::<Vec<_>>();
+        assert_eq!(cookies.len(), 1);
+        assert_eq!(
+            cookies[0].to_str().unwrap(),
+            "wordpress_test_cookie=WP%20Cookie%20check; path=/"
+        );
+        assert!(body.is_empty());
     }
 
     #[cfg(feature = "php-fpm")]
