@@ -48,6 +48,9 @@ pub enum AcmeCompanionCommand {
         #[arg(long)]
         vhost: Option<String>,
     },
+
+    /// Request certificate-handle reload from the running gateway.
+    Reload,
 }
 
 pub fn run_from_env() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -80,6 +83,9 @@ where
         AcmeCompanionCommand::Targets => print_targets(cli.config.as_deref()),
         AcmeCompanionCommand::Status { vhost } => {
             print_status(cli.config.as_deref(), vhost.as_deref())
+        }
+        AcmeCompanionCommand::Reload => {
+            request_certificate_reload_for_config(cli.config.as_deref())
         }
     }
 }
@@ -180,9 +186,27 @@ fn request_certificate_reload(config: &Config) -> Result<(), Box<dyn Error + Sen
     .into())
 }
 
+#[cfg(all(feature = "acme-client", unix))]
+fn request_certificate_reload_for_config(
+    config_path: Option<&std::path::Path>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let config = load_validated_config(config_path)?;
+    request_certificate_reload(&config)
+}
+
 #[cfg(all(feature = "acme-client", not(unix)))]
 fn request_certificate_reload(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     Err("certificate reload control socket requires Unix domain sockets".into())
+}
+
+#[cfg(any(not(feature = "acme-client"), all(feature = "acme-client", not(unix))))]
+fn request_certificate_reload_for_config(
+    _config_path: Option<&std::path::Path>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    Err(
+        "certificate reload control socket requires Unix domain sockets and the `acme-client` feature"
+            .into(),
+    )
 }
 
 #[cfg(feature = "acme")]
@@ -339,6 +363,48 @@ mod tests {
         config.server.process.certificate_reload_sock = socket;
 
         request_certificate_reload(&config).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[cfg(all(feature = "acme-client", unix))]
+    #[test]
+    fn reload_command_sends_control_command() {
+        use std::ffi::OsString;
+        use std::io::{Read, Write};
+
+        let root = std::env::temp_dir().join(format!("fh-acme-reload-cli-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).unwrap();
+        let socket = root.join("reload.sock");
+        let config = root.join("fluxheim.toml");
+        std::fs::write(
+            &config,
+            format!(
+                r#"
+                [server.process]
+                certificate_reload_sock = "{}"
+                "#,
+                socket.display()
+            ),
+        )
+        .unwrap();
+
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0_u8; 64];
+            let bytes = stream.read(&mut buffer).unwrap();
+            assert_eq!(&buffer[..bytes], b"reload-certificates\n");
+            stream.write_all(b"ok\n").unwrap();
+        });
+
+        run_from_args([
+            OsString::from("fluxheim-acme"),
+            OsString::from("--config"),
+            config.into_os_string(),
+            OsString::from("reload"),
+        ])
+        .unwrap();
         handle.join().unwrap();
     }
 }

@@ -442,7 +442,9 @@ entry point for service-manager or container-scheduled renewal workflows:
 
 ```bash
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml status
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml reload
 ```
 
 For live activation after renewal, the running gateway and companion need the
@@ -459,7 +461,7 @@ these paths instead of writing inside the image layer.
 | `/etc/fluxheim/fluxheim.toml` | Main config file. | `ro,Z` |
 | `/etc/fluxheim/conf.d` | Optional config directory. | `ro,Z` |
 | `/etc/fluxheim/tls` | Static certificate chains and private keys. | `ro,Z` |
-| `/run/fluxheim` | Process runtime files such as PID files and upgrade sockets. | `Z,U` |
+| `/run/fluxheim` | Process runtime files such as PID files, upgrade sockets, and the certificate reload socket. | `Z,U` |
 | `/var/lib/fluxheim` | Runtime state: ACME storage and future snapshots. | `Z,U` |
 | `/var/cache/fluxheim` | Disk cache root. | `Z,U` |
 | `/srv/fluxheim` | Default static content root if you want one shared root. | `ro,Z` |
@@ -658,6 +660,7 @@ podman run --rm \
   --network gateway_net \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
   -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
   -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
   -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
   -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
@@ -682,6 +685,7 @@ podman run -d \
   -p 443:8443 \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
   -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
   -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
   -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
   -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
@@ -699,8 +703,10 @@ targets, so first issuance does not require `--force-renew`:
 podman run --rm \
   --name fluxheim_acme_due \
   --network gateway_net \
+  --entrypoint /usr/local/bin/fluxheim-acme \
   -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
   -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
   -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
   -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
   -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
@@ -709,7 +715,7 @@ podman run --rm \
   -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
   ghcr.io/valkyoth/fluxheim:latest-wolfi \
   --config /etc/fluxheim/fluxheim.toml \
-  acme-renew
+  renew --vhost example.com
 ```
 
 If you kept `server.tls_listen` disabled for the first run, enable HTTPS in the

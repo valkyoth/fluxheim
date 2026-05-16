@@ -24,6 +24,8 @@ used to validate mounted configs without starting the gateway container.
   certificate activation after renewal.
 - Added `fluxheim-acme status` and `fluxheim-acme renew --vhost <name>` for
   single-target ACME checks and renewal on multi-site gateways.
+- Added `fluxheim-acme reload` for explicit certificate-handle reload requests
+  through the local control socket.
 - Packaged `fluxheim-acme` into RPMs and runtime images for external
   service/timer and container companion workflows.
 - Kept the tester out of normal RPM installation and runtime images; it is a

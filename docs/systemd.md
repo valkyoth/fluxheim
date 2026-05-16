@@ -130,9 +130,11 @@ RPM packages install a one-shot renewal unit and timer:
 - `fluxheim-acme.service`
 - `fluxheim-acme.timer`
 
-The service runs `fluxheim --config ${FLUXHEIM_CONFIG} acme-renew` as the same
-`fluxheim` user, with the same state/cache/log directories as the web service.
-It does not bind ports and does not receive `CAP_NET_BIND_SERVICE`.
+The service runs `fluxheim-acme --config ${FLUXHEIM_CONFIG} renew` as the same
+`fluxheim` user, with the same runtime/state/cache/log directories as the web
+service. It does not bind ports and does not receive `CAP_NET_BIND_SERVICE`.
+After successful renewal it requests live certificate activation through
+`/run/fluxheim/fluxheim-cert-reload.sock`.
 Set `tls.acme.automation = "external"` when using the timer so the main
 webserver does not also run the background renewal loop.
 

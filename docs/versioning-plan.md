@@ -739,6 +739,8 @@ Implementation status:
   certificate-handle reloads.
 - `fluxheim-acme status` and `fluxheim-acme renew --vhost <name>` added for
   target status reporting and single-target renewal.
+- `fluxheim-acme reload` added for explicit local certificate reload requests
+  through the companion control path.
 - Release evidence packaging for separate config-tester artifacts started.
 
 Exit criteria:

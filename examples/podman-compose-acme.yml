@@ -17,6 +17,7 @@ services:
     volumes:
       - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
       - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
+      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
       - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
       - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U
       - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U
@@ -33,15 +34,18 @@ services:
     image: ghcr.io/valkyoth/fluxheim:latest-wolfi
     container_name: fluxheim_acme
     restart: "no"
+    entrypoint:
+      - "/usr/local/bin/fluxheim-acme"
     depends_on:
       - fluxheim
     command:
       - "--config"
       - "/etc/fluxheim/fluxheim.toml"
-      - "acme-renew"
+      - "renew"
     volumes:
       - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
       - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
+      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
       - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
       - /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U
       - /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U

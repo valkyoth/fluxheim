@@ -30,6 +30,8 @@ Released: in progress
   can activate renewed certificate handles in the running gateway.
 - Added `fluxheim-acme status` and `fluxheim-acme renew --vhost <name>` for
   safer single-target first issuance and renewal operations.
+- Added `fluxheim-acme reload` for explicit service-manager or manual
+  certificate-handle reload requests.
 
 ### Changed
 

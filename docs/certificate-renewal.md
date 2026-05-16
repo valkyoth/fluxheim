@@ -351,6 +351,13 @@ sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
 sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew --vhost example.com
 ```
 
+Request only the live certificate-handle reload, for example after manually
+installing files below `tls.acme.storage`:
+
+```bash
+sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml reload
+```
+
 Enable the packaged timer after ACME config and credentials are installed:
 
 ```bash

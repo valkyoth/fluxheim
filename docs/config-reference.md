@@ -1144,9 +1144,13 @@ keeping port `80` online for HTTP-01. Static certificates are different: if a
 vhost points at operator-owned `cert_path`/`key_path` files, those files must
 exist and pass storage checks before the listener starts.
 
-You can also invoke the renewal command explicitly:
+You can also invoke renewal explicitly. Production packages include
+`fluxheim-acme`, which can renew and then request live certificate activation
+from the running gateway:
 
 ```bash
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml reload
 fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
 ```
 
