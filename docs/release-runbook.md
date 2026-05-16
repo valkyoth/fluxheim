@@ -7,7 +7,7 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.3.1
+RELEASE_VERSION=1.3.2
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
@@ -91,7 +91,7 @@ Pushing the tag starts the container image workflow.
 Build the full production release binary:
 
 ```bash
-cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-config-tester
 ```
 
 Create the release bundle:
@@ -109,7 +109,7 @@ For the cache-focused binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-cache-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client
+cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-config-tester
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
@@ -123,7 +123,7 @@ For the proxy-focused binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-proxy-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client
+cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-config-tester
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
@@ -137,7 +137,7 @@ For the PHP-FPM web binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-php-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client
+cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-config-tester
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
@@ -147,7 +147,20 @@ tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
 sha256sum "dist/${DIST_NAME}.tar.gz"
 ```
 
-Record all binary checksums.
+For each profile, also create a separate config-tester release asset:
+
+```bash
+PROFILE="full" # full, cache, proxy, or php; match the profile just built.
+TESTER_DIST_NAME="fluxheim-${RELEASE_VERSION}-config-tester-${PROFILE}-${TARGET}"
+rm -rf "dist/${TESTER_DIST_NAME}"
+mkdir -p "dist/${TESTER_DIST_NAME}"
+cp target/release/fluxheim-config-tester "dist/${TESTER_DIST_NAME}/"
+cp README.md LICENSE CHANGELOG.md "dist/${TESTER_DIST_NAME}/"
+tar -C dist -czf "dist/${TESTER_DIST_NAME}.tar.gz" "${TESTER_DIST_NAME}"
+sha256sum "dist/${TESTER_DIST_NAME}.tar.gz"
+```
+
+Record all runtime and config-tester binary checksums.
 
 Generate SBOMs for the tagged source tree:
 

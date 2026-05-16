@@ -410,6 +410,33 @@ feature override. Keep both IDs at `65532` for normal images. Use `0` only for
 a deliberate root-runtime image. Leave the feature override empty for normal
 release profile builds.
 
+## Config Tester Release Asset
+
+`1.3.2` adds a separate `fluxheim-config-tester` binary target for diagnosing
+configs outside the runtime container. It is intended for cases where a Podman
+or systemd deployment cannot start and the operator still needs Fluxheim's real
+config parser, feature/profile checks, TLS storage checks, ACME target preview,
+and upstream DNS checks.
+
+The tester is built as a release asset and is not installed into normal RPMs or
+runtime images by default.
+
+Example:
+
+```bash
+fluxheim-config-tester \
+  --config /etc/fluxheim/fluxheim.toml \
+  --profile proxy \
+  --check-tls-storage \
+  --acme-targets \
+  --resolve-upstreams \
+  --explain
+```
+
+Use `--profile full`, `--profile cache`, `--profile proxy`, or
+`--profile web-php` to match the release artifact or image profile you plan to
+run.
+
 ## Volume Mapping
 
 Fluxheim containers use a small set of stable paths. Mount host directories to

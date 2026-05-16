@@ -728,6 +728,13 @@ Stable scope for `1.3.2`:
   an `--explain` output mode that includes vhost/route/module context for
   filesystem, DNS, and disabled-module failures.
 
+Implementation status:
+
+- Initial `fluxheim-config-tester` binary target added.
+- Initial profile validation, runtime-path validation, TLS storage checks, ACME
+  target preview, upstream DNS resolution, and `--explain` output added.
+- Release evidence packaging for separate config-tester artifacts started.
+
 Exit criteria:
 
 - Adding a new ACME vhost with missing cert files does not break existing TLS

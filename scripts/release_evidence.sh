@@ -68,13 +68,13 @@ else
     for profile in full cache proxy php; do
         dist_name="fluxheim-${version}-${profile}-${target}"
         if [ "$profile" = full ]; then
-            cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
+            cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-config-tester
         elif [ "$profile" = cache ]; then
-            cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client
+            cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-config-tester
         elif [ "$profile" = proxy ]; then
-            cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client
+            cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-config-tester
         else
-            cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client
+            cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-config-tester
         fi
         rm -rf "dist/$dist_name"
         mkdir -p "dist/$dist_name"
@@ -85,6 +85,16 @@ else
         line="$(sha256sum "dist/${dist_name}.tar.gz")"
         binary_lines="${binary_lines}
   - \`${line}\`"
+
+        tester_dist_name="fluxheim-${version}-config-tester-${profile}-${target}"
+        rm -rf "dist/$tester_dist_name"
+        mkdir -p "dist/$tester_dist_name"
+        cp target/release/fluxheim-config-tester "dist/$tester_dist_name/"
+        cp README.md LICENSE CHANGELOG.md "dist/$tester_dist_name/"
+        tar -C dist -czf "dist/${tester_dist_name}.tar.gz" "$tester_dist_name"
+        tester_line="$(sha256sum "dist/${tester_dist_name}.tar.gz")"
+        binary_lines="${binary_lines}
+  - \`${tester_line}\`"
     done
 fi
 

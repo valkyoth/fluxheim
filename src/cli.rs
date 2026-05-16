@@ -508,7 +508,9 @@ where
     crate::runtime::run(config)
 }
 
-fn validate_compiled_module_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn validate_compiled_module_config(
+    config: &Config,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(all(feature = "web", feature = "cache", feature = "php-fpm"))]
     let _ = config;
     #[cfg(not(feature = "web"))]
@@ -620,14 +622,14 @@ fn validate_php_module_absent(config: &Config) -> Result<(), Box<dyn Error + Sen
 }
 
 #[cfg(feature = "proxy")]
-fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_compiled_module_config(config)?;
     crate::proxy::FluxProxy::from_config(config)?;
     Ok(())
 }
 
 #[cfg(all(feature = "web", not(feature = "proxy")))]
-fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_compiled_module_config(config)?;
     validate_web_runtime_config("global web", &config.web)?;
     for vhost in &config.vhosts {
@@ -655,7 +657,7 @@ fn validate_web_runtime_config(
 }
 
 #[cfg(not(any(feature = "proxy", feature = "web")))]
-fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_compiled_module_config(config)?;
     Ok(())
 }
@@ -3648,7 +3650,7 @@ fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
     feature = "tls-boringssl",
     feature = "tls-s2n"
 ))]
-fn check_tls_storage(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn check_tls_storage(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let check = crate::tls::validate_tls_storage(config);
     if check.is_secure() {
         println!("TLS storage check passed");
@@ -3673,7 +3675,7 @@ fn check_tls_storage(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>
     feature = "tls-boringssl",
     feature = "tls-s2n"
 )))]
-fn check_tls_storage(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub fn check_tls_storage(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     Err("TLS storage checks require a TLS feature".into())
 }
 

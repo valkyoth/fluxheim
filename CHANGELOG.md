@@ -11,6 +11,25 @@ behavior when the change improves security or project direction.
 
 No unreleased changes yet.
 
+## 1.3.2 - ACME Operations And Config Tester
+
+Released: in progress
+
+### Added
+
+- Started the `1.3.2` operational follow-up with a dedicated
+  `fluxheim-config-tester` binary for validating mounted configs without
+  starting the gateway.
+- Added config tester profile validation for `full`, `cache`, `proxy`,
+  `web-php`, `development`, and future `load-balancer` release profiles.
+- Added config tester modes for runtime-path validation, TLS storage checks,
+  ACME target preview, upstream DNS resolution, and explain output.
+
+### Changed
+
+- Release evidence now builds separate config-tester artifacts per release
+  profile instead of installing the tester into normal RPMs or runtime images.
+
 ## 1.3.1 - PHP-FPM Runtime Support
 
 Released: in progress

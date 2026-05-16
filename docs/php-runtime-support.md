@@ -48,7 +48,7 @@ Release order:
 - `1.3.1`: `php-fpm` FastCGI bridge, WordPress-style front-controller support,
   strict script resolution, bounded request/response buffering, split-cookie
   normalization, and browser-validated WordPress login/admin flows.
-- `1.3.2`: focused php-fpm hardening and compatibility fixes found during
+- `1.3.3`: focused php-fpm hardening and compatibility fixes found during
   production tests.
 - `1.3.3`: `php-turbine` review and first integration if the library/sidecar
   model is safe enough.
@@ -148,9 +148,9 @@ for separate php-fpm containers, but must require explicit config.
 Current tests cover config validation, traversal rejection, disabled `PATH_INFO`
 behavior, safe CGI header translation with HTTPoxy mitigation, and malformed
 FastCGI response headers. Rootless php-fpm container smoke tests, timeout tests,
-and oversized body tests remain part of the `1.3.2` hardening pass.
+and oversized body tests remain part of the `1.3.3` hardening pass.
 
-Planned `1.3.2` php-fpm hardening:
+Planned `1.3.3` php-fpm hardening:
 
 - Connection pooling to php-fpm with idle pruning.
 - True streaming request and response bodies.

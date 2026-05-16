@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.3.1
+Version:        1.3.2
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -15,7 +15,7 @@ URL:            https://github.com/valkyoth/fluxheim
 Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
 # Create with:
 #   cargo vendor vendor > /tmp/fluxheim-cargo-config.toml
-#   tar -czf fluxheim-1.3.1-vendor.tar.gz vendor
+#   tar -czf fluxheim-1.3.2-vendor.tar.gz vendor
 Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        fluxheim.tmpfiles
 Source3:        fluxheim.service
@@ -150,6 +150,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat May 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.2-1
+- Start ACME operations and config-tester follow-up.
+
 * Sat May 16 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.1-1
 - PHP-FPM runtime support and WordPress compatibility follow-up.
 - Keep the full RPM on the broad non-PHP production profile; PHP builds remain
