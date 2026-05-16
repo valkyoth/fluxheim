@@ -306,12 +306,17 @@ resolver or callback so new handshakes can use the freshly installed files
 without restarting. If a TLS backend or listener shape cannot provide a reload
 handle, Fluxheim logs that a restart or process reload is required.
 
-This reload happens inside the long-running Fluxheim process. A separate manual
-`fluxheim acme-renew` or one-shot companion container can write the certificate
-files, but it cannot directly mutate an already-running gateway unless the
-service manager also triggers a reload/restart or a future admin reload hook is
-used. The integrated background automation is the zero-downtime path for simple
-single-process deployments.
+This reload happens inside the long-running Fluxheim process. The gateway also
+owns a local Unix-domain certificate reload socket at
+`server.process.certificate_reload_sock`, defaulting to:
+
+```text
+/run/fluxheim/fluxheim-cert-reload.sock
+```
+
+The socket accepts only the narrow `reload-certificates` operation and is
+created with owner-only permissions by the running gateway. It is intended for
+the same runtime user or container pod, not remote administration.
 
 Production packages include the `fluxheim-acme` companion binary while keeping
 the integrated background worker for simple installs. In this model,
@@ -320,13 +325,22 @@ the one-shot `fluxheim-acme.service` and scheduled `fluxheim-acme.timer` run
 renewals as the Fluxheim runtime user. The companion command reuses the same
 ACME engine and storage layout as `fluxheim acme-renew`, uses systemd
 credentials or container secrets for EAB material, and writes certificates below
-the configured `tls.acme.storage`. Set `tls.acme.automation = "external"` in
-this mode so the webserver does not also run the background renewal loop.
+the configured `tls.acme.storage`. When certificates are renewed, it asks the
+running gateway to reload its certificate handles through
+`server.process.certificate_reload_sock`. Set `tls.acme.automation =
+"external"` in this mode so the webserver does not also run the background
+renewal loop.
 
 Preview targets without contacting the issuer:
 
 ```bash
 sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
+```
+
+Run renewal and request live certificate activation after successful issuance:
+
+```bash
+sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
 ```
 
 Enable the packaged timer after ACME config and credentials are installed:

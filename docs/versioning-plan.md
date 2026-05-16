@@ -735,6 +735,8 @@ Implementation status:
   target preview, upstream DNS resolution, and `--explain` output added.
 - Initial `fluxheim-acme` companion binary with `renew` and `targets` commands
   added.
+- Local Unix-domain certificate reload socket added for companion-driven
+  certificate-handle reloads.
 - Release evidence packaging for separate config-tester artifacts started.
 
 Exit criteria:

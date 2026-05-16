@@ -445,6 +445,10 @@ fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
 fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
 ```
 
+For live activation after renewal, the running gateway and companion need the
+same writable `/run/fluxheim` mount so `fluxheim-acme` can reach
+`server.process.certificate_reload_sock`.
+
 ## Volume Mapping
 
 Fluxheim containers use a small set of stable paths. Mount host directories to

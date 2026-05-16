@@ -602,6 +602,8 @@ pub struct ServerProcessConfig {
     pub pid_file: PathBuf,
     #[serde(default = "default_process_upgrade_sock")]
     pub upgrade_sock: PathBuf,
+    #[serde(default = "default_process_certificate_reload_sock")]
+    pub certificate_reload_sock: PathBuf,
     #[serde(default = "default_process_threads")]
     pub threads: usize,
     #[serde(default = "default_process_listener_tasks_per_fd")]
@@ -625,6 +627,7 @@ impl Default for ServerProcessConfig {
             error_log: None,
             pid_file: default_process_pid_file(),
             upgrade_sock: default_process_upgrade_sock(),
+            certificate_reload_sock: default_process_certificate_reload_sock(),
             threads: default_process_threads(),
             listener_tasks_per_fd: default_process_listener_tasks_per_fd(),
             work_stealing: true,
@@ -649,12 +652,19 @@ impl ServerProcessConfig {
         if self.upgrade_sock.is_relative() {
             self.upgrade_sock = base_dir.join(&self.upgrade_sock);
         }
+        if self.certificate_reload_sock.is_relative() {
+            self.certificate_reload_sock = base_dir.join(&self.certificate_reload_sock);
+        }
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
         validate_optional_process_path("server.process.error_log", self.error_log.as_deref())?;
         validate_required_process_path("server.process.pid_file", &self.pid_file)?;
         validate_required_process_path("server.process.upgrade_sock", &self.upgrade_sock)?;
+        validate_required_process_path(
+            "server.process.certificate_reload_sock",
+            &self.certificate_reload_sock,
+        )?;
         validate_process_usize("server.process.threads", self.threads, 1, 1024)?;
         validate_process_usize(
             "server.process.listener_tasks_per_fd",
@@ -6835,6 +6845,10 @@ fn default_process_upgrade_sock() -> PathBuf {
     PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock")
 }
 
+fn default_process_certificate_reload_sock() -> PathBuf {
+    PathBuf::from("/run/fluxheim/fluxheim-cert-reload.sock")
+}
+
 fn default_process_threads() -> usize {
     1
 }
@@ -8036,13 +8050,20 @@ mod tests {
 
     #[test]
     fn parses_server_process_settings() {
-        let config: Config = toml::from_str(
+        let root = unique_temp_path("config-process-settings");
+        fs::create_dir(&root).unwrap();
+        let error_log = safe_child_path(&root, "error.log");
+        let pid_file = safe_child_path(&root, "fluxheim.pid");
+        let upgrade_sock = safe_child_path(&root, "fluxheim-upgrade.sock");
+        let certificate_reload_sock = safe_child_path(&root, "fluxheim-cert-reload.sock");
+        let config: Config = toml::from_str(&format!(
             r#"
             [server.process]
             daemon = false
-            error_log = "/run/fluxheim/error.log"
-            pid_file = "/run/fluxheim/fluxheim.pid"
-            upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+            error_log = "{}"
+            pid_file = "{}"
+            upgrade_sock = "{}"
+            certificate_reload_sock = "{}"
             threads = 4
             listener_tasks_per_fd = 2
             work_stealing = false
@@ -8051,21 +8072,23 @@ mod tests {
             grace_period_seconds = 10
             graceful_shutdown_timeout_seconds = 30
             "#,
-        )
+            error_log.display(),
+            pid_file.display(),
+            upgrade_sock.display(),
+            certificate_reload_sock.display()
+        ))
         .unwrap();
 
         assert!(!config.server.process.daemon);
         assert_eq!(
             config.server.process.error_log.as_deref(),
-            Some(Path::new("/run/fluxheim/error.log"))
+            Some(error_log.as_path())
         );
+        assert_eq!(config.server.process.pid_file, pid_file);
+        assert_eq!(config.server.process.upgrade_sock, upgrade_sock);
         assert_eq!(
-            config.server.process.pid_file,
-            PathBuf::from("/run/fluxheim/fluxheim.pid")
-        );
-        assert_eq!(
-            config.server.process.upgrade_sock,
-            PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock")
+            config.server.process.certificate_reload_sock,
+            certificate_reload_sock
         );
         assert_eq!(config.server.process.threads, 4);
         assert_eq!(config.server.process.listener_tasks_per_fd, 2);

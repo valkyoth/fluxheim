@@ -7,6 +7,7 @@ trusted_proxies = []
 daemon = false
 pid_file = "/run/fluxheim/fluxheim.pid"
 upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+certificate_reload_sock = "/run/fluxheim/fluxheim-cert-reload.sock"
 grace_period_seconds = 2
 graceful_shutdown_timeout_seconds = 5
 

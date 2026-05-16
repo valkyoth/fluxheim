@@ -66,6 +66,7 @@ daemon = false
 error_log = "/run/fluxheim/error.log"
 pid_file = "/run/fluxheim/fluxheim.pid"
 upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+certificate_reload_sock = "/run/fluxheim/fluxheim-cert-reload.sock"
 threads = 1
 listener_tasks_per_fd = 1
 work_stealing = true
@@ -106,10 +107,14 @@ Notes:
   Changes to these values require a process upgrade, not a live snapshot
   reload. Keep `threads` conservative in containers because Pingora allocates
   worker threads per service.
-- `pid_file`, `upgrade_sock`, and optional `error_log` must not contain parent
-  traversal, must not be below symlinked existing parent directories, and on
-  Unix must not use a group- or world-writable existing parent such as `/tmp`. Use a
-  dedicated runtime directory such as `/run/fluxheim`.
+- `pid_file`, `upgrade_sock`, `certificate_reload_sock`, and optional
+  `error_log` must not contain parent traversal, must not be below symlinked
+  existing parent directories, and on Unix must not use a group- or
+  world-writable existing parent such as `/tmp`. Use a dedicated runtime
+  directory such as `/run/fluxheim`.
+- `certificate_reload_sock` is a local Unix-domain control socket used by
+  `fluxheim-acme` to request certificate-handle reloads after external ACME
+  renewal. It is not a general admin API.
 - `[server.https_redirect]` is disabled by default. When enabled, cleartext
   requests receive a direct HTTPS redirect before static serving or proxying.
   It requires at least one `tls_listen` address. `status` may be `301`, `302`,

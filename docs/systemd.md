@@ -196,7 +196,7 @@ The default native paths are:
 | `/var/lib/fluxheim` | State and future ACME/snapshot storage. |
 | `/var/cache/fluxheim` | Cache storage. |
 | `/var/log/fluxheim` | Optional file logs. |
-| `/run/fluxheim` | PID and upgrade socket. |
+| `/run/fluxheim` | PID file, upgrade socket, and certificate reload socket. |
 
 Keep private keys mode `0600` or stricter and owned by the runtime user when
 Fluxheim reads them directly:

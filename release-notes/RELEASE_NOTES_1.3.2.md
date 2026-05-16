@@ -20,6 +20,8 @@ used to validate mounted configs without starting the gateway container.
   target preview, upstream DNS resolution, and `--explain` output.
 - Added the `fluxheim-acme` companion binary with `renew` and `targets`
   commands.
+- Added a local Unix-domain certificate reload socket for companion-driven live
+  certificate activation after renewal.
 - Packaged `fluxheim-acme` into RPMs and runtime images for external
   service/timer and container companion workflows.
 - Kept the tester out of normal RPM installation and runtime images; it is a

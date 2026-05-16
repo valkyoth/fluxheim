@@ -1,10 +1,14 @@
 use std::error::Error;
 #[cfg(feature = "proxy")]
 use std::fs::{File, OpenOptions};
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+use std::io::Read;
 #[cfg(feature = "proxy")]
 use std::io::Write;
 #[cfg(all(feature = "proxy", target_os = "linux"))]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(feature = "proxy")]
 use std::path::Path;
 
@@ -116,6 +120,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let certificate_reloader = add_tls_listeners(&mut proxy_service, &config)?;
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
+    #[cfg(all(feature = "acme-client", unix))]
+    start_certificate_reload_control_socket(&config, certificate_reloader.clone())?;
 
     #[cfg(feature = "load-balancer")]
     for service in load_balancer_services {
@@ -178,6 +184,92 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+fn start_certificate_reload_control_socket(
+    config: &Config,
+    reloader: Option<DownstreamCertificateReloader>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !config.tls.acme.enabled || !config.tls.acme.renewal.reload_after_renewal {
+        return Ok(());
+    }
+
+    let path = config.server.process.certificate_reload_sock.clone();
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_socket() => {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(_) => {
+            return Err(format!(
+                "certificate reload control socket path {} already exists and is not a socket",
+                path.display()
+            )
+            .into());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+
+    let listener = std::os::unix::net::UnixListener::bind(&path)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    log::info!(
+        "certificate reload control socket enabled at {}",
+        path.display()
+    );
+
+    std::thread::Builder::new()
+        .name("fluxheim-cert-reload-control".to_owned())
+        .spawn(move || {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(mut stream) => {
+                        if let Err(error) = handle_certificate_reload_control_request(
+                            &mut stream,
+                            reloader.as_ref(),
+                        ) {
+                            log::warn!("certificate reload control request failed: {error}");
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("certificate reload control socket accept failed: {error}");
+                    }
+                }
+            }
+        })?;
+
+    Ok(())
+}
+
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+fn handle_certificate_reload_control_request(
+    stream: &mut std::os::unix::net::UnixStream,
+    reloader: Option<&DownstreamCertificateReloader>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let mut buffer = [0_u8; 1024];
+    let bytes = stream.read(&mut buffer)?;
+    let command = std::str::from_utf8(&buffer[..bytes])?.trim();
+    if command != "reload-certificates" {
+        stream.write_all(b"error: unsupported command\n")?;
+        return Ok(());
+    }
+
+    let Some(reloader) = reloader else {
+        stream.write_all(b"error: certificate reload handle unavailable\n")?;
+        return Ok(());
+    };
+
+    match reloader.reload() {
+        Ok(()) => {
+            stream.write_all(b"ok\n")?;
+            log::info!("downstream TLS certificates reloaded by local control socket");
+        }
+        Err(error) => {
+            let response = format!("error: {error}\n");
+            stream.write_all(response.as_bytes())?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
@@ -598,6 +690,9 @@ mod tests {
                     error_log: Some(std::path::PathBuf::from("/run/fluxheim/error.log")),
                     pid_file: std::path::PathBuf::from("/run/fluxheim/fluxheim.pid"),
                     upgrade_sock: std::path::PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock"),
+                    certificate_reload_sock: std::path::PathBuf::from(
+                        "/run/fluxheim/fluxheim-cert-reload.sock",
+                    ),
                     threads: 4,
                     listener_tasks_per_fd: 2,
                     work_stealing: false,
