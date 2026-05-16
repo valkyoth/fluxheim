@@ -32,6 +32,9 @@ Released: in progress
   safer single-target first issuance and renewal operations.
 - Added `fluxheim-acme reload` for explicit service-manager or manual
   certificate-handle reload requests.
+- Added bounded ACME lifecycle metrics through
+  `fluxheim_acme_events_total{event}` for pending, renewed, failed, and reload
+  outcomes without exposing domains, certificate paths, or challenge tokens.
 
 ### Changed
 

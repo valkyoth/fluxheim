@@ -741,6 +741,8 @@ Implementation status:
   target status reporting and single-target renewal.
 - `fluxheim-acme reload` added for explicit local certificate reload requests
   through the companion control path.
+- Bounded ACME lifecycle metric `fluxheim_acme_events_total{event}` added for
+  pending, renewed, failed, and reload outcomes.
 - Release evidence packaging for separate config-tester artifacts started.
 
 Exit criteria:

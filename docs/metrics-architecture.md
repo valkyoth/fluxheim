@@ -82,6 +82,7 @@ Per bucket:
 
 Current cache baseline:
 
+- `fluxheim_acme_events_total{event}`
 - `fluxheim_cache_vhosts`
 - `fluxheim_cache_enabled_vhosts`
 - `fluxheim_cache_tiered_vhosts`
@@ -107,6 +108,10 @@ The configuration gauges are aggregate, label-free, and populated from
 validated configuration when the metrics listener starts. The local
 observability smoke verifies the route/vhost cache policy gauges, the
 request-collapsing policy count, and the maximum configured lock wait timeout.
+`fluxheim_acme_events_total` uses only bounded lifecycle labels: `event` is
+`pending`, `renewed`, `failed`, `reload_success`, `reload_failed`,
+`reload_unavailable`, `tick_error`, or `other`. It intentionally avoids domain
+names, certificate paths, challenge URLs, and issuer secrets.
 `fluxheim_cache_activity_total` uses only bounded labels: `tier` is `memory`,
 `disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
 `store_refusal`, `eviction`, `purge`, `pass`, `bypass`, `stale`,

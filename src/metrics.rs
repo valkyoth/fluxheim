@@ -6,6 +6,7 @@ use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, Opts};
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ENABLED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
@@ -52,6 +53,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     proxy_requests_total()?;
     host_routing_rejections_total()?;
     admin_auth_events_total()?;
+    acme_events_total()?;
     cache_vhosts()?;
     cache_enabled_vhosts()?;
     cache_tiered_vhosts()?;
@@ -191,6 +193,13 @@ pub fn record_admin_auth_event(event: &str, scope: &str) {
             .with_label_values(&[admin_auth_event_label(event), admin_auth_scope_label(scope)])
             .inc(),
         Err(error) => log::debug!("metrics admin auth counter unavailable: {error}"),
+    }
+}
+
+pub fn record_acme_event(event: &str) {
+    match acme_events_total() {
+        Ok(counter) => counter.with_label_values(&[acme_event_label(event)]).inc(),
+        Err(error) => log::debug!("metrics ACME event counter unavailable: {error}"),
     }
 }
 
@@ -464,6 +473,30 @@ fn admin_auth_events_total() -> Result<&'static IntCounterVec, prometheus::Error
     ADMIN_AUTH_EVENTS_TOTAL.get().ok_or_else(|| {
         prometheus::Error::Msg("admin auth event counter failed to initialize".to_owned())
     })
+}
+
+fn acme_events_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = ACME_EVENTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_acme_events_total",
+            "Total Fluxheim managed-ACME lifecycle events by bounded event.",
+        ),
+        &["event"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = ACME_EVENTS_TOTAL.set(counter);
+    ACME_EVENTS_TOTAL
+        .get()
+        .ok_or_else(|| prometheus::Error::Msg("ACME event counter failed to initialize".to_owned()))
 }
 
 fn cache_vhosts() -> Result<&'static IntGauge, prometheus::Error> {
@@ -1105,6 +1138,19 @@ fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+fn acme_event_label(event: &str) -> &'static str {
+    match event {
+        "pending" => "pending",
+        "renewed" => "renewed",
+        "failed" => "failed",
+        "reload_success" => "reload_success",
+        "reload_failed" => "reload_failed",
+        "reload_unavailable" => "reload_unavailable",
+        "tick_error" => "tick_error",
+        _ => "other",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -1120,11 +1166,11 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        cache_config_stats, init, method_bucket, record_admin_auth_event, record_cache_activity,
-        record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
-        record_cache_purger_duration, record_cache_purger_entries, record_cache_purger_run,
-        record_config, record_host_routing_rejection, record_metrics_otlp_export,
-        record_proxy_outcome, status_class,
+        cache_config_stats, init, method_bucket, record_acme_event, record_admin_auth_event,
+        record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
+        record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
+        record_cache_purger_run, record_config, record_host_routing_rejection,
+        record_metrics_otlp_export, record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -1186,6 +1232,31 @@ mod tests {
         assert!(output.contains(r#"event="failure",scope="source""#));
         assert!(output.contains(r#"event="throttled",scope="global""#));
         assert!(output.contains(r#"event="other",scope="other""#));
+    }
+
+    #[test]
+    fn records_acme_event_counter_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_acme_event("pending");
+        record_acme_event("renewed");
+        record_acme_event("failed");
+        record_acme_event("reload_failed");
+        record_acme_event("attacker-event");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains(r#"fluxheim_acme_events_total{event="pending"}"#));
+        assert!(output.contains(r#"fluxheim_acme_events_total{event="renewed"}"#));
+        assert!(output.contains(r#"fluxheim_acme_events_total{event="failed"}"#));
+        assert!(output.contains(r#"fluxheim_acme_events_total{event="reload_failed"}"#));
+        assert!(output.contains(r#"fluxheim_acme_events_total{event="other"}"#));
+        assert!(!output.contains("attacker-event"));
     }
 
     #[test]

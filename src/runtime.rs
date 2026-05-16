@@ -464,6 +464,8 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
             );
             let renewed_count = run.renewed.len();
             for outcome in run.renewed {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_acme_event("renewed");
                 log::info!(
                     "ACME renewed vhost={} issuer={} cert={} key={} challenges={}",
                     outcome.vhost_name,
@@ -474,6 +476,8 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
                 );
             }
             for failure in run.failed {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_acme_event("failed");
                 log::error!(
                     "ACME renewal failed vhost={} issuer={} domains={} error={}",
                     failure.vhost_name,
@@ -486,19 +490,27 @@ async fn run_acme_renewal_tick(config: &Config, reloader: Option<&DownstreamCert
                 log::debug!("ACME renewal check completed without renewed certificates");
             } else if let Some(reloader) = reloader {
                 if let Err(error) = reloader.reload() {
+                    #[cfg(feature = "metrics")]
+                    crate::metrics::record_acme_event("reload_failed");
                     log::error!(
                         "failed to reload downstream TLS certificates after ACME renewal: {error}"
                     );
                 } else {
+                    #[cfg(feature = "metrics")]
+                    crate::metrics::record_acme_event("reload_success");
                     log::info!("downstream TLS certificates reloaded after ACME renewal");
                 }
             } else {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_acme_event("reload_unavailable");
                 log::warn!(
                     "ACME renewed certificates but no downstream TLS reload handle is available; restart or reload Fluxheim to use them"
                 );
             }
         }
         Err(error) => {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_acme_event("tick_error");
             log::error!("ACME renewal check failed: {error}");
         }
     }
@@ -1523,6 +1535,8 @@ fn load_rustls_certified_keys(
                 certificate.cert_path.display(),
                 certificate.key_path.display()
             );
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_acme_event("pending");
             certificates.push(None);
             continue;
         }
@@ -1605,6 +1619,8 @@ fn load_callback_certificates(
                 certificate.cert_path.display(),
                 certificate.key_path.display()
             );
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_acme_event("pending");
             certificates.push(None);
             continue;
         }
