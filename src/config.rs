@@ -1349,15 +1349,7 @@ impl LoggingFileConfig {
         }
 
         validate_path("logging.file.path", self.path.as_deref())?;
-        #[cfg(unix)]
-        if let Some(path) = self.path.as_deref()
-            && crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true)
-        {
-            return Err(ConfigError::UnsafePath {
-                field: "logging.file.path".to_owned(),
-                path: path.to_path_buf(),
-            });
-        }
+        validate_non_world_writable_parent("logging.file.path", self.path.as_deref())?;
         Ok(())
     }
 }
@@ -4807,13 +4799,7 @@ impl CacheDiskConfig {
         }
         let path_field = format!("{scope}.disk.path");
         validate_path(path_field.clone(), Some(path))?;
-        #[cfg(unix)]
-        if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true) {
-            return Err(ConfigError::UnsafePath {
-                field: path_field,
-                path: path.to_path_buf(),
-            });
-        }
+        validate_non_world_writable_parent(path_field, Some(path))?;
 
         if self.max_size_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidCacheTierMaxSize {
@@ -5620,6 +5606,11 @@ pub enum ConfigError {
         field: String,
         path: PathBuf,
     },
+    PathInspectionFailed {
+        field: String,
+        path: PathBuf,
+        reason: String,
+    },
     InvalidAdminSelfHealing {
         field: &'static str,
     },
@@ -6091,6 +6082,15 @@ impl Display for ConfigError {
             Self::UnsafePath { field, path } => write!(
                 formatter,
                 "{field} must be a safe filesystem path without parent-directory traversal, symlinked path components, or unsafe writable parents, got {}",
+                path.display()
+            ),
+            Self::PathInspectionFailed {
+                field,
+                path,
+                reason,
+            } => write!(
+                formatter,
+                "{field} could not be inspected as a safe filesystem path: {} ({reason}); run the command as the Fluxheim service user or fix path permissions",
                 path.display()
             ),
             Self::InvalidAdminSelfHealing { field } => {
@@ -7512,11 +7512,17 @@ fn validate_path(field: impl Into<String>, path: Option<&Path>) -> Result<(), Co
         });
     }
 
-    if path_existing_prefix_contains_symlink(path).unwrap_or(true) {
-        return Err(ConfigError::UnsafePath {
-            field,
-            path: path.to_path_buf(),
-        });
+    match path_existing_prefix_contains_symlink(path) {
+        Ok(true) => {
+            return Err(ConfigError::UnsafePath {
+                field,
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return Err(path_inspection_failed(field, path, error));
+        }
     }
 
     Ok(())
@@ -7532,11 +7538,17 @@ fn validate_non_world_writable_parent(
     };
 
     #[cfg(unix)]
-    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(true) {
-        return Err(ConfigError::UnsafePath {
-            field,
-            path: path.to_path_buf(),
-        });
+    match crate::fs_trust::existing_parent_has_insecure_write_permissions(path) {
+        Ok(true) => {
+            return Err(ConfigError::UnsafePath {
+                field,
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return Err(path_inspection_failed(field, path, error));
+        }
     }
 
     #[cfg(not(unix))]
@@ -7581,20 +7593,50 @@ fn validate_required_process_path(field: &'static str, path: &Path) -> Result<()
             path: path.to_path_buf(),
         });
     }
-    if path_existing_prefix_contains_symlink(path).unwrap_or(false) {
-        return Err(ConfigError::UnsafePath {
-            field: field.to_owned(),
-            path: path.to_path_buf(),
-        });
+    match path_existing_prefix_contains_symlink(path) {
+        Ok(true) => {
+            return Err(ConfigError::UnsafePath {
+                field: field.to_owned(),
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return Err(path_inspection_failed(field, path, error));
+        }
     }
     #[cfg(unix)]
-    if crate::fs_trust::existing_parent_has_insecure_write_permissions(path).unwrap_or(false) {
-        return Err(ConfigError::UnsafePath {
-            field: field.to_owned(),
-            path: path.to_path_buf(),
-        });
+    match crate::fs_trust::existing_parent_has_insecure_write_permissions(path) {
+        Ok(true) => {
+            return Err(ConfigError::UnsafePath {
+                field: field.to_owned(),
+                path: path.to_path_buf(),
+            });
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return Err(path_inspection_failed(field, path, error));
+        }
     }
     Ok(())
+}
+
+fn path_inspection_failed(
+    field: impl Into<String>,
+    path: &Path,
+    error: std::io::Error,
+) -> ConfigError {
+    let reason = match error.kind() {
+        std::io::ErrorKind::PermissionDenied => {
+            format!("permission denied while checking path ownership and symlinks: {error}")
+        }
+        _ => format!("failed to check path ownership and symlinks: {error}"),
+    };
+    ConfigError::PathInspectionFailed {
+        field: field.into(),
+        path: path.to_path_buf(),
+        reason,
+    }
 }
 
 fn validate_process_optional_duration(
@@ -9311,6 +9353,19 @@ mod tests {
             config.validate(),
             Err(ConfigError::UnsafePath { field, .. }) if field == "tls.acme.storage"
         ));
+    }
+
+    #[test]
+    fn path_inspection_error_mentions_permissions_and_service_user() {
+        let error = ConfigError::PathInspectionFailed {
+            field: "tls.acme.storage".to_owned(),
+            path: PathBuf::from("/var/lib/fluxheim/acme"),
+            reason: "permission denied while checking path ownership and symlinks: Permission denied (os error 13)".to_owned(),
+        };
+        let message = error.to_string();
+        assert!(message.contains("could not be inspected"));
+        assert!(message.contains("permission denied"));
+        assert!(message.contains("Fluxheim service user"));
     }
 
     #[cfg(unix)]
