@@ -592,7 +592,14 @@ without parsing text fixtures for every module.
      FIPS modes remain research until Fluxheim can prove the exact validated
      module boundary and runtime status. FIPS profiles must stay separate from
      default builds and fail closed when the configured backend/provider cannot
-     prove FIPS-required operation.
+     prove FIPS-required operation. The tracked compliance references are
+     FIPS PUB 140-3, the current FIPS 140-3 Implementation Guidance, NIST SP
+     800-52 Rev. 2 for TLS policy, and the selected module's CMVP Security
+     Policy. Fluxheim's job is to enforce FIPS-only TLS configuration, trigger
+     and verify the selected provider's FIPS mode, and keep internal crypto
+     operations on validated backends; operators remain responsible for the
+     validated module installation, OS/container boundary, and Security Policy
+     operating procedure.
   - ACME account/order/challenge runtime. Implemented as one-shot and
     background `acme-client` paths for HTTP-01.
   - Background renewal queue service. Implemented for due-only checks on the

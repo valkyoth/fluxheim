@@ -770,18 +770,41 @@ Follow-up `1.3.x` FIPS-capable TLS build plan:
   say "FIPS-capable build using a validated cryptographic module" and must
   point operators to the selected module certificate, security policy, platform
   limits, and install procedure.
+- Treat the compliance documents as release requirements, not optional
+  references:
+  - FIPS PUB 140-3 defines the cryptographic module security requirements.
+  - The current FIPS 140-3 Implementation Guidance defines how labs and
+    vendors interpret those requirements for modern software modules.
+  - NIST SP 800-52 Rev. 2 defines the TLS versions, cipher suites, key sizes,
+    and curves that a web server profile may allow.
+  - The chosen module's CMVP Security Policy is the binding installation and
+    invocation guide. Fluxheim documentation must point operators at the exact
+    certificate/security-policy boundary used for the selected backend.
+- Fluxheim's responsibility in a FIPS-required build is enforcement and
+  evidence: validate only FIPS-approved TLS versions/ciphers/curves, trigger
+  or verify the selected backend's FIPS mode exactly as its Security Policy
+  requires, expose backend/provider evidence in diagnostics, and fail closed
+  when the provider cannot prove approved operation. Fluxheim must not ship
+  home-grown cryptography or describe itself as FIPS compliant merely because
+  a feature flag was enabled.
 - Add backend-specific feature gates rather than one vague `fips` switch:
   - `tls-rustls-fips`: rustls backend using rustls' `fips` feature and the
     AWS-LC FIPS provider path. This requires replacing current ring-specific
     rustls helpers with provider-aware helpers, installing
     `rustls::crypto::default_fips_provider()` at startup, and failing startup
     if generated `ServerConfig` / `ClientConfig` objects do not report FIPS
-    status where rustls exposes that check.
+    status where rustls exposes that check. The feature should route builds to
+    the AWS-LC FIPS crate path, document the CMake, Go, and C compiler build
+    requirements, and explicitly construct rustls server/client configs from
+    provider suites permitted by NIST SP 800-52 Rev. 2.
   - `tls-openssl-fips`: OpenSSL backend built and linked against OpenSSL 3.x
-    with a validated FIPS provider. Fluxheim should support an operator-supplied
-    OpenSSL config path or environment contract, require provider/config
-    diagnostics, and fail closed when FIPS-required mode cannot prove the FIPS
-    provider/default properties are active.
+    with a validated FIPS provider. Operators remain responsible for installing
+    the validated provider and running the provider setup expected by the
+    module Security Policy, such as `openssl-fipsinstall` where applicable.
+    Fluxheim should support an operator-supplied OpenSSL config path or
+    environment contract, require provider/config diagnostics, and fail closed
+    when FIPS-required mode cannot prove the FIPS provider/default properties
+    are active.
   - `tls-boringssl-fips`: research-only until Fluxheim can prove it is linked
     to a BoringCrypto validated module stream, can query the module/version, and
     can document the exact CMVP certificate/security-policy boundary. Normal
@@ -793,6 +816,13 @@ Follow-up `1.3.x` FIPS-capable TLS build plan:
   backend-specific checks exist. When enabled, non-FIPS TLS backends, non-FIPS
   cipher/curve choices, non-FIPS ACME/account crypto paths, and incompatible
   dependencies must fail validation instead of silently downgrading.
+- Inventory internal cryptography before publishing FIPS profiles. Any
+  security-sensitive operation outside TLS, including random request/session
+  identifiers, admin token MACs, ACME/account signing, cache encryption,
+  password hashing, CSRF/session/JWT support, and future plugin signing, must
+  either route through the selected validated backend or be disabled/rejected in
+  FIPS-required builds. Pure RustCrypto, ring, or other non-validated fallback
+  paths cannot remain reachable for those operations in a FIPS-required binary.
 - Add `profile-fips-rustls` and optionally `profile-fips-openssl` once CI can
   build them reproducibly. These profiles should be separate from default,
   cache, proxy, PHP, and load-balancer profiles so non-FIPS operators do not
@@ -2039,7 +2069,8 @@ cache = [...]
 load-balancer = ["proxy", ...] # transitional until the 1.5 load-balancer line
 tls = ["ingress", "dep:rustix"]
 tls-rustls = ["tls", "pingora/rustls", "dep:rustls", "rustls/ring"]
-tls-rustls-fips = ["tls", "pingora/rustls", "dep:rustls", "rustls/fips"] # planned
+tls-rustls-fips = ["tls", "pingora/rustls", "dep:rustls", "rustls/fips"] # planned; provider-aware AWS-LC FIPS path
+fips-required = [] # planned guard after backend/provider checks and internal crypto routing exist
 acme = ["tls", ...]
 ```
 
