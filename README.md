@@ -23,11 +23,12 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.3.1`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.3.2`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
-support, focused full/cache-edge/proxy-edge image profiles, and opt-in
-PHP-FPM application serving for WordPress-style deployments.
+support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
+application serving for WordPress-style deployments, the `fluxheim-acme`
+companion, and release-page config tester diagnostics.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -330,6 +331,10 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
   `fluxheim-acme` handles external renewal/status/reload operations for
   service-manager and container deployments, while `fluxheim-config-tester`
   validates mounted configs without starting the gateway.
+- `1.3.3` is the active development line for PHP-FPM hardening and production
+  compatibility, including opt-in keepalive pooling and safe custom FastCGI
+  params. These changes are not part of the current stable release until
+  `1.3.3` is tagged.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
