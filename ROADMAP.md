@@ -48,15 +48,20 @@ without a second manual gateway restart, plus downloadable
 `fluxheim-config-tester` release assets for diagnosing configs when a container
 cannot start.
 Later `1.3.x` releases continue the PHP runtime line: php-fpm production
-compatibility, embedded Rust PHP/Turbine-style integration if it passes the
-security and licensing review, and pure-Rust PHP interpreter experiments behind
-separate feature gates.
+compatibility against the practical Apache, NGINX, and Caddy PHP surfaces
+(`try_files`/front-controller presets, path-info splitting, FastCGI params,
+FPM pooling/retry/failover, X-Accel/X-Sendfile offload, cache-plugin migration
+presets, and WordPress smoke coverage), embedded Rust PHP/Turbine-style
+integration if it passes the security and licensing review, and pure-Rust PHP
+interpreter experiments behind separate feature gates.
 `1.4` is planned as the advanced proxy parity release. Its target is
 HAProxy/nginx-style reverse-proxy migration coverage that is not fundamentally
 load-balancing: queue/backpressure controls, upstream keepalive pool tuning,
 proxy buffering and streaming controls, protocol translation, stream/TCP/UDP
 proxy foundations, PROXY protocol support, request mirroring, richer variables,
-structured logging, and local Unix-socket operational visibility. `1.5` is
+structured logging, host/header/cookie/redirect rewrite policy, DNS-refreshing
+upstreams for container service names, upstream TLS controls, and local
+Unix-socket operational visibility. `1.5` is
 planned as the enterprise load-balancer stabilization release. Its target is
 HAProxy/nginx/F5-style pool and traffic-distribution coverage on top of
 Pingora's load-balancing primitives: named upstream pools, weighted

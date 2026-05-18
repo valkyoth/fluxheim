@@ -844,17 +844,58 @@ Follow-up `1.3.x` PHP runtime plan:
 
 - `1.3.3`: php-fpm hardening and production compatibility fixes.
   - Connection pooling to php-fpm with idle pruning.
+  - `fastcgi_keep_conn`-style reuse where the selected client/runtime can
+    safely keep FastCGI connections open between requests, with stale-connection
+    detection and a clear fallback to one request per connection.
   - True streaming request and response bodies.
   - Chunked upload disk-spooling so large uploads do not require full RAM
     buffering before php-fpm receives `CONTENT_LENGTH`.
   - Custom FastCGI params in config.
   - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
+  - Caddy-style PHP root override and optional root-symlink resolution for
+    split container layouts, while keeping Fluxheim's symlink escape checks.
+  - NGINX/Caddy-style `try_files` PHP presets for common apps:
+    static-file first, directory index, front-controller fallback, and explicit
+    `=404` behavior for sites that must not route everything through
+    `index.php`.
+  - Configurable `PATH_INFO` splitting model compatible with Caddy's `split`
+    and NGINX's `fastcgi_split_path_info`, but expressed as safe typed config
+    rather than arbitrary regex by default.
+  - Canonical directory slash redirect when `{path}/index.php` exists and the
+    app expects `/dir/` semantics.
+  - `fastcgi_pass_request_headers` / `fastcgi_pass_request_body` equivalents
+    as explicit advanced switches, defaulting to today's safe allow-list.
   - `X-Accel-Redirect` / `X-Sendfile` support for PHP-assisted static
-    offload.
+    offload, plus internal-only target validation, `X-Accel-Expires` handling
+    where it maps to Fluxheim cache metadata, and response-header stripping so
+    backend control headers are not leaked to clients.
+  - `fastcgi_intercept_errors`-style integration with Fluxheim error pages for
+    selected PHP statuses, keeping normal PHP responses untouched by default.
+  - PHP response-header policy controls matching common NGINX migrations:
+    hide/pass selected backend headers, ignore selected cache-control headers,
+    and reject conflicting `Content-Length` / transfer headers.
+  - STDERR handling options: capture/log, truncate, severity mapping for 4xx/5xx
+    responses, and optional fatal-error match that marks a response invalid for
+    retry/failover.
   - php-fpm upstream load balancing and failover.
+  - FPM upstream retry policy aligned with NGINX/Apache/Caddy behavior:
+    connect error, timeout, invalid header, selected 5xx statuses, max tries,
+    total retry timeout, and retry-safe method matching.
+  - FPM upstream TLS and Unix/TCP socket controls should remain explicit; Unix
+    sockets keep strict path/permission validation and TCP supports DNS refresh
+    when the proxy resolver work lands.
   - PHP-specific Prometheus/OpenTelemetry metrics.
   - FastCGI cache-specific convenience config on top of Fluxheim's cache
     engine.
+  - FastCGI cache semantics compatible with common NGINX deployments:
+    cache key presets, status-based TTLs, `Cache-Control`/`Expires`/
+    `Set-Cookie`/`Vary` admission behavior, bypass/no-cache conditions,
+    cache lock, stale-on-error/timeout, background refresh where available, and
+    authenticated purge integration.
+  - WordPress-focused migration presets for `wp-admin`, `wp-login.php`,
+    `xmlrpc.php`, sitemap/feed exclusions, logged-in/commenter cookie bypass,
+    Super Cache/W3TC static-file fallbacks, and denial of PHP execution under
+    uploads/files-style directories.
   - FastCGI multiplexing, authorizer, and filter-role review. These are not
     required for normal PHP-FPM web serving, but should be documented
     explicitly as unsupported or implemented if enterprise users need them.
@@ -883,7 +924,9 @@ Exit criteria:
 - PHP source files are never served as static fallback.
 - Traversal, symlink escape, missing script, directory script, malformed
   FastCGI response, timeout, oversized body, and STDERR-size tests pass.
-- WordPress-style front-controller routing is smoke tested against php-fpm.
+- WordPress-style front-controller routing, login/admin cookies, plugin/theme
+  install/update/delete flows, and common cache-plugin bypass patterns are smoke
+  tested against php-fpm.
 - Config validation makes unsafe PHP roots, sockets, and runtime combinations
   actionable.
 
@@ -994,6 +1037,23 @@ Stable scope:
   - replacement output length limits;
   - deterministic failure behavior;
   - no arbitrary code execution.
+- Apache/NGINX/Caddy migration-oriented proxy knobs:
+  - `ProxyPreserveHost` / Caddy default-host behavior as explicit host policy;
+  - `ProxyPassReverse`/`proxy_redirect`-style `Location` and `Refresh` rewrite
+    rules;
+  - `ProxyPassReverseCookieDomain`, `ProxyPassReverseCookiePath`, and
+    NGINX-style cookie flag/domain/path rewrites;
+  - `proxy_set_header` / Caddy `header_up` and `header_down` parity including
+    set, append, unset, wildcard unset, and bounded regex replacement;
+  - pass/drop request headers and request body switches for migration cases;
+  - method and URI rewrite before upstream dispatch;
+  - response interception hooks for selected statuses and headers;
+  - upstream TLS controls: SNI override, trust roots, mTLS client cert, protocol
+    and cipher policy where supported, and explicit insecure-skip-verify
+    rejection or audit warning;
+  - upstream DNS refresh for container/service-name targets so Fluxheim can
+    start when optional backends are temporarily absent and recover when they
+    appear.
 
 Out of scope for `1.4`:
 

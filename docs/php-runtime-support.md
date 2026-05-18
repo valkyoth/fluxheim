@@ -153,14 +153,32 @@ and oversized body tests remain part of the `1.3.3` hardening pass.
 Planned `1.3.3` php-fpm hardening:
 
 - Connection pooling to php-fpm with idle pruning.
+- Safe FastCGI keep-connection reuse where the client/runtime supports it.
 - True streaming request and response bodies.
 - Chunked upload disk-spooling before php-fpm dispatch.
 - Custom FastCGI params in config.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
+- PHP root override for split container filesystem layouts.
+- Typed `try_files`/front-controller presets for WordPress, Laravel/Symfony,
+  and strict `=404` PHP locations.
+- Configurable safe `PATH_INFO` splitting.
+- Canonical directory slash redirects for directory index PHP apps.
+- Explicit request header/body pass-through switches for advanced migrations.
 - `X-Accel-Redirect` / `X-Sendfile` support.
+- `X-Accel-Expires` mapping into Fluxheim cache metadata where safe.
+- `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
+- Response header hide/pass/ignore controls for PHP backends.
+- STDERR capture/truncation/severity controls and fatal-error matching.
 - php-fpm upstream load balancing and failover.
+- Retry policy for connect error, timeout, invalid header, selected statuses,
+  max tries, total retry timeout, and retry-safe methods.
 - PHP-specific Prometheus/OpenTelemetry metrics.
 - FastCGI cache-specific convenience config.
+- FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
+  predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
+- WordPress cache-plugin migration presets for Super Cache/W3TC-style static
+  fallbacks, logged-in/commenter cookie bypass, admin/login exclusions, and
+  denial of PHP execution under uploads/files directories.
 - FastCGI multiplexing, authorizer, and filter-role review. These are not
   needed for normal PHP-FPM web serving, but should be explicitly unsupported
   or implemented if enterprise users need them.
