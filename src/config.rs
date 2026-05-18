@@ -5401,12 +5401,20 @@ pub struct PhpFpmConfig {
     #[serde(default)]
     pub tcp: Option<String>,
     #[serde(default)]
+    pub keepalive: bool,
+    #[serde(default = "default_php_fpm_pool_max_idle")]
+    pub pool_max_idle: usize,
+    #[serde(default = "default_php_fpm_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+    #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default)]
     pub read_timeout_secs: Option<u64>,
     #[serde(default)]
     pub write_timeout_secs: Option<u64>,
 }
+
+const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 
 impl PhpFpmConfig {
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
@@ -5457,6 +5465,21 @@ impl PhpFpmConfig {
         validate_optional_timeout_secs("php.fpm.connect_timeout_secs", self.connect_timeout_secs)?;
         validate_optional_timeout_secs("php.fpm.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("php.fpm.write_timeout_secs", self.write_timeout_secs)?;
+        if self.keepalive {
+            if self.pool_max_idle == 0 {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.pool_max_idle",
+                    reason: "must be greater than zero when php.fpm.keepalive is enabled",
+                });
+            }
+            if self.pool_max_idle > MAX_PHP_FPM_POOL_MAX_IDLE {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.pool_max_idle",
+                    reason: "must be less than or equal to 1024",
+                });
+            }
+            validate_required_timeout_secs("php.fpm.idle_timeout_secs", self.idle_timeout_secs)?;
+        }
         Ok(())
     }
 }
@@ -7073,6 +7096,14 @@ fn default_php_request_timeout_secs() -> u64 {
 
 fn default_php_max_response_bytes() -> ByteSize {
     ByteSize::from_bytes(64 * 1024 * 1024)
+}
+
+fn default_php_fpm_pool_max_idle() -> usize {
+    8
+}
+
+fn default_php_fpm_idle_timeout_secs() -> u64 {
+    60
 }
 
 fn default_static_cache_control() -> String {
@@ -9757,6 +9788,9 @@ mod tests {
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
+            keepalive = true
+            pool_max_idle = 4
+            idle_timeout_secs = 45
             "#,
             root.display()
         ))
@@ -9774,6 +9808,9 @@ mod tests {
         );
         assert_eq!(php.max_response_bytes.as_u64(), 8 * 1024 * 1024);
         assert_eq!(php.fpm.tcp.as_deref(), Some("127.0.0.1:9000"));
+        assert!(php.fpm.keepalive);
+        assert_eq!(php.fpm.pool_max_idle, 4);
+        assert_eq!(php.fpm.idle_timeout_secs, 45);
     }
 
     #[test]
@@ -9826,6 +9863,33 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("configure either socket or tcp"), "{error}");
+    }
+
+    #[test]
+    fn rejects_php_fpm_keepalive_without_idle_capacity() {
+        let root = unique_temp_path("config-php-fpm-keepalive-zero-pool");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            keepalive = true
+            pool_max_idle = 0
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.pool_max_idle"), "{error}");
     }
 
     #[test]

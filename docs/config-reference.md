@@ -1416,6 +1416,9 @@ path_info = "disabled"
 
 [vhosts.routes.php.fpm]
 tcp = "php-fpm:9000"
+keepalive = true
+pool_max_idle = 8
+idle_timeout_secs = 60
 
 [vhosts.acme_challenge]
 enabled = true
@@ -1443,7 +1446,12 @@ route owns its own proxy action.
 For PHP actions, `max_request_body_bytes` bounds the buffered request sent to
 php-fpm and `max_response_bytes` bounds the buffered FastCGI response returned
 from php-fpm. `max_response_bytes` defaults to `64MiB`; set a smaller value on
-memory-constrained or high-assurance edge nodes.
+memory-constrained or high-assurance edge nodes. `php.fpm.keepalive` enables
+FastCGI keep-connection reuse with an idle pool capped by
+`php.fpm.pool_max_idle`; it is off by default for conservative compatibility.
+When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
+discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
+keepalive is enabled.
 
 `[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache
 policy for that matched route only. Routes without a cache block continue to use

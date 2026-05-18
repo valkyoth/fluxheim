@@ -9,7 +9,11 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
-No unreleased changes yet.
+### Added
+
+- Started the `1.3.3` PHP-FPM hardening line with opt-in FastCGI
+  keep-connection pooling under `[vhosts.php.fpm]`: `keepalive`,
+  `pool_max_idle`, and `idle_timeout_secs`.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

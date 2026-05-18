@@ -9,9 +9,9 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 #[cfg(feature = "cache")]
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(feature = "cache")]
+#[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::time::Duration;
-#[cfg(any(not(feature = "privacy-mode"), feature = "cache"))]
+#[cfg(any(not(feature = "privacy-mode"), feature = "cache", feature = "php-fpm"))]
 use std::time::Instant;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -2764,6 +2764,58 @@ struct RuntimePhp {
     config: crate::config::PhpConfig,
     root: std::path::PathBuf,
     files: StaticFileServer,
+    pool: Option<Arc<PhpFpmPool>>,
+}
+
+#[cfg(feature = "php-fpm")]
+struct PhpFpmPool {
+    endpoint: PhpFpmEndpoint,
+    max_idle: usize,
+    idle_timeout: Duration,
+    idle: tokio::sync::Mutex<Vec<PhpFpmPoolEntry>>,
+}
+
+#[cfg(feature = "php-fpm")]
+impl std::fmt::Debug for PhpFpmPool {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PhpFpmPool")
+            .field("endpoint", &self.endpoint)
+            .field("max_idle", &self.max_idle)
+            .field("idle_timeout", &self.idle_timeout)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+#[derive(Debug, Clone)]
+enum PhpFpmEndpoint {
+    Tcp(String),
+    #[cfg(unix)]
+    Unix(std::path::PathBuf),
+}
+
+#[cfg(feature = "php-fpm")]
+struct PhpFpmPoolEntry {
+    client: PhpFpmPooledClient,
+    last_used: Instant,
+}
+
+#[cfg(feature = "php-fpm")]
+enum PhpFpmPooledClient {
+    Tcp(
+        fastcgi_client::Client<
+            fastcgi_client::io::TokioCompat<tokio::net::TcpStream>,
+            fastcgi_client::conn::KeepAlive,
+        >,
+    ),
+    #[cfg(unix)]
+    Unix(
+        fastcgi_client::Client<
+            fastcgi_client::io::TokioCompat<tokio::net::UnixStream>,
+            fastcgi_client::conn::KeepAlive,
+        >,
+    ),
 }
 
 #[cfg(feature = "web")]
@@ -2852,10 +2904,141 @@ impl RuntimePhp {
             )
         })?;
         Ok(Some(Self {
+            pool: PhpFpmPool::from_config(&config.fpm).map(Arc::new),
             config: config.clone(),
             root,
             files,
         }))
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl PhpFpmPool {
+    fn from_config(config: &crate::config::PhpFpmConfig) -> Option<Self> {
+        if !config.keepalive {
+            return None;
+        }
+        let endpoint = if let Some(address) = config.tcp.as_deref() {
+            PhpFpmEndpoint::Tcp(address.to_owned())
+        } else if let Some(socket) = config.socket.as_deref() {
+            #[cfg(unix)]
+            {
+                PhpFpmEndpoint::Unix(socket.to_path_buf())
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = socket;
+                return None;
+            }
+        } else {
+            return None;
+        };
+        Some(Self {
+            endpoint,
+            max_idle: config.pool_max_idle,
+            idle_timeout: Duration::from_secs(config.idle_timeout_secs),
+            idle: tokio::sync::Mutex::new(Vec::new()),
+        })
+    }
+
+    async fn execute(
+        &self,
+        params: fastcgi_client::Params<'_>,
+        body: Vec<u8>,
+        connect_timeout: Duration,
+        request_timeout: Duration,
+    ) -> io::Result<fastcgi_client::Response> {
+        let mut entry = self.checkout(connect_timeout).await?;
+        let result = entry.execute(params, body, request_timeout).await;
+        if result.is_ok() {
+            self.checkin(entry).await;
+        }
+        result
+    }
+
+    async fn checkout(&self, connect_timeout: Duration) -> io::Result<PhpFpmPoolEntry> {
+        let now = Instant::now();
+        {
+            let mut idle = self.idle.lock().await;
+            idle.retain(|entry| now.duration_since(entry.last_used) <= self.idle_timeout);
+            if let Some(entry) = idle.pop() {
+                return Ok(entry);
+            }
+        }
+        Ok(PhpFpmPoolEntry {
+            client: self.connect_client(connect_timeout).await?,
+            last_used: now,
+        })
+    }
+
+    async fn checkin(&self, mut entry: PhpFpmPoolEntry) {
+        entry.last_used = Instant::now();
+        let mut idle = self.idle.lock().await;
+        idle.retain(|entry| entry.last_used.elapsed() <= self.idle_timeout);
+        if idle.len() < self.max_idle {
+            idle.push(entry);
+        }
+    }
+
+    async fn connect_client(&self, timeout: Duration) -> io::Result<PhpFpmPooledClient> {
+        match &self.endpoint {
+            PhpFpmEndpoint::Tcp(address) => {
+                let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address))
+                    .await
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm connect timed out")
+                    })??;
+                Ok(PhpFpmPooledClient::Tcp(
+                    fastcgi_client::Client::new_keep_alive_tokio(stream),
+                ))
+            }
+            #[cfg(unix)]
+            PhpFpmEndpoint::Unix(socket) => {
+                let stream = tokio::time::timeout(timeout, tokio::net::UnixStream::connect(socket))
+                    .await
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm socket connect timed out")
+                    })??;
+                Ok(PhpFpmPooledClient::Unix(
+                    fastcgi_client::Client::new_keep_alive_tokio(stream),
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl PhpFpmPoolEntry {
+    async fn execute(
+        &mut self,
+        params: fastcgi_client::Params<'_>,
+        body: Vec<u8>,
+        timeout: Duration,
+    ) -> io::Result<fastcgi_client::Response> {
+        self.client.execute(params, body, timeout).await
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl PhpFpmPooledClient {
+    async fn execute(
+        &mut self,
+        params: fastcgi_client::Params<'_>,
+        body: Vec<u8>,
+        timeout: Duration,
+    ) -> io::Result<fastcgi_client::Response> {
+        let request = fastcgi_client::Request::new(params, fastcgi_client::io::Cursor::new(body));
+        match self {
+            Self::Tcp(client) => tokio::time::timeout(timeout, client.execute(request))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm request timed out"))?
+                .map_err(|error| io::Error::other(error.to_string())),
+            #[cfg(unix)]
+            Self::Unix(client) => tokio::time::timeout(timeout, client.execute(request))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm request timed out"))?
+                .map_err(|error| io::Error::other(error.to_string())),
+        }
     }
 }
 
@@ -6056,11 +6239,15 @@ async fn respond_php_request(
     }
 
     let timeout = std::time::Duration::from_secs(php.config.request_timeout_secs);
-    let output = execute_php_fpm(&php.config.fpm, params, request_body, timeout)
-        .await
-        .map_err(|error| {
-            Error::because(ErrorType::HTTPStatus(502), "php-fpm request failed", error)
-        })?;
+    let output = execute_php_fpm(
+        php.pool.as_deref(),
+        &php.config.fpm,
+        params,
+        request_body,
+        timeout,
+    )
+    .await
+    .map_err(|error| Error::because(ErrorType::HTTPStatus(502), "php-fpm request failed", error))?;
     if let Some(stderr) = output.stderr.as_deref()
         && !stderr.is_empty()
     {
@@ -6309,24 +6496,33 @@ async fn read_php_request_body(
 
 #[cfg(feature = "php-fpm")]
 async fn execute_php_fpm(
+    pool: Option<&PhpFpmPool>,
     fpm: &crate::config::PhpFpmConfig,
     params: fastcgi_client::Params<'_>,
     body: Vec<u8>,
     timeout: std::time::Duration,
 ) -> io::Result<fastcgi_client::Response> {
+    let connect_timeout = fpm
+        .connect_timeout_secs
+        .map(Duration::from_secs)
+        .unwrap_or(timeout);
+    if let Some(pool) = pool {
+        return pool.execute(params, body, connect_timeout, timeout).await;
+    }
     if let Some(address) = fpm.tcp.as_deref() {
-        let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address))
+        let stream = tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(address))
             .await
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm connect timed out"))??;
         execute_php_fpm_stream(stream, params, body, timeout).await
     } else if let Some(socket) = fpm.socket.as_deref() {
         #[cfg(unix)]
         {
-            let stream = tokio::time::timeout(timeout, tokio::net::UnixStream::connect(socket))
-                .await
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::TimedOut, "php-fpm socket connect timed out")
-                })??;
+            let stream =
+                tokio::time::timeout(connect_timeout, tokio::net::UnixStream::connect(socket))
+                    .await
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm socket connect timed out")
+                    })??;
             execute_php_fpm_stream(stream, params, body, timeout).await
         }
         #[cfg(not(unix))]
@@ -9024,6 +9220,7 @@ mod tests {
             config,
             root: root.canonicalize().unwrap(),
             files,
+            pool: None,
         }
     }
 

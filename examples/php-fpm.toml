@@ -40,6 +40,11 @@ path_info = "disabled"
 tcp = "php-fpm:9000"
 # Or a local Unix socket with hardened ownership/permissions:
 # socket = "/run/php/php-fpm.sock"
+# Optional FastCGI keep-connection pool. Leave disabled for the most
+# conservative migration path; enable after validating your php-fpm pool.
+# keepalive = true
+# pool_max_idle = 8
+# idle_timeout_secs = 60
 
 [vhosts.web]
 root = "/srv/sites/php.example.test/public"
