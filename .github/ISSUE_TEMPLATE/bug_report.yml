@@ -1,0 +1,72 @@
+name: Bug Report
+description: Report a bug, missing behavior, or unexpected infrastructure issue in Fluxheim.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Thanks for helping improve Fluxheim!
+        ⚠️ **CRITICAL SECURITY NOTICE:** If this is an exploitable security vulnerability, **DO NOT** open a public issue. Please follow the disclosure guidelines in [SECURITY.md](https://github.com/valkyoth/fluxheim/blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug, missing behavior, or confusing documentation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect to happen?
+      description: Describe the behavior or proxy routing output you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: Provide clear steps, configuration parameters, or commands to trigger the issue.
+      placeholder: |
+        1. Start Fluxheim with config...
+        2. Execute curl command...
+        3. See unexpected upstream gateway/routing failure...
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Fluxheim Configuration
+      description: Paste any relevant configuration blocks (`fluxheim.toml`, custom feature layouts, or proxy routes).
+      render: toml
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version and Build Environment
+      description: Please provide technical details about your exact environment configuration.
+      placeholder: |
+        - Fluxheim version or commit hash:
+        - Rust toolchain version (if building from source):
+        - Host Operating System / Kernel:
+        - Deployment mechanism (e.g., local compiled binary, rootless Podman container):
+        - Enabled features or active optimization profiles:
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or Console Output
+      description: Paste relevant logging output here. **Strip out all private keys, cookies, auth tokens, domains, or sensitive IPs before posting.**
+      render: text
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra Context
+      description: Add any other context, screenshots, or architectural edge cases regarding the issue here.
