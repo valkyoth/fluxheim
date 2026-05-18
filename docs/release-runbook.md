@@ -197,10 +197,13 @@ On GitHub:
 3. Select the tag from `$TAG`.
 4. Use `$TITLE` as the release title.
 5. Paste the contents of `$RELEASE_NOTES`.
-6. Upload `dist/${DIST_NAME}.tar.gz`.
-7. Upload `target/release-evidence/fluxheim.spdx.json`.
-8. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
-9. Publish the release.
+6. Upload every runtime profile archive built in step 4:
+   `dist/fluxheim-${RELEASE_VERSION}-{full,cache,proxy,php}-${TARGET}.tar.gz`.
+7. Upload every config-tester archive built in step 4:
+   `dist/fluxheim-${RELEASE_VERSION}-config-tester-{full,cache,proxy,php}-${TARGET}.tar.gz`.
+8. Upload `target/release-evidence/fluxheim.spdx.json`.
+9. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
+10. Publish the release.
 
 It is normal to publish before every evidence field is filled. Source archives
 and container digests are available only after the tag/release and image
@@ -267,9 +270,34 @@ done
 
 If Docker Hub publishing is enabled, repeat the same pull/inspect process for
 the Docker Hub tags. If Quay publishing is enabled, repeat it for the Quay
-release tags as well. For `v1.5.x` and newer tags, also collect the
-`load-balancer` image profile digests, for example
-`${TAG}-load-balancer-wolfi`.
+release tags as well:
+
+```bash
+for image in \
+  "${TAG}-wolfi" \
+  "${TAG}-alpine" \
+  "${TAG}-suse-micro" \
+  "${TAG}-debian" \
+  "${TAG}-cache-wolfi" \
+  "${TAG}-cache-alpine" \
+  "${TAG}-cache-suse-micro" \
+  "${TAG}-cache-debian" \
+  "${TAG}-proxy-wolfi" \
+  "${TAG}-proxy-alpine" \
+  "${TAG}-proxy-suse-micro" \
+  "${TAG}-proxy-debian" \
+  "${TAG}-php-wolfi" \
+  "${TAG}-php-alpine" \
+  "${TAG}-php-suse-micro" \
+  "${TAG}-php-debian"
+do
+  podman pull "quay.io/valkyoth/fluxheim:${image}"
+  podman inspect "quay.io/valkyoth/fluxheim:${image}" --format '{{index .RepoDigests 0}}'
+done
+```
+
+For `v1.5.x` and newer tags, also collect the `load-balancer` image profile
+digests, for example `${TAG}-load-balancer-wolfi`.
 
 Edit the GitHub release notes and add one digest per image variant.
 
@@ -291,22 +319,16 @@ The release notes should end with concrete evidence, not placeholders:
 - Reproducible build:
   - `...  target/reproducible-a/release/fluxheim`
 - Container digests:
-  - Full/default Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Full/default Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Full/default SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Full/default Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Cache Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Cache Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Cache SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Cache Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Proxy Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Proxy Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Proxy SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - Proxy Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - PHP Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - PHP Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - PHP SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
-  - PHP Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - GHCR full/default Wolfi: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - GHCR full/default Alpine: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - GHCR full/default SUSE Micro: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - GHCR full/default Debian: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - GHCR cache/proxy/php variants: `ghcr.io/valkyoth/fluxheim@sha256:...`
+  - Quay full/default Wolfi: `quay.io/valkyoth/fluxheim@sha256:...`
+  - Quay full/default Alpine: `quay.io/valkyoth/fluxheim@sha256:...`
+  - Quay full/default SUSE Micro: `quay.io/valkyoth/fluxheim@sha256:...`
+  - Quay full/default Debian: `quay.io/valkyoth/fluxheim@sha256:...`
+  - Quay cache/proxy/php variants: `quay.io/valkyoth/fluxheim@sha256:...`
 - Tag signature:
   - `Good "git" signature for ...`
 ```

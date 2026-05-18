@@ -35,6 +35,17 @@ used to validate mounted configs without starting the gateway container.
 - Hardened ACME reload socket responses with a bounded read, kept ACME/cache
   secret-file intermediates in zeroizing buffers, and capped Admin API JSON
   response/error sizes.
+- Hardened the certificate reload control socket with private bind/listen
+  sequencing and read timeouts.
+- Hardened filesystem opens with portable Unix `O_NOFOLLOW` coverage for
+  config, snapshot, web, runtime-log, ACME, and admin-token paths.
+- Hardened trace-context generation so CSPRNG failure disables tracing for the
+  request instead of spinning indefinitely.
+- Hardened admin authentication and responses with per-process HMAC token
+  digests, generic internal-error responses, and global-only throttling for
+  indeterminate client sources.
+- Documented the current protobuf advisory boundary: Fluxheim's Pingora metrics
+  endpoint uses text encoding directly and does not expose protobuf parsing.
 
 ## Build
 
@@ -43,7 +54,7 @@ Build the main runtime and tester for a profile explicitly:
 ```bash
 cargo build --release --locked --no-default-features \
   --features profile-web-server,php-fpm,acme-client \
-  --bin fluxheim --bin fluxheim-config-tester
+  --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
 ```
 
 ## Checksums And Signatures

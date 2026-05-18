@@ -48,6 +48,15 @@ Released: in progress
   ACME secret input files.
 - Capped Admin API JSON response and error-message sizes as a defense-in-depth
   guard for authenticated control-plane responses.
+- Hardened the certificate reload control socket with private bind/listen
+  sequencing and read timeouts.
+- Extended Unix `O_NOFOLLOW` coverage across config, snapshot, web,
+  runtime-log, ACME, and admin-token path opens.
+- Bounded trace-context random ID generation so CSPRNG failures disable tracing
+  for the request instead of spinning indefinitely.
+- Switched in-memory admin token digests from bare SHA-256 to per-process
+  HMAC-SHA256, redacted internal Admin API 500 responses, and made
+  indeterminate admin sources count only toward the global throttle budget.
 
 ## 1.3.1 - PHP-FPM Runtime Support
 

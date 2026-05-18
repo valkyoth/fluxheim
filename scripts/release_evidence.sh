@@ -136,12 +136,20 @@ else
         container_lines="
   - not collected (podman/docker not installed)"
     else
-        for variant in wolfi alpine suse-micro debian cache-wolfi cache-alpine cache-suse-micro cache-debian proxy-wolfi proxy-alpine proxy-suse-micro proxy-debian php-wolfi php-alpine php-suse-micro php-debian; do
-            image="ghcr.io/valkyoth/fluxheim:${tag}-${variant}"
-            "$tool" pull "$image" >/dev/null
-            digest="$("$tool" inspect "$image" --format '{{index .RepoDigests 0}}')"
-            container_lines="${container_lines}
-  - ${variant}: \`${digest}\`"
+        quay_namespace="${QUAY_NAMESPACE:-valkyoth}"
+        quay_repository="${QUAY_REPOSITORY:-fluxheim}"
+        for registry in "ghcr.io/valkyoth/fluxheim" "quay.io/${quay_namespace}/${quay_repository}"; do
+            for variant in wolfi alpine suse-micro debian cache-wolfi cache-alpine cache-suse-micro cache-debian proxy-wolfi proxy-alpine proxy-suse-micro proxy-debian php-wolfi php-alpine php-suse-micro php-debian; do
+                image="${registry}:${tag}-${variant}"
+                if "$tool" pull "$image" >/dev/null 2>&1; then
+                    digest="$("$tool" inspect "$image" --format '{{index .RepoDigests 0}}')"
+                    container_lines="${container_lines}
+  - ${registry} ${variant}: \`${digest}\`"
+                else
+                    container_lines="${container_lines}
+  - ${registry} ${variant}: not collected (pull failed for \`${image}\`)"
+                fi
+            done
         done
     fi
 fi
