@@ -91,7 +91,7 @@ Pushing the tag starts the container image workflow.
 Build the full production release binary:
 
 ```bash
-cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme
 ```
 
 Create the release bundle:
@@ -110,7 +110,7 @@ For the cache-focused binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-cache-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-acme
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
@@ -125,7 +125,7 @@ For the proxy-focused binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-proxy-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-acme
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
@@ -140,7 +140,7 @@ For the PHP-FPM web binary profile, rebuild with:
 
 ```bash
 DIST_NAME="fluxheim-${RELEASE_VERSION}-php-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme
 rm -rf "dist/${DIST_NAME}"
 mkdir -p "dist/${DIST_NAME}"
 cp target/release/fluxheim "dist/${DIST_NAME}/"
@@ -151,11 +151,13 @@ tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
 sha256sum "dist/${DIST_NAME}.tar.gz"
 ```
 
-For each profile, also create a separate config-tester release asset:
+Build one unified config-tester release asset. The tester is compiled with the
+broad development feature set and validates the intended runtime shape with
+`--profile full`, `--profile cache`, `--profile proxy`, or `--profile web-php`.
 
 ```bash
-PROFILE="full" # full, cache, proxy, or php; match the profile just built.
-TESTER_DIST_NAME="fluxheim-${RELEASE_VERSION}-config-tester-${PROFILE}-${TARGET}"
+TESTER_DIST_NAME="fluxheim-${RELEASE_VERSION}-config-tester-${TARGET}"
+cargo build --release --locked --no-default-features --features profile-development --bin fluxheim-config-tester
 rm -rf "dist/${TESTER_DIST_NAME}"
 mkdir -p "dist/${TESTER_DIST_NAME}"
 cp target/release/fluxheim-config-tester "dist/${TESTER_DIST_NAME}/"
@@ -199,8 +201,8 @@ On GitHub:
 5. Paste the contents of `$RELEASE_NOTES`.
 6. Upload every runtime profile archive built in step 4:
    `dist/fluxheim-${RELEASE_VERSION}-{full,cache,proxy,php}-${TARGET}.tar.gz`.
-7. Upload every config-tester archive built in step 4:
-   `dist/fluxheim-${RELEASE_VERSION}-config-tester-{full,cache,proxy,php}-${TARGET}.tar.gz`.
+7. Upload the unified config-tester archive built in step 4:
+   `dist/fluxheim-${RELEASE_VERSION}-config-tester-${TARGET}.tar.gz`.
 8. Upload `target/release-evidence/fluxheim.spdx.json`.
 9. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
 10. Publish the release.

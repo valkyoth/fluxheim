@@ -234,6 +234,15 @@ cargo build --no-default-features --features profile-proxy-edge,acme-client
 cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 ```
 
+Official container images are published to GitHub Container Registry and Quay:
+
+- `ghcr.io/valkyoth/fluxheim`
+- `quay.io/valkyoth/fluxheim`
+
+Release tags use the same profile/OS suffixes on both registries, for example
+`v1.3.2-wolfi`, `v1.3.2-cache-wolfi`, `v1.3.2-proxy-wolfi`, and
+`v1.3.2-php-wolfi`.
+
 Manual feature selection also works:
 
 ```bash

@@ -38,8 +38,8 @@ Released: in progress
 
 ### Changed
 
-- Release evidence now builds separate config-tester artifacts per release
-  profile instead of installing the tester into normal RPMs or runtime images.
+- Release evidence now builds one unified config-tester artifact instead of
+  installing the tester into normal RPMs or runtime images.
 - RPMs and runtime images now include `fluxheim-acme` for external ACME
   service/timer and container companion workflows.
 - Hardened `fluxheim-acme` certificate reload responses with a bounded socket
