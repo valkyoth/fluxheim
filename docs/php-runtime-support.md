@@ -114,6 +114,9 @@ eligible:
   hardening defaults.
 - Treat `PATH_INFO` as disabled by default; enable only with strict path split
   rules.
+- Allow administrator-controlled custom FastCGI params only after validating
+  names and values, and never let them override Fluxheim-managed CGI params
+  such as `SCRIPT_FILENAME`, `CONTENT_LENGTH`, `HTTPS`, or `HTTP_PROXY`.
 - Enforce global and PHP-specific request body limits for both declared and
   streaming bodies.
 - Apply runtime request timeouts and connection timeouts.
@@ -146,17 +149,21 @@ Prefer Unix sockets first for local/rootless deployments. TCP support is useful
 for separate php-fpm containers, but must require explicit config.
 
 Current tests cover config validation, traversal rejection, disabled `PATH_INFO`
-behavior, safe CGI header translation with HTTPoxy mitigation, and malformed
-FastCGI response headers. Rootless php-fpm container smoke tests, timeout tests,
-and oversized body tests remain part of the `1.3.3` hardening pass.
+behavior, safe CGI header translation with HTTPoxy mitigation, custom FastCGI
+param validation, and malformed FastCGI response headers. Rootless php-fpm
+container smoke tests, timeout tests, and oversized body tests remain part of
+the `1.3.3` hardening pass.
 
 Planned `1.3.3` php-fpm hardening:
 
-- Connection pooling to php-fpm with idle pruning.
+- Connection pooling to php-fpm with idle pruning. Implemented as opt-in
+  `php.fpm.keepalive`.
 - Safe FastCGI keep-connection reuse where the client/runtime supports it.
+  Implemented for the `fastcgi-client` keep-alive path.
 - True streaming request and response bodies.
 - Chunked upload disk-spooling before php-fpm dispatch.
-- Custom FastCGI params in config.
+- Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
+  `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
 - PHP root override for split container filesystem layouts.
 - Typed `try_files`/front-controller presets for WordPress, Laravel/Symfony,

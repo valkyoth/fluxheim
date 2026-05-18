@@ -5291,6 +5291,8 @@ pub struct PhpConfig {
     #[serde(default)]
     pub path_info: PhpPathInfoMode,
     #[serde(default)]
+    pub params: BTreeMap<String, String>,
+    #[serde(default)]
     pub fpm: PhpFpmConfig,
 }
 
@@ -5306,6 +5308,7 @@ impl Default for PhpConfig {
             max_request_body_bytes: None,
             max_response_bytes: default_php_max_response_bytes(),
             path_info: PhpPathInfoMode::default(),
+            params: BTreeMap::new(),
             fpm: PhpFpmConfig::default(),
         }
     }
@@ -5355,6 +5358,7 @@ impl PhpConfig {
 
         validate_php_index(&self.index)?;
         validate_php_extensions(&self.allowed_extensions)?;
+        validate_php_params(&self.params)?;
         validate_required_timeout_secs("php.request_timeout_secs", self.request_timeout_secs)?;
         if self
             .max_request_body_bytes
@@ -5415,6 +5419,8 @@ pub struct PhpFpmConfig {
 }
 
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
+const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
+const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 
 impl PhpFpmConfig {
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
@@ -7550,6 +7556,96 @@ fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigError> {
+    for (name, value) in params {
+        validate_php_param_name(name)?;
+        validate_php_param_value(value)?;
+    }
+    Ok(())
+}
+
+fn validate_php_param_name(name: &str) -> Result<(), ConfigError> {
+    if name.is_empty() || name.len() > MAX_PHP_PARAM_NAME_BYTES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "parameter names must be 1 to 128 bytes",
+        });
+    }
+    if !name
+        .bytes()
+        .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "parameter names must use uppercase ASCII letters, digits, and underscores",
+        });
+    }
+    if name
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_digit())
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "parameter names must not start with a digit",
+        });
+    }
+    if protected_php_param_name(name) {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "parameter name is managed by Fluxheim and cannot be overridden",
+        });
+    }
+    Ok(())
+}
+
+fn validate_php_param_value(value: &str) -> Result<(), ConfigError> {
+    if value.len() > MAX_PHP_PARAM_VALUE_BYTES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "parameter values must be at most 16KiB",
+        });
+    }
+    if value.bytes().any(|byte| matches!(byte, 0..=31 | 127)) {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "parameter values must not contain ASCII control characters",
+        });
+    }
+    Ok(())
+}
+
+fn protected_php_param_name(name: &str) -> bool {
+    matches!(
+        name,
+        "AUTH_TYPE"
+            | "CONTENT_LENGTH"
+            | "CONTENT_TYPE"
+            | "DOCUMENT_ROOT"
+            | "DOCUMENT_URI"
+            | "GATEWAY_INTERFACE"
+            | "HTTPS"
+            | "HTTP_HOST"
+            | "HTTP_PROXY"
+            | "PATH_INFO"
+            | "PATH_TRANSLATED"
+            | "QUERY_STRING"
+            | "REDIRECT_STATUS"
+            | "REMOTE_ADDR"
+            | "REMOTE_PORT"
+            | "REQUEST_METHOD"
+            | "REQUEST_SCHEME"
+            | "REQUEST_URI"
+            | "SCRIPT_FILENAME"
+            | "SCRIPT_NAME"
+            | "SERVER_ADDR"
+            | "SERVER_NAME"
+            | "SERVER_PORT"
+            | "SERVER_PROTOCOL"
+            | "SERVER_SOFTWARE"
+    )
 }
 
 fn validate_path(field: impl Into<String>, path: Option<&Path>) -> Result<(), ConfigError> {
@@ -9786,6 +9882,10 @@ mod tests {
             max_response_bytes = "8MiB"
             path_info = "disabled"
 
+            [vhosts.php.params]
+            APP_ENV = "production"
+            PHP_VALUE = "memory_limit=256M"
+
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
             keepalive = true
@@ -9807,6 +9907,14 @@ mod tests {
             16 * 1024 * 1024
         );
         assert_eq!(php.max_response_bytes.as_u64(), 8 * 1024 * 1024);
+        assert_eq!(
+            php.params.get("APP_ENV").map(String::as_str),
+            Some("production")
+        );
+        assert_eq!(
+            php.params.get("PHP_VALUE").map(String::as_str),
+            Some("memory_limit=256M")
+        );
         assert_eq!(php.fpm.tcp.as_deref(), Some("127.0.0.1:9000"));
         assert!(php.fpm.keepalive);
         assert_eq!(php.fpm.pool_max_idle, 4);
@@ -9890,6 +9998,63 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.pool_max_idle"), "{error}");
+    }
+
+    #[test]
+    fn rejects_php_param_that_overrides_script_filename() {
+        let root = unique_temp_path("config-php-param-protected");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.params]
+            SCRIPT_FILENAME = "/tmp/other.php"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.params"), "{error}");
+        assert!(error.contains("managed by Fluxheim"), "{error}");
+    }
+
+    #[test]
+    fn rejects_php_param_control_character_value() {
+        let root = unique_temp_path("config-php-param-control");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.params]
+            APP_ENV = "production\u000a"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("control characters"), "{error}");
     }
 
     #[test]

@@ -35,6 +35,13 @@ max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
 path_info = "disabled"
 
+[vhosts.php.params]
+# Optional administrator-controlled FastCGI params. Core CGI values such as
+# SCRIPT_FILENAME, CONTENT_LENGTH, HTTPS, and HTTP_PROXY are managed by
+# Fluxheim and cannot be overridden here.
+# APP_ENV = "production"
+# PHP_VALUE = "memory_limit=256M"
+
 [vhosts.php.fpm]
 # Use either a container/network endpoint:
 tcp = "php-fpm:9000"

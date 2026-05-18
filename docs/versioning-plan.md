@@ -850,7 +850,9 @@ Follow-up `1.3.x` PHP runtime plan:
   - True streaming request and response bodies.
   - Chunked upload disk-spooling so large uploads do not require full RAM
     buffering before php-fpm receives `CONTENT_LENGTH`.
-  - Custom FastCGI params in config.
+  - Custom FastCGI params in config. Implemented as validated
+    `[vhosts.php.params]` / `[vhosts.routes.php.params]` tables that cannot
+    override Fluxheim-managed CGI parameters.
   - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
   - Caddy-style PHP root override and optional root-symlink resolution for
     split container layouts, while keeping Fluxheim's symlink escape checks.

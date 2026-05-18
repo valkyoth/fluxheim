@@ -1414,6 +1414,10 @@ max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
 path_info = "disabled"
 
+[vhosts.routes.php.params]
+APP_ENV = "production"
+PHP_VALUE = "memory_limit=256M"
+
 [vhosts.routes.php.fpm]
 tcp = "php-fpm:9000"
 keepalive = true
@@ -1451,7 +1455,11 @@ FastCGI keep-connection reuse with an idle pool capped by
 `php.fpm.pool_max_idle`; it is off by default for conservative compatibility.
 When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
 discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
-keepalive is enabled.
+keepalive is enabled. `[vhosts.php.params]` or `[vhosts.routes.php.params]`
+adds administrator-controlled FastCGI parameters such as `APP_ENV` or
+`PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core
+CGI parameters that it owns, including `SCRIPT_FILENAME`, `CONTENT_LENGTH`,
+`HTTPS`, and `HTTP_PROXY`.
 
 `[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache
 policy for that matched route only. Routes without a cache block continue to use

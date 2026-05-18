@@ -6228,6 +6228,7 @@ async fn respond_php_request(
         .custom("REDIRECT_STATUS", "200");
     add_php_request_header_params(&mut params, session.req_header());
     add_php_host_param(&mut params, host);
+    add_php_custom_params(&mut params, &php.config.params);
     if !resolution.path_info.is_empty() {
         params = params.custom("PATH_INFO", resolution.path_info.clone());
         let path_translated = php
@@ -6432,6 +6433,16 @@ fn add_php_request_header_params(params: &mut fastcgi_client::Params<'_>, reques
 fn add_php_host_param(params: &mut fastcgi_client::Params<'_>, host: &str) {
     if safe_php_param_value(host) {
         params.insert("HTTP_HOST".into(), host.to_owned().into());
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn add_php_custom_params(
+    params: &mut fastcgi_client::Params<'_>,
+    custom: &std::collections::BTreeMap<String, String>,
+) {
+    for (name, value) in custom {
+        params.insert(name.clone().into(), value.clone().into());
     }
 }
 
