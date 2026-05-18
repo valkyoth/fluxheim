@@ -5,7 +5,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Read;
 #[cfg(feature = "proxy")]
 use std::io::Write;
-#[cfg(all(feature = "proxy", target_os = "linux"))]
+#[cfg(all(feature = "proxy", unix))]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
@@ -211,8 +211,7 @@ fn start_certificate_reload_control_socket(
         Err(error) => return Err(error.into()),
     }
 
-    let listener = std::os::unix::net::UnixListener::bind(&path)?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    let listener = bind_private_unix_listener(&path)?;
     log::info!(
         "certificate reload control socket enabled at {}",
         path.display()
@@ -242,10 +241,33 @@ fn start_certificate_reload_control_socket(
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]
+fn bind_private_unix_listener(
+    path: &Path,
+) -> Result<std::os::unix::net::UnixListener, Box<dyn Error + Send + Sync>> {
+    let address = rustix::net::SocketAddrUnix::new(path)?;
+    let socket = rustix::net::socket(
+        rustix::net::AddressFamily::UNIX,
+        rustix::net::SocketType::STREAM,
+        None,
+    )?;
+    rustix::net::bind(&socket, &address)?;
+    if let Err(error) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        let _ = std::fs::remove_file(path);
+        return Err(error.into());
+    }
+    if let Err(error) = rustix::net::listen(&socket, 128) {
+        let _ = std::fs::remove_file(path);
+        return Err(error.into());
+    }
+    Ok(std::os::unix::net::UnixListener::from(socket))
+}
+
+#[cfg(all(feature = "proxy", feature = "acme-client", unix))]
 fn handle_certificate_reload_control_request(
     stream: &mut std::os::unix::net::UnixStream,
     reloader: Option<&DownstreamCertificateReloader>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
     let mut buffer = [0_u8; 1024];
     let bytes = stream.read(&mut buffer)?;
     let command = std::str::from_utf8(&buffer[..bytes])?.trim();
@@ -583,7 +605,7 @@ fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
         options.truncate(true);
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     options.custom_flags(O_NOFOLLOW);
 
     let file = options.open(path)?;
@@ -598,8 +620,37 @@ fn open_log_file(path: &Path, append: bool) -> std::io::Result<File> {
     Ok(file)
 }
 
-#[cfg(all(feature = "proxy", target_os = "linux"))]
+#[cfg(all(feature = "proxy", any(target_os = "linux", target_os = "android")))]
 const O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(all(
+    feature = "proxy",
+    any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    )
+))]
+const O_NOFOLLOW: i32 = 0x0100;
+
+#[cfg(all(
+    feature = "proxy",
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const O_NOFOLLOW: i32 = 0;
 
 #[cfg(feature = "proxy")]
 fn write_text_log_record(

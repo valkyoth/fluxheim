@@ -1,8 +1,10 @@
 [advisories]
 ignore = [
     # Transitive through pingora-core -> prometheus 0.13.4 -> protobuf 2.28.0.
-    # Fluxheim does not parse protobuf input. Remove this when Pingora moves to
-    # prometheus >=0.14 or otherwise drops vulnerable protobuf 2.x.
+    # Pingora's PrometheusHttpApp uses TextEncoder directly and ignores Accept
+    # negotiation, so Fluxheim does not expose protobuf parsing on /metrics.
+    # Remove this when Pingora moves to prometheus >=0.14 or otherwise drops
+    # vulnerable protobuf 2.x.
     "RUSTSEC-2024-0437",
 ]
 

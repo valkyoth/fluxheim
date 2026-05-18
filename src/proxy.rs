@@ -75,6 +75,8 @@ const CACHE_ONLY_RESPONSE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg(feature = "cache")]
 type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 #[cfg(feature = "cache")]
+const PEER_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
+#[cfg(feature = "cache")]
 static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
 
 #[derive(Clone)]
@@ -3468,10 +3470,10 @@ impl ProxyHttp for FluxProxy {
             let trusted_peer = client_addr
                 .map(|addr| state.trusted_proxy(addr.ip()))
                 .unwrap_or(false);
-            ctx.trace_context = Some(crate::trace_context::context_from_traceparent(
+            ctx.trace_context = crate::trace_context::context_from_traceparent(
                 request_header_value(session.req_header(), "traceparent"),
                 trusted_peer,
-            ));
+            );
         }
         if let Some(status) = request_limit_status(
             &state.limits,
@@ -5683,6 +5685,13 @@ fn acquire_peer_fill_concurrency_permit(
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        prune_inactive_peer_fill_concurrency_counters(
+            &mut counters,
+            PEER_FILL_CONCURRENCY_MAX_KEYS,
+        );
+        if counters.len() >= PEER_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key) {
+            return None;
+        }
         counters
             .entry(key)
             .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
@@ -5704,6 +5713,17 @@ fn acquire_peer_fill_concurrency_permit(
             Err(observed) => current = observed,
         }
     }
+}
+
+#[cfg(feature = "cache")]
+fn prune_inactive_peer_fill_concurrency_counters(
+    counters: &mut HashMap<String, Arc<AtomicUsize>>,
+    max_keys: usize,
+) {
+    if counters.len() < max_keys {
+        return;
+    }
+    counters.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
 }
 
 #[cfg(feature = "cache")]
@@ -8839,23 +8859,26 @@ fn has_non_identity_transfer_encoding(request: &RequestHeader) -> bool {
 }
 
 fn approximate_request_header_bytes(request: &RequestHeader) -> usize {
-    let request_line_bytes = request.method.as_str().len()
-        + 1
-        + request.uri.to_string().len()
-        + 1
-        + "HTTP/1.1".len()
-        + 2;
+    let request_line_bytes = request
+        .method
+        .as_str()
+        .len()
+        .saturating_add(1)
+        .saturating_add(request.uri.to_string().len())
+        .saturating_add(1)
+        .saturating_add("HTTP/1.1".len())
+        .saturating_add(2);
 
-    request
-        .headers
-        .iter()
-        .fold(request_line_bytes + 2, |total, (name, value)| {
+    request.headers.iter().fold(
+        request_line_bytes.saturating_add(2),
+        |total, (name, value)| {
             total
                 .saturating_add(name.as_str().len())
                 .saturating_add(2)
                 .saturating_add(value.as_bytes().len())
                 .saturating_add(2)
-        })
+        },
+    )
 }
 
 #[cfg(test)]
@@ -8893,15 +8916,16 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, HostRoutingRejectReason, count_response_body_chunk, http_peer_for_proxy,
-        https_redirect_location, normalize_cookie_headers, redirect_authority,
-        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
-        route_rewritten_path_and_query,
+        FluxProxy, HostRoutingRejectReason, approximate_request_header_bytes,
+        count_response_body_chunk, http_peer_for_proxy, https_redirect_location,
+        normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
+        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "cache")]
     use super::{
         PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
         peer_fill_request_from_header, peer_fill_url,
+        prune_inactive_peer_fill_concurrency_counters,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -11983,6 +12007,15 @@ mod tests {
     }
 
     #[test]
+    fn request_header_byte_estimate_counts_request_line_and_headers() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/ok", None).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+
+        assert!(approximate_request_header_bytes(&request) >= "GET /ok HTTP/1.1\r\n".len());
+        assert!(approximate_request_header_bytes(&request) >= "host: example.test\r\n".len());
+    }
+
+    #[test]
     fn rejects_content_length_over_global_limit() {
         let limits = ServerLimitsConfig {
             max_request_header_bytes: ByteSize::from_bytes(512),
@@ -12276,6 +12309,25 @@ mod tests {
         let route_permit = acquire_peer_fill_concurrency_permit(route_key, 1)
             .expect("different route has separate concurrency budget");
         drop(route_permit);
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn peer_fill_concurrency_prunes_inactive_counters_at_capacity() {
+        let mut counters = std::collections::HashMap::new();
+        counters.insert(
+            "active".to_owned(),
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(1)),
+        );
+        counters.insert(
+            "inactive".to_owned(),
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        );
+
+        prune_inactive_peer_fill_concurrency_counters(&mut counters, 2);
+
+        assert!(counters.contains_key("active"));
+        assert!(!counters.contains_key("inactive"));
     }
 
     #[cfg(feature = "cache")]

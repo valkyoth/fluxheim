@@ -6,6 +6,7 @@ const SPAN_ID_HEX_LEN: usize = 16;
 const FLAGS_HEX_LEN: usize = 2;
 const TRACEPARENT_LEN: usize = 2 + 1 + TRACE_ID_HEX_LEN + 1 + SPAN_ID_HEX_LEN + 1 + FLAGS_HEX_LEN;
 const SAMPLED_FLAG: u8 = 0x01;
+const RANDOM_ID_ATTEMPTS: usize = 8;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct TraceContext {
@@ -16,13 +17,13 @@ pub struct TraceContext {
 }
 
 impl TraceContext {
-    pub fn generate() -> Self {
-        Self {
-            trace_id: non_zero_random_16(),
-            span_id: non_zero_random_8(),
+    pub fn generate() -> Option<Self> {
+        Some(Self {
+            trace_id: non_zero_random_16()?,
+            span_id: non_zero_random_8()?,
             parent_span_id: None,
             flags: 0,
-        }
+        })
     }
 
     pub fn parse_traceparent(value: &str, trusted_peer: bool) -> Option<Self> {
@@ -47,10 +48,11 @@ impl TraceContext {
         if span_id.iter().all(|byte| *byte == 0) {
             return None;
         }
+        let regenerated_span_id = non_zero_random_8()?;
         let flags = parse_hex_byte(&value[53..55])?;
         Some(Self {
             trace_id,
-            span_id: non_zero_random_8(),
+            span_id: regenerated_span_id,
             parent_span_id: Some(span_id),
             flags: if trusted_peer {
                 flags & SAMPLED_FLAG
@@ -82,28 +84,32 @@ impl TraceContext {
     }
 }
 
-pub fn context_from_traceparent(value: Option<&str>, trusted_peer: bool) -> TraceContext {
+pub fn context_from_traceparent(value: Option<&str>, trusted_peer: bool) -> Option<TraceContext> {
     value
         .and_then(|value| TraceContext::parse_traceparent(value, trusted_peer))
-        .unwrap_or_else(TraceContext::generate)
+        .or_else(TraceContext::generate)
 }
 
-fn non_zero_random_16() -> [u8; 16] {
-    loop {
+fn non_zero_random_16() -> Option<[u8; 16]> {
+    for _ in 0..RANDOM_ID_ATTEMPTS {
         let mut bytes = [0_u8; 16];
         if getrandom::fill(&mut bytes).is_ok() && bytes.iter().any(|byte| *byte != 0) {
-            return bytes;
+            return Some(bytes);
         }
     }
+    log::error!("trace context: CSPRNG unavailable after {RANDOM_ID_ATTEMPTS} attempts");
+    None
 }
 
-fn non_zero_random_8() -> [u8; 8] {
-    loop {
+fn non_zero_random_8() -> Option<[u8; 8]> {
+    for _ in 0..RANDOM_ID_ATTEMPTS {
         let mut bytes = [0_u8; 8];
         if getrandom::fill(&mut bytes).is_ok() && bytes.iter().any(|byte| *byte != 0) {
-            return bytes;
+            return Some(bytes);
         }
     }
+    log::error!("trace context: CSPRNG unavailable after {RANDOM_ID_ATTEMPTS} attempts");
+    None
 }
 
 fn parse_hex_array<const N: usize>(value: &str) -> Option<[u8; N]> {
@@ -198,7 +204,7 @@ mod tests {
 
     #[test]
     fn generates_non_zero_context() {
-        let context = TraceContext::generate();
+        let context = TraceContext::generate().unwrap();
 
         assert_ne!(context.trace_id_hex(), "00000000000000000000000000000000");
         assert_eq!(context.to_traceparent().len(), TRACEPARENT_LEN);

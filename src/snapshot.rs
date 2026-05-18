@@ -10,11 +10,36 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 const O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const O_NOFOLLOW: i32 = 0x0100;
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const O_NOFOLLOW: i32 = 0;
 
 const MAX_CURRENT_SNAPSHOT_POINTER_BYTES: u64 = 4096;
 const MAX_SNAPSHOT_FILE_BYTES: u64 = 16 * 1024 * 1024;
@@ -508,7 +533,7 @@ fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), SnapshotError> {
     {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         options.custom_flags(O_NOFOLLOW);
 
         let mut file = options.open(&temp_path).map_err(SnapshotError::Io)?;
@@ -599,7 +624,7 @@ fn open_regular_file(path: &Path) -> Result<File, SnapshotError> {
 
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     options.custom_flags(O_NOFOLLOW);
 
     let file = options.open(path).map_err(SnapshotError::Io)?;

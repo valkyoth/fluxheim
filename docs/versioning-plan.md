@@ -763,6 +763,53 @@ Exit criteria:
 - Tester release assets are produced for the official release profiles and are
   documented as diagnostics-only tools, not runtime dependencies.
 
+Follow-up `1.3.x` FIPS-capable TLS build plan:
+
+- Add an explicit FIPS-capable compile/profile line without claiming that
+  Fluxheim itself is a validated cryptographic module. The release wording must
+  say "FIPS-capable build using a validated cryptographic module" and must
+  point operators to the selected module certificate, security policy, platform
+  limits, and install procedure.
+- Add backend-specific feature gates rather than one vague `fips` switch:
+  - `tls-rustls-fips`: rustls backend using rustls' `fips` feature and the
+    AWS-LC FIPS provider path. This requires replacing current ring-specific
+    rustls helpers with provider-aware helpers, installing
+    `rustls::crypto::default_fips_provider()` at startup, and failing startup
+    if generated `ServerConfig` / `ClientConfig` objects do not report FIPS
+    status where rustls exposes that check.
+  - `tls-openssl-fips`: OpenSSL backend built and linked against OpenSSL 3.x
+    with a validated FIPS provider. Fluxheim should support an operator-supplied
+    OpenSSL config path or environment contract, require provider/config
+    diagnostics, and fail closed when FIPS-required mode cannot prove the FIPS
+    provider/default properties are active.
+  - `tls-boringssl-fips`: research-only until Fluxheim can prove it is linked
+    to a BoringCrypto validated module stream, can query the module/version, and
+    can document the exact CMVP certificate/security-policy boundary. Normal
+    BoringSSL must not be described as FIPS validated.
+  - `tls-s2n-fips`: research-only until the s2n/Pingora integration can prove
+    s2n was built with FIPS-capable AWS-LC, expose `s2n_get_fips_mode`, and
+    restrict configured s2n security policies to FIPS-approved cryptography.
+- Add a high-level `fips-required` compile feature or config guard only after
+  backend-specific checks exist. When enabled, non-FIPS TLS backends, non-FIPS
+  cipher/curve choices, non-FIPS ACME/account crypto paths, and incompatible
+  dependencies must fail validation instead of silently downgrading.
+- Add `profile-fips-rustls` and optionally `profile-fips-openssl` once CI can
+  build them reproducibly. These profiles should be separate from default,
+  cache, proxy, PHP, and load-balancer profiles so non-FIPS operators do not
+  inherit large FIPS build dependencies.
+- Add release evidence:
+  - compile logs and lockfile for the selected backend;
+  - runtime `--version --crypto` or equivalent output showing backend, provider,
+    FIPS-required setting, and module/version evidence where available;
+  - config-tester checks that prove a FIPS-required config fails with a
+    non-FIPS backend or missing provider;
+  - docs explaining that FIPS compliance also depends on OS/container base,
+    provider installation, module integrity data, runtime configuration, and the
+    operator's deployment environment.
+- Keep FIPS support incompatible with any backend or feature where we cannot
+  prove the cryptographic boundary. "Compiled with a FIPS-capable dependency"
+  is not enough for release claims.
+
 Follow-up `1.3.x` PHP runtime plan:
 
 - `1.3.3`: php-fpm hardening and production compatibility fixes.
@@ -1992,11 +2039,14 @@ cache = [...]
 load-balancer = ["proxy", ...] # transitional until the 1.5 load-balancer line
 tls = ["ingress", "dep:rustix"]
 tls-rustls = ["tls", "pingora/rustls", "dep:rustls", "rustls/ring"]
+tls-rustls-fips = ["tls", "pingora/rustls", "dep:rustls", "rustls/fips"] # planned
 acme = ["tls", ...]
 ```
 
 The contract should not change: TLS and ACME are ingress capabilities, not
-webserver capabilities.
+webserver capabilities. FIPS-capable TLS features should follow the same rule:
+they are backend-specific ingress capabilities and must not pull in unrelated
+web/cache/proxy/load-balancer behavior.
 
 Grouped builds should be exposed as Cargo feature aliases, not a custom
 `--group` flag. The initial profile aliases are `profile-core`,

@@ -13,11 +13,40 @@ use crate::config::WebConfig;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-#[cfg(all(feature = "proxy", target_os = "linux"))]
+#[cfg(all(feature = "proxy", unix))]
 use std::os::unix::fs::OpenOptionsExt;
 
-#[cfg(all(feature = "proxy", target_os = "linux"))]
+#[cfg(all(feature = "proxy", any(target_os = "linux", target_os = "android")))]
 const O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(all(
+    feature = "proxy",
+    any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    )
+))]
+const O_NOFOLLOW: i32 = 0x0100;
+
+#[cfg(all(
+    feature = "proxy",
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const O_NOFOLLOW: i32 = 0;
 
 #[cfg(feature = "proxy")]
 pub const MAX_STATIC_BUFFERED_BODY_BYTES: u64 = 64 * 1024 * 1024;
@@ -992,7 +1021,7 @@ fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
 
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     options.custom_flags(O_NOFOLLOW);
 
     let file_handle = options.open(&canonical)?;

@@ -11,11 +11,36 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use toml::value::{Datetime, Offset};
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 const O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const O_NOFOLLOW: i32 = 0x0100;
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const O_NOFOLLOW: i32 = 0;
 
 const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
@@ -7173,7 +7198,7 @@ fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigLoadE
 
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     options.custom_flags(O_NOFOLLOW);
 
     let file = options.open(path).map_err(ConfigLoadError::Read)?;

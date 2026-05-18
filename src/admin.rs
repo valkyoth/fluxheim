@@ -5,7 +5,7 @@ use std::fs;
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use arc_swap::ArcSwap;
@@ -15,7 +15,7 @@ use pingora::apps::http_app::{HttpServer, ServeHttp};
 use pingora::protocols::http::ServerSession;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::services::listening::Service;
-use sha2::{Digest, Sha256};
+use ring::hmac;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -164,6 +164,9 @@ impl AdminAuthThrottle {
         if state.global_locked_until > now {
             return Some(AdminAuthThrottleScope::Global);
         }
+        if source == AuthSource::Unknown {
+            return None;
+        }
         state.sources.get(&source).and_then(|record| {
             (record.locked_until > now).then_some(AdminAuthThrottleScope::Source)
         })
@@ -181,6 +184,20 @@ impl AdminAuthThrottle {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.prune(now, &self.config);
         state.global_failures.push_back(now);
+        if source == AuthSource::Unknown {
+            log::warn!(
+                target: "fluxheim::security",
+                "admin auth failure from indeterminate source; applying global throttle only"
+            );
+            if state.global_failures.len() >= self.config.global_failures {
+                state.global_lockouts = state.global_lockouts.saturating_add(1);
+                state.global_locked_until =
+                    now.saturating_add(lockout_secs(&self.config, state.global_lockouts));
+                state.global_failures.clear();
+                return Some(AdminAuthThrottleScope::Global);
+            }
+            return None;
+        }
         state.ensure_source_capacity(now, &self.config, source);
 
         let source_locked = {
@@ -214,6 +231,9 @@ impl AdminAuthThrottle {
             return;
         }
         let source = AuthSource::from(source);
+        if source == AuthSource::Unknown {
+            return;
+        }
         let mut state = self
             .state
             .lock()
@@ -626,29 +646,11 @@ impl AdminApp {
     fn status_response(&self) -> AdminResponse {
         let current = match self.store.current_id() {
             Ok(current) => current,
-            Err(error) => {
-                return json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!(
-                        r#"{{"status":"error","error":"{}"}}"#,
-                        json_escape(&error.to_string())
-                    )
-                    .as_bytes(),
-                );
-            }
+            Err(error) => return internal_error_response(&error),
         };
         let snapshots = match self.store.list() {
             Ok(snapshots) => snapshots.len(),
-            Err(error) => {
-                return json_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!(
-                        r#"{{"status":"error","error":"{}"}}"#,
-                        json_escape(&error.to_string())
-                    )
-                    .as_bytes(),
-                );
-            }
+            Err(error) => return internal_error_response(&error),
         };
         let current = current
             .map(|id| format!(r#""{}""#, json_escape(&id)))
@@ -678,7 +680,7 @@ impl AdminApp {
                 body.push_str("]}");
                 json_response(StatusCode::OK, body.as_bytes())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -693,7 +695,7 @@ impl AdminApp {
                 );
                 json_response(StatusCode::OK, body.as_bytes())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -744,7 +746,7 @@ impl AdminApp {
             Err(error @ SnapshotError::InvalidSnapshotMessage { .. }) => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -776,7 +778,7 @@ impl AdminApp {
             Err(response) => return response,
         };
         if let Err(error) = self.store.set_current_snapshot(&snapshot.id) {
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+            return internal_error_response(&error);
         }
 
         let body = format!(
@@ -886,7 +888,7 @@ impl AdminApp {
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -975,7 +977,7 @@ impl AdminApp {
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -1058,7 +1060,7 @@ impl AdminApp {
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -1149,7 +1151,7 @@ impl AdminApp {
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -1236,7 +1238,7 @@ impl AdminApp {
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -1326,7 +1328,7 @@ impl AdminApp {
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -1417,7 +1419,7 @@ impl AdminApp {
             Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
-            Err(error) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string()),
+            Err(error) => internal_error_response(&error),
         }
     }
 
@@ -1530,10 +1532,7 @@ impl AdminApp {
         }
 
         if let Err(error) = self.proxy.reload_from_config(&new_config) {
-            return Err(error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &error.to_string(),
-            ));
+            return Err(internal_error_response(&error));
         }
         self.current_config.store(Arc::new(new_config));
 
@@ -1703,7 +1702,7 @@ impl AdminApp {
             Err(response) => return response,
         };
         if let Err(error) = self.store.set_current_snapshot(&snapshot.id) {
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, &error.to_string());
+            return internal_error_response(&error);
         }
 
         let body = format!(
@@ -2032,11 +2031,35 @@ fn secret_parent_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
     Ok(false)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
     use std::os::unix::fs::OpenOptionsExt;
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))]
+    const O_NOFOLLOW: i32 = 0x0100;
+    #[cfg(all(
+        unix,
+        not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly"
+        ))
+    ))]
+    const O_NOFOLLOW: i32 = 0;
 
     fs::OpenOptions::new()
         .read(true)
@@ -2051,7 +2074,7 @@ fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Sen
         })
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(unix))]
 fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Send + Sync>> {
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         format!(
@@ -2091,7 +2114,22 @@ fn constant_time_eq(candidate: &[u8], token: &AdminToken) -> bool {
 }
 
 fn digest_admin_token(token: &[u8]) -> [u8; 32] {
-    Sha256::digest(token).into()
+    let key = hmac::Key::new(hmac::HMAC_SHA256, token_mac_key());
+    let tag = hmac::sign(&key, token);
+    let mut digest = [0_u8; 32];
+    digest.copy_from_slice(tag.as_ref());
+    digest
+}
+
+fn token_mac_key() -> &'static [u8; 32] {
+    static TOKEN_MAC_KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
+    TOKEN_MAC_KEY.get_or_init(|| {
+        let mut key = [0_u8; 32];
+        if let Err(error) = getrandom::fill(&mut key) {
+            log::error!("admin token MAC key generation failed: {error}");
+        }
+        Zeroizing::new(key)
+    })
 }
 
 fn json_response(status: StatusCode, body: &[u8]) -> AdminResponse {
@@ -2124,6 +2162,14 @@ fn error_response(status: StatusCode, error: &str) -> AdminResponse {
     json_response(
         status,
         format!(r#"{{"status":"error","error":"{}"}}"#, json_escape(&error)).as_bytes(),
+    )
+}
+
+fn internal_error_response(error: &impl std::fmt::Display) -> AdminResponse {
+    log::error!("admin internal error: {error}");
+    json_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        br#"{"status":"error","error":"internal_error"}"#,
     )
 }
 
@@ -3112,6 +3158,23 @@ mod tests {
             Some("192.0.2.22".parse().unwrap()),
         );
         assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn admin_auth_throttle_does_not_source_lock_indeterminate_clients() {
+        let throttle = AdminAuthThrottle::new(AdminAuthThrottleConfig {
+            enabled: true,
+            window_secs: 60,
+            per_source_failures: 2,
+            global_failures: 100,
+            base_lockout_secs: 60,
+            max_lockout_secs: 60,
+            max_sources: 16,
+        });
+
+        assert_eq!(throttle.record_failure(None), None);
+        assert_eq!(throttle.record_failure(None), None);
+        assert_eq!(throttle.pre_auth_check(None), None);
     }
 
     #[test]

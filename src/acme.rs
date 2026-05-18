@@ -28,6 +28,34 @@ const MAX_ACCOUNT_CREDENTIALS_BYTES: u64 = 32 * 1024;
 const MAX_CERTIFICATE_CHAIN_BYTES: usize = 1024 * 1024;
 const MAX_PRIVATE_KEY_BYTES: usize = 128 * 1024;
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const UNIX_O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const UNIX_O_NOFOLLOW: i32 = 0x0100;
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const UNIX_O_NOFOLLOW: i32 = 0;
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AcmeRenewalTarget {
     pub vhost_name: String,
@@ -2007,9 +2035,8 @@ fn write_new_file(
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        const O_NOFOLLOW: i32 = 0o400000;
         options.mode(mode);
-        options.custom_flags(O_NOFOLLOW);
+        options.custom_flags(UNIX_O_NOFOLLOW);
     }
 
     let mut file = options
@@ -2185,11 +2212,9 @@ fn sync_account_directory(path: &Path) -> Result<(), AcmeAccountStoreError> {
 fn open_regular_certificate_file(path: &Path) -> io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
-    const O_NOFOLLOW: i32 = 0o400000;
-
     std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(O_NOFOLLOW)
+        .custom_flags(UNIX_O_NOFOLLOW)
         .open(path)
 }
 
@@ -2210,11 +2235,9 @@ fn open_regular_certificate_file(path: &Path) -> io::Result<std::fs::File> {
 fn open_regular_account_credentials_file(path: &Path) -> io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
-    const O_NOFOLLOW: i32 = 0o400000;
-
     std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(O_NOFOLLOW)
+        .custom_flags(UNIX_O_NOFOLLOW)
         .open(path)
 }
 
@@ -2386,11 +2409,9 @@ fn read_eab_secret_file(
 fn open_regular_http_01_challenge_file(path: &Path) -> io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
-    const O_NOFOLLOW: i32 = 0o400000;
-
     std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(O_NOFOLLOW)
+        .custom_flags(UNIX_O_NOFOLLOW)
         .open(path)
 }
 
@@ -2415,11 +2436,9 @@ fn open_regular_eab_secret_file(
 ) -> Result<std::fs::File, AcmeSecretLoadError> {
     use std::os::unix::fs::OpenOptionsExt;
 
-    const O_NOFOLLOW: i32 = 0o400000;
-
     std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(O_NOFOLLOW)
+        .custom_flags(UNIX_O_NOFOLLOW)
         .open(path)
         .map_err(|error| eab_file_error(issuer, field, path, error))
 }

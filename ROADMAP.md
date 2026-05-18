@@ -584,6 +584,15 @@ without parsing text fixtures for every module.
      certificate or a default-vhost static/ACME certificate source.
    - Per-vhost/SNI downstream certificate selection. Implemented for the
      default rustls backend and callback-capable TLS backends.
+   - Future FIPS-capable TLS builds should be backend-specific and evidence
+     driven, not a generic marketing flag. Planned direction:
+     `tls-rustls-fips` uses rustls' AWS-LC FIPS provider path and runtime FIPS
+     checks; `tls-openssl-fips` relies on OpenSSL 3.x with a validated FIPS
+     provider plus provider/default-property verification; BoringSSL and s2n
+     FIPS modes remain research until Fluxheim can prove the exact validated
+     module boundary and runtime status. FIPS profiles must stay separate from
+     default builds and fail closed when the configured backend/provider cannot
+     prove FIPS-required operation.
   - ACME account/order/challenge runtime. Implemented as one-shot and
     background `acme-client` paths for HTTP-01.
   - Background renewal queue service. Implemented for due-only checks on the
