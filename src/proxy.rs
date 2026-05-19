@@ -360,6 +360,14 @@ impl FluxProxy {
             cache_phase,
             cache_lookup_duration_ms,
             cache_lock_wait_duration_ms,
+            #[cfg(feature = "php-fpm")]
+            php_runtime: ctx.php_outcome.map(|_| "php-fpm".to_owned()),
+            #[cfg(not(feature = "php-fpm"))]
+            php_runtime: None,
+            #[cfg(feature = "php-fpm")]
+            php_outcome: ctx.php_outcome.map(str::to_owned),
+            #[cfg(not(feature = "php-fpm"))]
+            php_outcome: None,
         });
     }
 
@@ -3596,6 +3604,8 @@ pub struct RequestContext {
     cache_range: Option<CacheRangeRequest>,
     #[cfg(feature = "cache")]
     revalidation_304_headers: Option<Revalidation304Headers>,
+    #[cfg(all(feature = "php-fpm", feature = "otel-otlp"))]
+    php_outcome: Option<&'static str>,
 }
 
 #[cfg(feature = "cache")]
@@ -6246,12 +6256,21 @@ enum PhpResolveOutcome {
 
 #[cfg(feature = "php-fpm")]
 fn record_php_request_metrics(
+    ctx: &mut RequestContext,
     vhost: &RuntimeVhost,
     method: &str,
     status: Option<u16>,
-    outcome: &str,
+    outcome: &'static str,
     started_at: Instant,
 ) {
+    #[cfg(feature = "otel-otlp")]
+    {
+        ctx.php_outcome = Some(outcome);
+    }
+    #[cfg(not(feature = "otel-otlp"))]
+    {
+        let _ = ctx;
+    }
     #[cfg(feature = "metrics")]
     crate::metrics::record_php_request(
         vhost.name.as_str(),
@@ -6267,6 +6286,7 @@ fn record_php_request_metrics(
     }
 }
 
+#[cfg(feature = "php-fpm")]
 async fn respond_php_request(
     session: &mut Session,
     ctx: &mut RequestContext,
@@ -6292,25 +6312,25 @@ async fn respond_php_request(
         PhpResolveOutcome::Execute(resolution) => resolution,
         PhpResolveOutcome::RedirectDirectorySlash => {
             respond_directory_slash_redirect(session, response_headers).await?;
-            record_php_request_metrics(vhost, &method, Some(308), "redirect", started_at);
+            record_php_request_metrics(ctx, vhost, &method, Some(308), "redirect", started_at);
             return Ok(true);
         }
         PhpResolveOutcome::Decline => {
-            record_php_request_metrics(vhost, &method, None, "declined", started_at);
+            record_php_request_metrics(ctx, vhost, &method, None, "declined", started_at);
             return Ok(false);
         }
         PhpResolveOutcome::Forbidden => {
             session
                 .respond_error_with_body(403, Bytes::from_static(b"forbidden"))
                 .await?;
-            record_php_request_metrics(vhost, &method, Some(403), "forbidden", started_at);
+            record_php_request_metrics(ctx, vhost, &method, Some(403), "forbidden", started_at);
             return Ok(true);
         }
         PhpResolveOutcome::NotFound => {
             session
                 .respond_error_with_body(404, Bytes::from_static(b"not found"))
                 .await?;
-            record_php_request_metrics(vhost, &method, Some(404), "not_found", started_at);
+            record_php_request_metrics(ctx, vhost, &method, Some(404), "not_found", started_at);
             return Ok(true);
         }
     };
@@ -6391,6 +6411,7 @@ async fn respond_php_request(
         Ok(output) => output,
         Err(error) => {
             record_php_request_metrics(
+                ctx,
                 vhost,
                 &method,
                 Some(502),
@@ -6428,7 +6449,14 @@ async fn respond_php_request(
     ) {
         Ok(parsed) => parsed,
         Err(error) => {
-            record_php_request_metrics(vhost, &method, Some(502), "invalid_response", started_at);
+            record_php_request_metrics(
+                ctx,
+                vhost,
+                &method,
+                Some(502),
+                "invalid_response",
+                started_at,
+            );
             return Err(Error::because(
                 ErrorType::HTTPStatus(502),
                 "php-fpm response was invalid",
@@ -6451,6 +6479,7 @@ async fn respond_php_request(
                     respond_php_static_offload(session, ctx, php, &file, &method, response_headers)
                         .await?;
                 record_php_request_metrics(
+                    ctx,
                     vhost,
                     &method,
                     Some(status),
@@ -6471,6 +6500,7 @@ async fn respond_php_request(
                     _ => 502,
                 };
                 record_php_request_metrics(
+                    ctx,
                     vhost,
                     &method,
                     Some(status),
@@ -6496,7 +6526,7 @@ async fn respond_php_request(
         if !sent_custom_page {
             session.respond_error(status).await?;
         }
-        record_php_request_metrics(vhost, &method, Some(status), "intercepted", started_at);
+        record_php_request_metrics(ctx, vhost, &method, Some(status), "intercepted", started_at);
         ctx.response_body_bytes_seen = 0;
         return Ok(true);
     }
@@ -6516,6 +6546,7 @@ async fn respond_php_request(
             .await?;
     }
     record_php_request_metrics(
+        ctx,
         vhost,
         &method,
         Some(response_status),
@@ -7290,6 +7321,7 @@ fn php_stderr_metric_state(stderr: &[u8], max_bytes: usize) -> &'static str {
     }
 }
 
+#[cfg(feature = "php-fpm")]
 fn sanitized_php_stderr(stderr: &[u8], max_bytes: usize) -> String {
     let max_bytes = max_bytes.max(1);
     let truncated = stderr.len() > max_bytes;

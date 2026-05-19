@@ -927,7 +927,9 @@ Follow-up `1.3.x` PHP runtime plan:
     `fluxheim_php_stderr_events_total`,
     `fluxheim_php_fpm_retries_total`,
     `fluxheim_php_fpm_pool_idle_connections`, and
-    `fluxheim_php_fpm_pool_events_total`.
+    `fluxheim_php_fpm_pool_events_total`. OTLP request spans include
+    low-cardinality `fluxheim.php.runtime` and `fluxheim.php.outcome`
+    attributes for PHP-handled requests when `otel-otlp` is enabled.
   - FastCGI cache-specific convenience config on top of Fluxheim's cache
     engine.
   - FastCGI cache semantics compatible with common NGINX deployments:

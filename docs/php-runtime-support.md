@@ -253,8 +253,10 @@ Planned `1.3.3` php-fpm hardening:
   `fluxheim_php_requests_total`, `fluxheim_php_request_duration_seconds`,
   `fluxheim_php_stderr_events_total`, `fluxheim_php_fpm_retries_total`,
   `fluxheim_php_fpm_pool_idle_connections`, and
-  `fluxheim_php_fpm_pool_events_total`; OpenTelemetry export follows the
-  existing metrics exporter path when enabled.
+  `fluxheim_php_fpm_pool_events_total`; OpenTelemetry metrics export follows the
+  existing metrics exporter path when enabled. OTLP request spans include
+  low-cardinality `fluxheim.php.runtime` and `fluxheim.php.outcome` attributes
+  for PHP-handled requests when `otel-otlp` is enabled.
 - FastCGI cache-specific convenience config.
   Initial convenience preset implemented as `cache.preset = "wordpress"`,
   expanding common path, cookie-prefix, query, and authorization bypasses.
