@@ -237,11 +237,15 @@ Planned `1.3.3` php-fpm hardening:
 - STDERR capture/truncation/severity controls and fatal-error matching.
   Initial controls implemented as `php.stderr_log` and
   `php.stderr_max_bytes`.
-- php-fpm upstream load balancing and failover.
+- Initial php-fpm TCP upstream list and failover. Implemented as
+  `php.fpm.tcp_upstreams` with round-robin endpoint selection and safe-method
+  failover on connection failures and connect timeouts.
 - Retry policy for connection failures and connect timeouts on configured safe
   methods. Implemented as `php.fpm.max_retries` and
-  `php.fpm.retry_methods`, defaulting to no retries; request timeouts are not
-  retried to avoid duplicating PHP side effects. Broader status/invalid-header
+  `php.fpm.retry_methods`; request timeouts are not retried to avoid
+  duplicating PHP side effects. With `tcp_upstreams`, Fluxheim tries enough
+  endpoints to cover the configured list for safe methods even when
+  `max_retries = 0`. Broader status/invalid-header
   retry policy remains future work.
 - PHP-specific Prometheus metrics for bounded request totals, durations, STDERR,
   retries, and keepalive pool state. Implemented as

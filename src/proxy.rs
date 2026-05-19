@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 #[cfg(feature = "cache")]
 use std::sync::OnceLock;
-#[cfg(feature = "cache")]
+#[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::time::Duration;
@@ -2767,7 +2767,8 @@ struct RuntimePhp {
     fpm_root: std::path::PathBuf,
     files: StaticFileServer,
     error_pages: Vec<RuntimeErrorPage>,
-    pool: Option<Arc<PhpFpmPool>>,
+    fpm_pools: Vec<Arc<PhpFpmPool>>,
+    fpm_next: Arc<AtomicUsize>,
 }
 
 #[cfg(feature = "php-fpm")]
@@ -2795,7 +2796,7 @@ impl std::fmt::Debug for PhpFpmPool {
 }
 
 #[cfg(feature = "php-fpm")]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 enum PhpFpmEndpoint {
     Tcp(String),
     #[cfg(unix)]
@@ -2918,8 +2919,10 @@ impl RuntimePhp {
             .iter()
             .map(|error_page| RuntimeErrorPage::from_config(&scope, error_page))
             .collect::<io::Result<Vec<_>>>()?;
+        let fpm_pools = php_fpm_keepalive_pools_from_config(&config.fpm, metric_vhost, metric_pool);
         Ok(Some(Self {
-            pool: PhpFpmPool::from_config(&config.fpm, metric_vhost, metric_pool).map(Arc::new),
+            fpm_pools,
+            fpm_next: Arc::new(AtomicUsize::new(0)),
             config: config.clone(),
             root,
             fpm_root,
@@ -2934,38 +2937,70 @@ impl RuntimePhp {
 }
 
 #[cfg(feature = "php-fpm")]
+fn php_fpm_endpoints_from_config(config: &crate::config::PhpFpmConfig) -> Vec<PhpFpmEndpoint> {
+    if !config.tcp_upstreams.is_empty() {
+        return config
+            .tcp_upstreams
+            .iter()
+            .cloned()
+            .map(PhpFpmEndpoint::Tcp)
+            .collect();
+    }
+    if let Some(address) = config.tcp.as_deref() {
+        return vec![PhpFpmEndpoint::Tcp(address.to_owned())];
+    }
+    if let Some(socket) = config.socket.as_deref() {
+        #[cfg(unix)]
+        {
+            return vec![PhpFpmEndpoint::Unix(socket.to_path_buf())];
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = socket;
+            return Vec::new();
+        }
+    }
+    Vec::new()
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_keepalive_pools_from_config(
+    config: &crate::config::PhpFpmConfig,
+    metric_vhost: &str,
+    metric_pool: &str,
+) -> Vec<Arc<PhpFpmPool>> {
+    if !config.keepalive {
+        return Vec::new();
+    }
+    php_fpm_endpoints_from_config(config)
+        .into_iter()
+        .map(|endpoint| {
+            Arc::new(PhpFpmPool::from_endpoint(
+                endpoint,
+                config,
+                metric_vhost,
+                metric_pool,
+            ))
+        })
+        .collect()
+}
+
+#[cfg(feature = "php-fpm")]
 impl PhpFpmPool {
-    fn from_config(
+    fn from_endpoint(
+        endpoint: PhpFpmEndpoint,
         config: &crate::config::PhpFpmConfig,
         metric_vhost: &str,
         metric_pool: &str,
-    ) -> Option<Self> {
-        if !config.keepalive {
-            return None;
-        }
-        let endpoint = if let Some(address) = config.tcp.as_deref() {
-            PhpFpmEndpoint::Tcp(address.to_owned())
-        } else if let Some(socket) = config.socket.as_deref() {
-            #[cfg(unix)]
-            {
-                PhpFpmEndpoint::Unix(socket.to_path_buf())
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = socket;
-                return None;
-            }
-        } else {
-            return None;
-        };
-        Some(Self {
+    ) -> Self {
+        Self {
             endpoint,
             metric_vhost: metric_vhost.to_owned(),
             metric_pool: metric_pool.to_owned(),
             max_idle: config.pool_max_idle,
             idle_timeout: Duration::from_secs(config.idle_timeout_secs),
             idle: tokio::sync::Mutex::new(Vec::new()),
-        })
+        }
     }
 
     fn record_pool_event(&self, event: &str) {
@@ -6344,8 +6379,7 @@ async fn respond_php_request(
 
     let timeout = std::time::Duration::from_secs(php.config.request_timeout_secs);
     let output = match execute_php_fpm(
-        php.pool.as_deref(),
-        &php.config.fpm,
+        php,
         params,
         request_body,
         timeout,
@@ -6906,8 +6940,7 @@ fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
 
 #[cfg(feature = "php-fpm")]
 async fn execute_php_fpm(
-    pool: Option<&PhpFpmPool>,
-    fpm: &crate::config::PhpFpmConfig,
+    php: &RuntimePhp,
     params: fastcgi_client::Params<'_>,
     body: Vec<u8>,
     timeout: std::time::Duration,
@@ -6917,16 +6950,28 @@ async fn execute_php_fpm(
     #[cfg(not(feature = "metrics"))]
     let _ = vhost_name;
 
+    let fpm = &php.config.fpm;
+    let endpoints = php_fpm_endpoints_from_config(fpm);
+    if endpoints.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php-fpm socket, tcp, or tcp_upstreams is required",
+        ));
+    }
+
     let connect_timeout = fpm
         .connect_timeout_secs
         .map(Duration::from_secs)
         .unwrap_or(timeout);
-    let max_retries = php_fpm_retry_attempts(fpm, method);
-    let mut attempts = 0;
+    let max_retries = php_fpm_retry_attempts_for_endpoint_count(fpm, method, endpoints.len());
+    let start_index = php_fpm_select_endpoint_index(php, endpoints.len());
+    let mut attempts = 0_u8;
     loop {
+        let endpoint_index = (start_index + usize::from(attempts)) % endpoints.len();
+        let pool = php.fpm_pools.get(endpoint_index).map(Arc::as_ref);
         let result = execute_php_fpm_once(
             pool,
-            fpm,
+            &endpoints[endpoint_index],
             params.clone(),
             body.clone(),
             connect_timeout,
@@ -6947,9 +6992,17 @@ async fn execute_php_fpm(
 }
 
 #[cfg(feature = "php-fpm")]
+fn php_fpm_select_endpoint_index(php: &RuntimePhp, endpoint_count: usize) -> usize {
+    if endpoint_count <= 1 {
+        return 0;
+    }
+    php.fpm_next.fetch_add(1, Ordering::Relaxed) % endpoint_count
+}
+
+#[cfg(feature = "php-fpm")]
 async fn execute_php_fpm_once(
     pool: Option<&PhpFpmPool>,
-    fpm: &crate::config::PhpFpmConfig,
+    endpoint: &PhpFpmEndpoint,
     params: fastcgi_client::Params<'_>,
     body: Vec<u8>,
     connect_timeout: Duration,
@@ -6958,14 +7011,19 @@ async fn execute_php_fpm_once(
     if let Some(pool) = pool {
         return pool.execute(params, body, connect_timeout, timeout).await;
     }
-    if let Some(address) = fpm.tcp.as_deref() {
-        let stream = tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(address))
-            .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm connect timed out"))??;
-        execute_php_fpm_stream(stream, params, body, timeout).await
-    } else if let Some(socket) = fpm.socket.as_deref() {
+
+    match endpoint {
+        PhpFpmEndpoint::Tcp(address) => {
+            let stream =
+                tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(address))
+                    .await
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm connect timed out")
+                    })??;
+            execute_php_fpm_stream(stream, params, body, timeout).await
+        }
         #[cfg(unix)]
-        {
+        PhpFpmEndpoint::Unix(socket) => {
             let stream =
                 tokio::time::timeout(connect_timeout, tokio::net::UnixStream::connect(socket))
                     .await
@@ -6974,33 +7032,32 @@ async fn execute_php_fpm_once(
                     })??;
             execute_php_fpm_stream(stream, params, body, timeout).await
         }
-        #[cfg(not(unix))]
-        {
-            let _ = socket;
-            Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "php-fpm Unix sockets are only supported on Unix",
-            ))
-        }
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "php-fpm socket or tcp is required",
-        ))
     }
 }
 
 #[cfg(feature = "php-fpm")]
+fn php_fpm_retry_method_allowed(fpm: &crate::config::PhpFpmConfig, method: &str) -> bool {
+    fpm.retry_methods
+        .iter()
+        .any(|retry_method| retry_method.eq_ignore_ascii_case(method))
+}
+
+#[cfg(all(feature = "php-fpm", test))]
 fn php_fpm_retry_attempts(fpm: &crate::config::PhpFpmConfig, method: &str) -> u8 {
-    if fpm.max_retries == 0
-        || !fpm
-            .retry_methods
-            .iter()
-            .any(|retry_method| retry_method.eq_ignore_ascii_case(method))
-    {
+    php_fpm_retry_attempts_for_endpoint_count(fpm, method, 1)
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_retry_attempts_for_endpoint_count(
+    fpm: &crate::config::PhpFpmConfig,
+    method: &str,
+    endpoint_count: usize,
+) -> u8 {
+    if !php_fpm_retry_method_allowed(fpm, method) {
         return 0;
     }
-    fpm.max_retries
+    let failover_retries = endpoint_count.saturating_sub(1).min(usize::from(u8::MAX)) as u8;
+    fpm.max_retries.max(failover_retries)
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9834,6 +9891,10 @@ mod tests {
     use std::fs;
     #[cfg(feature = "php-fpm")]
     use std::io;
+    #[cfg(feature = "php-fpm")]
+    use std::sync::Arc;
+    #[cfg(feature = "php-fpm")]
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
     use bytes::Bytes;
@@ -9882,8 +9943,9 @@ mod tests {
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         apply_php_x_accel_expires, directory_slash_redirect_location,
-        ignore_php_origin_cache_headers, parse_php_response, php_fpm_error_outcome,
-        php_fpm_path_translated, php_fpm_retry_attempts, php_fpm_retryable_error,
+        ignore_php_origin_cache_headers, parse_php_response, php_fpm_endpoints_from_config,
+        php_fpm_error_outcome, php_fpm_path_translated, php_fpm_retry_attempts,
+        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
         php_fpm_script_filename, php_header_param_name, php_script_name_denied,
         php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
         php_stderr_metric_state, php_x_accel_expires_ttl_secs, resolve_php_script,
@@ -9983,7 +10045,8 @@ mod tests {
             fpm_root: root.canonicalize().unwrap(),
             files,
             error_pages: Vec::new(),
-            pool: None,
+            fpm_pools: Vec::new(),
+            fpm_next: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -10384,6 +10447,39 @@ mod tests {
         assert_eq!(php_fpm_retry_attempts(&fpm, "POST"), 0);
         fpm.max_retries = 0;
         assert_eq!(php_fpm_retry_attempts(&fpm, "GET"), 0);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_endpoints_include_tcp_upstreams() {
+        let fpm = crate::config::PhpFpmConfig {
+            tcp_upstreams: vec!["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()],
+            ..crate::config::PhpFpmConfig::default()
+        };
+
+        assert_eq!(
+            php_fpm_endpoints_from_config(&fpm),
+            vec![
+                super::PhpFpmEndpoint::Tcp("127.0.0.1:9000".to_owned()),
+                super::PhpFpmEndpoint::Tcp("127.0.0.1:9001".to_owned()),
+            ]
+        );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_failover_attempts_cover_safe_tcp_upstreams() {
+        let fpm = crate::config::PhpFpmConfig {
+            max_retries: 0,
+            retry_methods: vec!["GET".to_owned(), "HEAD".to_owned()],
+            ..crate::config::PhpFpmConfig::default()
+        };
+
+        assert_eq!(php_fpm_retry_attempts_for_endpoint_count(&fpm, "GET", 3), 2);
+        assert_eq!(
+            php_fpm_retry_attempts_for_endpoint_count(&fpm, "POST", 3),
+            0
+        );
     }
 
     #[cfg(feature = "php-fpm")]

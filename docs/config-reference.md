@@ -1456,6 +1456,8 @@ PHP_VALUE = "memory_limit=256M"
 
 [vhosts.routes.php.fpm]
 tcp = "php-fpm:9000"
+# Or list multiple TCP endpoints for simple safe-method failover:
+# tcp_upstreams = ["php-fpm-a:9000", "php-fpm-b:9000"]
 keepalive = true
 pool_max_idle = 8
 idle_timeout_secs = 60
@@ -1554,12 +1556,17 @@ canonical `308` redirect before executing the script, for example `/blog` to
 memory-constrained or high-assurance edge nodes. `php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by
 `php.fpm.pool_max_idle`; it is off by default for conservative compatibility.
+Use either `php.fpm.socket`, `php.fpm.tcp`, or `php.fpm.tcp_upstreams`; the
+endpoint modes are mutually exclusive. `tcp_upstreams` enables round-robin TCP
+selection and conservative failover across configured php-fpm backends.
 When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
 discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
 keepalive is enabled. `php.fpm.max_retries` defaults to `0`; when set,
 Fluxheim retries only connection failures and connect timeouts for configured
-`php.fpm.retry_methods` before php-fpm has returned a response. Request
-timeouts are not retried to avoid duplicating side effects.
+`php.fpm.retry_methods` before php-fpm has returned a response. With
+`tcp_upstreams`, Fluxheim tries enough endpoints to cover the configured list
+for safe methods even when `max_retries = 0`. Request timeouts are not retried
+to avoid duplicating side effects.
 `[vhosts.php.params]` or `[vhosts.routes.php.params]`
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core

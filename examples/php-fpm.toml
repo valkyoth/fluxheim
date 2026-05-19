@@ -72,6 +72,8 @@ path_info = "disabled"
 [vhosts.php.fpm]
 # Use either a container/network endpoint:
 tcp = "php-fpm:9000"
+# Or list multiple TCP endpoints for simple safe-method failover:
+# tcp_upstreams = ["php-fpm-a:9000", "php-fpm-b:9000"]
 # Or a local Unix socket with hardened ownership/permissions:
 # socket = "/run/php/php-fpm.sock"
 # Optional FastCGI keep-connection pool. Leave disabled for the most

@@ -3891,6 +3891,7 @@ impl Default for CacheConfig {
 }
 
 impl CacheConfig {
+    #[cfg(any(feature = "cache", test))]
     pub(crate) fn with_presets(&self) -> Self {
         let mut config = self.clone();
         config.apply_preset_defaults();
@@ -5618,6 +5619,8 @@ pub struct PhpFpmConfig {
     #[serde(default)]
     pub tcp: Option<String>,
     #[serde(default)]
+    pub tcp_upstreams: Vec<String>,
+    #[serde(default)]
     pub keepalive: bool,
     #[serde(default = "default_php_fpm_pool_max_idle")]
     pub pool_max_idle: usize,
@@ -5652,20 +5655,23 @@ impl PhpFpmConfig {
     }
 
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
-        match (&self.socket, &self.tcp) {
-            (Some(_), Some(_)) => {
+        let endpoint_count = usize::from(self.socket.is_some())
+            + usize::from(self.tcp.is_some())
+            + usize::from(!self.tcp_upstreams.is_empty());
+        match endpoint_count {
+            1 => {}
+            0 => {
                 return Err(ConfigError::InvalidPhpConfig {
                     field: "php.fpm",
-                    reason: "configure either socket or tcp, not both",
+                    reason: "enabled PHP requires php-fpm socket, tcp, or tcp_upstreams",
                 });
             }
-            (None, None) => {
+            _ => {
                 return Err(ConfigError::InvalidPhpConfig {
                     field: "php.fpm",
-                    reason: "enabled PHP requires php-fpm socket or tcp",
+                    reason: "configure only one of socket, tcp, or tcp_upstreams",
                 });
             }
-            _ => {}
         }
 
         if let Some(socket) = &self.socket {
@@ -5686,6 +5692,14 @@ impl PhpFpmConfig {
                 field: "php.fpm.tcp",
                 reason: "must be host:port or ip:port",
             });
+        }
+        for tcp in &self.tcp_upstreams {
+            if !valid_authority(tcp) {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.tcp_upstreams",
+                    reason: "entries must be host:port or ip:port",
+                });
+            }
         }
 
         validate_optional_timeout_secs("php.fpm.connect_timeout_secs", self.connect_timeout_secs)?;
@@ -10332,11 +10346,72 @@ mod tests {
             Some("memory_limit=256M")
         );
         assert_eq!(php.fpm.tcp.as_deref(), Some("127.0.0.1:9000"));
+        assert!(php.fpm.tcp_upstreams.is_empty());
         assert!(php.fpm.keepalive);
         assert_eq!(php.fpm.pool_max_idle, 4);
         assert_eq!(php.fpm.idle_timeout_secs, 45);
         assert_eq!(php.fpm.max_retries, 2);
         assert_eq!(php.fpm.retry_methods, ["GET", "HEAD"]);
+    }
+
+    #[test]
+    fn parses_php_fpm_tcp_upstreams() {
+        let root = unique_temp_path("config-php-fpm-upstreams-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp_upstreams = ["127.0.0.1:9000", "127.0.0.1:9001"]
+            "#,
+            test_process_config_toml("config-php-fpm-upstreams-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(
+            config.vhosts[0].php.fpm.tcp_upstreams,
+            ["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()]
+        );
+    }
+
+    #[test]
+    fn rejects_mixed_php_fpm_endpoint_modes() {
+        let root = unique_temp_path("config-php-fpm-mixed-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            tcp_upstreams = ["127.0.0.1:9001"]
+            "#,
+            test_process_config_toml("config-php-fpm-mixed-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("socket, tcp, or tcp_upstreams"), "{error}");
     }
 
     #[test]
@@ -10612,7 +10687,10 @@ mod tests {
         .unwrap();
 
         let error = config.validate().unwrap_err().to_string();
-        assert!(error.contains("configure either socket or tcp"), "{error}");
+        assert!(
+            error.contains("configure only one of socket, tcp, or tcp_upstreams"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -896,7 +896,9 @@ Follow-up `1.3.x` PHP runtime plan:
     a response. Implemented as `php.fpm.max_retries` and
     `php.fpm.retry_methods`, defaulting to no retries and excluding request
     timeouts to avoid duplicated side effects. Broader status and invalid-header
-    retry controls remain future work.
+    retry controls remain future work. With `tcp_upstreams`, Fluxheim tries
+    enough endpoints to cover the configured list for safe methods even when
+    `max_retries = 0`.
   - PHP response-header policy controls matching common NGINX migrations:
     hide/pass selected backend headers, ignore selected cache-control headers,
     and reject conflicting `Content-Length` / transfer headers.
@@ -909,7 +911,9 @@ Follow-up `1.3.x` PHP runtime plan:
     retry/failover.
     Initial controls implemented as `php.stderr_log` and
     `php.stderr_max_bytes`.
-  - php-fpm upstream load balancing and failover.
+  - Initial php-fpm TCP upstream list and failover. Implemented as
+    `php.fpm.tcp_upstreams` with round-robin selection and safe-method
+    failover on connection failures and connect timeouts.
   - FPM upstream retry policy aligned with NGINX/Apache/Caddy behavior:
     connect error, timeout, invalid header, selected 5xx statuses, max tries,
     total retry timeout, and retry-safe method matching.

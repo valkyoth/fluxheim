@@ -59,6 +59,9 @@ behavior when the change improves security or project direction.
 - Added `php.ignore_origin_cache_headers` for NGINX-style migrations that need
   Fluxheim to drop PHP-generated `Cache-Control`, `Expires`, and `Pragma`
   before applying response policy.
+- Added `php.fpm.tcp_upstreams` for multiple TCP php-fpm backends with
+  round-robin selection and safe-method failover on connection failures and
+  connect timeouts.
 - Added opt-in php-fpm retry controls with `php.fpm.max_retries` and
   `php.fpm.retry_methods` for connection failures and connect timeouts before
   php-fpm returns a response; request timeouts are not retried.
