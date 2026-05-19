@@ -1443,6 +1443,7 @@ max_response_bytes = "64MiB"
 max_response_header_bytes = "64KiB"
 stderr_log = true
 stderr_max_bytes = "2KiB"
+stderr_failure_patterns = ["PHP Fatal error:"]
 hide_response_headers = ["x-powered-by"]
 ignore_origin_cache_headers = false
 intercept_error_statuses = []
@@ -1551,6 +1552,11 @@ stdin.
 `php.stderr_log` controls whether FastCGI STDERR is written to Fluxheim logs.
 `php.stderr_max_bytes` bounds each logged STDERR message and defaults to `2KiB`;
 larger output is sanitized and marked as truncated.
+`php.stderr_failure_patterns` is a default-empty list of literal ASCII-safe
+substrings. If any configured pattern appears in FastCGI STDERR, Fluxheim treats
+the PHP response as invalid. With `php.fpm.retry_invalid_response = true`, this
+can fail over safe methods to another php-fpm upstream for fatal PHP runtime
+failures such as `PHP Fatal error:`.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.

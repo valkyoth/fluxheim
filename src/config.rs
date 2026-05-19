@@ -5440,6 +5440,8 @@ pub struct PhpConfig {
     #[serde(default = "default_php_stderr_max_bytes")]
     pub stderr_max_bytes: ByteSize,
     #[serde(default)]
+    pub stderr_failure_patterns: Vec<String>,
+    #[serde(default)]
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
     pub ignore_origin_cache_headers: bool,
@@ -5477,6 +5479,7 @@ impl Default for PhpConfig {
             pass_request_body: true,
             stderr_log: true,
             stderr_max_bytes: default_php_stderr_max_bytes(),
+            stderr_failure_patterns: Vec::new(),
             hide_response_headers: Vec::new(),
             ignore_origin_cache_headers: false,
             intercept_error_statuses: Vec::new(),
@@ -5664,6 +5667,7 @@ impl PhpConfig {
                 reason: "must be less than or equal to 1MiB",
             });
         }
+        validate_php_stderr_failure_patterns(&self.stderr_failure_patterns)?;
         for header in &self.hide_response_headers {
             validate_header_name("php.hide_response_headers", header)?;
         }
@@ -5739,6 +5743,7 @@ const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
+const MAX_PHP_STDERR_FAILURE_PATTERN_BYTES: usize = 512;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
 const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
 
@@ -7941,6 +7946,28 @@ fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(), ConfigErro
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.deny_path_prefixes",
                 reason: "duplicate prefixes are not allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_php_stderr_failure_patterns(patterns: &[String]) -> Result<(), ConfigError> {
+    let mut seen = BTreeSet::new();
+    for pattern in patterns {
+        if pattern.is_empty()
+            || pattern.len() > MAX_PHP_STDERR_FAILURE_PATTERN_BYTES
+            || pattern.bytes().any(|byte| matches!(byte, 0..=31 | 127))
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.stderr_failure_patterns",
+                reason: "patterns must be 1 to 512 bytes and must not contain ASCII control characters",
+            });
+        }
+        if !seen.insert(pattern.clone()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.stderr_failure_patterns",
+                reason: "duplicate patterns are not allowed",
             });
         }
     }
@@ -10444,6 +10471,7 @@ mod tests {
             pass_request_body = false
             stderr_log = false
             stderr_max_bytes = "4KiB"
+            stderr_failure_patterns = ["PHP Fatal error:"]
             hide_response_headers = ["x-powered-by", "x-internal"]
             ignore_origin_cache_headers = true
             intercept_error_statuses = [404, 500, 502]
@@ -10505,6 +10533,7 @@ mod tests {
         assert!(!php.pass_request_body);
         assert!(!php.stderr_log);
         assert_eq!(php.stderr_max_bytes.as_u64(), 4 * 1024);
+        assert_eq!(php.stderr_failure_patterns, ["PHP Fatal error:".to_owned()]);
         assert_eq!(
             php.hide_response_headers,
             ["x-powered-by".to_owned(), "x-internal".to_owned()]
@@ -10738,6 +10767,35 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.stderr_max_bytes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_php_stderr_failure_pattern() {
+        let root = unique_temp_path("config-php-bad-stderr-pattern-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            stderr_failure_patterns = ["PHP\nFatal"]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-bad-stderr-pattern-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.stderr_failure_patterns"), "{error}");
     }
 
     #[test]

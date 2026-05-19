@@ -7283,6 +7283,16 @@ fn parse_php_fpm_output(
         php.config.max_response_bytes.as_u64(),
         php.config.max_response_header_bytes.as_u64(),
     )?;
+    if output
+        .stderr
+        .as_deref()
+        .is_some_and(|stderr| php_stderr_matches_failure_pattern(stderr, &php.config))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm stderr matched configured failure pattern",
+        ));
+    }
     Ok(PhpFpmParsedResponse {
         response,
         body,
@@ -7561,6 +7571,17 @@ fn php_stderr_metric_state(stderr: &[u8], max_bytes: usize) -> &'static str {
     } else {
         "emitted"
     }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_stderr_matches_failure_pattern(stderr: &[u8], config: &crate::config::PhpConfig) -> bool {
+    config.stderr_failure_patterns.iter().any(|pattern| {
+        let pattern = pattern.as_bytes();
+        !pattern.is_empty()
+            && stderr
+                .windows(pattern.len())
+                .any(|window| window == pattern)
+    })
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10236,12 +10257,13 @@ mod tests {
         PhpRequestBody, PhpResolveOutcome, RuntimePhp, add_php_host_param,
         add_php_request_header_params, apply_php_x_accel_expires,
         create_php_request_body_spool_file, directory_slash_redirect_location,
-        ignore_php_origin_cache_headers, parse_php_response, php_fpm_effective_request_timeout,
-        php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_keepalive_pools_from_config,
-        php_fpm_path_translated, php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count,
-        php_fpm_retryable_error, php_fpm_retryable_response, php_fpm_script_filename,
-        php_header_param_name, php_script_name_denied, php_script_name_for_request,
-        php_should_intercept_error_status, php_static_offload_file, php_stderr_metric_state,
+        ignore_php_origin_cache_headers, parse_php_fpm_output, parse_php_response,
+        php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
+        php_fpm_keepalive_pools_from_config, php_fpm_path_translated, php_fpm_retry_attempts,
+        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
+        php_fpm_retryable_response, php_fpm_script_filename, php_header_param_name,
+        php_script_name_denied, php_script_name_for_request, php_should_intercept_error_status,
+        php_static_offload_file, php_stderr_matches_failure_pattern, php_stderr_metric_state,
         php_x_accel_expires_ttl_secs, resolve_php_script, sanitized_php_stderr,
         strip_php_response_headers,
     };
@@ -10962,6 +10984,32 @@ mod tests {
         assert_eq!(sanitized_php_stderr(b"abcdef", 3), "abc ... <truncated>");
         assert_eq!(php_stderr_metric_state(b"warn", 64), "emitted");
         assert_eq!(php_stderr_metric_state(b"abcdef", 3), "truncated");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_stderr_failure_patterns_mark_response_invalid() {
+        let mut php = php_test_runtime("php-stderr-failure-pattern");
+        php.config.stderr_failure_patterns = vec!["PHP Fatal error:".to_owned()];
+
+        assert!(php_stderr_matches_failure_pattern(
+            b"PHP message: PHP Fatal error: Uncaught Error",
+            &php.config
+        ));
+        assert!(!php_stderr_matches_failure_pattern(
+            b"PHP message: PHP Warning: notice",
+            &php.config
+        ));
+
+        let mut output = fastcgi_client::Response::default();
+        output.stdout = Some(b"Content-Type: text/plain\r\n\r\nok".to_vec());
+        output.stderr = Some(b"PHP message: PHP Fatal error: boom".to_vec());
+        let error = match parse_php_fpm_output(&php, output) {
+            Ok(_) => panic!("expected stderr failure pattern to reject response"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("failure pattern"));
     }
 
     #[cfg(feature = "php-fpm")]

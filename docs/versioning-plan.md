@@ -920,8 +920,8 @@ Follow-up `1.3.x` PHP runtime plan:
   - STDERR handling options: capture/log, truncate, severity mapping for 4xx/5xx
     responses, and optional fatal-error match that marks a response invalid for
     retry/failover.
-    Initial controls implemented as `php.stderr_log` and
-    `php.stderr_max_bytes`.
+    Initial controls implemented as `php.stderr_log`, `php.stderr_max_bytes`,
+    and `php.stderr_failure_patterns` for opt-in invalid-response handling.
   - Initial php-fpm TCP upstream list and failover. Implemented as
     `php.fpm.tcp_upstreams` with round-robin selection and safe-method
     failover on connection failures and connect timeouts.
