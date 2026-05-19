@@ -6993,6 +6993,7 @@ async fn create_php_request_body_spool_file(
     spool_dir: &std::path::Path,
 ) -> io::Result<(PathBuf, tokio::fs::File)> {
     tokio::fs::create_dir_all(spool_dir).await?;
+    ensure_php_request_body_spool_dir(spool_dir)?;
     let mut last_error = None;
     for _ in 0..16 {
         let path = php_request_body_spool_path(spool_dir);
@@ -7016,6 +7017,25 @@ async fn create_php_request_body_spool_file(
             "could not allocate PHP request body spool file",
         )
     }))
+}
+
+#[cfg(feature = "php-fpm")]
+fn ensure_php_request_body_spool_dir(spool_dir: &std::path::Path) -> io::Result<()> {
+    let metadata = std::fs::symlink_metadata(spool_dir)?;
+    if !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PHP request body spool path is not a directory",
+        ));
+    }
+    #[cfg(unix)]
+    if crate::fs_trust::existing_path_or_parent_has_insecure_write_permissions(spool_dir)? {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "PHP request body spool directory is group/world writable",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10416,6 +10436,31 @@ mod tests {
         drop(reader);
         drop(body);
         assert!(!path.exists());
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_spool_file_creation_rejects_insecure_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let spool_dir = unique_temp_path("php-spooled-request-body-insecure");
+        fs::create_dir_all(&spool_dir).unwrap();
+        fs::set_permissions(&spool_dir, fs::Permissions::from_mode(0o777)).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(create_php_request_body_spool_file(&spool_dir))
+            .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(
+            error
+                .to_string()
+                .contains("spool directory is group/world writable"),
+            "{error}"
+        );
     }
 
     #[cfg(feature = "php-fpm")]

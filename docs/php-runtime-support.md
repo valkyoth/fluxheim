@@ -207,7 +207,9 @@ Planned `1.3.3` php-fpm hardening:
   large uploads keep exact FastCGI `CONTENT_LENGTH` without retaining the whole
   request body in memory. Both settings must be configured together, and the
   threshold must be lower than `php.max_request_body_bytes` when both are set
-  on the same PHP action.
+  on the same PHP action. Existing spool directories must not be group/world
+  writable, and runtime spool creation rechecks permissions before writing
+  upload bodies.
 - Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
