@@ -883,6 +883,9 @@ alone is too broad.
 `preset = "wordpress"` expands common WordPress shared-cache bypasses for
 admin/login paths, auth-related cookies, preview queries, and authorization
 headers. Explicit fields still work normally and are not removed by the preset.
+Cache bypass, header, status, vary, content-type, extension, and method lists
+are capped to bounded sizes to keep validation and per-request matching work
+predictable.
 `bypass_path_prefixes` and `bypass_path_exact` disable both cache lookup and
 storage for matching request paths. Prefixes are useful for app admin areas;
 exact paths are useful for login, XML-RPC, or cron endpoints.

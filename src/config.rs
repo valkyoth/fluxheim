@@ -3845,6 +3845,18 @@ pub struct CacheConfig {
     pub peer_fill: CachePeerFillConfig,
 }
 
+const MAX_CACHE_HEADER_LIST_ENTRIES: usize = 64;
+const MAX_CACHE_BYPASS_PATHS: usize = 128;
+const MAX_CACHE_BYPASS_HEADERS: usize = 64;
+const MAX_CACHE_BYPASS_COOKIES: usize = 128;
+const MAX_CACHE_BYPASS_QUERY_PARAMS: usize = 128;
+const MAX_CACHE_VARY_REQUEST_HEADERS: usize = 32;
+const MAX_CACHE_CONTENT_TYPES: usize = 64;
+const MAX_CACHE_IMAGE_EXTENSIONS: usize = 128;
+const MAX_CACHE_METHODS: usize = 16;
+const MAX_CACHE_STATUS_TTLS: usize = 128;
+const MAX_CACHE_STALE_IF_ERROR_STATUSES: usize = 100;
+
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
@@ -3956,6 +3968,116 @@ impl CacheConfig {
     }
 
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        validate_cache_list_len(
+            scope,
+            "hide_response_headers",
+            self.hide_response_headers.len(),
+            MAX_CACHE_HEADER_LIST_ENTRIES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "tag_headers",
+            self.tag_headers.len(),
+            MAX_CACHE_HEADER_LIST_ENTRIES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "no_store_response_headers",
+            self.no_store_response_headers.len(),
+            MAX_CACHE_HEADER_LIST_ENTRIES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "no_store_response_header_values",
+            self.no_store_response_header_values.len(),
+            MAX_CACHE_HEADER_LIST_ENTRIES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_path_prefixes",
+            self.bypass_path_prefixes.len(),
+            MAX_CACHE_BYPASS_PATHS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_path_exact",
+            self.bypass_path_exact.len(),
+            MAX_CACHE_BYPASS_PATHS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_request_headers",
+            self.bypass_request_headers.len(),
+            MAX_CACHE_BYPASS_HEADERS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_request_header_values",
+            self.bypass_request_header_values.len(),
+            MAX_CACHE_BYPASS_HEADERS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_cookie_names",
+            self.bypass_cookie_names.len(),
+            MAX_CACHE_BYPASS_COOKIES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_cookie_name_prefixes",
+            self.bypass_cookie_name_prefixes.len(),
+            MAX_CACHE_BYPASS_COOKIES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_cookie_values",
+            self.bypass_cookie_values.len(),
+            MAX_CACHE_BYPASS_COOKIES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_query_params",
+            self.bypass_query_params.len(),
+            MAX_CACHE_BYPASS_QUERY_PARAMS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "bypass_query_values",
+            self.bypass_query_values.len(),
+            MAX_CACHE_BYPASS_QUERY_PARAMS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "vary_request_headers",
+            self.vary_request_headers.len(),
+            MAX_CACHE_VARY_REQUEST_HEADERS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "status_ttls",
+            self.status_ttls.len(),
+            MAX_CACHE_STATUS_TTLS,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "stale_if_error_statuses",
+            self.stale_if_error_statuses.len(),
+            MAX_CACHE_STALE_IF_ERROR_STATUSES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "content_types",
+            self.content_types.len(),
+            MAX_CACHE_CONTENT_TYPES,
+        )?;
+        validate_cache_list_len(
+            scope,
+            "image_extensions",
+            self.image_extensions.len(),
+            MAX_CACHE_IMAGE_EXTENSIONS,
+        )?;
+        validate_cache_list_len(scope, "methods", self.methods.len(), MAX_CACHE_METHODS)?;
+
         if let Some(status_header) = &self.status_header {
             validate_header_name(scope, status_header)?;
         }
@@ -6311,6 +6433,11 @@ pub enum ConfigError {
         scope: &'static str,
         header: String,
     },
+    InvalidCacheListLength {
+        scope: &'static str,
+        field: &'static str,
+        max: usize,
+    },
     DuplicateCacheTagHeader {
         scope: &'static str,
         header: String,
@@ -6892,6 +7019,10 @@ impl Display for ConfigError {
             Self::InvalidCacheVaryRequestHeader { scope, header } => write!(
                 formatter,
                 "{scope}.vary_request_headers must not include sensitive request header {header:?}; use bypass_request_headers for request-specific responses"
+            ),
+            Self::InvalidCacheListLength { scope, field, max } => write!(
+                formatter,
+                "{scope}.{field} must contain at most {max} entries"
             ),
             Self::DuplicateCacheTagHeader { scope, header } => write!(
                 formatter,
@@ -7782,6 +7913,18 @@ fn valid_https_url(value: &str) -> bool {
     value.starts_with("https://")
         && value.len() > "https://".len()
         && !value.chars().any(char::is_whitespace)
+}
+
+fn validate_cache_list_len(
+    scope: &'static str,
+    field: &'static str,
+    len: usize,
+    max: usize,
+) -> Result<(), ConfigError> {
+    if len > max {
+        return Err(ConfigError::InvalidCacheListLength { scope, field, max });
+    }
+    Ok(())
 }
 
 fn validate_optional_timeout_secs(
@@ -12574,6 +12717,133 @@ mod tests {
                 "{header}"
             );
         }
+    }
+
+    #[test]
+    fn rejects_too_many_cache_bypass_paths() {
+        let prefixes = (0..=super::MAX_CACHE_BYPASS_PATHS)
+            .map(|index| format!("\"/private-{index}/\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            bypass_path_prefixes = [{prefixes}]
+            "#,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cache.bypass_path_prefixes"), "{error}");
+        assert!(error.contains("at most 128 entries"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_cache_bypass_cookies() {
+        let cookies = (0..=super::MAX_CACHE_BYPASS_COOKIES)
+            .map(|index| format!("\"cookie_{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            bypass_cookie_name_prefixes = [{cookies}]
+            "#,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("cache.bypass_cookie_name_prefixes"),
+            "{error}"
+        );
+        assert!(error.contains("at most 128 entries"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_cache_vary_headers() {
+        let headers = (0..=super::MAX_CACHE_VARY_REQUEST_HEADERS)
+            .map(|index| format!("\"x-vary-{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            vary_request_headers = [{headers}]
+            "#,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cache.vary_request_headers"), "{error}");
+        assert!(error.contains("at most 32 entries"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_cache_status_ttls() {
+        let status_ttls = (0..=super::MAX_CACHE_STATUS_TTLS)
+            .map(|index| format!("\"{}\" = 60", 100 + index))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            status_ttls = {{ {status_ttls} }}
+            "#,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cache.status_ttls"), "{error}");
+        assert!(error.contains("at most 128 entries"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_cache_content_types_extensions_and_methods() {
+        let content_types = (0..=super::MAX_CACHE_CONTENT_TYPES)
+            .map(|index| format!("\"application/x-{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            content_types = [{content_types}]
+            "#,
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cache.content_types"), "{error}");
+        assert!(error.contains("at most 64 entries"), "{error}");
+
+        let extensions = (0..=super::MAX_CACHE_IMAGE_EXTENSIONS)
+            .map(|index| format!("\"ext{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            image_extensions = [{extensions}]
+            "#,
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cache.image_extensions"), "{error}");
+        assert!(error.contains("at most 128 entries"), "{error}");
+
+        let methods = (0..=super::MAX_CACHE_METHODS)
+            .map(|index| format!("\"M{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            methods = [{methods}]
+            "#,
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cache.methods"), "{error}");
+        assert!(error.contains("at most 16 entries"), "{error}");
     }
 
     #[test]

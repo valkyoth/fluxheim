@@ -280,7 +280,9 @@ Planned `1.3.3` php-fpm hardening:
   for PHP-handled requests when `otel-otlp` is enabled.
 - FastCGI cache-specific convenience config.
   Initial convenience preset implemented as `cache.preset = "wordpress"`,
-  expanding common path, cookie-prefix, query, and authorization bypasses.
+  expanding common path, cookie-prefix, query, and authorization bypasses. The
+  underlying cache predicate lists are bounded to prevent unbounded per-request
+  matching.
 - FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
   predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
 - WordPress cache-plugin migration presets for Super Cache/W3TC-style static
