@@ -253,7 +253,7 @@ Planned `1.3.3` php-fpm hardening:
 - Initial php-fpm TCP upstream list and failover. Implemented as
   `php.fpm.tcp_upstreams` with round-robin endpoint selection and safe-method
   failover on connection failures and connect timeouts. Upstream lists are
-  capped at 64 entries.
+  capped at 64 entries and reject duplicate authorities.
 - Retry policy for connection failures and connect timeouts on configured safe
   methods. Implemented as `php.fpm.max_retries` and
   `php.fpm.retry_methods`, with `php.fpm.retry_timeout_secs` as an optional

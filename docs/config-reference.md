@@ -1611,7 +1611,7 @@ FastCGI keep-connection reuse with an idle pool capped by
 Use either `php.fpm.socket`, `php.fpm.tcp`, or `php.fpm.tcp_upstreams`; the
 endpoint modes are mutually exclusive. `tcp_upstreams` enables round-robin TCP
 selection and conservative failover across configured php-fpm backends. The
-`tcp_upstreams` list is capped at 64 entries.
+`tcp_upstreams` list is capped at 64 entries and rejects duplicate authorities.
 When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
 discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
 keepalive is enabled. `php.fpm.max_retries` defaults to `0`; when set,

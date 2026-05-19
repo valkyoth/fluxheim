@@ -5833,11 +5833,18 @@ impl PhpFpmConfig {
                 reason: "at most 64 upstreams are allowed",
             });
         }
+        let mut seen_tcp_upstreams = BTreeSet::new();
         for tcp in &self.tcp_upstreams {
             if !valid_authority(tcp) {
                 return Err(ConfigError::InvalidPhpConfig {
                     field: "php.fpm.tcp_upstreams",
                     reason: "entries must be host:port or ip:port",
+                });
+            }
+            if !seen_tcp_upstreams.insert(tcp.to_ascii_lowercase()) {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.tcp_upstreams",
+                    reason: "duplicate upstreams are not allowed",
                 });
             }
         }
@@ -10772,6 +10779,35 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.tcp_upstreams"), "{error}");
         assert!(error.contains("at most 64 upstreams"), "{error}");
+    }
+
+    #[test]
+    fn rejects_duplicate_php_fpm_tcp_upstreams() {
+        let root = unique_temp_path("config-php-fpm-duplicate-upstreams-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp_upstreams = ["php-fpm-a:9000", "PHP-FPM-A:9000"]
+            "#,
+            test_process_config_toml("config-php-fpm-duplicate-upstreams-process"),
+            root.display(),
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.tcp_upstreams"), "{error}");
+        assert!(error.contains("duplicate upstreams"), "{error}");
     }
 
     #[test]
