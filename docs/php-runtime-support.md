@@ -77,6 +77,7 @@ pass_request_headers = true
 pass_request_body = true
 stderr_log = true
 stderr_max_bytes = "2KiB"
+hide_response_headers = ["x-powered-by"]
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
@@ -130,6 +131,8 @@ eligible:
 - Apply runtime request timeouts and connection timeouts.
 - Log php-fpm STDERR only when `stderr_log` is enabled, sanitize controls, and
   cap each log message with `stderr_max_bytes`.
+- Remove selected php-fpm response headers with `hide_response_headers` before
+  the response reaches clients.
 - Cap response header bytes returned by PHP.
 - Parse PHP-generated headers strictly; reject malformed status lines and
   header injection.
@@ -195,6 +198,7 @@ Planned `1.3.3` php-fpm hardening:
 - `X-Accel-Expires` mapping into Fluxheim cache metadata where safe.
 - `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
 - Response header hide/pass/ignore controls for PHP backends.
+  Initial hide controls implemented as `php.hide_response_headers`.
 - STDERR capture/truncation/severity controls and fatal-error matching.
   Initial controls implemented as `php.stderr_log` and
   `php.stderr_max_bytes`.

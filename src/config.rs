@@ -5303,6 +5303,8 @@ pub struct PhpConfig {
     #[serde(default = "default_php_stderr_max_bytes")]
     pub stderr_max_bytes: ByteSize,
     #[serde(default)]
+    pub hide_response_headers: Vec<String>,
+    #[serde(default)]
     pub params: BTreeMap<String, String>,
     #[serde(default)]
     pub fpm: PhpFpmConfig,
@@ -5326,6 +5328,7 @@ impl Default for PhpConfig {
             pass_request_body: true,
             stderr_log: true,
             stderr_max_bytes: default_php_stderr_max_bytes(),
+            hide_response_headers: Vec::new(),
             params: BTreeMap::new(),
             fpm: PhpFpmConfig::default(),
         }
@@ -5426,6 +5429,9 @@ impl PhpConfig {
                 field: "php.stderr_max_bytes",
                 reason: "must be less than or equal to 1MiB",
             });
+        }
+        for header in &self.hide_response_headers {
+            validate_header_name("php.hide_response_headers", header)?;
         }
 
         self.fpm.validate(scope)?;
@@ -9968,6 +9974,7 @@ mod tests {
             pass_request_body = false
             stderr_log = false
             stderr_max_bytes = "4KiB"
+            hide_response_headers = ["x-powered-by", "x-internal"]
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
             max_response_bytes = "8MiB"
@@ -10002,6 +10009,10 @@ mod tests {
         assert!(!php.pass_request_body);
         assert!(!php.stderr_log);
         assert_eq!(php.stderr_max_bytes.as_u64(), 4 * 1024);
+        assert_eq!(
+            php.hide_response_headers,
+            ["x-powered-by".to_owned(), "x-internal".to_owned()]
+        );
         assert_eq!(php.allowed_extensions, ["php"]);
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),
@@ -10079,6 +10090,35 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.stderr_max_bytes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_php_hidden_response_header() {
+        let root = unique_temp_path("config-php-bad-hidden-header-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            hide_response_headers = ["bad header"]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-bad-hidden-header-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.hide_response_headers"), "{error}");
     }
 
     #[test]

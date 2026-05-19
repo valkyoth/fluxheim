@@ -30,6 +30,8 @@ behavior when the change improves security or project direction.
   advanced FastCGI migration control.
 - Added `php.stderr_log` and `php.stderr_max_bytes` controls for bounded,
   sanitized php-fpm STDERR logging.
+- Added `php.hide_response_headers` for removing selected php-fpm response
+  headers before they reach clients.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

@@ -6282,6 +6282,7 @@ async fn respond_php_request(
                 error,
             )
         })?;
+    strip_php_response_headers(&mut response, &php.config);
     response.remove_header("content-length");
     response.insert_header("content-length", body.len().to_string())?;
     crate::headers::apply_response_policy(&mut response, response_headers)?;
@@ -7825,6 +7826,13 @@ fn strip_cache_response_headers(
     }
 }
 
+#[cfg(feature = "php-fpm")]
+fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config::PhpConfig) {
+    for header in &php.hide_response_headers {
+        response.remove_header(header.as_str());
+    }
+}
+
 #[cfg(feature = "cache")]
 fn cache_control_freshness_value(
     ttl_secs: u32,
@@ -9221,6 +9229,8 @@ mod tests {
     use std::time::Duration;
 
     use bytes::Bytes;
+    #[cfg(feature = "php-fpm")]
+    use pingora::http::ResponseHeader;
 
     use crate::config::{
         ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
@@ -9265,7 +9275,7 @@ mod tests {
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         directory_slash_redirect_location, parse_php_response, php_fpm_path_translated,
         php_fpm_script_filename, php_header_param_name, php_script_name_for_request,
-        resolve_php_script, sanitized_php_stderr,
+        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9670,6 +9680,29 @@ mod tests {
     fn php_stderr_sanitizer_truncates_and_removes_controls() {
         assert_eq!(sanitized_php_stderr(b"warn\nnext", 64), "warn next");
         assert_eq!(sanitized_php_stderr(b"abcdef", 3), "abc ... <truncated>");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_hidden_response_headers_are_removed() {
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response.insert_header("x-powered-by", "PHP/8.4").unwrap();
+        response.insert_header("x-keep", "ok").unwrap();
+        let config = crate::config::PhpConfig {
+            hide_response_headers: vec!["x-powered-by".to_owned()],
+            ..crate::config::PhpConfig::default()
+        };
+
+        strip_php_response_headers(&mut response, &config);
+
+        assert!(!response.headers.contains_key("x-powered-by"));
+        assert_eq!(
+            response
+                .headers
+                .get("x-keep")
+                .and_then(|value| value.to_str().ok()),
+            Some("ok")
+        );
     }
 
     #[test]
