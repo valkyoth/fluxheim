@@ -5759,6 +5759,7 @@ const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
+const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
 const MAX_PHP_STDERR_FAILURE_PATTERN_BYTES: usize = 512;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
 const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
@@ -7969,6 +7970,12 @@ fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(), ConfigErro
 }
 
 fn validate_php_stderr_failure_patterns(patterns: &[String]) -> Result<(), ConfigError> {
+    if patterns.len() > MAX_PHP_STDERR_FAILURE_PATTERNS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.stderr_failure_patterns",
+            reason: "at most 32 patterns are allowed",
+        });
+    }
     let mut seen = BTreeSet::new();
     for pattern in patterns {
         if pattern.is_empty()
@@ -10814,6 +10821,41 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.stderr_failure_patterns"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_php_stderr_failure_patterns() {
+        let root = unique_temp_path("config-php-many-stderr-patterns-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let patterns = (0..=super::MAX_PHP_STDERR_FAILURE_PATTERNS)
+            .map(|index| format!("\"fatal-{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            stderr_failure_patterns = [{}]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-many-stderr-patterns-process"),
+            root.display(),
+            patterns,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.stderr_failure_patterns"), "{error}");
+        assert!(error.contains("at most 32 patterns"), "{error}");
     }
 
     #[test]

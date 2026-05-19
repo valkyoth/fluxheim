@@ -1561,7 +1561,8 @@ the PHP response as invalid. With `php.fpm.retry_invalid_response = true`, this
 can fail over safe methods to another php-fpm upstream for fatal PHP runtime
 failures such as `PHP Fatal error:`. Matching STDERR is still sanitized,
 bounded by `php.stderr_max_bytes`, and logged when `php.stderr_log` is enabled
-before Fluxheim rejects the response.
+before Fluxheim rejects the response. Up to 32 patterns are allowed, each 1 to
+512 bytes without ASCII control characters.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
