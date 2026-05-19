@@ -43,7 +43,8 @@ behavior when the change improves security or project direction.
   invalidation when STDERR logging is enabled. Pattern lists are bounded to 32
   entries, with each pattern capped at 512 bytes.
 - Added `php.hide_response_headers` for removing selected php-fpm response
-  headers before they reach clients.
+  headers before they reach clients; the list is now bounded and rejects
+  duplicate header names case-insensitively.
 - Stripped hop-by-hop php-fpm response headers, including `Connection`-named
   headers and `Transfer-Encoding`, before Fluxheim frames the client response.
 - Added `php.intercept_error_statuses` for opt-in

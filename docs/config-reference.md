@@ -1566,6 +1566,7 @@ before Fluxheim rejects the response. Up to 32 patterns are allowed, each 1 to
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
+The list is case-insensitively deduplicated and capped at 64 header names.
 `php.ignore_origin_cache_headers` removes PHP-generated `Cache-Control`,
 `Expires`, and `Pragma` response headers after Fluxheim has consumed internal PHP
 control headers. It defaults to `false`; use response header policy to set

@@ -5671,9 +5671,7 @@ impl PhpConfig {
             });
         }
         validate_php_stderr_failure_patterns(&self.stderr_failure_patterns)?;
-        for header in &self.hide_response_headers {
-            validate_header_name("php.hide_response_headers", header)?;
-        }
+        validate_php_hide_response_headers(&self.hide_response_headers)?;
         validate_php_intercept_error_statuses(&self.intercept_error_statuses)?;
         validate_php_error_pages(&self.error_pages)?;
 
@@ -5757,6 +5755,7 @@ pub struct PhpFpmConfig {
 
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
+const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
@@ -7991,6 +7990,27 @@ fn validate_php_stderr_failure_patterns(patterns: &[String]) -> Result<(), Confi
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.stderr_failure_patterns",
                 reason: "duplicate patterns are not allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_php_hide_response_headers(headers: &[String]) -> Result<(), ConfigError> {
+    if headers.len() > MAX_PHP_HIDE_RESPONSE_HEADERS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.hide_response_headers",
+            reason: "at most 64 headers are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for header in headers {
+        validate_header_name("php.hide_response_headers", header)?;
+        let normalized = header.to_ascii_lowercase();
+        if !seen.insert(normalized) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.hide_response_headers",
+                reason: "duplicate headers are not allowed",
             });
         }
     }
@@ -10885,6 +10905,71 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.hide_response_headers"), "{error}");
+    }
+
+    #[test]
+    fn rejects_duplicate_php_hidden_response_header() {
+        let root = unique_temp_path("config-php-duplicate-hidden-header-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            hide_response_headers = ["x-powered-by", "X-Powered-By"]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-duplicate-hidden-header-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.hide_response_headers"), "{error}");
+        assert!(error.contains("duplicate headers"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_php_hidden_response_headers() {
+        let root = unique_temp_path("config-php-many-hidden-headers-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let headers = (0..=super::MAX_PHP_HIDE_RESPONSE_HEADERS)
+            .map(|index| format!("\"x-hidden-{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            hide_response_headers = [{}]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-many-hidden-headers-process"),
+            root.display(),
+            headers,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.hide_response_headers"), "{error}");
+        assert!(error.contains("at most 64 headers"), "{error}");
     }
 
     #[test]
