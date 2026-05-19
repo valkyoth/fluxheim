@@ -894,7 +894,8 @@ Follow-up `1.3.x` PHP runtime plan:
     `[[vhosts.routes.php.error_pages]]`.
   - Retry policy for connection failures and connect timeouts before PHP returns
     a response. Implemented as `php.fpm.max_retries` and
-    `php.fpm.retry_methods`, defaulting to no retries and excluding request
+    `php.fpm.retry_methods`, with `php.fpm.retry_timeout_secs` as an optional
+    per-request retry window, defaulting to no retries and excluding request
     timeouts to avoid duplicated side effects. Broader status and invalid-header
     retry controls remain future work. With `tcp_upstreams`, Fluxheim tries
     enough endpoints to cover the configured list for safe methods even when

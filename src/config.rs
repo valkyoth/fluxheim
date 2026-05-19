@@ -5634,6 +5634,8 @@ pub struct PhpFpmConfig {
     pub write_timeout_secs: Option<u64>,
     #[serde(default)]
     pub max_retries: u8,
+    #[serde(default)]
+    pub retry_timeout_secs: Option<u64>,
     #[serde(default = "default_php_fpm_retry_methods")]
     pub retry_methods: Vec<String>,
 }
@@ -5705,6 +5707,7 @@ impl PhpFpmConfig {
         validate_optional_timeout_secs("php.fpm.connect_timeout_secs", self.connect_timeout_secs)?;
         validate_optional_timeout_secs("php.fpm.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("php.fpm.write_timeout_secs", self.write_timeout_secs)?;
+        validate_optional_timeout_secs("php.fpm.retry_timeout_secs", self.retry_timeout_secs)?;
         if self.max_retries > MAX_PHP_FPM_RETRIES {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.fpm.max_retries",
@@ -10294,6 +10297,7 @@ mod tests {
             pool_max_idle = 4
             idle_timeout_secs = 45
             max_retries = 2
+            retry_timeout_secs = 5
             retry_methods = ["GET", "HEAD"]
             "#,
             test_process_config_toml("config-php-fpm-process"),
@@ -10351,6 +10355,7 @@ mod tests {
         assert_eq!(php.fpm.pool_max_idle, 4);
         assert_eq!(php.fpm.idle_timeout_secs, 45);
         assert_eq!(php.fpm.max_retries, 2);
+        assert_eq!(php.fpm.retry_timeout_secs, Some(5));
         assert_eq!(php.fpm.retry_methods, ["GET", "HEAD"]);
     }
 
@@ -10742,6 +10747,29 @@ mod tests {
         .unwrap();
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.retry_methods"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            retry_timeout_secs = 0
+            "#,
+            test_process_config_toml("config-php-fpm-invalid-retry-timeout-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.retry_timeout_secs"), "{error}");
     }
 
     #[test]

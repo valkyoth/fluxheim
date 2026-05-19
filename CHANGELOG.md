@@ -62,8 +62,9 @@ behavior when the change improves security or project direction.
 - Added `php.fpm.tcp_upstreams` for multiple TCP php-fpm backends with
   round-robin selection and safe-method failover on connection failures and
   connect timeouts.
-- Added opt-in php-fpm retry controls with `php.fpm.max_retries` and
-  `php.fpm.retry_methods` for connection failures and connect timeouts before
+- Added opt-in php-fpm retry controls with `php.fpm.max_retries`,
+  `php.fpm.retry_timeout_secs`, and `php.fpm.retry_methods` for connection
+  failures and connect timeouts before
   php-fpm returns a response; request timeouts are not retried.
 - Added PHP-assisted static offload for `X-Accel-Redirect` and `X-Sendfile`.
   Offload targets must resolve under `php.root`, `X-Sendfile` paths are mapped

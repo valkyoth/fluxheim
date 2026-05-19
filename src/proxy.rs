@@ -6964,6 +6964,7 @@ async fn execute_php_fpm(
         .map(Duration::from_secs)
         .unwrap_or(timeout);
     let max_retries = php_fpm_retry_attempts_for_endpoint_count(fpm, method, endpoints.len());
+    let retry_deadline = php_fpm_retry_deadline(fpm.retry_timeout_secs);
     let start_index = php_fpm_select_endpoint_index(php, endpoints.len());
     let mut attempts = 0_u8;
     loop {
@@ -6980,7 +6981,11 @@ async fn execute_php_fpm(
         .await;
         match result {
             Ok(response) => return Ok(response),
-            Err(error) if attempts < max_retries && php_fpm_retryable_error(&error) => {
+            Err(error)
+                if attempts < max_retries
+                    && php_fpm_retryable_error(&error)
+                    && php_fpm_retry_deadline_allows(retry_deadline) =>
+            {
                 attempts += 1;
                 #[cfg(feature = "metrics")]
                 crate::metrics::record_php_fpm_retry(vhost_name, php_fpm_error_outcome(&error));
@@ -6997,6 +7002,19 @@ fn php_fpm_select_endpoint_index(php: &RuntimePhp, endpoint_count: usize) -> usi
         return 0;
     }
     php.fpm_next.fetch_add(1, Ordering::Relaxed) % endpoint_count
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_retry_deadline(retry_timeout_secs: Option<u64>) -> Option<Instant> {
+    retry_timeout_secs.and_then(|secs| Instant::now().checked_add(Duration::from_secs(secs)))
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_retry_deadline_allows(deadline: Option<Instant>) -> bool {
+    match deadline {
+        Some(deadline) => Instant::now() < deadline,
+        None => true,
+    }
 }
 
 #[cfg(feature = "php-fpm")]

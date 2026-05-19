@@ -1463,6 +1463,7 @@ pool_max_idle = 8
 idle_timeout_secs = 60
 # Conservative retry policy for connection failures before php-fpm returns data.
 max_retries = 1
+retry_timeout_secs = 5
 retry_methods = ["GET", "HEAD", "OPTIONS"]
 
 [vhosts.acme_challenge]
@@ -1563,7 +1564,9 @@ When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
 discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
 keepalive is enabled. `php.fpm.max_retries` defaults to `0`; when set,
 Fluxheim retries only connection failures and connect timeouts for configured
-`php.fpm.retry_methods` before php-fpm has returned a response. With
+`php.fpm.retry_methods` before php-fpm has returned a response.
+`php.fpm.retry_timeout_secs` optionally caps the total retry window for one PHP
+request. With
 `tcp_upstreams`, Fluxheim tries enough endpoints to cover the configured list
 for safe methods even when `max_retries = 0`. Request timeouts are not retried
 to avoid duplicating side effects.

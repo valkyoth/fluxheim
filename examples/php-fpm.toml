@@ -81,6 +81,7 @@ tcp = "php-fpm:9000"
 # keepalive = true
 # pool_max_idle = 8
 # idle_timeout_secs = 60
+# retry_timeout_secs = 5
 
 [vhosts.web]
 root = "/srv/sites/php.example.test/public"

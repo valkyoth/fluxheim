@@ -242,7 +242,8 @@ Planned `1.3.3` php-fpm hardening:
   failover on connection failures and connect timeouts.
 - Retry policy for connection failures and connect timeouts on configured safe
   methods. Implemented as `php.fpm.max_retries` and
-  `php.fpm.retry_methods`; request timeouts are not retried to avoid
+  `php.fpm.retry_methods`, with `php.fpm.retry_timeout_secs` as an optional
+  per-request retry window; request timeouts are not retried to avoid
   duplicating PHP side effects. With `tcp_upstreams`, Fluxheim tries enough
   endpoints to cover the configured list for safe methods even when
   `max_retries = 0`. Broader status/invalid-header
