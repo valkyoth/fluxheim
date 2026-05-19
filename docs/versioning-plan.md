@@ -881,7 +881,9 @@ Follow-up `1.3.x` PHP runtime plan:
   - Configurable CGI response-header limits.
     Implemented as `php.max_response_header_bytes`, defaulting to `64KiB`.
   - `X-Accel-Redirect` / `X-Sendfile` support for PHP-assisted static
-    offload, plus internal-only target validation. `X-Accel-Expires` is
+    offload. Implemented with targets constrained under `php.root`,
+    `X-Sendfile` mapped from `php.fpm_root` for split containers, and PHP
+    script extensions refused as offload targets. `X-Accel-Expires` is
     initially implemented for PHP responses by stripping the backend control
     header, mapping valid TTLs to normal cache headers, treating zero or past
     expiries as `no-store`, and keeping cookie responses private.

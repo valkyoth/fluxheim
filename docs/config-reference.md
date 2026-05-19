@@ -1504,6 +1504,12 @@ larger output is sanitized and marked as truncated.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
+Fluxheim consumes PHP `X-Accel-Redirect` and `X-Sendfile` headers for
+PHP-assisted static offload instead of forwarding them to clients.
+`X-Accel-Redirect` targets are internal URI paths resolved under `php.root`;
+`X-Sendfile` targets are absolute filesystem paths resolved under `php.root`,
+and are mapped from `php.fpm_root` for split-container layouts. Fluxheim refuses
+to offload files with configured PHP script extensions.
 Fluxheim also consumes PHP `X-Accel-Expires` control headers instead of
 forwarding them to clients. Positive TTLs become normal `Cache-Control` and
 `Expires` headers; responses with `Set-Cookie` use `private` cache directives,

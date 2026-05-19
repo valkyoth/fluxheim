@@ -132,6 +132,27 @@ impl StaticFileServer {
         self.resolve_relative_candidate(&relative_path)
     }
 
+    #[cfg(feature = "proxy")]
+    pub fn resolve_rooted_file(&self, path: &Path) -> io::Result<ResolveResult> {
+        if !path.is_absolute() {
+            return Ok(ResolveResult::Forbidden);
+        }
+        let Some(relative_path) = SafeRelativePath::from_rooted(&self.root, path) else {
+            return Ok(ResolveResult::Forbidden);
+        };
+        if self.deny_dotfiles
+            && relative_path.components.iter().any(|component| {
+                component
+                    .to_str()
+                    .is_some_and(|component| component.starts_with('.'))
+            })
+        {
+            return Ok(ResolveResult::Forbidden);
+        }
+
+        self.resolve_relative_candidate(&relative_path)
+    }
+
     fn relative_request_path(&self, request_path: &str) -> io::Result<Option<SafeRelativePath>> {
         if !request_path.starts_with('/') {
             return Ok(None);

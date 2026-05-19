@@ -216,7 +216,10 @@ Planned `1.3.3` php-fpm hardening:
 - Explicit request header/body pass-through switches for advanced migrations.
   Implemented as `php.pass_request_headers` and `php.pass_request_body`, both
   defaulting to `true`.
-- `X-Accel-Redirect` / `X-Sendfile` support.
+- `X-Accel-Redirect` / `X-Sendfile` support. Implemented for PHP-assisted
+  static offload under `php.root`; `X-Sendfile` paths are mapped from
+  `php.fpm_root` for split containers, and configured PHP script extensions
+  are refused as offload targets.
 - `X-Accel-Expires` response control handling. Implemented for PHP responses:
   Fluxheim strips the internal header, maps valid TTLs to `Cache-Control` and
   `Expires`, treats zero or past expiries as `no-store`, and uses `private`

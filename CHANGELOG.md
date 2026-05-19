@@ -50,6 +50,10 @@ behavior when the change improves security or project direction.
   `fluxheim_php_stderr_events_total`. PHP request outcomes now distinguish
   connect timeouts, request timeouts, connection errors, configuration errors,
   invalid responses, and intercepted PHP statuses.
+- Added PHP-assisted static offload for `X-Accel-Redirect` and `X-Sendfile`.
+  Offload targets must resolve under `php.root`, `X-Sendfile` paths are mapped
+  from `php.fpm_root` when configured, and Fluxheim refuses to offload files
+  with configured PHP script extensions.
 - Added PHP `X-Accel-Expires` handling: Fluxheim consumes the internal
   backend header, maps valid TTLs to normal `Cache-Control` and `Expires`
   headers, treats zero or past expiries as `no-store`, and avoids public cache

@@ -1262,6 +1262,8 @@ fn php_outcome_label(outcome: &str) -> &'static str {
         "configuration_error" => "configuration_error",
         "invalid_response" => "invalid_response",
         "intercepted" => "intercepted",
+        "offload" => "offload",
+        "offload_error" => "offload_error",
         "response" => "response",
         _ => "other",
     }
@@ -1355,6 +1357,13 @@ mod tests {
         );
         record_php_request(
             "php-metrics-test",
+            "GET",
+            Some(200),
+            "offload",
+            Duration::from_millis(10),
+        );
+        record_php_request(
+            "php-metrics-test",
             "BREW",
             Some(200),
             "attacker-outcome",
@@ -1372,6 +1381,7 @@ mod tests {
         assert!(output.contains(r#"vhost="php-metrics-test""#));
         assert!(output.contains(r#"method="POST""#));
         assert!(output.contains(r#"outcome="connect_timeout""#));
+        assert!(output.contains(r#"outcome="offload""#));
         assert!(output.contains(r#"status_class="5xx""#));
         assert!(output.contains(r#"method="OTHER""#));
         assert!(output.contains(r#"outcome="other""#));

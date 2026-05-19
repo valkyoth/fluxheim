@@ -6357,6 +6357,47 @@ async fn respond_php_request(
             error,
         )
     })?;
+    if response.status == StatusCode::OK {
+        match php_static_offload_file(&mut response, php) {
+            Ok(Some(file)) => {
+                let status =
+                    respond_php_static_offload(session, ctx, php, &file, &method, response_headers)
+                        .await?;
+                record_php_request_metrics(
+                    vhost,
+                    &method,
+                    Some(status),
+                    if status == 413 {
+                        "offload_error"
+                    } else {
+                        "offload"
+                    },
+                    started_at,
+                );
+                return Ok(true);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                let status = match error.kind() {
+                    io::ErrorKind::PermissionDenied => 403,
+                    io::ErrorKind::NotFound => 404,
+                    _ => 502,
+                };
+                record_php_request_metrics(
+                    vhost,
+                    &method,
+                    Some(status),
+                    "offload_error",
+                    started_at,
+                );
+                session.respond_error(status).await?;
+                ctx.response_body_bytes_seen = 0;
+                return Ok(true);
+            }
+        }
+    } else {
+        strip_php_static_offload_headers(&mut response);
+    }
     strip_php_response_headers(&mut response, &php.config);
     if php_should_intercept_error_status(response.status, php) {
         let status = response.status.as_u16();
@@ -6395,6 +6436,55 @@ async fn respond_php_request(
         started_at,
     );
     Ok(true)
+}
+
+#[cfg(feature = "php-fpm")]
+async fn respond_php_static_offload(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    php: &RuntimePhp,
+    file: &crate::web::StaticFile,
+    method: &str,
+    response_headers: &crate::config::ResponseHeaderPolicyConfig,
+) -> Result<u16> {
+    let request = session.req_header();
+    let if_match = request_header_values_joined(request, "if-match");
+    let if_unmodified_since = request_header_values_joined(request, "if-unmodified-since");
+    let if_none_match = request_header_values_joined(request, "if-none-match");
+    let if_modified_since = request_header_values_joined(request, "if-modified-since");
+    let cache_control = request_header_values_joined(request, "cache-control");
+    let pragma = request_header_values_joined(request, "pragma");
+    let range = request_header_values_joined(request, "range");
+    let if_range = request_header_values_joined(request, "if-range");
+    let plan = crate::web::plan_static_response(
+        file,
+        method,
+        crate::web::StaticRequestConditions {
+            if_match: if_match.as_deref(),
+            if_unmodified_since: if_unmodified_since.as_deref(),
+            if_none_match: if_none_match.as_deref(),
+            if_modified_since: if_modified_since.as_deref(),
+            cache_control: cache_control.as_deref(),
+            pragma: pragma.as_deref(),
+            range: range.as_deref(),
+            if_range: if_range.as_deref(),
+        },
+    );
+    if plan.response_body_bytes > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
+        session
+            .respond_error_with_body(
+                413,
+                Bytes::from_static(b"static offload response too large"),
+            )
+            .await?;
+        ctx.response_body_bytes_seen = 0;
+        return Ok(413);
+    }
+
+    let status = plan.status;
+    ctx.response_body_bytes_seen = plan.response_body_bytes;
+    crate::web::serve_static_file(session, &php.files, file, &plan, response_headers).await?;
+    Ok(status)
 }
 
 #[cfg(feature = "php-fpm")]
@@ -7994,6 +8084,119 @@ fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config
 }
 
 #[cfg(feature = "php-fpm")]
+fn php_static_offload_file(
+    response: &mut ResponseHeader,
+    php: &RuntimePhp,
+) -> io::Result<Option<crate::web::StaticFile>> {
+    let x_accel_redirect = php_internal_response_header(response, "x-accel-redirect");
+    let x_sendfile = php_internal_response_header(response, "x-sendfile");
+    strip_php_static_offload_headers(response);
+
+    if let Some(target) = x_accel_redirect {
+        return php_static_offload_uri(php, &target);
+    }
+    if let Some(target) = x_sendfile {
+        return php_static_offload_rooted_path(php, &target);
+    }
+    Ok(None)
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_internal_response_header(response: &ResponseHeader, name: &str) -> Option<String> {
+    response
+        .headers
+        .get_all(name)
+        .iter()
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+#[cfg(feature = "php-fpm")]
+fn strip_php_static_offload_headers(response: &mut ResponseHeader) {
+    response.remove_header("x-accel-redirect");
+    response.remove_header("x-sendfile");
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_static_offload_uri(
+    php: &RuntimePhp,
+    target: &str,
+) -> io::Result<Option<crate::web::StaticFile>> {
+    if target.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php X-Accel-Redirect target contains control characters",
+        ));
+    }
+    match php.files.resolve(target)? {
+        ResolveResult::Found(file) if php_static_offload_file_allowed(php, &file) => Ok(Some(file)),
+        ResolveResult::Found(_) | ResolveResult::Forbidden => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "php static offload target is forbidden",
+        )),
+        ResolveResult::NotFound => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "php static offload target was not found",
+        )),
+        ResolveResult::DirectoryListing(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php static offload target must be a file",
+        )),
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_static_offload_rooted_path(
+    php: &RuntimePhp,
+    target: &str,
+) -> io::Result<Option<crate::web::StaticFile>> {
+    if target.chars().any(char::is_control) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php X-Sendfile target contains control characters",
+        ));
+    }
+    let target_path = std::path::Path::new(target);
+    let local_path = target_path
+        .strip_prefix(&php.fpm_root)
+        .ok()
+        .map(|relative| php.root.join(relative))
+        .unwrap_or_else(|| target_path.to_path_buf());
+    match php.files.resolve_rooted_file(&local_path)? {
+        ResolveResult::Found(file) if php_static_offload_file_allowed(php, &file) => Ok(Some(file)),
+        ResolveResult::Found(_) | ResolveResult::Forbidden => Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "php static offload target is forbidden",
+        )),
+        ResolveResult::NotFound => Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "php static offload target was not found",
+        )),
+        ResolveResult::DirectoryListing(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "php static offload target must be a file",
+        )),
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_static_offload_file_allowed(php: &RuntimePhp, file: &crate::web::StaticFile) -> bool {
+    !file
+        .path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            php.config
+                .allowed_extensions
+                .iter()
+                .any(|allowed| extension.eq_ignore_ascii_case(allowed))
+        })
+}
+
+#[cfg(feature = "php-fpm")]
 fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> io::Result<()> {
     let Some(raw_value) = response
         .headers
@@ -9529,8 +9732,9 @@ mod tests {
         apply_php_x_accel_expires, directory_slash_redirect_location, parse_php_response,
         php_fpm_error_outcome, php_fpm_path_translated, php_fpm_script_filename,
         php_header_param_name, php_script_name_denied, php_script_name_for_request,
-        php_should_intercept_error_status, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
-        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
+        php_should_intercept_error_status, php_static_offload_file, php_stderr_metric_state,
+        php_x_accel_expires_ttl_secs, resolve_php_script, sanitized_php_stderr,
+        strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -10049,6 +10253,80 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("ok")
         );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_static_offload_resolves_x_accel_redirect_under_php_root() {
+        let php = php_test_runtime("php-x-accel-redirect");
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response
+            .insert_header("x-accel-redirect", "/style.css")
+            .unwrap();
+
+        let file = php_static_offload_file(&mut response, &php)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            file.path.file_name().and_then(|name| name.to_str()),
+            Some("style.css")
+        );
+        assert!(!response.headers.contains_key("x-accel-redirect"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_static_offload_resolves_x_sendfile_under_php_root() {
+        let php = php_test_runtime("php-x-sendfile");
+        let target = php.root.join("style.css");
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response
+            .insert_header("x-sendfile", target.to_string_lossy().to_string())
+            .unwrap();
+
+        let file = php_static_offload_file(&mut response, &php)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file.path, target);
+        assert!(!response.headers.contains_key("x-sendfile"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_static_offload_maps_x_sendfile_from_fpm_root() {
+        let mut php = php_test_runtime("php-x-sendfile-fpm-root");
+        php.fpm_root = std::path::PathBuf::from("/app");
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response
+            .insert_header("x-sendfile", "/app/style.css")
+            .unwrap();
+
+        let file = php_static_offload_file(&mut response, &php)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(file.path, php.root.join("style.css"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_static_offload_rejects_scripts_and_escape_paths() {
+        let php = php_test_runtime("php-static-offload-rejects");
+        let mut script = ResponseHeader::build(200, None).unwrap();
+        script
+            .insert_header("x-accel-redirect", "/app.php")
+            .unwrap();
+        let error = php_static_offload_file(&mut script, &php).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+
+        let mut escape = ResponseHeader::build(200, None).unwrap();
+        escape
+            .insert_header("x-accel-redirect", "/../style.css")
+            .unwrap();
+        let error = php_static_offload_file(&mut escape, &php).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 
     #[cfg(feature = "php-fpm")]
