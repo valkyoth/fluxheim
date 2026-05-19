@@ -165,6 +165,8 @@ Planned `1.3.3` php-fpm hardening:
 - Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
+  Implemented as `php.fpm_root` for FastCGI `DOCUMENT_ROOT`,
+  `SCRIPT_FILENAME`, and `PATH_TRANSLATED` mapping.
 - PHP root override for split container filesystem layouts.
 - Typed `try_files`/front-controller presets for WordPress, Laravel/Symfony,
   and strict `=404` PHP locations.

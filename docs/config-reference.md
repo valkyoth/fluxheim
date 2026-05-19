@@ -1407,6 +1407,9 @@ max_request_body_bytes = "64MiB"
 enabled = true
 runtime = "php-fpm"
 root = "/srv/sites/php.example.test/public"
+# Optional: path visible inside a separate php-fpm container.
+# When omitted, Fluxheim sends php.root as DOCUMENT_ROOT/SCRIPT_FILENAME.
+fpm_root = "/app/public"
 index = "index.php"
 allowed_extensions = ["php"]
 request_timeout_secs = 30
@@ -1449,7 +1452,10 @@ route owns its own proxy action.
 
 For PHP actions, `max_request_body_bytes` bounds the buffered request sent to
 php-fpm and `max_response_bytes` bounds the buffered FastCGI response returned
-from php-fpm. `max_response_bytes` defaults to `64MiB`; set a smaller value on
+from php-fpm. `php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
+`SCRIPT_FILENAME`, and `PATH_TRANSLATED` for separate php-fpm container
+filesystem roots while Fluxheim still checks scripts under `php.root`.
+`max_response_bytes` defaults to `64MiB`; set a smaller value on
 memory-constrained or high-assurance edge nodes. `php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by
 `php.fpm.pool_max_idle`; it is off by default for conservative compatibility.

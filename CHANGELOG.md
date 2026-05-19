@@ -17,6 +17,9 @@ behavior when the change improves security or project direction.
 - Added `[vhosts.php.params]` and `[vhosts.routes.php.params]` for safe custom
   FastCGI parameter injection without allowing overrides of Fluxheim-managed
   CGI variables.
+- Added `php.fpm_root` for split Fluxheim/php-fpm filesystem layouts so
+  Fluxheim can validate scripts under `php.root` while sending php-fpm paths
+  under the runtime container root.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

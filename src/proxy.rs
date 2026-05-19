@@ -2763,6 +2763,7 @@ struct RuntimeProxy {
 struct RuntimePhp {
     config: crate::config::PhpConfig,
     root: std::path::PathBuf,
+    fpm_root: std::path::PathBuf,
     files: StaticFileServer,
     pool: Option<Arc<PhpFpmPool>>,
 }
@@ -2888,6 +2889,7 @@ impl RuntimePhp {
                 format!("{scope}: php root {}: {error}", root.display()),
             )
         })?;
+        let fpm_root = config.fpm_root.clone().unwrap_or_else(|| root.clone());
         let files = StaticFileServer::from_config(&crate::config::WebConfig {
             root: Some(root.clone()),
             index_files: vec![config.index.clone()],
@@ -2907,6 +2909,7 @@ impl RuntimePhp {
             pool: PhpFpmPool::from_config(&config.fpm).map(Arc::new),
             config: config.clone(),
             root,
+            fpm_root,
             files,
         }))
     }
@@ -6201,8 +6204,9 @@ async fn respond_php_request(
         .map(|address| address.ip().to_string())
         .unwrap_or_default();
     let remote_port = remote.map(|address| address.port()).unwrap_or_default();
-    let document_root = php.root.to_string_lossy().to_string();
-    let script_filename = resolution.file.path.to_string_lossy().to_string();
+    let document_root = php.fpm_root.to_string_lossy().to_string();
+    let script_filename = php_fpm_script_filename(php, &resolution.file.path)
+        .unwrap_or_else(|| resolution.file.path.to_string_lossy().to_string());
     let host = request_host(session).unwrap_or(vhost.name.as_str());
 
     let mut params = fastcgi_client::Params::default()
@@ -6231,11 +6235,7 @@ async fn respond_php_request(
     add_php_custom_params(&mut params, &php.config.params);
     if !resolution.path_info.is_empty() {
         params = params.custom("PATH_INFO", resolution.path_info.clone());
-        let path_translated = php
-            .root
-            .join(resolution.path_info.trim_start_matches('/'))
-            .to_string_lossy()
-            .to_string();
+        let path_translated = php_fpm_path_translated(php, &resolution.path_info);
         params = params.custom("PATH_TRANSLATED", path_translated);
     }
 
@@ -6341,6 +6341,20 @@ fn php_static_file_script_name(php: &RuntimePhp, file: &crate::web::StaticFile) 
         return None;
     }
     Some(script_name)
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_script_filename(php: &RuntimePhp, local_path: &std::path::Path) -> Option<String> {
+    let relative = local_path.strip_prefix(&php.root).ok()?;
+    Some(php.fpm_root.join(relative).to_string_lossy().to_string())
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_path_translated(php: &RuntimePhp, path_info: &str) -> String {
+    php.fpm_root
+        .join(path_info.trim_start_matches('/'))
+        .to_string_lossy()
+        .to_string()
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9137,7 +9151,8 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
-        parse_php_response, php_header_param_name, php_script_name_for_request, resolve_php_script,
+        parse_php_response, php_fpm_path_translated, php_fpm_script_filename,
+        php_header_param_name, php_script_name_for_request, resolve_php_script,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9230,9 +9245,27 @@ mod tests {
         RuntimePhp {
             config,
             root: root.canonicalize().unwrap(),
+            fpm_root: root.canonicalize().unwrap(),
             files,
             pool: None,
         }
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_root_maps_script_and_path_info_for_split_containers() {
+        let mut php = php_test_runtime("php-fpm-root-mapping");
+        php.fpm_root = std::path::PathBuf::from("/app/public");
+        let local_script = php.root.join("blog").join("index.php");
+
+        assert_eq!(
+            php_fpm_script_filename(&php, &local_script).as_deref(),
+            Some("/app/public/blog/index.php")
+        );
+        assert_eq!(
+            php_fpm_path_translated(&php, "/uploads/file.txt"),
+            "/app/public/uploads/file.txt"
+        );
     }
 
     #[cfg(all(feature = "php-fpm", unix))]

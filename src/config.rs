@@ -5278,6 +5278,8 @@ pub struct PhpConfig {
     pub runtime: PhpRuntime,
     #[serde(default)]
     pub root: Option<PathBuf>,
+    #[serde(default)]
+    pub fpm_root: Option<PathBuf>,
     #[serde(default = "default_php_index")]
     pub index: String,
     #[serde(default = "default_php_allowed_extensions")]
@@ -5302,6 +5304,7 @@ impl Default for PhpConfig {
             enabled: false,
             runtime: PhpRuntime::default(),
             root: None,
+            fpm_root: None,
             index: default_php_index(),
             allowed_extensions: default_php_allowed_extensions(),
             request_timeout_secs: default_php_request_timeout_secs(),
@@ -5324,6 +5327,11 @@ impl PhpConfig {
             && root.is_relative()
         {
             *root = base_dir.join(&root);
+        }
+        if let Some(fpm_root) = &mut self.fpm_root
+            && fpm_root.is_relative()
+        {
+            *fpm_root = base_dir.join(&fpm_root);
         }
         self.fpm.resolve_relative_paths(base_dir);
     }
@@ -5355,6 +5363,23 @@ impl PhpConfig {
         }
         validate_path(root_field.clone(), Some(root))?;
         validate_non_world_writable_parent(root_field, Some(root))?;
+        if let Some(fpm_root) = &self.fpm_root {
+            if fpm_root.as_os_str().is_empty() {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm_root",
+                    reason: "fpm_root cannot be empty",
+                });
+            }
+            if !fpm_root.is_absolute() {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm_root",
+                    reason: "fpm_root must be absolute after relative path resolution",
+                });
+            }
+            let fpm_root_field = format!("{scope}.fpm_root");
+            validate_path(fpm_root_field.clone(), Some(fpm_root))?;
+            validate_non_world_writable_parent(fpm_root_field, Some(fpm_root))?;
+        }
 
         validate_php_index(&self.index)?;
         validate_php_extensions(&self.allowed_extensions)?;
@@ -9875,6 +9900,7 @@ mod tests {
             enabled = true
             runtime = "php-fpm"
             root = "{}"
+            fpm_root = "/app/public"
             index = "index.php"
             allowed_extensions = ["php"]
             request_timeout_secs = 30
@@ -9901,6 +9927,10 @@ mod tests {
         assert!(php.enabled);
         assert_eq!(php.runtime, super::PhpRuntime::PhpFpm);
         assert_eq!(php.root.as_deref(), Some(root.as_path()));
+        assert_eq!(
+            php.fpm_root.as_deref(),
+            Some(std::path::Path::new("/app/public"))
+        );
         assert_eq!(php.allowed_extensions, ["php"]);
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),

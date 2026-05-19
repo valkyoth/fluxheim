@@ -854,6 +854,8 @@ Follow-up `1.3.x` PHP runtime plan:
     `[vhosts.php.params]` / `[vhosts.routes.php.params]` tables that cannot
     override Fluxheim-managed CGI parameters.
   - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
+    Implemented as `php.fpm_root` for FastCGI `DOCUMENT_ROOT`,
+    `SCRIPT_FILENAME`, and `PATH_TRANSLATED` mapping.
   - Caddy-style PHP root override and optional root-symlink resolution for
     split container layouts, while keeping Fluxheim's symlink escape checks.
   - NGINX/Caddy-style `try_files` PHP presets for common apps:

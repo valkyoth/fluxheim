@@ -28,6 +28,9 @@ domains = ["php.example.test"]
 enabled = true
 runtime = "php-fpm"
 root = "/srv/sites/php.example.test/public"
+# Optional: path visible inside a separate php-fpm container.
+# When omitted, Fluxheim sends php.root as DOCUMENT_ROOT/SCRIPT_FILENAME.
+fpm_root = "/app/public"
 index = "index.php"
 allowed_extensions = ["php"]
 request_timeout_secs = 30
