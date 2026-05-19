@@ -5757,6 +5757,7 @@ const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
 const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
+const MAX_PHP_FPM_TCP_UPSTREAMS: usize = 64;
 const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
 const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
 const MAX_PHP_ERROR_PAGES: usize = 64;
@@ -5816,6 +5817,12 @@ impl PhpFpmConfig {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.fpm.tcp",
                 reason: "must be host:port or ip:port",
+            });
+        }
+        if self.tcp_upstreams.len() > MAX_PHP_FPM_TCP_UPSTREAMS {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.tcp_upstreams",
+                reason: "at most 64 upstreams are allowed",
             });
         }
         for tcp in &self.tcp_upstreams {
@@ -10723,6 +10730,40 @@ mod tests {
             config.vhosts[0].php.fpm.tcp_upstreams,
             ["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()]
         );
+    }
+
+    #[test]
+    fn rejects_too_many_php_fpm_tcp_upstreams() {
+        let root = unique_temp_path("config-php-fpm-too-many-upstreams-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let upstreams = (0..=super::MAX_PHP_FPM_TCP_UPSTREAMS)
+            .map(|index| format!("\"127.0.0.1:{}\"", 9000 + index))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp_upstreams = [{}]
+            "#,
+            test_process_config_toml("config-php-fpm-too-many-upstreams-process"),
+            root.display(),
+            upstreams,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.tcp_upstreams"), "{error}");
+        assert!(error.contains("at most 64 upstreams"), "{error}");
     }
 
     #[test]

@@ -80,7 +80,7 @@ behavior when the change improves security or project direction.
   before applying response policy.
 - Added `php.fpm.tcp_upstreams` for multiple TCP php-fpm backends with
   round-robin selection and safe-method failover on connection failures and
-  connect timeouts.
+  connect timeouts. Upstream lists are capped at 64 entries.
 - Added opt-in php-fpm retry controls with `php.fpm.max_retries`,
   `php.fpm.retry_timeout_secs`, and `php.fpm.retry_methods` for connection
   failures and connect timeouts before
