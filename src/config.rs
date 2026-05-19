@@ -5621,6 +5621,16 @@ impl PhpConfig {
                 reason: "must be greater than zero",
             });
         }
+        if let (Some(spool_threshold), Some(max_request_body)) = (
+            self.request_body_spool_threshold_bytes,
+            self.max_request_body_bytes,
+        ) && spool_threshold.as_u64() >= max_request_body.as_u64()
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.request_body_spool_threshold_bytes",
+                reason: "must be less than php.max_request_body_bytes when both are set",
+            });
+        }
         if self.request_body_spool_threshold_bytes.is_some()
             && self.request_body_spool_dir.is_none()
         {
@@ -10899,6 +10909,47 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
         assert!(
             error.contains("php.request_body_spool_threshold_bytes"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_php_request_body_spool_threshold_at_or_above_body_limit() {
+        let root = unique_temp_path("config-php-spool-threshold-over-limit-root");
+        let spool_dir = unique_temp_path("config-php-spool-threshold-over-limit-dir");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&spool_dir).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            max_request_body_bytes = "8MiB"
+            request_body_spool_threshold_bytes = "8MiB"
+            request_body_spool_dir = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-spool-threshold-over-limit-process"),
+            root.display(),
+            spool_dir.display(),
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("php.request_body_spool_threshold_bytes"),
+            "{error}"
+        );
+        assert!(
+            error.contains("less than php.max_request_body_bytes"),
             "{error}"
         );
     }

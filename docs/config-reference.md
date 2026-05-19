@@ -1510,7 +1510,8 @@ php-fpm. Set `php.request_body_spool_threshold_bytes` with
 temporary file before php-fpm dispatch. This keeps `CONTENT_LENGTH` exact for
 FastCGI and lets retries replay the same upload without cloning a large memory
 buffer; both spool settings must be configured together, and the spool file is
-removed when the request completes.
+removed when the request completes. When `php.max_request_body_bytes` is set on
+the same PHP action, the spool threshold must be lower than that body limit.
 `php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
 `SCRIPT_FILENAME`, and `PATH_TRANSLATED` for separate php-fpm container
 filesystem roots while Fluxheim still checks scripts under `php.root`.

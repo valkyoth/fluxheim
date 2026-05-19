@@ -100,6 +100,8 @@ behavior when the change improves security or project direction.
   `php.request_body_spool_threshold_bytes` and `php.request_body_spool_dir` so
   large uploads can be replayed to php-fpm and retried without cloning the
   entire request body in memory. Both spool settings are now required together.
+  When `php.max_request_body_bytes` is set on the same PHP action, the spool
+  threshold must be lower than that body limit.
 - Added PHP-assisted static offload for `X-Accel-Redirect` and `X-Sendfile`.
   Offload targets must resolve under `php.root`, `X-Sendfile` paths are mapped
   from `php.fpm_root` when configured, and Fluxheim refuses to offload files
