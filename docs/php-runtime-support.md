@@ -230,8 +230,10 @@ Planned `1.3.3` php-fpm hardening:
 - `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
   Initial generic interception implemented as `php.intercept_error_statuses`.
 - Response header hide/pass/ignore controls for PHP backends.
-  Initial hide controls implemented as `php.hide_response_headers`; hop-by-hop
-  PHP response headers are stripped by default.
+  Initial hide controls implemented as `php.hide_response_headers`;
+  `php.ignore_origin_cache_headers` removes PHP-generated `Cache-Control`,
+  `Expires`, and `Pragma`; hop-by-hop PHP response headers are stripped by
+  default.
 - STDERR capture/truncation/severity controls and fatal-error matching.
   Initial controls implemented as `php.stderr_log` and
   `php.stderr_max_bytes`.
@@ -241,11 +243,13 @@ Planned `1.3.3` php-fpm hardening:
   `php.fpm.retry_methods`, defaulting to no retries; request timeouts are not
   retried to avoid duplicating PHP side effects. Broader status/invalid-header
   retry policy remains future work.
-- PHP-specific Prometheus metrics for bounded request totals and durations.
-  Implemented as `fluxheim_php_requests_total` and
-  `fluxheim_php_request_duration_seconds`, and
-  `fluxheim_php_stderr_events_total`; OpenTelemetry export follows the existing
-  metrics exporter path when enabled.
+- PHP-specific Prometheus metrics for bounded request totals, durations, STDERR,
+  retries, and keepalive pool state. Implemented as
+  `fluxheim_php_requests_total`, `fluxheim_php_request_duration_seconds`,
+  `fluxheim_php_stderr_events_total`, `fluxheim_php_fpm_retries_total`,
+  `fluxheim_php_fpm_pool_idle_connections`, and
+  `fluxheim_php_fpm_pool_events_total`; OpenTelemetry export follows the
+  existing metrics exporter path when enabled.
 - FastCGI cache-specific convenience config.
 - FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
   predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
