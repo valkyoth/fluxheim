@@ -2765,6 +2765,7 @@ struct RuntimePhp {
     root: std::path::PathBuf,
     fpm_root: std::path::PathBuf,
     files: StaticFileServer,
+    error_pages: Vec<RuntimeErrorPage>,
     pool: Option<Arc<PhpFpmPool>>,
 }
 
@@ -2905,13 +2906,23 @@ impl RuntimePhp {
                 format!("{scope}: enabled PHP requires php.root"),
             )
         })?;
+        let error_pages = config
+            .error_pages
+            .iter()
+            .map(|error_page| RuntimeErrorPage::from_config(&scope, error_page))
+            .collect::<io::Result<Vec<_>>>()?;
         Ok(Some(Self {
             pool: PhpFpmPool::from_config(&config.fpm).map(Arc::new),
             config: config.clone(),
             root,
             fpm_root,
             files,
+            error_pages,
         }))
+    }
+
+    fn error_page(&self, status: u16) -> Option<&RuntimeErrorPage> {
+        self.error_pages.iter().find(|page| page.status == status)
     }
 }
 
@@ -6285,8 +6296,16 @@ async fn respond_php_request(
         )
     })?;
     strip_php_response_headers(&mut response, &php.config);
-    if php_should_intercept_error_status(response.status, &php.config) {
-        session.respond_error(response.status.as_u16()).await?;
+    if php_should_intercept_error_status(response.status, php) {
+        let status = response.status.as_u16();
+        let sent_custom_page = if let Some(error_page) = php.error_page(status) {
+            respond_custom_proxy_error_page(session, status, error_page, response_headers).await?
+        } else {
+            false
+        };
+        if !sent_custom_page {
+            session.respond_error(status).await?;
+        }
         ctx.response_body_bytes_seen = 0;
         return Ok(true);
     }
@@ -7872,10 +7891,13 @@ fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config
 }
 
 #[cfg(feature = "php-fpm")]
-fn php_should_intercept_error_status(status: StatusCode, php: &crate::config::PhpConfig) -> bool {
-    php.intercept_error_statuses
-        .iter()
-        .any(|intercept_status| *intercept_status == status.as_u16())
+fn php_should_intercept_error_status(status: StatusCode, php: &RuntimePhp) -> bool {
+    php.error_page(status.as_u16()).is_some()
+        || php
+            .config
+            .intercept_error_statuses
+            .iter()
+            .any(|intercept_status| *intercept_status == status.as_u16())
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9428,6 +9450,7 @@ mod tests {
             root: root.canonicalize().unwrap(),
             fpm_root: root.canonicalize().unwrap(),
             files,
+            error_pages: Vec::new(),
             pool: None,
         }
     }
@@ -9820,23 +9843,61 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_intercept_error_statuses_are_explicit() {
-        let config = crate::config::PhpConfig {
-            intercept_error_statuses: vec![404, 500],
-            ..crate::config::PhpConfig::default()
-        };
+        let mut php = php_test_runtime("php-intercept-error-statuses");
+        php.config.intercept_error_statuses = vec![404, 500];
 
         assert!(php_should_intercept_error_status(
             StatusCode::NOT_FOUND,
-            &config
+            &php
         ));
         assert!(php_should_intercept_error_status(
             StatusCode::INTERNAL_SERVER_ERROR,
-            &config
+            &php
         ));
         assert!(!php_should_intercept_error_status(
             StatusCode::BAD_GATEWAY,
-            &config
+            &php
         ));
+    }
+
+    #[cfg(all(feature = "php-fpm", feature = "web"))]
+    #[test]
+    fn php_error_pages_imply_status_interception() {
+        let root = unique_temp_path("php-error-page");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("502.html"), "bad gateway").unwrap();
+        let config = crate::config::PhpConfig {
+            enabled: true,
+            root: Some(root.clone()),
+            error_pages: vec![crate::config::ProxyErrorPageConfig {
+                status: 502,
+                path: "/502.html".to_owned(),
+                web: WebConfig {
+                    root: Some(root.clone()),
+                    ..WebConfig::default()
+                },
+            }],
+            fpm: crate::config::PhpFpmConfig {
+                tcp: Some("127.0.0.1:9000".to_owned()),
+                ..crate::config::PhpFpmConfig::default()
+            },
+            ..crate::config::PhpConfig::default()
+        };
+
+        let php = RuntimePhp::from_config("test php", &config)
+            .unwrap()
+            .unwrap();
+
+        assert!(php.error_page(502).is_some());
+        assert!(php_should_intercept_error_status(
+            StatusCode::BAD_GATEWAY,
+            &php
+        ));
+        assert!(!php_should_intercept_error_status(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &php
+        ));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

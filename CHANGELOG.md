@@ -37,6 +37,9 @@ behavior when the change improves security or project direction.
 - Added `php.intercept_error_statuses` for opt-in
   `fastcgi_intercept_errors`-style replacement of selected PHP 4xx/5xx
   responses with Fluxheim-generated errors.
+- Added `[[vhosts.php.error_pages]]` and route-level PHP error pages for
+  serving internal static fallback pages when selected PHP statuses are
+  intercepted.
 - Added `php.deny_path_prefixes` to block php-fpm script execution under
   configured URI prefixes such as WordPress upload directories.
 - Added `php.max_response_header_bytes` to make the php-fpm CGI response

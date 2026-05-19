@@ -54,6 +54,14 @@ intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
+#[[vhosts.php.error_pages]]
+#status = 502
+#path = "/502.html"
+#
+#[vhosts.php.error_pages.web]
+#root = "/srv/errors"
+#index_files = ["index.html"]
+
 [vhosts.php.params]
 # Optional administrator-controlled FastCGI params. Core CGI values such as
 # SCRIPT_FILENAME, CONTENT_LENGTH, HTTPS, and HTTP_PROXY are managed by

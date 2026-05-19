@@ -84,6 +84,14 @@ intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
+[[vhosts.php.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.php.error_pages.web]
+root = "/srv/errors"
+index_files = ["index.html"]
+
 [vhosts.php.fpm]
 tcp = "127.0.0.1:9000"
 # socket = "/run/php/php-fpm.sock"
@@ -146,6 +154,10 @@ eligible:
 - Optionally intercept selected PHP 4xx/5xx responses with
   `intercept_error_statuses` and replace them with Fluxheim-generated error
   responses.
+- Serve configured static PHP error pages with `[[vhosts.php.error_pages]]` or
+  `[[vhosts.routes.php.error_pages]]`; an error-page entry also intercepts that
+  status and falls back to Fluxheim's generated error if the static page cannot
+  be served.
 - Log PHP STDERR only through size-limited sanitized logs.
 - Keep php-fpm sockets private and validate Unix socket path permissions where
   possible.

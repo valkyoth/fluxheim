@@ -5311,6 +5311,8 @@ pub struct PhpConfig {
     #[serde(default)]
     pub intercept_error_statuses: Vec<u16>,
     #[serde(default)]
+    pub error_pages: Vec<ProxyErrorPageConfig>,
+    #[serde(default)]
     pub params: BTreeMap<String, String>,
     #[serde(default)]
     pub fpm: PhpFpmConfig,
@@ -5338,6 +5340,7 @@ impl Default for PhpConfig {
             stderr_max_bytes: default_php_stderr_max_bytes(),
             hide_response_headers: Vec::new(),
             intercept_error_statuses: Vec::new(),
+            error_pages: Vec::new(),
             params: BTreeMap::new(),
             fpm: PhpFpmConfig::default(),
         }
@@ -5361,6 +5364,9 @@ impl PhpConfig {
             *fpm_root = base_dir.join(&fpm_root);
         }
         self.fpm.resolve_relative_paths(base_dir);
+        for error_page in &mut self.error_pages {
+            error_page.resolve_relative_paths(base_dir);
+        }
     }
 
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
@@ -5456,6 +5462,7 @@ impl PhpConfig {
             validate_header_name("php.hide_response_headers", header)?;
         }
         validate_php_intercept_error_statuses(&self.intercept_error_statuses)?;
+        validate_php_error_pages(&self.error_pages)?;
 
         self.fpm.validate(scope)?;
         Ok(())
@@ -7709,6 +7716,38 @@ fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigE
         if !seen.insert(*status) {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.intercept_error_statuses",
+                reason: "duplicate statuses are not allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_php_error_pages(error_pages: &[ProxyErrorPageConfig]) -> Result<(), ConfigError> {
+    let mut seen = BTreeSet::new();
+    for error_page in error_pages {
+        if !(400..=599).contains(&error_page.status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.error_pages.status",
+                reason: "statuses must be HTTP error statuses from 400 through 599",
+            });
+        }
+        validate_route_path("php.error_pages.path", &error_page.path, false).map_err(|_| {
+            ConfigError::InvalidPhpConfig {
+                field: "php.error_pages.path",
+                reason: "must be an absolute internal request path",
+            }
+        })?;
+        error_page.web.validate()?;
+        if !error_page.web.enabled() {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.error_pages.web.root",
+                reason: "is required for each PHP error page",
+            });
+        }
+        if !seen.insert(error_page.status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.error_pages.status",
                 reason: "duplicate statuses are not allowed",
             });
         }
@@ -10059,6 +10098,14 @@ mod tests {
             max_response_header_bytes = "32KiB"
             path_info = "split"
 
+            [[vhosts.php.error_pages]]
+            status = 502
+            path = "/502.html"
+
+            [vhosts.php.error_pages.web]
+            root = "{}"
+            index_files = ["index.html"]
+
             [vhosts.php.params]
             APP_ENV = "production"
             PHP_VALUE = "memory_limit=256M"
@@ -10070,6 +10117,7 @@ mod tests {
             idle_timeout_secs = 45
             "#,
             test_process_config_toml("config-php-fpm-process"),
+            root.display(),
             root.display()
         ))
         .unwrap();
@@ -10097,6 +10145,9 @@ mod tests {
             ["x-powered-by".to_owned(), "x-internal".to_owned()]
         );
         assert_eq!(php.intercept_error_statuses, [404, 500, 502]);
+        assert_eq!(php.error_pages.len(), 1);
+        assert_eq!(php.error_pages[0].status, 502);
+        assert_eq!(php.error_pages[0].path, "/502.html");
         assert_eq!(php.allowed_extensions, ["php"]);
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),
@@ -10320,6 +10371,50 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.intercept_error_statuses"), "{error}");
+    }
+
+    #[test]
+    fn rejects_duplicate_php_error_page_status() {
+        let root = unique_temp_path("config-php-duplicate-error-page-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [[vhosts.php.error_pages]]
+            status = 502
+            path = "/502.html"
+
+            [vhosts.php.error_pages.web]
+            root = "{}"
+
+            [[vhosts.php.error_pages]]
+            status = 502
+            path = "/fallback.html"
+
+            [vhosts.php.error_pages.web]
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-duplicate-error-page-process"),
+            root.display(),
+            root.display(),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.error_pages.status"), "{error}");
     }
 
     #[test]

@@ -1430,6 +1430,14 @@ intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
+[[vhosts.routes.php.error_pages]]
+status = 502
+path = "/502.html"
+
+[vhosts.routes.php.error_pages.web]
+root = "/srv/errors"
+index_files = ["index.html"]
+
 [vhosts.routes.php.params]
 APP_ENV = "production"
 PHP_VALUE = "memory_limit=256M"
@@ -1504,6 +1512,12 @@ status list. When PHP returns one of those 4xx/5xx statuses, Fluxheim discards
 the PHP response body and sends a Fluxheim-generated error response instead.
 It defaults to an empty list so PHP applications keep their normal error pages
 unless the operator opts in.
+`[[vhosts.php.error_pages]]` and `[[vhosts.routes.php.error_pages]]` are
+internal static fallback pages for selected PHP statuses. A configured error
+page also intercepts that status; if the static page cannot be served, Fluxheim
+falls back to its generated error response. Use this for NGINX-style
+`fastcgi_intercept_errors` migrations where PHP 502/503/504 responses should
+never expose backend details.
 When a slashless request resolves to a directory PHP index, Fluxheim returns a
 canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.
