@@ -28,6 +28,8 @@ behavior when the change improves security or project direction.
   to `/dir/` before executing `/dir/index.php`.
 - Added `php.pass_request_headers` and `php.pass_request_body` switches for
   advanced FastCGI migration control.
+- Added `php.stderr_log` and `php.stderr_max_bytes` controls for bounded,
+  sanitized php-fpm STDERR logging.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

@@ -890,6 +890,8 @@ Follow-up `1.3.x` PHP runtime plan:
   - STDERR handling options: capture/log, truncate, severity mapping for 4xx/5xx
     responses, and optional fatal-error match that marks a response invalid for
     retry/failover.
+    Initial controls implemented as `php.stderr_log` and
+    `php.stderr_max_bytes`.
   - php-fpm upstream load balancing and failover.
   - FPM upstream retry policy aligned with NGINX/Apache/Caddy behavior:
     connect error, timeout, invalid header, selected 5xx statuses, max tries,

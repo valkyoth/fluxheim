@@ -42,6 +42,8 @@ pass_request_body = true
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
+stderr_log = true
+stderr_max_bytes = "2KiB"
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 

@@ -6264,10 +6264,14 @@ async fn respond_php_request(
     )
     .await
     .map_err(|error| Error::because(ErrorType::HTTPStatus(502), "php-fpm request failed", error))?;
-    if let Some(stderr) = output.stderr.as_deref()
+    if php.config.stderr_log
+        && let Some(stderr) = output.stderr.as_deref()
         && !stderr.is_empty()
     {
-        log::warn!("php-fpm stderr: {}", sanitized_php_stderr(stderr));
+        log::warn!(
+            "php-fpm stderr: {}",
+            sanitized_php_stderr(stderr, php.config.stderr_max_bytes.as_u64() as usize)
+        );
     }
     let stdout = output.stdout.unwrap_or_default();
     let (mut response, body) = parse_php_response(&stdout, php.config.max_response_bytes.as_u64())
@@ -6855,12 +6859,17 @@ impl SplitFirstColon for [u8] {
 }
 
 #[cfg(feature = "php-fpm")]
-fn sanitized_php_stderr(stderr: &[u8]) -> String {
-    const MAX_LOGGED_STDERR: usize = 2048;
-    String::from_utf8_lossy(&stderr[..stderr.len().min(MAX_LOGGED_STDERR)])
+fn sanitized_php_stderr(stderr: &[u8], max_bytes: usize) -> String {
+    let max_bytes = max_bytes.max(1);
+    let truncated = stderr.len() > max_bytes;
+    let mut output: String = String::from_utf8_lossy(&stderr[..stderr.len().min(max_bytes)])
         .chars()
         .map(|char| if char.is_control() { ' ' } else { char })
-        .collect()
+        .collect();
+    if truncated {
+        output.push_str(" ... <truncated>");
+    }
+    output
 }
 
 #[cfg(feature = "web")]
@@ -9256,7 +9265,7 @@ mod tests {
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         directory_slash_redirect_location, parse_php_response, php_fpm_path_translated,
         php_fpm_script_filename, php_header_param_name, php_script_name_for_request,
-        resolve_php_script,
+        resolve_php_script, sanitized_php_stderr,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9654,6 +9663,13 @@ mod tests {
     fn parse_php_response_enforces_configured_size_limit() {
         let error = parse_php_response(b"Content-Type: text/plain\r\n\r\nbody", 8).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_stderr_sanitizer_truncates_and_removes_controls() {
+        assert_eq!(sanitized_php_stderr(b"warn\nnext", 64), "warn next");
+        assert_eq!(sanitized_php_stderr(b"abcdef", 3), "abc ... <truncated>");
     }
 
     #[test]

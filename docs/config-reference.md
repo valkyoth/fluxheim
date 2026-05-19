@@ -1421,6 +1421,8 @@ pass_request_body = true
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
+stderr_log = true
+stderr_max_bytes = "2KiB"
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
@@ -1476,6 +1478,9 @@ translated to CGI `HTTP_*` params. `php.pass_request_body` controls whether the
 HTTP request body is sent to php-fpm; when disabled, Fluxheim still drains and
 limits the downstream body but sends `CONTENT_LENGTH=0` and an empty FastCGI
 stdin.
+`php.stderr_log` controls whether FastCGI STDERR is written to Fluxheim logs.
+`php.stderr_max_bytes` bounds each logged STDERR message and defaults to `2KiB`;
+larger output is sanitized and marked as truncated.
 When a slashless request resolves to a directory PHP index, Fluxheim returns a
 canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.

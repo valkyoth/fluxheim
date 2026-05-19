@@ -5298,6 +5298,10 @@ pub struct PhpConfig {
     pub pass_request_headers: bool,
     #[serde(default = "default_true")]
     pub pass_request_body: bool,
+    #[serde(default = "default_true")]
+    pub stderr_log: bool,
+    #[serde(default = "default_php_stderr_max_bytes")]
+    pub stderr_max_bytes: ByteSize,
     #[serde(default)]
     pub params: BTreeMap<String, String>,
     #[serde(default)]
@@ -5320,6 +5324,8 @@ impl Default for PhpConfig {
             try_files: PhpTryFilesMode::default(),
             pass_request_headers: true,
             pass_request_body: true,
+            stderr_log: true,
+            stderr_max_bytes: default_php_stderr_max_bytes(),
             params: BTreeMap::new(),
             fpm: PhpFpmConfig::default(),
         }
@@ -5409,6 +5415,18 @@ impl PhpConfig {
                 reason: "must be greater than zero",
             });
         }
+        if self.stderr_max_bytes.as_u64() == 0 {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.stderr_max_bytes",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.stderr_max_bytes.as_u64() > MAX_PHP_STDERR_LOG_BYTES as u64 {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.stderr_max_bytes",
+                reason: "must be less than or equal to 1MiB",
+            });
+        }
 
         self.fpm.validate(scope)?;
         Ok(())
@@ -5466,6 +5484,7 @@ pub struct PhpFpmConfig {
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
+const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
 
 impl PhpFpmConfig {
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
@@ -7147,6 +7166,10 @@ fn default_php_request_timeout_secs() -> u64 {
 
 fn default_php_max_response_bytes() -> ByteSize {
     ByteSize::from_bytes(64 * 1024 * 1024)
+}
+
+fn default_php_stderr_max_bytes() -> ByteSize {
+    ByteSize::from_bytes(2048)
 }
 
 fn default_php_fpm_pool_max_idle() -> usize {
@@ -9943,6 +9966,8 @@ mod tests {
             try_files = "wordpress"
             pass_request_headers = false
             pass_request_body = false
+            stderr_log = false
+            stderr_max_bytes = "4KiB"
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
             max_response_bytes = "8MiB"
@@ -9975,6 +10000,8 @@ mod tests {
         assert_eq!(php.try_files, super::PhpTryFilesMode::WordPress);
         assert!(!php.pass_request_headers);
         assert!(!php.pass_request_body);
+        assert!(!php.stderr_log);
+        assert_eq!(php.stderr_max_bytes.as_u64(), 4 * 1024);
         assert_eq!(php.allowed_extensions, ["php"]);
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),
@@ -10023,6 +10050,35 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.max_response_bytes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_zero_php_stderr_limit() {
+        let root = unique_temp_path("config-php-zero-stderr-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            stderr_max_bytes = 0
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-zero-stderr-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.stderr_max_bytes"), "{error}");
     }
 
     #[test]
