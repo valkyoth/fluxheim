@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
   `PATH_INFO` splitting, while keeping `strict` as a compatibility alias.
 - Added canonical slash redirects for PHP directory indexes so `/dir` redirects
   to `/dir/` before executing `/dir/index.php`.
+- Added `php.pass_request_headers` and `php.pass_request_body` switches for
+  advanced FastCGI migration control.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

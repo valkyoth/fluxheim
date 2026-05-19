@@ -1415,6 +1415,9 @@ allowed_extensions = ["php"]
 # `wordpress` and `front-controller` fall back to index.php for missing paths.
 # `strict` only executes explicit PHP scripts or directory PHP indexes.
 try_files = "wordpress"
+# Advanced migration switches; both default to true.
+pass_request_headers = true
+pass_request_body = true
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
@@ -1468,6 +1471,11 @@ to be served by `[vhosts.web]`.
 that expect safe trailing `PATH_INFO` after an explicit PHP script such as
 `/index.php/user/1`. The older `strict` spelling is accepted as an alias for
 `split`.
+`php.pass_request_headers` controls whether safe inbound request headers are
+translated to CGI `HTTP_*` params. `php.pass_request_body` controls whether the
+HTTP request body is sent to php-fpm; when disabled, Fluxheim still drains and
+limits the downstream body but sends `CONTENT_LENGTH=0` and an empty FastCGI
+stdin.
 When a slashless request resolves to a directory PHP index, Fluxheim returns a
 canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.

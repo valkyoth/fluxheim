@@ -875,6 +875,9 @@ Follow-up `1.3.x` PHP runtime plan:
     scripts.
   - `fastcgi_pass_request_headers` / `fastcgi_pass_request_body` equivalents
     as explicit advanced switches, defaulting to today's safe allow-list.
+    Implemented as `php.pass_request_headers` and `php.pass_request_body`, both
+    defaulting to `true`; disabled body pass-through still drains and limits the
+    downstream body.
   - `X-Accel-Redirect` / `X-Sendfile` support for PHP-assisted static
     offload, plus internal-only target validation, `X-Accel-Expires` handling
     where it maps to Fluxheim cache metadata, and response-header stripping so

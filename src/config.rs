@@ -5294,6 +5294,10 @@ pub struct PhpConfig {
     pub path_info: PhpPathInfoMode,
     #[serde(default)]
     pub try_files: PhpTryFilesMode,
+    #[serde(default = "default_true")]
+    pub pass_request_headers: bool,
+    #[serde(default = "default_true")]
+    pub pass_request_body: bool,
     #[serde(default)]
     pub params: BTreeMap<String, String>,
     #[serde(default)]
@@ -5314,6 +5318,8 @@ impl Default for PhpConfig {
             max_response_bytes: default_php_max_response_bytes(),
             path_info: PhpPathInfoMode::default(),
             try_files: PhpTryFilesMode::default(),
+            pass_request_headers: true,
+            pass_request_body: true,
             params: BTreeMap::new(),
             fpm: PhpFpmConfig::default(),
         }
@@ -9935,6 +9941,8 @@ mod tests {
             index = "index.php"
             allowed_extensions = ["php"]
             try_files = "wordpress"
+            pass_request_headers = false
+            pass_request_body = false
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
             max_response_bytes = "8MiB"
@@ -9965,6 +9973,8 @@ mod tests {
             Some(std::path::Path::new("/app/public"))
         );
         assert_eq!(php.try_files, super::PhpTryFilesMode::WordPress);
+        assert!(!php.pass_request_headers);
+        assert!(!php.pass_request_body);
         assert_eq!(php.allowed_extensions, ["php"]);
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),

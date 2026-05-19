@@ -6198,9 +6198,17 @@ async fn respond_php_request(
         .map(|bytes| bytes.as_u64())
         .or(ctx.request_body_limit_bytes)
         .unwrap_or(u64::MAX);
-    let request_body = read_php_request_body(session, ctx, body_limit).await?;
-    let content_type =
-        request_header_values_joined(session.req_header(), "content-type").unwrap_or_default();
+    let request_body = if php.config.pass_request_body {
+        read_php_request_body(session, ctx, body_limit).await?
+    } else {
+        drain_php_request_body(session, ctx, body_limit).await?;
+        Vec::new()
+    };
+    let content_type = if php.config.pass_request_body {
+        request_header_values_joined(session.req_header(), "content-type").unwrap_or_default()
+    } else {
+        String::new()
+    };
     let is_tls = downstream_tls(session);
     let request_scheme = if is_tls { "https" } else { "http" };
     let server_port = if is_tls { 443 } else { 80 };
@@ -6235,8 +6243,10 @@ async fn respond_php_request(
         .custom("REQUEST_SCHEME", request_scheme)
         .custom("HTTPS", if is_tls { "on" } else { "off" })
         .custom("REDIRECT_STATUS", "200");
-    add_php_request_header_params(&mut params, session.req_header());
-    add_php_host_param(&mut params, host);
+    if php.config.pass_request_headers {
+        add_php_request_header_params(&mut params, session.req_header());
+        add_php_host_param(&mut params, host);
+    }
     add_php_custom_params(&mut params, &php.config.params);
     if !resolution.path_info.is_empty() {
         params = params.custom("PATH_INFO", resolution.path_info.clone());
@@ -6587,6 +6597,29 @@ async fn read_php_request_body(
         body.extend_from_slice(&chunk);
     }
     Ok(body)
+}
+
+#[cfg(feature = "php-fpm")]
+async fn drain_php_request_body(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    limit_bytes: u64,
+) -> Result<()> {
+    while let Some(chunk) = session.as_downstream_mut().read_request_body().await? {
+        if request_body_chunk_limit_status(
+            limit_bytes,
+            &mut ctx.request_body_bytes_seen,
+            chunk.len(),
+        )
+        .is_some()
+        {
+            return Error::e_explain(
+                ErrorType::HTTPStatus(413),
+                "PHP request body exceeds configured limit",
+            );
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "php-fpm")]

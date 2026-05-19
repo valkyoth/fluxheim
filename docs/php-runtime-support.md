@@ -73,6 +73,8 @@ allowed_extensions = ["php"]
 request_timeout_secs = 30
 max_request_body_bytes = "16MiB"
 max_response_bytes = "64MiB"
+pass_request_headers = true
+pass_request_body = true
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
@@ -120,6 +122,9 @@ eligible:
   such as `SCRIPT_FILENAME`, `CONTENT_LENGTH`, `HTTPS`, or `HTTP_PROXY`.
 - Enforce global and PHP-specific request body limits for both declared and
   streaming bodies.
+- Support explicit `pass_request_headers` and `pass_request_body` switches.
+  Body pass-through disabled still drains and limits the downstream body before
+  sending empty FastCGI stdin.
 - Apply runtime request timeouts and connection timeouts.
 - Cap response header bytes returned by PHP.
 - Parse PHP-generated headers strictly; reject malformed status lines and
@@ -180,6 +185,8 @@ Planned `1.3.3` php-fpm hardening:
   Implemented as a `308` redirect before executing directory `index.php`
   scripts.
 - Explicit request header/body pass-through switches for advanced migrations.
+  Implemented as `php.pass_request_headers` and `php.pass_request_body`, both
+  defaulting to `true`.
 - `X-Accel-Redirect` / `X-Sendfile` support.
 - `X-Accel-Expires` mapping into Fluxheim cache metadata where safe.
 - `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
