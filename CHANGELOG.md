@@ -16,7 +16,7 @@ behavior when the change improves security or project direction.
   `pool_max_idle`, and `idle_timeout_secs`.
 - Added `[vhosts.php.params]` and `[vhosts.routes.php.params]` for safe custom
   FastCGI parameter injection without allowing overrides of Fluxheim-managed
-  CGI variables.
+  CGI variables. Custom parameter tables are capped at 128 entries.
 - Added `php.fpm_root` for split Fluxheim/php-fpm filesystem layouts so
   Fluxheim can validate scripts under `php.root` while sending php-fpm paths
   under the runtime container root.

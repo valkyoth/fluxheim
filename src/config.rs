@@ -5759,6 +5759,7 @@ const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
 const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
 const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
 const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
+const MAX_PHP_PARAMS: usize = 128;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
@@ -8040,6 +8041,12 @@ fn validate_php_hide_response_headers(headers: &[String]) -> Result<(), ConfigEr
 }
 
 fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigError> {
+    if params.len() > MAX_PHP_PARAMS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "at most 128 parameters are allowed",
+        });
+    }
     for (name, value) in params {
         validate_php_param_name(name)?;
         validate_php_param_value(value)?;
@@ -11374,6 +11381,43 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("control characters"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_php_params() {
+        let root = unique_temp_path("config-php-many-params");
+        std::fs::create_dir_all(&root).unwrap();
+        let params = (0..=super::MAX_PHP_PARAMS)
+            .map(|index| format!("PARAM_{index} = \"value\""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.params]
+            {}
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-many-params-process"),
+            root.display(),
+            params,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.params"), "{error}");
+        assert!(error.contains("at most 128 parameters"), "{error}");
     }
 
     #[test]

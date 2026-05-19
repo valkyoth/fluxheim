@@ -1627,7 +1627,8 @@ tokens.
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core
 CGI parameters that it owns, including `SCRIPT_FILENAME`, `CONTENT_LENGTH`,
-`HTTPS`, and `HTTP_PROXY`.
+`HTTPS`, and `HTTP_PROXY`. Custom parameter tables are capped at 128 entries;
+each parameter name is capped at 128 bytes and each value at 16KiB.
 
 `[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache
 policy for that matched route only. Routes without a cache block continue to use
