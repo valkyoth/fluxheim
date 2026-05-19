@@ -2,6 +2,8 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+#[cfg(feature = "php-fpm")]
+use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(feature = "cache")]
 use std::sync::Mutex;
@@ -78,6 +80,8 @@ type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 const PEER_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
 static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
+#[cfg(feature = "php-fpm")]
+static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone)]
 pub struct FluxProxy {
@@ -3040,7 +3044,7 @@ impl PhpFpmPool {
     async fn execute(
         &self,
         params: fastcgi_client::Params<'_>,
-        body: Vec<u8>,
+        body: &PhpRequestBody,
         connect_timeout: Duration,
         request_timeout: Duration,
     ) -> io::Result<fastcgi_client::Response> {
@@ -3125,7 +3129,7 @@ impl PhpFpmPoolEntry {
     async fn execute(
         &mut self,
         params: fastcgi_client::Params<'_>,
-        body: Vec<u8>,
+        body: &PhpRequestBody,
         timeout: Duration,
     ) -> io::Result<fastcgi_client::Response> {
         self.client.execute(params, body, timeout).await
@@ -3137,10 +3141,10 @@ impl PhpFpmPooledClient {
     async fn execute(
         &mut self,
         params: fastcgi_client::Params<'_>,
-        body: Vec<u8>,
+        body: &PhpRequestBody,
         timeout: Duration,
     ) -> io::Result<fastcgi_client::Response> {
-        let request = fastcgi_client::Request::new(params, fastcgi_client::io::Cursor::new(body));
+        let request = fastcgi_client::Request::new(params, body.reader().await?);
         match self {
             Self::Tcp(client) => tokio::time::timeout(timeout, client.execute(request))
                 .await
@@ -6352,10 +6356,10 @@ async fn respond_php_request(
         .or(ctx.request_body_limit_bytes)
         .unwrap_or(u64::MAX);
     let request_body = if php.config.pass_request_body {
-        read_php_request_body(session, ctx, body_limit).await?
+        read_php_request_body(session, ctx, &php.config, body_limit).await?
     } else {
         drain_php_request_body(session, ctx, body_limit).await?;
-        Vec::new()
+        PhpRequestBody::memory(Vec::new())
     };
     let content_type = if php.config.pass_request_body {
         request_header_values_joined(session.req_header(), "content-type").unwrap_or_default()
@@ -6908,12 +6912,125 @@ fn safe_php_param_value(value: &str) -> bool {
 }
 
 #[cfg(feature = "php-fpm")]
+#[derive(Clone)]
+struct PhpRequestBody {
+    inner: Arc<PhpRequestBodyInner>,
+    len: usize,
+}
+
+#[cfg(feature = "php-fpm")]
+enum PhpRequestBodyInner {
+    Memory(Vec<u8>),
+    Spool(PhpRequestBodySpool),
+}
+
+#[cfg(feature = "php-fpm")]
+struct PhpRequestBodySpool {
+    path: PathBuf,
+}
+
+#[cfg(feature = "php-fpm")]
+impl Drop for PhpRequestBodySpool {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl PhpRequestBody {
+    fn memory(body: Vec<u8>) -> Self {
+        let len = body.len();
+        Self {
+            inner: Arc::new(PhpRequestBodyInner::Memory(body)),
+            len,
+        }
+    }
+
+    fn spooled(path: PathBuf, len: usize) -> Self {
+        Self {
+            inner: Arc::new(PhpRequestBodyInner::Spool(PhpRequestBodySpool { path })),
+            len,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    async fn reader(&self) -> io::Result<Box<dyn fastcgi_client::io::AsyncRead + Unpin + Send>> {
+        match self.inner.as_ref() {
+            PhpRequestBodyInner::Memory(body) => {
+                Ok(Box::new(fastcgi_client::io::Cursor::new(body.clone())))
+            }
+            PhpRequestBodyInner::Spool(spool) => {
+                let file = tokio::fs::File::open(&spool.path).await?;
+                Ok(Box::new(
+                    fastcgi_client::io::TokioAsyncReadCompatExt::compat(file),
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_request_body_spool_path(spool_dir: &std::path::Path) -> PathBuf {
+    let counter = PHP_REQUEST_BODY_SPOOL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    spool_dir.join(format!(
+        ".fluxheim-php-body-{}-{counter}.tmp",
+        std::process::id()
+    ))
+}
+
+#[cfg(feature = "php-fpm")]
+async fn create_php_request_body_spool_file(
+    spool_dir: &std::path::Path,
+) -> io::Result<(PathBuf, tokio::fs::File)> {
+    tokio::fs::create_dir_all(spool_dir).await?;
+    let mut last_error = None;
+    for _ in 0..16 {
+        let path = php_request_body_spool_path(spool_dir);
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            options.mode(0o600);
+        }
+        match options.open(&path).await {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate PHP request body spool file",
+        )
+    }))
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_spool_error(context: &'static str, error: io::Error) -> Box<Error> {
+    Error::because(ErrorType::InternalError, context, error)
+}
+
+#[cfg(feature = "php-fpm")]
 async fn read_php_request_body(
     session: &mut Session,
     ctx: &mut RequestContext,
+    config: &crate::config::PhpConfig,
     limit_bytes: u64,
-) -> Result<Vec<u8>> {
+) -> Result<PhpRequestBody> {
+    use tokio::io::AsyncWriteExt;
+
+    let spool_threshold = config
+        .request_body_spool_threshold_bytes
+        .map(|bytes| usize::try_from(bytes.as_u64()).unwrap_or(usize::MAX));
+    let spool_dir = config.request_body_spool_dir.as_deref();
     let mut body = Vec::new();
+    let mut spool: Option<(PathBuf, tokio::fs::File)> = None;
     while let Some(chunk) = session.as_downstream_mut().read_request_body().await? {
         if request_body_chunk_limit_status(
             limit_bytes,
@@ -6927,9 +7044,45 @@ async fn read_php_request_body(
                 "PHP request body exceeds configured limit",
             );
         }
-        body.extend_from_slice(&chunk);
+        if let Some((_, file)) = &mut spool {
+            file.write_all(&chunk).await.map_err(|error| {
+                php_spool_error("failed to write PHP request body spool file", error)
+            })?;
+            continue;
+        }
+        if let (Some(threshold), Some(spool_dir)) = (spool_threshold, spool_dir)
+            && body.len().saturating_add(chunk.len()) > threshold
+        {
+            let (path, mut file) = create_php_request_body_spool_file(spool_dir)
+                .await
+                .map_err(|error| {
+                    php_spool_error("failed to create PHP request body spool file", error)
+                })?;
+            if !body.is_empty() {
+                file.write_all(&body).await.map_err(|error| {
+                    php_spool_error("failed to write PHP request body spool file", error)
+                })?;
+                body.clear();
+            }
+            file.write_all(&chunk).await.map_err(|error| {
+                php_spool_error("failed to write PHP request body spool file", error)
+            })?;
+            spool = Some((path, file));
+        } else {
+            body.extend_from_slice(&chunk);
+        }
     }
-    Ok(body)
+    if let Some((path, mut file)) = spool {
+        file.flush().await.map_err(|error| {
+            php_spool_error("failed to flush PHP request body spool file", error)
+        })?;
+        Ok(PhpRequestBody::spooled(
+            path,
+            ctx.request_body_bytes_seen.min(usize::MAX as u64) as usize,
+        ))
+    } else {
+        Ok(PhpRequestBody::memory(body))
+    }
 }
 
 #[cfg(feature = "php-fpm")]
@@ -6983,7 +7136,7 @@ fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
 async fn execute_php_fpm(
     php: &RuntimePhp,
     params: fastcgi_client::Params<'_>,
-    body: Vec<u8>,
+    body: PhpRequestBody,
     timeout: std::time::Duration,
     method: &str,
     vhost_name: &str,
@@ -7015,7 +7168,7 @@ async fn execute_php_fpm(
             pool,
             &endpoints[endpoint_index],
             params.clone(),
-            body.clone(),
+            &body,
             connect_timeout,
             timeout,
         )
@@ -7063,7 +7216,7 @@ async fn execute_php_fpm_once(
     pool: Option<&PhpFpmPool>,
     endpoint: &PhpFpmEndpoint,
     params: fastcgi_client::Params<'_>,
-    body: Vec<u8>,
+    body: &PhpRequestBody,
     connect_timeout: Duration,
     timeout: std::time::Duration,
 ) -> io::Result<fastcgi_client::Response> {
@@ -7140,14 +7293,14 @@ fn php_fpm_retryable_error(error: &io::Error) -> bool {
 async fn execute_php_fpm_stream<S>(
     stream: S,
     params: fastcgi_client::Params<'_>,
-    body: Vec<u8>,
+    body: &PhpRequestBody,
     timeout: std::time::Duration,
 ) -> io::Result<fastcgi_client::Response>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let client = fastcgi_client::Client::new_tokio(stream);
-    let request = fastcgi_client::Request::new(params, fastcgi_client::io::Cursor::new(body));
+    let request = fastcgi_client::Request::new(params, body.reader().await?);
     tokio::time::timeout(timeout, client.execute_once(request))
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm request timed out"))?
@@ -10001,8 +10154,9 @@ mod tests {
     };
     #[cfg(feature = "php-fpm")]
     use super::{
-        PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
-        apply_php_x_accel_expires, directory_slash_redirect_location,
+        PhpRequestBody, PhpResolveOutcome, RuntimePhp, add_php_host_param,
+        add_php_request_header_params, apply_php_x_accel_expires,
+        create_php_request_body_spool_file, directory_slash_redirect_location,
         ignore_php_origin_cache_headers, parse_php_response, php_fpm_endpoints_from_config,
         php_fpm_error_outcome, php_fpm_keepalive_pools_from_config, php_fpm_path_translated,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
@@ -10108,6 +10262,44 @@ mod tests {
             fpm_pools: Vec::new(),
             fpm_next: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_spooled_request_body_replays_and_cleans_up_file() {
+        let spool_dir = unique_temp_path("php-spooled-request-body");
+        fs::create_dir_all(&spool_dir).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+        let (path, mut file) = runtime
+            .block_on(create_php_request_body_spool_file(&spool_dir))
+            .unwrap();
+        runtime.block_on(async {
+            use tokio::io::AsyncWriteExt;
+
+            file.write_all(b"spooled-body").await.unwrap();
+            file.flush().await.unwrap();
+        });
+
+        let body = PhpRequestBody::spooled(path.clone(), "spooled-body".len());
+        assert_eq!(body.len(), "spooled-body".len());
+
+        let mut reader = runtime.block_on(body.reader()).unwrap();
+        let mut replayed = Vec::new();
+        runtime
+            .block_on(fastcgi_client::io::AsyncReadExt::read_to_end(
+                &mut reader,
+                &mut replayed,
+            ))
+            .unwrap();
+        assert_eq!(replayed, b"spooled-body");
+        assert!(path.exists());
+
+        drop(reader);
+        drop(body);
+        assert!(!path.exists());
     }
 
     #[cfg(feature = "php-fpm")]

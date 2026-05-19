@@ -5402,6 +5402,10 @@ pub struct PhpConfig {
     pub request_timeout_secs: u64,
     #[serde(default)]
     pub max_request_body_bytes: Option<ByteSize>,
+    #[serde(default)]
+    pub request_body_spool_threshold_bytes: Option<ByteSize>,
+    #[serde(default)]
+    pub request_body_spool_dir: Option<PathBuf>,
     #[serde(default = "default_php_max_response_bytes")]
     pub max_response_bytes: ByteSize,
     #[serde(default = "default_php_max_response_header_bytes")]
@@ -5444,6 +5448,8 @@ impl Default for PhpConfig {
             deny_path_prefixes: Vec::new(),
             request_timeout_secs: default_php_request_timeout_secs(),
             max_request_body_bytes: None,
+            request_body_spool_threshold_bytes: None,
+            request_body_spool_dir: None,
             max_response_bytes: default_php_max_response_bytes(),
             max_response_header_bytes: default_php_max_response_header_bytes(),
             path_info: PhpPathInfoMode::default(),
@@ -5477,6 +5483,11 @@ impl PhpConfig {
             && fpm_root.is_relative()
         {
             *fpm_root = base_dir.join(&fpm_root);
+        }
+        if let Some(spool_dir) = &mut self.request_body_spool_dir
+            && spool_dir.is_relative()
+        {
+            *spool_dir = base_dir.join(&spool_dir);
         }
         self.fpm.resolve_relative_paths(base_dir);
         for error_page in &mut self.error_pages {
@@ -5542,6 +5553,34 @@ impl PhpConfig {
                 field: "php.max_request_body_bytes",
                 reason: "must be greater than zero",
             });
+        }
+        if self
+            .request_body_spool_threshold_bytes
+            .is_some_and(|bytes| bytes.as_u64() == 0)
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.request_body_spool_threshold_bytes",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.request_body_spool_threshold_bytes.is_some()
+            && self.request_body_spool_dir.is_none()
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.request_body_spool_dir",
+                reason: "is required when php.request_body_spool_threshold_bytes is set",
+            });
+        }
+        if let Some(spool_dir) = &self.request_body_spool_dir {
+            if spool_dir.as_os_str().is_empty() {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.request_body_spool_dir",
+                    reason: "cannot be empty",
+                });
+            }
+            let spool_dir_field = format!("{scope}.request_body_spool_dir");
+            validate_path(spool_dir_field.clone(), Some(spool_dir))?;
+            validate_non_world_writable_parent(spool_dir_field, Some(spool_dir))?;
         }
         if self.max_response_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidPhpConfig {
@@ -10249,6 +10288,8 @@ mod tests {
     fn parses_php_fpm_vhost_config() {
         let root = unique_temp_path("config-php-fpm-root");
         std::fs::create_dir_all(&root).unwrap();
+        let spool_dir = unique_temp_path("config-php-fpm-spool");
+        std::fs::create_dir_all(&spool_dir).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
             {}
@@ -10275,6 +10316,8 @@ mod tests {
             intercept_error_statuses = [404, 500, 502]
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
+            request_body_spool_threshold_bytes = "1MiB"
+            request_body_spool_dir = "{}"
             max_response_bytes = "8MiB"
             max_response_header_bytes = "32KiB"
             path_info = "split"
@@ -10302,6 +10345,7 @@ mod tests {
             "#,
             test_process_config_toml("config-php-fpm-process"),
             root.display(),
+            spool_dir.display(),
             root.display()
         ))
         .unwrap();
@@ -10337,6 +10381,14 @@ mod tests {
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),
             16 * 1024 * 1024
+        );
+        assert_eq!(
+            php.request_body_spool_threshold_bytes.unwrap().as_u64(),
+            1024 * 1024
+        );
+        assert_eq!(
+            php.request_body_spool_dir.as_deref(),
+            Some(spool_dir.as_path())
         );
         assert_eq!(php.max_response_bytes.as_u64(), 8 * 1024 * 1024);
         assert_eq!(php.max_response_header_bytes.as_u64(), 32 * 1024);

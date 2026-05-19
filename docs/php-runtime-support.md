@@ -198,8 +198,13 @@ Planned `1.3.3` php-fpm hardening:
   `php.fpm.keepalive`.
 - Safe FastCGI keep-connection reuse where the client/runtime supports it.
   Implemented for the `fastcgi-client` keep-alive path.
-- True streaming request and response bodies.
-- Chunked upload disk-spooling before php-fpm dispatch.
+- True streaming request and response bodies. Request-body disk replay is in
+  place for large PHP bodies; direct downstream-to-FastCGI and FastCGI-to-client
+  streaming remain future work.
+- Chunked upload disk-spooling before php-fpm dispatch. Implemented with
+  `php.request_body_spool_threshold_bytes` and `php.request_body_spool_dir` so
+  large uploads keep exact FastCGI `CONTENT_LENGTH` without retaining the whole
+  request body in memory.
 - Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.

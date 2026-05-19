@@ -1432,6 +1432,9 @@ pass_request_headers = true
 pass_request_body = true
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
+# Optional: spill larger PHP request bodies to disk before FastCGI dispatch.
+request_body_spool_threshold_bytes = "4MiB"
+request_body_spool_dir = "/var/lib/fluxheim/php-spool/example.test"
 max_response_bytes = "64MiB"
 max_response_header_bytes = "64KiB"
 stderr_log = true
@@ -1489,9 +1492,14 @@ body limit for uploads handled by that route. Proxy actions accept
 proxy timeout values override the vhost/global proxy timeout values because the
 route owns its own proxy action.
 
-For PHP actions, `max_request_body_bytes` bounds the buffered request sent to
-php-fpm and `max_response_bytes` bounds the buffered FastCGI response returned
-from php-fpm. `php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
+For PHP actions, `max_request_body_bytes` bounds the request sent to php-fpm
+and `max_response_bytes` bounds the buffered FastCGI response returned from
+php-fpm. Set `php.request_body_spool_threshold_bytes` with
+`php.request_body_spool_dir` to spill larger request bodies to an owner-safe
+temporary file before php-fpm dispatch. This keeps `CONTENT_LENGTH` exact for
+FastCGI and lets retries replay the same upload without cloning a large memory
+buffer; the spool file is removed when the request completes.
+`php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
 `SCRIPT_FILENAME`, and `PATH_TRANSLATED` for separate php-fpm container
 filesystem roots while Fluxheim still checks scripts under `php.root`.
 `php.max_response_header_bytes` caps the CGI-style response header block before

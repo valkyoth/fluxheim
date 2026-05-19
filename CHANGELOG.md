@@ -69,6 +69,10 @@ behavior when the change improves security or project direction.
   `php.fpm.retry_timeout_secs`, and `php.fpm.retry_methods` for connection
   failures and connect timeouts before
   php-fpm returns a response; request timeouts are not retried.
+- Added opt-in PHP request-body disk spooling with
+  `php.request_body_spool_threshold_bytes` and `php.request_body_spool_dir` so
+  large uploads can be replayed to php-fpm and retried without cloning the
+  entire request body in memory.
 - Added PHP-assisted static offload for `X-Accel-Redirect` and `X-Sendfile`.
   Offload targets must resolve under `php.root`, `X-Sendfile` paths are mapped
   from `php.fpm_root` when configured, and Fluxheim refuses to offload files

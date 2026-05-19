@@ -847,9 +847,13 @@ Follow-up `1.3.x` PHP runtime plan:
   - `fastcgi_keep_conn`-style reuse where the selected client/runtime can
     safely keep FastCGI connections open between requests, with stale-connection
     detection and a clear fallback to one request per connection.
-  - True streaming request and response bodies.
+  - True streaming request and response bodies. Request-body disk replay is in
+    place for large PHP bodies; direct downstream-to-FastCGI and
+    FastCGI-to-client streaming remain future work.
   - Chunked upload disk-spooling so large uploads do not require full RAM
-    buffering before php-fpm receives `CONTENT_LENGTH`.
+    buffering before php-fpm receives `CONTENT_LENGTH`. Implemented with
+    `php.request_body_spool_threshold_bytes` and
+    `php.request_body_spool_dir`.
   - Custom FastCGI params in config. Implemented as validated
     `[vhosts.php.params]` / `[vhosts.routes.php.params]` tables that cannot
     override Fluxheim-managed CGI parameters.
