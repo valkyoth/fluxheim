@@ -32,6 +32,8 @@ behavior when the change improves security or project direction.
   sanitized php-fpm STDERR logging.
 - Added `php.hide_response_headers` for removing selected php-fpm response
   headers before they reach clients.
+- Stripped hop-by-hop php-fpm response headers, including `Connection`-named
+  headers and `Transfer-Encoding`, before Fluxheim frames the client response.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

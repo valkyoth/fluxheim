@@ -1485,6 +1485,9 @@ larger output is sanitized and marked as truncated.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
+Fluxheim always strips hop-by-hop php-fpm response headers such as
+`Connection`, `Transfer-Encoding`, and headers named by `Connection` before it
+frames the client response.
 When a slashless request resolves to a directory PHP index, Fluxheim returns a
 canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.

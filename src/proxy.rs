@@ -7828,10 +7828,39 @@ fn strip_cache_response_headers(
 
 #[cfg(feature = "php-fpm")]
 fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config::PhpConfig) {
+    let connection_header_tokens = response
+        .headers
+        .get_all("connection")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    for header in PHP_HOP_BY_HOP_RESPONSE_HEADERS {
+        response.remove_header(*header);
+    }
+    for header in connection_header_tokens {
+        response.remove_header(header.as_str());
+    }
     for header in &php.hide_response_headers {
         response.remove_header(header.as_str());
     }
 }
+
+#[cfg(feature = "php-fpm")]
+const PHP_HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
 
 #[cfg(feature = "cache")]
 fn cache_control_freshness_value(
@@ -9686,6 +9715,13 @@ mod tests {
     #[test]
     fn php_hidden_response_headers_are_removed() {
         let mut response = ResponseHeader::build(200, None).unwrap();
+        response
+            .insert_header("connection", "x-hop, keep-alive")
+            .unwrap();
+        response
+            .insert_header("transfer-encoding", "chunked")
+            .unwrap();
+        response.insert_header("x-hop", "secret").unwrap();
         response.insert_header("x-powered-by", "PHP/8.4").unwrap();
         response.insert_header("x-keep", "ok").unwrap();
         let config = crate::config::PhpConfig {
@@ -9696,6 +9732,9 @@ mod tests {
         strip_php_response_headers(&mut response, &config);
 
         assert!(!response.headers.contains_key("x-powered-by"));
+        assert!(!response.headers.contains_key("connection"));
+        assert!(!response.headers.contains_key("transfer-encoding"));
+        assert!(!response.headers.contains_key("x-hop"));
         assert_eq!(
             response
                 .headers

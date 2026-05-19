@@ -887,7 +887,8 @@ Follow-up `1.3.x` PHP runtime plan:
   - PHP response-header policy controls matching common NGINX migrations:
     hide/pass selected backend headers, ignore selected cache-control headers,
     and reject conflicting `Content-Length` / transfer headers.
-    Initial hide controls implemented as `php.hide_response_headers`.
+    Initial hide controls implemented as `php.hide_response_headers`; hop-by-hop
+    PHP response headers are stripped by default.
   - STDERR handling options: capture/log, truncate, severity mapping for 4xx/5xx
     responses, and optional fatal-error match that marks a response invalid for
     retry/failover.

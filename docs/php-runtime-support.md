@@ -136,6 +136,8 @@ eligible:
 - Cap response header bytes returned by PHP.
 - Parse PHP-generated headers strictly; reject malformed status lines and
   header injection.
+- Strip hop-by-hop php-fpm response headers, including `Connection`-named
+  headers and `Transfer-Encoding`, before Fluxheim frames the client response.
 - Log PHP STDERR only through size-limited sanitized logs.
 - Keep php-fpm sockets private and validate Unix socket path permissions where
   possible.
@@ -198,7 +200,8 @@ Planned `1.3.3` php-fpm hardening:
 - `X-Accel-Expires` mapping into Fluxheim cache metadata where safe.
 - `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
 - Response header hide/pass/ignore controls for PHP backends.
-  Initial hide controls implemented as `php.hide_response_headers`.
+  Initial hide controls implemented as `php.hide_response_headers`; hop-by-hop
+  PHP response headers are stripped by default.
 - STDERR capture/truncation/severity controls and fatal-error matching.
   Initial controls implemented as `php.stderr_log` and
   `php.stderr_max_bytes`.
