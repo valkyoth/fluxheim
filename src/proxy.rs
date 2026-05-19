@@ -6299,6 +6299,7 @@ async fn respond_php_request(
         params,
         request_body,
         timeout,
+        &method,
     )
     .await
     {
@@ -6858,11 +6859,44 @@ async fn execute_php_fpm(
     params: fastcgi_client::Params<'_>,
     body: Vec<u8>,
     timeout: std::time::Duration,
+    method: &str,
 ) -> io::Result<fastcgi_client::Response> {
     let connect_timeout = fpm
         .connect_timeout_secs
         .map(Duration::from_secs)
         .unwrap_or(timeout);
+    let max_retries = php_fpm_retry_attempts(fpm, method);
+    let mut attempts = 0;
+    loop {
+        let result = execute_php_fpm_once(
+            pool,
+            fpm,
+            params.clone(),
+            body.clone(),
+            connect_timeout,
+            timeout,
+        )
+        .await;
+        match result {
+            Ok(response) => return Ok(response),
+            Err(error) if attempts < max_retries && php_fpm_retryable_error(&error) => {
+                attempts += 1;
+                log::debug!("retrying php-fpm request after {}", error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+async fn execute_php_fpm_once(
+    pool: Option<&PhpFpmPool>,
+    fpm: &crate::config::PhpFpmConfig,
+    params: fastcgi_client::Params<'_>,
+    body: Vec<u8>,
+    connect_timeout: Duration,
+    timeout: std::time::Duration,
+) -> io::Result<fastcgi_client::Response> {
     if let Some(pool) = pool {
         return pool.execute(params, body, connect_timeout, timeout).await;
     }
@@ -6895,6 +6929,36 @@ async fn execute_php_fpm(
             io::ErrorKind::InvalidInput,
             "php-fpm socket or tcp is required",
         ))
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_retry_attempts(fpm: &crate::config::PhpFpmConfig, method: &str) -> u8 {
+    if fpm.max_retries == 0
+        || !fpm
+            .retry_methods
+            .iter()
+            .any(|retry_method| retry_method.eq_ignore_ascii_case(method))
+    {
+        return 0;
+    }
+    fpm.max_retries
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_retryable_error(error: &io::Error) -> bool {
+    match error.kind() {
+        io::ErrorKind::TimedOut => error.to_string().contains("connect"),
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe
+        | io::ErrorKind::NotConnected
+        | io::ErrorKind::AddrInUse
+        | io::ErrorKind::AddrNotAvailable
+        | io::ErrorKind::NotFound
+        | io::ErrorKind::UnexpectedEof => true,
+        _ => false,
     }
 }
 
@@ -9730,11 +9794,11 @@ mod tests {
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         apply_php_x_accel_expires, directory_slash_redirect_location, parse_php_response,
-        php_fpm_error_outcome, php_fpm_path_translated, php_fpm_script_filename,
-        php_header_param_name, php_script_name_denied, php_script_name_for_request,
-        php_should_intercept_error_status, php_static_offload_file, php_stderr_metric_state,
-        php_x_accel_expires_ttl_secs, resolve_php_script, sanitized_php_stderr,
-        strip_php_response_headers,
+        php_fpm_error_outcome, php_fpm_path_translated, php_fpm_retry_attempts,
+        php_fpm_retryable_error, php_fpm_script_filename, php_header_param_name,
+        php_script_name_denied, php_script_name_for_request, php_should_intercept_error_status,
+        php_static_offload_file, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
+        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -10211,6 +10275,42 @@ mod tests {
             php_fpm_error_outcome(&io::Error::other("backend failed")),
             "fpm_error"
         );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_retry_policy_is_bounded_and_safe_by_method() {
+        let mut fpm = crate::config::PhpFpmConfig {
+            max_retries: 2,
+            retry_methods: vec!["GET".to_owned(), "HEAD".to_owned()],
+            ..crate::config::PhpFpmConfig::default()
+        };
+
+        assert_eq!(php_fpm_retry_attempts(&fpm, "GET"), 2);
+        assert_eq!(php_fpm_retry_attempts(&fpm, "POST"), 0);
+        fpm.max_retries = 0;
+        assert_eq!(php_fpm_retry_attempts(&fpm, "GET"), 0);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_retryable_errors_exclude_request_timeouts() {
+        assert!(php_fpm_retryable_error(&io::Error::new(
+            io::ErrorKind::TimedOut,
+            "php-fpm connect timed out",
+        )));
+        assert!(php_fpm_retryable_error(&io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "connection refused",
+        )));
+        assert!(!php_fpm_retryable_error(&io::Error::new(
+            io::ErrorKind::TimedOut,
+            "php-fpm request timed out",
+        )));
+        assert!(!php_fpm_retryable_error(&io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "bad config",
+        )));
     }
 
     #[cfg(feature = "php-fpm")]

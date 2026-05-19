@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, OpenOptions};
@@ -5515,9 +5515,14 @@ pub struct PhpFpmConfig {
     pub read_timeout_secs: Option<u64>,
     #[serde(default)]
     pub write_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub max_retries: u8,
+    #[serde(default = "default_php_fpm_retry_methods")]
+    pub retry_methods: Vec<String>,
 }
 
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
+const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
@@ -5572,6 +5577,13 @@ impl PhpFpmConfig {
         validate_optional_timeout_secs("php.fpm.connect_timeout_secs", self.connect_timeout_secs)?;
         validate_optional_timeout_secs("php.fpm.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("php.fpm.write_timeout_secs", self.write_timeout_secs)?;
+        if self.max_retries > MAX_PHP_FPM_RETRIES {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.max_retries",
+                reason: "must be less than or equal to 10",
+            });
+        }
+        validate_php_fpm_retry_methods(&self.retry_methods)?;
         if self.keepalive {
             if self.pool_max_idle == 0 {
                 return Err(ConfigError::InvalidPhpConfig {
@@ -7221,6 +7233,10 @@ fn default_php_fpm_idle_timeout_secs() -> u64 {
     60
 }
 
+fn default_php_fpm_retry_methods() -> Vec<String> {
+    vec!["GET".to_owned(), "HEAD".to_owned(), "OPTIONS".to_owned()]
+}
+
 fn default_static_cache_control() -> String {
     "public, max-age=60".to_owned()
 }
@@ -7700,6 +7716,30 @@ fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigEr
     for (name, value) in params {
         validate_php_param_name(name)?;
         validate_php_param_value(value)?;
+    }
+    Ok(())
+}
+
+fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError> {
+    let mut seen = HashSet::new();
+    for method in methods {
+        if method.is_empty()
+            || method.len() > 32
+            || !method
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_methods",
+                reason: "methods must be uppercase HTTP method tokens",
+            });
+        }
+        if !seen.insert(method.clone()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_methods",
+                reason: "contains duplicate methods",
+            });
+        }
     }
     Ok(())
 }
@@ -10115,6 +10155,8 @@ mod tests {
             keepalive = true
             pool_max_idle = 4
             idle_timeout_secs = 45
+            max_retries = 2
+            retry_methods = ["GET", "HEAD"]
             "#,
             test_process_config_toml("config-php-fpm-process"),
             root.display(),
@@ -10168,6 +10210,8 @@ mod tests {
         assert!(php.fpm.keepalive);
         assert_eq!(php.fpm.pool_max_idle, 4);
         assert_eq!(php.fpm.idle_timeout_secs, 45);
+        assert_eq!(php.fpm.max_retries, 2);
+        assert_eq!(php.fpm.retry_methods, ["GET", "HEAD"]);
     }
 
     #[test]
@@ -10444,6 +10488,57 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("configure either socket or tcp"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_php_fpm_retry_policy() {
+        let root = unique_temp_path("config-php-fpm-invalid-retries-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            max_retries = 11
+            "#,
+            test_process_config_toml("config-php-fpm-invalid-retries-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.max_retries"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            retry_methods = ["GET", "get"]
+            "#,
+            test_process_config_toml("config-php-fpm-invalid-retry-methods-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.retry_methods"), "{error}");
     }
 
     #[test]

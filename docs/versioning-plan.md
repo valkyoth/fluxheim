@@ -892,6 +892,11 @@ Follow-up `1.3.x` PHP runtime plan:
     Initial generic interception implemented as `php.intercept_error_statuses`;
     static fallback pages are supported with `[[vhosts.php.error_pages]]` and
     `[[vhosts.routes.php.error_pages]]`.
+  - Retry policy for connection failures and connect timeouts before PHP returns
+    a response. Implemented as `php.fpm.max_retries` and
+    `php.fpm.retry_methods`, defaulting to no retries and excluding request
+    timeouts to avoid duplicated side effects. Broader status and invalid-header
+    retry controls remain future work.
   - PHP response-header policy controls matching common NGINX migrations:
     hide/pass selected backend headers, ignore selected cache-control headers,
     and reject conflicting `Content-Length` / transfer headers.

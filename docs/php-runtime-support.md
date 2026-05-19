@@ -233,8 +233,11 @@ Planned `1.3.3` php-fpm hardening:
   Initial controls implemented as `php.stderr_log` and
   `php.stderr_max_bytes`.
 - php-fpm upstream load balancing and failover.
-- Retry policy for connect error, timeout, invalid header, selected statuses,
-  max tries, total retry timeout, and retry-safe methods.
+- Retry policy for connection failures and connect timeouts on configured safe
+  methods. Implemented as `php.fpm.max_retries` and
+  `php.fpm.retry_methods`, defaulting to no retries; request timeouts are not
+  retried to avoid duplicating PHP side effects. Broader status/invalid-header
+  retry policy remains future work.
 - PHP-specific Prometheus metrics for bounded request totals and durations.
   Implemented as `fluxheim_php_requests_total` and
   `fluxheim_php_request_duration_seconds`, and

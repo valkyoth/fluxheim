@@ -50,6 +50,9 @@ behavior when the change improves security or project direction.
   `fluxheim_php_stderr_events_total`. PHP request outcomes now distinguish
   connect timeouts, request timeouts, connection errors, configuration errors,
   invalid responses, and intercepted PHP statuses.
+- Added opt-in php-fpm retry controls with `php.fpm.max_retries` and
+  `php.fpm.retry_methods` for connection failures and connect timeouts before
+  php-fpm returns a response; request timeouts are not retried.
 - Added PHP-assisted static offload for `X-Accel-Redirect` and `X-Sendfile`.
   Offload targets must resolve under `php.root`, `X-Sendfile` paths are mapped
   from `php.fpm_root` when configured, and Fluxheim refuses to offload files

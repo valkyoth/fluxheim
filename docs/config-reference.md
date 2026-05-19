@@ -1447,6 +1447,9 @@ tcp = "php-fpm:9000"
 keepalive = true
 pool_max_idle = 8
 idle_timeout_secs = 60
+# Conservative retry policy for connection failures before php-fpm returns data.
+max_retries = 1
+retry_methods = ["GET", "HEAD", "OPTIONS"]
 
 [vhosts.acme_challenge]
 enabled = true
@@ -1537,7 +1540,11 @@ FastCGI keep-connection reuse with an idle pool capped by
 `php.fpm.pool_max_idle`; it is off by default for conservative compatibility.
 When enabled, stale idle entries older than `php.fpm.idle_timeout_secs` are
 discarded before reuse. `pool_max_idle` must be between 1 and 1024 when
-keepalive is enabled. `[vhosts.php.params]` or `[vhosts.routes.php.params]`
+keepalive is enabled. `php.fpm.max_retries` defaults to `0`; when set,
+Fluxheim retries only connection failures and connect timeouts for configured
+`php.fpm.retry_methods` before php-fpm has returned a response. Request
+timeouts are not retried to avoid duplicating side effects.
+`[vhosts.php.params]` or `[vhosts.routes.php.params]`
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core
 CGI parameters that it owns, including `SCRIPT_FILENAME`, `CONTENT_LENGTH`,
