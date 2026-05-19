@@ -54,7 +54,9 @@ const UNIX_O_NOFOLLOW: i32 = 0x0100;
         target_os = "dragonfly"
     ))
 ))]
-const UNIX_O_NOFOLLOW: i32 = 0;
+compile_error!(
+    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
+);
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AcmeRenewalTarget {

@@ -40,7 +40,9 @@ const O_NOFOLLOW: i32 = 0x0100;
         target_os = "dragonfly"
     ))
 ))]
-const O_NOFOLLOW: i32 = 0;
+compile_error!(
+    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
+);
 
 const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
@@ -5683,6 +5685,8 @@ pub struct PhpConfig {
     pub pass_request_headers: bool,
     #[serde(default = "default_true")]
     pub pass_request_body: bool,
+    #[serde(default)]
+    pub server_port: Option<u16>,
     #[serde(default = "default_true")]
     pub stderr_log: bool,
     #[serde(default)]
@@ -5727,6 +5731,7 @@ impl Default for PhpConfig {
             try_files: PhpTryFilesMode::default(),
             pass_request_headers: true,
             pass_request_body: true,
+            server_port: None,
             stderr_log: true,
             stderr_log_level: PhpStderrLogLevel::default(),
             stderr_max_bytes: default_php_stderr_max_bytes(),
@@ -5929,6 +5934,12 @@ impl PhpConfig {
                 reason: "must be less than or equal to 1MiB",
             });
         }
+        if self.server_port == Some(0) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.server_port",
+                reason: "must be greater than zero",
+            });
+        }
         if self.stderr_max_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.stderr_max_bytes",
@@ -6027,6 +6038,7 @@ pub struct PhpFpmConfig {
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
+const PHP_FPM_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
 const MAX_PHP_FPM_TCP_UPSTREAMS: usize = 64;
 const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
@@ -8503,6 +8515,12 @@ fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError>
                 reason: "contains duplicate methods",
             });
         }
+        if !PHP_FPM_SAFE_RETRY_METHODS.iter().any(|safe| safe == method) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_methods",
+                reason: "only safe HTTP methods GET, HEAD, OPTIONS, and TRACE are allowed",
+            });
+        }
     }
     Ok(())
 }
@@ -8619,6 +8637,12 @@ fn validate_php_param_name(name: &str) -> Result<(), ConfigError> {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.params",
             reason: "parameter names must not start with a digit",
+        });
+    }
+    if name.starts_with("HTTP_") {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.params",
+            reason: "HTTP_* request header parameters cannot be overridden with php.params",
         });
     }
     if protected_php_param_name(name) {
@@ -12312,6 +12336,77 @@ mod tests {
         .unwrap();
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.retry_methods"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            server_port = 0
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-invalid-server-port-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.server_port"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.params]
+            HTTP_AUTHORIZATION = "Bearer fixed"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-http-param-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("HTTP_* request header"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            retry_methods = ["GET", "POST"]
+            "#,
+            test_process_config_toml("config-php-fpm-unsafe-retry-method-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("safe HTTP methods"), "{error}");
 
         let retry_methods = (0..=super::MAX_PHP_FPM_RETRY_METHODS)
             .map(|index| format!("\"M{index}\""))

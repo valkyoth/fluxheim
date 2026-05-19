@@ -39,7 +39,9 @@ const O_NOFOLLOW: i32 = 0x0100;
         target_os = "dragonfly"
     ))
 ))]
-const O_NOFOLLOW: i32 = 0;
+compile_error!(
+    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
+);
 
 const MAX_CURRENT_SNAPSHOT_POINTER_BYTES: u64 = 4096;
 const MAX_SNAPSHOT_FILE_BYTES: u64 = 16 * 1024 * 1024;

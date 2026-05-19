@@ -2790,6 +2790,7 @@ struct PhpFpmPool {
     metric_pool: String,
     max_idle: usize,
     idle_timeout: Duration,
+    max_response_bytes: u64,
     idle: tokio::sync::Mutex<Vec<PhpFpmPoolEntry>>,
 }
 
@@ -2803,6 +2804,7 @@ impl std::fmt::Debug for PhpFpmPool {
             .field("metric_pool", &self.metric_pool)
             .field("max_idle", &self.max_idle)
             .field("idle_timeout", &self.idle_timeout)
+            .field("max_response_bytes", &self.max_response_bytes)
             .finish_non_exhaustive()
     }
 }
@@ -2956,7 +2958,7 @@ impl RuntimePhp {
             .iter()
             .map(|error_page| RuntimeErrorPage::from_config(&scope, error_page))
             .collect::<io::Result<Vec<_>>>()?;
-        let fpm_pools = php_fpm_keepalive_pools_from_config(&config.fpm, metric_vhost, metric_pool);
+        let fpm_pools = php_fpm_keepalive_pools_from_config(config, metric_vhost, metric_pool);
         Ok(Some(Self {
             fpm_pools,
             fpm_next: Arc::new(AtomicUsize::new(0)),
@@ -3002,15 +3004,15 @@ fn php_fpm_endpoints_from_config(config: &crate::config::PhpFpmConfig) -> Vec<Ph
 
 #[cfg(feature = "php-fpm")]
 fn php_fpm_keepalive_pools_from_config(
-    config: &crate::config::PhpFpmConfig,
+    config: &crate::config::PhpConfig,
     metric_vhost: &str,
     metric_pool: &str,
 ) -> Vec<Arc<PhpFpmPool>> {
-    if !config.keepalive {
+    if !config.fpm.keepalive {
         return Vec::new();
     }
     {
-        let endpoints = php_fpm_endpoints_from_config(config);
+        let endpoints = php_fpm_endpoints_from_config(&config.fpm);
         let multiple_endpoints = endpoints.len() > 1;
         endpoints
             .into_iter()
@@ -3023,9 +3025,10 @@ fn php_fpm_keepalive_pools_from_config(
                 };
                 Arc::new(PhpFpmPool::from_endpoint(
                     endpoint,
-                    config,
+                    &config.fpm,
                     metric_vhost,
                     &pool_label,
+                    config.max_response_bytes.as_u64(),
                 ))
             })
             .collect()
@@ -3039,6 +3042,7 @@ impl PhpFpmPool {
         config: &crate::config::PhpFpmConfig,
         metric_vhost: &str,
         metric_pool: &str,
+        max_response_bytes: u64,
     ) -> Self {
         Self {
             endpoint,
@@ -3046,6 +3050,7 @@ impl PhpFpmPool {
             metric_pool: metric_pool.to_owned(),
             max_idle: config.pool_max_idle,
             idle_timeout: Duration::from_secs(config.idle_timeout_secs),
+            max_response_bytes,
             idle: tokio::sync::Mutex::new(Vec::new()),
         }
     }
@@ -3074,7 +3079,9 @@ impl PhpFpmPool {
         request_timeout: Duration,
     ) -> io::Result<fastcgi_client::Response> {
         let mut entry = self.checkout(connect_timeout).await?;
-        let result = entry.execute(params, body, request_timeout).await;
+        let result = entry
+            .execute(params, body, request_timeout, self.max_response_bytes)
+            .await;
         if result.is_ok() {
             self.checkin(entry).await;
         }
@@ -3127,9 +3134,7 @@ impl PhpFpmPool {
             PhpFpmEndpoint::Tcp(address) => {
                 let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address))
                     .await
-                    .map_err(|_| {
-                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm connect timed out")
-                    })??;
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
                 Ok(PhpFpmPooledClient::Tcp(
                     fastcgi_client::Client::new_keep_alive_tokio(stream),
                 ))
@@ -3138,9 +3143,7 @@ impl PhpFpmPool {
             PhpFpmEndpoint::Unix(socket) => {
                 let stream = tokio::time::timeout(timeout, tokio::net::UnixStream::connect(socket))
                     .await
-                    .map_err(|_| {
-                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm socket connect timed out")
-                    })??;
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
                 Ok(PhpFpmPooledClient::Unix(
                     fastcgi_client::Client::new_keep_alive_tokio(stream),
                 ))
@@ -3156,8 +3159,11 @@ impl PhpFpmPoolEntry {
         params: fastcgi_client::Params<'_>,
         body: &PhpRequestBody,
         timeout: Duration,
+        max_response_bytes: u64,
     ) -> io::Result<fastcgi_client::Response> {
-        self.client.execute(params, body, timeout).await
+        self.client
+            .execute(params, body, timeout, max_response_bytes)
+            .await
     }
 }
 
@@ -3168,18 +3174,25 @@ impl PhpFpmPooledClient {
         params: fastcgi_client::Params<'_>,
         body: &PhpRequestBody,
         timeout: Duration,
+        max_response_bytes: u64,
     ) -> io::Result<fastcgi_client::Response> {
         let request = fastcgi_client::Request::new(params, body.reader().await?);
         match self {
-            Self::Tcp(client) => tokio::time::timeout(timeout, client.execute(request))
-                .await
-                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm request timed out"))?
-                .map_err(|error| io::Error::other(error.to_string())),
+            Self::Tcp(client) => {
+                let stream = tokio::time::timeout(timeout, client.execute_stream(request))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
+                    .map_err(|error| io::Error::other(error.to_string()))?;
+                collect_php_fpm_response_stream(stream, max_response_bytes).await
+            }
             #[cfg(unix)]
-            Self::Unix(client) => tokio::time::timeout(timeout, client.execute(request))
-                .await
-                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm request timed out"))?
-                .map_err(|error| io::Error::other(error.to_string())),
+            Self::Unix(client) => {
+                let stream = tokio::time::timeout(timeout, client.execute_stream(request))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
+                    .map_err(|error| io::Error::other(error.to_string()))?;
+                collect_php_fpm_response_stream(stream, max_response_bytes).await
+            }
         }
     }
 }
@@ -6326,6 +6339,26 @@ fn record_php_request_metrics(
 }
 
 #[cfg(feature = "php-fpm")]
+fn php_server_port(session: &Session, is_tls: bool) -> u16 {
+    request_host(session)
+        .and_then(explicit_authority_port)
+        .unwrap_or(if is_tls { 443 } else { 80 })
+}
+
+#[cfg(feature = "php-fpm")]
+fn explicit_authority_port(authority: &str) -> Option<u16> {
+    if let Some(rest) = authority.strip_prefix('[') {
+        let (_, after_host) = rest.split_once(']')?;
+        return after_host.strip_prefix(':')?.parse().ok();
+    }
+    let (_, port) = authority.rsplit_once(':')?;
+    if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    port.parse().ok()
+}
+
+#[cfg(feature = "php-fpm")]
 async fn respond_php_request(
     session: &mut Session,
     ctx: &mut RequestContext,
@@ -6393,15 +6426,44 @@ async fn respond_php_request(
     };
     let is_tls = downstream_tls(session);
     let request_scheme = if is_tls { "https" } else { "http" };
-    let server_port = if is_tls { 443 } else { 80 };
+    let server_port = php
+        .config
+        .server_port
+        .unwrap_or_else(|| php_server_port(session, is_tls));
     let remote = session.client_addr().and_then(|address| address.as_inet());
-    let remote_addr = remote
-        .map(|address| address.ip().to_string())
-        .unwrap_or_default();
-    let remote_port = remote.map(|address| address.port()).unwrap_or_default();
-    let document_root = php.fpm_root.to_string_lossy().to_string();
-    let script_filename = php_fpm_script_filename(php, &resolution.file.path)
-        .unwrap_or_else(|| resolution.file.path.to_string_lossy().to_string());
+    let Some(remote) = remote else {
+        return Err(Error::because(
+            ErrorType::HTTPStatus(502),
+            "php-fpm: cannot determine client address",
+            io::Error::new(io::ErrorKind::AddrNotAvailable, "no client address"),
+        ));
+    };
+    let remote_addr = remote.ip().to_string();
+    let remote_port = remote.port();
+    let document_root = php
+        .fpm_root
+        .to_str()
+        .ok_or_else(|| {
+            Error::because(
+                ErrorType::InternalError,
+                "php-fpm: fpm_root is not valid UTF-8",
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "php fpm_root is not valid UTF-8",
+                ),
+            )
+        })?
+        .to_owned();
+    let script_filename = php_fpm_script_filename(php, &resolution.file.path).ok_or_else(|| {
+        Error::because(
+            ErrorType::InternalError,
+            "php-fpm: script path is not valid UTF-8 or outside php.root",
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "php script path is not valid UTF-8",
+            ),
+        )
+    })?;
     let host = request_host(session).unwrap_or(vhost.name.as_str());
 
     let mut params = fastcgi_client::Params::default()
@@ -6432,7 +6494,17 @@ async fn respond_php_request(
     add_php_custom_params(&mut params, &php.config.params);
     if !resolution.path_info.is_empty() {
         params = params.custom("PATH_INFO", resolution.path_info.clone());
-        let path_translated = php_fpm_path_translated(php, &resolution.path_info);
+        let path_translated =
+            php_fpm_path_translated(php, &resolution.path_info).ok_or_else(|| {
+                Error::because(
+                    ErrorType::InternalError,
+                    "php-fpm: translated path is not valid UTF-8",
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "php translated path is not valid UTF-8",
+                    ),
+                )
+            })?;
         params = params.custom("PATH_TRANSLATED", path_translated);
     }
 
@@ -6753,15 +6825,15 @@ fn php_static_file_script_name(php: &RuntimePhp, file: &crate::web::StaticFile) 
 #[cfg(feature = "php-fpm")]
 fn php_fpm_script_filename(php: &RuntimePhp, local_path: &std::path::Path) -> Option<String> {
     let relative = local_path.strip_prefix(&php.root).ok()?;
-    Some(php.fpm_root.join(relative).to_string_lossy().to_string())
+    php.fpm_root.join(relative).to_str().map(str::to_owned)
 }
 
 #[cfg(feature = "php-fpm")]
-fn php_fpm_path_translated(php: &RuntimePhp, path_info: &str) -> String {
+fn php_fpm_path_translated(php: &RuntimePhp, path_info: &str) -> Option<String> {
     php.fpm_root
         .join(path_info.trim_start_matches('/'))
-        .to_string_lossy()
-        .to_string()
+        .to_str()
+        .map(str::to_owned)
 }
 
 #[cfg(feature = "php-fpm")]
@@ -6980,12 +7052,19 @@ impl PhpRequestBody {
 }
 
 #[cfg(feature = "php-fpm")]
-fn php_request_body_spool_path(spool_dir: &std::path::Path) -> PathBuf {
+fn php_request_body_spool_path(spool_dir: &std::path::Path) -> io::Result<PathBuf> {
     let counter = PHP_REQUEST_BODY_SPOOL_COUNTER.fetch_add(1, Ordering::Relaxed);
-    spool_dir.join(format!(
-        ".fluxheim-php-body-{}-{counter}.tmp",
+    let mut random = [0_u8; 8];
+    getrandom::fill(&mut random).map_err(|error| {
+        io::Error::other(format!(
+            "failed to generate PHP spool filename entropy: {error}"
+        ))
+    })?;
+    let random = u64::from_le_bytes(random);
+    Ok(spool_dir.join(format!(
+        ".fluxheim-php-body-{}-{counter}-{random:016x}.tmp",
         std::process::id()
-    ))
+    )))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -6996,7 +7075,7 @@ async fn create_php_request_body_spool_file(
     ensure_php_request_body_spool_dir(spool_dir)?;
     let mut last_error = None;
     for _ in 0..16 {
-        let path = php_request_body_spool_path(spool_dir);
+        let path = php_request_body_spool_path(spool_dir)?;
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -7136,15 +7215,45 @@ async fn drain_php_request_body(
 }
 
 #[cfg(feature = "php-fpm")]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum PhpFpmTimeoutKind {
+    Connect,
+    Request,
+}
+
+#[cfg(feature = "php-fpm")]
+impl std::fmt::Display for PhpFpmTimeoutKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connect => write!(formatter, "php-fpm connect timed out"),
+            Self::Request => write!(formatter, "php-fpm request timed out"),
+        }
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl std::error::Error for PhpFpmTimeoutKind {}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_timeout_error(kind: PhpFpmTimeoutKind) -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, kind)
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_timeout_kind(error: &io::Error) -> Option<PhpFpmTimeoutKind> {
+    error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<PhpFpmTimeoutKind>())
+        .copied()
+}
+
+#[cfg(feature = "php-fpm")]
 fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
     match error.kind() {
-        io::ErrorKind::TimedOut => {
-            if error.to_string().contains("connect") {
-                "connect_timeout"
-            } else {
-                "request_timeout"
-            }
-        }
+        io::ErrorKind::TimedOut => match php_fpm_timeout_kind(error) {
+            Some(PhpFpmTimeoutKind::Connect) => "connect_timeout",
+            Some(PhpFpmTimeoutKind::Request) | None => "request_timeout",
+        },
         io::ErrorKind::ConnectionRefused
         | io::ErrorKind::ConnectionReset
         | io::ErrorKind::ConnectionAborted
@@ -7197,6 +7306,7 @@ async fn execute_php_fpm(
             &body,
             connect_timeout,
             request_timeout,
+            php.config.max_response_bytes.as_u64(),
         )
         .await;
         match result {
@@ -7330,6 +7440,7 @@ async fn execute_php_fpm_once(
     body: &PhpRequestBody,
     connect_timeout: Duration,
     timeout: std::time::Duration,
+    max_response_bytes: u64,
 ) -> io::Result<fastcgi_client::Response> {
     if let Some(pool) = pool {
         return pool.execute(params, body, connect_timeout, timeout).await;
@@ -7340,20 +7451,16 @@ async fn execute_php_fpm_once(
             let stream =
                 tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(address))
                     .await
-                    .map_err(|_| {
-                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm connect timed out")
-                    })??;
-            execute_php_fpm_stream(stream, params, body, timeout).await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+            execute_php_fpm_stream(stream, params, body, timeout, max_response_bytes).await
         }
         #[cfg(unix)]
         PhpFpmEndpoint::Unix(socket) => {
             let stream =
                 tokio::time::timeout(connect_timeout, tokio::net::UnixStream::connect(socket))
                     .await
-                    .map_err(|_| {
-                        io::Error::new(io::ErrorKind::TimedOut, "php-fpm socket connect timed out")
-                    })??;
-            execute_php_fpm_stream(stream, params, body, timeout).await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+            execute_php_fpm_stream(stream, params, body, timeout, max_response_bytes).await
         }
     }
 }
@@ -7386,7 +7493,7 @@ fn php_fpm_retry_attempts_for_endpoint_count(
 #[cfg(feature = "php-fpm")]
 fn php_fpm_retryable_error(error: &io::Error) -> bool {
     match error.kind() {
-        io::ErrorKind::TimedOut => error.to_string().contains("connect"),
+        io::ErrorKind::TimedOut => php_fpm_timeout_kind(error) == Some(PhpFpmTimeoutKind::Connect),
         io::ErrorKind::ConnectionRefused
         | io::ErrorKind::ConnectionReset
         | io::ErrorKind::ConnectionAborted
@@ -7401,21 +7508,88 @@ fn php_fpm_retryable_error(error: &io::Error) -> bool {
 }
 
 #[cfg(feature = "php-fpm")]
+async fn collect_php_fpm_response_stream<S>(
+    mut stream: S,
+    max_response_bytes: u64,
+) -> io::Result<fastcgi_client::Response>
+where
+    S: fastcgi_client::StreamExt<
+            Item = fastcgi_client::ClientResult<fastcgi_client::response::Content>,
+        > + Unpin,
+{
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut total_bytes = 0_u64;
+    while let Some(content) = stream.next().await {
+        match content.map_err(|error| io::Error::other(error.to_string()))? {
+            fastcgi_client::response::Content::Stdout(chunk) => {
+                push_php_fpm_stream_chunk(
+                    &mut stdout,
+                    &chunk,
+                    &mut total_bytes,
+                    max_response_bytes,
+                )?;
+            }
+            fastcgi_client::response::Content::Stderr(chunk) => {
+                push_php_fpm_stream_chunk(
+                    &mut stderr,
+                    &chunk,
+                    &mut total_bytes,
+                    max_response_bytes,
+                )?;
+            }
+        }
+    }
+
+    let mut response = fastcgi_client::Response::default();
+    response.stdout = (!stdout.is_empty()).then_some(stdout);
+    response.stderr = (!stderr.is_empty()).then_some(stderr);
+    Ok(response)
+}
+
+#[cfg(feature = "php-fpm")]
+fn push_php_fpm_stream_chunk(
+    target: &mut Vec<u8>,
+    chunk: &[u8],
+    total_bytes: &mut u64,
+    max_response_bytes: u64,
+) -> io::Result<()> {
+    let chunk_len = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+    let Some(next_total) = total_bytes.checked_add(chunk_len) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response exceeds maximum buffered size",
+        ));
+    };
+    if next_total > max_response_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response exceeds maximum buffered size",
+        ));
+    }
+    *total_bytes = next_total;
+    target.extend_from_slice(chunk);
+    Ok(())
+}
+
+#[cfg(feature = "php-fpm")]
 async fn execute_php_fpm_stream<S>(
     stream: S,
     params: fastcgi_client::Params<'_>,
     body: &PhpRequestBody,
     timeout: std::time::Duration,
+    max_response_bytes: u64,
 ) -> io::Result<fastcgi_client::Response>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let client = fastcgi_client::Client::new_tokio(stream);
     let request = fastcgi_client::Request::new(params, body.reader().await?);
-    tokio::time::timeout(timeout, client.execute_once(request))
+    let stream = tokio::time::timeout(timeout, client.execute_once_stream(request))
         .await
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "php-fpm request timed out"))?
-        .map_err(|error| io::Error::other(error.to_string()))
+        .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    collect_php_fpm_response_stream(stream, max_response_bytes).await
 }
 
 #[cfg(feature = "php-fpm")]
@@ -7570,7 +7744,9 @@ fn safe_php_header_name(name: &[u8]) -> bool {
 
 #[cfg(feature = "php-fpm")]
 fn safe_php_header_value(value: &[u8]) -> bool {
-    value.iter().all(|byte| !matches!(byte, b'\r' | b'\n' | 0))
+    value
+        .iter()
+        .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E | 0x80..=0xFF))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10296,18 +10472,19 @@ mod tests {
     };
     #[cfg(feature = "php-fpm")]
     use super::{
-        PhpRequestBody, PhpResolveOutcome, RuntimePhp, add_php_host_param,
+        PhpFpmTimeoutKind, PhpRequestBody, PhpResolveOutcome, RuntimePhp, add_php_host_param,
         add_php_request_header_params, apply_php_x_accel_expires,
         create_php_request_body_spool_file, directory_slash_redirect_location,
-        ignore_php_origin_cache_headers, parse_php_fpm_output, parse_php_response,
-        php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
+        explicit_authority_port, ignore_php_origin_cache_headers, parse_php_fpm_output,
+        parse_php_response, php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
         php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_keepalive_pools_from_config,
         php_fpm_path_translated, php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count,
         php_fpm_retryable_error, php_fpm_retryable_response, php_fpm_script_filename,
-        php_header_param_name, php_script_name_denied, php_script_name_for_request,
-        php_should_intercept_error_status, php_static_offload_file,
+        php_fpm_timeout_error, php_header_param_name, php_script_name_denied,
+        php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
         php_stderr_matches_failure_pattern, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
-        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
+        push_php_fpm_stream_chunk, resolve_php_script, safe_php_header_value, sanitized_php_stderr,
+        strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -10483,8 +10660,8 @@ mod tests {
             Some("/app/public/blog/index.php")
         );
         assert_eq!(
-            php_fpm_path_translated(&php, "/uploads/file.txt"),
-            "/app/public/uploads/file.txt"
+            php_fpm_path_translated(&php, "/uploads/file.txt").as_deref(),
+            Some("/app/public/uploads/file.txt")
         );
     }
 
@@ -10887,17 +11064,11 @@ mod tests {
     #[test]
     fn php_fpm_error_outcomes_are_bounded() {
         assert_eq!(
-            php_fpm_error_outcome(&io::Error::new(
-                io::ErrorKind::TimedOut,
-                "php-fpm connect timed out",
-            )),
+            php_fpm_error_outcome(&php_fpm_timeout_error(PhpFpmTimeoutKind::Connect)),
             "connect_timeout"
         );
         assert_eq!(
-            php_fpm_error_outcome(&io::Error::new(
-                io::ErrorKind::TimedOut,
-                "php-fpm request timed out",
-            )),
+            php_fpm_error_outcome(&php_fpm_timeout_error(PhpFpmTimeoutKind::Request)),
             "request_timeout"
         );
         assert_eq!(
@@ -11000,13 +11171,16 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_fpm_keepalive_pool_labels_are_distinct_for_tcp_upstreams() {
-        let fpm = crate::config::PhpFpmConfig {
-            tcp_upstreams: vec!["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()],
-            keepalive: true,
-            ..crate::config::PhpFpmConfig::default()
+        let php = crate::config::PhpConfig {
+            fpm: crate::config::PhpFpmConfig {
+                tcp_upstreams: vec!["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()],
+                keepalive: true,
+                ..crate::config::PhpFpmConfig::default()
+            },
+            ..crate::config::PhpConfig::default()
         };
 
-        let pools = php_fpm_keepalive_pools_from_config(&fpm, "vhost", "default");
+        let pools = php_fpm_keepalive_pools_from_config(&php, "vhost", "default");
 
         assert_eq!(pools.len(), 2);
         assert_eq!(pools[0].metric_pool, "default-0");
@@ -11032,22 +11206,58 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_fpm_retryable_errors_exclude_request_timeouts() {
-        assert!(php_fpm_retryable_error(&io::Error::new(
-            io::ErrorKind::TimedOut,
-            "php-fpm connect timed out",
+        assert!(php_fpm_retryable_error(&php_fpm_timeout_error(
+            PhpFpmTimeoutKind::Connect
         )));
         assert!(php_fpm_retryable_error(&io::Error::new(
             io::ErrorKind::ConnectionRefused,
             "connection refused",
         )));
+        assert!(!php_fpm_retryable_error(&php_fpm_timeout_error(
+            PhpFpmTimeoutKind::Request
+        )));
         assert!(!php_fpm_retryable_error(&io::Error::new(
             io::ErrorKind::TimedOut,
-            "php-fpm request timed out",
+            "php-fpm connect timed out",
         )));
         assert!(!php_fpm_retryable_error(&io::Error::new(
             io::ErrorKind::InvalidInput,
             "bad config",
         )));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_stream_chunk_limit_counts_stdout_and_stderr() {
+        let mut total = 0;
+        let mut stdout = Vec::new();
+        push_php_fpm_stream_chunk(&mut stdout, b"1234", &mut total, 6).unwrap();
+        let mut stderr = Vec::new();
+        let error = push_php_fpm_stream_chunk(&mut stderr, b"567", &mut total, 6)
+            .expect_err("combined FastCGI output should be bounded");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(stdout, b"1234");
+        assert!(stderr.is_empty());
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_header_values_reject_all_disallowed_controls() {
+        assert!(safe_php_header_value(b"session=ok; Path=/"));
+        assert!(safe_php_header_value(b"tab\tallowed"));
+        assert!(!safe_php_header_value(b"bad\x0binject"));
+        assert!(!safe_php_header_value(b"bad\x7fdelete"));
+        assert!(!safe_php_header_value(b"bad\r\ninject"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn explicit_authority_port_reads_host_header_ports() {
+        assert_eq!(explicit_authority_port("example.test:8443"), Some(8443));
+        assert_eq!(explicit_authority_port("[2001:db8::1]:8443"), Some(8443));
+        assert_eq!(explicit_authority_port("example.test"), None);
+        assert_eq!(explicit_authority_port("example.test:https"), None);
     }
 
     #[cfg(feature = "php-fpm")]

@@ -1455,6 +1455,8 @@ try_files = "wordpress"
 # Advanced migration switches; both default to true.
 pass_request_headers = true
 pass_request_body = true
+# Optional override for CGI SERVER_PORT; otherwise Host port or scheme default is used.
+server_port = 8443
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 # Optional: spill larger PHP request bodies to disk before FastCGI dispatch.
@@ -1525,8 +1527,8 @@ proxy timeout values override the vhost/global proxy timeout values because the
 route owns its own proxy action.
 
 For PHP actions, `max_request_body_bytes` bounds the request sent to php-fpm
-and `max_response_bytes` bounds the buffered FastCGI response returned from
-php-fpm. Set `php.request_body_spool_threshold_bytes` with
+and `max_response_bytes` bounds the FastCGI STDOUT/STDERR bytes accepted from
+php-fpm before Fluxheim rejects the response. Set `php.request_body_spool_threshold_bytes` with
 `php.request_body_spool_dir` to spill larger request bodies to an owner-safe
 temporary file before php-fpm dispatch. This keeps `CONTENT_LENGTH` exact for
 FastCGI and lets retries replay the same upload without cloning a large memory
@@ -1576,7 +1578,10 @@ shortest of `php.request_timeout_secs`, `php.fpm.read_timeout_secs`, and
 `php.fpm.write_timeout_secs` is used until the future streaming FastCGI path
 can enforce separate per-direction timeouts.
 `php.pass_request_headers` controls whether safe inbound request headers are
-translated to CGI `HTTP_*` params. `php.pass_request_body` controls whether the
+translated to CGI `HTTP_*` params. `php.server_port` can override CGI
+`SERVER_PORT`; when omitted, Fluxheim uses an explicit port from the request
+`Host` authority and otherwise falls back to `443` for TLS or `80` for
+cleartext. `php.pass_request_body` controls whether the
 HTTP request body is sent to php-fpm; when disabled, Fluxheim still drains and
 limits the downstream body but sends `CONTENT_LENGTH=0` and an empty FastCGI
 stdin.
@@ -1653,14 +1658,14 @@ to avoid duplicating side effects. `php.fpm.retry_invalid_response` and
 `php.fpm.retry_statuses` extend the same safe-method retry policy to malformed
 FastCGI responses and selected PHP 5xx responses. They default to disabled;
 configure them only for idempotent request methods where replaying the PHP
-request is acceptable. `php.fpm.retry_methods` is capped at 16 uppercase method
-tokens; `php.fpm.retry_statuses` is capped at the valid 500-599 server-error
+request is acceptable. `php.fpm.retry_methods` is capped at 16 uppercase safe-method
+tokens and only accepts `GET`, `HEAD`, `OPTIONS`, and `TRACE`; `php.fpm.retry_statuses` is capped at the valid 500-599 server-error
 status range.
 `[vhosts.php.params]` or `[vhosts.routes.php.params]`
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core
 CGI parameters that it owns, including `SCRIPT_FILENAME`, `CONTENT_LENGTH`,
-`HTTPS`, and `HTTP_PROXY`. Custom parameter tables are capped at 128 entries;
+`HTTPS`, and all `HTTP_*` request-header parameters. Custom parameter tables are capped at 128 entries;
 each parameter name is capped at 128 bytes and each value at 16KiB.
 
 `[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache

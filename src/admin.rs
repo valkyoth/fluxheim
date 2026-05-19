@@ -198,7 +198,17 @@ impl AdminAuthThrottle {
             }
             return None;
         }
-        state.ensure_source_capacity(now, &self.config, source);
+        if !state.ensure_source_capacity(&self.config, source) {
+            log::warn!(
+                target: "fluxheim::security",
+                "admin auth throttle source table full; applying global lockout"
+            );
+            state.global_lockouts = state.global_lockouts.saturating_add(1);
+            state.global_locked_until =
+                now.saturating_add(lockout_secs(&self.config, state.global_lockouts));
+            state.global_failures.clear();
+            return Some(AdminAuthThrottleScope::Global);
+        }
 
         let source_locked = {
             let source_record = state.sources.entry(source).or_default();
@@ -254,27 +264,13 @@ impl AdminAuthThrottleState {
 
     fn ensure_source_capacity(
         &mut self,
-        now: u64,
         config: &AdminAuthThrottleConfig,
         source: AuthSource,
-    ) {
+    ) -> bool {
         if self.sources.contains_key(&source) || self.sources.len() < config.max_sources {
-            return;
+            return true;
         }
-        if let Some(oldest) = self
-            .sources
-            .iter()
-            .filter(|(_, record)| record.locked_until <= now)
-            .min_by_key(|(_, record)| record.last_seen)
-            .or_else(|| {
-                self.sources
-                    .iter()
-                    .min_by_key(|(_, record)| record.last_seen)
-            })
-            .map(|(source, _)| *source)
-        {
-            self.sources.remove(&oldest);
-        }
+        false
     }
 }
 
@@ -2059,7 +2055,9 @@ fn open_regular_secret_file(path: &Path) -> Result<fs::File, Box<dyn Error + Sen
             target_os = "dragonfly"
         ))
     ))]
-    const O_NOFOLLOW: i32 = 0;
+    compile_error!(
+        "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
+    );
 
     fs::OpenOptions::new()
         .read(true)
@@ -2126,7 +2124,10 @@ fn token_mac_key() -> &'static [u8; 32] {
     TOKEN_MAC_KEY.get_or_init(|| {
         let mut key = [0_u8; 32];
         if let Err(error) = getrandom::fill(&mut key) {
-            log::error!("admin token MAC key generation failed: {error}");
+            log::error!(
+                "fatal: admin token MAC key generation failed; cannot continue without entropy: {error}"
+            );
+            std::process::abort();
         }
         Zeroizing::new(key)
     })
@@ -2954,9 +2955,9 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::{
-        AdminApp, AdminAuthThrottle, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
-        admin_services_from_config, authorized, constant_time_eq, error_response, json_response,
-        read_bounded_secret_file, read_secret_file,
+        AdminApp, AdminAuthThrottle, AdminAuthThrottleScope, AdminRuntimeState, AdminToken,
+        MAX_ADMIN_TOKEN_FILE_BYTES, admin_services_from_config, authorized, constant_time_eq,
+        error_response, json_response, read_bounded_secret_file, read_secret_file,
     };
     use crate::config::{
         AdminAuthThrottleConfig, AdminConfig, AdminHealthConfig, AdminHealthResponseMode,
@@ -3158,6 +3159,32 @@ mod tests {
             Some("192.0.2.22".parse().unwrap()),
         );
         assert_eq!(response.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn admin_auth_throttle_locks_globally_when_source_table_is_full() {
+        let throttle = AdminAuthThrottle::new(AdminAuthThrottleConfig {
+            enabled: true,
+            window_secs: 60,
+            per_source_failures: 100,
+            global_failures: 100,
+            base_lockout_secs: 60,
+            max_lockout_secs: 60,
+            max_sources: 1,
+        });
+
+        assert_eq!(
+            throttle.record_failure(Some("192.0.2.30".parse().unwrap())),
+            None
+        );
+        assert_eq!(
+            throttle.record_failure(Some("192.0.2.31".parse().unwrap())),
+            Some(AdminAuthThrottleScope::Global)
+        );
+        assert_eq!(
+            throttle.pre_auth_check(Some("192.0.2.30".parse().unwrap())),
+            Some(AdminAuthThrottleScope::Global)
+        );
     }
 
     #[test]

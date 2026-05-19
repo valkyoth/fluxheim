@@ -16,7 +16,8 @@ behavior when the change improves security or project direction.
   `pool_max_idle`, and `idle_timeout_secs`.
 - Added `[vhosts.php.params]` and `[vhosts.routes.php.params]` for safe custom
   FastCGI parameter injection without allowing overrides of Fluxheim-managed
-  CGI variables. Custom parameter tables are capped at 128 entries.
+  CGI variables or inbound `HTTP_*` request-header parameters. Custom parameter
+  tables are capped at 128 entries.
 - Added `php.fpm_root` for split Fluxheim/php-fpm filesystem layouts so
   Fluxheim can validate scripts under `php.root` while sending php-fpm paths
   under the runtime container root.
@@ -59,9 +60,12 @@ behavior when the change improves security or project direction.
   deny prefixes are capped at 128 entries, and `php.allowed_extensions` is
   capped at 16 entries with case-insensitive duplicate rejection.
 - Added `php.max_response_header_bytes` to make the php-fpm CGI response
-  header cap configurable while keeping the `64KiB` default.
+  header cap configurable while keeping the `64KiB` default. Added
+  `php.server_port` for explicit CGI `SERVER_PORT` overrides on non-standard
+  PHP listener deployments.
 - Capped configurable buffered PHP responses at `1GiB` while keeping the
-  default `php.max_response_bytes = "64MiB"`.
+  default `php.max_response_bytes = "64MiB"`; php-fpm STDOUT/STDERR is now
+  collected through the configured cap instead of after unbounded buffering.
 - Added PHP-specific Prometheus request totals and duration histograms with
   bounded labels through `fluxheim_php_requests_total` and
   `fluxheim_php_request_duration_seconds`, and
@@ -89,7 +93,8 @@ behavior when the change improves security or project direction.
   `php.fpm.retry_timeout_secs`, and `php.fpm.retry_methods` for connection
   failures and connect timeouts before
   php-fpm returns a response; request timeouts are not retried. Retry method
-  lists are capped at 16 methods.
+  lists are capped at 16 safe methods and now reject non-idempotent methods such
+  as `POST`, `PUT`, `PATCH`, and `DELETE`.
 - Added opt-in php-fpm retry controls for malformed FastCGI responses and
   selected PHP 5xx responses through `php.fpm.retry_invalid_response` and
   `php.fpm.retry_statuses`, using the same safe-method and retry-window policy.
@@ -104,7 +109,8 @@ behavior when the change improves security or project direction.
   When `php.max_request_body_bytes` is set on the same PHP action, the spool
   threshold must be lower than that body limit. Existing spool directories must
   be directories and must not be group/world writable, and runtime spool
-  creation rechecks permissions before writing upload bodies.
+  creation rechecks permissions before writing upload bodies. Runtime spool
+  filenames now include CSPRNG entropy to avoid predictable local pre-creation.
 - Added PHP-assisted static offload for `X-Accel-Redirect` and `X-Sendfile`.
   Offload targets must resolve under `php.root`, `X-Sendfile` paths are mapped
   from `php.fpm_root` when configured, and Fluxheim refuses to offload files
@@ -131,6 +137,9 @@ behavior when the change improves security or project direction.
   responses, and metric dimensions remain bounded.
 
 ### Changed
+
+- Admin authentication throttling now fails closed with a global lockout when
+  the per-source table is full instead of evicting tracked source state.
 
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
   decoding and OpenBao Transit cache encryption encoding.
