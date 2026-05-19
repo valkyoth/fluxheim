@@ -48,7 +48,9 @@ behavior when the change improves security or project direction.
   bounded labels through `fluxheim_php_requests_total` and
   `fluxheim_php_request_duration_seconds`, and
   `fluxheim_php_stderr_events_total`, and retry-attempt counts through
-  `fluxheim_php_fpm_retries_total`. PHP request outcomes now distinguish
+  `fluxheim_php_fpm_retries_total`, plus pool visibility through
+  `fluxheim_php_fpm_pool_idle_connections` and
+  `fluxheim_php_fpm_pool_events_total`. PHP request outcomes now distinguish
   connect timeouts, request timeouts, connection errors, configuration errors,
   invalid responses, and intercepted PHP statuses.
 - Added opt-in php-fpm retry controls with `php.fpm.max_retries` and

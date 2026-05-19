@@ -2772,6 +2772,8 @@ struct RuntimePhp {
 #[cfg(feature = "php-fpm")]
 struct PhpFpmPool {
     endpoint: PhpFpmEndpoint,
+    metric_vhost: String,
+    metric_pool: String,
     max_idle: usize,
     idle_timeout: Duration,
     idle: tokio::sync::Mutex<Vec<PhpFpmPoolEntry>>,
@@ -2783,6 +2785,8 @@ impl std::fmt::Debug for PhpFpmPool {
         formatter
             .debug_struct("PhpFpmPool")
             .field("endpoint", &self.endpoint)
+            .field("metric_vhost", &self.metric_vhost)
+            .field("metric_pool", &self.metric_pool)
             .field("max_idle", &self.max_idle)
             .field("idle_timeout", &self.idle_timeout)
             .finish_non_exhaustive()
@@ -2857,6 +2861,8 @@ impl RuntimeProxy {
 impl RuntimePhp {
     fn from_config(
         scope: impl std::fmt::Display,
+        metric_vhost: &str,
+        metric_pool: &str,
         config: &crate::config::PhpConfig,
     ) -> io::Result<Option<Self>> {
         if !config.enabled {
@@ -2912,7 +2918,7 @@ impl RuntimePhp {
             .map(|error_page| RuntimeErrorPage::from_config(&scope, error_page))
             .collect::<io::Result<Vec<_>>>()?;
         Ok(Some(Self {
-            pool: PhpFpmPool::from_config(&config.fpm).map(Arc::new),
+            pool: PhpFpmPool::from_config(&config.fpm, metric_vhost, metric_pool).map(Arc::new),
             config: config.clone(),
             root,
             fpm_root,
@@ -2928,7 +2934,11 @@ impl RuntimePhp {
 
 #[cfg(feature = "php-fpm")]
 impl PhpFpmPool {
-    fn from_config(config: &crate::config::PhpFpmConfig) -> Option<Self> {
+    fn from_config(
+        config: &crate::config::PhpFpmConfig,
+        metric_vhost: &str,
+        metric_pool: &str,
+    ) -> Option<Self> {
         if !config.keepalive {
             return None;
         }
@@ -2949,10 +2959,28 @@ impl PhpFpmPool {
         };
         Some(Self {
             endpoint,
+            metric_vhost: metric_vhost.to_owned(),
+            metric_pool: metric_pool.to_owned(),
             max_idle: config.pool_max_idle,
             idle_timeout: Duration::from_secs(config.idle_timeout_secs),
             idle: tokio::sync::Mutex::new(Vec::new()),
         })
+    }
+
+    fn record_pool_event(&self, event: &str) {
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_php_fpm_pool_event(&self.metric_vhost, &self.metric_pool, event);
+        let _ = event;
+    }
+
+    fn record_pool_idle(&self, idle_connections: usize) {
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_php_fpm_pool_idle(
+            &self.metric_vhost,
+            &self.metric_pool,
+            idle_connections,
+        );
+        let _ = idle_connections;
     }
 
     async fn execute(
@@ -2974,13 +3002,22 @@ impl PhpFpmPool {
         let now = Instant::now();
         {
             let mut idle = self.idle.lock().await;
+            let before_retain = idle.len();
             idle.retain(|entry| now.duration_since(entry.last_used) <= self.idle_timeout);
+            if before_retain > idle.len() {
+                self.record_pool_event("drop_stale");
+            }
             if let Some(entry) = idle.pop() {
+                self.record_pool_event("reuse");
+                self.record_pool_idle(idle.len());
                 return Ok(entry);
             }
+            self.record_pool_idle(idle.len());
         }
+        let client = self.connect_client(connect_timeout).await?;
+        self.record_pool_event("connect");
         Ok(PhpFpmPoolEntry {
-            client: self.connect_client(connect_timeout).await?,
+            client,
             last_used: now,
         })
     }
@@ -2988,10 +3025,18 @@ impl PhpFpmPool {
     async fn checkin(&self, mut entry: PhpFpmPoolEntry) {
         entry.last_used = Instant::now();
         let mut idle = self.idle.lock().await;
+        let before_retain = idle.len();
         idle.retain(|entry| entry.last_used.elapsed() <= self.idle_timeout);
+        if before_retain > idle.len() {
+            self.record_pool_event("drop_stale");
+        }
         if idle.len() < self.max_idle {
             idle.push(entry);
+            self.record_pool_event("return");
+        } else {
+            self.record_pool_event("discard_full");
         }
+        self.record_pool_idle(idle.len());
     }
 
     async fn connect_client(&self, timeout: Duration) -> io::Result<PhpFpmPooledClient> {
@@ -3156,6 +3201,8 @@ impl RuntimeRoute {
             {
                 let php = RuntimePhp::from_config(
                     format!("vhost {vhost_name:?} route {:?} php", route.name),
+                    vhost_name,
+                    &route.name,
                     php,
                 )?
                 .ok_or_else(|| {
@@ -3470,7 +3517,7 @@ impl RuntimeVhost {
             #[cfg(feature = "web")]
             web: static_file_server_from_config(web_scope, &vhost.web)?,
             #[cfg(feature = "php-fpm")]
-            php: RuntimePhp::from_config(php_scope, &vhost.php)?,
+            php: RuntimePhp::from_config(php_scope, &vhost.name, "default", &vhost.php)?,
             routes,
         })
     }
@@ -9940,7 +9987,12 @@ mod tests {
             ..crate::config::PhpConfig::default()
         };
 
-        let result = RuntimePhp::from_config("vhost \"fluxheim.test\" php", &config);
+        let result = RuntimePhp::from_config(
+            "vhost \"fluxheim.test\" php",
+            "fluxheim.test",
+            "default",
+            &config,
+        );
         fs::set_permissions(&parent, original_permissions).unwrap();
         let error = result.unwrap_err().to_string();
         assert!(error.contains("vhost \"fluxheim.test\" php"), "{error}");
@@ -10551,7 +10603,7 @@ mod tests {
             ..crate::config::PhpConfig::default()
         };
 
-        let php = RuntimePhp::from_config("test php", &config)
+        let php = RuntimePhp::from_config("test php", "test", "default", &config)
             .unwrap()
             .unwrap();
 

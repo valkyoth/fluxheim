@@ -293,5 +293,5 @@ path resolution, runtime handles, and request isolation are immutable per
 runtime snapshot.
 
 Operational metrics include bounded Prometheus request totals, durations,
-STDERR event counts, and php-fpm retry-attempt counts for the PHP handler.
-Future follow-ups should add pool saturation detail.
+STDERR event counts, php-fpm retry-attempt counts, and keepalive pool idle and
+event metrics for the PHP handler.

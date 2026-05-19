@@ -87,6 +87,8 @@ Current cache baseline:
 - `fluxheim_php_request_duration_seconds{vhost,method,outcome,status_class}`
 - `fluxheim_php_stderr_events_total{vhost,state}`
 - `fluxheim_php_fpm_retries_total{vhost,reason}`
+- `fluxheim_php_fpm_pool_idle_connections{vhost,pool}`
+- `fluxheim_php_fpm_pool_events_total{vhost,pool,event}`
 - `fluxheim_cache_vhosts`
 - `fluxheim_cache_enabled_vhosts`
 - `fluxheim_cache_tiered_vhosts`
@@ -130,6 +132,11 @@ without exposing PHP error text.
 `reason` labels of `connect_timeout`, `connection_error`, or `other`; it counts
 retry attempts without exposing upstream addresses, socket paths, raw request
 paths, cookies, or FastCGI params.
+`fluxheim_php_fpm_pool_idle_connections` and
+`fluxheim_php_fpm_pool_events_total` use configured vhost and pool labels. The
+`pool` label is `default` for a vhost-level PHP runtime or the configured route
+name for a route-level PHP runtime. Pool `event` labels are bounded to `connect`,
+`reuse`, `return`, `drop_stale`, `discard_full`, or `other`.
 `fluxheim_cache_activity_total` uses only bounded labels: `tier` is `memory`,
 `disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
 `store_refusal`, `eviction`, `purge`, `pass`, `bypass`, `stale`,

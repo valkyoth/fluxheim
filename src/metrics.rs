@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, Opts};
+use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts};
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -11,6 +11,8 @@ static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUEST_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
 static PHP_STDERR_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_FPM_RETRIES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static PHP_FPM_POOL_IDLE_CONNECTIONS: OnceLock<IntGaugeVec> = OnceLock::new();
+static PHP_FPM_POOL_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ENABLED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
@@ -62,6 +64,8 @@ pub fn init() -> Result<(), prometheus::Error> {
     php_request_duration_seconds()?;
     php_stderr_events_total()?;
     php_fpm_retries_total()?;
+    php_fpm_pool_idle_connections()?;
+    php_fpm_pool_events_total()?;
     cache_vhosts()?;
     cache_enabled_vhosts()?;
     cache_tiered_vhosts()?;
@@ -248,6 +252,24 @@ pub fn record_php_fpm_retry(vhost: &str, reason: &str) {
             .with_label_values(&[vhost, php_fpm_retry_reason_label(reason)])
             .inc(),
         Err(error) => log::debug!("metrics PHP FPM retry counter unavailable: {error}"),
+    }
+}
+
+pub fn record_php_fpm_pool_idle(vhost: &str, pool: &str, idle_connections: usize) {
+    match php_fpm_pool_idle_connections() {
+        Ok(gauge) => gauge
+            .with_label_values(&[vhost, pool])
+            .set(usize_to_i64_saturating(idle_connections)),
+        Err(error) => log::debug!("metrics PHP FPM pool idle gauge unavailable: {error}"),
+    }
+}
+
+pub fn record_php_fpm_pool_event(vhost: &str, pool: &str, event: &str) {
+    match php_fpm_pool_events_total() {
+        Ok(counter) => counter
+            .with_label_values(&[vhost, pool, php_fpm_pool_event_label(event)])
+            .inc(),
+        Err(error) => log::debug!("metrics PHP FPM pool event counter unavailable: {error}"),
     }
 }
 
@@ -457,6 +479,10 @@ fn ratio_per_mille(value: u64, max: u64) -> u64 {
 }
 
 fn u64_to_i64_saturating(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn usize_to_i64_saturating(value: usize) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
@@ -882,6 +908,54 @@ fn php_fpm_retries_total() -> Result<&'static IntCounterVec, prometheus::Error> 
     let _ = PHP_FPM_RETRIES_TOTAL.set(counter);
     PHP_FPM_RETRIES_TOTAL.get().ok_or_else(|| {
         prometheus::Error::Msg("PHP FPM retry counter failed to initialize".to_owned())
+    })
+}
+
+fn php_fpm_pool_idle_connections() -> Result<&'static IntGaugeVec, prometheus::Error> {
+    if let Some(gauge) = PHP_FPM_POOL_IDLE_CONNECTIONS.get() {
+        return Ok(gauge);
+    }
+
+    let gauge = IntGaugeVec::new(
+        Opts::new(
+            "fluxheim_php_fpm_pool_idle_connections",
+            "Current idle php-fpm keepalive connections by virtual host and configured pool.",
+        ),
+        &["vhost", "pool"],
+    )?;
+    match prometheus::default_registry().register(Box::new(gauge.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = PHP_FPM_POOL_IDLE_CONNECTIONS.set(gauge);
+    PHP_FPM_POOL_IDLE_CONNECTIONS.get().ok_or_else(|| {
+        prometheus::Error::Msg("PHP FPM pool idle gauge failed to initialize".to_owned())
+    })
+}
+
+fn php_fpm_pool_events_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = PHP_FPM_POOL_EVENTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_php_fpm_pool_events_total",
+            "Total Fluxheim php-fpm keepalive pool events by virtual host, configured pool, and bounded event.",
+        ),
+        &["vhost", "pool", "event"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = PHP_FPM_POOL_EVENTS_TOTAL.set(counter);
+    PHP_FPM_POOL_EVENTS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("PHP FPM pool event counter failed to initialize".to_owned())
     })
 }
 
@@ -1312,6 +1386,17 @@ fn php_fpm_retry_reason_label(reason: &str) -> &'static str {
     }
 }
 
+fn php_fpm_pool_event_label(event: &str) -> &'static str {
+    match event {
+        "connect" => "connect",
+        "reuse" => "reuse",
+        "return" => "return",
+        "drop_stale" => "drop_stale",
+        "discard_full" => "discard_full",
+        _ => "other",
+    }
+}
+
 fn php_stderr_state_label(state: &str) -> &'static str {
     match state {
         "emitted" => "emitted",
@@ -1361,8 +1446,9 @@ mod tests {
         record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
         record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
         record_cache_purger_run, record_config, record_host_routing_rejection,
-        record_metrics_otlp_export, record_php_fpm_retry, record_php_request, record_php_stderr,
-        record_proxy_outcome, status_class,
+        record_metrics_otlp_export, record_php_fpm_pool_event, record_php_fpm_pool_idle,
+        record_php_fpm_retry, record_php_request, record_php_stderr, record_proxy_outcome,
+        status_class,
     };
 
     #[test]
@@ -1452,6 +1538,32 @@ mod tests {
         assert!(output.contains(r#"reason="connection_error""#));
         assert!(output.contains(r#"reason="other""#));
         assert!(!output.contains("attacker-reason"));
+    }
+
+    #[test]
+    fn records_php_fpm_pool_metrics_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_php_fpm_pool_idle("php-pool-test", "default", 2);
+        record_php_fpm_pool_event("php-pool-test", "default", "connect");
+        record_php_fpm_pool_event("php-pool-test", "default", "reuse");
+        record_php_fpm_pool_event("php-pool-test", "default", "attacker-event");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_php_fpm_pool_idle_connections"));
+        assert!(output.contains("fluxheim_php_fpm_pool_events_total"));
+        assert!(output.contains(r#"vhost="php-pool-test""#));
+        assert!(output.contains(r#"pool="default""#));
+        assert!(output.contains(r#"event="connect""#));
+        assert!(output.contains(r#"event="reuse""#));
+        assert!(output.contains(r#"event="other""#));
+        assert!(!output.contains("attacker-event"));
     }
 
     #[test]
