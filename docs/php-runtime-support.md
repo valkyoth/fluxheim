@@ -204,7 +204,7 @@ Planned `1.3.3` php-fpm hardening:
 - Chunked upload disk-spooling before php-fpm dispatch. Implemented with
   `php.request_body_spool_threshold_bytes` and `php.request_body_spool_dir` so
   large uploads keep exact FastCGI `CONTENT_LENGTH` without retaining the whole
-  request body in memory.
+  request body in memory. Both settings must be configured together.
 - Custom FastCGI params in config. Implemented as `[vhosts.php.params]` and
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.

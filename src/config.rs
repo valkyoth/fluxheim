@@ -5629,6 +5629,14 @@ impl PhpConfig {
                 reason: "is required when php.request_body_spool_threshold_bytes is set",
             });
         }
+        if self.request_body_spool_dir.is_some()
+            && self.request_body_spool_threshold_bytes.is_none()
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.request_body_spool_threshold_bytes",
+                reason: "is required when php.request_body_spool_dir is set",
+            });
+        }
         if let Some(spool_dir) = &self.request_body_spool_dir {
             if spool_dir.as_os_str().is_empty() {
                 return Err(ConfigError::InvalidPhpConfig {
@@ -10793,6 +10801,63 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("socket, tcp, or tcp_upstreams"), "{error}");
+    }
+
+    #[test]
+    fn rejects_incomplete_php_request_body_spool_config() {
+        let root = unique_temp_path("config-php-incomplete-spool-root");
+        let spool_dir = unique_temp_path("config-php-incomplete-spool-dir");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&spool_dir).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            request_body_spool_threshold_bytes = "1MiB"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-spool-threshold-without-dir-process"),
+            root.display(),
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.request_body_spool_dir"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            request_body_spool_dir = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-spool-dir-without-threshold-process"),
+            root.display(),
+            spool_dir.display(),
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("php.request_body_spool_threshold_bytes"),
+            "{error}"
+        );
     }
 
     #[test]
