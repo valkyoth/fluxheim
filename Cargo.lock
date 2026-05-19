@@ -282,9 +282,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64-ng"
-version = "0.12.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37eed55a133c2f0bea61aeb02993c196e713322de08b704528b81a17c00ed0de"
+checksum = "aefaec771fa19c3966b17225d461a34328ef60f858ae726729c7acf591931003"
 
 [[package]]
 name = "bindgen"

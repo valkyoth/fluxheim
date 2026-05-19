@@ -90,6 +90,11 @@ behavior when the change improves security or project direction.
   headers, treats zero or past expiries as `no-store`, and avoids public cache
   directives on responses that set cookies.
 
+### Changed
+
+- Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
+  decoding and OpenBao Transit cache encryption encoding.
+
 ## 1.3.2 - ACME Operations And Config Tester
 
 Released: in progress
