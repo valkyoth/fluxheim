@@ -285,6 +285,8 @@ Planned `1.3.3` php-fpm hardening:
   matching.
 - FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
   predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
+  The WordPress cache preset now also supports the common NGINX rule that any
+  non-empty query string bypasses shared cache lookup and storage.
 - WordPress cache-plugin migration presets for Super Cache/W3TC-style static
   fallbacks, logged-in/commenter cookie bypass, admin/login exclusions, and
   denial of PHP execution under uploads/files directories. The first cache

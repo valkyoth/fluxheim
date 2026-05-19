@@ -3912,6 +3912,8 @@ pub struct CacheConfig {
     #[serde(default)]
     pub bypass_query_values: BTreeMap<String, String>,
     #[serde(default)]
+    pub bypass_query: bool,
+    #[serde(default)]
     pub allow_client_cache_refresh: bool,
     #[serde(default)]
     pub vary_request_headers: Vec<String>,
@@ -3995,6 +3997,7 @@ impl Default for CacheConfig {
             bypass_cookie_values: BTreeMap::new(),
             bypass_query_params: Vec::new(),
             bypass_query_values: BTreeMap::new(),
+            bypass_query: false,
             allow_client_cache_refresh: false,
             vary_request_headers: Vec::new(),
             ignore_origin_cache_headers: false,
@@ -4057,6 +4060,7 @@ impl CacheConfig {
             &mut self.bypass_query_params,
             ["preview"].map(str::to_owned),
         );
+        self.bypass_query = true;
         extend_unique(
             &mut self.bypass_cookie_name_prefixes,
             [
@@ -12879,6 +12883,7 @@ mod tests {
             bypass_cookie_values = { preview = "1" }
             bypass_query_params = ["preview", "token"]
             bypass_query_values = { mode = "private" }
+            bypass_query = false
             allow_client_cache_refresh = true
             vary_request_headers = ["accept-encoding", "accept-language"]
             ignore_origin_cache_headers = true
@@ -12992,6 +12997,7 @@ mod tests {
             config.cache.bypass_query_values.get("mode"),
             Some(&"private".to_owned())
         );
+        assert!(!config.cache.bypass_query);
         assert!(config.cache.allow_client_cache_refresh);
         assert_eq!(
             config.cache.vary_request_headers,
@@ -13049,6 +13055,7 @@ mod tests {
                 .bypass_cookie_name_prefixes
                 .contains(&"wordpress_logged_in_".to_owned())
         );
+        assert!(wordpress_cache.bypass_query);
         assert_eq!(
             config.cache.max_object_bytes,
             ByteSize::from_bytes(4 * 1024 * 1024)

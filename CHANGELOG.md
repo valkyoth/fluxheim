@@ -78,10 +78,11 @@ behavior when the change improves security or project direction.
   handling without script-path labels. PHP request outcomes now distinguish
   connect timeouts, request timeouts, connection errors, configuration errors,
   invalid responses, and intercepted PHP statuses.
-- Added cache bypass primitives for path prefixes, exact paths, and cookie-name
-  prefixes, plus `cache.preset = "wordpress"` for common WordPress shared-cache
-  bypasses. Cache bypass, header, status, vary, content-type, extension, and
-  method lists are capped to bounded sizes.
+- Added cache bypass primitives for path prefixes, exact paths, any non-empty
+  query string, and cookie-name prefixes, plus `cache.preset = "wordpress"`
+  for common WordPress shared-cache bypasses. Cache bypass, header,
+  status, vary, content-type, extension, and method lists are capped to
+  bounded sizes.
 - Added `php.ignore_origin_cache_headers` for NGINX-style migrations that need
   Fluxheim to drop PHP-generated `Cache-Control`, `Expires`, and `Pragma`
   before applying response policy.

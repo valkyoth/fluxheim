@@ -585,6 +585,7 @@ bypass_cookie_name_prefixes = ["wordpress_logged_in_", "wordpress_sec_"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
 bypass_query_values = { mode = "private" }
+bypass_query = false
 allow_client_cache_refresh = false
 vary_request_headers = ["accept-encoding"]
 ignore_origin_cache_headers = false
@@ -887,8 +888,9 @@ listed origin response header has the exact configured value. Use it for
 bounded app signals such as `x-app-cache = "private"` when header presence
 alone is too broad.
 `preset = "wordpress"` expands common WordPress shared-cache bypasses for
-admin/login paths, auth-related cookies, preview queries, and authorization
-headers. Explicit fields still work normally and are not removed by the preset.
+admin/login paths, auth-related cookies, any non-empty query string, and
+authorization headers. Explicit fields still work normally and are not removed
+by the preset.
 Cache bypass, header, status, vary, content-type, extension, and method lists
 are capped to bounded sizes to keep validation and per-request matching work
 predictable.
@@ -912,6 +914,9 @@ make the response unsafe to share.
 `bypass_cookie_values` disables both cache lookup and cache storage when a
 listed cookie name appears with the exact configured value. Use it for bounded
 flags such as `preview = "1"` when the cookie name alone is too broad.
+`bypass_query = true` disables both cache lookup and cache storage for any
+non-empty query string. This matches common WordPress FastCGI cache examples
+where query-string requests are treated as dynamic.
 `bypass_query_params` disables both cache lookup and cache storage when the raw
 request query string contains any listed parameter name. Matching is exact on
 the raw key before `=`, so `preview=true` matches `preview`, while
@@ -1397,6 +1402,7 @@ no_store_response_header_values = { x-app-cache = "private" }
 bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_values = { preview = "1" }
 bypass_query_values = { mode = "private" }
+bypass_query = false
 status_ttls = { "200" = 3600, "302" = 3600, "404" = 60 }
 stale_while_revalidate_secs = 30
 stale_if_error_secs = 120

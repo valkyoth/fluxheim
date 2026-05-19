@@ -9945,11 +9945,12 @@ fn request_cache_bypass_reason(
         return Some("request-cookie");
     }
     if request.uri.query().is_some_and(|query| {
-        query_matches_cache_bypass(
-            query,
-            &cache.bypass_query_params,
-            &cache.bypass_query_values,
-        )
+        cache.bypass_query
+            || query_matches_cache_bypass(
+                query,
+                &cache.bypass_query_params,
+                &cache.bypass_query_values,
+            )
     }) {
         return Some("request-query");
     }
@@ -14952,6 +14953,26 @@ mod tests {
         assert_eq!(
             request_cache_bypass_reason(&request, &cache),
             Some("request-cookie")
+        );
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_any_query_switch() {
+        let cache = CacheConfig {
+            bypass_query: true,
+            ..CacheConfig::default()
+        };
+
+        let request = pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        assert!(!request_cache_bypass(&request, &cache));
+
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1", None).unwrap();
+        assert!(request_cache_bypass(&request, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&request, &cache),
+            Some("request-query")
         );
     }
 

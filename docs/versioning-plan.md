@@ -947,7 +947,8 @@ Follow-up `1.3.x` PHP runtime plan:
   - FastCGI cache-specific convenience config on top of Fluxheim's cache
     engine.
   - FastCGI cache semantics compatible with common NGINX deployments:
-    cache key presets, status-based TTLs, `Cache-Control`/`Expires`/
+    cache key presets, status-based TTLs, any-query bypass for WordPress-style
+    dynamic URLs, `Cache-Control`/`Expires`/
     `Set-Cookie`/`Vary` admission behavior, bypass/no-cache conditions,
     cache lock, stale-on-error/timeout, background refresh where available, and
     authenticated purge integration.
