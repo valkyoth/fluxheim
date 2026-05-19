@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
   modes for typed PHP front-controller and `try_files $uri =404` behavior.
 - Added `php.path_info = "split"` as the clear spelling for safe explicit
   `PATH_INFO` splitting, while keeping `strict` as a compatibility alias.
+- Added canonical slash redirects for PHP directory indexes so `/dir` redirects
+  to `/dir/` before executing `/dir/index.php`.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

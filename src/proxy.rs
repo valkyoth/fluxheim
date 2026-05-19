@@ -6144,6 +6144,7 @@ struct PhpScriptResolution {
 #[cfg(feature = "php-fpm")]
 enum PhpResolveOutcome {
     Execute(PhpScriptResolution),
+    RedirectDirectorySlash,
     Decline,
     Forbidden,
     NotFound,
@@ -6172,6 +6173,10 @@ async fn respond_php_request(
     let version = session.req_header().version;
     let resolution = match resolve_php_script(php, &request_path, decline_existing_static) {
         PhpResolveOutcome::Execute(resolution) => resolution,
+        PhpResolveOutcome::RedirectDirectorySlash => {
+            respond_directory_slash_redirect(session, response_headers).await?;
+            return Ok(true);
+        }
         PhpResolveOutcome::Decline => return Ok(false),
         PhpResolveOutcome::Forbidden => {
             session
@@ -6294,6 +6299,9 @@ fn resolve_php_script(
 
     if !explicit_php && let Ok(ResolveResult::Found(file)) = php.files.resolve(request_path) {
         if let Some(script_name) = php_static_file_script_name(php, &file) {
+            if php_should_redirect_directory_index(request_path, &script_name, php) {
+                return PhpResolveOutcome::RedirectDirectorySlash;
+            }
             return PhpResolveOutcome::Execute(PhpScriptResolution {
                 file,
                 script_name,
@@ -6323,6 +6331,65 @@ fn resolve_php_script(
             PhpResolveOutcome::NotFound
         }
     }
+}
+
+#[cfg(feature = "php-fpm")]
+async fn respond_directory_slash_redirect(
+    session: &mut Session,
+    response_headers: &crate::config::ResponseHeaderPolicyConfig,
+) -> Result<()> {
+    let Some(location) = directory_slash_redirect_location(session.req_header()) else {
+        session
+            .respond_error_with_body(400, Bytes::from_static(b"invalid redirect target"))
+            .await?;
+        return Ok(());
+    };
+    let mut response = ResponseHeader::build(308, Some(4))?;
+    response.insert_header("location", location)?;
+    response.insert_header("content-length", "0")?;
+    crate::headers::apply_response_policy(&mut response, response_headers)?;
+    session
+        .write_response_header(Box::new(response), true)
+        .await
+}
+
+#[cfg(feature = "php-fpm")]
+fn directory_slash_redirect_location(request: &RequestHeader) -> Option<String> {
+    let path = request.uri.path();
+    if path.is_empty() || path.ends_with('/') || path.contains('\\') {
+        return None;
+    }
+    let mut location = String::with_capacity(
+        path.len()
+            + 1
+            + request
+                .uri
+                .query()
+                .map(|query| query.len() + 1)
+                .unwrap_or(0),
+    );
+    location.push_str(path);
+    location.push('/');
+    if let Some(query) = request.uri.query() {
+        location.push('?');
+        location.push_str(query);
+    }
+    Some(location)
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_should_redirect_directory_index(
+    request_path: &str,
+    script_name: &str,
+    php: &RuntimePhp,
+) -> bool {
+    if request_path.ends_with('/') || request_path.contains('\\') {
+        return false;
+    }
+    let Some(parent) = script_name.strip_suffix(&format!("/{}", php.config.index)) else {
+        return false;
+    };
+    !parent.is_empty() && parent == request_path
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9154,8 +9221,9 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
-        parse_php_response, php_fpm_path_translated, php_fpm_script_filename,
-        php_header_param_name, php_script_name_for_request, resolve_php_script,
+        directory_slash_redirect_location, parse_php_response, php_fpm_path_translated,
+        php_fpm_script_filename, php_header_param_name, php_script_name_for_request,
+        resolve_php_script,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9355,6 +9423,34 @@ mod tests {
             panic!("expected directory PHP index to execute");
         };
         assert_eq!(resolution.script_name, "/blog/index.php");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_resolution_redirects_slashless_directory_php_index() {
+        let php = php_test_runtime("proxy-php-directory-slash");
+
+        assert!(matches!(
+            resolve_php_script(&php, "/blog", true),
+            PhpResolveOutcome::RedirectDirectorySlash
+        ));
+
+        let PhpResolveOutcome::Execute(resolution) = resolve_php_script(&php, "/blog/", true)
+        else {
+            panic!("expected canonical directory PHP index to execute");
+        };
+        assert_eq!(resolution.script_name, "/blog/index.php");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_directory_slash_redirect_location_preserves_query() {
+        let request = pingora::http::RequestHeader::build("GET", b"/blog?preview=1", None).unwrap();
+
+        assert_eq!(
+            directory_slash_redirect_location(&request).as_deref(),
+            Some("/blog/?preview=1")
+        );
     }
 
     #[cfg(feature = "php-fpm")]

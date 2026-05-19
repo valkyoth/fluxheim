@@ -871,6 +871,8 @@ Follow-up `1.3.x` PHP runtime plan:
     retained as a compatibility alias for `"split"`.
   - Canonical directory slash redirect when `{path}/index.php` exists and the
     app expects `/dir/` semantics.
+    Implemented as a `308` redirect before executing directory `index.php`
+    scripts.
   - `fastcgi_pass_request_headers` / `fastcgi_pass_request_body` equivalents
     as explicit advanced switches, defaulting to today's safe allow-list.
   - `X-Accel-Redirect` / `X-Sendfile` support for PHP-assisted static

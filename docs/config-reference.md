@@ -1468,6 +1468,9 @@ to be served by `[vhosts.web]`.
 that expect safe trailing `PATH_INFO` after an explicit PHP script such as
 `/index.php/user/1`. The older `strict` spelling is accepted as an alias for
 `split`.
+When a slashless request resolves to a directory PHP index, Fluxheim returns a
+canonical `308` redirect before executing the script, for example `/blog` to
+`/blog/` when `/blog/index.php` exists.
 `max_response_bytes` defaults to `64MiB`; set a smaller value on
 memory-constrained or high-assurance edge nodes. `php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by

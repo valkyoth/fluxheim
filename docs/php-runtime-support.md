@@ -177,6 +177,8 @@ Planned `1.3.3` php-fpm hardening:
   Implemented as `php.path_info = "disabled"` or `"split"`; the legacy
   `"strict"` spelling remains accepted as an alias for `"split"`.
 - Canonical directory slash redirects for directory index PHP apps.
+  Implemented as a `308` redirect before executing directory `index.php`
+  scripts.
 - Explicit request header/body pass-through switches for advanced migrations.
 - `X-Accel-Redirect` / `X-Sendfile` support.
 - `X-Accel-Expires` mapping into Fluxheim cache metadata where safe.
