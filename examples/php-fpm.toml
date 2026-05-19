@@ -46,6 +46,8 @@ stderr_log = true
 stderr_max_bytes = "2KiB"
 # Remove selected headers emitted by PHP before the response is sent.
 hide_response_headers = ["x-powered-by"]
+# Convert selected PHP error statuses into Fluxheim-generated error responses.
+intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 

@@ -1424,6 +1424,7 @@ max_response_bytes = "64MiB"
 stderr_log = true
 stderr_max_bytes = "2KiB"
 hide_response_headers = ["x-powered-by"]
+intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
@@ -1488,6 +1489,11 @@ NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
 Fluxheim always strips hop-by-hop php-fpm response headers such as
 `Connection`, `Transfer-Encoding`, and headers named by `Connection` before it
 frames the client response.
+`php.intercept_error_statuses` is an explicit `fastcgi_intercept_errors`-style
+status list. When PHP returns one of those 4xx/5xx statuses, Fluxheim discards
+the PHP response body and sends a Fluxheim-generated error response instead.
+It defaults to an empty list so PHP applications keep their normal error pages
+unless the operator opts in.
 When a slashless request resolves to a directory PHP index, Fluxheim returns a
 canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.

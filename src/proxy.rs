@@ -6283,6 +6283,11 @@ async fn respond_php_request(
             )
         })?;
     strip_php_response_headers(&mut response, &php.config);
+    if php_should_intercept_error_status(response.status, &php.config) {
+        session.respond_error(response.status.as_u16()).await?;
+        ctx.response_body_bytes_seen = 0;
+        return Ok(true);
+    }
     response.remove_header("content-length");
     response.insert_header("content-length", body.len().to_string())?;
     crate::headers::apply_response_policy(&mut response, response_headers)?;
@@ -7851,6 +7856,13 @@ fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config
 }
 
 #[cfg(feature = "php-fpm")]
+fn php_should_intercept_error_status(status: StatusCode, php: &crate::config::PhpConfig) -> bool {
+    php.intercept_error_statuses
+        .iter()
+        .any(|intercept_status| *intercept_status == status.as_u16())
+}
+
+#[cfg(feature = "php-fpm")]
 const PHP_HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
     "connection",
     "keep-alive",
@@ -9259,7 +9271,7 @@ mod tests {
 
     use bytes::Bytes;
     #[cfg(feature = "php-fpm")]
-    use pingora::http::ResponseHeader;
+    use pingora::http::{ResponseHeader, StatusCode};
 
     use crate::config::{
         ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
@@ -9304,7 +9316,8 @@ mod tests {
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         directory_slash_redirect_location, parse_php_response, php_fpm_path_translated,
         php_fpm_script_filename, php_header_param_name, php_script_name_for_request,
-        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
+        php_should_intercept_error_status, resolve_php_script, sanitized_php_stderr,
+        strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9742,6 +9755,28 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("ok")
         );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_intercept_error_statuses_are_explicit() {
+        let config = crate::config::PhpConfig {
+            intercept_error_statuses: vec![404, 500],
+            ..crate::config::PhpConfig::default()
+        };
+
+        assert!(php_should_intercept_error_status(
+            StatusCode::NOT_FOUND,
+            &config
+        ));
+        assert!(php_should_intercept_error_status(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &config
+        ));
+        assert!(!php_should_intercept_error_status(
+            StatusCode::BAD_GATEWAY,
+            &config
+        ));
     }
 
     #[test]

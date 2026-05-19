@@ -78,6 +78,7 @@ pass_request_body = true
 stderr_log = true
 stderr_max_bytes = "2KiB"
 hide_response_headers = ["x-powered-by"]
+intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
@@ -138,6 +139,9 @@ eligible:
   header injection.
 - Strip hop-by-hop php-fpm response headers, including `Connection`-named
   headers and `Transfer-Encoding`, before Fluxheim frames the client response.
+- Optionally intercept selected PHP 4xx/5xx responses with
+  `intercept_error_statuses` and replace them with Fluxheim-generated error
+  responses.
 - Log PHP STDERR only through size-limited sanitized logs.
 - Keep php-fpm sockets private and validate Unix socket path permissions where
   possible.
@@ -199,6 +203,7 @@ Planned `1.3.3` php-fpm hardening:
 - `X-Accel-Redirect` / `X-Sendfile` support.
 - `X-Accel-Expires` mapping into Fluxheim cache metadata where safe.
 - `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
+  Initial generic interception implemented as `php.intercept_error_statuses`.
 - Response header hide/pass/ignore controls for PHP backends.
   Initial hide controls implemented as `php.hide_response_headers`; hop-by-hop
   PHP response headers are stripped by default.

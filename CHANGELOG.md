@@ -34,6 +34,9 @@ behavior when the change improves security or project direction.
   headers before they reach clients.
 - Stripped hop-by-hop php-fpm response headers, including `Connection`-named
   headers and `Transfer-Encoding`, before Fluxheim frames the client response.
+- Added `php.intercept_error_statuses` for opt-in
+  `fastcgi_intercept_errors`-style replacement of selected PHP 4xx/5xx
+  responses with Fluxheim-generated errors.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

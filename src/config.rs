@@ -5305,6 +5305,8 @@ pub struct PhpConfig {
     #[serde(default)]
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
+    pub intercept_error_statuses: Vec<u16>,
+    #[serde(default)]
     pub params: BTreeMap<String, String>,
     #[serde(default)]
     pub fpm: PhpFpmConfig,
@@ -5329,6 +5331,7 @@ impl Default for PhpConfig {
             stderr_log: true,
             stderr_max_bytes: default_php_stderr_max_bytes(),
             hide_response_headers: Vec::new(),
+            intercept_error_statuses: Vec::new(),
             params: BTreeMap::new(),
             fpm: PhpFpmConfig::default(),
         }
@@ -5433,6 +5436,7 @@ impl PhpConfig {
         for header in &self.hide_response_headers {
             validate_header_name("php.hide_response_headers", header)?;
         }
+        validate_php_intercept_error_statuses(&self.intercept_error_statuses)?;
 
         self.fpm.validate(scope)?;
         Ok(())
@@ -7636,6 +7640,25 @@ fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigEr
     for (name, value) in params {
         validate_php_param_name(name)?;
         validate_php_param_value(value)?;
+    }
+    Ok(())
+}
+
+fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+    let mut seen = BTreeSet::new();
+    for status in statuses {
+        if !(400..=599).contains(status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.intercept_error_statuses",
+                reason: "statuses must be HTTP error statuses from 400 through 599",
+            });
+        }
+        if !seen.insert(*status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.intercept_error_statuses",
+                reason: "duplicate statuses are not allowed",
+            });
+        }
     }
     Ok(())
 }
@@ -9975,6 +9998,7 @@ mod tests {
             stderr_log = false
             stderr_max_bytes = "4KiB"
             hide_response_headers = ["x-powered-by", "x-internal"]
+            intercept_error_statuses = [404, 500, 502]
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
             max_response_bytes = "8MiB"
@@ -10013,6 +10037,7 @@ mod tests {
             php.hide_response_headers,
             ["x-powered-by".to_owned(), "x-internal".to_owned()]
         );
+        assert_eq!(php.intercept_error_statuses, [404, 500, 502]);
         assert_eq!(php.allowed_extensions, ["php"]);
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),
@@ -10119,6 +10144,64 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.hide_response_headers"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_php_intercept_error_status() {
+        let root = unique_temp_path("config-php-bad-intercept-status-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            intercept_error_statuses = [302]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-bad-intercept-status-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.intercept_error_statuses"), "{error}");
+    }
+
+    #[test]
+    fn rejects_duplicate_php_intercept_error_status() {
+        let root = unique_temp_path("config-php-duplicate-intercept-status-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            intercept_error_statuses = [500, 500]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-duplicate-intercept-status-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.intercept_error_statuses"), "{error}");
     }
 
     #[test]

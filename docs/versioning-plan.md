@@ -884,6 +884,7 @@ Follow-up `1.3.x` PHP runtime plan:
     backend control headers are not leaked to clients.
   - `fastcgi_intercept_errors`-style integration with Fluxheim error pages for
     selected PHP statuses, keeping normal PHP responses untouched by default.
+    Initial generic interception implemented as `php.intercept_error_statuses`.
   - PHP response-header policy controls matching common NGINX migrations:
     hide/pass selected backend headers, ignore selected cache-control headers,
     and reject conflicting `Content-Length` / transfer headers.
