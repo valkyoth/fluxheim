@@ -292,6 +292,6 @@ Per-vhost PHP routing policy may later become snapshot-safe, but only after
 path resolution, runtime handles, and request isolation are immutable per
 runtime snapshot.
 
-Operational metrics include bounded Prometheus request totals, durations, and
-STDERR event counts for the PHP handler. Future follow-ups should add pool
-saturation and retry-attempt detail.
+Operational metrics include bounded Prometheus request totals, durations,
+STDERR event counts, and php-fpm retry-attempt counts for the PHP handler.
+Future follow-ups should add pool saturation detail.

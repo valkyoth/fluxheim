@@ -86,6 +86,7 @@ Current cache baseline:
 - `fluxheim_php_requests_total{vhost,method,outcome,status_class}`
 - `fluxheim_php_request_duration_seconds{vhost,method,outcome,status_class}`
 - `fluxheim_php_stderr_events_total{vhost,state}`
+- `fluxheim_php_fpm_retries_total{vhost,reason}`
 - `fluxheim_cache_vhosts`
 - `fluxheim_cache_enabled_vhosts`
 - `fluxheim_cache_tiered_vhosts`
@@ -125,6 +126,10 @@ queries, script filenames, usernames, cookies, and FastCGI params.
 `fluxheim_php_stderr_events_total` uses configured vhost names plus bounded
 `state` labels of `emitted`, `truncated`, or `other`; it counts STDERR presence
 without exposing PHP error text.
+`fluxheim_php_fpm_retries_total` uses configured vhost names plus bounded
+`reason` labels of `connect_timeout`, `connection_error`, or `other`; it counts
+retry attempts without exposing upstream addresses, socket paths, raw request
+paths, cookies, or FastCGI params.
 `fluxheim_cache_activity_total` uses only bounded labels: `tier` is `memory`,
 `disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
 `store_refusal`, `eviction`, `purge`, `pass`, `bypass`, `stale`,

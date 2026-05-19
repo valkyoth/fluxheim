@@ -10,6 +10,7 @@ static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUEST_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
 static PHP_STDERR_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static PHP_FPM_RETRIES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ENABLED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
@@ -60,6 +61,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     php_requests_total()?;
     php_request_duration_seconds()?;
     php_stderr_events_total()?;
+    php_fpm_retries_total()?;
     cache_vhosts()?;
     cache_enabled_vhosts()?;
     cache_tiered_vhosts()?;
@@ -237,6 +239,15 @@ pub fn record_php_request(
             ])
             .observe(duration.as_secs_f64()),
         Err(error) => log::debug!("metrics PHP request duration unavailable: {error}"),
+    }
+}
+
+pub fn record_php_fpm_retry(vhost: &str, reason: &str) {
+    match php_fpm_retries_total() {
+        Ok(counter) => counter
+            .with_label_values(&[vhost, php_fpm_retry_reason_label(reason)])
+            .inc(),
+        Err(error) => log::debug!("metrics PHP FPM retry counter unavailable: {error}"),
     }
 }
 
@@ -850,6 +861,30 @@ fn cache_disk_purge_index_entries() -> Result<&'static IntGauge, prometheus::Err
     )
 }
 
+fn php_fpm_retries_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = PHP_FPM_RETRIES_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_php_fpm_retries_total",
+            "Total Fluxheim php-fpm retry attempts by virtual host and bounded reason.",
+        ),
+        &["vhost", "reason"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = PHP_FPM_RETRIES_TOTAL.set(counter);
+    PHP_FPM_RETRIES_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("PHP FPM retry counter failed to initialize".to_owned())
+    })
+}
+
 fn cache_activity_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     if let Some(counter) = CACHE_ACTIVITY_TOTAL.get() {
         return Ok(counter);
@@ -1269,6 +1304,14 @@ fn php_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+fn php_fpm_retry_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "connect_timeout" => "connect_timeout",
+        "connection_error" => "connection_error",
+        _ => "other",
+    }
+}
+
 fn php_stderr_state_label(state: &str) -> &'static str {
     match state {
         "emitted" => "emitted",
@@ -1318,8 +1361,8 @@ mod tests {
         record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
         record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
         record_cache_purger_run, record_config, record_host_routing_rejection,
-        record_metrics_otlp_export, record_php_request, record_php_stderr, record_proxy_outcome,
-        status_class,
+        record_metrics_otlp_export, record_php_fpm_retry, record_php_request, record_php_stderr,
+        record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -1386,6 +1429,29 @@ mod tests {
         assert!(output.contains(r#"method="OTHER""#));
         assert!(output.contains(r#"outcome="other""#));
         assert!(!output.contains("attacker-outcome"));
+    }
+
+    #[test]
+    fn records_php_fpm_retry_counter_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_php_fpm_retry("php-retry-test", "connect_timeout");
+        record_php_fpm_retry("php-retry-test", "connection_error");
+        record_php_fpm_retry("php-retry-test", "attacker-reason");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_php_fpm_retries_total"));
+        assert!(output.contains(r#"vhost="php-retry-test""#));
+        assert!(output.contains(r#"reason="connect_timeout""#));
+        assert!(output.contains(r#"reason="connection_error""#));
+        assert!(output.contains(r#"reason="other""#));
+        assert!(!output.contains("attacker-reason"));
     }
 
     #[test]

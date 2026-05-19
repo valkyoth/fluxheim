@@ -6300,6 +6300,7 @@ async fn respond_php_request(
         request_body,
         timeout,
         &method,
+        vhost.name.as_str(),
     )
     .await
     {
@@ -6860,6 +6861,7 @@ async fn execute_php_fpm(
     body: Vec<u8>,
     timeout: std::time::Duration,
     method: &str,
+    vhost_name: &str,
 ) -> io::Result<fastcgi_client::Response> {
     let connect_timeout = fpm
         .connect_timeout_secs
@@ -6881,6 +6883,8 @@ async fn execute_php_fpm(
             Ok(response) => return Ok(response),
             Err(error) if attempts < max_retries && php_fpm_retryable_error(&error) => {
                 attempts += 1;
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_php_fpm_retry(vhost_name, php_fpm_error_outcome(&error));
                 log::debug!("retrying php-fpm request after {}", error);
             }
             Err(error) => return Err(error),

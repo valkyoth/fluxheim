@@ -916,9 +916,9 @@ Follow-up `1.3.x` PHP runtime plan:
     when the proxy resolver work lands.
   - PHP-specific Prometheus metrics for bounded request totals and durations.
     Implemented as `fluxheim_php_requests_total` and
-    `fluxheim_php_request_duration_seconds`, and
-    `fluxheim_php_stderr_events_total`; deeper pool saturation and retry-attempt
-    counters remain planned.
+    `fluxheim_php_request_duration_seconds`,
+    `fluxheim_php_stderr_events_total`, and
+    `fluxheim_php_fpm_retries_total`; deeper pool saturation remains planned.
   - FastCGI cache-specific convenience config on top of Fluxheim's cache
     engine.
   - FastCGI cache semantics compatible with common NGINX deployments:
