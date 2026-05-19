@@ -6129,8 +6129,6 @@ async fn respond_host_routing_rejection(
 }
 
 #[cfg(feature = "php-fpm")]
-const MAX_PHP_RESPONSE_HEADER_BYTES: usize = 64 * 1024;
-#[cfg(feature = "php-fpm")]
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 
 #[cfg(feature = "php-fpm")]
@@ -6274,14 +6272,18 @@ async fn respond_php_request(
         );
     }
     let stdout = output.stdout.unwrap_or_default();
-    let (mut response, body) = parse_php_response(&stdout, php.config.max_response_bytes.as_u64())
-        .map_err(|error| {
-            Error::because(
-                ErrorType::HTTPStatus(502),
-                "php-fpm response was invalid",
-                error,
-            )
-        })?;
+    let (mut response, body) = parse_php_response(
+        &stdout,
+        php.config.max_response_bytes.as_u64(),
+        php.config.max_response_header_bytes.as_u64(),
+    )
+    .map_err(|error| {
+        Error::because(
+            ErrorType::HTTPStatus(502),
+            "php-fpm response was invalid",
+            error,
+        )
+    })?;
     strip_php_response_headers(&mut response, &php.config);
     if php_should_intercept_error_status(response.status, &php.config) {
         session.respond_error(response.status.as_u16()).await?;
@@ -6714,6 +6716,7 @@ where
 fn parse_php_response(
     stdout: &[u8],
     max_response_bytes: u64,
+    max_response_header_bytes: u64,
 ) -> io::Result<(ResponseHeader, Vec<u8>)> {
     if stdout.len() as u64 > max_response_bytes {
         return Err(io::Error::new(
@@ -6722,7 +6725,7 @@ fn parse_php_response(
         ));
     }
     let (header_bytes, body) = split_php_response(stdout)?;
-    if header_bytes.len() > MAX_PHP_RESPONSE_HEADER_BYTES {
+    if header_bytes.len() as u64 > max_response_header_bytes {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "php-fpm response headers exceed maximum size",
@@ -9701,6 +9704,7 @@ mod tests {
         let (response, body) = parse_php_response(
             b"Status: 201 Created\r\nContent-Type: text/plain\r\n\r\nok",
             64 * 1024 * 1024,
+            64 * 1024,
         )
         .unwrap();
 
@@ -9723,6 +9727,7 @@ mod tests {
         let (response, body) = parse_php_response(
             b"Set-Cookie: wordpress_test_cookie=WP%20Cookie%20check; path=/\r\nStatus: 302 Found\r\nLocation: /wp-admin/\r\n\r\n",
             64 * 1024 * 1024,
+            64 * 1024,
         )
         .unwrap();
 
@@ -9747,15 +9752,28 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn parse_php_response_rejects_header_injection() {
-        let error =
-            parse_php_response(b"X-Test: ok\rbad\r\n\r\nbody", 64 * 1024 * 1024).unwrap_err();
+        let error = parse_php_response(b"X-Test: ok\rbad\r\n\r\nbody", 64 * 1024 * 1024, 64 * 1024)
+            .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[cfg(feature = "php-fpm")]
     #[test]
     fn parse_php_response_enforces_configured_size_limit() {
-        let error = parse_php_response(b"Content-Type: text/plain\r\n\r\nbody", 8).unwrap_err();
+        let error =
+            parse_php_response(b"Content-Type: text/plain\r\n\r\nbody", 8, 64 * 1024).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn parse_php_response_enforces_configured_header_size_limit() {
+        let error = parse_php_response(
+            b"Content-Type: text/plain\r\nX-Test: abc\r\n\r\nbody",
+            64 * 1024 * 1024,
+            8,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     }
 

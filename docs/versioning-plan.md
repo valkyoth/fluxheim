@@ -878,6 +878,8 @@ Follow-up `1.3.x` PHP runtime plan:
     Implemented as `php.pass_request_headers` and `php.pass_request_body`, both
     defaulting to `true`; disabled body pass-through still drains and limits the
     downstream body.
+  - Configurable CGI response-header limits.
+    Implemented as `php.max_response_header_bytes`, defaulting to `64KiB`.
   - `X-Accel-Redirect` / `X-Sendfile` support for PHP-assisted static
     offload, plus internal-only target validation, `X-Accel-Expires` handling
     where it maps to Fluxheim cache metadata, and response-header stripping so

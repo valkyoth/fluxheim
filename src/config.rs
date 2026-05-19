@@ -5292,6 +5292,8 @@ pub struct PhpConfig {
     pub max_request_body_bytes: Option<ByteSize>,
     #[serde(default = "default_php_max_response_bytes")]
     pub max_response_bytes: ByteSize,
+    #[serde(default = "default_php_max_response_header_bytes")]
+    pub max_response_header_bytes: ByteSize,
     #[serde(default)]
     pub path_info: PhpPathInfoMode,
     #[serde(default)]
@@ -5327,6 +5329,7 @@ impl Default for PhpConfig {
             request_timeout_secs: default_php_request_timeout_secs(),
             max_request_body_bytes: None,
             max_response_bytes: default_php_max_response_bytes(),
+            max_response_header_bytes: default_php_max_response_header_bytes(),
             path_info: PhpPathInfoMode::default(),
             try_files: PhpTryFilesMode::default(),
             pass_request_headers: true,
@@ -5425,6 +5428,18 @@ impl PhpConfig {
                 reason: "must be greater than zero",
             });
         }
+        if self.max_response_header_bytes.as_u64() == 0 {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.max_response_header_bytes",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.max_response_header_bytes.as_u64() > MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES as u64 {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.max_response_header_bytes",
+                reason: "must be less than or equal to 1MiB",
+            });
+        }
         if self.stderr_max_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.stderr_max_bytes",
@@ -5499,6 +5514,7 @@ const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
+const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
 
 impl PhpFpmConfig {
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
@@ -7180,6 +7196,10 @@ fn default_php_request_timeout_secs() -> u64 {
 
 fn default_php_max_response_bytes() -> ByteSize {
     ByteSize::from_bytes(64 * 1024 * 1024)
+}
+
+fn default_php_max_response_header_bytes() -> ByteSize {
+    ByteSize::from_bytes(64 * 1024)
 }
 
 fn default_php_stderr_max_bytes() -> ByteSize {
@@ -10036,6 +10056,7 @@ mod tests {
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
             max_response_bytes = "8MiB"
+            max_response_header_bytes = "32KiB"
             path_info = "split"
 
             [vhosts.php.params]
@@ -10082,6 +10103,7 @@ mod tests {
             16 * 1024 * 1024
         );
         assert_eq!(php.max_response_bytes.as_u64(), 8 * 1024 * 1024);
+        assert_eq!(php.max_response_header_bytes.as_u64(), 32 * 1024);
         assert_eq!(php.path_info, super::PhpPathInfoMode::Split);
         assert_eq!(
             php.params.get("APP_ENV").map(String::as_str),
@@ -10124,6 +10146,64 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.max_response_bytes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_zero_php_response_header_limit() {
+        let root = unique_temp_path("config-php-zero-response-header-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            max_response_header_bytes = 0
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-zero-response-header-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.max_response_header_bytes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_excessive_php_response_header_limit() {
+        let root = unique_temp_path("config-php-excessive-response-header-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            max_response_header_bytes = "2MiB"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-excessive-response-header-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.max_response_header_bytes"), "{error}");
     }
 
     #[test]

@@ -39,6 +39,8 @@ behavior when the change improves security or project direction.
   responses with Fluxheim-generated errors.
 - Added `php.deny_path_prefixes` to block php-fpm script execution under
   configured URI prefixes such as WordPress upload directories.
+- Added `php.max_response_header_bytes` to make the php-fpm CGI response
+  header cap configurable while keeping the `64KiB` default.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

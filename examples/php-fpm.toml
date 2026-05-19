@@ -44,6 +44,7 @@ pass_request_body = true
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
+max_response_header_bytes = "64KiB"
 stderr_log = true
 stderr_max_bytes = "2KiB"
 # Remove selected headers emitted by PHP before the response is sent.

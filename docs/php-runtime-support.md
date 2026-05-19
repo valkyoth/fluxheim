@@ -74,6 +74,7 @@ deny_path_prefixes = ["/wp-content/uploads/"]
 request_timeout_secs = 30
 max_request_body_bytes = "16MiB"
 max_response_bytes = "64MiB"
+max_response_header_bytes = "64KiB"
 pass_request_headers = true
 pass_request_body = true
 stderr_log = true
@@ -137,6 +138,7 @@ eligible:
 - Remove selected php-fpm response headers with `hide_response_headers` before
   the response reaches clients.
 - Cap response header bytes returned by PHP.
+  Implemented as `php.max_response_header_bytes`, defaulting to `64KiB`.
 - Parse PHP-generated headers strictly; reject malformed status lines and
   header injection.
 - Strip hop-by-hop php-fpm response headers, including `Connection`-named

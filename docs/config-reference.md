@@ -1422,6 +1422,7 @@ pass_request_body = true
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
+max_response_header_bytes = "64KiB"
 stderr_log = true
 stderr_max_bytes = "2KiB"
 hide_response_headers = ["x-powered-by"]
@@ -1467,6 +1468,8 @@ php-fpm and `max_response_bytes` bounds the buffered FastCGI response returned
 from php-fpm. `php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
 `SCRIPT_FILENAME`, and `PATH_TRANSLATED` for separate php-fpm container
 filesystem roots while Fluxheim still checks scripts under `php.root`.
+`php.max_response_header_bytes` caps the CGI-style response header block before
+body parsing and defaults to `64KiB`.
 `php.deny_path_prefixes` rejects PHP script execution for configured absolute
 URI path prefixes before php-fpm is contacted. Use it for WordPress-style media
 directories such as `/wp-content/uploads/` where uploaded PHP files must never
