@@ -484,6 +484,8 @@ cache_control = "private, no-store"
 
 Every `upstreams` entry must be an authority such as
 `127.0.0.1:3000` or `origin.example.test:443`.
+Proxy upstream lists are capped at 64 entries and reject duplicates
+case-insensitively. Proxy error-page lists are also capped at 64 entries.
 
 `upstreams` is the preferred proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple
@@ -1657,7 +1659,8 @@ that path. Advanced route configs can still use `https_redirect_exempt = true`
 for deliberate non-ACME cleartext exceptions.
 Use either `upstream = "host:port"` or `upstreams = ["host:port"]`; do not set
 both. The helper accepts the same `upstream_tls` and upstream timeout fields as
-normal proxy actions.
+normal proxy actions. ACME challenge upstream lists are capped at 64 entries
+and reject duplicates case-insensitively.
 
 `[vhosts.redirect]` creates a fallback redirect route for the whole vhost. It is
 intended for canonical-host vhosts such as `www` to apex redirects. Do not

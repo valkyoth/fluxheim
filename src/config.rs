@@ -2879,6 +2879,9 @@ pub struct ProxyConfig {
     pub load_balance: LoadBalanceConfig,
 }
 
+const MAX_PROXY_UPSTREAMS: usize = 64;
+const MAX_PROXY_ERROR_PAGES: usize = 64;
+
 impl Default for ProxyConfig {
     fn default() -> Self {
         Self {
@@ -2937,6 +2940,16 @@ impl ProxyConfig {
         if self.upstream.is_some() && !self.upstreams.is_empty() {
             return Err(ConfigError::ConflictingProxyUpstreams);
         }
+        if self.upstreams.len() > MAX_PROXY_UPSTREAMS {
+            return Err(ConfigError::TooManyProxyUpstreams {
+                max: MAX_PROXY_UPSTREAMS,
+            });
+        }
+        if self.error_pages.len() > MAX_PROXY_ERROR_PAGES {
+            return Err(ConfigError::TooManyProxyErrorPages {
+                max: MAX_PROXY_ERROR_PAGES,
+            });
+        }
 
         if let Some(upstream) = &self.upstream
             && !valid_authority(upstream)
@@ -2946,10 +2959,16 @@ impl ProxyConfig {
             });
         }
 
+        let mut seen_upstreams = std::collections::HashSet::new();
         for upstream in &self.upstreams {
             if !valid_authority(upstream) {
                 return Err(ConfigError::InvalidUpstream {
                     address: upstream.clone(),
+                });
+            }
+            if !seen_upstreams.insert(upstream.to_ascii_lowercase()) {
+                return Err(ConfigError::DuplicateProxyUpstream {
+                    upstream: upstream.clone(),
                 });
             }
         }
@@ -3653,6 +3672,7 @@ impl VhostAcmeConfig {
 }
 
 const ACME_HTTP_CHALLENGE_PREFIX: &str = "/.well-known/acme-challenge/";
+const MAX_ACME_CHALLENGE_UPSTREAMS: usize = 64;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -3689,6 +3709,12 @@ impl VhostAcmeChallengeConfig {
                 vhost: vhost.to_owned(),
             });
         }
+        if self.upstreams.len() > MAX_ACME_CHALLENGE_UPSTREAMS {
+            return Err(ConfigError::TooManyAcmeChallengeUpstreams {
+                vhost: vhost.to_owned(),
+                max: MAX_ACME_CHALLENGE_UPSTREAMS,
+            });
+        }
 
         if let Some(upstream) = &self.upstream
             && !valid_authority(upstream)
@@ -3697,10 +3723,17 @@ impl VhostAcmeChallengeConfig {
                 address: upstream.clone(),
             });
         }
+        let mut seen_upstreams = std::collections::HashSet::new();
         for upstream in &self.upstreams {
             if !valid_authority(upstream) {
                 return Err(ConfigError::InvalidUpstream {
                     address: upstream.clone(),
+                });
+            }
+            if !seen_upstreams.insert(upstream.to_ascii_lowercase()) {
+                return Err(ConfigError::DuplicateAcmeChallengeUpstream {
+                    vhost: vhost.to_owned(),
+                    upstream: upstream.clone(),
                 });
             }
         }
@@ -6320,13 +6353,30 @@ pub enum ConfigError {
     ConflictingAcmeChallengeUpstreams {
         vhost: String,
     },
+    TooManyAcmeChallengeUpstreams {
+        vhost: String,
+        max: usize,
+    },
+    DuplicateAcmeChallengeUpstream {
+        vhost: String,
+        upstream: String,
+    },
     InvalidUpstream {
         address: String,
     },
     ConflictingProxyUpstreams,
+    TooManyProxyUpstreams {
+        max: usize,
+    },
+    DuplicateProxyUpstream {
+        upstream: String,
+    },
     EmptyUpstreamSni,
     InvalidProxyTimeout {
         field: &'static str,
+    },
+    TooManyProxyErrorPages {
+        max: usize,
     },
     InvalidProxyErrorPageStatus {
         status: u16,
@@ -6863,6 +6913,14 @@ impl Display for ConfigError {
                 formatter,
                 "vhost {vhost:?} acme_challenge.upstream and acme_challenge.upstreams cannot both be configured"
             ),
+            Self::TooManyAcmeChallengeUpstreams { vhost, max } => write!(
+                formatter,
+                "vhost {vhost:?} acme_challenge.upstreams must contain at most {max} entries"
+            ),
+            Self::DuplicateAcmeChallengeUpstream { vhost, upstream } => write!(
+                formatter,
+                "vhost {vhost:?} acme_challenge.upstreams contains duplicate upstream {upstream:?}"
+            ),
             Self::InvalidUpstream { address } => {
                 write!(
                     formatter,
@@ -6873,10 +6931,22 @@ impl Display for ConfigError {
                 formatter,
                 "proxy.upstream and proxy.upstreams cannot both be configured; use proxy.upstreams for one or many targets"
             ),
+            Self::TooManyProxyUpstreams { max } => write!(
+                formatter,
+                "proxy.upstreams must contain at most {max} entries"
+            ),
+            Self::DuplicateProxyUpstream { upstream } => write!(
+                formatter,
+                "proxy.upstreams contains duplicate upstream {upstream:?}"
+            ),
             Self::EmptyUpstreamSni => write!(formatter, "upstream_sni cannot be empty"),
             Self::InvalidProxyTimeout { field } => {
                 write!(formatter, "{field} must be greater than zero")
             }
+            Self::TooManyProxyErrorPages { max } => write!(
+                formatter,
+                "proxy.error_pages must contain at most {max} entries"
+            ),
             Self::InvalidProxyErrorPageStatus { status } => write!(
                 formatter,
                 "proxy.error_pages.status must be an HTTP error status from 400 through 599, got {status}"
@@ -9321,6 +9391,46 @@ mod tests {
     }
 
     #[test]
+    fn rejects_too_many_proxy_upstreams() {
+        let upstreams = (0..=super::MAX_PROXY_UPSTREAMS)
+            .map(|index| format!("\"origin-{index}.example.test:8080\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [proxy]
+            upstreams = [{upstreams}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::TooManyProxyUpstreams {
+                max: super::MAX_PROXY_UPSTREAMS
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_proxy_upstreams() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["origin.example.test:8080", "ORIGIN.example.test:8080"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::DuplicateProxyUpstream {
+                upstream: "ORIGIN.example.test:8080".to_owned()
+            })
+        );
+    }
+
+    #[test]
     fn vhost_without_proxy_does_not_inherit_legacy_default_upstream() {
         let config: Config = toml::from_str(
             r#"
@@ -9421,6 +9531,31 @@ mod tests {
         assert_eq!(
             config.validate(),
             Err(ConfigError::MissingProxyErrorPageRoot { status: 502 })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_proxy_error_pages() {
+        let error_pages = (0..=super::MAX_PROXY_ERROR_PAGES)
+            .map(|index| super::ProxyErrorPageConfig {
+                status: 400 + (index % 100) as u16,
+                path: format!("/error-{index}.html"),
+                web: WebConfig::default(),
+            })
+            .collect();
+        let config = Config {
+            proxy: ProxyConfig {
+                error_pages,
+                ..ProxyConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::TooManyProxyErrorPages {
+                max: super::MAX_PROXY_ERROR_PAGES
+            })
         );
     }
 
@@ -15346,6 +15481,58 @@ mod tests {
             config.validate(),
             Err(ConfigError::MissingAcmeChallengeUpstream { vhost }) if vhost == "gateway"
         ));
+    }
+
+    #[test]
+    fn rejects_too_many_acme_challenge_upstreams() {
+        let upstreams = (0..=super::MAX_ACME_CHALLENGE_UPSTREAMS)
+            .map(|index| format!("\"acme-{index}.example.test:8080\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [vhosts.acme_challenge]
+            enabled = true
+            upstreams = [{upstreams}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::TooManyAcmeChallengeUpstreams {
+                vhost: "gateway".to_owned(),
+                max: super::MAX_ACME_CHALLENGE_UPSTREAMS,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_acme_challenge_upstreams() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [vhosts.acme_challenge]
+            enabled = true
+            upstreams = ["acme.example.test:8080", "ACME.example.test:8080"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::DuplicateAcmeChallengeUpstream {
+                vhost: "gateway".to_owned(),
+                upstream: "ACME.example.test:8080".to_owned(),
+            })
+        );
     }
 
     #[test]

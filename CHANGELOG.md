@@ -113,6 +113,8 @@ behavior when the change improves security or project direction.
   backend header, maps valid TTLs to normal `Cache-Control` and `Expires`
   headers, treats zero or past expiries as `no-store`, and avoids public cache
   directives on responses that set cookies.
+- Capped proxy upstream lists, ACME challenge upstream lists, and proxy
+  error-page lists at 64 entries, with duplicate upstream rejection.
 
 ### Changed
 
