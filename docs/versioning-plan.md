@@ -862,6 +862,8 @@ Follow-up `1.3.x` PHP runtime plan:
     `SCRIPT_FILENAME`, and `PATH_TRANSLATED` mapping.
   - Caddy-style PHP root override and optional root-symlink resolution for
     split container layouts, while keeping Fluxheim's symlink escape checks.
+    Implemented with `php.fpm_root` and default-off
+    `php.resolve_root_symlink` for final-root symlinks.
   - NGINX/Caddy-style `try_files` PHP presets for common apps:
     static-file first, directory index, front-controller fallback, and explicit
     `=404` behavior for sites that must not route everything through

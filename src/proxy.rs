@@ -2889,27 +2889,52 @@ impl RuntimePhp {
                 format!("{scope}: enabled PHP requires php.root"),
             )
         })?;
-        let root_metadata = std::fs::symlink_metadata(root).map_err(|error| {
+        let configured_root = root;
+        let root_metadata = std::fs::symlink_metadata(configured_root).map_err(|error| {
             io::Error::new(
                 error.kind(),
-                format!("{scope}: php root {}: {error}", root.display()),
+                format!("{scope}: php root {}: {error}", configured_root.display()),
             )
         })?;
-        if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        if root_metadata.file_type().is_symlink() && !config.resolve_root_symlink {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "{scope}: php root is not a real directory: {}",
-                    root.display()
+                    configured_root.display()
                 ),
             ));
         }
-        let root = root.canonicalize().map_err(|error| {
+        if !root_metadata.file_type().is_symlink() && !root_metadata.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{scope}: php root is not a real directory: {}",
+                    configured_root.display()
+                ),
+            ));
+        }
+        let root = configured_root.canonicalize().map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("{scope}: php root {}: {error}", configured_root.display()),
+            )
+        })?;
+        let resolved_metadata = std::fs::metadata(&root).map_err(|error| {
             io::Error::new(
                 error.kind(),
                 format!("{scope}: php root {}: {error}", root.display()),
             )
         })?;
+        if !resolved_metadata.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{scope}: php root does not resolve to a directory: {}",
+                    configured_root.display()
+                ),
+            ));
+        }
         let fpm_root = config.fpm_root.clone().unwrap_or_else(|| root.clone());
         let files = StaticFileServer::from_config(&crate::config::WebConfig {
             root: Some(root.clone()),
@@ -10391,6 +10416,68 @@ mod tests {
         let error = result.unwrap_err().to_string();
         assert!(error.contains("vhost \"fluxheim.test\" php"), "{error}");
         assert!(error.contains(&root.display().to_string()), "{error}");
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_runtime_resolves_final_root_symlink_when_enabled() {
+        let parent = unique_temp_path("proxy-php-root-symlink");
+        let real_root = parent.join("releases").join("current");
+        let linked_root = parent.join("public");
+        fs::create_dir_all(&real_root).unwrap();
+        fs::write(real_root.join("index.php"), "<?php echo 'index';").unwrap();
+        std::os::unix::fs::symlink(&real_root, &linked_root).unwrap();
+
+        let config = crate::config::PhpConfig {
+            enabled: true,
+            root: Some(linked_root.clone()),
+            resolve_root_symlink: true,
+            fpm: crate::config::PhpFpmConfig {
+                tcp: Some("127.0.0.1:9000".to_owned()),
+                ..crate::config::PhpFpmConfig::default()
+            },
+            ..crate::config::PhpConfig::default()
+        };
+
+        let php = RuntimePhp::from_config("test php", "test", "default", &config)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(php.root, real_root.canonicalize().unwrap());
+        assert_eq!(php.fpm_root, real_root.canonicalize().unwrap());
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_runtime_rejects_final_root_symlink_by_default() {
+        let parent = unique_temp_path("proxy-php-root-symlink-reject");
+        let real_root = parent.join("releases").join("current");
+        let linked_root = parent.join("public");
+        fs::create_dir_all(&real_root).unwrap();
+        std::os::unix::fs::symlink(&real_root, &linked_root).unwrap();
+
+        let config = crate::config::PhpConfig {
+            enabled: true,
+            root: Some(linked_root.clone()),
+            fpm: crate::config::PhpFpmConfig {
+                tcp: Some("127.0.0.1:9000".to_owned()),
+                ..crate::config::PhpFpmConfig::default()
+            },
+            ..crate::config::PhpConfig::default()
+        };
+
+        let error = RuntimePhp::from_config("test php", "test", "default", &config)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("php root is not a real directory"),
+            "{error}"
+        );
+        assert!(
+            error.contains(&linked_root.display().to_string()),
+            "{error}"
+        );
     }
 
     #[cfg(feature = "php-fpm")]

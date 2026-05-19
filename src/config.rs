@@ -5406,6 +5406,8 @@ pub struct PhpConfig {
     #[serde(default)]
     pub root: Option<PathBuf>,
     #[serde(default)]
+    pub resolve_root_symlink: bool,
+    #[serde(default)]
     pub fpm_root: Option<PathBuf>,
     #[serde(default = "default_php_index")]
     pub index: String,
@@ -5458,6 +5460,7 @@ impl Default for PhpConfig {
             enabled: false,
             runtime: PhpRuntime::default(),
             root: None,
+            resolve_root_symlink: false,
             fpm_root: None,
             index: default_php_index(),
             allowed_extensions: default_php_allowed_extensions(),
@@ -5560,8 +5563,17 @@ impl PhpConfig {
                 reason: "root cannot be empty",
             });
         }
-        validate_path(root_field.clone(), Some(root))?;
-        validate_non_world_writable_parent(root_field, Some(root))?;
+        validate_php_root_path(root_field.clone(), root, self.resolve_root_symlink)?;
+        validate_non_world_writable_parent(root_field.clone(), Some(root))?;
+        if self.resolve_root_symlink
+            && let Ok(metadata) = fs::symlink_metadata(root)
+            && metadata.file_type().is_symlink()
+        {
+            let resolved = root
+                .canonicalize()
+                .map_err(|error| path_inspection_failed(root_field.clone(), root, error))?;
+            validate_non_world_writable_parent(format!("{root_field}.resolved"), Some(&resolved))?;
+        }
         if let Some(fpm_root) = &self.fpm_root {
             if fpm_root.as_os_str().is_empty() {
                 return Err(ConfigError::InvalidPhpConfig {
@@ -8151,6 +8163,61 @@ fn validate_path(field: impl Into<String>, path: Option<&Path>) -> Result<(), Co
     Ok(())
 }
 
+fn validate_php_root_path(
+    field: impl Into<String>,
+    path: &Path,
+    allow_final_symlink: bool,
+) -> Result<(), ConfigError> {
+    let field = field.into();
+    if !allow_final_symlink {
+        return validate_path(field, Some(path));
+    }
+
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ConfigError::UnsafePath {
+            field,
+            path: path.to_path_buf(),
+        });
+    }
+
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        match path_existing_prefix_contains_symlink(parent) {
+            Ok(true) => {
+                return Err(ConfigError::UnsafePath {
+                    field,
+                    path: path.to_path_buf(),
+                });
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return Err(path_inspection_failed(field, path, error));
+            }
+        }
+    }
+
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            let resolved = path
+                .canonicalize()
+                .map_err(|error| path_inspection_failed(field.clone(), path, error))?;
+            validate_path(format!("{field}.resolved"), Some(&resolved))?;
+        }
+        Ok(_) => validate_path(field, Some(path))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(path_inspection_failed(field, path, error));
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_non_world_writable_parent(
     field: impl Into<String>,
     path: Option<&Path>,
@@ -10367,6 +10434,7 @@ mod tests {
             enabled = true
             runtime = "php-fpm"
             root = "{}"
+            resolve_root_symlink = true
             fpm_root = "/app/public"
             index = "index.php"
             allowed_extensions = ["php"]
@@ -10423,6 +10491,7 @@ mod tests {
         assert!(php.enabled);
         assert_eq!(php.runtime, super::PhpRuntime::PhpFpm);
         assert_eq!(php.root.as_deref(), Some(root.as_path()));
+        assert!(php.resolve_root_symlink);
         assert_eq!(
             php.fpm_root.as_deref(),
             Some(std::path::Path::new("/app/public"))
@@ -15053,6 +15122,83 @@ mod tests {
             error,
             ConfigLoadError::Validate(ConfigError::UnsafePath { field, .. })
                 if field == "web.root"
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accepts_final_php_root_symlink_when_enabled() {
+        let dir = TestDir::new("php-root-final-symlink");
+        let real_root = dir.child("releases/current");
+        let symlink_root = dir.child("public");
+        fs::create_dir_all(&real_root).unwrap();
+        std::os::unix::fs::symlink(&real_root, &symlink_root).unwrap();
+        fs::write(
+            dir.child("fluxheim.toml"),
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "public"
+            resolve_root_symlink = true
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+        )
+        .unwrap();
+
+        let config = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap();
+
+        assert_eq!(
+            config.vhosts[0].php.root.as_deref(),
+            Some(symlink_root.as_path())
+        );
+        assert!(config.vhosts[0].php.resolve_root_symlink);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_php_root_below_symlinked_parent_when_final_symlink_enabled() {
+        let dir = TestDir::new("php-root-parent-symlink");
+        let real_dir = dir.child("real");
+        let symlink_dir = dir.child("linked");
+        fs::create_dir_all(safe_child_path(&real_dir, "public")).unwrap();
+        std::os::unix::fs::symlink(&real_dir, &symlink_dir).unwrap();
+        fs::write(
+            dir.child("fluxheim.toml"),
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "linked/public"
+            resolve_root_symlink = true
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigLoadError::Validate(ConfigError::VhostSection {
+                vhost,
+                section: "php",
+                source,
+            }) if vhost == "php"
+                && matches!(
+                    *source,
+                    ConfigError::UnsafePath { ref field, .. } if field == "vhosts.php.root"
+                )
         ));
     }
 

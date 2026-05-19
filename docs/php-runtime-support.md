@@ -210,7 +210,10 @@ Planned `1.3.3` php-fpm hardening:
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
   Implemented as `php.fpm_root` for FastCGI `DOCUMENT_ROOT`,
   `SCRIPT_FILENAME`, and `PATH_TRANSLATED` mapping.
-- PHP root override for split container filesystem layouts.
+- PHP root override for split container filesystem layouts. Implemented with
+  `php.fpm_root` for the path sent to php-fpm and
+  `php.resolve_root_symlink` for opt-in final `php.root` symlink resolution in
+  current-release deploy layouts.
 - Typed `try_files`/front-controller presets for WordPress, Laravel/Symfony,
   and strict `=404` PHP locations.
   Implemented as `php.try_files = "front-controller"`, `"wordpress"`, or

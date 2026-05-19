@@ -20,6 +20,9 @@ behavior when the change improves security or project direction.
 - Added `php.fpm_root` for split Fluxheim/php-fpm filesystem layouts so
   Fluxheim can validate scripts under `php.root` while sending php-fpm paths
   under the runtime container root.
+- Added `php.resolve_root_symlink` for opt-in final `php.root` symlink
+  resolution in current-release/Caddy-style deploy layouts while keeping
+  symlinked parent directories rejected.
 - Added `php.try_files` with `front-controller`, `wordpress`, and `strict`
   modes for typed PHP front-controller and `try_files $uri =404` behavior.
 - Added `php.preset = "wordpress"` to combine WordPress front-controller

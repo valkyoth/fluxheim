@@ -1419,6 +1419,9 @@ preset = "wordpress"
 enabled = true
 runtime = "php-fpm"
 root = "/srv/sites/php.example.test/public"
+# Default false. When true, only the final php.root component may be a symlink;
+# Fluxheim resolves it once at startup and still rejects symlinked parents.
+resolve_root_symlink = false
 # Optional: path visible inside a separate php-fpm container.
 # When omitted, Fluxheim sends php.root as DOCUMENT_ROOT/SCRIPT_FILENAME.
 fpm_root = "/app/public"
@@ -1505,6 +1508,12 @@ buffer; the spool file is removed when the request completes.
 `php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
 `SCRIPT_FILENAME`, and `PATH_TRANSLATED` for separate php-fpm container
 filesystem roots while Fluxheim still checks scripts under `php.root`.
+`php.resolve_root_symlink = true` allows Caddy-style/current-release deploy
+layouts where the final `php.root` path is a symlink. The default is false.
+When enabled, Fluxheim resolves that final symlink at startup and still rejects
+parent-directory traversal, symlinked parent directories, and unsafe writable
+parents; script resolution and static offload continue to run under the
+canonical target root.
 `php.max_response_header_bytes` caps the CGI-style response header block before
 body parsing and defaults to `64KiB`.
 `php.deny_path_prefixes` rejects PHP script execution for configured absolute
