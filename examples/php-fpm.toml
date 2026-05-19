@@ -33,6 +33,9 @@ root = "/srv/sites/php.example.test/public"
 fpm_root = "/app/public"
 index = "index.php"
 allowed_extensions = ["php"]
+# `wordpress`/`front-controller` routes missing paths to index.php.
+# Use `strict` for try_files $uri =404 style PHP execution.
+try_files = "wordpress"
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"

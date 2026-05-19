@@ -862,6 +862,8 @@ Follow-up `1.3.x` PHP runtime plan:
     static-file first, directory index, front-controller fallback, and explicit
     `=404` behavior for sites that must not route everything through
     `index.php`.
+    Implemented as `php.try_files = "front-controller"`, `"wordpress"`, or
+    `"strict"`.
   - Configurable `PATH_INFO` splitting model compatible with Caddy's `split`
     and NGINX's `fastcgi_split_path_info`, but expressed as safe typed config
     rather than arbitrary regex by default.

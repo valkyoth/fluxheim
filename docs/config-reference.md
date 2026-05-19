@@ -1412,6 +1412,9 @@ root = "/srv/sites/php.example.test/public"
 fpm_root = "/app/public"
 index = "index.php"
 allowed_extensions = ["php"]
+# `wordpress` and `front-controller` fall back to index.php for missing paths.
+# `strict` only executes explicit PHP scripts or directory PHP indexes.
+try_files = "wordpress"
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
@@ -1455,6 +1458,11 @@ php-fpm and `max_response_bytes` bounds the buffered FastCGI response returned
 from php-fpm. `php.fpm_root` optionally rewrites `DOCUMENT_ROOT`,
 `SCRIPT_FILENAME`, and `PATH_TRANSLATED` for separate php-fpm container
 filesystem roots while Fluxheim still checks scripts under `php.root`.
+`php.try_files` is a typed replacement for common `try_files` recipes:
+`front-controller` keeps the default `/index.php` fallback, `wordpress` is an
+explicit alias for WordPress-style front-controller sites, and `strict` behaves
+like `try_files $uri =404` for PHP execution while still allowing static files
+to be served by `[vhosts.web]`.
 `max_response_bytes` defaults to `64MiB`; set a smaller value on
 memory-constrained or high-assurance edge nodes. `php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by

@@ -170,6 +170,8 @@ Planned `1.3.3` php-fpm hardening:
 - PHP root override for split container filesystem layouts.
 - Typed `try_files`/front-controller presets for WordPress, Laravel/Symfony,
   and strict `=404` PHP locations.
+  Implemented as `php.try_files = "front-controller"`, `"wordpress"`, or
+  `"strict"`.
 - Configurable safe `PATH_INFO` splitting.
 - Canonical directory slash redirects for directory index PHP apps.
 - Explicit request header/body pass-through switches for advanced migrations.

@@ -5293,6 +5293,8 @@ pub struct PhpConfig {
     #[serde(default)]
     pub path_info: PhpPathInfoMode,
     #[serde(default)]
+    pub try_files: PhpTryFilesMode,
+    #[serde(default)]
     pub params: BTreeMap<String, String>,
     #[serde(default)]
     pub fpm: PhpFpmConfig,
@@ -5311,6 +5313,7 @@ impl Default for PhpConfig {
             max_request_body_bytes: None,
             max_response_bytes: default_php_max_response_bytes(),
             path_info: PhpPathInfoMode::default(),
+            try_files: PhpTryFilesMode::default(),
             params: BTreeMap::new(),
             fpm: PhpFpmConfig::default(),
         }
@@ -5418,6 +5421,17 @@ pub enum PhpPathInfoMode {
     #[default]
     #[serde(rename = "disabled")]
     Disabled,
+    #[serde(rename = "strict")]
+    Strict,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PhpTryFilesMode {
+    #[default]
+    #[serde(rename = "front-controller")]
+    FrontController,
+    #[serde(rename = "wordpress")]
+    WordPress,
     #[serde(rename = "strict")]
     Strict,
 }
@@ -8183,6 +8197,21 @@ mod tests {
         path
     }
 
+    fn test_process_config_toml(label: &str) -> String {
+        let root = secure_test_dir(label);
+        format!(
+            r#"
+            [server.process]
+            pid_file = "{}"
+            upgrade_sock = "{}"
+            certificate_reload_sock = "{}"
+            "#,
+            safe_child_path(&root, "fluxheim.pid").display(),
+            safe_child_path(&root, "fluxheim-upgrade.sock").display(),
+            safe_child_path(&root, "fluxheim-cert-reload.sock").display()
+        )
+    }
+
     #[test]
     fn default_config_is_valid() {
         Config::default().validate().unwrap();
@@ -9892,6 +9921,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
+            {}
+
             [[vhosts]]
             name = "php"
             hosts = ["php.example.test"]
@@ -9903,6 +9934,7 @@ mod tests {
             fpm_root = "/app/public"
             index = "index.php"
             allowed_extensions = ["php"]
+            try_files = "wordpress"
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
             max_response_bytes = "8MiB"
@@ -9918,6 +9950,7 @@ mod tests {
             pool_max_idle = 4
             idle_timeout_secs = 45
             "#,
+            test_process_config_toml("config-php-fpm-process"),
             root.display()
         ))
         .unwrap();
@@ -9931,6 +9964,7 @@ mod tests {
             php.fpm_root.as_deref(),
             Some(std::path::Path::new("/app/public"))
         );
+        assert_eq!(php.try_files, super::PhpTryFilesMode::WordPress);
         assert_eq!(php.allowed_extensions, ["php"]);
         assert_eq!(
             php.max_request_body_bytes.unwrap().as_u64(),
@@ -9957,6 +9991,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
+            {}
+
             [[vhosts]]
             name = "php"
             hosts = ["php.example.test"]
@@ -9969,6 +10005,7 @@ mod tests {
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
             "#,
+            test_process_config_toml("config-php-zero-response-process"),
             root.display()
         ))
         .unwrap();
@@ -9983,6 +10020,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
+            {}
+
             [[vhosts]]
             name = "php"
             hosts = ["php.example.test"]
@@ -9995,6 +10034,7 @@ mod tests {
             socket = "/run/php/php-fpm.sock"
             tcp = "127.0.0.1:9000"
             "#,
+            test_process_config_toml("config-php-fpm-conflict-process"),
             root.display()
         ))
         .unwrap();
@@ -10009,6 +10049,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
+            {}
+
             [[vhosts]]
             name = "php"
             hosts = ["php.example.test"]
@@ -10022,6 +10064,7 @@ mod tests {
             keepalive = true
             pool_max_idle = 0
             "#,
+            test_process_config_toml("config-php-fpm-keepalive-process"),
             root.display()
         ))
         .unwrap();
@@ -10036,6 +10079,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
+            {}
+
             [[vhosts]]
             name = "php"
             hosts = ["php.example.test"]
@@ -10050,6 +10095,7 @@ mod tests {
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
             "#,
+            test_process_config_toml("config-php-param-protected-process"),
             root.display()
         ))
         .unwrap();
@@ -10065,6 +10111,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
+            {}
+
             [[vhosts]]
             name = "php"
             hosts = ["php.example.test"]
@@ -10079,6 +10127,7 @@ mod tests {
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
             "#,
+            test_process_config_toml("config-php-param-control-process"),
             root.display()
         ))
         .unwrap();
@@ -10093,6 +10142,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let config: Config = toml::from_str(&format!(
             r#"
+            {}
+
             [[vhosts]]
             name = "php"
             hosts = ["php.example.test"]
@@ -10105,6 +10156,7 @@ mod tests {
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
             "#,
+            test_process_config_toml("config-php-extension-dot-process"),
             root.display()
         ))
         .unwrap();

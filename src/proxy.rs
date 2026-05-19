@@ -6304,6 +6304,9 @@ fn resolve_php_script(
             return PhpResolveOutcome::Decline;
         }
     }
+    if !explicit_php && php.config.try_files == crate::config::PhpTryFilesMode::Strict {
+        return PhpResolveOutcome::NotFound;
+    }
 
     match php.files.resolve(&script_name) {
         Ok(ResolveResult::Found(file)) => PhpResolveOutcome::Execute(PhpScriptResolution {
@@ -9331,6 +9334,30 @@ mod tests {
             resolve_php_script(&php, "/style.css", true),
             PhpResolveOutcome::Decline
         ));
+        let PhpResolveOutcome::Execute(resolution) = resolve_php_script(&php, "/blog/", true)
+        else {
+            panic!("expected directory PHP index to execute");
+        };
+        assert_eq!(resolution.script_name, "/blog/index.php");
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_strict_try_files_rejects_missing_front_controller_fallback() {
+        let mut php = php_test_runtime("proxy-php-strict-try-files");
+        php.config.try_files = crate::config::PhpTryFilesMode::Strict;
+
+        assert!(matches!(
+            resolve_php_script(&php, "/missing/page", true),
+            PhpResolveOutcome::NotFound
+        ));
+
+        let PhpResolveOutcome::Execute(resolution) = resolve_php_script(&php, "/app.php", true)
+        else {
+            panic!("expected direct PHP script to execute");
+        };
+        assert_eq!(resolution.script_name, "/app.php");
+
         let PhpResolveOutcome::Execute(resolution) = resolve_php_script(&php, "/blog/", true)
         else {
             panic!("expected directory PHP index to execute");
