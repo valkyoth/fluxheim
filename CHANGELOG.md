@@ -69,6 +69,9 @@ behavior when the change improves security or project direction.
   `php.fpm.retry_timeout_secs`, and `php.fpm.retry_methods` for connection
   failures and connect timeouts before
   php-fpm returns a response; request timeouts are not retried.
+- Added opt-in php-fpm retry controls for malformed FastCGI responses and
+  selected PHP 5xx responses through `php.fpm.retry_invalid_response` and
+  `php.fpm.retry_statuses`, using the same safe-method and retry-window policy.
 - Added opt-in PHP request-body disk spooling with
   `php.request_body_spool_threshold_bytes` and `php.request_body_spool_dir` so
   large uploads can be replayed to php-fpm and retried without cloning the

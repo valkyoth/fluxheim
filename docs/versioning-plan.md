@@ -901,7 +901,8 @@ Follow-up `1.3.x` PHP runtime plan:
     `php.fpm.retry_methods`, with `php.fpm.retry_timeout_secs` as an optional
     per-request retry window, defaulting to no retries and excluding request
     timeouts to avoid duplicated side effects. Broader status and invalid-header
-    retry controls remain future work. With `tcp_upstreams`, Fluxheim tries
+    retry controls are opt-in as `php.fpm.retry_invalid_response` and
+    `php.fpm.retry_statuses`. With `tcp_upstreams`, Fluxheim tries
     enough endpoints to cover the configured list for safe methods even when
     `max_retries = 0`.
   - PHP response-header policy controls matching common NGINX migrations:
@@ -922,6 +923,8 @@ Follow-up `1.3.x` PHP runtime plan:
   - FPM upstream retry policy aligned with NGINX/Apache/Caddy behavior:
     connect error, timeout, invalid header, selected 5xx statuses, max tries,
     total retry timeout, and retry-safe method matching.
+    Implemented for connection errors, connect timeouts, malformed FastCGI
+    responses, and configured 5xx statuses; request timeouts stay non-retryable.
   - FPM upstream TLS and Unix/TCP socket controls should remain explicit; Unix
     sockets keep strict path/permission validation and TCP supports DNS refresh
     when the proxy resolver work lands.

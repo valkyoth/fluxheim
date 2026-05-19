@@ -251,8 +251,8 @@ Planned `1.3.3` php-fpm hardening:
   per-request retry window; request timeouts are not retried to avoid
   duplicating PHP side effects. With `tcp_upstreams`, Fluxheim tries enough
   endpoints to cover the configured list for safe methods even when
-  `max_retries = 0`. Broader status/invalid-header
-  retry policy remains future work.
+  `max_retries = 0`. Broader status/invalid-header retry policy is available
+  as opt-in `php.fpm.retry_invalid_response` and `php.fpm.retry_statuses`.
 - PHP-specific Prometheus metrics for bounded request totals, durations, STDERR,
   retries, and keepalive pool state. Multi-upstream keepalive pools use stable
   indexed pool labels for Prometheus gauges. Implemented as

@@ -6412,7 +6412,7 @@ async fn respond_php_request(
     }
 
     let timeout = std::time::Duration::from_secs(php.config.request_timeout_secs);
-    let output = match execute_php_fpm(
+    let parsed = match execute_php_fpm(
         php,
         params,
         request_body,
@@ -6422,7 +6422,7 @@ async fn respond_php_request(
     )
     .await
     {
-        Ok(output) => output,
+        Ok(parsed) => parsed,
         Err(error) => {
             record_php_request_metrics(
                 ctx,
@@ -6439,7 +6439,7 @@ async fn respond_php_request(
             ));
         }
     };
-    if let Some(stderr) = output.stderr.as_deref()
+    if let Some(stderr) = parsed.stderr.as_deref()
         && !stderr.is_empty()
     {
         let stderr_max_bytes = php.config.stderr_max_bytes.as_u64() as usize;
@@ -6455,29 +6455,9 @@ async fn respond_php_request(
             );
         }
     }
-    let stdout = output.stdout.unwrap_or_default();
-    let (mut response, body) = match parse_php_response(
-        &stdout,
-        php.config.max_response_bytes.as_u64(),
-        php.config.max_response_header_bytes.as_u64(),
-    ) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            record_php_request_metrics(
-                ctx,
-                vhost,
-                &method,
-                Some(502),
-                "invalid_response",
-                started_at,
-            );
-            return Err(Error::because(
-                ErrorType::HTTPStatus(502),
-                "php-fpm response was invalid",
-                error,
-            ));
-        }
-    };
+    let PhpFpmParsedResponse {
+        mut response, body, ..
+    } = parsed;
     apply_php_x_accel_expires(&mut response).map_err(|error| {
         Error::because(
             ErrorType::HTTPStatus(502),
@@ -6930,6 +6910,13 @@ struct PhpRequestBodySpool {
 }
 
 #[cfg(feature = "php-fpm")]
+struct PhpFpmParsedResponse {
+    response: ResponseHeader,
+    body: Vec<u8>,
+    stderr: Option<Vec<u8>>,
+}
+
+#[cfg(feature = "php-fpm")]
 impl Drop for PhpRequestBodySpool {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
@@ -7128,6 +7115,7 @@ fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
         | io::ErrorKind::NotFound
         | io::ErrorKind::UnexpectedEof => "connection_error",
         io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported => "configuration_error",
+        io::ErrorKind::InvalidData => "invalid_response",
         _ => "fpm_error",
     }
 }
@@ -7140,7 +7128,7 @@ async fn execute_php_fpm(
     timeout: std::time::Duration,
     method: &str,
     vhost_name: &str,
-) -> io::Result<fastcgi_client::Response> {
+) -> io::Result<PhpFpmParsedResponse> {
     #[cfg(not(feature = "metrics"))]
     let _ = vhost_name;
 
@@ -7174,7 +7162,35 @@ async fn execute_php_fpm(
         )
         .await;
         match result {
-            Ok(response) => return Ok(response),
+            Ok(output) => match parse_php_fpm_output(php, output) {
+                Ok(parsed)
+                    if php_fpm_retryable_response(&php.config.fpm, parsed.response.status) =>
+                {
+                    if attempts < max_retries && php_fpm_retry_deadline_allows(retry_deadline) {
+                        attempts += 1;
+                        #[cfg(feature = "metrics")]
+                        crate::metrics::record_php_fpm_retry(vhost_name, "response_status");
+                        log::debug!(
+                            "retrying php-fpm request after retryable status {}",
+                            parsed.response.status.as_u16()
+                        );
+                        continue;
+                    }
+                    return Ok(parsed);
+                }
+                Ok(parsed) => return Ok(parsed),
+                Err(error)
+                    if php.config.fpm.retry_invalid_response
+                        && attempts < max_retries
+                        && php_fpm_retry_deadline_allows(retry_deadline) =>
+                {
+                    attempts += 1;
+                    #[cfg(feature = "metrics")]
+                    crate::metrics::record_php_fpm_retry(vhost_name, "invalid_response");
+                    log::debug!("retrying php-fpm request after invalid response: {}", error);
+                }
+                Err(error) => return Err(error),
+            },
             Err(error)
                 if attempts < max_retries
                     && php_fpm_retryable_error(&error)
@@ -7209,6 +7225,31 @@ fn php_fpm_retry_deadline_allows(deadline: Option<Instant>) -> bool {
         Some(deadline) => Instant::now() < deadline,
         None => true,
     }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_retryable_response(fpm: &crate::config::PhpFpmConfig, status: StatusCode) -> bool {
+    fpm.retry_statuses
+        .iter()
+        .any(|retry_status| *retry_status == status.as_u16())
+}
+
+#[cfg(feature = "php-fpm")]
+fn parse_php_fpm_output(
+    php: &RuntimePhp,
+    output: fastcgi_client::Response,
+) -> io::Result<PhpFpmParsedResponse> {
+    let stdout = output.stdout.unwrap_or_default();
+    let (response, body) = parse_php_response(
+        &stdout,
+        php.config.max_response_bytes.as_u64(),
+        php.config.max_response_header_bytes.as_u64(),
+    )?;
+    Ok(PhpFpmParsedResponse {
+        response,
+        body,
+        stderr: output.stderr,
+    })
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10160,10 +10201,10 @@ mod tests {
         ignore_php_origin_cache_headers, parse_php_response, php_fpm_endpoints_from_config,
         php_fpm_error_outcome, php_fpm_keepalive_pools_from_config, php_fpm_path_translated,
         php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
-        php_fpm_script_filename, php_header_param_name, php_script_name_denied,
-        php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
-        php_stderr_metric_state, php_x_accel_expires_ttl_secs, resolve_php_script,
-        sanitized_php_stderr, strip_php_response_headers,
+        php_fpm_retryable_response, php_fpm_script_filename, php_header_param_name,
+        php_script_name_denied, php_script_name_for_request, php_should_intercept_error_status,
+        php_static_offload_file, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
+        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -10769,6 +10810,24 @@ mod tests {
             io::ErrorKind::InvalidInput,
             "bad config",
         )));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_retryable_response_statuses_are_explicit() {
+        let mut fpm = crate::config::PhpFpmConfig::default();
+        assert!(!php_fpm_retryable_response(
+            &fpm,
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
+
+        fpm.retry_statuses = vec![500, 502, 503];
+        assert!(php_fpm_retryable_response(
+            &fpm,
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
+        assert!(php_fpm_retryable_response(&fpm, StatusCode::BAD_GATEWAY));
+        assert!(!php_fpm_retryable_response(&fpm, StatusCode::NOT_FOUND));
     }
 
     #[cfg(feature = "php-fpm")]

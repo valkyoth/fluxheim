@@ -5677,6 +5677,10 @@ pub struct PhpFpmConfig {
     pub retry_timeout_secs: Option<u64>,
     #[serde(default = "default_php_fpm_retry_methods")]
     pub retry_methods: Vec<String>,
+    #[serde(default)]
+    pub retry_invalid_response: bool,
+    #[serde(default)]
+    pub retry_statuses: Vec<u16>,
 }
 
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
@@ -5754,6 +5758,7 @@ impl PhpFpmConfig {
             });
         }
         validate_php_fpm_retry_methods(&self.retry_methods)?;
+        validate_php_fpm_retry_statuses(&self.retry_statuses)?;
         if self.keepalive {
             if self.pool_max_idle == 0 {
                 return Err(ConfigError::InvalidPhpConfig {
@@ -7916,6 +7921,25 @@ fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError>
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.fpm.retry_methods",
                 reason: "contains duplicate methods",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+    let mut seen = BTreeSet::new();
+    for status in statuses {
+        if !(500..=599).contains(status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_statuses",
+                reason: "statuses must be HTTP server error statuses from 500 through 599",
+            });
+        }
+        if !seen.insert(*status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_statuses",
+                reason: "duplicate statuses are not allowed",
             });
         }
     }
@@ -10342,6 +10366,8 @@ mod tests {
             max_retries = 2
             retry_timeout_secs = 5
             retry_methods = ["GET", "HEAD"]
+            retry_invalid_response = true
+            retry_statuses = [500, 502, 503]
             "#,
             test_process_config_toml("config-php-fpm-process"),
             root.display(),
@@ -10409,6 +10435,8 @@ mod tests {
         assert_eq!(php.fpm.max_retries, 2);
         assert_eq!(php.fpm.retry_timeout_secs, Some(5));
         assert_eq!(php.fpm.retry_methods, ["GET", "HEAD"]);
+        assert!(php.fpm.retry_invalid_response);
+        assert_eq!(php.fpm.retry_statuses, [500, 502, 503]);
     }
 
     #[test]
@@ -10822,6 +10850,52 @@ mod tests {
         .unwrap();
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.retry_timeout_secs"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            retry_statuses = [404]
+            "#,
+            test_process_config_toml("config-php-fpm-invalid-retry-status-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.retry_statuses"), "{error}");
+
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            retry_statuses = [500, 500]
+            "#,
+            test_process_config_toml("config-php-fpm-duplicate-retry-status-process"),
+            root.display()
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.retry_statuses"), "{error}");
     }
 
     #[test]
