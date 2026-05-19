@@ -561,6 +561,7 @@ compiled.
 
 ```toml
 [cache]
+preset = "none"
 enabled = false
 local_static = false
 status_header = "X-Cache-Status"
@@ -569,9 +570,12 @@ hide_response_headers = ["set-cookie"]
 tag_headers = ["surrogate-key", "cache-tag", "x-cache-tags"]
 no_store_response_headers = ["x-app-no-store"]
 no_store_response_header_values = { x-app-cache = "private" }
+bypass_path_prefixes = ["/wp-admin/"]
+bypass_path_exact = ["/wp-login.php", "/xmlrpc.php"]
 bypass_request_headers = ["cookie", "authorization"]
 bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
+bypass_cookie_name_prefixes = ["wordpress_logged_in_", "wordpress_sec_"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
 bypass_query_values = { mode = "private" }
@@ -876,6 +880,12 @@ through standard `Cache-Control` directives.
 listed origin response header has the exact configured value. Use it for
 bounded app signals such as `x-app-cache = "private"` when header presence
 alone is too broad.
+`preset = "wordpress"` expands common WordPress shared-cache bypasses for
+admin/login paths, auth-related cookies, preview queries, and authorization
+headers. Explicit fields still work normally and are not removed by the preset.
+`bypass_path_prefixes` and `bypass_path_exact` disable both cache lookup and
+storage for matching request paths. Prefixes are useful for app admin areas;
+exact paths are useful for login, XML-RPC, or cron endpoints.
 `bypass_request_headers` disables both cache lookup and cache storage when any
 listed request header is present. Use it on routes where a header such as
 `Cookie` or `Authorization` changes the upstream response but should not become
@@ -885,9 +895,10 @@ asset routes can still cache browser requests that carry unrelated cookies.
 request header has the exact configured value. Use it for bounded flags such as
 `x-preview-mode = "1"` when header presence alone is too broad.
 `bypass_cookie_names` disables both cache lookup and cache storage when a
-listed cookie name appears in any `Cookie` request header. Only names are
-matched; values are ignored. This is narrower than bypassing on every `Cookie`
-header and is useful for static routes where only session or preview cookies
+listed cookie name appears in any `Cookie` request header. Only exact names are
+matched; values are ignored. `bypass_cookie_name_prefixes` applies the same
+behavior to cookie-name prefixes such as WordPress hashed login cookies.
+This is narrower than bypassing on every `Cookie` header and is useful for static routes where only session or preview cookies
 make the response unsafe to share.
 `bypass_cookie_values` disables both cache lookup and cache storage when a
 listed cookie name appears with the exact configured value. Use it for bounded

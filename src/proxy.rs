@@ -2635,15 +2635,16 @@ impl RuntimeRouteCache {
         name: &str,
         config: &crate::config::CacheConfig,
     ) -> io::Result<Self> {
+        let config = config.with_presets();
         let pingora_memory_storage =
             crate::cache::pingora_memory_storage_from_config_with_metric_scope(
-                config,
+                &config,
                 vhost_name,
                 Some(name),
             );
         let pingora_disk_storage =
             crate::cache::pingora_disk_storage_backend_from_config_with_metric_scope(
-                config,
+                &config,
                 vhost_name,
                 Some(name),
             )
@@ -2657,24 +2658,24 @@ impl RuntimeRouteCache {
             .zip(pingora_disk_storage)
             .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
         let pingora_cache_lock = cache_lock_from_config(
-            config,
+            &config,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
         let pingora_cache_predictor = cache_predictor_from_config(
-            config,
+            &config,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
 
         Ok(Self {
             name: name.to_owned(),
             config: config.clone(),
-            memory_cache: crate::cache::memory_image_cache_from_config(config),
+            memory_cache: crate::cache::memory_image_cache_from_config(&config),
             pingora_memory_storage,
             pingora_disk_storage,
             pingora_tiered_storage,
             pingora_cache_lock,
             pingora_cache_predictor,
-            cache_lock_wait_timeout: cache_lock_wait_timeout(config),
+            cache_lock_wait_timeout: cache_lock_wait_timeout(&config),
         })
     }
 
@@ -3450,16 +3451,18 @@ impl RuntimeVhost {
                 })?,
         );
         #[cfg(feature = "cache")]
+        let cache_config = vhost.cache.with_presets();
+        #[cfg(feature = "cache")]
         let pingora_memory_storage =
             crate::cache::pingora_memory_storage_from_config_with_metric_scope(
-                &vhost.cache,
+                &cache_config,
                 &vhost.name,
                 None,
             );
         #[cfg(feature = "cache")]
         let pingora_disk_storage =
             crate::cache::pingora_disk_storage_backend_from_config_with_metric_scope(
-                &vhost.cache,
+                &cache_config,
                 &vhost.name,
                 None,
             )
@@ -3475,12 +3478,12 @@ impl RuntimeVhost {
             .map(|(memory, disk)| crate::cache::pingora_tiered_storage_from_parts(memory, disk));
         #[cfg(feature = "cache")]
         let pingora_cache_lock = cache_lock_from_config(
-            &vhost.cache,
+            &cache_config,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
         #[cfg(feature = "cache")]
         let pingora_cache_predictor = cache_predictor_from_config(
-            &vhost.cache,
+            &cache_config,
             pingora_memory_storage.is_some() || pingora_disk_storage.is_some(),
         );
         let proxy_scope = format!("vhost {:?} proxy", vhost.name);
@@ -3499,7 +3502,7 @@ impl RuntimeVhost {
             request_headers: headers.request,
             response_headers: headers.response,
             #[cfg(feature = "cache")]
-            memory_cache: crate::cache::memory_image_cache_from_config(&vhost.cache),
+            memory_cache: crate::cache::memory_image_cache_from_config(&cache_config),
             #[cfg(feature = "cache")]
             pingora_memory_storage,
             #[cfg(feature = "cache")]
@@ -3511,9 +3514,9 @@ impl RuntimeVhost {
             #[cfg(feature = "cache")]
             pingora_cache_predictor,
             #[cfg(feature = "cache")]
-            cache_lock_wait_timeout: cache_lock_wait_timeout(&vhost.cache),
+            cache_lock_wait_timeout: cache_lock_wait_timeout(&cache_config),
             #[cfg(feature = "cache")]
-            cache: vhost.cache.clone(),
+            cache: cache_config,
             #[cfg(feature = "web")]
             web: static_file_server_from_config(web_scope, &vhost.web)?,
             #[cfg(feature = "php-fpm")]
@@ -9269,6 +9272,18 @@ fn request_cache_bypass_reason(
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
 ) -> Option<&'static str> {
+    let path = request.uri.path();
+    if cache
+        .bypass_path_exact
+        .iter()
+        .any(|configured| configured == path)
+        || cache
+            .bypass_path_prefixes
+            .iter()
+            .any(|configured| path.starts_with(configured))
+    {
+        return Some("request-path");
+    }
     if cache
         .bypass_request_headers
         .iter()
@@ -9282,6 +9297,7 @@ fn request_cache_bypass_reason(
     if request_cookies_match_cache_bypass(
         request_header_values(request, "cookie"),
         &cache.bypass_cookie_names,
+        &cache.bypass_cookie_name_prefixes,
         &cache.bypass_cookie_values,
     ) {
         return Some("request-cookie");
@@ -9332,15 +9348,22 @@ fn request_headers_match_cache_bypass_value(
 fn request_cookies_match_cache_bypass<'a>(
     cookie_headers: impl Iterator<Item = &'a str>,
     configured_names: &[String],
+    configured_name_prefixes: &[String],
     configured_values: &std::collections::BTreeMap<String, String>,
 ) -> bool {
-    if configured_names.is_empty() && configured_values.is_empty() {
+    if configured_names.is_empty()
+        && configured_name_prefixes.is_empty()
+        && configured_values.is_empty()
+    {
         return false;
     }
     cookie_headers
         .flat_map(cookie_header_pairs)
         .any(|(name, value)| {
             configured_names.iter().any(|configured| configured == name)
+                || configured_name_prefixes
+                    .iter()
+                    .any(|configured| name.starts_with(configured))
                 || configured_values
                     .get(name)
                     .is_some_and(|configured| configured == value)
@@ -13827,6 +13850,41 @@ mod tests {
         );
         assert!(!header.headers.contains_key("connection"));
         assert!(!header.headers.contains_key("transfer-encoding"));
+    }
+
+    #[cfg(feature = "cache")]
+    #[test]
+    fn request_cache_bypass_honors_configured_paths_and_cookie_prefixes() {
+        let cache = CacheConfig {
+            bypass_path_prefixes: vec!["/wp-admin/".to_owned()],
+            bypass_path_exact: vec!["/wp-login.php".to_owned()],
+            bypass_cookie_name_prefixes: vec!["wordpress_logged_in_".to_owned()],
+            ..CacheConfig::default()
+        };
+
+        let admin = pingora::http::RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
+        assert!(request_cache_bypass(&admin, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&admin, &cache),
+            Some("request-path")
+        );
+
+        let login = pingora::http::RequestHeader::build("GET", b"/wp-login.php", None).unwrap();
+        assert!(request_cache_bypass(&login, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&login, &cache),
+            Some("request-path")
+        );
+
+        let mut cookie = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        cookie
+            .insert_header("cookie", "wordpress_logged_in_c71744=user")
+            .unwrap();
+        assert!(request_cache_bypass(&cookie, &cache));
+        assert_eq!(
+            request_cache_bypass_reason(&cookie, &cache),
+            Some("request-cookie")
+        );
     }
 
     #[cfg(feature = "cache")]

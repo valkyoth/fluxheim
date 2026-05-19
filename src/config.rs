@@ -79,7 +79,7 @@ pub struct Config {
 
 impl Config {
     pub fn load(path: Option<&Path>) -> Result<Self, ConfigLoadError> {
-        let config = match path {
+        let mut config = match path {
             Some(path) => {
                 let path = canonical_config_source(path)?;
                 if path.is_dir() {
@@ -91,6 +91,7 @@ impl Config {
             None => Self::default(),
         };
 
+        config.apply_presets();
         config.validate().map_err(ConfigLoadError::Validate)?;
         Ok(config)
     }
@@ -148,6 +149,18 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    fn apply_presets(&mut self) {
+        self.cache.apply_preset_defaults();
+        for vhost in &mut self.vhosts {
+            vhost.cache.apply_preset_defaults();
+            for route in &mut vhost.routes {
+                if let Some(cache) = &mut route.cache {
+                    cache.apply_preset_defaults();
+                }
+            }
+        }
     }
 
     fn merge(&mut self, fragment: ConfigFragment) {
@@ -3730,9 +3743,20 @@ impl VhostAcmeChallengeConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CachePreset {
+    #[default]
+    None,
+    #[serde(rename = "wordpress")]
+    WordPress,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CacheConfig {
+    #[serde(default)]
+    pub preset: CachePreset,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -3750,11 +3774,17 @@ pub struct CacheConfig {
     #[serde(default)]
     pub no_store_response_header_values: BTreeMap<String, String>,
     #[serde(default)]
+    pub bypass_path_prefixes: Vec<String>,
+    #[serde(default)]
+    pub bypass_path_exact: Vec<String>,
+    #[serde(default)]
     pub bypass_request_headers: Vec<String>,
     #[serde(default)]
     pub bypass_request_header_values: BTreeMap<String, String>,
     #[serde(default)]
     pub bypass_cookie_names: Vec<String>,
+    #[serde(default)]
+    pub bypass_cookie_name_prefixes: Vec<String>,
     #[serde(default)]
     pub bypass_cookie_values: BTreeMap<String, String>,
     #[serde(default)]
@@ -3814,6 +3844,7 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
+            preset: CachePreset::default(),
             enabled: false,
             local_static: false,
             status_header: None,
@@ -3822,9 +3853,12 @@ impl Default for CacheConfig {
             tag_headers: default_cache_tag_headers(),
             no_store_response_headers: Vec::new(),
             no_store_response_header_values: BTreeMap::new(),
+            bypass_path_prefixes: Vec::new(),
+            bypass_path_exact: Vec::new(),
             bypass_request_headers: Vec::new(),
             bypass_request_header_values: BTreeMap::new(),
             bypass_cookie_names: Vec::new(),
+            bypass_cookie_name_prefixes: Vec::new(),
             bypass_cookie_values: BTreeMap::new(),
             bypass_query_params: Vec::new(),
             bypass_query_values: BTreeMap::new(),
@@ -3857,6 +3891,56 @@ impl Default for CacheConfig {
 }
 
 impl CacheConfig {
+    pub(crate) fn with_presets(&self) -> Self {
+        let mut config = self.clone();
+        config.apply_preset_defaults();
+        config
+    }
+
+    fn apply_preset_defaults(&mut self) {
+        match self.preset {
+            CachePreset::None => {}
+            CachePreset::WordPress => self.apply_wordpress_preset_defaults(),
+        }
+    }
+
+    fn apply_wordpress_preset_defaults(&mut self) {
+        extend_unique(
+            &mut self.bypass_path_prefixes,
+            ["/wp-admin/", "/feed/"].map(str::to_owned),
+        );
+        extend_unique(
+            &mut self.bypass_path_exact,
+            [
+                "/wp-login.php",
+                "/xmlrpc.php",
+                "/wp-cron.php",
+                "/wp-comments-post.php",
+            ]
+            .map(str::to_owned),
+        );
+        extend_unique(
+            &mut self.bypass_query_params,
+            ["preview"].map(str::to_owned),
+        );
+        extend_unique(
+            &mut self.bypass_cookie_name_prefixes,
+            [
+                "comment_author_",
+                "wordpress_",
+                "wordpress_logged_in_",
+                "wordpress_no_cache",
+                "wordpress_sec_",
+                "wp-postpass_",
+            ]
+            .map(str::to_owned),
+        );
+        extend_unique(
+            &mut self.bypass_request_headers,
+            ["authorization"].map(str::to_owned),
+        );
+    }
+
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.disk.path
             && path.is_relative()
@@ -3894,6 +3978,22 @@ impl CacheConfig {
             validate_header_name(scope, header)?;
             validate_cache_no_store_response_header_value(scope, header, value)?;
         }
+        for path in &self.bypass_path_prefixes {
+            validate_route_path(scope, path, true).map_err(|_| {
+                ConfigError::InvalidCacheBypassPath {
+                    scope,
+                    path: path.clone(),
+                }
+            })?;
+        }
+        for path in &self.bypass_path_exact {
+            validate_route_path(scope, path, false).map_err(|_| {
+                ConfigError::InvalidCacheBypassPath {
+                    scope,
+                    path: path.clone(),
+                }
+            })?;
+        }
         for header in &self.bypass_request_headers {
             validate_header_name(scope, header)?;
         }
@@ -3902,6 +4002,9 @@ impl CacheConfig {
             validate_cache_bypass_request_header_value(scope, header, value)?;
         }
         for cookie in &self.bypass_cookie_names {
+            validate_cache_cookie_name(scope, cookie)?;
+        }
+        for cookie in &self.bypass_cookie_name_prefixes {
             validate_cache_cookie_name(scope, cookie)?;
         }
         for (cookie, value) in &self.bypass_cookie_values {
@@ -4330,6 +4433,14 @@ impl Display for CacheKeyPart {
             Self::Host => formatter.write_str("host"),
             Self::Path => formatter.write_str("path"),
             Self::Query => formatter.write_str("query"),
+        }
+    }
+}
+
+fn extend_unique(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
+    for value in values {
+        if !target.iter().any(|existing| existing == &value) {
+            target.push(value);
         }
     }
 }
@@ -5972,6 +6083,10 @@ pub enum ConfigError {
         field: &'static str,
         reason: &'static str,
     },
+    InvalidCacheBypassPath {
+        scope: &'static str,
+        path: String,
+    },
     InvalidCacheBypassQueryParam {
         scope: &'static str,
         param: String,
@@ -6533,6 +6648,10 @@ impl Display for ConfigError {
                 field,
                 reason,
             } => write!(formatter, "{scope}.{field} is invalid: {reason}"),
+            Self::InvalidCacheBypassPath { scope, path } => write!(
+                formatter,
+                "{scope}.bypass_path_prefixes and {scope}.bypass_path_exact must contain absolute normalized request paths, got {path:?}"
+            ),
             Self::InvalidCacheBypassQueryParam { scope, param } => write!(
                 formatter,
                 "{scope}.bypass_query_params must contain raw query parameter names without whitespace, controls, '&', '=', '#', '?', or ';', got {param:?}"
@@ -8365,12 +8484,13 @@ mod tests {
     use super::{
         AdminConfig, AdminHealthConfig, AdminHealthResponseMode, AdminRemoteTransportMode,
         AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
-        CacheDiskEncryptionProvider, CacheKeyPart, CachePurgerConfig, CacheStaleErrorKind, Config,
-        ConfigError, ConfigLoadError, HeaderPolicyConfig, LoggingConfig, MetricsConfig,
-        ProxyConfig, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
-        TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig,
-        VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host,
-        normalize_host_pattern, valid_dynamic_header_variable, validate_dynamic_header_template,
+        CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig,
+        CacheStaleErrorKind, Config, ConfigError, ConfigLoadError, HeaderPolicyConfig,
+        LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig, ServerLimitsConfig,
+        StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsCurvePreference,
+        TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig, VhostHeaderPolicyConfig,
+        VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+        valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     #[cfg(feature = "cache")]
     use super::{CachePeerConfig, CachePeerFillConfig};
@@ -10734,6 +10854,7 @@ mod tests {
         let config: Config = toml::from_str(
             r#"
             [cache]
+            preset = "wordpress"
             enabled = true
             local_static = true
             status_header = "X-Cache-Status"
@@ -10742,9 +10863,12 @@ mod tests {
             tag_headers = ["Surrogate-Key", "X-App-Cache-Tags"]
             no_store_response_headers = ["x-fluxheim-no-store"]
             no_store_response_header_values = { x-app-cache = "private" }
+            bypass_path_prefixes = ["/private/"]
+            bypass_path_exact = ["/login"]
             bypass_request_headers = ["cookie", "authorization"]
             bypass_request_header_values = { x-preview-mode = "1" }
             bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
+            bypass_cookie_name_prefixes = ["wordpress_sec_"]
             bypass_cookie_values = { preview = "1" }
             bypass_query_params = ["preview", "token"]
             bypass_query_values = { mode = "private" }
@@ -10799,6 +10923,7 @@ mod tests {
         .unwrap();
 
         assert!(config.cache.enabled);
+        assert_eq!(config.cache.preset, CachePreset::WordPress);
         assert!(config.cache.local_static);
         assert_eq!(
             config.cache.status_header,
@@ -10827,6 +10952,8 @@ mod tests {
                 .get("x-app-cache"),
             Some(&"private".to_owned())
         );
+        assert_eq!(config.cache.bypass_path_prefixes, ["/private/".to_owned()]);
+        assert_eq!(config.cache.bypass_path_exact, ["/login".to_owned()]);
         assert_eq!(
             config.cache.bypass_request_headers,
             ["cookie".to_owned(), "authorization".to_owned()]
@@ -10841,6 +10968,10 @@ mod tests {
         assert_eq!(
             config.cache.bypass_cookie_names,
             ["sessionid".to_owned(), "wordpress_logged_in".to_owned()]
+        );
+        assert_eq!(
+            config.cache.bypass_cookie_name_prefixes,
+            ["wordpress_sec_".to_owned()]
         );
         assert_eq!(
             config.cache.bypass_cookie_values.get("preview"),
@@ -10895,6 +11026,22 @@ mod tests {
             ["jpg".to_owned(), "webp".to_owned(), "css".to_owned()]
         );
         assert_eq!(config.cache.methods, ["GET".to_owned()]);
+        let wordpress_cache = config.cache.with_presets();
+        assert!(
+            wordpress_cache
+                .bypass_path_prefixes
+                .contains(&"/wp-admin/".to_owned())
+        );
+        assert!(
+            wordpress_cache
+                .bypass_path_exact
+                .contains(&"/wp-login.php".to_owned())
+        );
+        assert!(
+            wordpress_cache
+                .bypass_cookie_name_prefixes
+                .contains(&"wordpress_logged_in_".to_owned())
+        );
         assert_eq!(
             config.cache.max_object_bytes,
             ByteSize::from_bytes(4 * 1024 * 1024)
@@ -10929,7 +11076,7 @@ mod tests {
         assert_eq!(config.cache.lock.wait_timeout_secs, 10);
         assert!(config.cache.predictor.enabled);
         assert_eq!(config.cache.predictor.capacity, 8192);
-        config.validate().unwrap();
+        config.cache.validate("cache").unwrap();
     }
 
     #[test]

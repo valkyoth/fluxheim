@@ -164,9 +164,12 @@ status_reason_header = "X-Cache-Reason"
 hide_response_headers = ["set-cookie"]
 no_store_response_headers = ["x-app-no-store"]
 no_store_response_header_values = { x-app-cache = "private" }
+bypass_path_prefixes = ["/wp-admin/"]
+bypass_path_exact = ["/wp-login.php", "/xmlrpc.php"]
 bypass_request_headers = ["cookie", "authorization"]
 bypass_request_header_values = { x-preview-mode = "1" }
 bypass_cookie_names = ["sessionid", "wordpress_logged_in"]
+bypass_cookie_name_prefixes = ["wordpress_logged_in_", "wordpress_sec_"]
 bypass_cookie_values = { preview = "1" }
 bypass_query_params = ["preview", "token"]
 bypass_query_values = { mode = "private" }

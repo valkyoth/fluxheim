@@ -251,11 +251,14 @@ Planned `1.3.3` php-fpm hardening:
   `fluxheim_php_fpm_pool_events_total`; OpenTelemetry export follows the
   existing metrics exporter path when enabled.
 - FastCGI cache-specific convenience config.
+  Initial convenience preset implemented as `cache.preset = "wordpress"`,
+  expanding common path, cookie-prefix, query, and authorization bypasses.
 - FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
   predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
 - WordPress cache-plugin migration presets for Super Cache/W3TC-style static
   fallbacks, logged-in/commenter cookie bypass, admin/login exclusions, and
-  denial of PHP execution under uploads/files directories.
+  denial of PHP execution under uploads/files directories. The first cache
+  safety preset is `cache.preset = "wordpress"`.
   Initial execution denial implemented as `php.deny_path_prefixes`; this is
   defense in depth above local filesystem permissions and stops Fluxheim from
   sending matching PHP scripts to php-fpm.
