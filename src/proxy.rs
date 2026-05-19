@@ -6473,12 +6473,7 @@ async fn respond_php_request(
             vhost.name.as_str(),
             php_stderr_metric_state(stderr, stderr_max_bytes),
         );
-        if php.config.stderr_log {
-            log_php_stderr(
-                php.config.stderr_log_level,
-                &sanitized_php_stderr(stderr, stderr_max_bytes),
-            );
-        }
+        log_php_stderr_if_enabled(&php.config, stderr);
     }
     let PhpFpmParsedResponse {
         mut response, body, ..
@@ -7283,11 +7278,10 @@ fn parse_php_fpm_output(
         php.config.max_response_bytes.as_u64(),
         php.config.max_response_header_bytes.as_u64(),
     )?;
-    if output
-        .stderr
-        .as_deref()
-        .is_some_and(|stderr| php_stderr_matches_failure_pattern(stderr, &php.config))
+    if let Some(stderr) = output.stderr.as_deref()
+        && php_stderr_matches_failure_pattern(stderr, &php.config)
     {
+        log_php_stderr_if_enabled(&php.config, stderr);
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "php-fpm stderr matched configured failure pattern",
@@ -7580,6 +7574,16 @@ fn log_php_stderr(level: crate::config::PhpStderrLogLevel, message: &str) {
         crate::config::PhpStderrLogLevel::Warn => log::warn!("php-fpm stderr: {message}"),
         crate::config::PhpStderrLogLevel::Info => log::info!("php-fpm stderr: {message}"),
         crate::config::PhpStderrLogLevel::Debug => log::debug!("php-fpm stderr: {message}"),
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn log_php_stderr_if_enabled(config: &crate::config::PhpConfig, stderr: &[u8]) {
+    if config.stderr_log {
+        log_php_stderr(
+            config.stderr_log_level,
+            &sanitized_php_stderr(stderr, config.stderr_max_bytes.as_u64() as usize),
+        );
     }
 }
 

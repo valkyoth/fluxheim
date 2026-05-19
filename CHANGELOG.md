@@ -39,7 +39,8 @@ behavior when the change improves security or project direction.
   `warn`, `info`, or `debug` instead of always using warning severity.
 - Added `php.stderr_failure_patterns` for opt-in literal STDERR matching that
   marks a php-fpm response invalid for safe-method retry/failover when
-  `php.fpm.retry_invalid_response` is enabled.
+  `php.fpm.retry_invalid_response` is enabled; matching STDERR is logged before
+  invalidation when STDERR logging is enabled.
 - Added `php.hide_response_headers` for removing selected php-fpm response
   headers before they reach clients.
 - Stripped hop-by-hop php-fpm response headers, including `Connection`-named

@@ -1559,7 +1559,9 @@ larger output is sanitized and marked as truncated.
 substrings. If any configured pattern appears in FastCGI STDERR, Fluxheim treats
 the PHP response as invalid. With `php.fpm.retry_invalid_response = true`, this
 can fail over safe methods to another php-fpm upstream for fatal PHP runtime
-failures such as `PHP Fatal error:`.
+failures such as `PHP Fatal error:`. Matching STDERR is still sanitized,
+bounded by `php.stderr_max_bytes`, and logged when `php.stderr_log` is enabled
+before Fluxheim rejects the response.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
