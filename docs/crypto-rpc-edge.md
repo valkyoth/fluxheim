@@ -22,10 +22,19 @@ Long-term feature shape:
 chain-edge-core = ["proxy", "cache", "dep:serde_json", "dep:sha2"]
 eth = ["chain-edge-core"]
 eth-ens = ["eth"] # planned review only; exact dependencies not selected yet
+eth-verify = ["eth"] # future proof-verification/co-processing review
 btc = ["chain-edge-core"] # future review
 ada = ["chain-edge-core"] # future review
 xrpl = ["chain-edge-core"] # future review
 profile-ethereum-rpc = ["proxy", "cache", "eth", "tls-rustls", "security"]
+profile-ethereum-verified-rpc = [
+  "proxy",
+  "cache",
+  "eth",
+  "eth-verify",
+  "tls-rustls",
+  "security",
+]
 ```
 
 `chain-edge-core` should hold only shared primitives:
@@ -75,6 +84,10 @@ Possible later dependencies, after license/advisory review:
 
 Avoid exposing third-party Ethereum types in public Fluxheim config. Config
 should stay plain TOML with strings, numbers, durations, and byte sizes.
+
+`eth-verify` must be a separate compile-time feature because proof verification
+adds consensus, trie, precompile, and ZK-related dependencies that should not be
+pulled into a normal RPC cache/proxy build.
 
 ## Basic Config Model
 
@@ -288,6 +301,84 @@ uses multiple upstreams or strips logs. The hard claim is: can the gateway
 operator, upstream provider, and observers link user, query, timing, and
 response? Until the answer is defensible, the feature should be documented as
 privacy-reducing or privacy-preserving, not verifiably anonymous.
+
+## Verification Co-Processing
+
+`eth-verify` is a later Ethereum-specific verification track. It should not be
+part of the first stable `eth` cache/proxy release.
+
+Goal: allow Fluxheim to verify selected blockchain-derived data at the edge
+before returning or caching it. Instead of trusting one RPC provider's response,
+Fluxheim can fetch proofs, verify them against a trusted block header or
+light-client state, and then return data with stronger integrity guarantees.
+
+Candidate verification modes:
+
+- Ethereum account/storage proof verification through `eth_getProof` using
+  Merkle-Patricia trie proofs against a known state root.
+- Receipt or transaction inclusion checks against block bodies/receipts roots
+  where proof material is available and bounded.
+- Header verification through an embedded or sidecar light client such as a
+  Helios-style model.
+- ZK proof verification for application-specific state claims where a mature
+  verifier and proof format exist.
+- Quorum plus proof mode, where Fluxheim compares multiple upstream responses
+  and verifies proof material before cache admission.
+
+Candidate config shape:
+
+```toml
+[vhosts.eth.verify]
+enabled = true
+mode = "light-client"
+require_proofs_for = ["eth_getProof"]
+trusted_checkpoint = "0x..."
+max_proof_bytes = "1MiB"
+max_verification_time_ms = 50
+fail_closed = true
+```
+
+Security model:
+
+- Verification must be explicit per method or route.
+- Verification failure must default to fail-closed for protected methods.
+- Proof size, proof depth, execution time, and cache memory impact must be
+  bounded.
+- Verified cache entries must record the verified block hash/number, state root,
+  proof type, and verification policy version.
+- Stale light-client checkpoints must make protected verification unavailable
+  rather than silently falling back to provider trust.
+- Metrics must report verification result classes without labeling addresses,
+  storage slots, transaction hashes, or raw proof identifiers.
+
+Dependency guidance:
+
+- Do not implement cryptographic proof systems from scratch.
+- Prefer mature, reviewed Ethereum/light-client libraries once their license,
+  advisory, maintenance, and `unsafe` profile are acceptable.
+- Keep proof engines behind Fluxheim-owned interfaces so `eth` can remain a
+  lightweight RPC cache/proxy when `eth-verify` is not compiled.
+
+Open questions:
+
+- Whether verification should run in-process, in a worker pool, or in a
+  separate sidecar to isolate expensive proof work.
+- How to represent verified responses to downstream clients without inventing a
+  misleading trust signal.
+- How to combine proof verification with privacy-preserving RPC modes, since
+  proof requests can themselves reveal the queried account/storage key.
+- Whether ZK proof verification belongs in `eth-verify` or a later generic
+  `proof-verify` module that can be shared by non-Ethereum chains.
+
+Exit criteria before stable `eth-verify`:
+
+- Light-client/header trust model is documented and tested.
+- Malformed, oversized, deeply nested, and inconsistent proofs fail safely.
+- Verification timeout/cancellation is covered by tests.
+- Verified cache admission rejects mismatched state roots, wrong block headers,
+  stale checkpoints, and unverified provider responses.
+- Default and `eth`-only builds prove verification code and dependencies are
+  absent.
 
 ## Metrics And Observability
 

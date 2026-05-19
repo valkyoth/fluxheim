@@ -2048,6 +2048,7 @@ Shared family shape:
 ```toml
 chain-edge-core = ["proxy", "cache", "dep:serde_json", "dep:sha2"]
 eth = ["chain-edge-core"]
+eth-verify = ["eth"] # future proof-verification/co-processing review
 btc = ["chain-edge-core"] # future review
 ada = ["chain-edge-core"] # future review
 xrpl = ["chain-edge-core"] # future review
@@ -2064,6 +2065,7 @@ First implementation feature shape:
 ```toml
 eth = ["proxy", "cache", "dep:serde_json", "dep:sha2"]
 eth-ens = ["eth"] # future review; exact dependencies intentionally undecided
+eth-verify = ["eth"] # future proof-verification/co-processing review
 profile-ethereum-rpc = ["proxy", "cache", "eth", "tls-rustls", "security"]
 ```
 
@@ -2134,8 +2136,28 @@ Beta scope:
 - Quorum reads for selected immutable methods, comparing responses from two or
   more upstreams before caching or returning high-assurance data.
 - Privacy-preserving relay mode for JSON-RPC reads after a threat-model review.
+- Proof-verification co-processing behind `eth-verify`, including
+  `eth_getProof`/Merkle-Patricia proof checks, light-client header validation,
+  and later ZK proof verification where mature libraries exist.
 - More method-specific cache policies after production traces prove safe
   behavior.
+
+Future `eth-verify` review:
+
+- Verify selected blockchain-derived data at the edge before returning or
+  caching it.
+- Use account/storage proofs, transaction/receipt inclusion checks, or
+  Helios-style light-client state instead of trusting a single RPC provider.
+- Keep proof engines behind a separate compile-time feature because trie,
+  consensus, precompile, and ZK dependencies are too heavy for a normal RPC
+  cache/proxy build.
+- Bound proof bytes, trie depth, verification time, worker concurrency, and
+  cache metadata size.
+- Fail closed for protected methods when proof verification fails, checkpoints
+  are stale, or the provider response does not match the verified state root.
+- Treat privacy as a separate design problem: proof requests can reveal the
+  account, storage key, or contract state being queried unless combined with a
+  stronger relay/blinding design.
 
 Future `eth-ens` review:
 
@@ -2199,6 +2221,10 @@ Exit criteria:
   anonymized" RPC needs more than ordinary reverse proxying.
 - Later chain modules must ship their own method-safety matrix, finality model,
   health probes, and cache-admission tests before stable release.
+- `eth-verify` cannot be promoted until default and `eth`-only builds prove
+  verification dependencies are absent, malformed proofs fail safely, stale
+  light-client checkpoints fail closed, and verified cache entries record the
+  verified block/state-root context.
 
 Detailed design lives in [Crypto RPC Edge](crypto-rpc-edge.md).
 
