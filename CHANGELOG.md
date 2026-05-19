@@ -54,7 +54,9 @@ behavior when the change improves security or project direction.
   serving internal static fallback pages when selected PHP statuses are
   intercepted.
 - Added `php.deny_path_prefixes` to block php-fpm script execution under
-  configured URI prefixes such as WordPress upload directories.
+  configured URI prefixes such as WordPress upload directories. PHP execution
+  deny prefixes are capped at 128 entries, and `php.allowed_extensions` is
+  capped at 16 entries with case-insensitive duplicate rejection.
 - Added `php.max_response_header_bytes` to make the php-fpm CGI response
   header cap configurable while keeping the `64KiB` default.
 - Added PHP-specific Prometheus request totals and duration histograms with

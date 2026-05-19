@@ -1526,7 +1526,10 @@ URI path prefixes before php-fpm is contacted. Use it for WordPress-style media
 directories such as `/wp-content/uploads/` where uploaded PHP files must never
 execute. This is defense in depth on top of filesystem permissions; it blocks
 Fluxheim's PHP execution path for matching URI prefixes even if a writable
-upload directory accidentally contains a `.php` file.
+upload directory accidentally contains a `.php` file. The list is capped at 128
+prefixes.
+`php.allowed_extensions` is capped at 16 plain extension names and rejects
+case-insensitive duplicates.
 `php.preset = "wordpress"` applies PHP-side WordPress migration defaults: it
 uses the WordPress front-controller mode when `try_files` is otherwise unset and
 adds deny prefixes for common upload/file directories such as

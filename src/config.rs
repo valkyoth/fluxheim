@@ -5756,6 +5756,8 @@ pub struct PhpFpmConfig {
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
+const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
+const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
 const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
@@ -7922,6 +7924,13 @@ fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
             reason: "at least one extension is required",
         });
     }
+    if extensions.len() > MAX_PHP_ALLOWED_EXTENSIONS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.allowed_extensions",
+            reason: "at most 16 extensions are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
     for extension in extensions {
         if extension.trim().is_empty()
             || extension.starts_with('.')
@@ -7936,11 +7945,23 @@ fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
                 reason: "extensions must be plain extension names without dots or separators",
             });
         }
+        if !seen.insert(extension.to_ascii_lowercase()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.allowed_extensions",
+                reason: "duplicate extensions are not allowed",
+            });
+        }
     }
     Ok(())
 }
 
 fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(), ConfigError> {
+    if prefixes.len() > MAX_PHP_DENY_PATH_PREFIXES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.deny_path_prefixes",
+            reason: "at most 128 prefixes are allowed",
+        });
+    }
     let mut seen = BTreeSet::new();
     for prefix in prefixes {
         if prefix.is_empty()
@@ -11388,6 +11409,71 @@ mod tests {
     }
 
     #[test]
+    fn rejects_duplicate_php_allowed_extension() {
+        let root = unique_temp_path("config-php-duplicate-extension-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            allowed_extensions = ["php", "PHP"]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-duplicate-extension-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.allowed_extensions"), "{error}");
+        assert!(error.contains("duplicate extensions"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_php_allowed_extensions() {
+        let root = unique_temp_path("config-php-many-extensions-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let extensions = (0..=super::MAX_PHP_ALLOWED_EXTENSIONS)
+            .map(|index| format!("\"php{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            allowed_extensions = [{}]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-many-extensions-process"),
+            root.display(),
+            extensions,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.allowed_extensions"), "{error}");
+        assert!(error.contains("at most 16 extensions"), "{error}");
+    }
+
+    #[test]
     fn rejects_invalid_php_deny_path_prefix() {
         let root = unique_temp_path("config-php-bad-deny-prefix-root");
         std::fs::create_dir_all(&root).unwrap();
@@ -11443,6 +11529,41 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.deny_path_prefixes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_php_deny_path_prefixes() {
+        let root = unique_temp_path("config-php-many-deny-prefixes-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let prefixes = (0..=super::MAX_PHP_DENY_PATH_PREFIXES)
+            .map(|index| format!("\"/upload-{index}/\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            deny_path_prefixes = [{}]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-many-deny-prefixes-process"),
+            root.display(),
+            prefixes,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.deny_path_prefixes"), "{error}");
+        assert!(error.contains("at most 128 prefixes"), "{error}");
     }
 
     #[test]
