@@ -6350,6 +6350,13 @@ async fn respond_php_request(
             ));
         }
     };
+    apply_php_x_accel_expires(&mut response).map_err(|error| {
+        Error::because(
+            ErrorType::HTTPStatus(502),
+            "php-fpm response cache controls were invalid",
+            error,
+        )
+    })?;
     strip_php_response_headers(&mut response, &php.config);
     if php_should_intercept_error_status(response.status, php) {
         let status = response.status.as_u16();
@@ -7987,6 +7994,75 @@ fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config
 }
 
 #[cfg(feature = "php-fpm")]
+fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> io::Result<()> {
+    let Some(raw_value) = response
+        .headers
+        .get_all("x-accel-expires")
+        .iter()
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .map(str::to_owned)
+    else {
+        return Ok(());
+    };
+    response.remove_header("x-accel-expires");
+    if raw_value.is_empty() || raw_value.eq_ignore_ascii_case("off") {
+        return Ok(());
+    }
+
+    let Some(ttl_secs) = php_x_accel_expires_ttl_secs(&raw_value) else {
+        return Ok(());
+    };
+
+    response.remove_header("cache-control");
+    response.remove_header("expires");
+    response.remove_header("pragma");
+    if ttl_secs == 0 {
+        response
+            .insert_header("cache-control", "no-store, private")
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        response
+            .insert_header(
+                "expires",
+                httpdate::fmt_http_date(std::time::SystemTime::UNIX_EPOCH),
+            )
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        return Ok(());
+    }
+
+    let directive = if response.headers.contains_key("set-cookie") {
+        format!("private, max-age={ttl_secs}")
+    } else {
+        format!("public, max-age={ttl_secs}")
+    };
+    response
+        .insert_header("cache-control", directive)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    let expires = std::time::SystemTime::now()
+        .checked_add(std::time::Duration::from_secs(ttl_secs))
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    response
+        .insert_header("expires", httpdate::fmt_http_date(expires))
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(())
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_x_accel_expires_ttl_secs(value: &str) -> Option<u64> {
+    if let Some(epoch) = value.strip_prefix('@') {
+        let epoch = epoch.parse::<u64>().ok()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        return Some(epoch.saturating_sub(now));
+    }
+    let ttl = value.parse::<i64>().ok()?;
+    Some(u64::try_from(ttl).unwrap_or(0))
+}
+
+#[cfg(feature = "php-fpm")]
 fn php_should_intercept_error_status(status: StatusCode, php: &RuntimePhp) -> bool {
     php.error_page(status.as_u16()).is_some()
         || php
@@ -9450,11 +9526,11 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
-        directory_slash_redirect_location, parse_php_response, php_fpm_error_outcome,
-        php_fpm_path_translated, php_fpm_script_filename, php_header_param_name,
-        php_script_name_denied, php_script_name_for_request, php_should_intercept_error_status,
-        php_stderr_metric_state, resolve_php_script, sanitized_php_stderr,
-        strip_php_response_headers,
+        apply_php_x_accel_expires, directory_slash_redirect_location, parse_php_response,
+        php_fpm_error_outcome, php_fpm_path_translated, php_fpm_script_filename,
+        php_header_param_name, php_script_name_denied, php_script_name_for_request,
+        php_should_intercept_error_status, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
+        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9973,6 +10049,80 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("ok")
         );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_x_accel_expires_maps_positive_ttl_to_cache_headers() {
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response.insert_header("x-accel-expires", "60").unwrap();
+        response.insert_header("cache-control", "no-cache").unwrap();
+        response.insert_header("pragma", "no-cache").unwrap();
+
+        apply_php_x_accel_expires(&mut response).unwrap();
+
+        assert!(!response.headers.contains_key("x-accel-expires"));
+        assert!(!response.headers.contains_key("pragma"));
+        assert_eq!(
+            response
+                .headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("public, max-age=60")
+        );
+        assert!(response.headers.contains_key("expires"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_x_accel_expires_uses_private_cache_for_cookie_responses() {
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response.insert_header("set-cookie", "wordpress=1").unwrap();
+        response.insert_header("x-accel-expires", "120").unwrap();
+
+        apply_php_x_accel_expires(&mut response).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("private, max-age=120")
+        );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_x_accel_expires_zero_disables_cache() {
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response.insert_header("x-accel-expires", "0").unwrap();
+
+        apply_php_x_accel_expires(&mut response).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("no-store, private")
+        );
+        assert!(!response.headers.contains_key("x-accel-expires"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_x_accel_expires_parses_absolute_epoch() {
+        let future = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 60;
+        let ttl = php_x_accel_expires_ttl_secs(&format!("@{}", future)).unwrap();
+
+        assert!(ttl <= 60);
+        assert!(ttl > 0);
+        assert_eq!(php_x_accel_expires_ttl_secs("-1"), Some(0));
+        assert_eq!(php_x_accel_expires_ttl_secs("bad"), None);
     }
 
     #[cfg(feature = "php-fpm")]

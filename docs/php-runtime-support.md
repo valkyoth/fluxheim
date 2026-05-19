@@ -217,7 +217,10 @@ Planned `1.3.3` php-fpm hardening:
   Implemented as `php.pass_request_headers` and `php.pass_request_body`, both
   defaulting to `true`.
 - `X-Accel-Redirect` / `X-Sendfile` support.
-- `X-Accel-Expires` mapping into Fluxheim cache metadata where safe.
+- `X-Accel-Expires` response control handling. Implemented for PHP responses:
+  Fluxheim strips the internal header, maps valid TTLs to `Cache-Control` and
+  `Expires`, treats zero or past expiries as `no-store`, and uses `private`
+  directives for responses that set cookies.
 - `fastcgi_intercept_errors`-style integration with Fluxheim error pages.
   Initial generic interception implemented as `php.intercept_error_statuses`.
 - Response header hide/pass/ignore controls for PHP backends.

@@ -881,9 +881,10 @@ Follow-up `1.3.x` PHP runtime plan:
   - Configurable CGI response-header limits.
     Implemented as `php.max_response_header_bytes`, defaulting to `64KiB`.
   - `X-Accel-Redirect` / `X-Sendfile` support for PHP-assisted static
-    offload, plus internal-only target validation, `X-Accel-Expires` handling
-    where it maps to Fluxheim cache metadata, and response-header stripping so
-    backend control headers are not leaked to clients.
+    offload, plus internal-only target validation. `X-Accel-Expires` is
+    initially implemented for PHP responses by stripping the backend control
+    header, mapping valid TTLs to normal cache headers, treating zero or past
+    expiries as `no-store`, and keeping cookie responses private.
   - `fastcgi_intercept_errors`-style integration with Fluxheim error pages for
     selected PHP statuses, keeping normal PHP responses untouched by default.
     Initial generic interception implemented as `php.intercept_error_statuses`;

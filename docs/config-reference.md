@@ -1504,6 +1504,10 @@ larger output is sanitized and marked as truncated.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
+Fluxheim also consumes PHP `X-Accel-Expires` control headers instead of
+forwarding them to clients. Positive TTLs become normal `Cache-Control` and
+`Expires` headers; responses with `Set-Cookie` use `private` cache directives,
+and zero or past expiries become `no-store, private`.
 Fluxheim always strips hop-by-hop php-fpm response headers such as
 `Connection`, `Transfer-Encoding`, and headers named by `Connection` before it
 frames the client response.

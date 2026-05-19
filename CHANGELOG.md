@@ -50,6 +50,10 @@ behavior when the change improves security or project direction.
   `fluxheim_php_stderr_events_total`. PHP request outcomes now distinguish
   connect timeouts, request timeouts, connection errors, configuration errors,
   invalid responses, and intercepted PHP statuses.
+- Added PHP `X-Accel-Expires` handling: Fluxheim consumes the internal
+  backend header, maps valid TTLs to normal `Cache-Control` and `Expires`
+  headers, treats zero or past expiries as `no-store`, and avoids public cache
+  directives on responses that set cookies.
 
 ## 1.3.2 - ACME Operations And Config Tester
 
