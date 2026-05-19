@@ -117,6 +117,9 @@ behavior when the change improves security or project direction.
   error-page lists at 64 entries, with duplicate upstream rejection.
 - Capped configured request/response header mutation lists and maps so
   remove/unset, set/add, and append policies remain bounded.
+- Capped listener lists, trusted proxy lists, total vhosts, vhost host aliases,
+  and per-vhost route counts so config validation and reload planning stay
+  bounded.
 
 ### Changed
 

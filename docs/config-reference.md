@@ -89,6 +89,7 @@ Notes:
 - `listen` must not be empty.
 - TLS listeners are explicit through `tls_listen`; Fluxheim does not infer TLS
   from port numbers.
+- `listen` and `tls_listen` are each capped at 64 entries.
 - `default_vhost`, when set, must match a configured `[[vhosts]].name`.
 - `[server.host_routing].strict = false` preserves compatibility by falling
   back to `default_vhost` for missing, invalid, or unknown host names. Set it
@@ -102,7 +103,7 @@ Notes:
   gateway, Cloudflare, or a trusted edge proxy. When the direct peer is trusted,
   Fluxheim walks `X-Forwarded-For` from right to left and restores the last
   non-trusted hop for generated client-IP headers, equivalent to nginx
-  `real_ip_recursive on`.
+  `real_ip_recursive on`. The list is capped at 512 entries.
 - `[server.process]` maps safe process settings into Pingora's `ServerConf`.
   Changes to these values require a process upgrade, not a live snapshot
   reload. Keep `threads` conservative in containers because Pingora allocates
@@ -1354,6 +1355,8 @@ upstream_tls = false
 
 Hostnames are normalized to lower case. Duplicate hosts are rejected. A single
 left-most wildcard label is supported, for example `*.api.example.test`.
+The config is capped at 1024 vhosts; each vhost may define up to 64 host
+aliases and 256 routes.
 `max_request_body_bytes` is optional on a vhost and overrides the global
 `server.limits.max_request_body_bytes` for that host. Route-level
 `max_request_body_bytes` still wins when a matching route sets its own limit.

@@ -45,6 +45,11 @@ const O_NOFOLLOW: i32 = 0;
 const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
 const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_ADMIN_HEALTH_PATH_BYTES: usize = 2048;
+const MAX_SERVER_LISTENERS: usize = 64;
+const MAX_TRUSTED_PROXIES: usize = 512;
+const MAX_VHOSTS: usize = 1024;
+const MAX_VHOST_HOSTS: usize = 64;
+const MAX_VHOST_ROUTES: usize = 256;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -283,6 +288,8 @@ impl Config {
     }
 
     fn validate_vhosts(&self) -> Result<(), ConfigError> {
+        validate_config_list_len("vhosts", self.vhosts.len(), MAX_VHOSTS)?;
+
         let mut seen_names = std::collections::HashSet::new();
         let mut seen_hosts = std::collections::HashSet::new();
 
@@ -526,6 +533,17 @@ impl ServerConfig {
         if self.listen.is_empty() {
             return Err(ConfigError::EmptyListeners);
         }
+        validate_config_list_len("server.listen", self.listen.len(), MAX_SERVER_LISTENERS)?;
+        validate_config_list_len(
+            "server.tls_listen",
+            self.tls_listen.len(),
+            MAX_SERVER_LISTENERS,
+        )?;
+        validate_config_list_len(
+            "server.trusted_proxies",
+            self.trusted_proxies.len(),
+            MAX_TRUSTED_PROXIES,
+        )?;
 
         for listen in &self.listen {
             if listen.parse::<SocketAddr>().is_err() {
@@ -3190,6 +3208,16 @@ impl VhostConfig {
                 vhost: self.name.clone(),
             });
         }
+        validate_config_list_len(
+            format!("vhost {:?}.hosts", self.name),
+            self.hosts.len(),
+            MAX_VHOST_HOSTS,
+        )?;
+        validate_config_list_len(
+            format!("vhost {:?}.routes", self.name),
+            self.routes.len(),
+            MAX_VHOST_ROUTES,
+        )?;
 
         self.proxy
             .validate()
@@ -6192,6 +6220,10 @@ pub enum ConfigError {
     InvalidTrustedProxy {
         value: String,
     },
+    InvalidConfigListLength {
+        field: String,
+        max: usize,
+    },
     InvalidProcessSetting {
         field: &'static str,
     },
@@ -6684,6 +6716,9 @@ impl Display for ConfigError {
                 formatter,
                 "server.trusted_proxies entries must be IP addresses or CIDR ranges, got {value:?}"
             ),
+            Self::InvalidConfigListLength { field, max } => {
+                write!(formatter, "{field} must contain at most {max} entries")
+            }
             Self::InvalidProcessSetting { field } => {
                 write!(formatter, "{field} is outside the supported process range")
             }
@@ -8006,6 +8041,20 @@ fn valid_https_url(value: &str) -> bool {
     value.starts_with("https://")
         && value.len() > "https://".len()
         && !value.chars().any(char::is_whitespace)
+}
+
+fn validate_config_list_len(
+    field: impl Into<String>,
+    len: usize,
+    max: usize,
+) -> Result<(), ConfigError> {
+    if len > max {
+        return Err(ConfigError::InvalidConfigListLength {
+            field: field.into(),
+            max,
+        });
+    }
+    Ok(())
 }
 
 fn validate_cache_list_len(
@@ -15614,6 +15663,157 @@ mod tests {
                 field: "max_request_body_bytes"
             }) if vhost == "gateway"
         ));
+    }
+
+    #[test]
+    fn rejects_too_many_server_listeners() {
+        let listen = (0..=super::MAX_SERVER_LISTENERS)
+            .map(|index| format!("\"127.0.0.1:{}\"", 10_000 + index))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [server]
+            listen = [{listen}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "server.listen".to_owned(),
+                max: super::MAX_SERVER_LISTENERS,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_tls_listeners() {
+        let tls_listen = (0..=super::MAX_SERVER_LISTENERS)
+            .map(|index| format!("\"127.0.0.1:{}\"", 20_000 + index))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [server]
+            tls_listen = [{tls_listen}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "server.tls_listen".to_owned(),
+                max: super::MAX_SERVER_LISTENERS,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_trusted_proxies() {
+        let trusted_proxies = (0..=super::MAX_TRUSTED_PROXIES)
+            .map(|index| format!("\"10.{}.0.0/16\"", index % 256))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [server]
+            trusted_proxies = [{trusted_proxies}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "server.trusted_proxies".to_owned(),
+                max: super::MAX_TRUSTED_PROXIES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_vhosts() {
+        let vhosts = (0..=super::MAX_VHOSTS)
+            .map(|index| {
+                format!(
+                    r#"
+                    [[vhosts]]
+                    name = "site-{index}"
+                    hosts = ["site-{index}.example.test"]
+                    "#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&vhosts).unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "vhosts".to_owned(),
+                max: super::MAX_VHOSTS,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_vhost_hosts() {
+        let hosts = (0..=super::MAX_VHOST_HOSTS)
+            .map(|index| format!("\"alias-{index}.example.test\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = [{hosts}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "vhost \"gateway\".hosts".to_owned(),
+                max: super::MAX_VHOST_HOSTS,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_vhost_routes() {
+        let routes = (0..=super::MAX_VHOST_ROUTES)
+            .map(|index| {
+                format!(
+                    r#"
+                    [[vhosts.routes]]
+                    name = "route-{index}"
+                    path_prefix = "/route-{index}/"
+                    "#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+            {routes}
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "vhost \"gateway\".routes".to_owned(),
+                max: super::MAX_VHOST_ROUTES,
+            })
+        );
     }
 
     #[test]
