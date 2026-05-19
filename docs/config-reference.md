@@ -1618,7 +1618,8 @@ to avoid duplicating side effects. `php.fpm.retry_invalid_response` and
 `php.fpm.retry_statuses` extend the same safe-method retry policy to malformed
 FastCGI responses and selected PHP 5xx responses. They default to disabled;
 configure them only for idempotent request methods where replaying the PHP
-request is acceptable.
+request is acceptable. `php.fpm.retry_methods` is capped at 16 uppercase method
+tokens.
 `[vhosts.php.params]` or `[vhosts.routes.php.params]`
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core

@@ -81,7 +81,8 @@ behavior when the change improves security or project direction.
 - Added opt-in php-fpm retry controls with `php.fpm.max_retries`,
   `php.fpm.retry_timeout_secs`, and `php.fpm.retry_methods` for connection
   failures and connect timeouts before
-  php-fpm returns a response; request timeouts are not retried.
+  php-fpm returns a response; request timeouts are not retried. Retry method
+  lists are capped at 16 methods.
 - Added opt-in php-fpm retry controls for malformed FastCGI responses and
   selected PHP 5xx responses through `php.fpm.retry_invalid_response` and
   `php.fpm.retry_statuses`, using the same safe-method and retry-window policy.

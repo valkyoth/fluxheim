@@ -5755,6 +5755,7 @@ pub struct PhpFpmConfig {
 
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
+const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
 const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
@@ -8026,6 +8027,12 @@ fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigEr
 }
 
 fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError> {
+    if methods.len() > MAX_PHP_FPM_RETRY_METHODS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.retry_methods",
+            reason: "at most 16 methods are allowed",
+        });
+    }
     let mut seen = HashSet::new();
     for method in methods {
         if method.is_empty()
@@ -11155,6 +11162,35 @@ mod tests {
         .unwrap();
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.retry_methods"), "{error}");
+
+        let retry_methods = (0..=super::MAX_PHP_FPM_RETRY_METHODS)
+            .map(|index| format!("\"M{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            retry_methods = [{}]
+            "#,
+            test_process_config_toml("config-php-fpm-too-many-retry-methods-process"),
+            root.display(),
+            retry_methods,
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.retry_methods"), "{error}");
+        assert!(error.contains("at most 16 methods"), "{error}");
 
         let config: Config = toml::from_str(&format!(
             r#"
