@@ -224,7 +224,9 @@ Planned `1.3.3` php-fpm hardening:
 - WordPress cache-plugin migration presets for Super Cache/W3TC-style static
   fallbacks, logged-in/commenter cookie bypass, admin/login exclusions, and
   denial of PHP execution under uploads/files directories.
-  Initial execution denial implemented as `php.deny_path_prefixes`.
+  Initial execution denial implemented as `php.deny_path_prefixes`; this is
+  defense in depth above local filesystem permissions and stops Fluxheim from
+  sending matching PHP scripts to php-fpm.
 - FastCGI multiplexing, authorizer, and filter-role review. These are not
   needed for normal PHP-FPM web serving, but should be explicitly unsupported
   or implemented if enterprise users need them.

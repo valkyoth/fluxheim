@@ -372,7 +372,7 @@ full release ladder.
 - [Metrics Architecture](docs/metrics-architecture.md)
 - [OpenTelemetry Tracing](docs/opentelemetry-tracing.md)
 - [WASM Extensibility](docs/wasm-extensibility.md)
-- [Crypto RPC Edge](docs/ethereum-rpc-edge.md)
+- [Crypto RPC Edge](docs/crypto-rpc-edge.md)
 - [External Authorization Request](docs/auth-request.md)
 - [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md)
 - [WAF Architecture](docs/waf-architecture.md)

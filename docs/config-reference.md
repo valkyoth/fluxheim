@@ -1473,7 +1473,9 @@ body parsing and defaults to `64KiB`.
 `php.deny_path_prefixes` rejects PHP script execution for configured absolute
 URI path prefixes before php-fpm is contacted. Use it for WordPress-style media
 directories such as `/wp-content/uploads/` where uploaded PHP files must never
-execute.
+execute. This is defense in depth on top of filesystem permissions; it blocks
+Fluxheim's PHP execution path for matching URI prefixes even if a writable
+upload directory accidentally contains a `.php` file.
 `php.try_files` is a typed replacement for common `try_files` recipes:
 `front-controller` keeps the default `/index.php` fallback, `wordpress` is an
 explicit alias for WordPress-style front-controller sites, and `strict` behaves

@@ -2087,8 +2087,21 @@ Stable Ethereum `eth` scope:
 - Native cache-key generation for Ethereum JSON-RPC POST requests.
 - Cache admission only for whitelisted immutable/finality-safe methods.
 - Cache integration with existing memory/disk cache backends and cache metrics.
+- Multi-provider upstream routing so applications are not dependent on one
+  centralized RPC provider. Operators should be able to mix local nodes,
+  community nodes, and hosted providers, with explicit failover and optional
+  quorum/compare modes for high-value reads.
+- Censorship-resistance controls that can detect repeated provider-side
+  denials, lag, or method-specific failures and move read traffic to healthier
+  upstreams without client-side code changes.
 - Redacted logging and tracing that records method and policy decisions but not
   full params or responses by default.
+- Privacy-preserving RPC modes should be researched as a separate beta track:
+  request metadata minimization, no body/param logging, optional cache-only
+  answers for immutable data, client IP/header stripping before upstream, and
+  future relay/blind-query designs. Fluxheim must not claim full verifiable
+  anonymization until the design can prove the gateway cannot link requester,
+  query, and response.
 
 Initial cacheable method candidates:
 
@@ -2118,6 +2131,9 @@ Beta scope:
 - WebSocket pass-through with sticky upstream selection.
 - `eth_subscribe` health-aware placement for new sessions.
 - Hosted-provider fallback with quota-aware routing.
+- Quorum reads for selected immutable methods, comparing responses from two or
+  more upstreams before caching or returning high-assurance data.
+- Privacy-preserving relay mode for JSON-RPC reads after a threat-model review.
 - More method-specific cache policies after production traces prove safe
   behavior.
 
@@ -2178,10 +2194,13 @@ Exit criteria:
 - Metrics avoid account, transaction, block, contract, calldata, and ENS-name
   label cardinality.
 - Documentation includes Geth, Erigon, Reth, and hosted-provider examples.
+- Documentation includes a decentralization and privacy threat model explaining
+  what Fluxheim can protect, what it cannot protect, and why "verifiably
+  anonymized" RPC needs more than ordinary reverse proxying.
 - Later chain modules must ship their own method-safety matrix, finality model,
   health probes, and cache-admission tests before stable release.
 
-Detailed design lives in [Crypto RPC Edge](ethereum-rpc-edge.md).
+Detailed design lives in [Crypto RPC Edge](crypto-rpc-edge.md).
 
 ### Future - Dependency Reduction And Sovereign Core
 

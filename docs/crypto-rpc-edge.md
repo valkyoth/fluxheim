@@ -119,6 +119,8 @@ Stable first scope:
   says the error is immutable and safe.
 - Normalize upstream response handling so Fluxheim can remove hop-by-hop
   headers and apply existing response policy.
+- Support multi-provider upstream pools so applications are not coupled to one
+  centralized RPC provider.
 
 Batch behavior should be conservative. A batch is cacheable only when every
 call in the batch is individually cacheable under the current policy. Mixed
@@ -200,6 +202,19 @@ Selection policies:
 - sticky selection for WebSocket sessions;
 - optional fallback to hosted providers only when explicitly configured.
 
+Decentralization goals:
+
+- let operators mix local execution clients, community RPC nodes, and hosted
+  providers in one policy;
+- verify upstream `chain_id`, sync state, and block lag before serving traffic;
+- detect repeated provider-side denial, lag, or method-specific failure and
+  route read traffic to healthier alternatives;
+- support optional quorum/compare mode for selected immutable reads, where
+  Fluxheim asks multiple upstreams and only caches/returns data when responses
+  agree;
+- keep hosted-provider fallback explicit so Fluxheim does not silently
+  centralize traffic that was meant to stay local.
+
 ## WebSocket Scope
 
 WebSocket support should be beta after HTTP JSON-RPC caching is stable.
@@ -234,6 +249,45 @@ The module must include:
 Do not expose upstream execution clients directly to arbitrary debug/admin
 namespaces through a broad allow-list. The default policy should allow only
 standard public read methods and explicitly selected write methods.
+
+## Privacy And Anonymity Research
+
+Crypto RPC privacy is a separate problem from caching and load balancing. A
+normal reverse proxy can hide the user's IP address from the upstream provider,
+but the gateway itself can still see the requester, method, params, timing, and
+response unless the design deliberately removes or blinds that information.
+
+Initial privacy-preserving controls should be practical and honest:
+
+- never log full params, responses, calldata, signatures, addresses, or
+  transaction hashes by default;
+- strip client-identifying headers before upstream unless explicitly allowed;
+- support cache-only answers for finalized/immutable data, where Fluxheim can
+  answer without contacting an upstream for that request;
+- provide a privacy mode that rejects non-cacheable or identifying methods
+  rather than forwarding them;
+- keep metrics cardinality-safe and avoid labels for addresses, hashes,
+  contracts, ENS names, or raw method params;
+- document retention behavior for access logs, traces, cache metadata, and
+  upstream health probes.
+
+"Verifiably anonymized" RPC should remain research/beta until Fluxheim can
+state and test a real threat model. Candidate future designs:
+
+- blind or relay-based read queries where the public gateway cannot link the
+  external client identity to the upstream query;
+- split trust between a privacy relay and a cache/proxy node;
+- anonymous credential or token-bucket rate limiting that does not identify the
+  caller to the RPC gateway;
+- differential privacy or aggregation for high-level metrics;
+- privacy-preserving audit proofs showing that request bodies and identifying
+  headers were not logged.
+
+Fluxheim must not claim that a deployment is fully anonymous merely because it
+uses multiple upstreams or strips logs. The hard claim is: can the gateway
+operator, upstream provider, and observers link user, query, timing, and
+response? Until the answer is defensible, the feature should be documented as
+privacy-reducing or privacy-preserving, not verifiably anonymous.
 
 ## Metrics And Observability
 

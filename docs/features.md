@@ -161,7 +161,7 @@ These are documented architecture tracks, not enabled Cargo features yet:
 | Programmable media edge | [Programmable Media Edge](programmable-media-edge.md) |
 | OpenTelemetry OTLP export | [OpenTelemetry Tracing](opentelemetry-tracing.md) |
 | WASM extensibility | [WASM Extensibility](wasm-extensibility.md) |
-| Crypto RPC edge | [Crypto RPC Edge](ethereum-rpc-edge.md) |
+| Crypto RPC edge | [Crypto RPC Edge](crypto-rpc-edge.md) |
 | WAF | [WAF Architecture](waf-architecture.md) |
 | Cloudflare origin support | [Cloudflare Origin Support](cloudflare-origin-support.md) |
 | External authorization request | [External Authorization Request](auth-request.md) |
