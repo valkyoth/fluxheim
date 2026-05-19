@@ -229,7 +229,10 @@ Planned `1.3.3` php-fpm hardening:
 - php-fpm upstream load balancing and failover.
 - Retry policy for connect error, timeout, invalid header, selected statuses,
   max tries, total retry timeout, and retry-safe methods.
-- PHP-specific Prometheus/OpenTelemetry metrics.
+- PHP-specific Prometheus metrics for bounded request totals and durations.
+  Implemented as `fluxheim_php_requests_total` and
+  `fluxheim_php_request_duration_seconds`; OpenTelemetry export follows the
+  existing metrics exporter path when enabled.
 - FastCGI cache-specific convenience config.
 - FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
   predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
@@ -279,5 +282,6 @@ Per-vhost PHP routing policy may later become snapshot-safe, but only after
 path resolution, runtime handles, and request isolation are immutable per
 runtime snapshot.
 
-Operational metrics should include request totals by runtime, PHP status codes,
-runtime errors, timeouts, STDERR counts, and php-fpm connection failures.
+Operational metrics include bounded Prometheus request totals and durations for
+the PHP handler. Future follow-ups should add STDERR counts, pool saturation,
+timeouts, and php-fpm connection-failure detail.

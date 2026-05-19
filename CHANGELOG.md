@@ -44,6 +44,9 @@ behavior when the change improves security or project direction.
   configured URI prefixes such as WordPress upload directories.
 - Added `php.max_response_header_bytes` to make the php-fpm CGI response
   header cap configurable while keeping the `64KiB` default.
+- Added PHP-specific Prometheus request totals and duration histograms with
+  bounded labels through `fluxheim_php_requests_total` and
+  `fluxheim_php_request_duration_seconds`.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

@@ -906,7 +906,10 @@ Follow-up `1.3.x` PHP runtime plan:
   - FPM upstream TLS and Unix/TCP socket controls should remain explicit; Unix
     sockets keep strict path/permission validation and TCP supports DNS refresh
     when the proxy resolver work lands.
-  - PHP-specific Prometheus/OpenTelemetry metrics.
+  - PHP-specific Prometheus metrics for bounded request totals and durations.
+    Implemented as `fluxheim_php_requests_total` and
+    `fluxheim_php_request_duration_seconds`; deeper pool, timeout, and STDERR
+    counters remain planned.
   - FastCGI cache-specific convenience config on top of Fluxheim's cache
     engine.
   - FastCGI cache semantics compatible with common NGINX deployments:

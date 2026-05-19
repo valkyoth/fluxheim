@@ -6160,6 +6160,28 @@ enum PhpResolveOutcome {
 }
 
 #[cfg(feature = "php-fpm")]
+fn record_php_request_metrics(
+    vhost: &RuntimeVhost,
+    method: &str,
+    status: Option<u16>,
+    outcome: &str,
+    started_at: Instant,
+) {
+    #[cfg(feature = "metrics")]
+    crate::metrics::record_php_request(
+        vhost.name.as_str(),
+        method,
+        status,
+        outcome,
+        started_at.elapsed(),
+    );
+
+    #[cfg(not(feature = "metrics"))]
+    {
+        let _ = (vhost, method, status, outcome, started_at);
+    }
+}
+
 async fn respond_php_request(
     session: &mut Session,
     ctx: &mut RequestContext,
@@ -6179,24 +6201,31 @@ async fn respond_php_request(
         .map(|path_and_query| path_and_query.as_str().to_owned())
         .unwrap_or_else(|| request_path.clone());
     let method = session.req_header().method.as_str().to_owned();
+    let started_at = Instant::now();
     let version = session.req_header().version;
     let resolution = match resolve_php_script(php, &request_path, decline_existing_static) {
         PhpResolveOutcome::Execute(resolution) => resolution,
         PhpResolveOutcome::RedirectDirectorySlash => {
             respond_directory_slash_redirect(session, response_headers).await?;
+            record_php_request_metrics(vhost, &method, Some(308), "redirect", started_at);
             return Ok(true);
         }
-        PhpResolveOutcome::Decline => return Ok(false),
+        PhpResolveOutcome::Decline => {
+            record_php_request_metrics(vhost, &method, None, "declined", started_at);
+            return Ok(false);
+        }
         PhpResolveOutcome::Forbidden => {
             session
                 .respond_error_with_body(403, Bytes::from_static(b"forbidden"))
                 .await?;
+            record_php_request_metrics(vhost, &method, Some(403), "forbidden", started_at);
             return Ok(true);
         }
         PhpResolveOutcome::NotFound => {
             session
                 .respond_error_with_body(404, Bytes::from_static(b"not found"))
                 .await?;
+            record_php_request_metrics(vhost, &method, Some(404), "not_found", started_at);
             return Ok(true);
         }
     };
@@ -6264,7 +6293,7 @@ async fn respond_php_request(
     }
 
     let timeout = std::time::Duration::from_secs(php.config.request_timeout_secs);
-    let output = execute_php_fpm(
+    let output = match execute_php_fpm(
         php.pool.as_deref(),
         &php.config.fpm,
         params,
@@ -6272,7 +6301,17 @@ async fn respond_php_request(
         timeout,
     )
     .await
-    .map_err(|error| Error::because(ErrorType::HTTPStatus(502), "php-fpm request failed", error))?;
+    {
+        Ok(output) => output,
+        Err(error) => {
+            record_php_request_metrics(vhost, &method, Some(502), "fpm_error", started_at);
+            return Err(Error::because(
+                ErrorType::HTTPStatus(502),
+                "php-fpm request failed",
+                error,
+            ));
+        }
+    };
     if php.config.stderr_log
         && let Some(stderr) = output.stderr.as_deref()
         && !stderr.is_empty()
@@ -6283,18 +6322,21 @@ async fn respond_php_request(
         );
     }
     let stdout = output.stdout.unwrap_or_default();
-    let (mut response, body) = parse_php_response(
+    let (mut response, body) = match parse_php_response(
         &stdout,
         php.config.max_response_bytes.as_u64(),
         php.config.max_response_header_bytes.as_u64(),
-    )
-    .map_err(|error| {
-        Error::because(
-            ErrorType::HTTPStatus(502),
-            "php-fpm response was invalid",
-            error,
-        )
-    })?;
+    ) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            record_php_request_metrics(vhost, &method, Some(502), "invalid_response", started_at);
+            return Err(Error::because(
+                ErrorType::HTTPStatus(502),
+                "php-fpm response was invalid",
+                error,
+            ));
+        }
+    };
     strip_php_response_headers(&mut response, &php.config);
     if php_should_intercept_error_status(response.status, php) {
         let status = response.status.as_u16();
@@ -6306,6 +6348,7 @@ async fn respond_php_request(
         if !sent_custom_page {
             session.respond_error(status).await?;
         }
+        record_php_request_metrics(vhost, &method, Some(status), "intercepted", started_at);
         ctx.response_body_bytes_seen = 0;
         return Ok(true);
     }
@@ -6314,6 +6357,7 @@ async fn respond_php_request(
     crate::headers::apply_response_policy(&mut response, response_headers)?;
 
     let is_head = method == "HEAD";
+    let response_status = response.status.as_u16();
     ctx.response_body_bytes_seen = if is_head { 0 } else { body.len() as u64 };
     session
         .write_response_header(Box::new(response), is_head || body.is_empty())
@@ -6323,6 +6367,13 @@ async fn respond_php_request(
             .write_response_body(Some(Bytes::from(body)), true)
             .await?;
     }
+    record_php_request_metrics(
+        vhost,
+        &method,
+        Some(response_status),
+        "response",
+        started_at,
+    );
     Ok(true)
 }
 

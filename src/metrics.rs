@@ -7,6 +7,8 @@ static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static PHP_REQUEST_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
 static CACHE_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ENABLED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
@@ -54,6 +56,8 @@ pub fn init() -> Result<(), prometheus::Error> {
     host_routing_rejections_total()?;
     admin_auth_events_total()?;
     acme_events_total()?;
+    php_requests_total()?;
+    php_request_duration_seconds()?;
     cache_vhosts()?;
     cache_enabled_vhosts()?;
     cache_tiered_vhosts()?;
@@ -200,6 +204,37 @@ pub fn record_acme_event(event: &str) {
     match acme_events_total() {
         Ok(counter) => counter.with_label_values(&[acme_event_label(event)]).inc(),
         Err(error) => log::debug!("metrics ACME event counter unavailable: {error}"),
+    }
+}
+
+pub fn record_php_request(
+    vhost: &str,
+    method: &str,
+    status: Option<u16>,
+    outcome: &str,
+    duration: Duration,
+) {
+    match php_requests_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                vhost,
+                method_bucket(method),
+                php_outcome_label(outcome),
+                status_class(status),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics PHP request counter unavailable: {error}"),
+    }
+    match php_request_duration_seconds() {
+        Ok(histogram) => histogram
+            .with_label_values(&[
+                vhost,
+                method_bucket(method),
+                php_outcome_label(outcome),
+                status_class(status),
+            ])
+            .observe(duration.as_secs_f64()),
+        Err(error) => log::debug!("metrics PHP request duration unavailable: {error}"),
     }
 }
 
@@ -497,6 +532,55 @@ fn acme_events_total() -> Result<&'static IntCounterVec, prometheus::Error> {
     ACME_EVENTS_TOTAL
         .get()
         .ok_or_else(|| prometheus::Error::Msg("ACME event counter failed to initialize".to_owned()))
+}
+
+fn php_requests_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = PHP_REQUESTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_php_requests_total",
+            "Total Fluxheim PHP handler requests by virtual host, method bucket, bounded outcome, and status class.",
+        ),
+        &["vhost", "method", "outcome", "status_class"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = PHP_REQUESTS_TOTAL.set(counter);
+    PHP_REQUESTS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("PHP request counter failed to initialize".to_owned())
+    })
+}
+
+fn php_request_duration_seconds() -> Result<&'static HistogramVec, prometheus::Error> {
+    if let Some(histogram) = PHP_REQUEST_DURATION_SECONDS.get() {
+        return Ok(histogram);
+    }
+
+    let histogram = HistogramVec::new(
+        HistogramOpts::new(
+            "fluxheim_php_request_duration_seconds",
+            "Fluxheim PHP handler request duration by virtual host, method bucket, bounded outcome, and status class.",
+        )
+        .buckets(vec![0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]),
+        &["vhost", "method", "outcome", "status_class"],
+    )?;
+    match prometheus::default_registry().register(Box::new(histogram.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = PHP_REQUEST_DURATION_SECONDS.set(histogram);
+    PHP_REQUEST_DURATION_SECONDS.get().ok_or_else(|| {
+        prometheus::Error::Msg("PHP request duration histogram failed to initialize".to_owned())
+    })
 }
 
 fn cache_vhosts() -> Result<&'static IntGauge, prometheus::Error> {
@@ -1130,6 +1214,20 @@ fn cache_purger_entry_result_label(result: &str) -> &'static str {
     }
 }
 
+fn php_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "declined" => "declined",
+        "redirect" => "redirect",
+        "forbidden" => "forbidden",
+        "not_found" => "not_found",
+        "fpm_error" => "fpm_error",
+        "invalid_response" => "invalid_response",
+        "intercepted" => "intercepted",
+        "response" => "response",
+        _ => "other",
+    }
+}
+
 fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
     match outcome {
         "success" => "success",
@@ -1154,6 +1252,7 @@ fn acme_event_label(event: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::time::Duration;
 
     use prometheus::Encoder;
 
@@ -1170,7 +1269,7 @@ mod tests {
         record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
         record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
         record_cache_purger_run, record_config, record_host_routing_rejection,
-        record_metrics_otlp_export, record_proxy_outcome, status_class,
+        record_metrics_otlp_export, record_php_request, record_proxy_outcome, status_class,
     };
 
     #[test]
@@ -1192,6 +1291,43 @@ mod tests {
         assert!(output.contains(r#"class="server_error""#));
         assert!(output.contains(r#"status_class="5xx""#));
         assert!(!output.contains(r#"status="502""#));
+    }
+
+    #[test]
+    fn records_php_request_metrics_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_php_request(
+            "php-metrics-test",
+            "POST",
+            Some(502),
+            "fpm_error",
+            Duration::from_millis(25),
+        );
+        record_php_request(
+            "php-metrics-test",
+            "BREW",
+            Some(200),
+            "attacker-outcome",
+            Duration::from_millis(1),
+        );
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_php_requests_total"));
+        assert!(output.contains("fluxheim_php_request_duration_seconds"));
+        assert!(output.contains(r#"vhost="php-metrics-test""#));
+        assert!(output.contains(r#"method="POST""#));
+        assert!(output.contains(r#"outcome="fpm_error""#));
+        assert!(output.contains(r#"status_class="5xx""#));
+        assert!(output.contains(r#"method="OTHER""#));
+        assert!(output.contains(r#"outcome="other""#));
+        assert!(!output.contains("attacker-outcome"));
     }
 
     #[test]

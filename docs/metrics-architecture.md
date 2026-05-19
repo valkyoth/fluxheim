@@ -83,6 +83,8 @@ Per bucket:
 Current cache baseline:
 
 - `fluxheim_acme_events_total{event}`
+- `fluxheim_php_requests_total{vhost,method,outcome,status_class}`
+- `fluxheim_php_request_duration_seconds{vhost,method,outcome,status_class}`
 - `fluxheim_cache_vhosts`
 - `fluxheim_cache_enabled_vhosts`
 - `fluxheim_cache_tiered_vhosts`
@@ -112,6 +114,11 @@ request-collapsing policy count, and the maximum configured lock wait timeout.
 `pending`, `renewed`, `failed`, `reload_success`, `reload_failed`,
 `reload_unavailable`, `tick_error`, or `other`. It intentionally avoids domain
 names, certificate paths, challenge URLs, and issuer secrets.
+`fluxheim_php_requests_total` and `fluxheim_php_request_duration_seconds` use
+configured vhost names plus bounded method, outcome, and status-class labels.
+`outcome` is `declined`, `redirect`, `forbidden`, `not_found`, `fpm_error`,
+`invalid_response`, `intercepted`, `response`, or `other`; these metrics avoid
+raw paths, queries, script filenames, usernames, cookies, and FastCGI params.
 `fluxheim_cache_activity_total` uses only bounded labels: `tier` is `memory`,
 `disk`, `policy`, or `other`, and `event` is `hit`, `miss`, `store`,
 `store_refusal`, `eviction`, `purge`, `pass`, `bypass`, `stale`,
