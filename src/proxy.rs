@@ -7181,10 +7181,7 @@ async fn execute_php_fpm(
         ));
     }
 
-    let connect_timeout = fpm
-        .connect_timeout_secs
-        .map(Duration::from_secs)
-        .unwrap_or(timeout);
+    let connect_timeout = php_fpm_effective_connect_timeout(fpm, timeout);
     let request_timeout = php_fpm_effective_request_timeout(fpm, timeout);
     let max_retries = php_fpm_retry_attempts_for_endpoint_count(fpm, method, endpoints.len());
     let retry_deadline = php_fpm_retry_deadline(fpm.retry_timeout_secs);
@@ -7245,6 +7242,17 @@ async fn execute_php_fpm(
             Err(error) => return Err(error),
         }
     }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_effective_connect_timeout(
+    fpm: &crate::config::PhpFpmConfig,
+    request_timeout: Duration,
+) -> Duration {
+    fpm.connect_timeout_secs
+        .map(Duration::from_secs)
+        .map(|connect_timeout| connect_timeout.min(request_timeout))
+        .unwrap_or(request_timeout)
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10292,14 +10300,14 @@ mod tests {
         add_php_request_header_params, apply_php_x_accel_expires,
         create_php_request_body_spool_file, directory_slash_redirect_location,
         ignore_php_origin_cache_headers, parse_php_fpm_output, parse_php_response,
-        php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
-        php_fpm_keepalive_pools_from_config, php_fpm_path_translated, php_fpm_retry_attempts,
-        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
-        php_fpm_retryable_response, php_fpm_script_filename, php_header_param_name,
-        php_script_name_denied, php_script_name_for_request, php_should_intercept_error_status,
-        php_static_offload_file, php_stderr_matches_failure_pattern, php_stderr_metric_state,
-        php_x_accel_expires_ttl_secs, resolve_php_script, sanitized_php_stderr,
-        strip_php_response_headers,
+        php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
+        php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_keepalive_pools_from_config,
+        php_fpm_path_translated, php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count,
+        php_fpm_retryable_error, php_fpm_retryable_response, php_fpm_script_filename,
+        php_header_param_name, php_script_name_denied, php_script_name_for_request,
+        php_should_intercept_error_status, php_static_offload_file,
+        php_stderr_matches_failure_pattern, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
+        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -10922,6 +10930,30 @@ mod tests {
         assert_eq!(php_fpm_retry_attempts(&fpm, "POST"), 0);
         fpm.max_retries = 0;
         assert_eq!(php_fpm_retry_attempts(&fpm, "GET"), 0);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_effective_connect_timeout_obeys_request_timeout_cap() {
+        let mut fpm = crate::config::PhpFpmConfig::default();
+        let request_timeout = Duration::from_secs(30);
+
+        assert_eq!(
+            php_fpm_effective_connect_timeout(&fpm, request_timeout),
+            request_timeout
+        );
+
+        fpm.connect_timeout_secs = Some(5);
+        assert_eq!(
+            php_fpm_effective_connect_timeout(&fpm, request_timeout),
+            Duration::from_secs(5)
+        );
+
+        fpm.connect_timeout_secs = Some(60);
+        assert_eq!(
+            php_fpm_effective_connect_timeout(&fpm, request_timeout),
+            request_timeout
+        );
     }
 
     #[cfg(feature = "php-fpm")]

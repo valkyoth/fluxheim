@@ -93,9 +93,9 @@ behavior when the change improves security or project direction.
   selected PHP 5xx responses through `php.fpm.retry_invalid_response` and
   `php.fpm.retry_statuses`, using the same safe-method and retry-window policy.
   Retry status lists are capped at the valid 500-599 server-error range.
-- Wired `php.fpm.read_timeout_secs` and `php.fpm.write_timeout_secs` as stricter
-  caps on the buffered FastCGI request phase alongside
-  `php.request_timeout_secs`.
+- Wired `php.fpm.connect_timeout_secs`, `php.fpm.read_timeout_secs`, and
+  `php.fpm.write_timeout_secs` as stricter caps on php-fpm connect and buffered
+  FastCGI request phases alongside `php.request_timeout_secs`.
 - Added opt-in PHP request-body disk spooling with
   `php.request_body_spool_threshold_bytes` and `php.request_body_spool_dir` so
   large uploads can be replayed to php-fpm and retried without cloning the

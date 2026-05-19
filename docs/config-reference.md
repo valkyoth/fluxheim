@@ -1548,11 +1548,12 @@ to be served by `[vhosts.web]`.
 that expect safe trailing `PATH_INFO` after an explicit PHP script such as
 `/index.php/user/1`. The older `strict` spelling is accepted as an alias for
 `split`.
-`php.fpm.connect_timeout_secs` caps connecting to php-fpm. `read_timeout_secs`
-and `write_timeout_secs` currently act as stricter caps on the buffered
-FastCGI request phase; the shortest of `php.request_timeout_secs`,
-`php.fpm.read_timeout_secs`, and `php.fpm.write_timeout_secs` is used until the
-future streaming FastCGI path can enforce separate per-direction timeouts.
+`php.fpm.connect_timeout_secs` caps connecting to php-fpm and is also bounded
+by `php.request_timeout_secs`. `read_timeout_secs` and `write_timeout_secs`
+currently act as stricter caps on the buffered FastCGI request phase; the
+shortest of `php.request_timeout_secs`, `php.fpm.read_timeout_secs`, and
+`php.fpm.write_timeout_secs` is used until the future streaming FastCGI path
+can enforce separate per-direction timeouts.
 `php.pass_request_headers` controls whether safe inbound request headers are
 translated to CGI `HTTP_*` params. `php.pass_request_body` controls whether the
 HTTP request body is sent to php-fpm; when disabled, Fluxheim still drains and
