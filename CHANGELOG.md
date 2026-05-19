@@ -46,7 +46,8 @@ behavior when the change improves security or project direction.
   header cap configurable while keeping the `64KiB` default.
 - Added PHP-specific Prometheus request totals and duration histograms with
   bounded labels through `fluxheim_php_requests_total` and
-  `fluxheim_php_request_duration_seconds`.
+  `fluxheim_php_request_duration_seconds`, and
+  `fluxheim_php_stderr_events_total`.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

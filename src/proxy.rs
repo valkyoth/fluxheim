@@ -6312,14 +6312,21 @@ async fn respond_php_request(
             ));
         }
     };
-    if php.config.stderr_log
-        && let Some(stderr) = output.stderr.as_deref()
+    if let Some(stderr) = output.stderr.as_deref()
         && !stderr.is_empty()
     {
-        log::warn!(
-            "php-fpm stderr: {}",
-            sanitized_php_stderr(stderr, php.config.stderr_max_bytes.as_u64() as usize)
+        let stderr_max_bytes = php.config.stderr_max_bytes.as_u64() as usize;
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_php_stderr(
+            vhost.name.as_str(),
+            php_stderr_metric_state(stderr, stderr_max_bytes),
         );
+        if php.config.stderr_log {
+            log::warn!(
+                "php-fpm stderr: {}",
+                sanitized_php_stderr(stderr, stderr_max_bytes)
+            );
+        }
     }
     let stdout = output.stdout.unwrap_or_default();
     let (mut response, body) = match parse_php_response(
@@ -6950,7 +6957,15 @@ impl SplitFirstColon for [u8] {
     }
 }
 
-#[cfg(feature = "php-fpm")]
+#[cfg(all(feature = "php-fpm", any(feature = "metrics", test)))]
+fn php_stderr_metric_state(stderr: &[u8], max_bytes: usize) -> &'static str {
+    if stderr.len() > max_bytes {
+        "truncated"
+    } else {
+        "emitted"
+    }
+}
+
 fn sanitized_php_stderr(stderr: &[u8], max_bytes: usize) -> String {
     let max_bytes = max_bytes.max(1);
     let truncated = stderr.len() > max_bytes;
@@ -9405,8 +9420,8 @@ mod tests {
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         directory_slash_redirect_location, parse_php_response, php_fpm_path_translated,
         php_fpm_script_filename, php_header_param_name, php_script_name_denied,
-        php_script_name_for_request, php_should_intercept_error_status, resolve_php_script,
-        sanitized_php_stderr, strip_php_response_headers,
+        php_script_name_for_request, php_should_intercept_error_status, php_stderr_metric_state,
+        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9856,6 +9871,8 @@ mod tests {
     fn php_stderr_sanitizer_truncates_and_removes_controls() {
         assert_eq!(sanitized_php_stderr(b"warn\nnext", 64), "warn next");
         assert_eq!(sanitized_php_stderr(b"abcdef", 3), "abc ... <truncated>");
+        assert_eq!(php_stderr_metric_state(b"warn", 64), "emitted");
+        assert_eq!(php_stderr_metric_state(b"abcdef", 3), "truncated");
     }
 
     #[cfg(feature = "php-fpm")]

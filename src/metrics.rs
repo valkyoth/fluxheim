@@ -9,6 +9,7 @@ static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUEST_DURATION_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
+static PHP_STDERR_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static CACHE_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_ENABLED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
 static CACHE_TIERED_VHOSTS: OnceLock<IntGauge> = OnceLock::new();
@@ -58,6 +59,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     acme_events_total()?;
     php_requests_total()?;
     php_request_duration_seconds()?;
+    php_stderr_events_total()?;
     cache_vhosts()?;
     cache_enabled_vhosts()?;
     cache_tiered_vhosts()?;
@@ -235,6 +237,15 @@ pub fn record_php_request(
             ])
             .observe(duration.as_secs_f64()),
         Err(error) => log::debug!("metrics PHP request duration unavailable: {error}"),
+    }
+}
+
+pub fn record_php_stderr(vhost: &str, state: &str) {
+    match php_stderr_events_total() {
+        Ok(counter) => counter
+            .with_label_values(&[vhost, php_stderr_state_label(state)])
+            .inc(),
+        Err(error) => log::debug!("metrics PHP STDERR counter unavailable: {error}"),
     }
 }
 
@@ -581,6 +592,30 @@ fn php_request_duration_seconds() -> Result<&'static HistogramVec, prometheus::E
     PHP_REQUEST_DURATION_SECONDS.get().ok_or_else(|| {
         prometheus::Error::Msg("PHP request duration histogram failed to initialize".to_owned())
     })
+}
+
+fn php_stderr_events_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = PHP_STDERR_EVENTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_php_stderr_events_total",
+            "Total Fluxheim PHP FastCGI STDERR events by virtual host and bounded state.",
+        ),
+        &["vhost", "state"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = PHP_STDERR_EVENTS_TOTAL.set(counter);
+    PHP_STDERR_EVENTS_TOTAL
+        .get()
+        .ok_or_else(|| prometheus::Error::Msg("PHP STDERR counter failed to initialize".to_owned()))
 }
 
 fn cache_vhosts() -> Result<&'static IntGauge, prometheus::Error> {
@@ -1228,6 +1263,14 @@ fn php_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+fn php_stderr_state_label(state: &str) -> &'static str {
+    match state {
+        "emitted" => "emitted",
+        "truncated" => "truncated",
+        _ => "other",
+    }
+}
+
 fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
     match outcome {
         "success" => "success",
@@ -1269,7 +1312,8 @@ mod tests {
         record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
         record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
         record_cache_purger_run, record_config, record_host_routing_rejection,
-        record_metrics_otlp_export, record_php_request, record_proxy_outcome, status_class,
+        record_metrics_otlp_export, record_php_request, record_php_stderr, record_proxy_outcome,
+        status_class,
     };
 
     #[test]
@@ -1328,6 +1372,29 @@ mod tests {
         assert!(output.contains(r#"method="OTHER""#));
         assert!(output.contains(r#"outcome="other""#));
         assert!(!output.contains("attacker-outcome"));
+    }
+
+    #[test]
+    fn records_php_stderr_counter_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_php_stderr("php-stderr-test", "emitted");
+        record_php_stderr("php-stderr-test", "truncated");
+        record_php_stderr("php-stderr-test", "attacker-state");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_php_stderr_events_total"));
+        assert!(output.contains(r#"vhost="php-stderr-test""#));
+        assert!(output.contains(r#"state="emitted""#));
+        assert!(output.contains(r#"state="truncated""#));
+        assert!(output.contains(r#"state="other""#));
+        assert!(!output.contains("attacker-state"));
     }
 
     #[test]
