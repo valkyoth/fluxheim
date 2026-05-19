@@ -246,9 +246,10 @@ Planned `1.3.3` php-fpm hardening:
   `Expires`, and `Pragma`; hop-by-hop PHP response headers are stripped by
   default.
 - STDERR capture/truncation/severity controls and fatal-error matching.
-  Initial controls implemented as `php.stderr_log`, `php.stderr_max_bytes`,
-  and `php.stderr_failure_patterns` for marking matching STDERR output as an
-  invalid php-fpm response eligible for opt-in safe-method retry/failover.
+  Initial controls implemented as `php.stderr_log`, `php.stderr_log_level`,
+  `php.stderr_max_bytes`, and `php.stderr_failure_patterns` for marking
+  matching STDERR output as an invalid php-fpm response eligible for opt-in
+  safe-method retry/failover.
 - Initial php-fpm TCP upstream list and failover. Implemented as
   `php.fpm.tcp_upstreams` with round-robin endpoint selection and safe-method
   failover on connection failures and connect timeouts.

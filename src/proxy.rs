@@ -6474,9 +6474,9 @@ async fn respond_php_request(
             php_stderr_metric_state(stderr, stderr_max_bytes),
         );
         if php.config.stderr_log {
-            log::warn!(
-                "php-fpm stderr: {}",
-                sanitized_php_stderr(stderr, stderr_max_bytes)
+            log_php_stderr(
+                php.config.stderr_log_level,
+                &sanitized_php_stderr(stderr, stderr_max_bytes),
             );
         }
     }
@@ -7570,6 +7570,16 @@ fn php_stderr_metric_state(stderr: &[u8], max_bytes: usize) -> &'static str {
         "truncated"
     } else {
         "emitted"
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn log_php_stderr(level: crate::config::PhpStderrLogLevel, message: &str) {
+    match level {
+        crate::config::PhpStderrLogLevel::Error => log::error!("php-fpm stderr: {message}"),
+        crate::config::PhpStderrLogLevel::Warn => log::warn!("php-fpm stderr: {message}"),
+        crate::config::PhpStderrLogLevel::Info => log::info!("php-fpm stderr: {message}"),
+        crate::config::PhpStderrLogLevel::Debug => log::debug!("php-fpm stderr: {message}"),
     }
 }
 

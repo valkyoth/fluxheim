@@ -35,6 +35,8 @@ behavior when the change improves security or project direction.
   advanced FastCGI migration control.
 - Added `php.stderr_log` and `php.stderr_max_bytes` controls for bounded,
   sanitized php-fpm STDERR logging.
+- Added `php.stderr_log_level` so php-fpm STDERR can be logged as `error`,
+  `warn`, `info`, or `debug` instead of always using warning severity.
 - Added `php.stderr_failure_patterns` for opt-in literal STDERR matching that
   marks a php-fpm response invalid for safe-method retry/failover when
   `php.fpm.retry_invalid_response` is enabled.

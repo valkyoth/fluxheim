@@ -5437,6 +5437,8 @@ pub struct PhpConfig {
     pub pass_request_body: bool,
     #[serde(default = "default_true")]
     pub stderr_log: bool,
+    #[serde(default)]
+    pub stderr_log_level: PhpStderrLogLevel,
     #[serde(default = "default_php_stderr_max_bytes")]
     pub stderr_max_bytes: ByteSize,
     #[serde(default)]
@@ -5478,6 +5480,7 @@ impl Default for PhpConfig {
             pass_request_headers: true,
             pass_request_body: true,
             stderr_log: true,
+            stderr_log_level: PhpStderrLogLevel::default(),
             stderr_max_bytes: default_php_stderr_max_bytes(),
             stderr_failure_patterns: Vec::new(),
             hide_response_headers: Vec::new(),
@@ -5704,6 +5707,19 @@ pub enum PhpTryFilesMode {
     WordPress,
     #[serde(rename = "strict")]
     Strict,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PhpStderrLogLevel {
+    #[serde(rename = "error")]
+    Error,
+    #[default]
+    #[serde(rename = "warn")]
+    Warn,
+    #[serde(rename = "info")]
+    Info,
+    #[serde(rename = "debug")]
+    Debug,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -10470,6 +10486,7 @@ mod tests {
             pass_request_headers = false
             pass_request_body = false
             stderr_log = false
+            stderr_log_level = "error"
             stderr_max_bytes = "4KiB"
             stderr_failure_patterns = ["PHP Fatal error:"]
             hide_response_headers = ["x-powered-by", "x-internal"]
@@ -10532,6 +10549,7 @@ mod tests {
         assert!(!php.pass_request_headers);
         assert!(!php.pass_request_body);
         assert!(!php.stderr_log);
+        assert_eq!(php.stderr_log_level, super::PhpStderrLogLevel::Error);
         assert_eq!(php.stderr_max_bytes.as_u64(), 4 * 1024);
         assert_eq!(php.stderr_failure_patterns, ["PHP Fatal error:".to_owned()]);
         assert_eq!(

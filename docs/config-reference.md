@@ -1442,6 +1442,7 @@ request_body_spool_dir = "/var/lib/fluxheim/php-spool/example.test"
 max_response_bytes = "64MiB"
 max_response_header_bytes = "64KiB"
 stderr_log = true
+stderr_log_level = "warn"
 stderr_max_bytes = "2KiB"
 stderr_failure_patterns = ["PHP Fatal error:"]
 hide_response_headers = ["x-powered-by"]
@@ -1550,6 +1551,8 @@ HTTP request body is sent to php-fpm; when disabled, Fluxheim still drains and
 limits the downstream body but sends `CONTENT_LENGTH=0` and an empty FastCGI
 stdin.
 `php.stderr_log` controls whether FastCGI STDERR is written to Fluxheim logs.
+`php.stderr_log_level` controls the emitted log level and accepts `error`,
+`warn`, `info`, or `debug`; the default is `warn`.
 `php.stderr_max_bytes` bounds each logged STDERR message and defaults to `2KiB`;
 larger output is sanitized and marked as truncated.
 `php.stderr_failure_patterns` is a default-empty list of literal ASCII-safe
