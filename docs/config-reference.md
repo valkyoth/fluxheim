@@ -1415,6 +1415,7 @@ strip_prefix = "/app"
 max_request_body_bytes = "64MiB"
 
 [vhosts.routes.php]
+preset = "wordpress"
 enabled = true
 runtime = "php-fpm"
 root = "/srv/sites/php.example.test/public"
@@ -1512,6 +1513,10 @@ directories such as `/wp-content/uploads/` where uploaded PHP files must never
 execute. This is defense in depth on top of filesystem permissions; it blocks
 Fluxheim's PHP execution path for matching URI prefixes even if a writable
 upload directory accidentally contains a `.php` file.
+`php.preset = "wordpress"` applies PHP-side WordPress migration defaults: it
+uses the WordPress front-controller mode when `try_files` is otherwise unset and
+adds deny prefixes for common upload/file directories such as
+`/wp-content/uploads/` and `/files/`.
 `php.try_files` is a typed replacement for common `try_files` recipes:
 `front-controller` keeps the default `/index.php` fallback, `wordpress` is an
 explicit alias for WordPress-style front-controller sites, and `strict` behaves

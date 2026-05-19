@@ -868,6 +868,9 @@ Follow-up `1.3.x` PHP runtime plan:
     `index.php`.
     Implemented as `php.try_files = "front-controller"`, `"wordpress"`, or
     `"strict"`.
+    WordPress PHP-side migration defaults are also available as
+    `php.preset = "wordpress"`, which combines WordPress front-controller
+    behavior with deny prefixes for common upload/file execution paths.
   - Configurable `PATH_INFO` splitting model compatible with Caddy's `split`
     and NGINX's `fastcgi_split_path_info`, but expressed as safe typed config
     rather than arbitrary regex by default.

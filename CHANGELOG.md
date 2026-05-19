@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
   under the runtime container root.
 - Added `php.try_files` with `front-controller`, `wordpress`, and `strict`
   modes for typed PHP front-controller and `try_files $uri =404` behavior.
+- Added `php.preset = "wordpress"` to combine WordPress front-controller
+  behavior with PHP execution denial for common upload/file directories.
 - Added `php.path_info = "split"` as the clear spelling for safe explicit
   `PATH_INFO` splitting, while keeping `strict` as a compatibility alias.
 - Added canonical slash redirects for PHP directory indexes so `/dir` redirects

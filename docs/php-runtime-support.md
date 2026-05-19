@@ -215,6 +215,9 @@ Planned `1.3.3` php-fpm hardening:
   and strict `=404` PHP locations.
   Implemented as `php.try_files = "front-controller"`, `"wordpress"`, or
   `"strict"`.
+- WordPress PHP-side migration preset. Implemented as `php.preset =
+  "wordpress"` to combine WordPress front-controller behavior with deny prefixes
+  for common upload/file execution paths.
 - Configurable safe `PATH_INFO` splitting.
   Implemented as `php.path_info = "disabled"` or `"split"`; the legacy
   `"strict"` spelling remains accepted as an alias for `"split"`.

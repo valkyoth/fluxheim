@@ -155,9 +155,13 @@ impl Config {
         self.cache.apply_preset_defaults();
         for vhost in &mut self.vhosts {
             vhost.cache.apply_preset_defaults();
+            vhost.php.apply_preset_defaults();
             for route in &mut vhost.routes {
                 if let Some(cache) = &mut route.cache {
                     cache.apply_preset_defaults();
+                }
+                if let Some(php) = &mut route.php {
+                    php.apply_preset_defaults();
                 }
             }
         }
@@ -5381,9 +5385,20 @@ impl WebConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhpPreset {
+    #[default]
+    None,
+    #[serde(rename = "wordpress")]
+    WordPress,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhpConfig {
+    #[serde(default)]
+    pub preset: PhpPreset,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -5439,6 +5454,7 @@ pub struct PhpConfig {
 impl Default for PhpConfig {
     fn default() -> Self {
         Self {
+            preset: PhpPreset::default(),
             enabled: false,
             runtime: PhpRuntime::default(),
             root: None,
@@ -5469,6 +5485,30 @@ impl Default for PhpConfig {
 }
 
 impl PhpConfig {
+    fn apply_preset_defaults(&mut self) {
+        match self.preset {
+            PhpPreset::None => {}
+            PhpPreset::WordPress => self.apply_wordpress_preset_defaults(),
+        }
+    }
+
+    fn apply_wordpress_preset_defaults(&mut self) {
+        if self.try_files == PhpTryFilesMode::FrontController {
+            self.try_files = PhpTryFilesMode::WordPress;
+        }
+        extend_unique(
+            &mut self.deny_path_prefixes,
+            [
+                "/wp-content/uploads/",
+                "/wp-content/blogs.dir/",
+                "/blogs.dir/",
+                "/uploads/",
+                "/files/",
+            ]
+            .map(str::to_owned),
+        );
+    }
+
     pub fn enabled(&self) -> bool {
         self.enabled
     }
@@ -10323,6 +10363,7 @@ mod tests {
             hosts = ["php.example.test"]
 
             [vhosts.php]
+            preset = "wordpress"
             enabled = true
             runtime = "php-fpm"
             root = "{}"
@@ -10378,6 +10419,7 @@ mod tests {
 
         config.validate().unwrap();
         let php = &config.vhosts[0].php;
+        assert_eq!(php.preset, super::PhpPreset::WordPress);
         assert!(php.enabled);
         assert_eq!(php.runtime, super::PhpRuntime::PhpFpm);
         assert_eq!(php.root.as_deref(), Some(root.as_path()));
@@ -10437,6 +10479,20 @@ mod tests {
         assert_eq!(php.fpm.retry_methods, ["GET", "HEAD"]);
         assert!(php.fpm.retry_invalid_response);
         assert_eq!(php.fpm.retry_statuses, [500, 502, 503]);
+
+        let mut wordpress_php = php.clone();
+        wordpress_php.apply_preset_defaults();
+        assert_eq!(wordpress_php.try_files, super::PhpTryFilesMode::WordPress);
+        assert!(
+            wordpress_php
+                .deny_path_prefixes
+                .contains(&"/wp-content/uploads/".to_owned())
+        );
+        assert!(
+            wordpress_php
+                .deny_path_prefixes
+                .contains(&"/files/".to_owned())
+        );
     }
 
     #[test]
