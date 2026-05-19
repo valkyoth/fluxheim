@@ -1331,6 +1331,9 @@ the configured static or ACME-managed vhost certificate selected by SNI.
 Vhosts bind hostnames to per-site web, proxy, PHP-FPM, TLS, cache, and header settings.
 TOML uses `[[vhosts]]` to start a new vhost. Every `[vhosts.*]` table that
 follows belongs to that current vhost until the next `[[vhosts]]`.
+Vhost names and route names are capped at 128 bytes. These names are operator
+labels used in logs, admin responses, and metrics; use DNS-style or short
+service names rather than long descriptive strings.
 
 ```toml
 # First vhost. The tables below belong to example.test.

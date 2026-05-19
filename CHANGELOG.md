@@ -127,6 +127,8 @@ behavior when the change improves security or project direction.
   index probing remains bounded.
 - Capped `cache.key_parts` to the four supported cache-key fields before
   duplicate and required-path validation.
+- Capped configured vhost and route names at 128 bytes so log labels, admin
+  responses, and metric dimensions remain bounded.
 
 ### Changed
 

@@ -48,8 +48,10 @@ const MAX_ADMIN_HEALTH_PATH_BYTES: usize = 2048;
 const MAX_SERVER_LISTENERS: usize = 64;
 const MAX_TRUSTED_PROXIES: usize = 512;
 const MAX_VHOSTS: usize = 1024;
+const MAX_VHOST_NAME_BYTES: usize = 128;
 const MAX_VHOST_HOSTS: usize = 64;
 const MAX_VHOST_ROUTES: usize = 256;
+const MAX_ROUTE_NAME_BYTES: usize = 128;
 const MAX_TLS_CURVE_PREFERENCES: usize = 16;
 const MAX_TLS_CIPHER_SUITES: usize = 32;
 const MAX_TLS_CERTIFICATES: usize = 1024;
@@ -3226,6 +3228,12 @@ impl VhostConfig {
         if self.name.trim().is_empty() {
             return Err(ConfigError::EmptyVhostName);
         }
+        if self.name.len() > MAX_VHOST_NAME_BYTES {
+            return Err(ConfigError::InvalidConfigNameLength {
+                field: "vhosts.name",
+                max: MAX_VHOST_NAME_BYTES,
+            });
+        }
 
         if self.hosts.is_empty() {
             return Err(ConfigError::EmptyVhostHosts {
@@ -3385,6 +3393,12 @@ impl RouteConfig {
         if self.name.trim().is_empty() {
             return Err(ConfigError::EmptyRouteName {
                 vhost: vhost.to_owned(),
+            });
+        }
+        if self.name.len() > MAX_ROUTE_NAME_BYTES {
+            return Err(ConfigError::InvalidConfigNameLength {
+                field: "vhosts.routes.name",
+                max: MAX_ROUTE_NAME_BYTES,
             });
         }
 
@@ -6265,6 +6279,10 @@ pub enum ConfigError {
         field: String,
         max: usize,
     },
+    InvalidConfigNameLength {
+        field: &'static str,
+        max: usize,
+    },
     InvalidProcessSetting {
         field: &'static str,
     },
@@ -6759,6 +6777,9 @@ impl Display for ConfigError {
             ),
             Self::InvalidConfigListLength { field, max } => {
                 write!(formatter, "{field} must contain at most {max} entries")
+            }
+            Self::InvalidConfigNameLength { field, max } => {
+                write!(formatter, "{field} must be at most {max} bytes")
             }
             Self::InvalidProcessSetting { field } => {
                 write!(formatter, "{field} is outside the supported process range")
@@ -16056,6 +16077,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_oversized_vhost_name() {
+        let name = "v".repeat(super::MAX_VHOST_NAME_BYTES + 1);
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = {name:?}
+            hosts = ["gateway.example.test"]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigNameLength {
+                field: "vhosts.name",
+                max: super::MAX_VHOST_NAME_BYTES,
+            })
+        );
+    }
+
+    #[test]
     fn rejects_too_many_vhost_hosts() {
         let hosts = (0..=super::MAX_VHOST_HOSTS)
             .map(|index| format!("\"alias-{index}.example.test\""))
@@ -16108,6 +16150,34 @@ mod tests {
             Err(ConfigError::InvalidConfigListLength {
                 field: "vhost \"gateway\".routes".to_owned(),
                 max: super::MAX_VHOST_ROUTES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_oversized_route_name() {
+        let route_name = "r".repeat(super::MAX_ROUTE_NAME_BYTES + 1);
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [[vhosts.routes]]
+            name = {route_name:?}
+            path_prefix = "/assets/"
+
+            [vhosts.routes.web]
+            root = "/srv/assets"
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigNameLength {
+                field: "vhosts.routes.name",
+                max: super::MAX_ROUTE_NAME_BYTES,
             })
         );
     }
