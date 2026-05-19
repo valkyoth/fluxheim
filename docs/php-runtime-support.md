@@ -180,8 +180,9 @@ This is the compatibility-first path. Fluxheim acts as a FastCGI client:
 5. Bounded-buffer and parse FastCGI STDOUT into HTTP headers and body.
 6. Send PHP STDERR to sanitized logs and metrics.
 
-`max_response_bytes` defaults to `64MiB`. Hardened edge deployments can lower
-it per vhost or route to reduce per-request memory exposure for PHP responses.
+`max_response_bytes` defaults to `64MiB` and is capped at `1GiB`. Hardened edge
+deployments can lower it per vhost or route to reduce per-request memory
+exposure for PHP responses.
 
 Prefer Unix sockets first for local/rootless deployments. TCP support is useful
 for separate php-fpm containers, but must require explicit config.

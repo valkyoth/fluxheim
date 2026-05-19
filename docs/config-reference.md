@@ -1605,7 +1605,9 @@ When a slashless request resolves to a directory PHP index, Fluxheim returns a
 canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.
 `max_response_bytes` defaults to `64MiB`; set a smaller value on
-memory-constrained or high-assurance edge nodes. `php.fpm.keepalive` enables
+memory-constrained or high-assurance edge nodes. Because PHP responses are
+currently buffered, the configured value is capped at `1GiB`.
+`php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by
 `php.fpm.pool_max_idle`; it is off by default for conservative compatibility.
 Use either `php.fpm.socket`, `php.fpm.tcp`, or `php.fpm.tcp_upstreams`; the

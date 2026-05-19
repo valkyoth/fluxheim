@@ -60,6 +60,8 @@ behavior when the change improves security or project direction.
   capped at 16 entries with case-insensitive duplicate rejection.
 - Added `php.max_response_header_bytes` to make the php-fpm CGI response
   header cap configurable while keeping the `64KiB` default.
+- Capped configurable buffered PHP responses at `1GiB` while keeping the
+  default `php.max_response_bytes = "64MiB"`.
 - Added PHP-specific Prometheus request totals and duration histograms with
   bounded labels through `fluxheim_php_requests_total` and
   `fluxheim_php_request_duration_seconds`, and

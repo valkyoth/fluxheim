@@ -5654,6 +5654,12 @@ impl PhpConfig {
                 reason: "must be greater than zero",
             });
         }
+        if self.max_response_bytes.as_u64() > MAX_PHP_RESPONSE_CONFIG_BYTES as u64 {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.max_response_bytes",
+                reason: "must be less than or equal to 1GiB",
+            });
+        }
         if self.max_response_header_bytes.as_u64() == 0 {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.max_response_header_bytes",
@@ -5777,6 +5783,7 @@ const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
 const MAX_PHP_STDERR_FAILURE_PATTERN_BYTES: usize = 512;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
+const MAX_PHP_RESPONSE_CONFIG_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
 
 impl PhpFpmConfig {
@@ -10923,6 +10930,36 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.max_response_bytes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_excessive_php_response_limit() {
+        let root = unique_temp_path("config-php-excessive-response-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            max_response_bytes = "2GiB"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-excessive-response-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.max_response_bytes"), "{error}");
+        assert!(error.contains("less than or equal to 1GiB"), "{error}");
     }
 
     #[test]
