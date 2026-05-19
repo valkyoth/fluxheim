@@ -9327,6 +9327,22 @@ mod tests {
 
     #[cfg(feature = "php-fpm")]
     #[test]
+    fn php_path_info_split_mode_extracts_safe_trailing_segments() {
+        let mut php = php_test_runtime("proxy-php-path-info-split");
+        php.config.path_info = crate::config::PhpPathInfoMode::Split;
+
+        let (script, path_info, explicit) =
+            php_script_name_for_request(&php, "/app.php/user/1").unwrap();
+        assert_eq!(script, "/app.php");
+        assert_eq!(path_info, "/user/1");
+        assert!(explicit);
+
+        assert!(php_script_name_for_request(&php, "/app.php/../admin").is_none());
+        assert!(php_script_name_for_request(&php, "/app.php/.hidden").is_none());
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
     fn php_resolution_declines_static_assets_but_executes_directory_php_index() {
         let php = php_test_runtime("proxy-php-existing-static");
 

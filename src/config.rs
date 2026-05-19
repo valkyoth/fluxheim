@@ -5421,8 +5421,8 @@ pub enum PhpPathInfoMode {
     #[default]
     #[serde(rename = "disabled")]
     Disabled,
-    #[serde(rename = "strict")]
-    Strict,
+    #[serde(rename = "split", alias = "strict")]
+    Split,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -9938,7 +9938,7 @@ mod tests {
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
             max_response_bytes = "8MiB"
-            path_info = "disabled"
+            path_info = "split"
 
             [vhosts.php.params]
             APP_ENV = "production"
@@ -9971,6 +9971,7 @@ mod tests {
             16 * 1024 * 1024
         );
         assert_eq!(php.max_response_bytes.as_u64(), 8 * 1024 * 1024);
+        assert_eq!(php.path_info, super::PhpPathInfoMode::Split);
         assert_eq!(
             php.params.get("APP_ENV").map(String::as_str),
             Some("production")

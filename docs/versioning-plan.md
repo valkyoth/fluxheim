@@ -867,6 +867,8 @@ Follow-up `1.3.x` PHP runtime plan:
   - Configurable `PATH_INFO` splitting model compatible with Caddy's `split`
     and NGINX's `fastcgi_split_path_info`, but expressed as safe typed config
     rather than arbitrary regex by default.
+    Implemented as `php.path_info = "disabled"` or `"split"`; `"strict"` is
+    retained as a compatibility alias for `"split"`.
   - Canonical directory slash redirect when `{path}/index.php` exists and the
     app expects `/dir/` semantics.
   - `fastcgi_pass_request_headers` / `fastcgi_pass_request_body` equivalents

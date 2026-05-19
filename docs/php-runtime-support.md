@@ -73,6 +73,7 @@ allowed_extensions = ["php"]
 request_timeout_secs = 30
 max_request_body_bytes = "16MiB"
 max_response_bytes = "64MiB"
+# Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
 [vhosts.php.fpm]
@@ -112,8 +113,8 @@ eligible:
   downstream connection state.
 - Set `REDIRECT_STATUS=200` for php-fpm compatibility with common PHP
   hardening defaults.
-- Treat `PATH_INFO` as disabled by default; enable only with strict path split
-  rules.
+- Treat `PATH_INFO` as disabled by default; enable `path_info = "split"` only
+  when the application expects safe trailing segments after `script.php`.
 - Allow administrator-controlled custom FastCGI params only after validating
   names and values, and never let them override Fluxheim-managed CGI params
   such as `SCRIPT_FILENAME`, `CONTENT_LENGTH`, `HTTPS`, or `HTTP_PROXY`.
@@ -173,6 +174,8 @@ Planned `1.3.3` php-fpm hardening:
   Implemented as `php.try_files = "front-controller"`, `"wordpress"`, or
   `"strict"`.
 - Configurable safe `PATH_INFO` splitting.
+  Implemented as `php.path_info = "disabled"` or `"split"`; the legacy
+  `"strict"` spelling remains accepted as an alias for `"split"`.
 - Canonical directory slash redirects for directory index PHP apps.
 - Explicit request header/body pass-through switches for advanced migrations.
 - `X-Accel-Redirect` / `X-Sendfile` support.

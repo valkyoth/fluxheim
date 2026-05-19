@@ -1418,6 +1418,7 @@ try_files = "wordpress"
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
 max_response_bytes = "64MiB"
+# Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
 
 [vhosts.routes.php.params]
@@ -1463,6 +1464,10 @@ filesystem roots while Fluxheim still checks scripts under `php.root`.
 explicit alias for WordPress-style front-controller sites, and `strict` behaves
 like `try_files $uri =404` for PHP execution while still allowing static files
 to be served by `[vhosts.web]`.
+`php.path_info` defaults to `disabled`; set it to `split` only for applications
+that expect safe trailing `PATH_INFO` after an explicit PHP script such as
+`/index.php/user/1`. The older `strict` spelling is accepted as an alias for
+`split`.
 `max_response_bytes` defaults to `64MiB`; set a smaller value on
 memory-constrained or high-assurance edge nodes. `php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by

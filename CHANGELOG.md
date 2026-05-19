@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
   under the runtime container root.
 - Added `php.try_files` with `front-controller`, `wordpress`, and `strict`
   modes for typed PHP front-controller and `try_files $uri =404` behavior.
+- Added `php.path_info = "split"` as the clear spelling for safe explicit
+  `PATH_INFO` splitting, while keeping `strict` as a compatibility alias.
 
 ## 1.3.2 - ACME Operations And Config Tester
 
