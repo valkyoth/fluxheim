@@ -1465,6 +1465,9 @@ PHP_VALUE = "memory_limit=256M"
 tcp = "php-fpm:9000"
 # Or list multiple TCP endpoints for simple safe-method failover:
 # tcp_upstreams = ["php-fpm-a:9000", "php-fpm-b:9000"]
+connect_timeout_secs = 5
+read_timeout_secs = 30
+write_timeout_secs = 30
 keepalive = true
 pool_max_idle = 8
 idle_timeout_secs = 60
@@ -1535,6 +1538,11 @@ to be served by `[vhosts.web]`.
 that expect safe trailing `PATH_INFO` after an explicit PHP script such as
 `/index.php/user/1`. The older `strict` spelling is accepted as an alias for
 `split`.
+`php.fpm.connect_timeout_secs` caps connecting to php-fpm. `read_timeout_secs`
+and `write_timeout_secs` currently act as stricter caps on the buffered
+FastCGI request phase; the shortest of `php.request_timeout_secs`,
+`php.fpm.read_timeout_secs`, and `php.fpm.write_timeout_secs` is used until the
+future streaming FastCGI path can enforce separate per-direction timeouts.
 `php.pass_request_headers` controls whether safe inbound request headers are
 translated to CGI `HTTP_*` params. `php.pass_request_body` controls whether the
 HTTP request body is sent to php-fpm; when disabled, Fluxheim still drains and

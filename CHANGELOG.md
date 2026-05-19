@@ -77,6 +77,9 @@ behavior when the change improves security or project direction.
 - Added opt-in php-fpm retry controls for malformed FastCGI responses and
   selected PHP 5xx responses through `php.fpm.retry_invalid_response` and
   `php.fpm.retry_statuses`, using the same safe-method and retry-window policy.
+- Wired `php.fpm.read_timeout_secs` and `php.fpm.write_timeout_secs` as stricter
+  caps on the buffered FastCGI request phase alongside
+  `php.request_timeout_secs`.
 - Added opt-in PHP request-body disk spooling with
   `php.request_body_spool_threshold_bytes` and `php.request_body_spool_dir` so
   large uploads can be replayed to php-fpm and retried without cloning the
