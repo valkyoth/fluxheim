@@ -3854,12 +3854,12 @@ impl ProxyHttp for FluxProxy {
                 }
                 RuntimeRouteAction::Proxy(_) => {
                     if !selected_runtime_proxy(vhost, ctx).enabled {
-                        session
-                            .respond_error_with_body(
-                                502,
-                                Bytes::from_static(b"proxy upstream not configured"),
-                            )
-                            .await?;
+                        respond_text_error(
+                            session,
+                            502,
+                            Bytes::from_static(b"proxy upstream not configured"),
+                        )
+                        .await?;
                         return Ok(true);
                     }
                     #[cfg(feature = "cache")]
@@ -3975,12 +3975,12 @@ impl ProxyHttp for FluxProxy {
                         },
                     );
                     if plan.response_body_bytes > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
-                        session
-                            .respond_error_with_body(
-                                413,
-                                Bytes::from_static(b"static response too large"),
-                            )
-                            .await?;
+                        respond_text_error(
+                            session,
+                            413,
+                            Bytes::from_static(b"static response too large"),
+                        )
+                        .await?;
                         return Ok(true);
                     }
                     let static_request = StaticServeRequest {
@@ -4007,9 +4007,7 @@ impl ProxyHttp for FluxProxy {
                     Ok(true)
                 }
                 Ok(ResolveResult::Forbidden) => {
-                    session
-                        .respond_error_with_body(403, Bytes::from_static(b"forbidden"))
-                        .await?;
+                    respond_text_error(session, 403, Bytes::from_static(b"forbidden")).await?;
                     Ok(true)
                 }
                 Ok(ResolveResult::NotFound) => {
@@ -4025,8 +4023,7 @@ impl ProxyHttp for FluxProxy {
                 }
                 Err(error) => {
                     log::error!("static file resolver failed: {error}");
-                    session
-                        .respond_error_with_body(500, Bytes::from_static(b"internal server error"))
+                    respond_text_error(session, 500, Bytes::from_static(b"internal server error"))
                         .await?;
                     Ok(true)
                 }
@@ -4143,6 +4140,7 @@ impl ProxyHttp for FluxProxy {
             request_id,
         )?;
         normalize_cookie_headers(upstream_request)?;
+        append_fluxheim_via_to_request(upstream_request)?;
 
         #[cfg(feature = "cache")]
         if let Some(range) = ctx.cache_range {
@@ -4433,7 +4431,8 @@ impl ProxyHttp for FluxProxy {
             effective_cache_phase(session, ctx),
         )?;
         let response_headers = selected_response_headers(vhost, ctx);
-        crate::headers::apply_response_policy(response, response_headers)
+        crate::headers::apply_response_policy(response, response_headers)?;
+        append_fluxheim_via_to_response(response)
     }
 
     fn response_body_filter(
@@ -6281,9 +6280,28 @@ async fn respond_host_routing_rejection(
     );
     #[cfg(feature = "metrics")]
     crate::metrics::record_host_routing_rejection(reason.as_str());
+    respond_text_error(
+        session,
+        reason.status(),
+        Bytes::from_static(reason.response_body()),
+    )
+    .await
+}
+
+async fn respond_text_error(session: &mut Session, status: u16, body: Bytes) -> Result<()> {
+    let mut response = ResponseHeader::build(status, Some(4))?;
+    response.insert_header("content-type", "text/plain; charset=utf-8")?;
+    response.insert_header("cache-control", "no-store")?;
+    response.insert_header("content-length", body.len().to_string())?;
+    let send_body = !body.is_empty() && session.req_header().method.as_str() != "HEAD";
     session
-        .respond_error_with_body(reason.status(), Bytes::from_static(reason.response_body()))
-        .await
+        .write_response_header(Box::new(response), !send_body)
+        .await?;
+    if send_body {
+        session.write_response_body(Some(body), true).await
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "php-fpm")]
@@ -6392,16 +6410,12 @@ async fn respond_php_request(
             return Ok(false);
         }
         PhpResolveOutcome::Forbidden => {
-            session
-                .respond_error_with_body(403, Bytes::from_static(b"forbidden"))
-                .await?;
+            respond_text_error(session, 403, Bytes::from_static(b"forbidden")).await?;
             record_php_request_metrics(ctx, vhost, &method, Some(403), "forbidden", started_at);
             return Ok(true);
         }
         PhpResolveOutcome::NotFound => {
-            session
-                .respond_error_with_body(404, Bytes::from_static(b"not found"))
-                .await?;
+            respond_text_error(session, 404, Bytes::from_static(b"not found")).await?;
             record_php_request_metrics(ctx, vhost, &method, Some(404), "not_found", started_at);
             return Ok(true);
         }
@@ -6675,12 +6689,12 @@ async fn respond_php_static_offload(
         },
     );
     if plan.response_body_bytes > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
-        session
-            .respond_error_with_body(
-                413,
-                Bytes::from_static(b"static offload response too large"),
-            )
-            .await?;
+        respond_text_error(
+            session,
+            413,
+            Bytes::from_static(b"static offload response too large"),
+        )
+        .await?;
         ctx.response_body_bytes_seen = 0;
         return Ok(413);
     }
@@ -6748,9 +6762,7 @@ async fn respond_directory_slash_redirect(
     response_headers: &crate::config::ResponseHeaderPolicyConfig,
 ) -> Result<()> {
     let Some(location) = directory_slash_redirect_location(session.req_header()) else {
-        session
-            .respond_error_with_body(400, Bytes::from_static(b"invalid redirect target"))
-            .await?;
+        respond_text_error(session, 400, Bytes::from_static(b"invalid redirect target")).await?;
         return Ok(());
     };
     let mut response = ResponseHeader::build(308, Some(4))?;
@@ -7875,9 +7887,12 @@ async fn serve_static_route(
                 },
             );
             if plan.response_body_bytes > crate::web::MAX_STATIC_BUFFERED_BODY_BYTES {
-                session
-                    .respond_error_with_body(413, Bytes::from_static(b"static response too large"))
-                    .await?;
+                respond_text_error(
+                    session,
+                    413,
+                    Bytes::from_static(b"static response too large"),
+                )
+                .await?;
                 return Ok(true);
             }
             let static_request = StaticServeRequest {
@@ -7904,17 +7919,13 @@ async fn serve_static_route(
             Ok(true)
         }
         Ok(ResolveResult::Forbidden) => {
-            session
-                .respond_error_with_body(403, Bytes::from_static(b"forbidden"))
-                .await?;
+            respond_text_error(session, 403, Bytes::from_static(b"forbidden")).await?;
             Ok(true)
         }
         Ok(ResolveResult::NotFound) => Ok(false),
         Err(error) => {
             log::error!("static route resolver failed: {error}");
-            session
-                .respond_error_with_body(500, Bytes::from_static(b"internal server error"))
-                .await?;
+            respond_text_error(session, 500, Bytes::from_static(b"internal server error")).await?;
             Ok(true)
         }
     }
@@ -9312,7 +9323,7 @@ async fn respond_acme_http_01_challenge(
 ) -> Result<()> {
     let method = session.req_header().method.as_str();
     if method != "GET" && method != "HEAD" {
-        session.respond_error(405).await?;
+        respond_method_not_allowed(session, &route.response_headers, "GET, HEAD").await?;
         return Ok(());
     }
 
@@ -9329,9 +9340,7 @@ async fn respond_acme_http_01_challenge(
         }
         Err(error) => {
             log::error!("failed to load ACME HTTP-01 challenge token: {error}");
-            session
-                .respond_error_with_body(500, Bytes::from_static(b"internal server error"))
-                .await?;
+            respond_text_error(session, 500, Bytes::from_static(b"internal server error")).await?;
             return Ok(());
         }
     };
@@ -9358,6 +9367,55 @@ async fn respond_acme_http_01_challenge(
     }
 
     Ok(())
+}
+
+#[cfg(feature = "acme")]
+async fn respond_method_not_allowed(
+    session: &mut Session,
+    response_policy: &crate::config::ResponseHeaderPolicyConfig,
+    allow: &str,
+) -> Result<()> {
+    let mut response = ResponseHeader::build(405, Some(4))?;
+    response.insert_header("allow", allow)?;
+    response.insert_header("content-length", "0")?;
+    crate::headers::apply_response_policy(&mut response, response_policy)?;
+    session
+        .write_response_header(Box::new(response), true)
+        .await
+}
+
+const FLUXHEIM_VIA_VALUE: &str = "1.1 fluxheim";
+
+fn append_fluxheim_via_value(existing: &str) -> String {
+    if existing.trim().is_empty() {
+        FLUXHEIM_VIA_VALUE.to_owned()
+    } else {
+        format!("{}, {}", existing.trim(), FLUXHEIM_VIA_VALUE)
+    }
+}
+
+fn append_fluxheim_via_to_request(request: &mut RequestHeader) -> Result<()> {
+    let existing = request
+        .headers
+        .get_all("via")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>()
+        .join(", ");
+    request.remove_header("via");
+    request.insert_header("via", append_fluxheim_via_value(&existing))
+}
+
+fn append_fluxheim_via_to_response(response: &mut ResponseHeader) -> Result<()> {
+    let existing = response
+        .headers
+        .get_all("via")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>()
+        .join(", ");
+    response.remove_header("via");
+    response.insert_header("via", append_fluxheim_via_value(&existing))
 }
 
 fn proxy_error_status(error: &Error) -> u16 {
@@ -9433,9 +9491,7 @@ async fn respond_route_redirect(
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
 ) -> Result<()> {
     let Some(location) = route_redirect_location(session.req_header(), redirect) else {
-        session
-            .respond_error_with_body(400, Bytes::from_static(b"invalid redirect target"))
-            .await?;
+        respond_text_error(session, 400, Bytes::from_static(b"invalid redirect target")).await?;
         return Ok(());
     };
 
@@ -9454,9 +9510,7 @@ async fn respond_https_redirect(
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
 ) -> Result<()> {
     let Some(location) = https_redirect_location(session.req_header(), config) else {
-        session
-            .respond_error_with_body(400, Bytes::from_static(b"missing or invalid host"))
-            .await?;
+        respond_text_error(session, 400, Bytes::from_static(b"missing or invalid host")).await?;
         return Ok(());
     };
 
@@ -10339,12 +10393,8 @@ fn request_body_limit_status(limit_bytes: u64, request: &RequestHeader) -> Optio
         Err(status) => return Some(status),
     };
 
-    if has_non_identity_transfer_encoding(request) {
-        return if content_length.is_some() {
-            Some(400)
-        } else {
-            Some(411)
-        };
+    if has_non_identity_transfer_encoding(request) && content_length.is_some() {
+        return Some(400);
     }
 
     if content_length.is_some_and(|bytes| bytes > limit_bytes) {
@@ -10459,7 +10509,8 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, HostRoutingRejectReason, approximate_request_header_bytes,
+        FluxProxy, HostRoutingRejectReason, append_fluxheim_via_to_request,
+        append_fluxheim_via_to_response, approximate_request_header_bytes,
         count_response_body_chunk, http_peer_for_proxy, https_redirect_location,
         normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
@@ -14419,7 +14470,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_chunked_body_without_content_length() {
+    fn accepts_chunked_body_without_content_length() {
         let limits = ServerLimitsConfig {
             max_request_header_bytes: ByteSize::from_bytes(512),
             max_uri_bytes: ByteSize::from_bytes(128),
@@ -14431,7 +14482,7 @@ mod tests {
             .insert_header("transfer-encoding", "chunked")
             .unwrap();
 
-        assert_eq!(request_limit_status(&limits, None, &request), Some(411));
+        assert_eq!(request_limit_status(&limits, None, &request), None);
     }
 
     #[cfg(feature = "cache")]
@@ -16064,6 +16115,36 @@ mod tests {
         assert_eq!(
             super::request_header_values_joined(&request, "missing").as_deref(),
             None
+        );
+    }
+
+    #[test]
+    fn appends_fluxheim_via_to_forwarded_request_and_response() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        request.append_header("via", "1.0 edge").unwrap();
+        request.append_header("via", "1.1 cache").unwrap();
+
+        append_fluxheim_via_to_request(&mut request).unwrap();
+
+        assert_eq!(
+            request
+                .headers
+                .get("via")
+                .and_then(|value| value.to_str().ok()),
+            Some("1.0 edge, 1.1 cache, 1.1 fluxheim")
+        );
+
+        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        response.insert_header("via", "1.0 origin-proxy").unwrap();
+
+        append_fluxheim_via_to_response(&mut response).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get("via")
+                .and_then(|value| value.to_str().ok()),
+            Some("1.0 origin-proxy, 1.1 fluxheim")
         );
     }
 

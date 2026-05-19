@@ -138,6 +138,7 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Added RFC 9110 hardening for proxy and static responses: ACME HTTP-01 405 responses now include `Allow`, proxied requests and responses append Fluxheim `Via`, chunked requests without `Content-Length` are accepted for streaming body limits, satisfiable multi-range static requests are served as full responses, and Fluxheim-generated text error bodies include `Content-Type`.
 - Admin authentication throttling now fails closed with a global lockout when
   the per-source table is full instead of evicting tracked source state.
 

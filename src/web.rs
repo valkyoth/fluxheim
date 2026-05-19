@@ -544,7 +544,7 @@ pub fn plan_static_response(
 
     if let Some(range) = range {
         return match parse_single_byte_range(range, file.len) {
-            Some((start, len)) => StaticResponsePlan {
+            ByteRangeParse::Single { start, len } => StaticResponsePlan {
                 status: 206,
                 body: response_body(method, StaticResponseBody::Range { start, len }),
                 content_length: Some(len),
@@ -556,7 +556,7 @@ pub fn plan_static_response(
                 etag,
                 response_body_bytes: response_bytes(method, len),
             },
-            None => StaticResponsePlan {
+            ByteRangeParse::Unsatisfiable => StaticResponsePlan {
                 status: 416,
                 body: StaticResponseBody::None,
                 content_length: Some(0),
@@ -564,9 +564,14 @@ pub fn plan_static_response(
                 etag,
                 response_body_bytes: 0,
             },
+            ByteRangeParse::Ignore => full_static_response_plan(file, method, etag),
         };
     }
 
+    full_static_response_plan(file, method, etag)
+}
+
+fn full_static_response_plan(file: &StaticFile, method: &str, etag: String) -> StaticResponsePlan {
     StaticResponsePlan {
         status: 200,
         body: response_body(method, StaticResponseBody::Full),
@@ -916,39 +921,66 @@ fn unmodified_since_fails(modified: Option<SystemTime>, if_unmodified_since: Opt
     modified_seconds > requested_seconds
 }
 
-fn parse_single_byte_range(range: &str, file_len: u64) -> Option<(u64, u64)> {
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ByteRangeParse {
+    Single { start: u64, len: u64 },
+    Unsatisfiable,
+    Ignore,
+}
+
+fn parse_single_byte_range(range: &str, file_len: u64) -> ByteRangeParse {
     let range = range.trim();
-    let range = range.strip_prefix("bytes=")?;
-    if range.contains(',') || file_len == 0 {
-        return None;
+    let Some(range) = range.strip_prefix("bytes=") else {
+        return ByteRangeParse::Unsatisfiable;
+    };
+    if range.contains(',') {
+        return ByteRangeParse::Ignore;
+    }
+    if file_len == 0 {
+        return ByteRangeParse::Unsatisfiable;
     }
 
-    let (start, end) = range.split_once('-')?;
+    let Some((start, end)) = range.split_once('-') else {
+        return ByteRangeParse::Unsatisfiable;
+    };
     if start.is_empty() {
-        let suffix_len = end.parse::<u64>().ok()?;
+        let Ok(suffix_len) = end.parse::<u64>() else {
+            return ByteRangeParse::Unsatisfiable;
+        };
         if suffix_len == 0 {
-            return None;
+            return ByteRangeParse::Unsatisfiable;
         }
         let len = suffix_len.min(file_len);
-        return Some((file_len - len, len));
+        return ByteRangeParse::Single {
+            start: file_len - len,
+            len,
+        };
     }
 
-    let start = start.parse::<u64>().ok()?;
+    let Ok(start) = start.parse::<u64>() else {
+        return ByteRangeParse::Unsatisfiable;
+    };
     if start >= file_len {
-        return None;
+        return ByteRangeParse::Unsatisfiable;
     }
 
     let end = if end.is_empty() {
         file_len - 1
     } else {
-        end.parse::<u64>().ok()?.min(file_len - 1)
+        match end.parse::<u64>() {
+            Ok(end) => end.min(file_len - 1),
+            Err(_) => return ByteRangeParse::Unsatisfiable,
+        }
     };
 
     if end < start {
-        return None;
+        return ByteRangeParse::Unsatisfiable;
     }
 
-    Some((start, end - start + 1))
+    ByteRangeParse::Single {
+        start,
+        len: end - start + 1,
+    }
 }
 
 fn if_range_allows_range(modified: Option<SystemTime>, etag: &str, if_range: Option<&str>) -> bool {
@@ -1085,8 +1117,8 @@ mod tests {
     #[cfg(feature = "proxy")]
     use super::StaticCacheHeaders;
     use super::{
-        ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions, StaticResponseBody,
-        parse_single_byte_range, plan_static_response,
+        ByteRangeParse, ResolveResult, StaticFile, StaticFileServer, StaticRequestConditions,
+        StaticResponseBody, parse_single_byte_range, plan_static_response,
     };
 
     #[test]
@@ -1572,10 +1604,22 @@ mod tests {
 
     #[test]
     fn rejects_invalid_static_ranges() {
-        assert_eq!(parse_single_byte_range("bytes=100-200", 100), None);
-        assert_eq!(parse_single_byte_range("bytes=20-10", 100), None);
-        assert_eq!(parse_single_byte_range("bytes=0-1,4-5", 100), None);
-        assert_eq!(parse_single_byte_range("items=0-1", 100), None);
+        assert_eq!(
+            parse_single_byte_range("bytes=100-200", 100),
+            ByteRangeParse::Unsatisfiable
+        );
+        assert_eq!(
+            parse_single_byte_range("bytes=20-10", 100),
+            ByteRangeParse::Unsatisfiable
+        );
+        assert_eq!(
+            parse_single_byte_range("bytes=0-1,4-5", 100),
+            ByteRangeParse::Ignore
+        );
+        assert_eq!(
+            parse_single_byte_range("items=0-1", 100),
+            ByteRangeParse::Unsatisfiable
+        );
 
         let file = static_file(100, None);
         let plan = plan_static_response(
@@ -1590,6 +1634,23 @@ mod tests {
         assert_eq!(plan.content_length, Some(0));
         assert_eq!(plan.content_range.as_deref(), Some("bytes */100"));
         assert_eq!(plan.response_body_bytes, 0);
+    }
+
+    #[test]
+    fn ignores_satisfiable_multi_range_requests() {
+        let file = static_file(100, None);
+        let plan = plan_static_response(
+            &file,
+            "GET",
+            StaticRequestConditions {
+                range: Some("bytes=0-1,4-5"),
+                ..StaticRequestConditions::default()
+            },
+        );
+        assert_eq!(plan.status, 200);
+        assert_eq!(plan.body, StaticResponseBody::Full);
+        assert_eq!(plan.content_length, Some(100));
+        assert_eq!(plan.content_range, None);
     }
 
     #[test]
