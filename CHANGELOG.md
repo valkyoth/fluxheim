@@ -52,7 +52,7 @@ behavior when the change improves security or project direction.
   responses with Fluxheim-generated errors.
 - Added `[[vhosts.php.error_pages]]` and route-level PHP error pages for
   serving internal static fallback pages when selected PHP statuses are
-  intercepted.
+  intercepted. PHP error-page lists are capped at 64 entries.
 - Added `php.deny_path_prefixes` to block php-fpm script execution under
   configured URI prefixes such as WordPress upload directories. PHP execution
   deny prefixes are capped at 128 entries, and `php.allowed_extensions` is

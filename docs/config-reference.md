@@ -1597,7 +1597,8 @@ internal static fallback pages for selected PHP statuses. A configured error
 page also intercepts that status; if the static page cannot be served, Fluxheim
 falls back to its generated error response. Use this for NGINX-style
 `fastcgi_intercept_errors` migrations where PHP 502/503/504 responses should
-never expose backend details.
+never expose backend details. PHP error-page lists are capped at 64 entries and
+cannot contain duplicate statuses.
 When a slashless request resolves to a directory PHP index, Fluxheim returns a
 canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.

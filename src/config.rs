@@ -5758,6 +5758,7 @@ const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
 const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
 const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
+const MAX_PHP_ERROR_PAGES: usize = 64;
 const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
 const MAX_PHP_PARAMS: usize = 128;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
@@ -8123,6 +8124,12 @@ fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigE
 }
 
 fn validate_php_error_pages(error_pages: &[ProxyErrorPageConfig]) -> Result<(), ConfigError> {
+    if error_pages.len() > MAX_PHP_ERROR_PAGES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.error_pages",
+            reason: "at most 64 error pages are allowed",
+        });
+    }
     let mut seen = BTreeSet::new();
     for error_page in error_pages {
         if !(400..=599).contains(&error_page.status) {
@@ -11107,6 +11114,56 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.error_pages.status"), "{error}");
+    }
+
+    #[test]
+    fn rejects_too_many_php_error_pages() {
+        let root = unique_temp_path("config-php-many-error-pages-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let error_pages = (0..=super::MAX_PHP_ERROR_PAGES)
+            .map(|index| {
+                format!(
+                    r#"
+            [[vhosts.php.error_pages]]
+            status = {}
+            path = "/{}.html"
+
+            [vhosts.php.error_pages.web]
+            root = "{}"
+                    "#,
+                    400 + index,
+                    400 + index,
+                    root.display()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            {}
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-many-error-pages-process"),
+            root.display(),
+            error_pages,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.error_pages"), "{error}");
+        assert!(error.contains("at most 64 error pages"), "{error}");
     }
 
     #[test]
