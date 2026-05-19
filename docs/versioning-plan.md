@@ -922,6 +922,7 @@ Follow-up `1.3.x` PHP runtime plan:
     sockets keep strict path/permission validation and TCP supports DNS refresh
     when the proxy resolver work lands.
   - PHP-specific Prometheus metrics for bounded request totals and durations.
+    Multi-upstream keepalive pools use stable indexed pool labels.
     Implemented as `fluxheim_php_requests_total` and
     `fluxheim_php_request_duration_seconds`,
     `fluxheim_php_stderr_events_total`,

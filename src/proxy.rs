@@ -2980,17 +2980,27 @@ fn php_fpm_keepalive_pools_from_config(
     if !config.keepalive {
         return Vec::new();
     }
-    php_fpm_endpoints_from_config(config)
-        .into_iter()
-        .map(|endpoint| {
-            Arc::new(PhpFpmPool::from_endpoint(
-                endpoint,
-                config,
-                metric_vhost,
-                metric_pool,
-            ))
-        })
-        .collect()
+    {
+        let endpoints = php_fpm_endpoints_from_config(config);
+        let multiple_endpoints = endpoints.len() > 1;
+        endpoints
+            .into_iter()
+            .enumerate()
+            .map(|(index, endpoint)| {
+                let pool_label = if multiple_endpoints {
+                    format!("{metric_pool}-{index}")
+                } else {
+                    metric_pool.to_owned()
+                };
+                Arc::new(PhpFpmPool::from_endpoint(
+                    endpoint,
+                    config,
+                    metric_vhost,
+                    &pool_label,
+                ))
+            })
+            .collect()
+    }
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9994,8 +10004,8 @@ mod tests {
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         apply_php_x_accel_expires, directory_slash_redirect_location,
         ignore_php_origin_cache_headers, parse_php_response, php_fpm_endpoints_from_config,
-        php_fpm_error_outcome, php_fpm_path_translated, php_fpm_retry_attempts,
-        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
+        php_fpm_error_outcome, php_fpm_keepalive_pools_from_config, php_fpm_path_translated,
+        php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
         php_fpm_script_filename, php_header_param_name, php_script_name_denied,
         php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
         php_stderr_metric_state, php_x_accel_expires_ttl_secs, resolve_php_script,
@@ -10514,6 +10524,22 @@ mod tests {
                 super::PhpFpmEndpoint::Tcp("127.0.0.1:9001".to_owned()),
             ]
         );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_keepalive_pool_labels_are_distinct_for_tcp_upstreams() {
+        let fpm = crate::config::PhpFpmConfig {
+            tcp_upstreams: vec!["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()],
+            keepalive: true,
+            ..crate::config::PhpFpmConfig::default()
+        };
+
+        let pools = php_fpm_keepalive_pools_from_config(&fpm, "vhost", "default");
+
+        assert_eq!(pools.len(), 2);
+        assert_eq!(pools[0].metric_pool, "default-0");
+        assert_eq!(pools[1].metric_pool, "default-1");
     }
 
     #[cfg(feature = "php-fpm")]

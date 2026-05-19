@@ -50,7 +50,8 @@ behavior when the change improves security or project direction.
   `fluxheim_php_stderr_events_total`, and retry-attempt counts through
   `fluxheim_php_fpm_retries_total`, plus pool visibility through
   `fluxheim_php_fpm_pool_idle_connections` and
-  `fluxheim_php_fpm_pool_events_total`. Added low-cardinality OTLP trace
+  `fluxheim_php_fpm_pool_events_total`; multi-upstream keepalive pools use
+  stable indexed pool labels. Added low-cardinality OTLP trace
   attributes for PHP runtime and PHP outcome so Jaeger can distinguish PHP
   handling without script-path labels. PHP request outcomes now distinguish
   connect timeouts, request timeouts, connection errors, configuration errors,
