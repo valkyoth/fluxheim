@@ -120,6 +120,9 @@ behavior when the change improves security or project direction.
 - Capped listener lists, trusted proxy lists, total vhosts, vhost host aliases,
   and per-vhost route counts so config validation and reload planning stay
   bounded.
+- Capped TLS policy allow-lists, global static certificate lists, ACME issuer
+  lists, and explicit vhost ACME domain lists so certificate planning remains
+  bounded.
 
 ### Changed
 

@@ -50,6 +50,11 @@ const MAX_TRUSTED_PROXIES: usize = 512;
 const MAX_VHOSTS: usize = 1024;
 const MAX_VHOST_HOSTS: usize = 64;
 const MAX_VHOST_ROUTES: usize = 256;
+const MAX_TLS_CURVE_PREFERENCES: usize = 16;
+const MAX_TLS_CIPHER_SUITES: usize = 32;
+const MAX_TLS_CERTIFICATES: usize = 1024;
+const MAX_ACME_ISSUERS: usize = 128;
+const MAX_VHOST_ACME_DOMAINS: usize = 64;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -2248,6 +2253,22 @@ impl TlsConfig {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
+        validate_config_list_len(
+            "tls.curve_preferences",
+            self.curve_preferences.len(),
+            MAX_TLS_CURVE_PREFERENCES,
+        )?;
+        validate_config_list_len(
+            "tls.cipher_suites",
+            self.cipher_suites.len(),
+            MAX_TLS_CIPHER_SUITES,
+        )?;
+        validate_config_list_len(
+            "tls.certificates",
+            self.certificates.len(),
+            MAX_TLS_CERTIFICATES,
+        )?;
+
         let effective_min_protocol = self.effective_min_protocol();
         if self.profile == TlsPolicyProfile::Modern
             && effective_min_protocol != TlsProtocolVersion::Tls13
@@ -2599,6 +2620,8 @@ impl AcmeConfig {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
+        validate_config_list_len("tls.acme.issuers", self.issuers.len(), MAX_ACME_ISSUERS)?;
+
         if self.enabled {
             let Some(storage) = &self.storage else {
                 return Err(ConfigError::MissingAcmeStorage);
@@ -3682,6 +3705,11 @@ impl VhostAcmeConfig {
                 .filter(|host| !host.starts_with("*."))
                 .collect()
         } else {
+            validate_config_list_len(
+                format!("{scope}.acme.domains"),
+                self.domains.len(),
+                MAX_VHOST_ACME_DOMAINS,
+            )?;
             self.domains.iter().map(String::as_str).collect()
         };
 
@@ -10577,6 +10605,145 @@ mod tests {
             ]
         );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_too_many_tls_curve_preferences() {
+        let curve_preferences = (0..=super::MAX_TLS_CURVE_PREFERENCES)
+            .map(|_| "\"X25519\"")
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            curve_preferences = [{curve_preferences}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "tls.curve_preferences".to_owned(),
+                max: super::MAX_TLS_CURVE_PREFERENCES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_tls_cipher_suites() {
+        let cipher_suites = (0..=super::MAX_TLS_CIPHER_SUITES)
+            .map(|_| "\"TLS_AES_256_GCM_SHA384\"")
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            cipher_suites = [{cipher_suites}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "tls.cipher_suites".to_owned(),
+                max: super::MAX_TLS_CIPHER_SUITES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_tls_certificates() {
+        let certificates = (0..=super::MAX_TLS_CERTIFICATES)
+            .map(|index| {
+                format!(
+                    r#"
+                    [[tls.certificates]]
+                    cert_path = "tests/fixtures/tls/cert-{index}.pem"
+                    key_path = "tests/fixtures/tls/key-{index}.pem"
+                    "#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&certificates).unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "tls.certificates".to_owned(),
+                max: super::MAX_TLS_CERTIFICATES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_acme_issuers() {
+        let issuers = (0..=super::MAX_ACME_ISSUERS)
+            .map(|index| {
+                format!(
+                    r#"
+                    [[tls.acme.issuers]]
+                    name = "issuer-{index}"
+                    directory_url = "https://issuer-{index}.example.test/acme/directory"
+                    "#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&issuers).unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "tls.acme.issuers".to_owned(),
+                max: super::MAX_ACME_ISSUERS,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_vhost_acme_domains() {
+        let storage = secure_test_dir("config-vhost-acme-too-many-domains");
+        let domains = (0..=super::MAX_VHOST_ACME_DOMAINS)
+            .map(|index| format!("\"alias-{index}.example.test\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls.acme]
+            enabled = true
+            storage = "{}"
+            contact_email = "admin@example.test"
+            default_issuer = "letsencrypt"
+
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [vhosts.tls]
+            enabled = true
+
+            [vhosts.tls.acme]
+            enabled = true
+            domains = [{domains}]
+            "#,
+            storage.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::VhostSection {
+                vhost: "gateway".to_owned(),
+                section: "tls",
+                source: Box::new(ConfigError::InvalidConfigListLength {
+                    field: "vhosts.tls.acme.domains".to_owned(),
+                    max: super::MAX_VHOST_ACME_DOMAINS,
+                })
+            })
+        );
     }
 
     #[test]
