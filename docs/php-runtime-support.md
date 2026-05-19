@@ -80,6 +80,7 @@ pass_request_body = true
 stderr_log = true
 stderr_max_bytes = "2KiB"
 hide_response_headers = ["x-powered-by"]
+ignore_origin_cache_headers = false
 intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
@@ -145,6 +146,8 @@ eligible:
   cap each log message with `stderr_max_bytes`.
 - Remove selected php-fpm response headers with `hide_response_headers` before
   the response reaches clients.
+- Optionally ignore PHP-generated `Cache-Control`, `Expires`, and `Pragma`
+  headers with `ignore_origin_cache_headers` before response policy is applied.
 - Cap response header bytes returned by PHP.
   Implemented as `php.max_response_header_bytes`, defaulting to `64KiB`.
 - Parse PHP-generated headers strictly; reject malformed status lines and

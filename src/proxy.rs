@@ -6406,6 +6406,7 @@ async fn respond_php_request(
             error,
         )
     })?;
+    ignore_php_origin_cache_headers(&mut response, &php.config);
     if response.status == StatusCode::OK {
         match php_static_offload_file(&mut response, php) {
             Ok(Some(file)) => {
@@ -6910,6 +6911,9 @@ async fn execute_php_fpm(
     method: &str,
     vhost_name: &str,
 ) -> io::Result<fastcgi_client::Response> {
+    #[cfg(not(feature = "metrics"))]
+    let _ = vhost_name;
+
     let connect_timeout = fpm
         .connect_timeout_secs
         .map(Duration::from_secs)
@@ -8196,6 +8200,16 @@ fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config
     for header in &php.hide_response_headers {
         response.remove_header(header.as_str());
     }
+}
+
+#[cfg(feature = "php-fpm")]
+fn ignore_php_origin_cache_headers(response: &mut ResponseHeader, php: &crate::config::PhpConfig) {
+    if !php.ignore_origin_cache_headers {
+        return;
+    }
+    response.remove_header("cache-control");
+    response.remove_header("expires");
+    response.remove_header("pragma");
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9844,12 +9858,13 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
-        apply_php_x_accel_expires, directory_slash_redirect_location, parse_php_response,
-        php_fpm_error_outcome, php_fpm_path_translated, php_fpm_retry_attempts,
-        php_fpm_retryable_error, php_fpm_script_filename, php_header_param_name,
-        php_script_name_denied, php_script_name_for_request, php_should_intercept_error_status,
-        php_static_offload_file, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
-        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
+        apply_php_x_accel_expires, directory_slash_redirect_location,
+        ignore_php_origin_cache_headers, parse_php_response, php_fpm_error_outcome,
+        php_fpm_path_translated, php_fpm_retry_attempts, php_fpm_retryable_error,
+        php_fpm_script_filename, php_header_param_name, php_script_name_denied,
+        php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
+        php_stderr_metric_state, php_x_accel_expires_ttl_secs, resolve_php_script,
+        sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -10557,6 +10572,38 @@ mod tests {
         assert!(ttl > 0);
         assert_eq!(php_x_accel_expires_ttl_secs("-1"), Some(0));
         assert_eq!(php_x_accel_expires_ttl_secs("bad"), None);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_can_ignore_origin_cache_headers() {
+        let mut php = crate::config::PhpConfig {
+            ignore_origin_cache_headers: true,
+            ..crate::config::PhpConfig::default()
+        };
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        response
+            .insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        response
+            .insert_header("expires", "Wed, 21 Oct 2026 07:28:00 GMT")
+            .unwrap();
+        response.insert_header("pragma", "no-cache").unwrap();
+        response.insert_header("etag", "abc").unwrap();
+
+        ignore_php_origin_cache_headers(&mut response, &php);
+
+        assert!(!response.headers.contains_key("cache-control"));
+        assert!(!response.headers.contains_key("expires"));
+        assert!(!response.headers.contains_key("pragma"));
+        assert!(response.headers.contains_key("etag"));
+
+        php.ignore_origin_cache_headers = false;
+        response
+            .insert_header("cache-control", "public, max-age=60")
+            .unwrap();
+        ignore_php_origin_cache_headers(&mut response, &php);
+        assert!(response.headers.contains_key("cache-control"));
     }
 
     #[cfg(feature = "php-fpm")]

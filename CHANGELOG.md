@@ -53,6 +53,9 @@ behavior when the change improves security or project direction.
   `fluxheim_php_fpm_pool_events_total`. PHP request outcomes now distinguish
   connect timeouts, request timeouts, connection errors, configuration errors,
   invalid responses, and intercepted PHP statuses.
+- Added `php.ignore_origin_cache_headers` for NGINX-style migrations that need
+  Fluxheim to drop PHP-generated `Cache-Control`, `Expires`, and `Pragma`
+  before applying response policy.
 - Added opt-in php-fpm retry controls with `php.fpm.max_retries` and
   `php.fpm.retry_methods` for connection failures and connect timeouts before
   php-fpm returns a response; request timeouts are not retried.

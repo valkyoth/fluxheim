@@ -5309,6 +5309,8 @@ pub struct PhpConfig {
     #[serde(default)]
     pub hide_response_headers: Vec<String>,
     #[serde(default)]
+    pub ignore_origin_cache_headers: bool,
+    #[serde(default)]
     pub intercept_error_statuses: Vec<u16>,
     #[serde(default)]
     pub error_pages: Vec<ProxyErrorPageConfig>,
@@ -5339,6 +5341,7 @@ impl Default for PhpConfig {
             stderr_log: true,
             stderr_max_bytes: default_php_stderr_max_bytes(),
             hide_response_headers: Vec::new(),
+            ignore_origin_cache_headers: false,
             intercept_error_statuses: Vec::new(),
             error_pages: Vec::new(),
             params: BTreeMap::new(),
@@ -10131,6 +10134,7 @@ mod tests {
             stderr_log = false
             stderr_max_bytes = "4KiB"
             hide_response_headers = ["x-powered-by", "x-internal"]
+            ignore_origin_cache_headers = true
             intercept_error_statuses = [404, 500, 502]
             request_timeout_secs = 30
             max_request_body_bytes = "16MiB"
@@ -10186,6 +10190,7 @@ mod tests {
             php.hide_response_headers,
             ["x-powered-by".to_owned(), "x-internal".to_owned()]
         );
+        assert!(php.ignore_origin_cache_headers);
         assert_eq!(php.intercept_error_statuses, [404, 500, 502]);
         assert_eq!(php.error_pages.len(), 1);
         assert_eq!(php.error_pages[0].status, 502);

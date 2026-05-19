@@ -1426,6 +1426,7 @@ max_response_header_bytes = "64KiB"
 stderr_log = true
 stderr_max_bytes = "2KiB"
 hide_response_headers = ["x-powered-by"]
+ignore_origin_cache_headers = false
 intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
 path_info = "disabled"
@@ -1507,6 +1508,10 @@ larger output is sanitized and marked as truncated.
 `php.hide_response_headers` removes selected headers emitted by php-fpm before
 Fluxheim applies the normal response header policy. This is useful for
 NGINX-style migrations that hide `X-Powered-By` or other backend-only headers.
+`php.ignore_origin_cache_headers` removes PHP-generated `Cache-Control`,
+`Expires`, and `Pragma` response headers after Fluxheim has consumed internal PHP
+control headers. It defaults to `false`; use response header policy to set
+replacement cache directives when needed.
 Fluxheim consumes PHP `X-Accel-Redirect` and `X-Sendfile` headers for
 PHP-assisted static offload instead of forwarding them to clients.
 `X-Accel-Redirect` targets are internal URI paths resolved under `php.root`;
