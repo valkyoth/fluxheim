@@ -118,7 +118,8 @@ names, certificate paths, challenge URLs, and issuer secrets.
 `fluxheim_php_requests_total` and `fluxheim_php_request_duration_seconds` use
 configured vhost names plus bounded method, outcome, and status-class labels.
 `outcome` is `declined`, `redirect`, `forbidden`, `not_found`, `fpm_error`,
-`invalid_response`, `intercepted`, `response`, or `other`; these metrics avoid
+`connect_timeout`, `request_timeout`, `connection_error`,
+`configuration_error`, `invalid_response`, `intercepted`, `response`, or `other`; these metrics avoid
 raw paths, queries, script filenames, usernames, cookies, and FastCGI params.
 `fluxheim_php_stderr_events_total` uses configured vhost names plus bounded
 `state` labels of `emitted`, `truncated`, or `other`; it counts STDERR presence

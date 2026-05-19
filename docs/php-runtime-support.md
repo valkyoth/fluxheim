@@ -285,4 +285,4 @@ runtime snapshot.
 
 Operational metrics include bounded Prometheus request totals, durations, and
 STDERR event counts for the PHP handler. Future follow-ups should add pool
-saturation, timeout, and php-fpm connection-failure detail.
+saturation and retry-attempt detail.

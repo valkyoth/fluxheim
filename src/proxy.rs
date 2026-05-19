@@ -6304,7 +6304,13 @@ async fn respond_php_request(
     {
         Ok(output) => output,
         Err(error) => {
-            record_php_request_metrics(vhost, &method, Some(502), "fpm_error", started_at);
+            record_php_request_metrics(
+                vhost,
+                &method,
+                Some(502),
+                php_fpm_error_outcome(&error),
+                started_at,
+            );
             return Err(Error::because(
                 ErrorType::HTTPStatus(502),
                 "php-fpm request failed",
@@ -6722,6 +6728,30 @@ async fn drain_php_request_body(
         }
     }
     Ok(())
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
+    match error.kind() {
+        io::ErrorKind::TimedOut => {
+            if error.to_string().contains("connect") {
+                "connect_timeout"
+            } else {
+                "request_timeout"
+            }
+        }
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe
+        | io::ErrorKind::NotConnected
+        | io::ErrorKind::AddrInUse
+        | io::ErrorKind::AddrNotAvailable
+        | io::ErrorKind::NotFound
+        | io::ErrorKind::UnexpectedEof => "connection_error",
+        io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported => "configuration_error",
+        _ => "fpm_error",
+    }
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9371,6 +9401,8 @@ fn approximate_request_header_bytes(request: &RequestHeader) -> usize {
 mod tests {
     #[cfg(feature = "php-fpm")]
     use std::fs;
+    #[cfg(feature = "php-fpm")]
+    use std::io;
     use std::time::Duration;
 
     use bytes::Bytes;
@@ -9418,10 +9450,11 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
-        directory_slash_redirect_location, parse_php_response, php_fpm_path_translated,
-        php_fpm_script_filename, php_header_param_name, php_script_name_denied,
-        php_script_name_for_request, php_should_intercept_error_status, php_stderr_metric_state,
-        resolve_php_script, sanitized_php_stderr, strip_php_response_headers,
+        directory_slash_redirect_location, parse_php_response, php_fpm_error_outcome,
+        php_fpm_path_translated, php_fpm_script_filename, php_header_param_name,
+        php_script_name_denied, php_script_name_for_request, php_should_intercept_error_status,
+        php_stderr_metric_state, resolve_php_script, sanitized_php_stderr,
+        strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9864,6 +9897,40 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_fpm_error_outcomes_are_bounded() {
+        assert_eq!(
+            php_fpm_error_outcome(&io::Error::new(
+                io::ErrorKind::TimedOut,
+                "php-fpm connect timed out",
+            )),
+            "connect_timeout"
+        );
+        assert_eq!(
+            php_fpm_error_outcome(&io::Error::new(
+                io::ErrorKind::TimedOut,
+                "php-fpm request timed out",
+            )),
+            "request_timeout"
+        );
+        assert_eq!(
+            php_fpm_error_outcome(&io::Error::new(
+                io::ErrorKind::ConnectionRefused,
+                "connection refused",
+            )),
+            "connection_error"
+        );
+        assert_eq!(
+            php_fpm_error_outcome(&io::Error::new(io::ErrorKind::InvalidInput, "missing fpm")),
+            "configuration_error"
+        );
+        assert_eq!(
+            php_fpm_error_outcome(&io::Error::other("backend failed")),
+            "fpm_error"
+        );
     }
 
     #[cfg(feature = "php-fpm")]

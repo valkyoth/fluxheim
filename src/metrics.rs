@@ -1256,6 +1256,10 @@ fn php_outcome_label(outcome: &str) -> &'static str {
         "forbidden" => "forbidden",
         "not_found" => "not_found",
         "fpm_error" => "fpm_error",
+        "connect_timeout" => "connect_timeout",
+        "request_timeout" => "request_timeout",
+        "connection_error" => "connection_error",
+        "configuration_error" => "configuration_error",
         "invalid_response" => "invalid_response",
         "intercepted" => "intercepted",
         "response" => "response",
@@ -1346,7 +1350,7 @@ mod tests {
             "php-metrics-test",
             "POST",
             Some(502),
-            "fpm_error",
+            "connect_timeout",
             Duration::from_millis(25),
         );
         record_php_request(
@@ -1367,7 +1371,7 @@ mod tests {
         assert!(output.contains("fluxheim_php_request_duration_seconds"));
         assert!(output.contains(r#"vhost="php-metrics-test""#));
         assert!(output.contains(r#"method="POST""#));
-        assert!(output.contains(r#"outcome="fpm_error""#));
+        assert!(output.contains(r#"outcome="connect_timeout""#));
         assert!(output.contains(r#"status_class="5xx""#));
         assert!(output.contains(r#"method="OTHER""#));
         assert!(output.contains(r#"outcome="other""#));

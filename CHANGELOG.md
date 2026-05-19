@@ -47,7 +47,9 @@ behavior when the change improves security or project direction.
 - Added PHP-specific Prometheus request totals and duration histograms with
   bounded labels through `fluxheim_php_requests_total` and
   `fluxheim_php_request_duration_seconds`, and
-  `fluxheim_php_stderr_events_total`.
+  `fluxheim_php_stderr_events_total`. PHP request outcomes now distinguish
+  connect timeouts, request timeouts, connection errors, configuration errors,
+  invalid responses, and intercepted PHP statuses.
 
 ## 1.3.2 - ACME Operations And Config Tester
 
