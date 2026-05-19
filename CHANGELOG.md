@@ -49,7 +49,8 @@ behavior when the change improves security or project direction.
   headers and `Transfer-Encoding`, before Fluxheim frames the client response.
 - Added `php.intercept_error_statuses` for opt-in
   `fastcgi_intercept_errors`-style replacement of selected PHP 4xx/5xx
-  responses with Fluxheim-generated errors.
+  responses with Fluxheim-generated errors. Intercept status lists are capped
+  at the valid 400-599 error-status range.
 - Added `[[vhosts.php.error_pages]]` and route-level PHP error pages for
   serving internal static fallback pages when selected PHP statuses are
   intercepted. PHP error-page lists are capped at 64 entries.
@@ -88,6 +89,7 @@ behavior when the change improves security or project direction.
 - Added opt-in php-fpm retry controls for malformed FastCGI responses and
   selected PHP 5xx responses through `php.fpm.retry_invalid_response` and
   `php.fpm.retry_statuses`, using the same safe-method and retry-window policy.
+  Retry status lists are capped at the valid 500-599 server-error range.
 - Wired `php.fpm.read_timeout_secs` and `php.fpm.write_timeout_secs` as stricter
   caps on the buffered FastCGI request phase alongside
   `php.request_timeout_secs`.

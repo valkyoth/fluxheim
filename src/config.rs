@@ -5756,10 +5756,12 @@ pub struct PhpFpmConfig {
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
+const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
 const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
 const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
 const MAX_PHP_ERROR_PAGES: usize = 64;
 const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
+const MAX_PHP_INTERCEPT_ERROR_STATUSES: usize = 200;
 const MAX_PHP_PARAMS: usize = 128;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
@@ -8086,6 +8088,12 @@ fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError>
 }
 
 fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+    if statuses.len() > MAX_PHP_FPM_RETRY_STATUSES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.retry_statuses",
+            reason: "at most 100 statuses are allowed",
+        });
+    }
     let mut seen = BTreeSet::new();
     for status in statuses {
         if !(500..=599).contains(status) {
@@ -8105,6 +8113,12 @@ fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), ConfigError> 
 }
 
 fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+    if statuses.len() > MAX_PHP_INTERCEPT_ERROR_STATUSES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.intercept_error_statuses",
+            reason: "at most 200 statuses are allowed",
+        });
+    }
     let mut seen = BTreeSet::new();
     for status in statuses {
         if !(400..=599).contains(status) {
@@ -11073,6 +11087,41 @@ mod tests {
     }
 
     #[test]
+    fn rejects_too_many_php_intercept_error_statuses() {
+        let root = unique_temp_path("config-php-many-intercept-statuses-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let statuses = (0..=super::MAX_PHP_INTERCEPT_ERROR_STATUSES)
+            .map(|index| (400 + index).to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            intercept_error_statuses = [{}]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-many-intercept-statuses-process"),
+            root.display(),
+            statuses,
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.intercept_error_statuses"), "{error}");
+        assert!(error.contains("at most 200 statuses"), "{error}");
+    }
+
+    #[test]
     fn rejects_duplicate_php_error_page_status() {
         let root = unique_temp_path("config-php-duplicate-error-page-root");
         std::fs::create_dir_all(&root).unwrap();
@@ -11322,6 +11371,35 @@ mod tests {
         .unwrap();
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.retry_statuses"), "{error}");
+
+        let retry_statuses = (0..=super::MAX_PHP_FPM_RETRY_STATUSES)
+            .map(|index| (500 + index).to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            retry_statuses = [{}]
+            "#,
+            test_process_config_toml("config-php-fpm-too-many-retry-statuses-process"),
+            root.display(),
+            retry_statuses,
+        ))
+        .unwrap();
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.retry_statuses"), "{error}");
+        assert!(error.contains("at most 100 statuses"), "{error}");
 
         let config: Config = toml::from_str(&format!(
             r#"

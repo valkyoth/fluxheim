@@ -1591,7 +1591,8 @@ frames the client response.
 status list. When PHP returns one of those 4xx/5xx statuses, Fluxheim discards
 the PHP response body and sends a Fluxheim-generated error response instead.
 It defaults to an empty list so PHP applications keep their normal error pages
-unless the operator opts in.
+unless the operator opts in. The status list is capped at the valid 400-599
+error-status range and cannot contain duplicates.
 `[[vhosts.php.error_pages]]` and `[[vhosts.routes.php.error_pages]]` are
 internal static fallback pages for selected PHP statuses. A configured error
 page also intercepts that status; if the static page cannot be served, Fluxheim
@@ -1623,7 +1624,8 @@ to avoid duplicating side effects. `php.fpm.retry_invalid_response` and
 FastCGI responses and selected PHP 5xx responses. They default to disabled;
 configure them only for idempotent request methods where replaying the PHP
 request is acceptable. `php.fpm.retry_methods` is capped at 16 uppercase method
-tokens.
+tokens; `php.fpm.retry_statuses` is capped at the valid 500-599 server-error
+status range.
 `[vhosts.php.params]` or `[vhosts.routes.php.params]`
 adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core
