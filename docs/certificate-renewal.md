@@ -162,29 +162,50 @@ create order, publish challenge material, mark challenges ready, finalize the
 generated CSR, retrieve the certificate chain, install it atomically, and clean
 up challenge files.
 
-Operators can run the live path explicitly:
+Production packages and container images ship the `fluxheim-acme` companion as
+the preferred external renewal command. It uses the same ACME engine, storage
+layout, issuer credentials, and vhost target planner as the integrated gateway,
+but keeps renewal scheduling outside the traffic-serving process:
 
 ```bash
-fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml targets
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml status
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
 ```
 
-By default the command observes the managed certificate files and attempts only
+By default `renew` observes the managed certificate files and attempts only
 missing or due certificates. If nothing needs renewal, it exits successfully
 with `acme attempted: 0` and a status message saying no certificates are due.
 First issuance normally does not need `--force-renew`: missing certificate files
 are due targets. The command prints every target with `status=due`,
 `status=skipped`, or `status=forced`, then reports per-target `renewed:` and
 `failed:` lines. For HTTP-01 failures after challenge files are published, the
-failure includes `published_http_01=` URLs so operators can test the exact public
-challenge paths that the issuer should have reached. It exits non-zero if any
-target failed, while still reporting successful renewals from the same run.
+failure includes `published_http_01=` URLs so operators can test the exact
+public challenge paths that the issuer should have reached. It exits non-zero
+if any target failed, while still reporting successful renewals from the same
+run.
+
+`fluxheim-acme renew` also asks the running gateway to reload its certificate
+handles after a successful renewal when `server.process.certificate_reload_sock`
+is reachable. Use `reload` explicitly after manually installing managed files:
+
+```bash
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml reload
+```
+
+The legacy integrated command is kept for manual compatibility, but new
+automation should use `fluxheim-acme`:
+
+```bash
+fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
+```
 
 Use `--force-renew` only for deliberate emergency rotation or testing when you
 really need to reissue certificates that are still valid; repeated forced
 renewals can hit issuer rate limits:
 
 ```bash
-fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew --force-renew
+fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew --force-renew
 ```
 
 `--all` is accepted as a backward-compatible alias for `--force-renew`, but it
@@ -234,7 +255,7 @@ the renewal command:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart fluxheim
-sudo fluxheim --config /etc/fluxheim/fluxheim.toml acme-renew
+sudo fluxheim-acme --config /etc/fluxheim/fluxheim.toml renew
 ```
 
 ## Packaged Actalis Credentials
@@ -325,10 +346,10 @@ the integrated background worker for simple installs. In this model,
 `fluxheim.service` stays focused on serving traffic and challenge files, while
 the one-shot `fluxheim-acme.service` and scheduled `fluxheim-acme.timer` run
 renewals as the Fluxheim runtime user. The companion command reuses the same
-ACME engine and storage layout as `fluxheim acme-renew`, uses systemd
-credentials or container secrets for EAB material, and writes certificates below
-the configured `tls.acme.storage`. When certificates are renewed, it asks the
-running gateway to reload its certificate handles through
+ACME engine and storage layout as the legacy `fluxheim acme-renew` command,
+uses systemd credentials or container secrets for EAB material, and writes
+certificates below the configured `tls.acme.storage`. When certificates are
+renewed, it asks the running gateway to reload its certificate handles through
 `server.process.certificate_reload_sock`. Set `tls.acme.automation =
 "external"` in this mode so the webserver does not also run the background
 renewal loop.
@@ -373,6 +394,134 @@ sudo systemctl start fluxheim-acme.service
 
 Do not make the webserver spawn a long-lived helper process; let the service
 manager or container orchestrator supervise the companion.
+
+## Container Renewal
+
+Runtime images include both `/usr/local/bin/fluxheim` and
+`/usr/local/bin/fluxheim-acme`. The companion can run inside the already running
+gateway container with `podman exec`, or as a separate one-shot container. In
+both cases it must see the same config, ACME storage, secrets, and
+`/run/fluxheim` directory as the gateway.
+
+The gateway and companion must share `server.process.certificate_reload_sock`.
+The packaged container configs use:
+
+```toml
+[server.process]
+certificate_reload_sock = "/run/fluxheim/fluxheim-cert-reload.sock"
+```
+
+Keep the host-side run directory private to the container runtime user and mount
+it read-write into both containers:
+
+```bash
+install -d -m 0700 /srv/infra/fluxheim/run
+```
+
+If the gateway container is already running, the simplest operational commands
+are:
+
+```bash
+podman exec fluxheim_gateway \
+  /usr/local/bin/fluxheim-acme \
+  --config /etc/fluxheim/fluxheim.toml \
+  targets
+
+podman exec fluxheim_gateway \
+  /usr/local/bin/fluxheim-acme \
+  --config /etc/fluxheim/fluxheim.toml \
+  status
+
+podman exec fluxheim_gateway \
+  /usr/local/bin/fluxheim-acme \
+  --config /etc/fluxheim/fluxheim.toml \
+  renew
+```
+
+`podman exec` naturally shares the gateway container filesystem, secrets, and
+reload socket. It is useful for manual checks, but scheduled renewals are often
+cleaner as a one-shot companion container:
+
+```bash
+podman run --rm \
+  --name fluxheim_acme_due \
+  --network gateway_net \
+  --entrypoint /usr/local/bin/fluxheim-acme \
+  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
+  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/cache:/var/cache/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/logs:/var/log/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/html:/srv/fluxheim:ro,Z \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
+  ghcr.io/valkyoth/fluxheim:latest-wolfi \
+  --config /etc/fluxheim/fluxheim.toml \
+  renew
+```
+
+Use `status` before `renew` when testing a new mount layout:
+
+```bash
+podman run --rm \
+  --network gateway_net \
+  --entrypoint /usr/local/bin/fluxheim-acme \
+  -v /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z \
+  -v /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z \
+  -v /srv/infra/fluxheim/run:/run/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro \
+  -v /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro \
+  ghcr.io/valkyoth/fluxheim:latest-wolfi \
+  --config /etc/fluxheim/fluxheim.toml \
+  status
+```
+
+For Compose, keep `fluxheim` and `fluxheim-acme` on the same network and use
+the same bind mounts. The companion service should override only the entrypoint
+and command:
+
+```yaml
+services:
+  fluxheim:
+    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
+      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+
+  fluxheim-acme:
+    image: ghcr.io/valkyoth/fluxheim:latest-wolfi
+    entrypoint: ["/usr/local/bin/fluxheim-acme"]
+    command: ["--config", "/etc/fluxheim/fluxheim.toml", "renew"]
+    depends_on:
+      - fluxheim
+    volumes:
+      - /srv/infra/fluxheim/config/fluxheim.toml:/etc/fluxheim/fluxheim.toml:ro,Z
+      - /srv/infra/fluxheim/config/conf.d:/etc/fluxheim/conf.d:ro,Z
+      - /srv/infra/fluxheim/run:/run/fluxheim:Z,U
+      - /srv/infra/fluxheim/state:/var/lib/fluxheim:Z,U
+      - /srv/infra/fluxheim/secrets/actalis-eab-kid:/run/secrets/actalis-eab-kid:ro
+      - /srv/infra/fluxheim/secrets/actalis-eab-hmac-key:/run/secrets/actalis-eab-hmac-key:ro
+```
+
+Run it on demand with:
+
+```bash
+podman compose run --rm fluxheim-acme
+```
+
+For scheduled container renewals, use a host systemd timer, Kubernetes CronJob,
+or the platform scheduler to start the one-shot companion. Keep
+`tls.acme.automation = "external"` so the gateway does not also run the
+background renewal loop.
 
 ## Runtime Crate Candidates
 
