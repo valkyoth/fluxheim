@@ -2026,6 +2026,159 @@ Exit criteria:
 - Source files are never served as static fallback.
 - Rootless Podman examples exist for every runtime.
 
+### 1.9 - Crypto RPC Edge
+
+Goal: add a compile-time optional crypto RPC edge family for blockchain-aware
+JSON-RPC/WebSocket proxying, safe POST-body caching, and node-health-aware
+routing. Ethereum/EVM should be the first concrete implementation because it has
+the strongest dApp fit and a comparatively standard HTTP/WebSocket JSON-RPC
+surface. Bitcoin, Cardano, and XRPL should be documented as later chain-specific
+modules, not forced into the Ethereum policy model.
+
+This is a future module family after the web, PHP, proxy, load-balancer, and
+WASM foundations have enough stability to support chain-specific edge gateways
+without weakening the default build.
+
+Shared family shape:
+
+```toml
+chain-edge-core = ["proxy", "cache", "dep:serde_json", "dep:sha2"]
+eth = ["chain-edge-core"]
+btc = ["chain-edge-core"] # future review
+ada = ["chain-edge-core"] # future review
+xrpl = ["chain-edge-core"] # future review
+```
+
+`chain-edge-core` should contain only bounded shared primitives: JSON-RPC
+parsing, batch limits, method policy dispatch, cache-key helpers, upstream
+health snapshots, retry safety classification, redacted logging/tracing helpers,
+and WebSocket sticky-routing primitives. It must not contain chain-specific
+method allow-lists or finality rules.
+
+First implementation feature shape:
+
+```toml
+eth = ["proxy", "cache", "dep:serde_json", "dep:sha2"]
+eth-ens = ["eth"] # future review; exact dependencies intentionally undecided
+profile-ethereum-rpc = ["proxy", "cache", "eth", "tls-rustls", "security"]
+```
+
+The first implementation should focus on native Ethereum JSON-RPC proxy/cache
+behavior. ENS routing is documented for later review as `eth-ens`, but should
+not block or expand the initial `eth` scope.
+
+Stable Ethereum `eth` scope:
+
+- HTTP JSON-RPC `POST` pass-through with bounded body, response, method, and
+  batch limits.
+- JSON-RPC 2.0 single-call and batch classifier.
+- Chain-id verification with `eth_chainId` before serving traffic.
+- Health probes using `eth_blockNumber`, `eth_syncing`, and finalized/safe
+  block data when available.
+- Upstream ejection or de-prioritization for syncing nodes, stale nodes, chain
+  mismatch, repeated transport failures, and selected read-only JSON-RPC error
+  classes.
+- Conservative retry only for read-only calls; no default retry for
+  transaction submission or signing/account methods.
+- Native cache-key generation for Ethereum JSON-RPC POST requests.
+- Cache admission only for whitelisted immutable/finality-safe methods.
+- Cache integration with existing memory/disk cache backends and cache metrics.
+- Redacted logging and tracing that records method and policy decisions but not
+  full params or responses by default.
+
+Initial cacheable method candidates:
+
+- `eth_getBlockByHash`;
+- `eth_getBlockByNumber` for explicit old block numbers, `safe`, or
+  `finalized`;
+- `eth_getBlockTransactionCountByHash`;
+- `eth_getBlockTransactionCountByNumber` under the same block-number policy;
+- `eth_getTransactionByHash` with conservative TTL/negative-cache controls;
+- `eth_getTransactionReceipt`, with long TTL only after the containing block is
+  known finalized;
+- `eth_getLogs` only for bounded ranges entirely finalized or older than the
+  configured finality depth.
+
+Do not cache in the initial stable module:
+
+- `latest` or `pending` requests unless a later explicit short-TTL policy is
+  designed;
+- `eth_sendRawTransaction`, signing methods, account methods, txpool/debug/admin
+  namespaces, or any method with side effects;
+- `eth_call`, `eth_estimateGas`, fee methods, or gas-price methods until a
+  method-specific block-tag/TTL policy exists;
+- WebSocket subscriptions.
+
+Beta scope:
+
+- WebSocket pass-through with sticky upstream selection.
+- `eth_subscribe` health-aware placement for new sessions.
+- Hosted-provider fallback with quota-aware routing.
+- More method-specific cache policies after production traces prove safe
+  behavior.
+
+Future `eth-ens` review:
+
+- Resolve ENS registry/resolver records through Ethereum RPC.
+- Read and decode resolver `contenthash()` records.
+- Proxy or redirect IPFS/Arweave content through configured gateways.
+- Cache resolver/contenthash answers with block/finality awareness.
+- Explicitly document browser and TLS limitations: browsers do not normally
+  resolve raw `.eth` names through DNS, public ACME does not issue for raw
+  `.eth`, and Fluxheim can route `.eth` hosts only when traffic reaches it with
+  that Host header or through a gateway-domain pattern.
+
+Future `btc` review:
+
+- Bitcoin Core JSON-RPC proxy/cache for selected chain methods.
+- Confirmation-depth-based cache safety instead of Ethereum `finalized`/`safe`
+  tags.
+- Candidate cached methods: `getblockhash`, `getblock`, `getblockheader`, and
+  carefully gated `getrawtransaction`.
+- Wallet, mining, raw transaction submission, and node/admin methods denied by
+  default or explicitly pass-through only.
+- Pruned-node and `txindex` behavior documented before any cache claims.
+
+Future `ada` review:
+
+- Cardano support should likely target Ogmios first, or explicitly choose a
+  higher-level provider API after review.
+- Chain points, slots, epochs, rollbacks, and UTXO-state cache invalidation
+  require Cardano-specific policy.
+- Cache candidates include known-point block queries, transaction lookup,
+  stable epoch protocol parameters, and selected UTXO queries tied to a known
+  point.
+
+Future `xrpl` review:
+
+- XRPL HTTP JSON-RPC/WebSocket proxy/cache with ledger-aware routing.
+- Validated ledger queries can be cache candidates; current/open ledger queries
+  and subscriptions are not cacheable by default.
+- Transaction submission stays non-retry/non-cache by default.
+- Health probes should track validated ledger progress and full-history node
+  behavior.
+
+Exit criteria:
+
+- Default, PHP, static-site, cache-edge, proxy-edge, privacy, and
+  load-balancer builds prove crypto RPC modules are absent unless selected.
+- `--features eth` and `profile-ethereum-rpc` release builds pass.
+- Malformed JSON, oversized batches, unknown methods, cache-key limits, and
+  oversized upstream responses are tested.
+- `latest`, `pending`, side-effect, account, signing, debug/admin, and
+  transaction-submission methods are not cached by default.
+- Finalized/old-block responses are cached with deterministic cache keys and
+  purge-compatible metadata.
+- Chain-id mismatch and syncing/stale upstreams are rejected or ejected before
+  serving normal traffic.
+- Metrics avoid account, transaction, block, contract, calldata, and ENS-name
+  label cardinality.
+- Documentation includes Geth, Erigon, Reth, and hosted-provider examples.
+- Later chain modules must ship their own method-safety matrix, finality model,
+  health probes, and cache-admission tests before stable release.
+
+Detailed design lives in [Crypto RPC Edge](ethereum-rpc-edge.md).
+
 ### Future - Dependency Reduction And Sovereign Core
 
 Goal: after the main web, cache, PHP, proxy, load-balancer, and extension
