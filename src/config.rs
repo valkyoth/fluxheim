@@ -1518,6 +1518,9 @@ impl VhostHeaderPolicyConfig {
     }
 }
 
+const MAX_HEADER_MUTATION_NAMES: usize = 128;
+const MAX_HEADER_APPEND_VALUES: usize = 32;
+
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RequestHeaderPolicyOverlayConfig {
@@ -1979,6 +1982,13 @@ impl HeaderValues {
         match self {
             Self::One(value) => Box::new(std::iter::once(value.as_str())),
             Self::Many(values) => Box::new(values.iter().map(String::as_str)),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::One(_) => 1,
+            Self::Many(values) => values.len(),
         }
     }
 
@@ -6269,6 +6279,11 @@ pub enum ConfigError {
         field: &'static str,
         name: String,
     },
+    InvalidHeaderMutationLength {
+        field: &'static str,
+        operation: &'static str,
+        max: usize,
+    },
     InvalidHeaderTemplate {
         field: &'static str,
         name: String,
@@ -6798,6 +6813,14 @@ impl Display for ConfigError {
             Self::InvalidHeaderValue { field, name } => write!(
                 formatter,
                 "{field}.{name} must be a non-empty HTTP header value without control characters"
+            ),
+            Self::InvalidHeaderMutationLength {
+                field,
+                operation,
+                max,
+            } => write!(
+                formatter,
+                "{field}.{operation} must contain at most {max} entries"
             ),
             Self::InvalidHeaderTemplate {
                 field,
@@ -8795,6 +8818,10 @@ fn validate_header_mutations(
     set: &BTreeMap<String, String>,
     append: &BTreeMap<String, HeaderValues>,
 ) -> Result<(), ConfigError> {
+    validate_header_mutation_len(field, "unset", unset.len(), MAX_HEADER_MUTATION_NAMES)?;
+    validate_header_mutation_len(field, "set", set.len(), MAX_HEADER_MUTATION_NAMES)?;
+    validate_header_mutation_len(field, "append", append.len(), MAX_HEADER_MUTATION_NAMES)?;
+
     for name in unset {
         validate_header_name(field, name)?;
     }
@@ -8804,11 +8831,33 @@ fn validate_header_mutations(
     }
     for (name, values) in append {
         validate_header_name(field, name)?;
+        validate_header_mutation_len(
+            field,
+            "append values",
+            values.len(),
+            MAX_HEADER_APPEND_VALUES,
+        )?;
         for value in values.iter() {
             validate_header_mutation_value(field, name, value)?;
         }
     }
 
+    Ok(())
+}
+
+fn validate_header_mutation_len(
+    field: &'static str,
+    operation: &'static str,
+    len: usize,
+    max: usize,
+) -> Result<(), ConfigError> {
+    if len > max {
+        return Err(ConfigError::InvalidHeaderMutationLength {
+            field,
+            operation,
+            max,
+        });
+    }
     Ok(())
 }
 
@@ -9783,6 +9832,110 @@ mod tests {
                     field: "vhosts.headers.request",
                     name: "x-route".to_owned()
                 })
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_header_unset_operations() {
+        let headers = (0..=super::MAX_HEADER_MUTATION_NAMES)
+            .map(|index| format!("\"x-remove-{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [headers.request]
+            remove = [{headers}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderMutationLength {
+                field: "headers.request",
+                operation: "unset",
+                max: super::MAX_HEADER_MUTATION_NAMES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_header_set_operations() {
+        let headers = (0..=super::MAX_HEADER_MUTATION_NAMES)
+            .map(|index| format!("\"x-set-{index}\" = \"value\""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [headers.response.add]
+            {headers}
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderMutationLength {
+                field: "headers.response",
+                operation: "set",
+                max: super::MAX_HEADER_MUTATION_NAMES,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_header_append_operations() {
+        let headers = (0..=super::MAX_HEADER_MUTATION_NAMES)
+            .map(|index| format!("\"x-append-{index}\" = \"value\""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "api"
+            hosts = ["api.example.test"]
+
+            [vhosts.headers.response.append]
+            {headers}
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::VhostSection {
+                vhost: "api".to_owned(),
+                section: "headers",
+                source: Box::new(ConfigError::InvalidHeaderMutationLength {
+                    field: "vhosts.headers.response",
+                    operation: "append",
+                    max: super::MAX_HEADER_MUTATION_NAMES,
+                })
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_too_many_header_append_values() {
+        let values = (0..=super::MAX_HEADER_APPEND_VALUES)
+            .map(|index| format!("\"value-{index}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [headers.response.append]
+            vary = [{values}]
+            "#,
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderMutationLength {
+                field: "headers.response",
+                operation: "append values",
+                max: super::MAX_HEADER_APPEND_VALUES,
             })
         );
     }

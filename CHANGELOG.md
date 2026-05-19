@@ -115,6 +115,8 @@ behavior when the change improves security or project direction.
   directives on responses that set cookies.
 - Capped proxy upstream lists, ACME challenge upstream lists, and proxy
   error-page lists at 64 entries, with duplicate upstream rejection.
+- Capped configured request/response header mutation lists and maps so
+  remove/unset, set/add, and append policies remain bounded.
 
 ### Changed
 

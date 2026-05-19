@@ -419,7 +419,9 @@ For header mutations, `remove`/`add` are the preferred readable names.
 `[vhosts.headers.*.operations]` tables are useful when you want all explicit
 header operations grouped together. Do not define the same header in more than
 one `set`, `add`, or `operations.add` table in the same policy; Fluxheim rejects
-that as ambiguous.
+that as ambiguous. Each header mutation policy is bounded: remove/unset, set/add,
+and append header-name collections are capped at 128 entries each, and a single
+append header may contain at most 32 values.
 
 Security headers are easy to enable globally:
 
