@@ -125,6 +125,8 @@ behavior when the change improves security or project direction.
   bounded.
 - Capped static web `index_files` lists so global, vhost, and route static
   index probing remains bounded.
+- Capped `cache.key_parts` to the four supported cache-key fields before
+  duplicate and required-path validation.
 
 ### Changed
 

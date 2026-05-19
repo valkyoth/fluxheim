@@ -3951,6 +3951,7 @@ const MAX_CACHE_BYPASS_HEADERS: usize = 64;
 const MAX_CACHE_BYPASS_COOKIES: usize = 128;
 const MAX_CACHE_BYPASS_QUERY_PARAMS: usize = 128;
 const MAX_CACHE_VARY_REQUEST_HEADERS: usize = 32;
+const MAX_CACHE_KEY_PARTS: usize = 4;
 const MAX_CACHE_CONTENT_TYPES: usize = 64;
 const MAX_CACHE_IMAGE_EXTENSIONS: usize = 128;
 const MAX_CACHE_METHODS: usize = 16;
@@ -4260,6 +4261,12 @@ impl CacheConfig {
         if self.key_parts.is_empty() {
             return Err(ConfigError::EmptyCacheKeyParts { scope });
         }
+        validate_cache_list_len(
+            scope,
+            "key_parts",
+            self.key_parts.len(),
+            MAX_CACHE_KEY_PARTS,
+        )?;
         let mut seen_parts = BTreeSet::new();
         for part in &self.key_parts {
             if !seen_parts.insert(*part) {
@@ -13396,6 +13403,51 @@ mod tests {
             config.validate(),
             Err(ConfigError::EmptyCacheKeyParts { scope: "cache" })
         );
+    }
+
+    #[test]
+    fn rejects_too_many_cache_key_parts() {
+        let config: Config = toml::from_str(
+            r#"
+            [cache]
+            key_parts = ["method", "host", "path", "query", "path"]
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("cache.key_parts"), "{error}");
+        assert!(error.contains("at most 4 entries"), "{error}");
+    }
+
+    #[test]
+    fn route_cache_wraps_too_many_key_parts() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [[vhosts.routes]]
+            name = "assets"
+            path_prefix = "/assets/"
+
+            [vhosts.routes.proxy]
+            upstream = "127.0.0.1:3000"
+
+            [vhosts.routes.cache]
+            key_parts = ["method", "host", "path", "query", "path"]
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("vhost \"gateway\" route \"assets\" cache:"),
+            "{error}"
+        );
+        assert!(error.contains("vhosts.routes.cache.key_parts"), "{error}");
+        assert!(error.contains("at most 4 entries"), "{error}");
     }
 
     #[test]
