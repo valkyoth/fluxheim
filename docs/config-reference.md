@@ -538,7 +538,8 @@ local_time = false
 Static serving requires `web.root` to be a real directory, not a symlink and
 not below a symlinked parent directory. Request paths are symlink-free,
 including intermediate directories. Static serving also rejects traversal,
-dotfiles by default, and unknown nested index file names. Static body reads
+dotfiles by default, and unknown nested index file names. `index_files` is
+capped at 32 entries. Static body reads
 re-check the opened file handle and full-body reads are length-exact, failing
 if the file changes while it is being read. The current static response path is
 buffered and refuses response bodies larger than 64 MiB; larger-file streaming

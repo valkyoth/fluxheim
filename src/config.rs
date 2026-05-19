@@ -55,6 +55,7 @@ const MAX_TLS_CIPHER_SUITES: usize = 32;
 const MAX_TLS_CERTIFICATES: usize = 1024;
 const MAX_ACME_ISSUERS: usize = 128;
 const MAX_VHOST_ACME_DOMAINS: usize = 64;
+const MAX_WEB_INDEX_FILES: usize = 32;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -5586,6 +5587,11 @@ impl WebConfig {
         if self.index_files.is_empty() {
             return Err(ConfigError::EmptyIndexFiles);
         }
+        validate_config_list_len(
+            "web.index_files",
+            self.index_files.len(),
+            MAX_WEB_INDEX_FILES,
+        )?;
 
         for index in &self.index_files {
             if index.trim().is_empty()
@@ -15543,6 +15549,77 @@ mod tests {
         };
 
         assert_eq!(config.validate(), Err(ConfigError::EmptyIndexFiles));
+    }
+
+    #[test]
+    fn rejects_too_many_index_files() {
+        let index_files = (0..=super::MAX_WEB_INDEX_FILES)
+            .map(|index| format!("index-{index}.html"))
+            .collect::<Vec<_>>();
+        let config = Config {
+            server: ServerConfig::default(),
+            admin: AdminConfig::default(),
+            metrics: MetricsConfig::default(),
+            tracing: TracingConfig::default(),
+            logging: LoggingConfig::default(),
+            headers: HeaderPolicyConfig::default(),
+            tls: super::TlsConfig::default(),
+            proxy: ProxyConfig::default(),
+            cache: CacheConfig::default(),
+            cache_purger: CachePurgerConfig::default(),
+            web: WebConfig {
+                root: Some(PathBuf::from("public")),
+                index_files,
+                deny_dotfiles: true,
+                ..WebConfig::default()
+            },
+            vhosts: vec![],
+        };
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidConfigListLength {
+                field: "web.index_files".to_owned(),
+                max: super::MAX_WEB_INDEX_FILES,
+            })
+        );
+    }
+
+    #[test]
+    fn route_web_wraps_too_many_index_files() {
+        let index_files = (0..=super::MAX_WEB_INDEX_FILES)
+            .map(|index| format!("\"index-{index}.html\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [[vhosts.routes]]
+            name = "static"
+            path_prefix = "/static/"
+
+            [vhosts.routes.web]
+            root = "public"
+            index_files = [{index_files}]
+            "#
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::RouteSection {
+                vhost: "gateway".to_owned(),
+                route: "static".to_owned(),
+                section: "web",
+                source: Box::new(ConfigError::InvalidConfigListLength {
+                    field: "web.index_files".to_owned(),
+                    max: super::MAX_WEB_INDEX_FILES,
+                })
+            })
+        );
     }
 
     #[test]

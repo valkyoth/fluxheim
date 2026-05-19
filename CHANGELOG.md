@@ -123,6 +123,8 @@ behavior when the change improves security or project direction.
 - Capped TLS policy allow-lists, global static certificate lists, ACME issuer
   lists, and explicit vhost ACME domain lists so certificate planning remains
   bounded.
+- Capped static web `index_files` lists so global, vhost, and route static
+  index probing remains bounded.
 
 ### Changed
 
