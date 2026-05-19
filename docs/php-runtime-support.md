@@ -70,6 +70,7 @@ runtime = "php-fpm"
 root = "/srv/sites/php.example.test/public"
 index = "index.php"
 allowed_extensions = ["php"]
+deny_path_prefixes = ["/wp-content/uploads/"]
 request_timeout_secs = 30
 max_request_body_bytes = "16MiB"
 max_response_bytes = "64MiB"
@@ -108,6 +109,7 @@ eligible:
   targets.
 - Never build `SCRIPT_FILENAME` through string concatenation alone.
 - Deny dotfiles and hidden path segments by default.
+- Deny configured PHP execution path prefixes before contacting php-fpm.
 - Never pass arbitrary process environment to PHP.
 - Use a small allow-list for CGI/FastCGI params.
 - Set `SCRIPT_NAME`, `SCRIPT_FILENAME`, `DOCUMENT_ROOT`, `REQUEST_METHOD`,
@@ -220,6 +222,7 @@ Planned `1.3.3` php-fpm hardening:
 - WordPress cache-plugin migration presets for Super Cache/W3TC-style static
   fallbacks, logged-in/commenter cookie bypass, admin/login exclusions, and
   denial of PHP execution under uploads/files directories.
+  Initial execution denial implemented as `php.deny_path_prefixes`.
 - FastCGI multiplexing, authorizer, and filter-role review. These are not
   needed for normal PHP-FPM web serving, but should be explicitly unsupported
   or implemented if enterprise users need them.

@@ -33,6 +33,8 @@ root = "/srv/sites/php.example.test/public"
 fpm_root = "/app/public"
 index = "index.php"
 allowed_extensions = ["php"]
+# Optional hardening for WordPress/media directories that must never execute PHP.
+deny_path_prefixes = ["/wp-content/uploads/"]
 # `wordpress`/`front-controller` routes missing paths to index.php.
 # Use `strict` for try_files $uri =404 style PHP execution.
 try_files = "wordpress"

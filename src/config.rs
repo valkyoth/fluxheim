@@ -5284,6 +5284,8 @@ pub struct PhpConfig {
     pub index: String,
     #[serde(default = "default_php_allowed_extensions")]
     pub allowed_extensions: Vec<String>,
+    #[serde(default)]
+    pub deny_path_prefixes: Vec<String>,
     #[serde(default = "default_php_request_timeout_secs")]
     pub request_timeout_secs: u64,
     #[serde(default)]
@@ -5321,6 +5323,7 @@ impl Default for PhpConfig {
             fpm_root: None,
             index: default_php_index(),
             allowed_extensions: default_php_allowed_extensions(),
+            deny_path_prefixes: Vec::new(),
             request_timeout_secs: default_php_request_timeout_secs(),
             max_request_body_bytes: None,
             max_response_bytes: default_php_max_response_bytes(),
@@ -5404,6 +5407,7 @@ impl PhpConfig {
 
         validate_php_index(&self.index)?;
         validate_php_extensions(&self.allowed_extensions)?;
+        validate_php_deny_path_prefixes(&self.deny_path_prefixes)?;
         validate_php_params(&self.params)?;
         validate_required_timeout_secs("php.request_timeout_secs", self.request_timeout_secs)?;
         if self
@@ -7630,6 +7634,35 @@ fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.allowed_extensions",
                 reason: "extensions must be plain extension names without dots or separators",
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(), ConfigError> {
+    let mut seen = BTreeSet::new();
+    for prefix in prefixes {
+        if prefix.is_empty()
+            || !prefix.starts_with('/')
+            || prefix.contains('\0')
+            || prefix.contains('\\')
+            || prefix.contains('?')
+            || prefix.contains('#')
+            || prefix.chars().any(char::is_control)
+            || prefix
+                .split('/')
+                .any(|segment| segment == "." || segment == "..")
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.deny_path_prefixes",
+                reason: "prefixes must be absolute URI paths without dot segments, query, fragment, backslash, or control characters",
+            });
+        }
+        if !seen.insert(prefix.clone()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.deny_path_prefixes",
+                reason: "duplicate prefixes are not allowed",
             });
         }
     }
@@ -9992,6 +10025,7 @@ mod tests {
             fpm_root = "/app/public"
             index = "index.php"
             allowed_extensions = ["php"]
+            deny_path_prefixes = ["/wp-content/uploads/", "/uploads"]
             try_files = "wordpress"
             pass_request_headers = false
             pass_request_body = false
@@ -10027,6 +10061,10 @@ mod tests {
         assert_eq!(
             php.fpm_root.as_deref(),
             Some(std::path::Path::new("/app/public"))
+        );
+        assert_eq!(
+            php.deny_path_prefixes,
+            ["/wp-content/uploads/".to_owned(), "/uploads".to_owned()]
         );
         assert_eq!(php.try_files, super::PhpTryFilesMode::WordPress);
         assert!(!php.pass_request_headers);
@@ -10356,6 +10394,64 @@ mod tests {
             error.contains("extensions must be plain extension names"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn rejects_invalid_php_deny_path_prefix() {
+        let root = unique_temp_path("config-php-bad-deny-prefix-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            deny_path_prefixes = ["uploads/../secret"]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-bad-deny-prefix-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.deny_path_prefixes"), "{error}");
+    }
+
+    #[test]
+    fn rejects_duplicate_php_deny_path_prefix() {
+        let root = unique_temp_path("config-php-duplicate-deny-prefix-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+            deny_path_prefixes = ["/uploads", "/uploads"]
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-duplicate-deny-prefix-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.deny_path_prefixes"), "{error}");
     }
 
     #[test]

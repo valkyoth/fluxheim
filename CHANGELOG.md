@@ -37,6 +37,8 @@ behavior when the change improves security or project direction.
 - Added `php.intercept_error_statuses` for opt-in
   `fastcgi_intercept_errors`-style replacement of selected PHP 4xx/5xx
   responses with Fluxheim-generated errors.
+- Added `php.deny_path_prefixes` to block php-fpm script execution under
+  configured URI prefixes such as WordPress upload directories.
 
 ## 1.3.2 - ACME Operations And Config Tester
 

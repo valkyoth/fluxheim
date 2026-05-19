@@ -914,6 +914,7 @@ Follow-up `1.3.x` PHP runtime plan:
     `xmlrpc.php`, sitemap/feed exclusions, logged-in/commenter cookie bypass,
     Super Cache/W3TC static-file fallbacks, and denial of PHP execution under
     uploads/files-style directories.
+    Initial execution denial implemented as `php.deny_path_prefixes`.
   - FastCGI multiplexing, authorizer, and filter-role review. These are not
     required for normal PHP-FPM web serving, but should be documented
     explicitly as unsupported or implemented if enterprise users need them.

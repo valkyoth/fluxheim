@@ -6316,6 +6316,9 @@ fn resolve_php_script(
     else {
         return PhpResolveOutcome::Forbidden;
     };
+    if php_script_name_denied(php, &script_name) {
+        return PhpResolveOutcome::Forbidden;
+    }
 
     if !explicit_php && let Ok(ResolveResult::Found(file)) = php.files.resolve(request_path) {
         if let Some(script_name) = php_static_file_script_name(php, &file) {
@@ -6490,6 +6493,16 @@ fn php_script_name_for_request(
     }
 
     Some((format!("/{}", php.config.index), String::new(), false))
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_script_name_denied(php: &RuntimePhp, script_name: &str) -> bool {
+    php.config.deny_path_prefixes.iter().any(|prefix| {
+        script_name == prefix
+            || script_name
+                .strip_prefix(prefix)
+                .is_some_and(|rest| prefix.ends_with('/') || rest.starts_with('/'))
+    })
 }
 
 #[cfg(feature = "php-fpm")]
@@ -9315,9 +9328,9 @@ mod tests {
     use super::{
         PhpResolveOutcome, RuntimePhp, add_php_host_param, add_php_request_header_params,
         directory_slash_redirect_location, parse_php_response, php_fpm_path_translated,
-        php_fpm_script_filename, php_header_param_name, php_script_name_for_request,
-        php_should_intercept_error_status, resolve_php_script, sanitized_php_stderr,
-        strip_php_response_headers,
+        php_fpm_script_filename, php_header_param_name, php_script_name_denied,
+        php_script_name_for_request, php_should_intercept_error_status, resolve_php_script,
+        sanitized_php_stderr, strip_php_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -9485,6 +9498,35 @@ mod tests {
 
         assert!(php_script_name_for_request(&php, "/../app.php").is_none());
         assert!(php_script_name_for_request(&php, "/app.php/admin").is_none());
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_denies_configured_script_prefixes() {
+        let mut php = php_test_runtime("proxy-php-deny-prefixes");
+        fs::create_dir_all(php.root.join("wp-content").join("uploads")).unwrap();
+        fs::write(
+            php.root
+                .join("wp-content")
+                .join("uploads")
+                .join("shell.php"),
+            "<?php echo 'blocked';",
+        )
+        .unwrap();
+        php.config.deny_path_prefixes = vec!["/wp-content/uploads/".to_owned()];
+
+        assert!(php_script_name_denied(
+            &php,
+            "/wp-content/uploads/shell.php"
+        ));
+        assert!(!php_script_name_denied(
+            &php,
+            "/wp-content/uploads2/app.php"
+        ));
+        assert!(matches!(
+            resolve_php_script(&php, "/wp-content/uploads/shell.php", true),
+            PhpResolveOutcome::Forbidden
+        ));
     }
 
     #[cfg(feature = "php-fpm")]
