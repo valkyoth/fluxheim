@@ -112,7 +112,7 @@ multiple header fields.
 For application-specific examples, including WordPress, WordPress Multisite,
 Laravel, Symfony, Flarum, MediaWiki, phpBB, XenForo, MyBB, and
 Discourse-as-proxy, see
-[`PHP Application Recipes`](php-app-recipes.md).
+[`PHP-FPM Application Recipes`](php-fpm-app-recipes.md).
 
 ## FastCGI Protocol Scope
 

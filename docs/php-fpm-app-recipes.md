@@ -1,7 +1,7 @@
-# PHP Application Recipes
+# PHP-FPM Application Recipes
 
 This page maps common PHP application web-server requirements to Fluxheim's
-generic PHP-FPM primitives. It is intentionally documentation-first: add an
+php-fpm/FastCGI primitives. It is intentionally documentation-first: add an
 application preset only after repeated production testing proves that a stable,
 security-sensitive pattern is common enough to encode in Fluxheim itself.
 
