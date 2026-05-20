@@ -6436,7 +6436,7 @@ async fn respond_php_request(
         PhpRequestBody::memory(Vec::new())
     };
     let content_type = if php.config.pass_request_body {
-        request_header_values_joined(session.req_header(), "content-type").unwrap_or_default()
+        php_content_type_param(session.req_header())
     } else {
         String::new()
     };
@@ -6481,6 +6481,7 @@ async fn respond_php_request(
         )
     })?;
     let host = request_host(session).unwrap_or(vhost.name.as_str());
+    let server_name = php_server_name_param(host, vhost.name.as_str());
 
     let mut params = fastcgi_client::Params::default()
         .gateway_interface("CGI/1.1")
@@ -6497,7 +6498,7 @@ async fn respond_php_request(
         .remote_port(remote_port)
         .server_addr("")
         .server_port(server_port)
-        .server_name(host.to_owned())
+        .server_name(server_name)
         .content_type(content_type)
         .content_length(request_body.len())
         .custom("REQUEST_SCHEME", request_scheme)
@@ -6843,10 +6844,20 @@ fn php_fpm_script_filename(php: &RuntimePhp, local_path: &std::path::Path) -> Op
 
 #[cfg(feature = "php-fpm")]
 fn php_fpm_path_translated(php: &RuntimePhp, path_info: &str) -> Option<String> {
-    php.fpm_root
-        .join(path_info.trim_start_matches('/'))
-        .to_str()
-        .map(str::to_owned)
+    let mut translated = php.fpm_root.clone();
+    for segment in path_info.trim_start_matches('/').split('/') {
+        if segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.starts_with('.')
+            || segment.contains('\\')
+            || segment.contains('\0')
+        {
+            return None;
+        }
+        translated.push(segment);
+    }
+    translated.to_str().map(str::to_owned)
 }
 
 #[cfg(feature = "php-fpm")]
@@ -6958,6 +6969,24 @@ fn add_php_host_param(params: &mut fastcgi_client::Params<'_>, host: &str) {
     if safe_php_param_value(host) {
         params.insert("HTTP_HOST".into(), host.to_owned().into());
     }
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_server_name_param(host: &str, fallback: &str) -> String {
+    if safe_php_param_value(host) && !host.is_empty() {
+        return host.to_owned();
+    }
+    if safe_php_param_value(fallback) && !fallback.is_empty() {
+        return fallback.to_owned();
+    }
+    "localhost".to_owned()
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_content_type_param(request: &RequestHeader) -> String {
+    request_header_values_joined(request, "content-type")
+        .filter(|value| safe_php_param_value(value))
+        .unwrap_or_default()
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10629,12 +10658,13 @@ mod tests {
         apply_php_x_accel_expires, create_php_request_body_spool_file,
         directory_slash_redirect_location, explicit_authority_port,
         ignore_php_origin_cache_headers, parse_php_fpm_output, parse_php_response,
-        php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
-        php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_keepalive_pools_from_config,
-        php_fpm_path_translated, php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count,
-        php_fpm_retryable_error, php_fpm_retryable_response, php_fpm_script_filename,
-        php_fpm_timeout_error, php_header_param_name, php_script_name_denied,
-        php_script_name_for_request, php_should_intercept_error_status, php_static_offload_file,
+        php_content_type_param, php_fpm_effective_connect_timeout,
+        php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
+        php_fpm_keepalive_pools_from_config, php_fpm_path_translated, php_fpm_retry_attempts,
+        php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
+        php_fpm_retryable_response, php_fpm_script_filename, php_fpm_timeout_error,
+        php_header_param_name, php_script_name_denied, php_script_name_for_request,
+        php_server_name_param, php_should_intercept_error_status, php_static_offload_file,
         php_stderr_matches_failure_pattern, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
         push_php_fpm_stream_chunk, resolve_php_script, safe_php_header_value, sanitized_php_stderr,
         strip_php_response_headers,
@@ -10843,6 +10873,9 @@ mod tests {
             php_fpm_path_translated(&php, "/uploads/file.txt").as_deref(),
             Some("/app/public/uploads/file.txt")
         );
+        assert!(php_fpm_path_translated(&php, "/uploads/../wp-config.php").is_none());
+        assert!(php_fpm_path_translated(&php, "/uploads/.secret").is_none());
+        assert!(php_fpm_path_translated(&php, "/uploads\\wp-config.php").is_none());
     }
 
     #[cfg(all(feature = "php-fpm", unix))]
@@ -11183,6 +11216,43 @@ mod tests {
             params.get("HTTP_HOST").map(|value| value.as_ref()),
             Some("example.test")
         );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_server_name_param_falls_back_on_unsafe_host() {
+        assert_eq!(
+            php_server_name_param("example.test", "fallback.test"),
+            "example.test"
+        );
+        assert_eq!(
+            php_server_name_param("bad\nhost", "fallback.test"),
+            "fallback.test"
+        );
+        assert_eq!(
+            php_server_name_param("bad\nhost", "bad\rfallback"),
+            "localhost"
+        );
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_content_type_param_rejects_unsafe_values() {
+        let mut request = pingora::http::RequestHeader::build("POST", b"/index.php", None).unwrap();
+        request
+            .insert_header("content-type", "application/x-www-form-urlencoded")
+            .unwrap();
+        assert_eq!(
+            php_content_type_param(&request),
+            "application/x-www-form-urlencoded"
+        );
+
+        let mut request = pingora::http::RequestHeader::build("POST", b"/index.php", None).unwrap();
+        let content_type = "a".repeat(MAX_PHP_PARAM_VALUE_BYTES + 1);
+        request
+            .insert_header("content-type", content_type.as_str())
+            .unwrap();
+        assert_eq!(php_content_type_param(&request), "");
     }
 
     #[cfg(feature = "php-fpm")]
