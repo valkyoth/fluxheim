@@ -164,7 +164,7 @@ behavior when the change improves security or project direction.
 
 ## 1.3.2 - ACME Operations And Config Tester
 
-Released: in progress
+Released: 2026-05-18
 
 ### Added
 
@@ -211,7 +211,7 @@ Released: in progress
 
 ## 1.3.1 - PHP-FPM Runtime Support
 
-Released: in progress
+Released: 2026-05-16
 
 ### Added
 
@@ -242,7 +242,7 @@ Released: in progress
 
 ## 1.3.0 - Shared Ingress And TLS Feature Split
 
-Released: in progress
+Released: 2026-05-14
 
 ### Changed
 
