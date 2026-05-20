@@ -151,7 +151,8 @@ behavior when the change improves security or project direction.
   runtime path inspection before config loading fails on inaccessible
   `/run/fluxheim` mounts, while still validating non-path process settings.
   Updated the container and production docs to show when to use the tester
-  versus full `fluxheim --validate-config` preflight.
+  versus full `fluxheim --validate-config` preflight, and refreshed container
+  and RPM examples to the current `1.3.2` stable tag.
 - Documented the explicit FastCGI protocol scope for php-fpm: Fluxheim
   supports the one-request-at-a-time `FCGI_RESPONDER` web-serving subset and
   does not support FastCGI multiplexing, authorizer, filter, or management

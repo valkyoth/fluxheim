@@ -232,7 +232,7 @@ scripts/capture_release_gate_report.sh
 
 Before starting the server:
 
- - validate every config with `fluxheim --validate-config --config <path>` before
+- validate every config with `fluxheim --validate-config --config <path>` before
   service start;
 - use `fluxheim-config-tester --config <path> --profile <profile> --no-runtime-paths`
   when diagnosing a mounted config without access to `/run/fluxheim`;
