@@ -954,9 +954,10 @@ Follow-up `1.3.x` PHP runtime plan:
     authenticated purge integration.
   - WordPress-focused migration presets for `wp-admin`, `wp-login.php`,
     `xmlrpc.php`, sitemap/feed exclusions, logged-in/commenter cookie bypass,
-    Super Cache/W3TC static-file fallbacks, and denial of PHP execution under
-    uploads/files-style directories.
+    and denial of PHP execution under uploads/files-style directories.
     Initial execution denial implemented as `php.deny_path_prefixes`.
+    Super Cache/W3TC static-file fallbacks remain future work and need typed
+    static-file probing rather than rewrite-string interpolation.
   - FastCGI multiplexing, authorizer, and filter-role review. Documented as
     unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
     `FCGI_RESPONDER` PHP-FPM web-serving subset.

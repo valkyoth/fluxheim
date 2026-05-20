@@ -899,9 +899,8 @@ bounded app signals such as `x-app-cache = "private"` when header presence
 alone is too broad.
 `preset = "wordpress"` expands common WordPress shared-cache bypasses for
 admin/login paths, app/mail/register/index and sitemap endpoints,
-auth-related cookies, any non-empty query string, and authorization headers. Explicit
-fields still work normally and are not removed
-by the preset.
+auth-related cookies, any non-empty query string, and authorization headers.
+Explicit fields still work normally and are not removed by the preset.
 Cache bypass, header, status, vary, content-type, extension, and method lists
 are capped to bounded sizes to keep validation and per-request matching work
 predictable.
@@ -920,8 +919,9 @@ request header has the exact configured value. Use it for bounded flags such as
 listed cookie name appears in any `Cookie` request header. Only exact names are
 matched; values are ignored. `bypass_cookie_name_prefixes` applies the same
 behavior to cookie-name prefixes such as WordPress hashed login cookies.
-This is narrower than bypassing on every `Cookie` header and is useful for static routes where only session or preview cookies
-make the response unsafe to share.
+This is narrower than bypassing on every `Cookie` header and is useful for
+static routes where only session or preview cookies make the response unsafe to
+share.
 `bypass_cookie_values` disables both cache lookup and cache storage when a
 listed cookie name appears with the exact configured value. Use it for bounded
 flags such as `preview = "1"` when the cookie name alone is too broad.

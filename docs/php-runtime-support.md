@@ -298,19 +298,21 @@ Planned `1.3.3` php-fpm hardening:
   Initial convenience preset implemented as `cache.preset = "wordpress"`,
   expanding common admin/login/legacy endpoint, cookie-prefix, query, and
   authorization bypasses. The underlying cache predicate lists are bounded to
-  prevent unbounded per-request
-  matching.
+  prevent unbounded per-request matching.
 - FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
   predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
   The WordPress cache preset now also supports the common NGINX rule that any
   non-empty query string bypasses shared cache lookup and storage.
-- WordPress cache-plugin migration presets for Super Cache/W3TC-style static
-  fallbacks, logged-in/commenter cookie bypass, admin/login exclusions, and
-  denial of PHP execution under uploads/files directories. The first cache
-  safety preset is `cache.preset = "wordpress"`.
+- WordPress cache-plugin migration presets for logged-in/commenter cookie
+  bypass, admin/login exclusions, and denial of PHP execution under
+  uploads/files directories. The first cache safety preset is
+  `cache.preset = "wordpress"`.
   Initial execution denial implemented as `php.deny_path_prefixes`; this is
   defense in depth above local filesystem permissions and stops Fluxheim from
   sending matching PHP scripts to php-fpm.
+- Super Cache/W3TC-style static-file fallbacks remain future work. They need a
+  typed static-file probing design so Fluxheim can avoid broad rewrite-string
+  interpolation while still matching common WordPress plugin cache layouts.
 - FastCGI multiplexing, authorizer, and filter-role review. Documented as
   unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
   `FCGI_RESPONDER` PHP-FPM web-serving subset.

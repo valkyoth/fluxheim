@@ -82,8 +82,8 @@ behavior when the change improves security or project direction.
   query string, and cookie-name prefixes, plus `cache.preset = "wordpress"`
   for common WordPress shared-cache bypasses, including admin, login,
   XML-RPC, cron, app/mail/register, index, and sitemap endpoints. Cache
-  bypass, header, status, vary, content-type, extension, and method lists are capped to
-  bounded sizes.
+  bypass, header, status, vary, content-type, extension, and method lists are
+  capped to bounded sizes.
 - Added `php.ignore_origin_cache_headers` for NGINX-style migrations that need
   Fluxheim to drop PHP-generated `Cache-Control`, `Expires`, and `Pragma`
   before applying response policy.
