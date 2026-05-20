@@ -60,6 +60,19 @@ response correctness discovered during production and pentest testing.
   `Content-Length` are accepted, satisfiable static multi-range requests fall
   back to full responses, and generated text error bodies include
   `Content-Type`.
+- Hardened PHP-FPM CGI parameter handling and runtime path handling after
+  post-hardening review: sanitized CGI `SERVER_NAME` fallback, validated
+  `CONTENT_TYPE`, added defense-in-depth checks for `PATH_TRANSLATED`, created
+  PHP upload spool directories with private Unix permissions, and canonicalized
+  existing `php.fpm_root` paths while preserving separate-container path
+  mapping.
+- Added private-PKI CA bundle support for OTLP metrics and tracing exporters
+  through `metrics.otlp.tls_ca_cert_path` and
+  `tracing.otlp.tls_ca_cert_path`, plus warnings for plaintext OTLP endpoints
+  outside loopback.
+- Added stronger operator warnings for high-risk `PHP_VALUE` and
+  `PHP_ADMIN_VALUE` directives, including an error-level warning when
+  `PHP_ADMIN_VALUE` overrides `disable_functions`.
 - Hardened admin throttling so exhausted per-source tracking fails closed with
   a global lockout.
 - Updated `base64-ng` to `1.0.0`.

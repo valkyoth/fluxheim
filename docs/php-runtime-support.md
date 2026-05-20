@@ -243,7 +243,7 @@ handling. Local WordPress php-fpm and proxied WordPress TLS smoke tests live in
 `scripts/smoke_wordpress_proxy_tls.sh`; keep running them as release evidence
 when PHP behavior changes.
 
-Planned `1.3.3` php-fpm hardening:
+`1.3.3` php-fpm hardening status:
 
 - Connection pooling to php-fpm with idle pruning. Implemented as opt-in
   `php.fpm.keepalive`.
