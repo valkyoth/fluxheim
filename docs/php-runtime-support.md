@@ -11,7 +11,11 @@ Use this order for implementation and evaluation:
 
 1. `php-fpm`: stable backwards-compatible path for real PHP applications today.
    This is implemented in `1.3.1`.
-2. `experimental-pure-php`: future pure-Rust interpreter path, likely based on
+2. Managed `php-fpm`: future zero-admin deployment mode inside the existing
+   `php-fpm` feature. Fluxheim would generate a minimal private php-fpm pool,
+   spawn and supervise php-fpm, and connect to its private socket, while still
+   using the same FastCGI request path as external php-fpm.
+3. `experimental-pure-php`: future pure-Rust interpreter path, likely based on
    a reviewed `phprs`-style engine if compatibility and maintenance are proven.
    This is useful for research, tests, and long-term optionality, not for
    production PHP hosting yet.
@@ -49,6 +53,10 @@ Release order:
   normalization, and browser-validated WordPress login/admin flows.
 - `1.3.3`: focused php-fpm hardening and compatibility fixes found during
   production tests.
+- Later `1.3.x`: managed php-fpm mode as a config option under the existing
+  `php-fpm` feature, not as a separate Cargo runtime. The goal is a
+  single-binary operator experience while retaining normal php-fpm request
+  isolation and compatibility.
 - Later `1.3.x`: `experimental-pure-php` pure-Rust interpreter research,
   test-only unless compatibility, security, and maintenance are proven.
 
@@ -94,6 +102,25 @@ index_files = ["index.html"]
 tcp = "127.0.0.1:9000"
 # socket = "/run/php/php-fpm.sock"
 ```
+
+A future managed php-fpm mode should keep the runtime selection in
+`[vhosts.php.fpm]` instead of adding a new compile-time PHP runtime:
+
+```toml
+[vhosts.php.fpm]
+mode = "managed" # "external" remains the default
+php_fpm_binary = "/usr/sbin/php-fpm"
+workers = 4
+max_requests_per_worker = 1000
+socket_dir = "/run/fluxheim/php"
+```
+
+Managed mode should generate a minimal private php-fpm config, create a
+Fluxheim-owned Unix socket, supervise the php-fpm master process, restart it on
+failure, and shut it down cleanly on reload or gateway shutdown. It should not
+be implemented as a persistent `php-cli` stdin/stdout worker pool for production
+apps, because normal WordPress, Laravel, Symfony, forum, and wiki applications
+expect per-request PHP isolation.
 
 The PHP handler runs before static fallback. Existing non-PHP files under the
 PHP root are declined so the normal static server can serve assets. Missing

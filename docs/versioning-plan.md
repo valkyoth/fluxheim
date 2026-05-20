@@ -966,6 +966,33 @@ Follow-up `1.3.x` PHP runtime plan:
   - FastCGI multiplexing, authorizer, and filter-role review. Documented as
     unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
     `FCGI_RESPONDER` PHP-FPM web-serving subset.
+- Later `1.3.x`: managed php-fpm mode under the existing `php-fpm` feature.
+  This should be a runtime config choice, not a separate `php-fpm-managed`
+  Cargo feature, because it still uses the same FastCGI bridge and security
+  model. The target operator experience is `mode = "managed"` plus a small
+  worker count, where Fluxheim generates a minimal private php-fpm config,
+  creates a Fluxheim-owned Unix socket, starts php-fpm in foreground mode,
+  supervises restarts, enforces max-request recycling, and shuts workers down
+  cleanly during reload or gateway shutdown.
+  - Keep `mode = "external"` as the default and fully supported behavior.
+  - Managed mode must use the system php-fpm binary, not a long-lived
+    `php-cli` stdin/stdout worker protocol, for production apps. Persistent
+    CLI workers do not provide the request isolation expected by WordPress,
+    Laravel, Symfony, phpBB, XenForo, MediaWiki, and similar applications.
+  - The generated pool config should expose only a small, auditable subset:
+    binary path, worker count, max requests per worker, optional user/group
+    where safe, environment allow-list, php_admin_value overrides for session
+    path and upload temp path, socket directory, and timeout controls.
+  - The generated socket, config, pid, logs, and temporary directories must use
+    the same safe-path ownership, symlink, and writable-parent checks used by
+    ACME/cache/runtime paths.
+  - On validation, Fluxheim should fail clearly when php-fpm is missing,
+    incompatible, or cannot write to its managed directories, and should
+    distinguish process-start failure from FastCGI request failure in logs,
+    metrics, and config-tester output.
+  - Future php-cgi support can be evaluated separately for tiny deployments,
+    but it should not block managed php-fpm because php-cgi process-per-request
+    behavior is a different performance and compatibility tradeoff.
 - Later `1.3.x`: pure-Rust PHP interpreter experiment behind
   `experimental-pure-php`, test-only until compatibility, security, and
   maintenance are proven. The feature must warn operators at startup that it is
@@ -987,6 +1014,8 @@ experimental-pure-php = ["php"] # add dep:phprs only after engine review
 
 Only one PHP runtime feature may be selected in one binary. Add compile-time
 guards for incompatible runtime combinations.
+Managed php-fpm is not a separate runtime feature; it belongs behind
+`php-fpm` because it changes process lifecycle, not the request protocol.
 
 Exit criteria:
 

@@ -172,6 +172,10 @@ Released: 2026-05-20
   servers are better handled as reverse-proxy upstreams, and renamed the
   reserved pure-Rust PHP gate to `experimental-pure-php` with an explicit
   startup warning that production PHP applications should use `php-fpm`.
+- Added managed php-fpm process supervision to the future `1.3.x` PHP plan as
+  a runtime config mode inside the existing `php-fpm` feature, while keeping
+  external php-fpm as the default and rejecting persistent `php-cli` workers as
+  the production path for normal PHP applications.
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
   decoding and OpenBao Transit cache encryption encoding.
 

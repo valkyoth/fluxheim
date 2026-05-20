@@ -86,6 +86,11 @@ renewal.
 cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 ```
 
+Future managed php-fpm process supervision is planned as a runtime config mode
+inside this same `php-fpm` feature, not as a separate Cargo feature. It still
+uses the FastCGI bridge; only php-fpm process lifecycle changes from
+operator-managed to Fluxheim-supervised.
+
 Only one PHP runtime feature may be selected in one binary. Future pure-Rust
 PHP work is reserved behind `experimental-pure-php`; it is not a production
 runtime and must warn operators to use `php-fpm` for real PHP applications
