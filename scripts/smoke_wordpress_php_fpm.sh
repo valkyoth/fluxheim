@@ -84,6 +84,7 @@ trusted_proxies = []
 [server.process]
 pid_file = "$tmp/run/fluxheim.pid"
 upgrade_sock = "$tmp/run/fluxheim-upgrade.sock"
+certificate_reload_sock = "$tmp/run/fluxheim-cert-reload.sock"
 daemon = false
 threads = 2
 
@@ -137,7 +138,7 @@ if [ -n "${FLUXHEIM_BIN:-}" ]; then
     fluxheim_bin="$FLUXHEIM_BIN"
 else
     cargo build --quiet --no-default-features --features profile-web-server,php-fpm
-    fluxheim_bin="target/debug/fluxheim"
+    fluxheim_bin="${CARGO_TARGET_DIR:-target}/debug/fluxheim"
 fi
 
 "$fluxheim_bin" --config "$config" --validate-config

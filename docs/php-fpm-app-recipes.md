@@ -29,24 +29,90 @@ References checked for this page:
 - Discourse install docs:
   <https://github.com/discourse/discourse/blob/main/docs/INSTALL-cloud.md>
 
-## PHP-FPM Compatibility
+## Supported PHP-FPM Functionality
 
-Fluxheim has the PHP-FPM primitives needed by the reviewed PHP applications:
+Fluxheim has the PHP-FPM primitives needed by the reviewed PHP applications.
+The authoritative field-by-field reference is
+[Config Reference](config-reference.md#vhosts-and-routes); this section is the
+operational checklist.
 
-- TCP and Unix php-fpm endpoints.
-- `SCRIPT_FILENAME`, `SCRIPT_NAME`, `DOCUMENT_ROOT`, `REQUEST_URI`,
-  `QUERY_STRING`, `REQUEST_METHOD`, `CONTENT_TYPE`, `CONTENT_LENGTH`,
-  `SERVER_NAME`, `SERVER_PORT`, `HTTPS`, and `REQUEST_SCHEME` generation.
-- Safe inbound request-header translation to `HTTP_*`, including `HTTP_HOST`
-  and `HTTP_AUTHORIZATION`, while dropping `Proxy` for HTTPoxy mitigation.
-- Front-controller routing through `php.try_files = "front-controller"`.
-- Strict real-script execution through `php.try_files = "strict"`.
-- Configurable front-controller file through `php.index`.
-- Optional safe `PATH_INFO` splitting through `php.path_info = "split"`.
-- Split Fluxheim/php-fpm filesystem roots through `php.fpm_root`.
-- Custom FastCGI params through `[vhosts.php.params]`.
-- PHP STDERR logging, error interception, response-header hiding, request body
-  limits, response limits, request-body spooling, and conservative retry/failover.
+FastCGI and backend connectivity:
+
+- `php.runtime = "php-fpm"` uses the one-request-at-a-time FastCGI
+  `FCGI_RESPONDER` web-serving subset.
+- `php.fpm.socket`, `php.fpm.tcp`, and `php.fpm.tcp_upstreams` cover Unix
+  sockets, a single TCP endpoint, or multiple TCP php-fpm backends.
+- `php.fpm.keepalive`, `pool_max_idle`, and `idle_timeout_secs` enable
+  optional FastCGI keep-connection pooling.
+- `php.fpm.connect_timeout_secs`, `read_timeout_secs`,
+  `write_timeout_secs`, `max_retries`, `retry_timeout_secs`,
+  `retry_methods`, `retry_invalid_response`, and `retry_statuses` provide
+  conservative safe-method retry/failover before php-fpm has side effects, or
+  after explicitly configured malformed/5xx responses.
+
+CGI/FastCGI request construction:
+
+- Fluxheim generates `SCRIPT_FILENAME`, `SCRIPT_NAME`, `DOCUMENT_ROOT`,
+  `DOCUMENT_URI`, `REQUEST_URI`, `QUERY_STRING`, `REQUEST_METHOD`,
+  `CONTENT_TYPE`, `CONTENT_LENGTH`, `SERVER_NAME`, `SERVER_PORT`, `HTTPS`,
+  `REQUEST_SCHEME`, `REMOTE_ADDR`, `REMOTE_PORT`, and related CGI variables.
+- `php.pass_request_headers` safely translates inbound HTTP headers to
+  `HTTP_*`, including `HTTP_HOST` and `HTTP_AUTHORIZATION`, while dropping
+  `Proxy` for HTTPoxy mitigation.
+- `php.pass_request_body` controls whether the bounded HTTP body is forwarded
+  to FastCGI STDIN.
+- `php.server_port` can pin CGI `SERVER_PORT` when a deployment needs an
+  application-visible port different from the listener port.
+- `[vhosts.php.params]` and `[vhosts.routes.php.params]` add validated custom
+  FastCGI params without allowing overrides of Fluxheim-owned CGI fields.
+
+Path mapping and application routing:
+
+- `php.root` is the local root Fluxheim validates before any PHP execution.
+- `php.fpm_root` maps that validated root to a different path visible inside a
+  separate php-fpm container or chroot.
+- `php.resolve_root_symlink` allows only a trusted final root symlink for
+  current-release deploy layouts.
+- `php.index` chooses the front-controller or directory index script.
+- `php.allowed_extensions` limits executable script extensions.
+- `php.deny_path_prefixes` blocks PHP execution under upload/private
+  directories even if a matching script file exists.
+- `php.try_files = "front-controller"`, `"wordpress"`, or `"strict"` covers
+  missing-path front controllers and strict `try_files $uri =404` execution.
+- `php.path_info = "split"` enables safe `PATH_INFO` for apps that route
+  through `/index.php/foo`.
+- `php.preset = "wordpress"` combines WordPress front-controller behavior with
+  upload/file PHP execution denies.
+
+Request and response controls:
+
+- `php.max_request_body_bytes` bounds request bodies sent to php-fpm.
+- `php.request_body_spool_threshold_bytes` and
+  `php.request_body_spool_dir` spill larger request bodies to a safe temporary
+  file before php-fpm dispatch so retries can replay them without cloning a
+  large buffer.
+- `php.max_response_bytes` bounds combined FastCGI STDOUT/STDERR buffering.
+- `php.max_response_header_bytes` bounds the CGI response header block.
+- `php.hide_response_headers` removes selected php-fpm response headers before
+  Fluxheim response policy runs.
+- `php.ignore_origin_cache_headers` discards PHP `Cache-Control`, `Expires`,
+  and `Pragma` response headers when Fluxheim should own cache directives.
+- Fluxheim consumes PHP `X-Accel-Redirect`, `X-Sendfile`, and
+  `X-Accel-Expires` for internal static offload and cache-control behavior
+  instead of forwarding those headers to clients.
+- Hop-by-hop php-fpm response headers such as `Connection` and
+  `Transfer-Encoding` are stripped automatically.
+- `php.intercept_error_statuses` and `[[vhosts.php.error_pages]]` implement
+  `fastcgi_intercept_errors`-style generated or static fallback error pages.
+
+Logging and observability:
+
+- `php.stderr_log`, `stderr_log_level`, and `stderr_max_bytes` control
+  sanitized FastCGI STDERR logging.
+- `php.stderr_failure_patterns` can mark a response invalid when STDERR
+  contains configured fatal patterns, which can trigger safe-method failover
+  when `retry_invalid_response` is enabled.
+- Metrics builds expose PHP request/error/retry and php-fpm pool metrics.
 
 The common application-level gap is not a FastCGI protocol gap. Some flat-root
 applications, especially classic forum/wiki packages, expect the web server to

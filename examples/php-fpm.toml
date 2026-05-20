@@ -31,6 +31,9 @@ preset = "wordpress"
 enabled = true
 runtime = "php-fpm"
 root = "/srv/sites/php.example.test/public"
+# Default false. When true, only the final php.root component may be a symlink;
+# Fluxheim resolves it once at startup and still rejects symlinked parents.
+# resolve_root_symlink = true
 # Optional: path visible inside a separate php-fpm container.
 # When omitted, Fluxheim sends php.root as DOCUMENT_ROOT/SCRIPT_FILENAME.
 fpm_root = "/app/public"
@@ -43,15 +46,27 @@ allowed_extensions = ["php"]
 # Advanced migration switches; both default to true.
 pass_request_headers = true
 pass_request_body = true
+# Optional override for CGI SERVER_PORT. When omitted, Fluxheim uses an
+# explicit Host port or falls back to 443 for TLS and 80 for cleartext.
+# server_port = 443
 request_timeout_secs = 30
 max_request_body_bytes = "64MiB"
+# Optional upload spooling for larger request bodies. Configure both fields
+# together; the directory must be safe for the Fluxheim service user.
+# request_body_spool_threshold_bytes = "4MiB"
+# request_body_spool_dir = "/var/lib/fluxheim/php-spool/php.example.test"
 max_response_bytes = "64MiB"
 max_response_header_bytes = "64KiB"
 stderr_log = true
 stderr_log_level = "warn"
 stderr_max_bytes = "2KiB"
+# Treat matching STDERR output as an invalid FastCGI response. Pair with
+# php.fpm.retry_invalid_response for safe-method failover.
+# stderr_failure_patterns = ["PHP Fatal error:"]
 # Remove selected headers emitted by PHP before the response is sent.
 hide_response_headers = ["x-powered-by"]
+# Let Fluxheim own cache headers after consuming PHP cache/offload controls.
+# ignore_origin_cache_headers = false
 # Convert selected PHP error statuses into Fluxheim-generated error responses.
 intercept_error_statuses = []
 # Use "split" only when the application expects PATH_INFO after script.php.
@@ -84,7 +99,16 @@ tcp = "php-fpm:9000"
 # keepalive = true
 # pool_max_idle = 8
 # idle_timeout_secs = 60
+# Optional stricter php-fpm I/O timeouts, bounded by php.request_timeout_secs.
+# connect_timeout_secs = 5
+# read_timeout_secs = 30
+# write_timeout_secs = 30
+# Conservative retry policy for connection failures before php-fpm returns data.
+# max_retries = 1
 # retry_timeout_secs = 5
+# retry_methods = ["GET", "HEAD", "OPTIONS"]
+# retry_invalid_response = false
+# retry_statuses = [500, 502, 503, 504]
 
 # Optional shared cache migration preset for WordPress sites. Enable only for
 # routes where public-page caching is wanted; logged-in and query-string
