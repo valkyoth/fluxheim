@@ -46,6 +46,11 @@ response correctness discovered during production and pentest testing.
 - Added WordPress shared-cache safety helpers through `cache.preset =
   "wordpress"` for admin/login/path, cookie-prefix, query-string, and
   authorization bypasses.
+- Added PHP app recipe documentation for Laravel, Symfony, Flarum, MediaWiki,
+  phpBB, XenForo, MyBB, and Discourse-as-proxy. The review found no missing
+  PHP-FPM protocol primitive for the PHP apps, but flat-root apps still need
+  careful static path exposure until Fluxheim has generic static deny/allow
+  policy.
 - Capped major config collections, including upstream lists, header mutation
   policies, listener lists, trusted proxies, vhosts, routes, ACME issuers and
   domains, TLS allow-lists, static index files, cache key parts, and metric/log

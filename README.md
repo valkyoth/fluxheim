@@ -253,7 +253,8 @@ cargo build --no-default-features --features proxy,web,tls-rustls,load-balancer
 PHP support starts in `1.3.1` with an explicit `php-fpm` module. A PHP build
 can serve normal static assets from the same root while routing missing paths
 and explicit `.php` scripts to php-fpm. See
-[`docs/php-runtime-support.md`](docs/php-runtime-support.md) and
+[`docs/php-runtime-support.md`](docs/php-runtime-support.md),
+[`docs/php-app-recipes.md`](docs/php-app-recipes.md), and
 [`examples/php-fpm.toml`](examples/php-fpm.toml).
 
 TLS backends are mutually exclusive. Select exactly one backend when TLS is

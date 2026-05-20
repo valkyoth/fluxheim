@@ -958,6 +958,11 @@ Follow-up `1.3.x` PHP runtime plan:
     Initial execution denial implemented as `php.deny_path_prefixes`.
     Super Cache/W3TC static-file fallbacks remain future work and need typed
     static-file probing rather than rewrite-string interpolation.
+  - Flat-root PHP applications such as classic forum/wiki packages expose a
+    separate web/static concern: they often need arbitrary private directory
+    denial while still serving selected static asset directories. This is not a
+    PHP-FPM protocol gap; track a generic static `deny_path_prefixes` /
+    allow-list policy before recommending broad static roots for those apps.
   - FastCGI multiplexing, authorizer, and filter-role review. Documented as
     unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
     `FCGI_RESPONDER` PHP-FPM web-serving subset.
