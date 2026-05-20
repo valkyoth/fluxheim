@@ -67,6 +67,50 @@ expect_feature_validation_failure() {
     esac
 }
 
+CHECKS_TMP_DIR="${TMPDIR:-/tmp}/fluxheim-checks-$$"
+export CHECKS_TMP_DIR
+mkdir -p \
+    "$CHECKS_TMP_DIR/configs" \
+    "$CHECKS_TMP_DIR/etc/fluxheim" \
+    "$CHECKS_TMP_DIR/run/fluxheim" \
+    "$CHECKS_TMP_DIR/srv/fluxheim" \
+    "$CHECKS_TMP_DIR/srv/sites" \
+    "$CHECKS_TMP_DIR/var/cache/fluxheim" \
+    "$CHECKS_TMP_DIR/var/lib/fluxheim/acme" \
+    "$CHECKS_TMP_DIR/var/log/fluxheim"
+trap 'rm -rf "$CHECKS_TMP_DIR"' EXIT HUP INT TERM
+
+local_config_copy() {
+    source="$1"
+    target="$CHECKS_TMP_DIR/configs/$source"
+    mkdir -p "$(dirname "$target")"
+    if [ -d "$source" ]; then
+        mkdir -p "$target"
+        cp -R "$source"/. "$target"/
+    else
+        cp "$source" "$target"
+    fi
+    find "$target" -type f -name '*.toml' -exec perl -0pi -e '
+        s#/etc/fluxheim#$ENV{CHECKS_TMP_DIR}/etc/fluxheim#g;
+        s#/run/fluxheim#$ENV{CHECKS_TMP_DIR}/run/fluxheim#g;
+        s#/srv/fluxheim#$ENV{CHECKS_TMP_DIR}/srv/fluxheim#g;
+        s#/srv/sites#$ENV{CHECKS_TMP_DIR}/srv/sites#g;
+        s#/var/cache/fluxheim#$ENV{CHECKS_TMP_DIR}/var/cache/fluxheim#g;
+        s#/var/lib/fluxheim#$ENV{CHECKS_TMP_DIR}/var/lib/fluxheim#g;
+        s#/var/log/fluxheim#$ENV{CHECKS_TMP_DIR}/var/log/fluxheim#g;
+    ' {} +
+    printf '%s\n' "$target"
+}
+
+config_tester() {
+    config="$(local_config_copy "$1")"
+    profile="${2:-development}"
+    cargo run --quiet --no-default-features --features profile-development --bin fluxheim-config-tester -- \
+        --config "$config" \
+        --profile "$profile" \
+        --no-runtime-paths >/dev/null
+}
+
 cargo fmt --all --check
 scripts/validate-release-metadata.sh
 perl scripts/check-doc-links.pl
@@ -123,30 +167,26 @@ cargo check --no-default-features --features proxy,tls
 cargo check --no-default-features --features proxy,tls-rustls
 python3 -m py_compile scripts/prepare-server.py scripts/build_fluxheim_rpm.py
 scripts/validate-tls-backends.sh check
-cargo run --quiet -- --check-config --config examples/fluxheim.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/admin.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/vhosts.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/acme-http-01.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/acme-actalis.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/cache-storage-bin.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/cache-encryption-local.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/cache-encryption-openbao.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/cache-peer-fill.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config examples/php-fpm.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/tls-modern.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/tls-intermediate.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/privacy.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/container/fluxheim.toml >/dev/null
-cargo run --quiet -- --check-config --config packaging/container/fluxheim.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp -- --check-config --config packaging/container/fluxheim.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-web-server,acme-client -- --check-config --config packaging/container/fluxheim.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-cache-edge,acme-client -- --validate-config --config packaging/container/cache.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-proxy-edge,acme-client -- --validate-config --config packaging/container/proxy.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config packaging/container/php.toml >/dev/null
-cargo run --quiet --no-default-features --features profile-load-balancer-edge,acme-client -- --validate-config --config packaging/container/proxy.toml >/dev/null
-cargo run --quiet -- --check-config --config packaging/default/fluxheim.toml >/dev/null
-cargo run --quiet -- --check-config --config examples/conf.d >/dev/null
-cargo run --quiet -- --check-config --config examples/gateway-1-0 >/dev/null
-cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml >/dev/null
+config_tester examples/fluxheim.toml
+config_tester examples/admin.toml
+config_tester examples/vhosts.toml
+config_tester examples/acme-http-01.toml
+config_tester examples/acme-actalis.toml
+config_tester examples/cache-storage-bin.toml
+config_tester examples/cache-encryption-local.toml
+config_tester examples/cache-encryption-openbao.toml
+config_tester examples/cache-peer-fill.toml
+config_tester examples/php-fpm.toml web-php
+config_tester examples/tls-modern.toml
+config_tester examples/tls-intermediate.toml
+config_tester examples/privacy.toml
+config_tester examples/container/fluxheim.toml
+config_tester packaging/container/fluxheim.toml
+config_tester packaging/container/cache.toml cache
+config_tester packaging/container/proxy.toml proxy
+config_tester packaging/container/php.toml web-php
+config_tester packaging/default/fluxheim.toml
+config_tester examples/conf.d
+config_tester examples/gateway-1-0
 cargo deny check
 cargo audit

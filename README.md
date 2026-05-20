@@ -23,12 +23,13 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.3.2`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.3.3`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
-application serving for WordPress-style deployments, the `fluxheim-acme`
-companion, and release-page config tester diagnostics.
+application serving for WordPress-style deployments, PHP-FPM hardening and
+application recipes, the `fluxheim-acme` companion, and release-page config
+tester diagnostics.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -241,8 +242,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.3.2-wolfi`, `v1.3.2-cache-wolfi`, `v1.3.2-proxy-wolfi`, and
-`v1.3.2-php-wolfi`.
+`v1.3.3-wolfi`, `v1.3.3-cache-wolfi`, `v1.3.3-proxy-wolfi`, and
+`v1.3.3-php-wolfi`.
 
 Manual feature selection also works:
 
@@ -332,10 +333,9 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
   `fluxheim-acme` handles external renewal/status/reload operations for
   service-manager and container deployments, while `fluxheim-config-tester`
   validates mounted configs without starting the gateway.
-- `1.3.3` is the active development line for PHP-FPM hardening and production
-  compatibility, including opt-in keepalive pooling and safe custom FastCGI
-  params. These changes are not part of the current stable release until
-  `1.3.3` is tagged.
+- `1.3.3` adds PHP-FPM hardening and production compatibility, including
+  opt-in keepalive pooling, safe custom FastCGI params, PHP response/offload
+  controls, PHP metrics, WordPress cache helpers, and PHP-FPM app recipes.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

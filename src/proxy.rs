@@ -6553,11 +6553,10 @@ async fn respond_php_request(
     if let Some(stderr) = parsed.stderr.as_deref()
         && !stderr.is_empty()
     {
-        let stderr_max_bytes = php.config.stderr_max_bytes.as_u64() as usize;
         #[cfg(feature = "metrics")]
         crate::metrics::record_php_stderr(
             vhost.name.as_str(),
-            php_stderr_metric_state(stderr, stderr_max_bytes),
+            php_stderr_metric_state(stderr, php.config.stderr_max_bytes.as_u64() as usize),
         );
         log_php_stderr_if_enabled(&php.config, stderr);
     }

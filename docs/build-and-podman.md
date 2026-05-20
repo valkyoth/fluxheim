@@ -365,15 +365,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.3.2-wolfi`, `v1.3.2-alpine`, `v1.3.2-suse-micro`, `v1.3.2-debian`
+- `v1.3.3-wolfi`, `v1.3.3-alpine`, `v1.3.3-suse-micro`, `v1.3.3-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.3.2`
-- `v1.3.2-base`
+- `v1.3.3`
+- `v1.3.3-base`
 - `latest`
 - `latest-base`
 
@@ -382,17 +382,17 @@ automation. They point at the full/default image profile.
 
 The cache and proxy image profiles publish tags with a profile segment:
 
-- `v1.3.2-cache-wolfi`, `v1.3.2-cache-alpine`,
-  `v1.3.2-cache-suse-micro`, `v1.3.2-cache-debian`
-- `v1.3.2-proxy-wolfi`, `v1.3.2-proxy-alpine`,
-  `v1.3.2-proxy-suse-micro`, `v1.3.2-proxy-debian`
-- `v1.3.2-php-wolfi`, `v1.3.2-php-alpine`,
-  `v1.3.2-php-suse-micro`, `v1.3.2-php-debian`
+- `v1.3.3-cache-wolfi`, `v1.3.3-cache-alpine`,
+  `v1.3.3-cache-suse-micro`, `v1.3.3-cache-debian`
+- `v1.3.3-proxy-wolfi`, `v1.3.3-proxy-alpine`,
+  `v1.3.3-proxy-suse-micro`, `v1.3.3-proxy-debian`
+- `v1.3.3-php-wolfi`, `v1.3.3-php-alpine`,
+  `v1.3.3-php-suse-micro`, `v1.3.3-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`, `latest-php-wolfi`, etc. when
   run from the default branch
-- Wolfi short aliases: `v1.3.2-cache`, `v1.3.2-proxy`, `v1.3.2-php`,
+- Wolfi short aliases: `v1.3.3-cache`, `v1.3.3-proxy`, `v1.3.3-php`,
   `latest-cache`, `latest-proxy`, and `latest-php`
 
 The load-balancer image profile is prepared for the `1.5` line. It is skipped
@@ -807,8 +807,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.3.2 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.3.2 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.3.3 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.3.3 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date

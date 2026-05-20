@@ -9,6 +9,10 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+## 1.3.3 - PHP-FPM Hardening And Compatibility
+
+Released: 2026-05-20
+
 ### Added
 
 - Started the `1.3.3` PHP-FPM hardening line with opt-in FastCGI
@@ -152,7 +156,7 @@ behavior when the change improves security or project direction.
   `/run/fluxheim` mounts, while still validating non-path process settings.
   Updated the container and production docs to show when to use the tester
   versus full `fluxheim --validate-config` preflight, and refreshed container
-  and RPM examples to the current `1.3.2` stable tag.
+  and RPM examples to the current `1.3.3` release line.
 - Documented the explicit FastCGI protocol scope for php-fpm: Fluxheim
   supports the one-request-at-a-time `FCGI_RESPONDER` web-serving subset and
   does not support FastCGI multiplexing, authorizer, filter, or management
