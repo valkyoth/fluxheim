@@ -151,6 +151,8 @@ behavior when the change improves security or project direction.
   supports the one-request-at-a-time `FCGI_RESPONDER` web-serving subset and
   does not support FastCGI multiplexing, authorizer, filter, or management
   roles in `1.3.x`.
+- Updated the PHP-FPM example to use `php.preset = "wordpress"` and show the
+  optional `cache.preset = "wordpress"` shared-cache migration block.
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
   decoding and OpenBao Transit cache encryption encoding.
 

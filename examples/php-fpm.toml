@@ -25,6 +25,9 @@ enabled = true
 domains = ["php.example.test"]
 
 [vhosts.php]
+# WordPress preset applies the front-controller fallback and blocks PHP
+# execution under common upload/files directories.
+preset = "wordpress"
 enabled = true
 runtime = "php-fpm"
 root = "/srv/sites/php.example.test/public"
@@ -33,11 +36,10 @@ root = "/srv/sites/php.example.test/public"
 fpm_root = "/app/public"
 index = "index.php"
 allowed_extensions = ["php"]
-# Optional hardening for WordPress/media directories that must never execute PHP.
-deny_path_prefixes = ["/wp-content/uploads/"]
-# `wordpress`/`front-controller` routes missing paths to index.php.
+# Optional extra deny prefixes can still be added on top of the preset.
+# deny_path_prefixes = ["/custom-uploads/"]
 # Use `strict` for try_files $uri =404 style PHP execution.
-try_files = "wordpress"
+# try_files = "strict"
 # Advanced migration switches; both default to true.
 pass_request_headers = true
 pass_request_body = true
@@ -83,6 +85,15 @@ tcp = "php-fpm:9000"
 # pool_max_idle = 8
 # idle_timeout_secs = 60
 # retry_timeout_secs = 5
+
+# Optional shared cache migration preset for WordPress sites. Enable only for
+# routes where public-page caching is wanted; logged-in and query-string
+# requests bypass lookup and storage through the preset.
+# [vhosts.cache]
+# preset = "wordpress"
+# enabled = true
+# status_ttls = { "200" = 300, "301" = 300, "302" = 300, "404" = 60 }
+# stale_if_error_secs = 60
 
 [vhosts.web]
 root = "/srv/sites/php.example.test/public"
