@@ -296,8 +296,9 @@ Planned `1.3.3` php-fpm hardening:
   for PHP-handled requests when `otel-otlp` is enabled.
 - FastCGI cache-specific convenience config.
   Initial convenience preset implemented as `cache.preset = "wordpress"`,
-  expanding common admin/login/legacy endpoint, cookie-prefix, query, and authorization bypasses. The
-  underlying cache predicate lists are bounded to prevent unbounded per-request
+  expanding common admin/login/legacy endpoint, cookie-prefix, query, and
+  authorization bypasses. The underlying cache predicate lists are bounded to
+  prevent unbounded per-request
   matching.
 - FastCGI cache compatibility presets: cache keys, status TTLs, bypass/no-cache
   predicates, cache lock, stale-on-error/timeout, background refresh, and purge.
@@ -310,9 +311,9 @@ Planned `1.3.3` php-fpm hardening:
   Initial execution denial implemented as `php.deny_path_prefixes`; this is
   defense in depth above local filesystem permissions and stops Fluxheim from
   sending matching PHP scripts to php-fpm.
-- FastCGI multiplexing, authorizer, and filter-role review. These are not
-  needed for normal PHP-FPM web serving, but should be explicitly unsupported
-  or implemented if enterprise users need them.
+- FastCGI multiplexing, authorizer, and filter-role review. Documented as
+  unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
+  `FCGI_RESPONDER` PHP-FPM web-serving subset.
 
 ### `php-turbine`
 

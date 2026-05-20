@@ -94,6 +94,17 @@ pub struct Config {
 
 impl Config {
     pub fn load(path: Option<&Path>) -> Result<Self, ConfigLoadError> {
+        Self::load_with_runtime_path_validation(path, true)
+    }
+
+    pub fn load_without_runtime_paths(path: Option<&Path>) -> Result<Self, ConfigLoadError> {
+        Self::load_with_runtime_path_validation(path, false)
+    }
+
+    fn load_with_runtime_path_validation(
+        path: Option<&Path>,
+        validate_runtime_paths: bool,
+    ) -> Result<Self, ConfigLoadError> {
         let mut config = match path {
             Some(path) => {
                 let path = canonical_config_source(path)?;
@@ -107,7 +118,9 @@ impl Config {
         };
 
         config.apply_presets();
-        config.validate().map_err(ConfigLoadError::Validate)?;
+        config
+            .validate_with_runtime_path_validation(validate_runtime_paths)
+            .map_err(ConfigLoadError::Validate)?;
         Ok(config)
     }
 
@@ -220,7 +233,15 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
-        self.server.validate()?;
+        self.validate_with_runtime_path_validation(true)
+    }
+
+    fn validate_with_runtime_path_validation(
+        &self,
+        validate_runtime_paths: bool,
+    ) -> Result<(), ConfigError> {
+        self.server
+            .validate_with_runtime_path_validation(validate_runtime_paths)?;
         self.admin.validate()?;
         self.metrics.validate()?;
         self.tracing.validate()?;
@@ -539,7 +560,10 @@ impl ServerConfig {
         }
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    fn validate_with_runtime_path_validation(
+        &self,
+        validate_runtime_paths: bool,
+    ) -> Result<(), ConfigError> {
         if self.listen.is_empty() {
             return Err(ConfigError::EmptyListeners);
         }
@@ -587,7 +611,8 @@ impl ServerConfig {
         }
 
         self.limits.validate()?;
-        self.process.validate()?;
+        self.process
+            .validate_with_runtime_path_validation(validate_runtime_paths)?;
         self.https_redirect.validate()?;
         Ok(())
     }
@@ -727,14 +752,19 @@ impl ServerProcessConfig {
         }
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
-        validate_optional_process_path("server.process.error_log", self.error_log.as_deref())?;
-        validate_required_process_path("server.process.pid_file", &self.pid_file)?;
-        validate_required_process_path("server.process.upgrade_sock", &self.upgrade_sock)?;
-        validate_required_process_path(
-            "server.process.certificate_reload_sock",
-            &self.certificate_reload_sock,
-        )?;
+    fn validate_with_runtime_path_validation(
+        &self,
+        validate_runtime_paths: bool,
+    ) -> Result<(), ConfigError> {
+        if validate_runtime_paths {
+            validate_optional_process_path("server.process.error_log", self.error_log.as_deref())?;
+            validate_required_process_path("server.process.pid_file", &self.pid_file)?;
+            validate_required_process_path("server.process.upgrade_sock", &self.upgrade_sock)?;
+            validate_required_process_path(
+                "server.process.certificate_reload_sock",
+                &self.certificate_reload_sock,
+            )?;
+        }
         validate_process_usize("server.process.threads", self.threads, 1, 1024)?;
         validate_process_usize(
             "server.process.listener_tasks_per_fd",

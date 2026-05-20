@@ -147,6 +147,9 @@ behavior when the change improves security or project direction.
   responses, and Fluxheim-generated text error bodies include `Content-Type`.
 - Admin authentication throttling now fails closed with a global lockout when
   the per-source table is full instead of evicting tracked source state.
+- Fixed `fluxheim-config-tester --no-runtime-paths` so it skips `server.process`
+  runtime path inspection before config loading fails on inaccessible
+  `/run/fluxheim` mounts, while still validating non-path process settings.
 - Documented the explicit FastCGI protocol scope for php-fpm: Fluxheim
   supports the one-request-at-a-time `FCGI_RESPONDER` web-serving subset and
   does not support FastCGI multiplexing, authorizer, filter, or management

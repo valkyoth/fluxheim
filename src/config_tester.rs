@@ -71,8 +71,11 @@ where
 }
 
 fn run(cli: ConfigTesterCli) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let config = Config::load(Some(&cli.config))?;
-    config.validate()?;
+    let config = if cli.no_runtime_paths {
+        Config::load_without_runtime_paths(Some(&cli.config))?
+    } else {
+        Config::load(Some(&cli.config))?
+    };
     validate_profile_config(&config, cli.profile)?;
 
     if cli.explain {
@@ -404,6 +407,8 @@ fn push_proxy_upstreams(scope: &str, proxy: &ProxyConfig, targets: &mut Vec<Upst
 mod tests {
     use super::{ConfigTesterProfile, configured_upstreams, validate_profile_config};
     use crate::config::Config;
+    use crate::test_support::unique_temp_path;
+    use std::fs;
 
     fn config_from_toml(input: &str) -> Config {
         toml::from_str(input).expect("config should parse")
@@ -448,6 +453,42 @@ mod tests {
         let error = validate_profile_config(&config, ConfigTesterProfile::Full).unwrap_err();
 
         assert!(error.to_string().contains("does not include php-fpm"));
+    }
+
+    fn write_test_config(label: &str, contents: &str) -> std::path::PathBuf {
+        let dir = unique_temp_path(label);
+        fs::create_dir_all(&dir).expect("create config tester fixture dir");
+        let path = dir.join("config.toml");
+        fs::write(&path, contents).expect("write config tester fixture");
+        path
+    }
+
+    #[test]
+    fn no_runtime_paths_skips_process_path_inspection() {
+        let path = write_test_config("config-tester-no-runtime", "");
+
+        let config = Config::load_without_runtime_paths(Some(&path))
+            .expect("default runtime paths should be skipped");
+
+        assert!(config.server.process.pid_file.ends_with("fluxheim.pid"));
+    }
+
+    #[test]
+    fn no_runtime_paths_still_validates_process_settings() {
+        let path = write_test_config(
+            "config-tester-invalid-process",
+            r#"
+            [server.process]
+            threads = 0
+            "#,
+        );
+
+        let error = Config::load_without_runtime_paths(Some(&path)).unwrap_err();
+
+        assert!(
+            error.to_string().contains("server.process.threads"),
+            "{error}"
+        );
     }
 
     #[test]
