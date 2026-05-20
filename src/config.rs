@@ -1158,7 +1158,7 @@ impl MetricsOtlpExportConfig {
             if !valid_http_otlp_endpoint(&self.endpoint) {
                 return Err(ConfigError::InvalidMetricsPolicy {
                     field: "metrics.otlp.endpoint",
-                    reason: "OTLP metrics export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
+                    reason: "OTLP metrics export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
             if !valid_service_name(&self.service_name) {
@@ -1298,7 +1298,7 @@ impl OtlpTraceExportConfig {
             if !valid_http_otlp_endpoint(&self.endpoint) {
                 return Err(ConfigError::InvalidTracingPolicy {
                     field: "tracing.otlp.endpoint",
-                    reason: "OTLP trace export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
+                    reason: "OTLP trace export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
             if !valid_service_name(&self.service_name) {
@@ -7587,7 +7587,10 @@ fn default_cache_purger_batches() -> usize {
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
-    let Some(rest) = endpoint.strip_prefix("http://") else {
+    let Some(rest) = endpoint
+        .strip_prefix("http://")
+        .or_else(|| endpoint.strip_prefix("https://"))
+    else {
         return false;
     };
     if rest.is_empty()
@@ -8541,6 +8544,7 @@ fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigEr
     for (name, value) in params {
         validate_php_param_name(name)?;
         validate_php_param_value(value)?;
+        warn_high_risk_php_param(name, value);
     }
     Ok(())
 }
@@ -8726,7 +8730,26 @@ fn validate_php_param_value(value: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn protected_php_param_name(name: &str) -> bool {
+fn warn_high_risk_php_param(name: &str, value: &str) {
+    if !matches!(name, "PHP_VALUE" | "PHP_ADMIN_VALUE") {
+        return;
+    }
+    let value = value.to_ascii_lowercase();
+    for directive in [
+        "open_basedir",
+        "disable_functions",
+        "allow_url_include",
+        "allow_url_fopen",
+    ] {
+        if value.contains(directive) {
+            log::warn!(
+                "php.params.{name} contains high-risk PHP directive {directive:?}; review this setting before production use"
+            );
+        }
+    }
+}
+
+pub(crate) fn protected_php_param_name(name: &str) -> bool {
     matches!(
         name,
         "AUTH_TYPE"
@@ -15006,7 +15029,7 @@ mod tests {
 
     #[cfg(feature = "metrics-otlp")]
     #[test]
-    fn rejects_invalid_otlp_metrics_endpoint() {
+    fn accepts_https_otlp_metrics_endpoint() {
         let config: Config = toml::from_str(
             r#"
             [metrics]
@@ -15019,12 +15042,10 @@ mod tests {
         )
         .unwrap();
 
+        config.validate().unwrap();
         assert_eq!(
-            config.validate(),
-            Err(ConfigError::InvalidMetricsPolicy {
-                field: "metrics.otlp.endpoint",
-                reason: "OTLP metrics export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
-            })
+            config.metrics.otlp.endpoint,
+            "https://collector.example.test/v1/metrics"
         );
     }
 
@@ -15098,7 +15119,7 @@ mod tests {
 
     #[cfg(all(feature = "otel-tracing", feature = "otel-otlp"))]
     #[test]
-    fn rejects_invalid_otlp_trace_endpoint() {
+    fn accepts_https_otlp_trace_endpoint() {
         let config: Config = toml::from_str(
             r#"
             [tracing]
@@ -15111,12 +15132,10 @@ mod tests {
         )
         .unwrap();
 
+        config.validate().unwrap();
         assert_eq!(
-            config.validate(),
-            Err(ConfigError::InvalidTracingPolicy {
-                field: "tracing.otlp.endpoint",
-                reason: "OTLP trace export currently requires an http://host[:port]/path endpoint without query, fragment, or credentials",
-            })
+            config.tracing.otlp.endpoint,
+            "https://collector.example.test/v1/traces"
         );
     }
 

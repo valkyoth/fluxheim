@@ -1,5 +1,3 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
 
@@ -82,6 +80,7 @@ pub struct TraceSpan {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct HttpEndpoint {
+    url: String,
     host: String,
     port: u16,
     path: String,
@@ -90,13 +89,20 @@ struct HttpEndpoint {
 
 impl HttpEndpoint {
     fn parse(endpoint: &str) -> Option<Self> {
-        let rest = endpoint.strip_prefix("http://")?;
+        let (rest, default_port) = if let Some(rest) = endpoint.strip_prefix("http://") {
+            (rest, 80)
+        } else if let Some(rest) = endpoint.strip_prefix("https://") {
+            (rest, 443)
+        } else {
+            return None;
+        };
         let (authority, path) = rest.split_once('/')?;
         if authority.is_empty() || path.is_empty() {
             return None;
         }
-        let (host, port) = parse_authority(authority)?;
+        let (host, port) = parse_authority(authority, default_port)?;
         Some(Self {
+            url: endpoint.to_owned(),
             host,
             port,
             path: format!("/{path}"),
@@ -105,14 +111,14 @@ impl HttpEndpoint {
     }
 }
 
-fn parse_authority(authority: &str) -> Option<(String, u16)> {
+fn parse_authority(authority: &str, default_port: u16) -> Option<(String, u16)> {
     if let Some(stripped) = authority.strip_prefix('[') {
         let (host, tail) = stripped.split_once(']')?;
         if host.is_empty() {
             return None;
         }
         let port = if tail.is_empty() {
-            80
+            default_port
         } else {
             tail.strip_prefix(':')?.parse::<u16>().ok()?
         };
@@ -120,7 +126,7 @@ fn parse_authority(authority: &str) -> Option<(String, u16)> {
     }
 
     let Some((host, port)) = authority.rsplit_once(':') else {
-        return Some((authority.to_owned(), 80));
+        return Some((authority.to_owned(), default_port));
     };
     if host.is_empty() {
         return None;
@@ -278,34 +284,29 @@ fn post_otlp_trace(
     timeout: Duration,
     body: String,
 ) -> std::io::Result<()> {
-    let mut stream = TcpStream::connect((endpoint.host.as_str(), endpoint.port))?;
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    write!(
-        stream,
-        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        endpoint.path,
-        endpoint.authority,
-        body.len(),
-        body
-    )?;
-    stream.flush()?;
-
-    let mut response = String::new();
-    stream.read_to_string(&mut response)?;
-    let Some(status_line) = response.lines().next() else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "empty OTLP response",
-        ));
-    };
-    if status_line.contains(" 2") {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let response = agent
+        .post(&endpoint.url)
+        .header("content-type", "application/json")
+        .send(body.as_str())
+        .map_err(otlp_trace_io_error)?;
+    let status = response.status().as_u16();
+    if (200..300).contains(&status) {
         Ok(())
     } else {
         Err(std::io::Error::other(format!(
-            "OTLP endpoint returned {status_line}"
+            "OTLP endpoint returned HTTP {status}"
         )))
     }
+}
+
+fn otlp_trace_io_error(error: ureq::Error) -> std::io::Error {
+    std::io::Error::other(error.to_string())
 }
 
 #[cfg(test)]
@@ -318,6 +319,15 @@ mod tests {
 
         assert_eq!(endpoint.host, "127.0.0.1");
         assert_eq!(endpoint.port, 4318);
+        assert_eq!(endpoint.path, "/v1/traces");
+    }
+
+    #[test]
+    fn parses_https_otlp_endpoint() {
+        let endpoint = HttpEndpoint::parse("https://collector.example.test/v1/traces").unwrap();
+
+        assert_eq!(endpoint.host, "collector.example.test");
+        assert_eq!(endpoint.port, 443);
         assert_eq!(endpoint.path, "/v1/traces");
     }
 

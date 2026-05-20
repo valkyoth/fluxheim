@@ -293,6 +293,9 @@ overflow_bucket = "overflow"
 
 ```
 
+The OTLP metrics exporter accepts `http://` and `https://` endpoints. Use
+loopback HTTP for same-host collectors and HTTPS for remote collectors.
+
 ## Implementation Stages
 
 1. Harden current labels: ensure request outcome labels are derived from

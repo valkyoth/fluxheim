@@ -176,6 +176,12 @@ Released: 2026-05-20
   a runtime config mode inside the existing `php-fpm` feature, while keeping
   external php-fpm as the default and rejecting persistent `php-cli` workers as
   the production path for normal PHP applications.
+- Hardened PHP-FPM and observability follow-ups from pentest review: bounded
+  joined FastCGI header params, added runtime custom-param guards, added a
+  default PHP request-body fallback cap, tightened X-Sendfile root checks,
+  restricted PHP response header values to ASCII-safe bytes, created PHP spool
+  files relative to a verified directory fd on Unix, and added HTTPS-capable
+  OTLP/HTTP export with strict 2xx status handling.
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
   decoding and OpenBao Transit cache encryption encoding.
 

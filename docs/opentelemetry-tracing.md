@@ -106,8 +106,8 @@ Implemented in the first exporter:
 
 - background worker;
 - bounded queue with drop-on-full behavior;
-- OTLP/HTTP JSON export to `http://` endpoints such as local Jaeger
-  `http://127.0.0.1:4318/v1/traces`;
+- OTLP/HTTP JSON export to `http://` or `https://` endpoints such as local
+  Jaeger `http://127.0.0.1:4318/v1/traces`;
 - request-level server spans with trace ID, regenerated span ID, optional parent
   span ID, method, vhost, route index, status, error flag, and body byte counts.
 
@@ -118,12 +118,12 @@ Requirements:
 - support explicit overflow behavior: `drop_new`, `drop_oldest`, or
   `block_startup_only`;
 - never block request workers on collector availability;
-- support TLS to the collector where the selected crate stack permits it;
+- use HTTPS for remote collectors unless the network is already isolated and
+  authenticated;
 - redact all configured sensitive fields before export.
 
-The current exporter intentionally starts with local HTTP only. Production-grade
-remote export should add TLS and/or gRPC before encouraging network collector
-endpoints.
+The exporter supports HTTP and HTTPS. Keep loopback HTTP for local collectors;
+use HTTPS for collector endpoints that cross a host or container trust boundary.
 
 ## Sampling
 

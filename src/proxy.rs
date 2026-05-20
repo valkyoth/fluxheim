@@ -6306,6 +6306,8 @@ async fn respond_text_error(session: &mut Session, status: u16, body: Bytes) -> 
 
 #[cfg(feature = "php-fpm")]
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
+#[cfg(feature = "php-fpm")]
+const DEFAULT_PHP_REQUEST_BODY_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 
 #[cfg(feature = "php-fpm")]
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -6426,7 +6428,7 @@ async fn respond_php_request(
         .max_request_body_bytes
         .map(|bytes| bytes.as_u64())
         .or(ctx.request_body_limit_bytes)
-        .unwrap_or(u64::MAX);
+        .unwrap_or(DEFAULT_PHP_REQUEST_BODY_LIMIT_BYTES);
     let request_body = if php.config.pass_request_body {
         read_php_request_body(session, ctx, &php.config, body_limit).await?
     } else {
@@ -6928,12 +6930,20 @@ fn add_php_request_header_params(params: &mut fastcgi_client::Params<'_>, reques
         translated
             .entry(param_name)
             .and_modify(|existing| {
-                if name.as_str().eq_ignore_ascii_case("cookie") {
-                    existing.push_str("; ");
+                let separator = if name.as_str().eq_ignore_ascii_case("cookie") {
+                    "; "
                 } else {
-                    existing.push_str(", ");
+                    ", "
+                };
+                if existing
+                    .len()
+                    .saturating_add(separator.len())
+                    .saturating_add(value.len())
+                    <= MAX_PHP_PARAM_VALUE_BYTES
+                {
+                    existing.push_str(separator);
+                    existing.push_str(value);
                 }
-                existing.push_str(value);
             })
             .or_insert_with(|| value.to_owned());
     }
@@ -6956,6 +6966,10 @@ fn add_php_custom_params(
     custom: &std::collections::BTreeMap<String, String>,
 ) {
     for (name, value) in custom {
+        if crate::config::protected_php_param_name(name) || !safe_php_param_value(value) {
+            log::warn!("dropping invalid custom FastCGI param: {name}");
+            continue;
+        }
         params.insert(name.clone().into(), value.clone().into());
     }
 }
@@ -7062,8 +7076,13 @@ impl PhpRequestBody {
     }
 }
 
-#[cfg(feature = "php-fpm")]
+#[cfg(all(feature = "php-fpm", not(unix)))]
 fn php_request_body_spool_path(spool_dir: &std::path::Path) -> io::Result<PathBuf> {
+    Ok(spool_dir.join(php_request_body_spool_filename()?))
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_request_body_spool_filename() -> io::Result<String> {
     let counter = PHP_REQUEST_BODY_SPOOL_COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut random = [0_u8; 8];
     getrandom::fill(&mut random).map_err(|error| {
@@ -7072,10 +7091,10 @@ fn php_request_body_spool_path(spool_dir: &std::path::Path) -> io::Result<PathBu
         ))
     })?;
     let random = u64::from_le_bytes(random);
-    Ok(spool_dir.join(format!(
+    Ok(format!(
         ".fluxheim-php-body-{}-{counter}-{random:016x}.tmp",
         std::process::id()
-    )))
+    ))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -7084,15 +7103,28 @@ async fn create_php_request_body_spool_file(
 ) -> io::Result<(PathBuf, tokio::fs::File)> {
     tokio::fs::create_dir_all(spool_dir).await?;
     ensure_php_request_body_spool_dir(spool_dir)?;
+
+    #[cfg(unix)]
+    {
+        create_php_request_body_spool_file_at(spool_dir)
+    }
+
+    #[cfg(not(unix))]
+    {
+        create_php_request_body_spool_file_by_path(spool_dir).await
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+#[cfg(not(unix))]
+async fn create_php_request_body_spool_file_by_path(
+    spool_dir: &std::path::Path,
+) -> io::Result<(PathBuf, tokio::fs::File)> {
     let mut last_error = None;
     for _ in 0..16 {
         let path = php_request_body_spool_path(spool_dir)?;
         let mut options = tokio::fs::OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            options.mode(0o600);
-        }
         match options.open(&path).await {
             Ok(file) => return Ok((path, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -7107,6 +7139,63 @@ async fn create_php_request_body_spool_file(
             "could not allocate PHP request body spool file",
         )
     }))
+}
+
+#[cfg(feature = "php-fpm")]
+#[cfg(unix)]
+fn create_php_request_body_spool_file_at(
+    spool_dir: &std::path::Path,
+) -> io::Result<(PathBuf, tokio::fs::File)> {
+    use rustix::fs::{Mode, OFlags};
+
+    let directory = rustix::fs::openat(
+        rustix::fs::CWD,
+        spool_dir,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    ensure_php_request_body_spool_dir_fd(&directory)?;
+
+    let mut last_error = None;
+    for _ in 0..16 {
+        let filename = php_request_body_spool_filename()?;
+        let path = spool_dir.join(&filename);
+        match rustix::fs::openat(
+            &directory,
+            filename.as_str(),
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        ) {
+            Ok(file) => {
+                let file = tokio::fs::File::from_std(std::fs::File::from(file));
+                return Ok((path, file));
+            }
+            Err(error) if error == rustix::io::Errno::EXIST => {
+                last_error = Some(io::Error::from(error));
+            }
+            Err(error) => return Err(io::Error::from(error)),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate PHP request body spool file",
+        )
+    }))
+}
+
+#[cfg(feature = "php-fpm")]
+#[cfg(unix)]
+fn ensure_php_request_body_spool_dir_fd<Fd: rustix::fd::AsFd>(directory: Fd) -> io::Result<()> {
+    let stat = rustix::fs::fstat(directory).map_err(io::Error::from)?;
+    if stat.st_mode & 0o022 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "PHP request body spool directory is group/world writable",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "php-fpm")]
@@ -7764,7 +7853,7 @@ fn safe_php_header_name(name: &[u8]) -> bool {
 fn safe_php_header_value(value: &[u8]) -> bool {
     value
         .iter()
-        .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E | 0x80..=0xFF))
+        .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E))
 }
 
 #[cfg(feature = "php-fpm")]
@@ -8897,11 +8986,22 @@ fn php_static_offload_rooted_path(
         ));
     }
     let target_path = std::path::Path::new(target);
-    let local_path = target_path
-        .strip_prefix(&php.fpm_root)
-        .ok()
-        .map(|relative| php.root.join(relative))
-        .unwrap_or_else(|| target_path.to_path_buf());
+    let relative = target_path.strip_prefix(&php.fpm_root).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "php X-Sendfile target is outside php.fpm_root",
+        )
+    })?;
+    if relative
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "php X-Sendfile target escapes php root",
+        ));
+    }
+    let local_path = php.root.join(relative);
     match php.files.resolve_rooted_file(&local_path)? {
         ResolveResult::Found(file) if php_static_offload_file_allowed(php, &file) => Ok(Some(file)),
         ResolveResult::Found(_) | ResolveResult::Forbidden => Err(io::Error::new(
@@ -10522,19 +10622,14 @@ mod tests {
         normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
-    #[cfg(feature = "cache")]
-    use super::{
-        PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
-        peer_fill_request_from_header, peer_fill_url,
-        prune_inactive_peer_fill_concurrency_counters,
-    };
     #[cfg(feature = "php-fpm")]
     use super::{
-        PhpFpmTimeoutKind, PhpRequestBody, PhpResolveOutcome, RuntimePhp, add_php_host_param,
-        add_php_request_header_params, apply_php_x_accel_expires,
-        create_php_request_body_spool_file, directory_slash_redirect_location,
-        explicit_authority_port, ignore_php_origin_cache_headers, parse_php_fpm_output,
-        parse_php_response, php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
+        MAX_PHP_PARAM_VALUE_BYTES, PhpFpmTimeoutKind, PhpRequestBody, PhpResolveOutcome,
+        RuntimePhp, add_php_custom_params, add_php_host_param, add_php_request_header_params,
+        apply_php_x_accel_expires, create_php_request_body_spool_file,
+        directory_slash_redirect_location, explicit_authority_port,
+        ignore_php_origin_cache_headers, parse_php_fpm_output, parse_php_response,
+        php_fpm_effective_connect_timeout, php_fpm_effective_request_timeout,
         php_fpm_endpoints_from_config, php_fpm_error_outcome, php_fpm_keepalive_pools_from_config,
         php_fpm_path_translated, php_fpm_retry_attempts, php_fpm_retry_attempts_for_endpoint_count,
         php_fpm_retryable_error, php_fpm_retryable_response, php_fpm_script_filename,
@@ -10543,6 +10638,12 @@ mod tests {
         php_stderr_matches_failure_pattern, php_stderr_metric_state, php_x_accel_expires_ttl_secs,
         push_php_fpm_stream_chunk, resolve_php_script, safe_php_header_value, sanitized_php_stderr,
         strip_php_response_headers,
+    };
+    #[cfg(feature = "cache")]
+    use super::{
+        PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
+        peer_fill_request_from_header, peer_fill_url,
+        prune_inactive_peer_fill_concurrency_counters,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -11035,6 +11136,41 @@ mod tests {
 
     #[cfg(feature = "php-fpm")]
     #[test]
+    fn php_header_param_translation_caps_joined_header_values() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        let cookie = "a".repeat(MAX_PHP_PARAM_VALUE_BYTES / 2);
+        request.append_header("cookie", cookie.as_str()).unwrap();
+        request.append_header("cookie", cookie.as_str()).unwrap();
+        request.append_header("cookie", cookie.as_str()).unwrap();
+
+        let mut params = fastcgi_client::Params::default();
+        add_php_request_header_params(&mut params, &request);
+
+        let value = params.get("HTTP_COOKIE").unwrap();
+        assert!(value.as_ref().len() <= MAX_PHP_PARAM_VALUE_BYTES);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_custom_params_drop_runtime_invalid_values() {
+        let mut params = fastcgi_client::Params::default();
+        let mut custom = std::collections::BTreeMap::new();
+        custom.insert("SAFE_PARAM".to_owned(), "ok".to_owned());
+        custom.insert("SCRIPT_FILENAME".to_owned(), "/tmp/bypass.php".to_owned());
+        custom.insert("BAD_VALUE".to_owned(), "bad\nvalue".to_owned());
+
+        add_php_custom_params(&mut params, &custom);
+
+        assert_eq!(
+            params.get("SAFE_PARAM").map(|value| value.as_ref()),
+            Some("ok")
+        );
+        assert!(!params.contains_key("SCRIPT_FILENAME"));
+        assert!(!params.contains_key("BAD_VALUE"));
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
     fn php_host_param_uses_resolved_request_host_without_literal_host_header() {
         let request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
         let mut params = fastcgi_client::Params::default();
@@ -11328,6 +11464,7 @@ mod tests {
         assert!(!safe_php_header_value(b"bad\x0binject"));
         assert!(!safe_php_header_value(b"bad\x7fdelete"));
         assert!(!safe_php_header_value(b"bad\r\ninject"));
+        assert!(!safe_php_header_value("bad-é".as_bytes()));
     }
 
     #[cfg(feature = "php-fpm")]
@@ -11496,6 +11633,28 @@ mod tests {
             .insert_header("x-accel-redirect", "/../style.css")
             .unwrap();
         let error = php_static_offload_file(&mut escape, &php).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[cfg(feature = "php-fpm")]
+    #[test]
+    fn php_static_offload_rejects_x_sendfile_outside_fpm_root() {
+        let mut php = php_test_runtime("php-x-sendfile-outside-fpm-root");
+        php.fpm_root = std::path::PathBuf::from("/app/public");
+        let mut outside = ResponseHeader::build(200, None).unwrap();
+        outside
+            .insert_header("x-sendfile", "/other/style.css")
+            .unwrap();
+
+        let error = php_static_offload_file(&mut outside, &php).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+
+        let mut traversal = ResponseHeader::build(200, None).unwrap();
+        traversal
+            .insert_header("x-sendfile", "/app/public/../secret.txt")
+            .unwrap();
+
+        let error = php_static_offload_file(&mut traversal, &php).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 
