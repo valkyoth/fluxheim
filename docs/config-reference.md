@@ -1081,6 +1081,9 @@ cipher_suites = [
   "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
 ]
 
+[tls.fips]
+required = false
+
 [[tls.certificates]]
 cert_path = "tls/fullchain.pem"
 key_path = "tls/key.pem"
@@ -1154,6 +1157,21 @@ The global `[[tls.certificates]]` table is capped at 1024 certificate pairs.
 
 Release validation must still scan every release candidate with a TLS scanner
 before publishing a stable release.
+
+### FIPS-Capable Planning Guard
+
+`[tls.fips] required = true` is accepted by the config schema as a
+fail-closed planning guard for the `1.3.4` FIPS foundation line. It is not a
+production FIPS implementation yet. When enabled today, Fluxheim rejects
+non-NIST or unproven groups such as `X25519` and `X25519MLKEM768`, rejects
+non-FIPS cipher choices such as ChaCha20 suites, and then fails validation
+because no compiled backend can currently prove a validated cryptographic
+module boundary.
+
+Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to print compiled
+TLS backend diagnostics. Use [FIPS-Capable Deployments](fips.md) for the full
+compliance boundary and post-`1.3.4` implementation plan. Do not treat a Cargo
+feature or this config block as a FIPS compliance claim.
 
 Check certificate storage permissions separately:
 

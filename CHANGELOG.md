@@ -15,6 +15,9 @@ behavior when the change improves security or project direction.
   references, compliance boundaries, backend-specific OpenSSL and rustls/AWS-LC
   paths, internal crypto blockers, and the post-`1.3.4` roadmap needed before
   any FIPS-required profile can be described as deployment-ready.
+- Added the initial `tls.fips.required` fail-closed planning guard,
+  `fluxheim crypto`, and `fluxheim-config-tester --crypto` diagnostics for the
+  `1.3.4` FIPS foundation line.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

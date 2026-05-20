@@ -128,11 +128,13 @@ curve_preferences = ["CurveP256", "CurveP384"]
 
 [tls.fips]
 required = true
-validated_module = "operator-managed"
 ```
 
-The exact config schema may change when implementation begins. The important
-rule is fail closed: a FIPS-required config must not silently fall back to a
+`tls.fips.required` is present as a fail-closed planning guard. It validates
+the obvious non-FIPS TLS choices and then rejects startup because no current
+backend can prove a validated cryptographic module boundary yet. The exact
+schema may grow when backend proof fields are implemented. The important rule
+is fail closed: a FIPS-required config must not silently fall back to a
 non-FIPS provider or non-approved cipher.
 
 ## Backend Paths
@@ -284,6 +286,9 @@ Deliverables:
   signature algorithms, and backend support.
 - A diagnostics design for `fluxheim --version --crypto` or an equivalent
   config-tester/runtime command.
+- Initial `fluxheim crypto` and `fluxheim-config-tester --crypto` output that
+  reports compiled TLS backends and states that FIPS-required mode is still
+  fail-closed.
 - Feature-name placeholders documented but not exposed as stable unless the
   corresponding backend checks work.
 

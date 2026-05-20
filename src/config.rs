@@ -2301,6 +2301,8 @@ pub struct TlsConfig {
     #[serde(default)]
     pub certificates: Vec<StaticCertificateConfig>,
     #[serde(default)]
+    pub fips: TlsFipsConfig,
+    #[serde(default)]
     pub acme: AcmeConfig,
 }
 
@@ -2315,6 +2317,7 @@ struct TlsConfigFragment {
     curve_preferences: Option<Vec<TlsCurvePreference>>,
     cipher_suites: Option<Vec<TlsCipherSuite>>,
     certificates: Option<Vec<StaticCertificateConfig>>,
+    fips: Option<TlsFipsConfigFragment>,
     acme: Option<AcmeConfigFragment>,
 }
 
@@ -2343,6 +2346,9 @@ impl TlsConfig {
         }
         if let Some(certificates) = fragment.certificates {
             self.certificates = certificates;
+        }
+        if let Some(fips) = fragment.fips {
+            self.fips.merge(fips);
         }
         if let Some(acme) = fragment.acme {
             self.acme.merge(acme);
@@ -2428,11 +2434,43 @@ impl TlsConfig {
                 reason: "X25519MLKEM768 needs a rustls crypto provider with post-quantum key exchange support; the default rustls backend currently uses ring",
             });
         }
+        self.validate_fips_policy()?;
 
         for certificate in &self.certificates {
             certificate.validate("tls.certificates")?;
         }
         self.acme.validate()
+    }
+
+    fn validate_fips_policy(&self) -> Result<(), ConfigError> {
+        if !self.fips.required {
+            return Ok(());
+        }
+        if self
+            .effective_curve_preferences()
+            .iter()
+            .any(|curve| !curve.is_fips_approved())
+        {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.curve_preferences",
+                reason: "tls.fips.required rejects non-NIST or unproven hybrid groups; use CurveP256 and/or CurveP384 until a validated provider supports more",
+            });
+        }
+        if self
+            .effective_cipher_suites()
+            .iter()
+            .any(|cipher| !cipher.is_fips_approved())
+        {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.cipher_suites",
+                reason: "tls.fips.required rejects non-FIPS cipher suites such as ChaCha20; use AES-GCM/SHA-2 suites from the selected validated provider",
+            });
+        }
+
+        Err(ConfigError::InvalidTlsPolicy {
+            field: "tls.fips.required",
+            reason: "FIPS-required mode is planned but this build cannot yet prove a validated cryptographic module; see docs/fips.md",
+        })
     }
 
     pub fn effective_min_protocol(&self) -> TlsProtocolVersion {
@@ -2477,6 +2515,27 @@ impl TlsConfigFragment {
         }
         if let Some(acme) = &mut self.acme {
             acme.resolve_relative_paths(base_dir);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsFipsConfig {
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TlsFipsConfigFragment {
+    required: Option<bool>,
+}
+
+impl TlsFipsConfig {
+    fn merge(&mut self, fragment: TlsFipsConfigFragment) {
+        if let Some(required) = fragment.required {
+            self.required = required;
         }
     }
 }
@@ -2571,6 +2630,12 @@ pub enum TlsCurvePreference {
     X25519MlKem768,
 }
 
+impl TlsCurvePreference {
+    const fn is_fips_approved(self) -> bool {
+        matches!(self, Self::P256 | Self::P384)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 pub enum TlsCipherSuite {
     #[serde(rename = "TLS_AES_256_GCM_SHA384")]
@@ -2600,6 +2665,18 @@ impl TlsCipherSuite {
             Self::Tls13Aes256GcmSha384
                 | Self::Tls13Chacha20Poly1305Sha256
                 | Self::Tls13Aes128GcmSha256
+        )
+    }
+
+    const fn is_fips_approved(self) -> bool {
+        matches!(
+            self,
+            Self::Tls13Aes256GcmSha384
+                | Self::Tls13Aes128GcmSha256
+                | Self::TlsEcdheEcdsaWithAes128GcmSha256
+                | Self::TlsEcdheRsaWithAes128GcmSha256
+                | Self::TlsEcdheEcdsaWithAes256GcmSha384
+                | Self::TlsEcdheRsaWithAes256GcmSha384
         )
     }
 }
@@ -10831,6 +10908,81 @@ mod tests {
             ]
         );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_tls_fips_config_but_fails_closed_until_backend_proof_exists() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            enabled = true
+            backend = "openssl"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = [
+              "TLS_AES_256_GCM_SHA384",
+              "TLS_AES_128_GCM_SHA256",
+              "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            ]
+
+            [tls.fips]
+            required = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.tls.fips.required);
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.fips.required",
+                reason: "FIPS-required mode is planned but this build cannot yet prove a validated cryptographic module; see docs/fips.md"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_tls_fips_policy_with_non_nist_group() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            curve_preferences = ["X25519", "CurveP256"]
+
+            [tls.fips]
+            required = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.curve_preferences",
+                reason: "tls.fips.required rejects non-NIST or unproven hybrid groups; use CurveP256 and/or CurveP384 until a validated provider supports more",
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_tls_fips_policy_with_chacha20_cipher() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256"]
+
+            [tls.fips]
+            required = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.cipher_suites",
+                reason: "tls.fips.required rejects non-FIPS cipher suites such as ChaCha20; use AES-GCM/SHA-2 suites from the selected validated provider",
+            })
+        );
     }
 
     #[test]

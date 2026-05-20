@@ -769,6 +769,8 @@ The standalone operator and implementation reference is
 [FIPS-Capable Deployments](fips.md). `1.3.4` should be treated as the FIPS
 foundation release: terminology guardrails, compliance-boundary documentation,
 crypto inventory, backend diagnostics design, and fail-closed TLS-policy design.
+The first foundation slice adds `[tls.fips] required = true` as a fail-closed
+planning guard and `fluxheim crypto` as a basic compiled-backend diagnostic.
 Actual FIPS-required deployment readiness should remain staged after `1.3.4`:
 OpenSSL FIPS provider first, rustls/AWS-LC FIPS after provider-aware rustls
 helpers exist, and internal crypto closure before any broad FIPS-required

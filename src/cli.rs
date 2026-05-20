@@ -74,6 +74,9 @@ pub enum CliCommand {
         store: PathBuf,
     },
 
+    /// Print compiled crypto/TLS backend diagnostics.
+    Crypto,
+
     /// Run ACME issuance/renewal once for all configured ACME vhosts.
     AcmeRenew {
         /// Force renewal for every configured ACME vhost, even when certificates are not due.
@@ -702,6 +705,7 @@ fn run_command(
             }
             Ok(())
         }
+        CliCommand::Crypto => run_crypto_diagnostics_command(config_path),
         CliCommand::AcmeRenew { force_renew, all } => {
             if *all {
                 eprintln!("warning: --all is deprecated; use --force-renew");
@@ -890,6 +894,74 @@ fn run_command(
             expect_serve_stale_if_error: *expect_serve_stale_if_error,
             expect_serve_stale_while_revalidate: *expect_serve_stale_while_revalidate,
         }),
+    }
+}
+
+fn run_crypto_diagnostics_command(
+    config_path: Option<&std::path::Path>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let config = match config_path {
+        Some(path) => Some(Config::load_without_runtime_paths(Some(path))?),
+        None => None,
+    };
+    print_crypto_diagnostics(config.as_ref(), config_path);
+    Ok(())
+}
+
+pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&std::path::Path>) {
+    println!("crypto diagnostics:");
+    println!("  version: {}", env!("FLUXHEIM_VERSION"));
+    println!("  tls compiled: {}", cfg!(feature = "tls"));
+    println!("  tls backends:");
+    println!("    rustls: {}", cfg!(feature = "tls-rustls"));
+    println!("    openssl: {}", cfg!(feature = "tls-openssl"));
+    println!("    boringssl: {}", cfg!(feature = "tls-boringssl"));
+    println!("    s2n: {}", cfg!(feature = "tls-s2n"));
+    println!("  fips-capable features:");
+    println!("    tls-rustls-fips: false");
+    println!("    tls-openssl-fips: false");
+    println!("    fips-required: false");
+    println!("  notes:");
+    println!("    FIPS-required mode is planned and currently fails closed.");
+    println!("    See docs/fips.md for the validated-module and operator-evidence model.");
+
+    if let Some(config) = config {
+        println!("  config:");
+        if let Some(path) = config_path {
+            println!("    path: {}", path.display());
+        }
+        println!("    tls.enabled: {}", config.tls.enabled);
+        println!("    tls.backend: {}", tls_backend_name(config.tls.backend));
+        println!("    tls.profile: {}", tls_profile_name(config.tls.profile));
+        println!(
+            "    tls.min_protocol: {}",
+            tls_protocol_name(config.tls.effective_min_protocol())
+        );
+        println!("    tls.fips.required: {}", config.tls.fips.required);
+    }
+}
+
+fn tls_backend_name(backend: crate::config::TlsBackend) -> &'static str {
+    match backend {
+        crate::config::TlsBackend::Rustls => "rustls",
+        crate::config::TlsBackend::Openssl => "openssl",
+        crate::config::TlsBackend::Boringssl => "boringssl",
+        crate::config::TlsBackend::S2n => "s2n",
+    }
+}
+
+fn tls_profile_name(profile: crate::config::TlsPolicyProfile) -> &'static str {
+    match profile {
+        crate::config::TlsPolicyProfile::Modern => "modern",
+        crate::config::TlsPolicyProfile::Intermediate => "intermediate",
+        crate::config::TlsPolicyProfile::Compat => "compat",
+    }
+}
+
+fn tls_protocol_name(protocol: crate::config::TlsProtocolVersion) -> &'static str {
+    match protocol {
+        crate::config::TlsProtocolVersion::Tls12 => "tls1.2",
+        crate::config::TlsProtocolVersion::Tls13 => "tls1.3",
     }
 }
 

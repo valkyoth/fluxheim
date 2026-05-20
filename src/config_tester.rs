@@ -39,6 +39,10 @@ pub struct ConfigTesterCli {
     /// Print vhost/route/module context for checks as they run.
     #[arg(long)]
     pub explain: bool,
+
+    /// Print compiled crypto/TLS diagnostics for this tester build.
+    #[arg(long)]
+    pub crypto: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -77,6 +81,10 @@ fn run(cli: ConfigTesterCli) -> Result<(), Box<dyn Error + Send + Sync>> {
         Config::load(Some(&cli.config))?
     };
     validate_profile_config(&config, cli.profile)?;
+
+    if cli.crypto {
+        crate::cli::print_crypto_diagnostics(Some(&config), Some(&cli.config));
+    }
 
     if cli.explain {
         println!(
