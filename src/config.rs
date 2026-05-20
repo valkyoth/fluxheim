@@ -7682,15 +7682,28 @@ fn default_max_request_body_bytes() -> ByteSize {
 }
 
 fn default_process_pid_file() -> PathBuf {
-    PathBuf::from("/run/fluxheim/fluxheim.pid")
+    default_process_runtime_path("fluxheim.pid")
 }
 
 fn default_process_upgrade_sock() -> PathBuf {
-    PathBuf::from("/run/fluxheim/fluxheim-upgrade.sock")
+    default_process_runtime_path("fluxheim-upgrade.sock")
 }
 
 fn default_process_certificate_reload_sock() -> PathBuf {
-    PathBuf::from("/run/fluxheim/fluxheim-cert-reload.sock")
+    default_process_runtime_path("fluxheim-cert-reload.sock")
+}
+
+#[cfg(not(test))]
+fn default_process_runtime_path(name: &str) -> PathBuf {
+    PathBuf::from("/run/fluxheim").join(name)
+}
+
+#[cfg(test)]
+fn default_process_runtime_path(name: &str) -> PathBuf {
+    crate::test_support::safe_relative_path(
+        &crate::test_support::test_root(),
+        &format!("run/{name}"),
+    )
 }
 
 fn default_process_threads() -> usize {
