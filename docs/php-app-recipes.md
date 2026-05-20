@@ -7,6 +7,9 @@ security-sensitive pattern is common enough to encode in Fluxheim itself.
 
 References checked for this page:
 
+- WordPress NGINX handbook, including single-site, multisite, upload PHP-deny,
+  and cache examples:
+  <https://developer.wordpress.org/advanced-administration/server/web-server/nginx/>
 - Laravel deployment docs:
   <https://laravel.com/docs/12.x/deployment>
 - Symfony web-server configuration:
@@ -53,6 +56,160 @@ directories. Fluxheim currently has dotfile denial and PHP execution
 `deny_path_prefixes` or static allow-list policy. For flat-root applications,
 prefer public-directory installs where available, or expose only explicit
 static routes until a generic static deny/allow policy exists.
+
+## WordPress
+
+WordPress single-site installs need the normal PHP-FPM front-controller shape:
+serve existing static files, route missing paths to `index.php`, and execute
+real `.php` scripts only through php-fpm. The official NGINX guidance also
+denies PHP execution under upload/file directories. Fluxheim's
+`php.preset = "wordpress"` encodes that PHP-side behavior.
+
+```toml
+[[vhosts]]
+name = "wordpress.example.test"
+hosts = ["wordpress.example.test"]
+max_request_body_bytes = "64MiB"
+
+[vhosts.php]
+preset = "wordpress"
+enabled = true
+runtime = "php-fpm"
+root = "/srv/sites/wordpress.example.test/public"
+index = "index.php"
+allowed_extensions = ["php"]
+request_timeout_secs = 30
+max_request_body_bytes = "64MiB"
+max_response_bytes = "64MiB"
+max_response_header_bytes = "64KiB"
+hide_response_headers = ["x-powered-by"]
+stderr_log = true
+
+[vhosts.php.fpm]
+tcp = "127.0.0.1:9000"
+connect_timeout_secs = 5
+read_timeout_secs = 30
+write_timeout_secs = 30
+
+[vhosts.web]
+root = "/srv/sites/wordpress.example.test/public"
+index_files = ["index.html", "index.php"]
+deny_dotfiles = true
+
+[vhosts.web.directory_listing]
+enabled = false
+```
+
+If php-fpm runs in a separate container with a different filesystem root, keep
+`root` as the path Fluxheim validates and add the path php-fpm sees:
+
+```toml
+[vhosts.php]
+root = "/srv/sites/wordpress.example.test/public"
+fpm_root = "/app/public"
+```
+
+For a shared edge cache in front of WordPress, use Fluxheim's WordPress cache
+preset only when you want shared cache behavior. It bypasses common admin,
+login, XML-RPC, cron, sitemap, query-string, authorization, and logged-in cookie
+paths. It does not implement WP Super Cache or W3 Total Cache static file
+probing.
+
+```toml
+[vhosts.cache]
+preset = "wordpress"
+enabled = true
+status_ttls = { "200" = 300, "301" = 300, "302" = 300, "404" = 60 }
+stale_if_error_secs = 60
+
+[vhosts.cache.memory]
+enabled = true
+max_size_bytes = "256MiB"
+```
+
+## WordPress Multisite
+
+Modern WordPress Multisite uses the same PHP-FPM primitives as single-site
+WordPress. WordPress handles subdirectory blog paths through `index.php`, and
+subdomain networks need the same front-controller behavior for every mapped
+host. Keep the Multisite constants and domain mapping in `wp-config.php`; the
+Fluxheim part is host matching, TLS coverage, static serving, and PHP-FPM
+dispatch.
+
+Subdirectory Multisite:
+
+```toml
+[[vhosts]]
+name = "wordpress-ms.example.test"
+hosts = ["wordpress-ms.example.test"]
+max_request_body_bytes = "64MiB"
+
+[vhosts.php]
+preset = "wordpress"
+enabled = true
+runtime = "php-fpm"
+root = "/srv/sites/wordpress-ms.example.test/public"
+index = "index.php"
+allowed_extensions = ["php"]
+max_request_body_bytes = "64MiB"
+max_response_bytes = "64MiB"
+stderr_log = true
+
+[vhosts.php.fpm]
+tcp = "127.0.0.1:9000"
+
+[vhosts.web]
+root = "/srv/sites/wordpress-ms.example.test/public"
+index_files = ["index.html", "index.php"]
+deny_dotfiles = true
+
+[vhosts.web.directory_listing]
+enabled = false
+```
+
+Subdomain Multisite:
+
+```toml
+[[vhosts]]
+name = "wordpress-ms-subdomains"
+hosts = ["example.test", "*.example.test"]
+max_request_body_bytes = "64MiB"
+
+[vhosts.tls]
+enabled = true
+
+# Wildcards require a certificate that already covers the wildcard name.
+# HTTP-01 ACME cannot issue wildcard certificates.
+[vhosts.tls.certificate]
+cert_path = "/etc/fluxheim/tls/example.test/fullchain.pem"
+key_path = "/etc/fluxheim/tls/example.test/privkey.pem"
+
+[vhosts.php]
+preset = "wordpress"
+enabled = true
+runtime = "php-fpm"
+root = "/srv/sites/example.test/public"
+index = "index.php"
+allowed_extensions = ["php"]
+max_request_body_bytes = "64MiB"
+max_response_bytes = "64MiB"
+stderr_log = true
+
+[vhosts.php.fpm]
+tcp = "127.0.0.1:9000"
+
+[vhosts.web]
+root = "/srv/sites/example.test/public"
+index_files = ["index.html", "index.php"]
+deny_dotfiles = true
+```
+
+For named domain-mapped sites instead of a wildcard, list the concrete host
+names in `hosts` and cover each name through the vhost certificate or ACME
+target. Older WordPress Multisite deployments that still use legacy `/files/`
+and `blogs.dir` rewrite/offload rules may need app-specific static aliases or
+an upstream NGINX/Apache helper until Fluxheim has typed static fallback and
+internal-route rules. The PHP-FPM part is still covered by the WordPress preset.
 
 ## Generic Front-Controller Apps
 

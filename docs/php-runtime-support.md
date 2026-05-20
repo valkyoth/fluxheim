@@ -109,8 +109,9 @@ Fluxheim normalizes multiple inbound `Cookie` header lines into one CGI
 PHP applications behind HTTP/2 or intermediaries that split cookies across
 multiple header fields.
 
-For application-specific examples, including Laravel, Symfony, Flarum,
-MediaWiki, phpBB, XenForo, MyBB, and Discourse-as-proxy, see
+For application-specific examples, including WordPress, WordPress Multisite,
+Laravel, Symfony, Flarum, MediaWiki, phpBB, XenForo, MyBB, and
+Discourse-as-proxy, see
 [`PHP Application Recipes`](php-app-recipes.md).
 
 ## FastCGI Protocol Scope

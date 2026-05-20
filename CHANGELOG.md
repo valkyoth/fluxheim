@@ -157,10 +157,11 @@ behavior when the change improves security or project direction.
   supports the one-request-at-a-time `FCGI_RESPONDER` web-serving subset and
   does not support FastCGI multiplexing, authorizer, filter, or management
   roles in `1.3.x`.
-- Added PHP application recipes for Laravel, Symfony, Flarum, MediaWiki, phpBB,
-  XenForo, MyBB, and Discourse-as-proxy, clarifying that the reviewed PHP apps
-  fit Fluxheim's generic PHP-FPM primitives while flat-root apps still need
-  careful static path exposure until generic static deny/allow policy exists.
+- Added PHP application recipes for WordPress, WordPress Multisite, Laravel,
+  Symfony, Flarum, MediaWiki, phpBB, XenForo, MyBB, and Discourse-as-proxy,
+  clarifying that the reviewed PHP apps fit Fluxheim's generic PHP-FPM
+  primitives while flat-root apps still need careful static path exposure until
+  generic static deny/allow policy exists.
 - Updated the PHP-FPM example to use `php.preset = "wordpress"` and show the
   optional `cache.preset = "wordpress"` shared-cache migration block.
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
