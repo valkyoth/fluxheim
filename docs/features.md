@@ -132,6 +132,22 @@ The raw profile aliases do not force `acme-client`; that is intentional for
 offline or static-certificate custom builds. Official RPMs, images, and release
 tarballs add `acme-client` to the full, cache, and proxy profiles by default.
 
+## FIPS-Capable TLS Features
+
+`tls-openssl-fips` is an opt-in OpenSSL 3 FIPS-provider proof path. It expands
+to `tls-openssl` and adds OpenSSL provider diagnostics for configurations that
+set `[tls.fips] required = true`. The build still depends on the operator
+installing and configuring a validated OpenSSL FIPS provider according to that
+module's CMVP Security Policy.
+
+```bash
+cargo build --no-default-features --features proxy,security,tls-openssl-fips
+```
+
+Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
+binary can load the provider in the current environment. See
+[FIPS-Capable Deployments](fips.md) before using this for regulated systems.
+
 Focused image profile status:
 
 - TLS and ACME are shared ingress capabilities, not implicit static webserver

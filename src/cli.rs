@@ -629,6 +629,7 @@ fn validate_php_module_absent(config: &Config) -> Result<(), Box<dyn Error + Sen
 #[cfg(feature = "proxy")]
 pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_compiled_module_config(config)?;
+    validate_fips_runtime_config(config)?;
     crate::proxy::FluxProxy::from_config(config)?;
     Ok(())
 }
@@ -636,6 +637,7 @@ pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Se
 #[cfg(all(feature = "web", not(feature = "proxy")))]
 pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_compiled_module_config(config)?;
+    validate_fips_runtime_config(config)?;
     validate_web_runtime_config("global web", &config.web)?;
     for vhost in &config.vhosts {
         validate_web_runtime_config(&format!("vhost {:?} web", vhost.name), &vhost.web)?;
@@ -664,7 +666,34 @@ fn validate_web_runtime_config(
 #[cfg(not(any(feature = "proxy", feature = "web")))]
 pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     validate_compiled_module_config(config)?;
+    validate_fips_runtime_config(config)?;
     Ok(())
+}
+
+fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if !config.tls.fips.required {
+        return Ok(());
+    }
+
+    #[cfg(feature = "tls-openssl-fips")]
+    {
+        let status = crate::tls::validate_openssl_fips_provider().map_err(|error| {
+            format!("tls.fips.required OpenSSL FIPS provider check failed: {error}")
+        })?;
+        log::info!(
+            "OpenSSL FIPS provider check passed using {}",
+            status.openssl_version
+        );
+        Ok(())
+    }
+
+    #[cfg(not(feature = "tls-openssl-fips"))]
+    {
+        Err(
+            "tls.fips.required requires a FIPS-capable TLS backend feature such as tls-openssl-fips"
+                .into(),
+        )
+    }
 }
 
 fn run_command(
@@ -919,10 +948,24 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     println!("    s2n: {}", cfg!(feature = "tls-s2n"));
     println!("  fips-capable features:");
     println!("    tls-rustls-fips: false");
-    println!("    tls-openssl-fips: false");
-    println!("    fips-required: false");
+    println!(
+        "    tls-openssl-fips: {}",
+        cfg!(feature = "tls-openssl-fips")
+    );
+    #[cfg(feature = "tls-openssl-fips")]
+    match crate::tls::validate_openssl_fips_provider() {
+        Ok(status) => println!(
+            "    openssl_fips_provider: available ({})",
+            status.openssl_version
+        ),
+        Err(error) => println!("    openssl_fips_provider: unavailable ({error})"),
+    }
+    #[cfg(not(feature = "tls-openssl-fips"))]
+    println!("    openssl_fips_provider: unavailable (build lacks tls-openssl-fips)");
     println!("  notes:");
-    println!("    FIPS-required mode is planned and currently fails closed.");
+    println!(
+        "    FIPS-required mode fails closed unless a configured backend can prove provider status."
+    );
     println!("    See docs/fips.md for the validated-module and operator-evidence model.");
 
     if let Some(config) = config {

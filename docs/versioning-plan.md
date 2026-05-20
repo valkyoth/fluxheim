@@ -770,11 +770,12 @@ The standalone operator and implementation reference is
 foundation release: terminology guardrails, compliance-boundary documentation,
 crypto inventory, backend diagnostics design, and fail-closed TLS-policy design.
 The first foundation slice adds `[tls.fips] required = true` as a fail-closed
-planning guard and `fluxheim crypto` as a basic compiled-backend diagnostic.
+planning guard, `fluxheim crypto` as a compiled-backend diagnostic, and an
+initial `tls-openssl-fips` OpenSSL provider proof path.
 Actual FIPS-required deployment readiness should remain staged after `1.3.4`:
-OpenSSL FIPS provider first, rustls/AWS-LC FIPS after provider-aware rustls
-helpers exist, and internal crypto closure before any broad FIPS-required
-profile is recommended for production.
+OpenSSL FIPS provider evidence first, rustls/AWS-LC FIPS after provider-aware
+rustls helpers exist, and internal crypto closure before any broad
+FIPS-required profile is recommended for production.
 
 - Add an explicit FIPS-capable compile/profile line without claiming that
   Fluxheim itself is a validated cryptographic module. The release wording must
@@ -823,10 +824,11 @@ profile is recommended for production.
   - `tls-s2n-fips`: research-only until the s2n/Pingora integration can prove
     s2n was built with FIPS-capable AWS-LC, expose `s2n_get_fips_mode`, and
     restrict configured s2n security policies to FIPS-approved cryptography.
-- Add a high-level `fips-required` compile feature or config guard only after
-  backend-specific checks exist. When enabled, non-FIPS TLS backends, non-FIPS
-  cipher/curve choices, non-FIPS ACME/account crypto paths, and incompatible
-  dependencies must fail validation instead of silently downgrading.
+- Keep `tls.fips.required` as the high-level config guard and require
+  backend-specific proof features underneath it. When enabled, non-FIPS TLS
+  backends, non-FIPS cipher/curve choices, non-FIPS ACME/account crypto paths,
+  and incompatible dependencies must fail validation instead of silently
+  downgrading.
 - Inventory internal cryptography before publishing FIPS profiles. Any
   security-sensitive operation outside TLS, including random request/session
   identifiers, admin token MACs, ACME/account signing, cache encryption,
@@ -853,9 +855,10 @@ profile is recommended for production.
 
 Post-`1.3.4` implementation ladder:
 
-- `1.3.5`: OpenSSL FIPS candidate. Add `tls-openssl-fips`, direct OpenSSL
-  provider/default-property diagnostics, config-tester failure cases, and
-  operator docs for OpenSSL 3.x FIPS provider installation according to the
+- `1.3.5`: OpenSSL FIPS candidate hardening. Expand the initial
+  `tls-openssl-fips` provider probe with release-evidence fixtures,
+  config-tester failure cases, optional OpenSSL config/module path diagnostics,
+  and operator docs for OpenSSL 3.x FIPS provider installation according to the
   selected module Security Policy. Managed ACME and local cache encryption may
   be rejected in FIPS-required mode until their crypto paths are rerouted or
   externally evidenced.

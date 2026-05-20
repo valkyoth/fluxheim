@@ -43,6 +43,21 @@ TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
 `tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls` is the default and
 recommended backend.
 
+For FIPS-capable OpenSSL testing, build with `tls-openssl-fips` instead of the
+default rustls backend and configure `[tls] backend = "openssl"` plus
+`[tls.fips] required = true`. The build must link to an OpenSSL 3 installation
+with a validated FIPS provider installed and configured by the operator:
+
+```bash
+cargo build --release --no-default-features --features proxy,security,tls-openssl-fips
+fluxheim crypto
+```
+
+This feature only makes Fluxheim fail closed and expose provider diagnostics;
+the deployment still needs the selected module's CMVP certificate, Security
+Policy, OpenSSL provider config, and platform evidence. See
+[FIPS-Capable Deployments](fips.md).
+
 PHP support starts with `php-fpm` in `1.3.1`. It is never compiled by default;
 build it explicitly with `profile-web-server,php-fpm` when Fluxheim should
 serve PHP applications through php-fpm.

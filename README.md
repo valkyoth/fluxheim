@@ -226,6 +226,12 @@ still omit `acme-client` for fully offline or static-certificate deployments.
 `profile-cache-server` and `profile-load-balancer` remain compatibility aliases
 for operators who want the older convenience bundles.
 
+FIPS-capable OpenSSL testing is available with `tls-openssl-fips`, which
+requires `backend = "openssl"` and an operator-installed OpenSSL 3 FIPS
+provider. Use `fluxheim crypto` to inspect provider availability, and read
+[FIPS-Capable Deployments](docs/fips.md) before treating a deployment as
+regulated evidence.
+
 Example grouped builds that match the official release artifacts:
 
 ```bash

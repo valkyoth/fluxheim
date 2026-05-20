@@ -18,6 +18,12 @@ behavior when the change improves security or project direction.
 - Added the initial `tls.fips.required` fail-closed planning guard,
   `fluxheim crypto`, and `fluxheim-config-tester --crypto` diagnostics for the
   `1.3.4` FIPS foundation line.
+- Added an opt-in `tls-openssl-fips` feature that accepts
+  `tls.fips.required` only with `backend = "openssl"` and verifies that the
+  OpenSSL FIPS provider can be loaded and queried with `fips=yes` at runtime.
+- Patched the vendored `pingora-openssl` compatibility crate to stop forcing
+  `openssl/vendored`, allowing OpenSSL builds to link against the operator's
+  system OpenSSL provider.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

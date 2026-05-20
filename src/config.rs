@@ -2467,10 +2467,24 @@ impl TlsConfig {
             });
         }
 
-        Err(ConfigError::InvalidTlsPolicy {
-            field: "tls.fips.required",
-            reason: "FIPS-required mode is planned but this build cannot yet prove a validated cryptographic module; see docs/fips.md",
-        })
+        #[cfg(not(feature = "tls-openssl-fips"))]
+        {
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.fips.required",
+                reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-openssl-fips; see docs/fips.md",
+            })
+        }
+
+        #[cfg(feature = "tls-openssl-fips")]
+        {
+            if self.backend != TlsBackend::Openssl {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.backend",
+                    reason: "tls.fips.required with this build requires backend = \"openssl\"",
+                });
+            }
+            Ok(())
+        }
     }
 
     pub fn effective_min_protocol(&self) -> TlsProtocolVersion {
@@ -10911,7 +10925,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_tls_fips_config_but_fails_closed_until_backend_proof_exists() {
+    fn parses_tls_fips_config_and_requires_fips_capable_build() {
         let config: Config = toml::from_str(
             r#"
             [tls]
@@ -10931,11 +10945,42 @@ mod tests {
         .unwrap();
 
         assert!(config.tls.fips.required);
+
+        #[cfg(not(feature = "tls-openssl-fips"))]
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidTlsPolicy {
                 field: "tls.fips.required",
-                reason: "FIPS-required mode is planned but this build cannot yet prove a validated cryptographic module; see docs/fips.md"
+                reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-openssl-fips; see docs/fips.md",
+            })
+        );
+
+        #[cfg(feature = "tls-openssl-fips")]
+        assert_eq!(config.validate(), Ok(()));
+    }
+
+    #[test]
+    #[cfg(feature = "tls-openssl-fips")]
+    fn rejects_tls_fips_policy_with_non_openssl_backend() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            enabled = true
+            backend = "rustls"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.backend",
+                reason: "tls.fips.required with this build requires backend = \"openssl\"",
             })
         );
     }

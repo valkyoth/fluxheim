@@ -1160,18 +1160,23 @@ before publishing a stable release.
 
 ### FIPS-Capable Planning Guard
 
-`[tls.fips] required = true` is accepted by the config schema as a
-fail-closed planning guard for the `1.3.4` FIPS foundation line. It is not a
-production FIPS implementation yet. When enabled today, Fluxheim rejects
-non-NIST or unproven groups such as `X25519` and `X25519MLKEM768`, rejects
-non-FIPS cipher choices such as ChaCha20 suites, and then fails validation
-because no compiled backend can currently prove a validated cryptographic
-module boundary.
+`[tls.fips] required = true` is accepted by the config schema as a fail-closed
+guard for the `1.3.4` FIPS foundation line. It is not a blanket FIPS compliance
+claim. When enabled, Fluxheim rejects non-NIST or unproven groups such as
+`X25519` and `X25519MLKEM768`, rejects non-FIPS cipher choices such as
+ChaCha20 suites, and requires a backend-specific proof path.
+
+Default builds fail closed because they do not contain a FIPS-capable proof
+path. Builds compiled with `tls-openssl-fips` may use `backend = "openssl"`:
+runtime validation then checks that the OpenSSL FIPS provider can be loaded and
+that an approved cipher can be fetched with the `fips=yes` property query.
+Operators still need the selected module's CMVP certificate, Security Policy,
+OpenSSL provider configuration, platform evidence, and deployment records.
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to print compiled
 TLS backend diagnostics. Use [FIPS-Capable Deployments](fips.md) for the full
 compliance boundary and post-`1.3.4` implementation plan. Do not treat a Cargo
-feature or this config block as a FIPS compliance claim.
+feature or this config block alone as a FIPS compliance claim.
 
 Check certificate storage permissions separately:
 

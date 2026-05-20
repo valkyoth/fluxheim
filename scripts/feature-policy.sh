@@ -49,6 +49,9 @@ expand_fluxheim_feature() {
         profile-privacy)
             echo "proxy,web,tls-rustls,privacy-mode,security"
             ;;
+        tls-openssl-fips)
+            echo "tls-openssl,tls-openssl-fips"
+            ;;
         *)
             echo "$1"
             ;;

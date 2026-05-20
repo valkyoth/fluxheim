@@ -1,4 +1,4 @@
-# Pingora Core Patch
+# Pingora Patches
 
 Fluxheim vendors `pingora-core 0.8.0` only to expose one rustls listener hook
 that is required for the default `tls-rustls` build:
@@ -42,6 +42,20 @@ be:
 
 Fluxheim should keep the vendored patch narrow and avoid unrelated edits to
 vendored Pingora source.
+
+## Pingora OpenSSL Patch
+
+Fluxheim also vendors `pingora-openssl 0.8.0` for one dependency-policy change:
+the crates.io package forces `openssl = { features = ["vendored"] }`.
+Fluxheim's `tls-openssl-fips` path must be able to link against the
+operator-installed OpenSSL 3 FIPS provider, so the local patch removes only the
+`vendored` feature from `pingora-openssl`'s OpenSSL dependency.
+
+This patch does not change Pingora's OpenSSL API or runtime behavior. It only
+lets normal Cargo/OpenSSL discovery use the system OpenSSL selected by the
+operator. Remove `vendor/pingora-openssl` and its `[patch.crates-io]` entry
+when upstream makes OpenSSL vendoring optional or no longer enables it by
+default.
 
 ## Proposed PR Steps
 

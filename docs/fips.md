@@ -131,37 +131,43 @@ required = true
 ```
 
 `tls.fips.required` is present as a fail-closed planning guard. It validates
-the obvious non-FIPS TLS choices and then rejects startup because no current
-backend can prove a validated cryptographic module boundary yet. The exact
-schema may grow when backend proof fields are implemented. The important rule
-is fail closed: a FIPS-required config must not silently fall back to a
-non-FIPS provider or non-approved cipher.
+the obvious non-FIPS TLS choices and rejects startup unless the build has a
+backend-specific proof path. The initial proof path is
+`tls-openssl-fips` with `backend = "openssl"`, which checks that the OpenSSL
+FIPS provider can be loaded and that a `fips=yes` property query can fetch an
+approved cipher. The exact schema may grow when more backend proof fields are
+implemented. The important rule is fail closed: a FIPS-required config must
+not silently fall back to a non-FIPS provider or non-approved cipher.
 
 ## Backend Paths
 
 ### OpenSSL FIPS Provider
 
-This is the practical first implementation path.
+This is the practical first implementation path. Fluxheim `1.3.4` starts this
+path with an opt-in feature and runtime provider probe; it still does not make
+a blanket FIPS-compliance claim for the deployment.
 
-Planned feature shape:
+Feature shape:
 
 ```toml
 tls-openssl-fips = ["tls-openssl", "dep:openssl"]
 ```
 
-Expected implementation work:
+Current Fluxheim enforcement:
 
-- Add a direct `openssl` crate dependency only for OpenSSL FIPS diagnostics and
-  provider/default-property checks.
-- Require OpenSSL 3.x for the FIPS provider path.
-- Add startup checks that prove the FIPS provider is loadable and that the
-  default property query includes `fips=yes` when FIPS-required mode is active.
-- Expose diagnostic output showing OpenSSL version, provider status, and
-  whether FIPS-required mode passed.
-- Reject FIPS-required startup if the backend is not OpenSSL or if the provider
-  check fails.
-- Add config-tester coverage for missing provider, wrong backend, and rejected
-  non-FIPS TLS settings.
+- Adds a direct `openssl` crate dependency only for OpenSSL FIPS diagnostics
+  and provider/property checks.
+- Uses Fluxheim's local `pingora-openssl` patch to avoid forced
+  `openssl/vendored`, so builds can link against the operator-selected OpenSSL
+  installation.
+- Requires OpenSSL 3.x behavior for the FIPS property query path.
+- Loads the `fips` provider and keeps it loaded for the process lifetime.
+- Attempts to load the `base` provider for normal encoder/decoder support.
+- Fetches `AES-256-GCM` with `fips=yes` to prove the property query can resolve
+  an approved cipher.
+- Exposes diagnostic output showing OpenSSL version and provider availability.
+- Rejects FIPS-required startup if the backend is not OpenSSL or if the
+  provider/property check fails.
 
 Operator responsibilities:
 
@@ -287,31 +293,29 @@ Deliverables:
 - A diagnostics design for `fluxheim --version --crypto` or an equivalent
   config-tester/runtime command.
 - Initial `fluxheim crypto` and `fluxheim-config-tester --crypto` output that
-  reports compiled TLS backends and states that FIPS-required mode is still
-  fail-closed.
-- Feature-name placeholders documented but not exposed as stable unless the
-  corresponding backend checks work.
+  reports compiled TLS backends and OpenSSL FIPS provider availability.
+- Initial `tls-openssl-fips` feature for OpenSSL 3 provider diagnostics and
+  fail-closed `tls.fips.required` startup validation.
 
 Exit criteria:
 
 - Documentation does not overclaim.
 - Operators can see which pieces remain blockers before they attempt a
   regulated deployment.
-- The next implementation PR has a clear OpenSSL-first path and a separate
-  rustls/AWS-LC path.
+- The next implementation PR has a clear release-evidence path for OpenSSL and
+  a separate rustls/AWS-LC path.
 
-### 1.3.5 - OpenSSL FIPS Candidate
+### 1.3.5 - OpenSSL FIPS Candidate Hardening
 
-Goal: first usable FIPS-capable runtime path using OpenSSL 3.x with a validated
-FIPS provider.
+Goal: harden the first OpenSSL FIPS-capable runtime path using OpenSSL 3.x with
+a validated FIPS provider.
 
 Deliverables:
 
-- `tls-openssl-fips` feature.
-- FIPS-required config guard for the OpenSSL backend.
-- Provider/default-property verification at startup.
-- Config-tester diagnostics for provider failure, non-FIPS TLS settings, and
-  backend mismatch.
+- Evidence-focused config-tester fixtures for provider failure, non-FIPS TLS
+  settings, and backend mismatch.
+- Optional operator-supplied OpenSSL config/module path diagnostics where the
+  platform exposes them cleanly.
 - Release evidence template listing OpenSSL version, provider config, module
   certificate, and Security Policy.
 - Documentation for systemd, RPM, and container operation using an

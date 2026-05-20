@@ -13,6 +13,45 @@ pub fn install_rustls_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
+#[cfg(feature = "tls-openssl-fips")]
+static OPENSSL_FIPS_PROVIDER_LOADED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "tls-openssl-fips")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct OpenSslFipsStatus {
+    pub openssl_version: String,
+}
+
+#[cfg(feature = "tls-openssl-fips")]
+pub fn validate_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
+    use std::sync::atomic::Ordering;
+
+    let openssl_version = openssl::version::version().to_owned();
+    if !OPENSSL_FIPS_PROVIDER_LOADED.load(Ordering::Acquire) {
+        let fips_provider = openssl::provider::Provider::try_load(None, "fips", true)
+            .map_err(|error| format!("OpenSSL FIPS provider could not be loaded: {error}"))?;
+        let base_provider = openssl::provider::Provider::try_load(None, "base", true).ok();
+        let _ = Box::leak(Box::new(fips_provider));
+        if let Some(base_provider) = base_provider {
+            let _ = Box::leak(Box::new(base_provider));
+        }
+        OPENSSL_FIPS_PROVIDER_LOADED.store(true, Ordering::Release);
+    }
+
+    openssl_fips_property_query_check()?;
+    Ok(OpenSslFipsStatus { openssl_version })
+}
+
+#[cfg(feature = "tls-openssl-fips")]
+fn openssl_fips_property_query_check() -> Result<(), String> {
+    openssl::cipher::Cipher::fetch(None, "AES-256-GCM", Some("fips=yes"))
+        .map(|_| ())
+        .map_err(|error| {
+            format!("OpenSSL FIPS property query failed for AES-256-GCM with fips=yes: {error}")
+        })
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TlsStorageCheck {
     pub issues: Vec<TlsStorageIssue>,
