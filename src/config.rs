@@ -5962,7 +5962,7 @@ impl PhpConfig {
         if self.max_response_bytes.as_u64() > MAX_PHP_RESPONSE_CONFIG_BYTES as u64 {
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.max_response_bytes",
-                reason: "must be less than or equal to 1GiB",
+                reason: "must be less than or equal to 64MiB",
             });
         }
         if self.max_response_header_bytes.as_u64() == 0 {
@@ -6095,7 +6095,7 @@ const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
 const MAX_PHP_STDERR_FAILURE_PATTERN_BYTES: usize = 512;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
-const MAX_PHP_RESPONSE_CONFIG_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_PHP_RESPONSE_CONFIG_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PHP_RESPONSE_HEADER_CONFIG_BYTES: usize = 1024 * 1024;
 
 impl PhpFpmConfig {
@@ -11864,7 +11864,7 @@ mod tests {
             [vhosts.php]
             enabled = true
             root = "{}"
-            max_response_bytes = "2GiB"
+            max_response_bytes = "65MiB"
 
             [vhosts.php.fpm]
             tcp = "127.0.0.1:9000"
@@ -11876,7 +11876,7 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.max_response_bytes"), "{error}");
-        assert!(error.contains("less than or equal to 1GiB"), "{error}");
+        assert!(error.contains("less than or equal to 64MiB"), "{error}");
     }
 
     #[test]

@@ -67,7 +67,7 @@ Released: 2026-05-20
   header cap configurable while keeping the `64KiB` default. Added
   `php.server_port` for explicit CGI `SERVER_PORT` overrides on non-standard
   PHP listener deployments.
-- Capped configurable buffered PHP responses at `1GiB` while keeping the
+- Capped configurable buffered PHP responses at `64MiB` while keeping the
   default `php.max_response_bytes = "64MiB"`; php-fpm STDOUT/STDERR is now
   collected through the configured cap instead of after unbounded buffering.
 - Added PHP-specific Prometheus request totals and duration histograms with

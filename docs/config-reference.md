@@ -1654,7 +1654,9 @@ canonical `308` redirect before executing the script, for example `/blog` to
 `/blog/` when `/blog/index.php` exists.
 `max_response_bytes` defaults to `64MiB`; set a smaller value on
 memory-constrained or high-assurance edge nodes. Because PHP responses are
-currently buffered, the configured value is capped at `1GiB`.
+currently buffered, the configured value is capped at `64MiB`. Use
+`X-Accel-Redirect` or `X-Sendfile` for large files so Fluxheim can serve the
+static asset path instead of buffering PHP output.
 `php.fpm.keepalive` enables
 FastCGI keep-connection reuse with an idle pool capped by
 `php.fpm.pool_max_idle`; it is off by default for conservative compatibility.

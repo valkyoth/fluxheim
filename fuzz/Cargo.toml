@@ -8,7 +8,7 @@ publish = false
 cargo-fuzz = true
 
 [dependencies]
-fluxheim = { path = ".." }
+fluxheim = { path = "..", features = ["php-fpm"] }
 libfuzzer-sys = "0.4"
 
 [patch.crates-io]
@@ -24,6 +24,13 @@ bench = false
 [[bin]]
 name = "cache_headers"
 path = "fuzz_targets/cache_headers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_php_response"
+path = "fuzz_targets/parse_php_response.rs"
 test = false
 doc = false
 bench = false

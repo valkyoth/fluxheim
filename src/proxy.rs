@@ -7663,6 +7663,13 @@ fn parse_php_response(
 }
 
 #[cfg(feature = "php-fpm")]
+#[doc(hidden)]
+pub fn fuzz_parse_php_response(stdout: &[u8]) -> io::Result<()> {
+    let _ = parse_php_response(stdout, 1024 * 1024, 64 * 1024)?;
+    Ok(())
+}
+
+#[cfg(feature = "php-fpm")]
 fn http_version_cgi(version: http::Version) -> &'static str {
     match version {
         http::Version::HTTP_09 => "HTTP/0.9",
@@ -10697,6 +10704,27 @@ mod tests {
                 .contains("spool directory is group/world writable"),
             "{error}"
         );
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_spool_file_creation_rejects_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+
+        let target = unique_temp_path("php-spooled-request-body-target");
+        let spool_dir = unique_temp_path("php-spooled-request-body-symlink");
+        fs::create_dir_all(&target).unwrap();
+        symlink(&target, &spool_dir).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(create_php_request_body_spool_file(&spool_dir))
+            .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("not a directory"), "{error}");
     }
 
     #[cfg(feature = "php-fpm")]

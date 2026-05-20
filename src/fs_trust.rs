@@ -26,8 +26,7 @@ fn existing_path_has_insecure_write_permissions(
     use std::os::unix::fs::PermissionsExt;
 
     loop {
-        match std::fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(false),
+        match std::fs::metadata(&current) {
             Ok(metadata) => return Ok(metadata.permissions().mode() & 0o022 != 0),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if !current.pop() {
@@ -51,4 +50,23 @@ pub(crate) fn existing_path_or_parent_has_insecure_write_permissions(
     _path: &Path,
 ) -> std::io::Result<bool> {
     Ok(false)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::existing_path_has_insecure_write_permissions;
+    use crate::test_support::unique_temp_path;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn follows_symlinked_path_for_permission_checks() {
+        let target = unique_temp_path("fs-trust-world-writable-target");
+        let link = unique_temp_path("fs-trust-world-writable-link");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o777)).unwrap();
+        symlink(&target, &link).unwrap();
+
+        let mut current = link;
+        assert!(existing_path_has_insecure_write_permissions(&mut current).unwrap());
+    }
 }
