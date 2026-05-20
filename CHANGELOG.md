@@ -27,6 +27,8 @@ behavior when the change improves security or project direction.
 - Added FIPS-capable release evidence instructions for OpenSSL provider
   diagnostics, `tls.fips.required` config-tester checks, and operator evidence
   capture.
+- Extended crypto diagnostics to report the OpenSSL configuration and module
+  environment visible to the Fluxheim process without hardcoding distro paths.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

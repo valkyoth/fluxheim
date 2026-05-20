@@ -962,6 +962,7 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     }
     #[cfg(not(feature = "tls-openssl-fips"))]
     println!("    openssl_fips_provider: unavailable (build lacks tls-openssl-fips)");
+    print_openssl_environment_diagnostics();
     println!("  notes:");
     println!(
         "    FIPS-required mode fails closed unless a configured backend can prove provider status."
@@ -981,6 +982,24 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
             tls_protocol_name(config.tls.effective_min_protocol())
         );
         println!("    tls.fips.required: {}", config.tls.fips.required);
+    }
+}
+
+fn print_openssl_environment_diagnostics() {
+    println!("  openssl environment:");
+    println!("    OPENSSL_CONF: {}", diagnostic_env_value("OPENSSL_CONF"));
+    println!(
+        "    OPENSSL_MODULES: {}",
+        diagnostic_env_value("OPENSSL_MODULES")
+    );
+}
+
+fn diagnostic_env_value(name: &str) -> String {
+    match std::env::var(name) {
+        Ok(value) if !value.trim().is_empty() => value,
+        Ok(_) => "<empty>".to_owned(),
+        Err(std::env::VarError::NotPresent) => "<unset>".to_owned(),
+        Err(std::env::VarError::NotUnicode(_)) => "<non-unicode>".to_owned(),
     }
 }
 

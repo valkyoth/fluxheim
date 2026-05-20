@@ -192,11 +192,15 @@ openssl list -providers -provider fips -provider base
 cargo run --no-default-features --features proxy,security,tls-openssl-fips --bin fluxheim -- crypto
 ```
 
+Fluxheim does not hardcode a provider directory. It lets OpenSSL use the
+platform's normal provider search rules, including `OPENSSL_CONF`,
+`OPENSSL_MODULES`, distro crypto policies, and compiled-in defaults. The
+`fluxheim crypto` output prints the OpenSSL environment variables visible to
+the process so operators can capture how provider discovery was configured.
 On distributions that package OpenSSL providers separately, install only the
-provider package needed for local testing. For example, openSUSE/SUSE systems
-provide `libopenssl-3-fips-provider`. Full-system FIPS mode packages, boot
-loader changes, and initramfs changes are deployment decisions, not required
-for normal Fluxheim development.
+provider package needed for local testing. Full-system FIPS mode packages,
+boot loader changes, and initramfs changes are deployment decisions, not
+required for normal Fluxheim development.
 
 Minimal FIPS-required runtime validation example:
 

@@ -1172,6 +1172,8 @@ runtime validation then checks that the OpenSSL FIPS provider can be loaded and
 that an approved cipher can be fetched with the `fips=yes` property query.
 Operators still need the selected module's CMVP certificate, Security Policy,
 OpenSSL provider configuration, platform evidence, and deployment records.
+Fluxheim does not hardcode an OpenSSL provider path; provider discovery follows
+the platform OpenSSL configuration and environment visible to the process.
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to print compiled
 TLS backend diagnostics. Use [FIPS-Capable Deployments](fips.md) for the full
