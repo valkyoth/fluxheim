@@ -205,9 +205,12 @@ for separate php-fpm containers, but must require explicit config.
 
 Current tests cover config validation, traversal rejection, disabled `PATH_INFO`
 behavior, safe CGI header translation with HTTPoxy mitigation, custom FastCGI
-param validation, and malformed FastCGI response headers. Rootless php-fpm
-container smoke tests, timeout tests, and oversized body tests remain part of
-the `1.3.3` hardening pass.
+param validation, malformed FastCGI response headers, php-fpm timeout
+classification, spooled request-body replay and cleanup, and bounded STDERR
+handling. Local WordPress php-fpm and proxied WordPress TLS smoke tests live in
+`scripts/smoke_wordpress_php_fpm.sh` and
+`scripts/smoke_wordpress_proxy_tls.sh`; keep running them as release evidence
+when PHP behavior changes.
 
 Planned `1.3.3` php-fpm hardening:
 
