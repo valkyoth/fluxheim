@@ -957,9 +957,9 @@ Follow-up `1.3.x` PHP runtime plan:
     Super Cache/W3TC static-file fallbacks, and denial of PHP execution under
     uploads/files-style directories.
     Initial execution denial implemented as `php.deny_path_prefixes`.
-  - FastCGI multiplexing, authorizer, and filter-role review. These are not
-    required for normal PHP-FPM web serving, but should be documented
-    explicitly as unsupported or implemented if enterprise users need them.
+  - FastCGI multiplexing, authorizer, and filter-role review. Documented as
+    unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
+    `FCGI_RESPONDER` PHP-FPM web-serving subset.
 - `1.3.4`: embedded Rust PHP/Turbine-style integration if the source, license,
   API, isolation, reload, and concurrency model pass review.
 - `1.3.5`: pure-Rust PHP interpreter experiment behind `php-phprs`, beta or

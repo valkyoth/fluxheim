@@ -81,9 +81,8 @@ behavior when the change improves security or project direction.
 - Added cache bypass primitives for path prefixes, exact paths, any non-empty
   query string, and cookie-name prefixes, plus `cache.preset = "wordpress"`
   for common WordPress shared-cache bypasses, including admin, login,
-  XML-RPC, cron, app/mail/register, index, and sitemap endpoints. Cache bypass,
-  header,
-  status, vary, content-type, extension, and method lists are capped to
+  XML-RPC, cron, app/mail/register, index, and sitemap endpoints. Cache
+  bypass, header, status, vary, content-type, extension, and method lists are capped to
   bounded sizes.
 - Added `php.ignore_origin_cache_headers` for NGINX-style migrations that need
   Fluxheim to drop PHP-generated `Cache-Control`, `Expires`, and `Pragma`
@@ -141,10 +140,17 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
-- Added RFC 9110 hardening for proxy and static responses: ACME HTTP-01 405 responses now include `Allow`, proxied requests and responses append Fluxheim `Via`, chunked requests without `Content-Length` are accepted for streaming body limits, satisfiable multi-range static requests are served as full responses, and Fluxheim-generated text error bodies include `Content-Type`.
+- Added RFC 9110 hardening for proxy and static responses: ACME HTTP-01 405
+  responses now include `Allow`, proxied requests and responses append Fluxheim
+  `Via`, chunked requests without `Content-Length` are accepted for streaming
+  body limits, satisfiable multi-range static requests are served as full
+  responses, and Fluxheim-generated text error bodies include `Content-Type`.
 - Admin authentication throttling now fails closed with a global lockout when
   the per-source table is full instead of evicting tracked source state.
-
+- Documented the explicit FastCGI protocol scope for php-fpm: Fluxheim
+  supports the one-request-at-a-time `FCGI_RESPONDER` web-serving subset and
+  does not support FastCGI multiplexing, authorizer, filter, or management
+  roles in `1.3.x`.
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
   decoding and OpenBao Transit cache encryption encoding.
 

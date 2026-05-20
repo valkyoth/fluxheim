@@ -109,6 +109,22 @@ Fluxheim normalizes multiple inbound `Cookie` header lines into one CGI
 PHP applications behind HTTP/2 or intermediaries that split cookies across
 multiple header fields.
 
+## FastCGI Protocol Scope
+
+Fluxheim's php-fpm integration intentionally implements the normal web-serving
+FastCGI subset: one `FCGI_RESPONDER` request at a time per selected backend
+connection, `BEGIN_REQUEST`, bounded `PARAMS`, optional `STDIN`, collected
+`STDOUT`, bounded and sanitized `STDERR`, and `END_REQUEST`. Opt-in keepalive
+may reuse an idle backend connection after a request completes, but Fluxheim does
+not multiplex concurrent FastCGI request IDs on one connection.
+
+`FCGI_AUTHORIZER`, `FCGI_FILTER`, FastCGI management records, and application
+protocols that require multiplexed request state are unsupported in `1.3.x`.
+They are not required for standard PHP-FPM WordPress, Laravel, Symfony, or
+legacy PHP web serving. Operators that need those roles should keep them behind
+a dedicated FastCGI-aware component until Fluxheim has an explicit design and
+test suite for them.
+
 ## Security Requirements
 
 The PHP layer must implement these checks before any runtime is production
