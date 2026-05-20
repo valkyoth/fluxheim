@@ -87,13 +87,17 @@ compile_error!(
     "privacy-mode cannot be combined with otel-otlp; zero-retention builds must not compile trace export"
 );
 
-#[cfg(any(
-    all(feature = "php-fpm", feature = "php-turbine"),
-    all(feature = "php-fpm", feature = "php-phprs"),
-    all(feature = "php-turbine", feature = "php-phprs"),
-))]
-compile_error!("select only one Fluxheim PHP runtime feature: php-fpm, php-turbine, or php-phprs");
+#[cfg(all(feature = "php-fpm", feature = "experimental-pure-php"))]
+compile_error!("select only one Fluxheim PHP runtime feature: php-fpm or experimental-pure-php");
 
 pub fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(feature = "experimental-pure-php")]
+    {
+        eprintln!("WARNING: experimental pure-Rust PHP engine feature enabled.");
+        eprintln!("This is intended for testing and zero-dependency edge microservices.");
+        eprintln!(
+            "For production PHP apps such as WordPress, Laravel, Symfony, phpBB, XenForo, or MediaWiki, use the stable php-fpm module."
+        );
+    }
     cli::run_from_env()
 }

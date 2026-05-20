@@ -966,18 +966,23 @@ Follow-up `1.3.x` PHP runtime plan:
   - FastCGI multiplexing, authorizer, and filter-role review. Documented as
     unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
     `FCGI_RESPONDER` PHP-FPM web-serving subset.
-- `1.3.4`: embedded Rust PHP/Turbine-style integration if the source, license,
-  API, isolation, reload, and concurrency model pass review.
-- `1.3.5`: pure-Rust PHP interpreter experiment behind `php-phprs`, beta or
-  test-only until compatibility and maintenance are proven.
+- Later `1.3.x`: pure-Rust PHP interpreter experiment behind
+  `experimental-pure-php`, test-only until compatibility, security, and
+  maintenance are proven. The feature must warn operators at startup that it is
+  intended for testing and zero-dependency edge microservices only, and that
+  production applications such as WordPress, Laravel, Symfony, phpBB, XenForo,
+  and MediaWiki should use the stable `php-fpm` module.
+- Turbine-style PHP app servers are not Fluxheim runtime targets. Treat them as
+  HTTP upstreams that Fluxheim can reverse-proxy to unless a future project
+  exposes a small, auditable library API with a clearly safer boundary than
+  reverse proxying.
 
 Compile-time feature shape stays:
 
 ```toml
 php = []
 php-fpm = ["php", "dep:fastcgi-client"]
-php-turbine = ["php"]
-php-phprs = ["php", "dep:phprs"]
+experimental-pure-php = ["php"] # add dep:phprs only after engine review
 ```
 
 Only one PHP runtime feature may be selected in one binary. Add compile-time
@@ -2484,8 +2489,8 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.3.2`: ACME companion agent, zero-downtime first-issuance activation, and
   release-page config tester binaries.
 - `v1.3.3`: focused php-fpm hardening and compatibility fixes.
-- `v1.3.4`: embedded Rust PHP/Turbine-style integration if review passes.
-- `v1.3.5`: pure-Rust PHP interpreter experiment behind `php-phprs`.
+- Later `v1.3.x`: experimental pure-Rust PHP research behind
+  `experimental-pure-php`; Turbine-style PHP app servers stay proxy upstreams.
 - `v1.4.1`: fixes for advanced proxy parity.
 - `v1.5.1`: fixes for load balancer.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.

@@ -11,19 +11,16 @@ Use this order for implementation and evaluation:
 
 1. `php-fpm`: stable backwards-compatible path for real PHP applications today.
    This is implemented in `1.3.1`.
-2. `php-turbine`: embedded Rust/library or managed-sidecar direction if
-   Turbine has an auditable API, compatible licensing, active maintenance, and
-   a security model that works inside Fluxheim. This belongs in a later `1.3.x`
-   release after `php-fpm`.
-3. `php-phprs`: experimental pure-Rust interpreter path. Useful for research,
-   tests, and long-term optionality, not for production PHP hosting yet.
+2. `experimental-pure-php`: future pure-Rust interpreter path, likely based on
+   a reviewed `phprs`-style engine if compatibility and maintenance are proven.
+   This is useful for research, tests, and long-term optionality, not for
+   production PHP hosting yet.
 
 As of the current review, `fastcgi-client 0.11.1` is available for the php-fpm
 path under Apache-2.0. `phprs 0.1.9` exists under Apache-2.0 but is still young.
 `ripht-php-sapi 0.1.0-rc.7` exists under MIT as an embedding reference. Turbine
-appears to be available as an external PHP app server/container, but it needs a
-source, license, crate/library API, and security review before Fluxheim treats
-it as an embeddable recommended module.
+is no longer a Fluxheim runtime target; it is better treated as an external PHP
+application server that Fluxheim can reverse-proxy to if an operator chooses it.
 
 ## Compile-Time Features
 
@@ -32,12 +29,14 @@ Implemented feature flags:
 ```toml
 php = ["proxy", "web"]
 php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio"]
-php-turbine = ["php"]
-php-phprs = ["php"]
+experimental-pure-php = ["php"]
 ```
 
 Only one PHP runtime feature may be selected in one binary. Fluxheim enforces
 this at compile time and in `scripts/validate-features.sh`.
+`experimental-pure-php` is a reserved feature gate today; it does not add a
+production runtime until a pure-Rust engine passes review and integration
+tests.
 
 The default feature set must not include `php`.
 
@@ -50,10 +49,8 @@ Release order:
   normalization, and browser-validated WordPress login/admin flows.
 - `1.3.3`: focused php-fpm hardening and compatibility fixes found during
   production tests.
-- `1.3.3`: `php-turbine` review and first integration if the library/sidecar
-  model is safe enough.
-- `1.3.4`: `php-phprs` pure-Rust interpreter experiment, test-only or beta
-  unless compatibility and maintenance are proven.
+- Later `1.3.x`: `experimental-pure-php` pure-Rust interpreter research,
+  test-only unless compatibility, security, and maintenance are proven.
 
 ## Config Shape
 
@@ -325,30 +322,45 @@ Planned `1.3.3` php-fpm hardening:
   unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
   `FCGI_RESPONDER` PHP-FPM web-serving subset.
 
-### `php-turbine`
+### Turbine-Style PHP App Servers
 
-Treat Turbine as the preferred direction only after review. The first evaluation
-must answer:
+Turbine-style PHP runtimes are outside Fluxheim's embedded PHP runtime plan.
+They are app servers with their own listener, worker, TLS, lifecycle, and
+metrics model. Operators can run one behind Fluxheim like any other HTTP
+upstream:
 
-- Is Turbine available as a Rust crate/library, or only as a standalone server?
-- Is the license compatible with Fluxheim's EUPL-1.2 project policy?
-- Does it embed PHP through unsafe FFI/SAPI code, and how is request isolation
-  handled?
-- Does it support rootless containers and local development without privileged
-  host setup?
-- Can Fluxheim safely reload config without corrupting embedded PHP state?
+```toml
+[[vhosts]]
+name = "turbine-app"
+hosts = ["turbine.example.test"]
 
-If Turbine is standalone-only, Fluxheim should integrate it as an HTTP upstream
-or managed sidecar rather than embedding it. If Turbine is embeddable, the
-module must remain feature-gated and should have separate build docs because PHP
-embed/ZTS requirements can be hardware and distribution specific.
+[vhosts.proxy]
+upstreams = ["turbine_app:8080"]
+upstream_tls = false
+```
 
-### `php-phprs`
+Fluxheim should not duplicate that model as an embedded PHP runtime unless a
+future project exposes a small auditable library API with a clearly safer
+security boundary than reverse proxying.
+
+### `experimental-pure-php`
 
 `phprs` is interesting because it points toward a pure-Rust PHP runtime, but it
-should stay experimental. Before it is considered production-capable, Fluxheim
-needs language compatibility tests, framework compatibility tests, extension
-behavior analysis, security tests, performance benchmarks, and a clear upstream
+must stay experimental. The feature name is intentionally
+`experimental-pure-php`, not `php` or a project-specific crate name, so
+operators do not confuse it with normal PHP compatibility.
+
+When this feature is compiled, Fluxheim must warn at startup:
+
+```text
+WARNING: experimental pure-Rust PHP engine feature enabled.
+This is intended for testing and zero-dependency edge microservices.
+For production PHP apps such as WordPress, Laravel, Symfony, phpBB, XenForo, or MediaWiki, use the stable php-fpm module.
+```
+
+Before it is considered production-capable, Fluxheim needs language
+compatibility tests, framework compatibility tests, extension behavior
+analysis, security tests, performance benchmarks, and a clear upstream
 maintenance signal.
 
 ## Reload And Operations

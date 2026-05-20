@@ -168,6 +168,10 @@ Released: 2026-05-20
   generic static deny/allow policy exists.
 - Updated the PHP-FPM example to use `php.preset = "wordpress"` and show the
   optional `cache.preset = "wordpress"` shared-cache migration block.
+- Removed `php-turbine` from the PHP runtime plan because Turbine-style app
+  servers are better handled as reverse-proxy upstreams, and renamed the
+  reserved pure-Rust PHP gate to `experimental-pure-php` with an explicit
+  startup warning that production PHP applications should use `php-fpm`.
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
   decoding and OpenBao Transit cache encryption encoding.
 

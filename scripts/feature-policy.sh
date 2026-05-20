@@ -5,7 +5,7 @@
 # profile features declared there.
 
 TLS_BACKENDS="tls-rustls tls-openssl tls-boringssl tls-s2n"
-PHP_RUNTIMES="php-fpm php-turbine php-phprs"
+PHP_RUNTIMES="php-fpm experimental-pure-php"
 PRIVACY_INCOMPATIBLE_FEATURES="cache metrics metrics-otlp otel-tracing otel-otlp"
 
 expand_fluxheim_feature() {
