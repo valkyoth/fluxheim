@@ -190,6 +190,29 @@ Record the reported binary hash as reproducible-build evidence.
 
 Do not commit `dist/`; it is local release output.
 
+### Optional FIPS-Capable Evidence
+
+For releases that changed FIPS-capable TLS code or docs, capture the local
+OpenSSL provider evidence when the release builder has a validated provider
+installed:
+
+```bash
+openssl list -providers -provider fips -provider base
+cargo run --release --locked --no-default-features --features proxy,security,tls-openssl-fips --bin fluxheim -- crypto
+```
+
+Create a minimal `tls.fips.required` config that uses `backend = "openssl"` and
+safe runtime paths on the release builder, then validate it:
+
+```bash
+cargo run --release --locked --no-default-features --features proxy,security,tls-openssl-fips --bin fluxheim-config-tester -- --config /path/to/fips-example.toml --crypto
+```
+
+Record the command output, OpenSSL package/provider version, provider config
+path, and the selected module Security Policy reference. If the release builder
+does not have a FIPS provider installed, record the expected fail-closed output
+instead.
+
 ## 5. Draft The GitHub Release
 
 On GitHub:

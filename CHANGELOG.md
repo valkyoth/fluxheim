@@ -24,6 +24,9 @@ behavior when the change improves security or project direction.
 - Patched the vendored `pingora-openssl` compatibility crate to stop forcing
   `openssl/vendored`, allowing OpenSSL builds to link against the operator's
   system OpenSSL provider.
+- Added FIPS-capable release evidence instructions for OpenSSL provider
+  diagnostics, `tls.fips.required` config-tester checks, and operator evidence
+  capture.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

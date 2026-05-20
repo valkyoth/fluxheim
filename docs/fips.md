@@ -185,6 +185,42 @@ Linking to OpenSSL is not enough. A Fluxheim binary built with
 `tls-openssl-fips` must still refuse to run in FIPS-required mode if the
 validated provider cannot be proven active.
 
+Local provider sanity check:
+
+```bash
+openssl list -providers -provider fips -provider base
+cargo run --no-default-features --features proxy,security,tls-openssl-fips --bin fluxheim -- crypto
+```
+
+On distributions that package OpenSSL providers separately, install only the
+provider package needed for local testing. For example, openSUSE/SUSE systems
+provide `libopenssl-3-fips-provider`. Full-system FIPS mode packages, boot
+loader changes, and initramfs changes are deployment decisions, not required
+for normal Fluxheim development.
+
+Minimal FIPS-required runtime validation example:
+
+```toml
+[server]
+listen = ["127.0.0.1:0"]
+
+[tls]
+enabled = true
+backend = "openssl"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+[tls.fips]
+required = true
+```
+
+Validate it with a `tls-openssl-fips` build:
+
+```bash
+cargo run --no-default-features --features proxy,security,tls-openssl-fips \
+  --bin fluxheim-config-tester -- --config fips-example.toml --crypto
+```
+
 ### rustls With AWS-LC FIPS
 
 This is desirable, but it requires more Fluxheim refactoring than OpenSSL.
@@ -389,6 +425,40 @@ Before claiming a Fluxheim deployment uses FIPS-validated cryptography:
    either FIPS-routed, externally evidenced, or disabled.
 9. Archive the Fluxheim version, build command, Cargo.lock, SBOM, module
    certificate, Security Policy, provider config, and runtime diagnostic output.
+
+## Evidence Capture Template
+
+For each FIPS-capable deployment or release candidate, capture:
+
+```text
+Fluxheim version:
+Fluxheim git commit:
+Fluxheim build command:
+Cargo.lock checksum:
+SBOM checksums:
+
+TLS backend:
+FIPS-required config path:
+fluxheim crypto output:
+fluxheim-config-tester --crypto output:
+
+OpenSSL version:
+openssl list -providers -provider fips -provider base output:
+OPENSSL_CONF:
+OPENSSL_MODULES:
+Provider config checksum:
+
+CMVP certificate number:
+Module Security Policy title/version:
+Operating system and OpenSSL package versions:
+TLS scanner output:
+Non-TLS crypto decision log:
+```
+
+The `fluxheim crypto` provider check proves only that the process can load a
+provider and fetch an approved cipher through `fips=yes`. It does not replace
+the CMVP certificate, the module Security Policy, or the operating-system
+evidence required by the deployment boundary.
 
 ## Documentation Rules
 
