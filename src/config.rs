@@ -4049,10 +4049,19 @@ impl CacheConfig {
         extend_unique(
             &mut self.bypass_path_exact,
             [
-                "/wp-login.php",
-                "/xmlrpc.php",
-                "/wp-cron.php",
+                "/index.php",
+                "/sitemap.xml",
+                "/sitemap_index.xml",
+                "/wp-app.php",
+                "/wp-comments-popup.php",
                 "/wp-comments-post.php",
+                "/wp-cron.php",
+                "/wp-links-opml.php",
+                "/wp-locations.php",
+                "/wp-login.php",
+                "/wp-mail.php",
+                "/wp-register.php",
+                "/xmlrpc.php",
             ]
             .map(str::to_owned),
         );
@@ -13045,11 +13054,19 @@ mod tests {
                 .bypass_path_prefixes
                 .contains(&"/wp-admin/".to_owned())
         );
-        assert!(
-            wordpress_cache
-                .bypass_path_exact
-                .contains(&"/wp-login.php".to_owned())
-        );
+        for path in [
+            "/wp-login.php",
+            "/wp-register.php",
+            "/wp-mail.php",
+            "/index.php",
+            "/sitemap.xml",
+            "/sitemap_index.xml",
+        ] {
+            assert!(
+                wordpress_cache.bypass_path_exact.contains(&path.to_owned()),
+                "missing WordPress bypass path {path}"
+            );
+        }
         assert!(
             wordpress_cache
                 .bypass_cookie_name_prefixes

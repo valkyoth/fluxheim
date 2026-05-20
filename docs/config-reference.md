@@ -888,15 +888,16 @@ listed origin response header has the exact configured value. Use it for
 bounded app signals such as `x-app-cache = "private"` when header presence
 alone is too broad.
 `preset = "wordpress"` expands common WordPress shared-cache bypasses for
-admin/login paths, auth-related cookies, any non-empty query string, and
-authorization headers. Explicit fields still work normally and are not removed
+admin/login paths, app/mail/register/index and sitemap endpoints,
+auth-related cookies, any non-empty query string, and authorization headers. Explicit
+fields still work normally and are not removed
 by the preset.
 Cache bypass, header, status, vary, content-type, extension, and method lists
 are capped to bounded sizes to keep validation and per-request matching work
 predictable.
 `bypass_path_prefixes` and `bypass_path_exact` disable both cache lookup and
 storage for matching request paths. Prefixes are useful for app admin areas;
-exact paths are useful for login, XML-RPC, or cron endpoints.
+exact paths are useful for login, XML-RPC, cron, sitemap, or legacy WordPress endpoints.
 `bypass_request_headers` disables both cache lookup and cache storage when any
 listed request header is present. Use it on routes where a header such as
 `Cookie` or `Authorization` changes the upstream response but should not become

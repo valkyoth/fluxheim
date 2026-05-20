@@ -80,7 +80,9 @@ behavior when the change improves security or project direction.
   invalid responses, and intercepted PHP statuses.
 - Added cache bypass primitives for path prefixes, exact paths, any non-empty
   query string, and cookie-name prefixes, plus `cache.preset = "wordpress"`
-  for common WordPress shared-cache bypasses. Cache bypass, header,
+  for common WordPress shared-cache bypasses, including admin, login,
+  XML-RPC, cron, app/mail/register, index, and sitemap endpoints. Cache bypass,
+  header,
   status, vary, content-type, extension, and method lists are capped to
   bounded sizes.
 - Added `php.ignore_origin_cache_headers` for NGINX-style migrations that need
