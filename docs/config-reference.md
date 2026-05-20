@@ -18,6 +18,16 @@ starts the service:
 fluxheim --validate-config --config /etc/fluxheim/fluxheim.toml
 ```
 
+When debugging a container or mounted config from outside the runtime
+environment, use the release-asset tester. `--no-runtime-paths` skips only
+`server.process` runtime path inspection, which is useful when `/run/fluxheim`
+is not mounted locally, while other config semantics and profile checks still
+run:
+
+```bash
+fluxheim-config-tester --config /etc/fluxheim/fluxheim.toml --profile web-php --no-runtime-paths
+```
+
 For split config directories, Fluxheim reads `*.toml` files in sorted order:
 
 ```bash

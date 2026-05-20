@@ -435,7 +435,11 @@ fluxheim-config-tester \
 
 Use `--profile full`, `--profile cache`, `--profile proxy`, or
 `--profile web-php` to match the release artifact or image profile you plan to
-run.
+run. Add `--no-runtime-paths` when you only need syntax, semantic, and profile
+validation from outside the gateway container and do not have access to the
+service runtime mount such as `/run/fluxheim`. Leave that flag off when you
+want the tester to inspect `server.process.pid_file`, upgrade socket, and
+certificate reload socket paths as part of a deployment preflight.
 
 Runtime images and RPMs do include `fluxheim-acme`, which is the ACME companion
 entry point for service-manager or container-scheduled renewal workflows:

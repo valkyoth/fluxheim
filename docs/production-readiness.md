@@ -232,7 +232,10 @@ scripts/capture_release_gate_report.sh
 
 Before starting the server:
 
-- validate every config with `fluxheim --check-config --config <path>`;
+ - validate every config with `fluxheim --validate-config --config <path>` before
+  service start;
+- use `fluxheim-config-tester --config <path> --profile <profile> --no-runtime-paths`
+  when diagnosing a mounted config without access to `/run/fluxheim`;
 - prefer split `conf.d` files with one `[[vhosts]]` per file;
 - use `upstreams = ["host:port"]` for proxy targets;
 - do not mix compatibility aliases such as `upstream` with preferred fields
