@@ -24,17 +24,16 @@ impl TraceExporter {
         })?;
         let service_name = config.service_name.clone();
         let timeout = Duration::from_secs(config.timeout_secs);
+        let agent = crate::otlp_http::agent(timeout, config.tls_ca_cert_path.as_deref())?;
         let (sender, receiver) = sync_channel(config.queue_size);
 
         std::thread::Builder::new()
             .name("Fluxheim OTLP".to_owned())
             .spawn(move || {
                 while let Ok(span) = receiver.recv() {
-                    if let Err(error) = post_otlp_trace(
-                        &endpoint,
-                        timeout,
-                        build_trace_payload(span, &service_name),
-                    ) {
+                    if let Err(error) =
+                        post_otlp_trace(&agent, &endpoint, build_trace_payload(span, &service_name))
+                    {
                         log::debug!("OTLP trace export failed: {error}");
                     }
                 }
@@ -280,16 +279,10 @@ fn double_attr(key: &str, value: f64) -> serde_json::Value {
 }
 
 fn post_otlp_trace(
+    agent: &ureq::Agent,
     endpoint: &HttpEndpoint,
-    timeout: Duration,
     body: String,
 ) -> std::io::Result<()> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .max_redirects(0)
-        .http_status_as_error(false)
-        .build()
-        .into();
     let response = agent
         .post(&endpoint.url)
         .header("content-type", "application/json")

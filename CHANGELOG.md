@@ -182,6 +182,11 @@ Released: 2026-05-20
   restricted PHP response header values to ASCII-safe bytes, created PHP spool
   files relative to a verified directory fd on Unix, and added HTTPS-capable
   OTLP/HTTP export with strict 2xx status handling.
+- Added private-PKI CA bundle support for OTLP metrics and tracing exporters,
+  warn on plaintext OTLP endpoints outside loopback, create PHP body spool
+  directories with private Unix permissions, canonicalize existing `php.fpm_root`
+  paths while preserving separate-container path mapping, and raise the
+  `PHP_ADMIN_VALUE disable_functions` warning to error level.
 - Updated the optional `base64-ng` dependency to `1.0.0` for ACME EAB key
   decoding and OpenBao Transit cache encryption encoding.
 

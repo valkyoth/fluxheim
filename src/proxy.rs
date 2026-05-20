@@ -2937,7 +2937,25 @@ impl RuntimePhp {
                 ),
             ));
         }
-        let fpm_root = config.fpm_root.clone().unwrap_or_else(|| root.clone());
+        let fpm_root = if let Some(configured_fpm_root) = &config.fpm_root {
+            match configured_fpm_root.canonicalize() {
+                Ok(resolved) => resolved,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    configured_fpm_root.clone()
+                }
+                Err(error) => {
+                    return Err(io::Error::new(
+                        error.kind(),
+                        format!(
+                            "{scope}: php fpm_root {}: {error}",
+                            configured_fpm_root.display()
+                        ),
+                    ));
+                }
+            }
+        } else {
+            root.clone()
+        };
         let files = StaticFileServer::from_config(&crate::config::WebConfig {
             root: Some(root.clone()),
             index_files: vec![config.index.clone()],
@@ -7130,7 +7148,7 @@ fn php_request_body_spool_filename() -> io::Result<String> {
 async fn create_php_request_body_spool_file(
     spool_dir: &std::path::Path,
 ) -> io::Result<(PathBuf, tokio::fs::File)> {
-    tokio::fs::create_dir_all(spool_dir).await?;
+    create_php_request_body_spool_dir(spool_dir).await?;
     ensure_php_request_body_spool_dir(spool_dir)?;
 
     #[cfg(unix)]
@@ -7142,6 +7160,42 @@ async fn create_php_request_body_spool_file(
     {
         create_php_request_body_spool_file_by_path(spool_dir).await
     }
+}
+
+#[cfg(feature = "php-fpm")]
+#[cfg(unix)]
+async fn create_php_request_body_spool_dir(spool_dir: &std::path::Path) -> io::Result<()> {
+    create_php_request_body_spool_dir_sync(spool_dir)
+}
+
+#[cfg(feature = "php-fpm")]
+#[cfg(not(unix))]
+async fn create_php_request_body_spool_dir(spool_dir: &std::path::Path) -> io::Result<()> {
+    tokio::fs::create_dir_all(spool_dir).await
+}
+
+#[cfg(feature = "php-fpm")]
+#[cfg(unix)]
+fn create_php_request_body_spool_dir_sync(spool_dir: &std::path::Path) -> io::Result<()> {
+    use rustix::fs::Mode;
+
+    if spool_dir.as_os_str().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PHP request body spool directory cannot be empty",
+        ));
+    }
+
+    let mut current = PathBuf::new();
+    for component in spool_dir.components() {
+        current.push(component.as_os_str());
+        match rustix::fs::mkdir(&current, Mode::from_raw_mode(0o700)) {
+            Ok(()) => {}
+            Err(rustix::io::Errno::EXIST) => {}
+            Err(error) => return Err(io::Error::from(error)),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(feature = "php-fpm")]
@@ -10839,6 +10893,18 @@ mod tests {
 
     #[cfg(all(feature = "php-fpm", unix))]
     #[test]
+    fn php_spool_dir_creation_uses_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let spool_dir = unique_temp_path("php-spooled-request-body-created-private");
+        super::create_php_request_body_spool_dir_sync(&spool_dir).unwrap();
+
+        let mode = fs::metadata(&spool_dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
     fn php_spool_file_creation_rejects_symlinked_directory() {
         use std::os::unix::fs::symlink;
 
@@ -10876,6 +10942,36 @@ mod tests {
         assert!(php_fpm_path_translated(&php, "/uploads/../wp-config.php").is_none());
         assert!(php_fpm_path_translated(&php, "/uploads/.secret").is_none());
         assert!(php_fpm_path_translated(&php, "/uploads\\wp-config.php").is_none());
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn php_runtime_canonicalizes_existing_fpm_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = unique_temp_path("php-fpm-root-canonical-local");
+        let fpm_target = unique_temp_path("php-fpm-root-canonical-target");
+        let fpm_link = unique_temp_path("php-fpm-root-canonical-link");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("index.php"), "<?php echo 'index';").unwrap();
+        fs::create_dir_all(&fpm_target).unwrap();
+        symlink(&fpm_target, &fpm_link).unwrap();
+
+        let config = crate::config::PhpConfig {
+            enabled: true,
+            root: Some(root),
+            fpm_root: Some(fpm_link),
+            fpm: crate::config::PhpFpmConfig {
+                tcp: Some("127.0.0.1:9000".to_owned()),
+                ..crate::config::PhpFpmConfig::default()
+            },
+            ..crate::config::PhpConfig::default()
+        };
+
+        let php = RuntimePhp::from_config("test php", "test", "default", &config)
+            .unwrap()
+            .unwrap();
+        assert_eq!(php.fpm_root, fpm_target.canonicalize().unwrap());
     }
 
     #[cfg(all(feature = "php-fpm", unix))]

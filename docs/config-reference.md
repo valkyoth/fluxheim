@@ -247,14 +247,19 @@ endpoint = "http://127.0.0.1:9090/api/v1/otlp/v1/metrics"
 service_name = "fluxheim"
 interval_secs = 15
 timeout_secs = 2
+# Optional PEM CA bundle for private-PKI HTTPS collectors.
+# tls_ca_cert_path = "/etc/fluxheim/otlp-ca.pem"
 ```
 
 The `metrics` compile-time feature is not part of `profile-privacy`.
 `metrics.otlp.enabled = true` requires the `metrics-otlp` feature. The exporter
 sends OTLP/HTTP JSON to `http://` or `https://` endpoints. Prefer local
-loopback HTTP for same-host collectors and HTTPS for remote collectors. When enabled,
-`fluxheim_metrics_otlp_exports_total{outcome}` records bounded exporter
-success and failure attempts through the local Prometheus metrics surface.
+loopback HTTP for same-host collectors and HTTPS for remote collectors.
+`metrics.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
+collectors; when omitted, the bundled WebPKI roots are used. Plaintext HTTP to
+non-loopback collectors logs a warning. When enabled,
+`fluxheim_metrics_otlp_exports_total{outcome}` records bounded exporter success
+and failure attempts through the local Prometheus metrics surface.
 
 ## Tracing
 
@@ -275,6 +280,8 @@ endpoint = "http://127.0.0.1:4318/v1/traces"
 service_name = "fluxheim"
 queue_size = 8192
 timeout_secs = 2
+# Optional PEM CA bundle for private-PKI HTTPS collectors.
+# tls_ca_cert_path = "/etc/fluxheim/otlp-ca.pem"
 ```
 
 Implemented values:
@@ -287,12 +294,15 @@ Implemented values:
 
 `tracing.enabled = true` is rejected when Fluxheim is built without
 `otel-tracing`. `tracing.otlp.enabled = true` requires the `otel-otlp` feature.
-The initial exporter supports OTLP/HTTP JSON over `http://` only, intended for a
-local collector or local Jaeger during development. When Fluxheim is built with
-the `cache` feature, exported request spans include bounded cache attributes
-for the cache phase plus cache lookup and request-collapsing wait durations.
-They do not include cache keys, paths beyond the normal HTTP span name, query
-strings, cookies, or request header values. `otel-tracing` and `otel-otlp` are
+The exporter supports OTLP/HTTP JSON over `http://` or `https://`.
+`tracing.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
+collectors; when omitted, the bundled WebPKI roots are used. Prefer loopback
+HTTP for local collectors and HTTPS for remote collectors; plaintext HTTP to a
+non-loopback collector logs a warning. When Fluxheim is built with the `cache`
+feature, exported request spans include bounded cache attributes for the cache
+phase plus cache lookup and request-collapsing wait durations. They do not
+include cache keys, paths beyond the normal HTTP span name, query strings,
+cookies, or request header values. `otel-tracing` and `otel-otlp` are
 incompatible with `privacy-mode`.
 
 ## Logging
@@ -1685,7 +1695,11 @@ adds administrator-controlled FastCGI parameters such as `APP_ENV` or
 `PHP_VALUE`; Fluxheim rejects unsafe names, control-character values, and core
 CGI parameters that it owns, including `SCRIPT_FILENAME`, `CONTENT_LENGTH`,
 `HTTPS`, and all `HTTP_*` request-header parameters. Custom parameter tables are capped at 128 entries;
-each parameter name is capped at 128 bytes and each value at 16KiB.
+each parameter name is capped at 128 bytes and each value at 16KiB. `PHP_VALUE`
+and `PHP_ADMIN_VALUE` are powerful php-fpm controls; Fluxheim logs high-risk
+warnings when they mention directives such as `open_basedir`,
+`disable_functions`, `allow_url_include`, or `allow_url_fopen`, and logs an
+error-level warning if `PHP_ADMIN_VALUE` overrides `disable_functions`.
 
 `[vhosts.routes.cache]` is optional. When present, it replaces the vhost cache
 policy for that matched route only. Routes without a cache block continue to use

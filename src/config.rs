@@ -470,6 +470,12 @@ impl ConfigFragment {
         if let Some(admin) = &mut self.admin {
             admin.resolve_relative_paths(base_dir);
         }
+        if let Some(metrics) = &mut self.metrics {
+            metrics.resolve_relative_paths(base_dir);
+        }
+        if let Some(tracing) = &mut self.tracing {
+            tracing.resolve_relative_paths(base_dir);
+        }
         if let Some(logging) = &mut self.logging {
             logging.resolve_relative_paths(base_dir);
         }
@@ -1130,6 +1136,8 @@ pub struct MetricsOtlpExportConfig {
     pub interval_secs: u64,
     #[serde(default = "default_metrics_otlp_timeout_secs")]
     pub timeout_secs: u64,
+    #[serde(default)]
+    pub tls_ca_cert_path: Option<PathBuf>,
 }
 
 impl Default for MetricsOtlpExportConfig {
@@ -1140,6 +1148,23 @@ impl Default for MetricsOtlpExportConfig {
             service_name: default_metrics_otlp_service_name(),
             interval_secs: default_metrics_otlp_interval_secs(),
             timeout_secs: default_metrics_otlp_timeout_secs(),
+            tls_ca_cert_path: None,
+        }
+    }
+}
+
+impl MetricsConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        self.otlp.resolve_relative_paths(base_dir);
+    }
+}
+
+impl MetricsOtlpExportConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.tls_ca_cert_path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
         }
     }
 }
@@ -1161,6 +1186,15 @@ impl MetricsOtlpExportConfig {
                     reason: "OTLP metrics export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
+            warn_plaintext_remote_otlp_endpoint("metrics.otlp.endpoint", &self.endpoint);
+            validate_otlp_ca_cert_path(
+                "metrics.otlp.tls_ca_cert_path",
+                self.tls_ca_cert_path.as_deref(),
+            )
+            .map_err(|reason| ConfigError::InvalidMetricsPolicy {
+                field: "metrics.otlp.tls_ca_cert_path",
+                reason,
+            })?;
             if !valid_service_name(&self.service_name) {
                 return Err(ConfigError::InvalidMetricsPolicy {
                     field: "metrics.otlp.service_name",
@@ -1270,6 +1304,8 @@ pub struct OtlpTraceExportConfig {
     pub queue_size: usize,
     #[serde(default = "default_otlp_timeout_secs")]
     pub timeout_secs: u64,
+    #[serde(default)]
+    pub tls_ca_cert_path: Option<PathBuf>,
 }
 
 impl Default for OtlpTraceExportConfig {
@@ -1280,6 +1316,23 @@ impl Default for OtlpTraceExportConfig {
             service_name: default_otlp_service_name(),
             queue_size: default_otlp_queue_size(),
             timeout_secs: default_otlp_timeout_secs(),
+            tls_ca_cert_path: None,
+        }
+    }
+}
+
+impl TracingConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        self.otlp.resolve_relative_paths(base_dir);
+    }
+}
+
+impl OtlpTraceExportConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.tls_ca_cert_path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
         }
     }
 }
@@ -1301,6 +1354,15 @@ impl OtlpTraceExportConfig {
                     reason: "OTLP trace export requires an http://host[:port]/path or https://host[:port]/path endpoint without query, fragment, or credentials",
                 });
             }
+            warn_plaintext_remote_otlp_endpoint("tracing.otlp.endpoint", &self.endpoint);
+            validate_otlp_ca_cert_path(
+                "tracing.otlp.tls_ca_cert_path",
+                self.tls_ca_cert_path.as_deref(),
+            )
+            .map_err(|reason| ConfigError::InvalidTracingPolicy {
+                field: "tracing.otlp.tls_ca_cert_path",
+                reason,
+            })?;
             if !valid_service_name(&self.service_name) {
                 return Err(ConfigError::InvalidTracingPolicy {
                     field: "tracing.otlp.service_name",
@@ -7613,6 +7675,28 @@ fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+fn validate_otlp_ca_cert_path(field: &str, path: Option<&Path>) -> Result<(), &'static str> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if path.as_os_str().is_empty() {
+        return Err("path cannot be empty");
+    }
+    validate_path(field.to_owned(), Some(path)).map_err(
+        |_| "path must be safe, without parent-directory traversal or symlinked components",
+    )
+}
+
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+fn warn_plaintext_remote_otlp_endpoint(field: &str, endpoint: &str) {
+    if crate::otlp_http::plaintext_non_loopback_endpoint(endpoint) {
+        log::warn!(
+            "{field} uses plaintext HTTP to a non-loopback host; use https:// or restrict OTLP export to a local collector"
+        );
+    }
+}
+
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_authority(authority: &str) -> bool {
     if authority.starts_with('[') {
         let Some(end) = authority.find(']') else {
@@ -8735,6 +8819,11 @@ fn warn_high_risk_php_param(name: &str, value: &str) {
         return;
     }
     let value = value.to_ascii_lowercase();
+    if name == "PHP_ADMIN_VALUE" && value.contains("disable_functions=") {
+        log::error!(
+            "php.params.PHP_ADMIN_VALUE overrides disable_functions; verify this is intentional before production deployment"
+        );
+    }
     for directive in [
         "open_basedir",
         "disable_functions",
@@ -15038,6 +15127,7 @@ mod tests {
             [metrics.otlp]
             enabled = true
             endpoint = "https://collector.example.test/v1/metrics"
+            tls_ca_cert_path = "fixtures/private-ca.pem"
             "#,
         )
         .unwrap();
@@ -15046,6 +15136,10 @@ mod tests {
         assert_eq!(
             config.metrics.otlp.endpoint,
             "https://collector.example.test/v1/metrics"
+        );
+        assert_eq!(
+            config.metrics.otlp.tls_ca_cert_path.as_deref(),
+            Some(Path::new("fixtures/private-ca.pem"))
         );
     }
 
@@ -15128,6 +15222,7 @@ mod tests {
             [tracing.otlp]
             enabled = true
             endpoint = "https://collector.example.test/v1/traces"
+            tls_ca_cert_path = "fixtures/private-ca.pem"
             "#,
         )
         .unwrap();
@@ -15136,6 +15231,10 @@ mod tests {
         assert_eq!(
             config.tracing.otlp.endpoint,
             "https://collector.example.test/v1/traces"
+        );
+        assert_eq!(
+            config.tracing.otlp.tls_ca_cert_path.as_deref(),
+            Some(Path::new("fixtures/private-ca.pem"))
         );
     }
 

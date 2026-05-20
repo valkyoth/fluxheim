@@ -283,6 +283,7 @@ endpoint = "http://127.0.0.1:9090/api/v1/otlp/v1/metrics"
 service_name = "fluxheim"
 interval_secs = 15
 timeout_secs = 2
+# tls_ca_cert_path = "/etc/fluxheim/otlp-ca.pem"
 
 [metrics.advanced]
 enabled = false
@@ -295,6 +296,9 @@ overflow_bucket = "overflow"
 
 The OTLP metrics exporter accepts `http://` and `https://` endpoints. Use
 loopback HTTP for same-host collectors and HTTPS for remote collectors.
+`metrics.otlp.tls_ca_cert_path` can point at a PEM CA bundle for private PKI
+collectors; otherwise the HTTPS client uses the bundled WebPKI roots. Plaintext
+HTTP to a non-loopback collector logs a startup warning.
 
 ## Implementation Stages
 

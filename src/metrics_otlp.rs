@@ -19,6 +19,7 @@ pub fn spawn_from_config(config: &MetricsOtlpExportConfig) -> std::io::Result<()
     let service_name = config.service_name.clone();
     let interval = Duration::from_secs(config.interval_secs);
     let timeout = Duration::from_secs(config.timeout_secs);
+    let agent = crate::otlp_http::agent(timeout, config.tls_ca_cert_path.as_deref())?;
 
     std::thread::Builder::new()
         .name("Fluxheim OTLP Metrics".to_owned())
@@ -26,7 +27,7 @@ pub fn spawn_from_config(config: &MetricsOtlpExportConfig) -> std::io::Result<()
             loop {
                 std::thread::sleep(interval);
                 let payload = build_metrics_payload(prometheus::gather(), &service_name);
-                match post_otlp_metrics(&endpoint, timeout, payload) {
+                match post_otlp_metrics(&agent, &endpoint, payload) {
                     Ok(()) => crate::metrics::record_metrics_otlp_export("success"),
                     Err(error) => {
                         crate::metrics::record_metrics_otlp_export("failure");
@@ -244,16 +245,10 @@ fn string_attr(key: &str, value: impl Into<String>) -> serde_json::Value {
 }
 
 fn post_otlp_metrics(
+    agent: &ureq::Agent,
     endpoint: &HttpEndpoint,
-    timeout: Duration,
     body: String,
 ) -> std::io::Result<()> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .max_redirects(0)
-        .http_status_as_error(false)
-        .build()
-        .into();
     let response = agent
         .post(&endpoint.url)
         .header("content-type", "application/json")
