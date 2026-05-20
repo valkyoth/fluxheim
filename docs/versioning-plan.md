@@ -765,6 +765,15 @@ Exit criteria:
 
 Follow-up `1.3.x` FIPS-capable TLS build plan:
 
+The standalone operator and implementation reference is
+[FIPS-Capable Deployments](fips.md). `1.3.4` should be treated as the FIPS
+foundation release: terminology guardrails, compliance-boundary documentation,
+crypto inventory, backend diagnostics design, and fail-closed TLS-policy design.
+Actual FIPS-required deployment readiness should remain staged after `1.3.4`:
+OpenSSL FIPS provider first, rustls/AWS-LC FIPS after provider-aware rustls
+helpers exist, and internal crypto closure before any broad FIPS-required
+profile is recommended for production.
+
 - Add an explicit FIPS-capable compile/profile line without claiming that
   Fluxheim itself is a validated cryptographic module. The release wording must
   say "FIPS-capable build using a validated cryptographic module" and must
@@ -839,6 +848,27 @@ Follow-up `1.3.x` FIPS-capable TLS build plan:
 - Keep FIPS support incompatible with any backend or feature where we cannot
   prove the cryptographic boundary. "Compiled with a FIPS-capable dependency"
   is not enough for release claims.
+
+Post-`1.3.4` implementation ladder:
+
+- `1.3.5`: OpenSSL FIPS candidate. Add `tls-openssl-fips`, direct OpenSSL
+  provider/default-property diagnostics, config-tester failure cases, and
+  operator docs for OpenSSL 3.x FIPS provider installation according to the
+  selected module Security Policy. Managed ACME and local cache encryption may
+  be rejected in FIPS-required mode until their crypto paths are rerouted or
+  externally evidenced.
+- `1.3.6`: rustls/AWS-LC FIPS candidate. Refactor current ring-specific rustls
+  helpers into provider-aware helpers, use rustls' AWS-LC FIPS provider path,
+  verify rustls FIPS status on generated configs, and document AWS-LC FIPS
+  build requirements and CMVP Security Policy evidence.
+- `1.3.7`: internal crypto closure. Classify ACME, EAB, admin tokens,
+  request IDs, temp names, cache encryption, OpenBao Transit, OTLP HTTPS, and
+  future signing/session features as validated-backend-routed, externally
+  evidenced, non-security-sensitive, or disabled in FIPS-required builds.
+- `1.3.8` or later: compliance evidence package. Publish a repeatable release
+  evidence template with SBOM notes, build command, module certificate,
+  Security Policy, provider config, runtime crypto diagnostics, and scanner
+  output checklist.
 
 Follow-up `1.3.x` PHP runtime plan:
 

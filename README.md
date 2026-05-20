@@ -360,6 +360,7 @@ full release ladder.
 - [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
 - [Production Readiness](docs/production-readiness.md)
 - [Feature Matrix](docs/features.md)
+- [FIPS-Capable Deployments](docs/fips.md)
 - [Config Reference](docs/config-reference.md)
 - [Gateway Recipes](docs/gateway-recipes.md)
 - [GitHub Repository Setup](docs/github-setup.md)

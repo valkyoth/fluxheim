@@ -605,6 +605,8 @@ without parsing text fixtures for every module.
      operations on validated backends; operators remain responsible for the
      validated module installation, OS/container boundary, and Security Policy
      operating procedure.
+     See `docs/fips.md` for the detailed post-`1.3.4` FIPS implementation
+     ladder and operator evidence model.
   - ACME account/order/challenge runtime. Implemented as one-shot and
     background `acme-client` paths for HTTP-01.
   - Background renewal queue service. Implemented for due-only checks on the

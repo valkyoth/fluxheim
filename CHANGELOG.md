@@ -9,6 +9,13 @@ behavior when the change improves security or project direction.
 
 ## Unreleased
 
+### Added
+
+- Added a standalone FIPS-capable deployment plan covering NIST/CMVP
+  references, compliance boundaries, backend-specific OpenSSL and rustls/AWS-LC
+  paths, internal crypto blockers, and the post-`1.3.4` roadmap needed before
+  any FIPS-required profile can be described as deployment-ready.
+
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 
 Released: 2026-05-20
