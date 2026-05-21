@@ -184,6 +184,15 @@ FLUXHEIM_GATE_FUZZ_CHECK=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_PODMAN=1 FLUXHEIM_GATE_PODMAN_VARIANTS=1 scripts/stable_release_gate.sh release
 ```
 
+For release builders that are expected to have a working OpenSSL FIPS provider,
+make absence a hard failure:
+
+```bash
+FLUXHEIM_REQUIRE_FIPS_PROVIDER=1 \
+FLUXHEIM_GATE_FIPS_OPENSSL=1 \
+scripts/stable_release_gate.sh release
+```
+
 - Dependency and license policy:
 
 ```bash

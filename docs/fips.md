@@ -144,14 +144,19 @@ non-FIPS provider or non-approved cipher.
 
 ### OpenSSL FIPS Provider
 
-This is the practical first implementation path. Fluxheim `1.3.4` starts this
-path with an opt-in feature and runtime provider probe; it still does not make
-a blanket FIPS-compliance claim for the deployment.
+This is the practical first implementation path. Fluxheim `1.3.4` completes
+the OpenSSL FIPS-capable TLS proof path with an opt-in feature, runtime
+provider probe, and default-property enforcement; it still does not make a
+blanket FIPS-compliance claim for the deployment.
 
 Feature shape:
 
 ```toml
-tls-openssl-fips = ["tls-openssl", "dep:openssl"]
+tls-openssl-fips = [
+  "tls-openssl",
+  "dep:fluxheim-openssl-fips-support",
+  "dep:openssl",
+]
 ```
 
 Current Fluxheim enforcement:
@@ -166,7 +171,13 @@ Current Fluxheim enforcement:
 - Attempts to load the `base` provider for normal encoder/decoder support.
 - Fetches `AES-256-GCM` with `fips=yes` to prove the property query can resolve
   an approved cipher.
-- Exposes diagnostic output showing OpenSSL version and provider availability.
+- Enables OpenSSL default FIPS properties for the process-default library
+  context through a small local support crate.
+- Verifies `EVP_default_properties_is_fips_enabled`, proves `AES-256-GCM` can
+  be fetched through the default property path, and proves `CHACHA20-POLY1305`
+  is rejected through that path.
+- Exposes diagnostic output showing OpenSSL version, provider availability, and
+  default FIPS property status.
 - Rejects FIPS-required startup if the backend is not OpenSSL or if the
   provider/property check fails.
 

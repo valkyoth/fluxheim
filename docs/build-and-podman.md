@@ -53,9 +53,10 @@ cargo build --release --no-default-features --features profile-fips-openssl
 fluxheim crypto
 ```
 
-This feature only makes Fluxheim fail closed and expose provider diagnostics;
-the deployment still needs the selected module's CMVP certificate, Security
-Policy, OpenSSL provider config, and platform evidence. See
+This feature makes Fluxheim fail closed, loads the OpenSSL FIPS provider,
+enables default FIPS properties for the process, and exposes provider/default
+property diagnostics. The deployment still needs the selected module's CMVP
+certificate, Security Policy, OpenSSL provider config, and platform evidence. See
 [FIPS-Capable Deployments](fips.md).
 
 PHP support starts with `php-fpm` in `1.3.1`. It is never compiled by default;
