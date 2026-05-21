@@ -69,6 +69,13 @@ Fluxheim does not hardcode provider module directories. Provider discovery uses
 OpenSSL's normal configuration and environment model, including `OPENSSL_CONF`,
 `OPENSSL_MODULES`, distro crypto policies, and compiled-in defaults.
 
+The 1.3.4 OpenSSL path proves provider availability with safe Rust APIs by
+loading the `fips` provider and fetching an approved cipher with `fips=yes`.
+It does not yet enforce OpenSSL-wide default properties from inside Fluxheim;
+operators needing that boundary must configure OpenSSL according to the chosen
+module Security Policy. Default-property verification/enforcement is tracked
+for the next OpenSSL FIPS hardening slice.
+
 ## Build
 
 Build the OpenSSL FIPS-capable profile explicitly:

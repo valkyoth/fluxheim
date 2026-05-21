@@ -43,6 +43,10 @@ behavior when the change improves security or project direction.
 - Added the OpenSSL FIPS-capable profile to CI and local check coverage so the
   feature alias, config tester fixture, provider diagnostics, and fail-closed
   behavior are exercised before release.
+- Documented the `1.3.4` OpenSSL FIPS boundary: Fluxheim proves provider
+  availability with safe `fips=yes` queries, while OpenSSL-wide default-property
+  enforcement remains a `1.3.5` hardening item unless supplied by the
+  operator's OpenSSL configuration.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

@@ -816,7 +816,10 @@ FIPS-required profile is recommended for production.
     Fluxheim should support an operator-supplied OpenSSL config path or
     environment contract, require provider/config diagnostics, and fail closed
     when FIPS-required mode cannot prove the FIPS provider/default properties
-    are active.
+    are active. The initial `1.3.4` path proves provider availability with a
+    safe explicit `fips=yes` fetch; OpenSSL-wide default-property enforcement is
+    still a `1.3.5` hardening item because Fluxheim currently forbids unsafe
+    calls to raw OpenSSL default-property APIs.
   - `tls-boringssl-fips`: research-only until Fluxheim can prove it is linked
     to a BoringCrypto validated module stream, can query the module/version, and
     can document the exact CMVP certificate/security-policy boundary. Normal
@@ -857,11 +860,12 @@ Post-`1.3.4` implementation ladder:
 
 - `1.3.5`: OpenSSL FIPS candidate hardening. Expand the initial
   `tls-openssl-fips` provider probe with release-evidence fixtures,
-  config-tester failure cases, optional OpenSSL config/module path diagnostics,
-  and operator docs for OpenSSL 3.x FIPS provider installation according to the
-  selected module Security Policy. Managed ACME and local cache encryption may
-  be rejected in FIPS-required mode until their crypto paths are rerouted or
-  externally evidenced.
+  config-tester failure cases, OpenSSL default-property verification or an
+  explicit Security-Policy-backed config requirement, optional OpenSSL
+  config/module path diagnostics, and operator docs for OpenSSL 3.x FIPS
+  provider installation according to the selected module Security Policy.
+  Managed ACME and local cache encryption may be rejected in FIPS-required mode
+  until their crypto paths are rerouted or externally evidenced.
 - `1.3.6`: rustls/AWS-LC FIPS candidate. Refactor current ring-specific rustls
   helpers into provider-aware helpers, use rustls' AWS-LC FIPS provider path,
   verify rustls FIPS status on generated configs, and document AWS-LC FIPS

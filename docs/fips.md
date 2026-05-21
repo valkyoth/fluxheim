@@ -185,6 +185,18 @@ Linking to OpenSSL is not enough. A Fluxheim binary built with
 `tls-openssl-fips` must still refuse to run in FIPS-required mode if the
 validated provider cannot be proven active.
 
+Fluxheim `1.3.4` proves provider availability with safe `openssl` crate APIs:
+it loads the `fips` provider and resolves `AES-256-GCM` through an explicit
+`fips=yes` property query. It does not yet call OpenSSL's process/default
+property APIs such as `EVP_default_properties_enable_fips` or
+`EVP_default_properties_is_fips_enabled`, because those APIs are only exposed
+through raw FFI in the current Rust bindings and Fluxheim forbids unsafe code.
+Operators who need stronger OpenSSL-wide default-property enforcement must use
+the OpenSSL configuration mechanism required by their module Security Policy,
+for example a provider config that activates the FIPS provider and sets default
+properties. Fluxheim `1.3.5` tracks adding a safe, auditable way to verify or
+enforce those default properties.
+
 Local provider sanity check:
 
 ```bash
@@ -340,6 +352,11 @@ Deliverables:
 
 - Evidence-focused config-tester fixtures for provider failure, non-FIPS TLS
   settings, and backend mismatch.
+- A safe strategy for OpenSSL default-property enforcement or verification,
+  such as a vetted safe wrapper around `EVP_default_properties_enable_fips` /
+  `EVP_default_properties_is_fips_enabled`, or a strict documented requirement
+  that the selected module Security Policy's OpenSSL config enables
+  `default_properties = fips=yes`.
 - Optional operator-supplied OpenSSL config/module path diagnostics where the
   platform exposes them cleanly.
 - Release evidence template listing OpenSSL version, provider config, module
