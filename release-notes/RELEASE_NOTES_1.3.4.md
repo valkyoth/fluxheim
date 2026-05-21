@@ -60,6 +60,12 @@ backend exposes it, and produce useful evidence for operators.
   Fluxheim-owned controls to A01-A10, with a quick CI mode and deeper local
   representative-test mode. The baseline is wired into CI, local checks, stable
   release gates, and release evidence capture.
+- Hardened self-healing rollback state handling so manual and watchdog
+  rollbacks atomically consume pending validation before applying a snapshot.
+- Hardened OTLP private-CA loading with symlink-safe, bounded regular-file
+  reads.
+- Snapshot stores now normalize Unix directory modes to `0700` and snapshot
+  pointer/config/metadata files to `0600`.
 - Updated build, feature, config-reference, release-runbook, readiness, and
   roadmap documentation to use "FIPS-capable" language and avoid compliance
   overclaims.

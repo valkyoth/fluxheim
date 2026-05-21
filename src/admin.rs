@@ -1563,7 +1563,7 @@ impl AdminApp {
             return error_response(StatusCode::BAD_REQUEST, "self-healing is disabled");
         }
 
-        let pending = match self.pending_validation() {
+        let pending = match self.take_pending_validation() {
             Some(pending) => pending,
             None => return error_response(StatusCode::BAD_REQUEST, "no pending validation"),
         };
@@ -1655,22 +1655,27 @@ impl AdminApp {
             return None;
         }
 
-        let pending = self.pending_validation()?;
-        let metrics = ValidationMetrics {
-            successful_checks: pending.successful_checks,
-            failed_checks: pending.failed_checks,
+        let rollback = {
+            let mut state = self.lock_runtime_state();
+            let pending = state.pending_validation.as_ref()?;
+            let metrics = ValidationMetrics {
+                successful_checks: pending.successful_checks,
+                failed_checks: pending.failed_checks,
+            };
+            let reason = if metrics.failed_checks > 0
+                && metrics.error_rate_per_mille() > u64::from(self.max_error_rate_per_mille)
+            {
+                Some("error-rate")
+            } else if pending.expires_unix_secs <= unix_secs() {
+                Some("expired")
+            } else {
+                None
+            }?;
+            let pending = state.pending_validation.take()?;
+            (pending, reason)
         };
-        if metrics.failed_checks > 0
-            && metrics.error_rate_per_mille() > u64::from(self.max_error_rate_per_mille)
-        {
-            return Some(self.rollback_pending_validation(&pending, "error-rate"));
-        }
 
-        if pending.expires_unix_secs > unix_secs() {
-            return None;
-        }
-
-        Some(self.rollback_pending_validation(&pending, "expired"))
+        Some(self.rollback_pending_validation(&rollback.0, rollback.1))
     }
 
     fn watchdog_interval_secs(&self) -> u64 {
@@ -1742,8 +1747,8 @@ impl AdminApp {
         self.lock_runtime_state().clone()
     }
 
-    fn pending_validation(&self) -> Option<PendingValidation> {
-        self.lock_runtime_state().pending_validation.clone()
+    fn take_pending_validation(&self) -> Option<PendingValidation> {
+        self.lock_runtime_state().pending_validation.take()
     }
 
     fn lock_runtime_state(&self) -> std::sync::MutexGuard<'_, AdminRuntimeState> {

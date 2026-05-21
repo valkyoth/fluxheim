@@ -256,6 +256,9 @@ Before starting the server:
   such as `upstreams`;
 - keep TLS private keys, ACME storage, log files, cache roots, runtime paths,
   admin token files, and snapshot stores outside group- or world-writable directories;
+- run Fluxheim with a restrictive umask such as `0077` or `0027`; Fluxheim sets
+  private modes for its snapshot store, but a restrictive service umask remains
+  useful defense in depth for operator-created paths and future state files;
 - keep admin and metrics listeners loopback-only unless a trusted local
   sidecar or network policy protects them;
 - set `[admin.transport] mode = "trusted_tls_terminator"` only when a trusted

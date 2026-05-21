@@ -49,6 +49,11 @@ limited to 4 KiB and snapshot TOML/metadata reads are limited to 16 MiB.
 Snapshot stores are limited to 1024 snapshots; operators should export or prune
 old snapshots before that limit.
 
+On Unix, Fluxheim normalizes the snapshot store root and `configs` directory to
+mode `0700`, and writes `current`, config snapshots, and metadata snapshots as
+mode `0600`. Operators should still run the service with a restrictive umask
+such as `0077` or `0027` as defense in depth for any future state files.
+
 ## Commands
 
 Create a snapshot from a config:

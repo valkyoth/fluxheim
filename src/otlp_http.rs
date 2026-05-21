@@ -1,6 +1,42 @@
-use std::io;
+use std::fs::OpenOptions;
+use std::io::{self, Read};
 use std::path::Path;
 use std::time::Duration;
+
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const O_NOFOLLOW: i32 = 0o400000;
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+const O_NOFOLLOW: i32 = 0x0100;
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+compile_error!(
+    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe OTLP CA loading before building Fluxheim"
+);
+
+const MAX_OTLP_CA_CERT_BYTES: u64 = 1024 * 1024;
 
 pub(crate) fn agent(timeout: Duration, tls_ca_cert_path: Option<&Path>) -> io::Result<ureq::Agent> {
     let mut builder = ureq::Agent::config_builder()
@@ -21,7 +57,11 @@ pub(crate) fn agent(timeout: Duration, tls_ca_cert_path: Option<&Path>) -> io::R
 }
 
 fn load_ca_certificates(path: &Path) -> io::Result<Vec<ureq::tls::Certificate<'static>>> {
-    let contents = std::fs::read(path).map_err(|error| {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(O_NOFOLLOW);
+    let file = options.open(path).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!(
@@ -30,6 +70,46 @@ fn load_ca_certificates(path: &Path) -> io::Result<Vec<ureq::tls::Certificate<'s
             ),
         )
     })?;
+    let metadata = file.metadata().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to inspect OTLP TLS CA certificate {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "OTLP TLS CA certificate {} is not a regular file",
+                path.display()
+            ),
+        ));
+    }
+
+    let mut contents = Vec::new();
+    let mut limited = file.take(MAX_OTLP_CA_CERT_BYTES.saturating_add(1));
+    limited.read_to_end(&mut contents).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "failed to read OTLP TLS CA certificate {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    if contents.len() as u64 > MAX_OTLP_CA_CERT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "OTLP TLS CA certificate {} exceeds {} bytes",
+                path.display(),
+                MAX_OTLP_CA_CERT_BYTES
+            ),
+        ));
+    }
     let mut certificates = Vec::new();
     for item in ureq::tls::parse_pem(&contents) {
         match item {
@@ -86,7 +166,7 @@ fn endpoint_host(authority: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::plaintext_non_loopback_endpoint;
+    use super::{load_ca_certificates, plaintext_non_loopback_endpoint};
 
     #[test]
     fn detects_plaintext_non_loopback_otlp_endpoint() {
@@ -108,5 +188,21 @@ mod tests {
         assert!(plaintext_non_loopback_endpoint(
             "http://10.0.0.10:4318/v1/traces"
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_ca_certificate() {
+        let target = crate::test_support::unique_temp_path("otlp-ca-target");
+        let link = crate::test_support::unique_temp_path("otlp-ca-link");
+        std::fs::write(&target, b"not a certificate\n").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let error = load_ca_certificates(&link).unwrap_err();
+
+        assert_ne!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("failed to read"));
+        let _ = std::fs::remove_file(target);
+        let _ = std::fs::remove_file(link);
     }
 }

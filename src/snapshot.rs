@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 
 #[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 const O_NOFOLLOW: i32 = 0o400000;
@@ -47,6 +47,8 @@ const MAX_CURRENT_SNAPSHOT_POINTER_BYTES: u64 = 4096;
 const MAX_SNAPSHOT_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_SNAPSHOT_STORE_ENTRIES: usize = 1024;
 const MAX_SNAPSHOT_ID_BYTES: usize = 128;
+const SNAPSHOT_DIR_MODE: u32 = 0o700;
+const SNAPSHOT_FILE_MODE: u32 = 0o600;
 pub const MAX_SNAPSHOT_MESSAGE_BYTES: usize = 4096;
 
 #[derive(Debug, Clone)]
@@ -536,9 +538,14 @@ fn write_atomically(path: &Path, contents: &[u8]) -> Result<(), SnapshotError> {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
-        options.custom_flags(O_NOFOLLOW);
+        {
+            options.custom_flags(O_NOFOLLOW).mode(SNAPSHOT_FILE_MODE);
+        }
 
         let mut file = options.open(&temp_path).map_err(SnapshotError::Io)?;
+        #[cfg(unix)]
+        fs::set_permissions(&temp_path, fs::Permissions::from_mode(SNAPSHOT_FILE_MODE))
+            .map_err(SnapshotError::Io)?;
         file.write_all(contents).map_err(SnapshotError::Io)?;
         file.sync_all().map_err(SnapshotError::Io)?;
     }
@@ -692,11 +699,15 @@ fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
                 path: path.to_path_buf(),
             });
         }
-        Some(_) => return Ok(()),
+        Some(_) => {
+            set_private_directory_mode(path)?;
+            return Ok(());
+        }
         None => {}
     }
 
     fs::create_dir_all(path).map_err(SnapshotError::Io)?;
+    set_private_directory_mode(path)?;
     let metadata = fs::symlink_metadata(path).map_err(SnapshotError::Io)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(SnapshotError::UnsafeSnapshotPath {
@@ -704,6 +715,15 @@ fn ensure_real_directory(path: &Path) -> Result<(), SnapshotError> {
         });
     }
 
+    Ok(())
+}
+
+fn set_private_directory_mode(path: &Path) -> Result<(), SnapshotError> {
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(SNAPSHOT_DIR_MODE))
+        .map_err(SnapshotError::Io)?;
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
@@ -763,6 +783,51 @@ mod tests {
             Some("initial config")
         );
         assert!(snapshot.config_path.starts_with(store.root()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshots_are_written_with_private_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TestDir::new("snapshot-private-modes");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let store = SnapshotStore::new(dir.path());
+        let snapshot = store
+            .snapshot_config(&Config::default(), Some("initial config"))
+            .unwrap();
+
+        let root_mode = std::fs::metadata(store.root())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let configs_mode = std::fs::metadata(store.root().join("configs"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let config_mode = std::fs::metadata(&snapshot.config_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let metadata_mode = std::fs::metadata(&snapshot.metadata_path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        let current_mode = std::fs::metadata(store.root().join("current"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+
+        assert_eq!(root_mode, super::SNAPSHOT_DIR_MODE);
+        assert_eq!(configs_mode, super::SNAPSHOT_DIR_MODE);
+        assert_eq!(config_mode, super::SNAPSHOT_FILE_MODE);
+        assert_eq!(metadata_mode, super::SNAPSHOT_FILE_MODE);
+        assert_eq!(current_mode, super::SNAPSHOT_FILE_MODE);
     }
 
     #[test]
