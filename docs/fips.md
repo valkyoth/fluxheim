@@ -14,10 +14,10 @@ published Security Policy.
 
 Current stable line: `1.3.3`.
 
-Planned `1.3.4` direction: OpenSSL FIPS-capable TLS validation and compliance
-evidence plumbing. The target is not a broad "FIPS compliant" claim. The
-target is to complete the OpenSSL backend proof path while leaving rustls,
-BoringSSL, s2n, and non-TLS internal crypto work explicitly staged.
+The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
+compliance evidence plumbing. This is not a broad "FIPS compliant" claim. The
+implemented target is the OpenSSL backend proof path, while rustls, BoringSSL,
+s2n, and non-TLS internal crypto work remain explicitly staged.
 
 ## Official References
 

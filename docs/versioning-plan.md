@@ -766,7 +766,7 @@ Exit criteria:
 Follow-up `1.3.x` FIPS-capable TLS build plan:
 
 The standalone operator and implementation reference is
-[FIPS-Capable Deployments](fips.md). `1.3.4` should complete the OpenSSL
+[FIPS-Capable Deployments](fips.md). The `1.3.4` line completes the OpenSSL
 FIPS-capable TLS path: terminology guardrails, compliance-boundary
 documentation, crypto inventory, backend diagnostics, fail-closed TLS-policy
 validation, OpenSSL provider proof, OpenSSL default FIPS property enablement,
