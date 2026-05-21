@@ -58,6 +58,7 @@ jobs:
           scripts/validate-features.sh profile-proxy-edge
           scripts/validate-features.sh profile-load-balancer-edge
           scripts/validate-features.sh profile-privacy
+          scripts/validate-features.sh profile-fips-openssl
           if scripts/validate-features.sh profile-privacy,metrics; then
             echo "profile-privacy,metrics unexpectedly passed feature validation" >&2
             exit 1
@@ -86,6 +87,7 @@ jobs:
           cargo clippy --no-default-features --features profile-web-server,php-fpm --all-targets -- -D warnings
           cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
           cargo clippy --no-default-features --features proxy,web,tls-rustls,privacy-mode --all-targets -- -D warnings
+          cargo clippy --no-default-features --features profile-fips-openssl --all-targets -- -D warnings
           cargo clippy --no-default-features --features web --all-targets -- -D warnings
 
       - name: Run default tests
@@ -122,6 +124,7 @@ jobs:
           cargo check --no-default-features --features profile-load-balancer-edge
           cargo check --no-default-features --features profile-observability
           cargo check --no-default-features --features profile-privacy
+          cargo check --no-default-features --features profile-fips-openssl
           cargo check --no-default-features --features tls-rustls
           cargo test --no-default-features --features proxy,metrics
           cargo test --no-default-features --features proxy,tls-rustls,acme
@@ -155,6 +158,10 @@ jobs:
           cargo run --quiet -- --check-config --config examples/conf.d
           cargo run --quiet -- --check-config --config examples/gateway-1-0
           cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml
+          cargo run --quiet --no-default-features --features profile-fips-openssl --bin fluxheim-config-tester -- --config examples/fips-openssl.toml --profile fips-openssl --no-runtime-paths --crypto
+
+      - name: Validate OpenSSL FIPS-capable profile
+        run: scripts/validate-fips-openssl.sh check
 
       - name: Run localhost smoke tests
         run: |

@@ -122,6 +122,7 @@ cargo clippy --no-default-features --features profile-web-server,php-fpm --all-t
 cargo clippy --no-default-features --features profile-cache-edge --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-proxy-edge --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-fips-openssl --all-targets -- -D warnings
 cargo test
 cargo test --no-default-features --features proxy,load-balancer
 cargo test --no-default-features --features proxy,cache
@@ -143,6 +144,7 @@ cargo check --no-default-features --features profile-proxy-edge
 cargo check --no-default-features --features profile-load-balancer-edge
 cargo check --no-default-features --features profile-observability
 cargo check --no-default-features --features profile-privacy
+cargo check --no-default-features --features profile-fips-openssl
 cargo check --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo check --no-default-features --features profile-cache-edge,acme-client
 cargo check --no-default-features --features profile-proxy-edge,acme-client
@@ -165,6 +167,7 @@ cargo test --no-default-features --features proxy,tls-rustls,acme-client
 cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
 cargo check --no-default-features --features proxy,tls
 cargo check --no-default-features --features proxy,tls-rustls
+scripts/validate-fips-openssl.sh check
 python3 -m py_compile scripts/prepare-server.py scripts/build_fluxheim_rpm.py
 scripts/validate-tls-backends.sh check
 config_tester examples/fluxheim.toml

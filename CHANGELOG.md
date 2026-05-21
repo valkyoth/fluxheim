@@ -40,6 +40,9 @@ behavior when the change improves security or project direction.
   with `FLUXHEIM_GATE_FIPS_OPENSSL=1`.
 - Added OpenSSL FIPS-capable evidence capture to `scripts/release_evidence.sh`,
   with `--skip-fips` for release lines where it is not relevant.
+- Added the OpenSSL FIPS-capable profile to CI and local check coverage so the
+  feature alias, config tester fixture, provider diagnostics, and fail-closed
+  behavior are exercised before release.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

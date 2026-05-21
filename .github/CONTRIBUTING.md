@@ -29,12 +29,19 @@ cargo build --no-default-features --features profile-proxy-edge
 cargo build --no-default-features --features profile-development
 cargo build --no-default-features --features profile-web-server,php-fpm
 cargo build --no-default-features --features profile-privacy
+cargo build --no-default-features --features profile-fips-openssl
 ```
 
 When using a custom feature set, run the feature preflight first:
 
 ```bash
 scripts/validate-features.sh proxy,web,tls-rustls
+```
+
+For OpenSSL FIPS-capable changes, run the dedicated fail-closed profile check:
+
+```bash
+scripts/validate-fips-openssl.sh check
 ```
 
 ## Checks
