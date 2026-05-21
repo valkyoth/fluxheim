@@ -66,6 +66,13 @@ else
     echo "stable release gate: skipping TLS backend matrix; set FLUXHEIM_GATE_TLS_BACKENDS=1 to enable"
 fi
 
+if [ "${FLUXHEIM_GATE_FIPS_OPENSSL:-0}" = "1" ]; then
+    echo "stable release gate: OpenSSL FIPS-capable validation ($mode)"
+    scripts/validate-fips-openssl.sh "$mode"
+else
+    echo "stable release gate: skipping OpenSSL FIPS-capable validation; set FLUXHEIM_GATE_FIPS_OPENSSL=1 to enable"
+fi
+
 if [ "${FLUXHEIM_GATE_TLS_SCAN:-0}" = "1" ]; then
     echo "stable release gate: local TLS scan"
     scripts/tls_scan_local.sh

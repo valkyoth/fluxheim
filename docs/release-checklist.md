@@ -166,6 +166,7 @@ Enable optional local matrices when the release includes those deliverables:
 
 ```bash
 FLUXHEIM_GATE_TLS_BACKENDS=1 scripts/stable_release_gate.sh release
+FLUXHEIM_GATE_FIPS_OPENSSL=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_TLS_SCAN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_LOAD=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FRAMING=1 scripts/stable_release_gate.sh release
