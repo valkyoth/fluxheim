@@ -12,7 +12,7 @@ published Security Policy.
 
 ## Status
 
-Current stable line: `1.3.3`.
+Current stable line: `1.3.4`.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
 compliance evidence plumbing. This is not a broad "FIPS compliant" claim. The

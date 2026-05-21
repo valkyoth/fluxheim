@@ -995,6 +995,9 @@ Follow-up `1.3.x` PHP runtime plan:
   - FastCGI multiplexing, authorizer, and filter-role review. Documented as
     unsupported for `1.3.x`; Fluxheim supports the normal one-request-at-a-time
     `FCGI_RESPONDER` PHP-FPM web-serving subset.
+- `1.3.4`: OpenSSL FIPS-capable TLS build path, fail-closed provider
+  validation for FIPS-required configs, runtime crypto diagnostics, and
+  release-gate evidence for FIPS-capable builds.
 - Later `1.3.x`: managed php-fpm mode under the existing `php-fpm` feature.
   This should be a runtime config choice, not a separate `php-fpm-managed`
   Cargo feature, because it still uses the same FastCGI bridge and security
@@ -2547,6 +2550,7 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.3.2`: ACME companion agent, zero-downtime first-issuance activation, and
   release-page config tester binaries.
 - `v1.3.3`: focused php-fpm hardening and compatibility fixes.
+- `v1.3.4`: OpenSSL FIPS-capable TLS build path and release evidence.
 - Later `v1.3.x`: experimental pure-Rust PHP research behind
   `experimental-pure-php`; Turbine-style PHP app servers stay proxy upstreams.
 - `v1.4.1`: fixes for advanced proxy parity.

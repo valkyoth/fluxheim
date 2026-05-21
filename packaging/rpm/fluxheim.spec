@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.3.3
+Version:        1.3.4
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -152,6 +152,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu May 21 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.4-1
+- OpenSSL FIPS-capable TLS release.
+- Add fail-closed FIPS runtime/provider validation, FIPS diagnostics, release
+  evidence checks, and sandbox-safe release gate runtime paths.
+
 * Wed May 20 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.3-1
 - PHP-FPM hardening and production compatibility follow-up.
 - Include php-fpm keepalive pooling, safer FastCGI params, PHP cache helpers,
