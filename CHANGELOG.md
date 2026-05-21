@@ -49,6 +49,8 @@ behavior when the change improves security or project direction.
   operator's OpenSSL configuration.
 - Added a mapped OWASP Top 10 2025 baseline document and validation script that
   checks Fluxheim-owned controls for the categories that can be tested in-repo.
+- Wired the OWASP Top 10 2025 baseline into stable release gates and release
+  evidence capture.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

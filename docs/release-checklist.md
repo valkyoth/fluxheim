@@ -149,8 +149,10 @@ For faster iteration before release week, run the same local gate in check mode:
 scripts/stable_release_gate.sh check
 ```
 
-Run the mapped OWASP Top 10 2025 baseline when the release touches request
-handling, admin, PHP, TLS, logging, cache, dependency, or error-handling code:
+The stable gate includes the mapped OWASP Top 10 2025 baseline in quick
+`check` mode. Run the deeper representative-test mode when the release touches
+request handling, admin, PHP, TLS, logging, cache, dependency, or
+error-handling code:
 
 ```bash
 scripts/validate-owasp-top10-2025.sh run
@@ -174,6 +176,7 @@ Enable optional local matrices when the release includes those deliverables:
 ```bash
 FLUXHEIM_GATE_TLS_BACKENDS=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FIPS_OPENSSL=1 scripts/stable_release_gate.sh release
+FLUXHEIM_GATE_OWASP_RUN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_TLS_SCAN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_LOAD=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FRAMING=1 scripts/stable_release_gate.sh release

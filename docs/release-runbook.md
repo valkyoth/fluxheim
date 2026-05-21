@@ -250,8 +250,10 @@ scripts/release_evidence.sh "${RELEASE_VERSION}"
 ```
 
 The helper includes OpenSSL FIPS-capable evidence by running
-`scripts/validate-fips-openssl.sh release`. Use `--skip-fips` only for release
-lines that did not touch FIPS-capable code or documentation.
+`scripts/validate-fips-openssl.sh release`, and OWASP Top 10 2025 baseline
+evidence by running `scripts/validate-owasp-top10-2025.sh run`. Use
+`--skip-fips` or `--skip-owasp` only for release lines where that evidence is
+not relevant.
 
 ## 7. Publish And Verify Container Images
 

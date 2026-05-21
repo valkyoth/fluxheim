@@ -25,6 +25,14 @@ cargo clippy --all-targets -- -D warnings
 echo "stable release gate: tests"
 cargo test
 
+if [ "${FLUXHEIM_GATE_OWASP_RUN:-0}" = "1" ]; then
+    echo "stable release gate: OWASP Top 10 2025 baseline (run)"
+    scripts/validate-owasp-top10-2025.sh run
+else
+    echo "stable release gate: OWASP Top 10 2025 baseline (check)"
+    scripts/validate-owasp-top10-2025.sh check
+fi
+
 echo "stable release gate: 1.0 core matrix ($mode)"
 scripts/validate-1-0-core.sh "$mode"
 

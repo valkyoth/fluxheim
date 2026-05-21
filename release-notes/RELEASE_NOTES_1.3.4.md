@@ -49,7 +49,8 @@ backend exposes it, and produce useful evidence for operators.
   capture.
 - Added an OWASP Top 10 2025 baseline document and validation script mapping
   Fluxheim-owned controls to A01-A10, with a quick CI mode and deeper local
-  representative-test mode.
+  representative-test mode. The baseline is wired into CI, local checks, stable
+  release gates, and release evidence capture.
 - Updated build, feature, config-reference, release-runbook, readiness, and
   roadmap documentation to use "FIPS-capable" language and avoid compliance
   overclaims.
