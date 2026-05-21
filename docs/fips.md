@@ -188,8 +188,7 @@ validated provider cannot be proven active.
 Local provider sanity check:
 
 ```bash
-openssl list -providers -provider fips -provider base
-cargo run --no-default-features --features profile-fips-openssl --bin fluxheim -- crypto
+scripts/validate-fips-openssl.sh check
 ```
 
 Fluxheim does not hardcode a provider directory. It lets OpenSSL use the
@@ -207,12 +206,7 @@ FIPS-required validation fixture. Validate it with a `profile-fips-openssl`
 build:
 
 ```bash
-cargo run --no-default-features --features profile-fips-openssl \
-  --bin fluxheim-config-tester -- \
-  --config examples/fips-openssl.toml \
-  --profile fips-openssl \
-  --no-runtime-paths \
-  --crypto
+scripts/validate-fips-openssl.sh check
 ```
 
 ### rustls With AWS-LC FIPS

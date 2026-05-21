@@ -197,20 +197,14 @@ OpenSSL provider evidence when the release builder has a validated provider
 installed:
 
 ```bash
-openssl list -providers -provider fips -provider base
-cargo run --release --locked --no-default-features --features profile-fips-openssl --bin fluxheim -- crypto
-```
-
-Validate the minimal `tls.fips.required` fixture:
-
-```bash
-cargo run --release --locked --no-default-features --features profile-fips-openssl --bin fluxheim-config-tester -- --config examples/fips-openssl.toml --profile fips-openssl --no-runtime-paths --crypto
+scripts/validate-fips-openssl.sh release
 ```
 
 Record the command output, OpenSSL package/provider version, provider config
 path, and the selected module Security Policy reference. If the release builder
 does not have a FIPS provider installed, record the expected fail-closed output
-instead.
+instead. Set `FLUXHEIM_REQUIRE_FIPS_PROVIDER=1` when the release builder is
+expected to have a working provider and absence should fail the release gate.
 
 ## 5. Draft The GitHub Release
 

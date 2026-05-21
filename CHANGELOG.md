@@ -33,6 +33,9 @@ behavior when the change improves security or project direction.
   alias for local and release validation.
 - Added `examples/fips-openssl.toml` and a matching
   `fluxheim-config-tester --profile fips-openssl` validation mode.
+- Added `scripts/validate-fips-openssl.sh` to build/check the FIPS-capable
+  OpenSSL profile, capture provider diagnostics, validate the fixture, and
+  optionally require a working provider with `FLUXHEIM_REQUIRE_FIPS_PROVIDER=1`.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

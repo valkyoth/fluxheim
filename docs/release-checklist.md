@@ -365,7 +365,7 @@ cargo build --release --no-default-features --features profile-full
 cargo build --release --no-default-features --features profile-cache-edge
 cargo build --release --no-default-features --features profile-proxy-edge
 cargo build --release --no-default-features --features profile-observability
-cargo build --release --no-default-features --features profile-fips-openssl
+scripts/validate-fips-openssl.sh check
 scripts/smoke_peer_fill_cache.sh
 scripts/smoke_observability_local.sh
 ```
