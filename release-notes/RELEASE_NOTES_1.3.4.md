@@ -44,6 +44,8 @@ backend exposes it, and produce useful evidence for operators.
   builds the FIPS-capable profile, captures provider diagnostics, validates the
   FIPS fixture, and optionally fails if no provider is available with
   `FLUXHEIM_REQUIRE_FIPS_PROVIDER=1`.
+- The OpenSSL FIPS-capable validation script now also proves fail-closed
+  behavior for backend mismatch and non-FIPS TLS policy fixtures.
 - Wired OpenSSL FIPS-capable validation into CI, `scripts/checks.sh`, the
   optional stable release gate, the deep release gate, and release evidence
   capture.

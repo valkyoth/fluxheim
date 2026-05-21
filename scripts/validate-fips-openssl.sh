@@ -22,11 +22,55 @@ features="profile-fips-openssl"
 require_provider="${FLUXHEIM_REQUIRE_FIPS_PROVIDER:-0}"
 work_dir="target/fips-openssl-validation"
 runtime_config="$work_dir/config.toml"
+backend_mismatch_config="$work_dir/backend-mismatch.toml"
+non_fips_policy_config="$work_dir/non-fips-policy.toml"
 
 scripts/validate-features.sh "$features"
 
 echo "fips openssl: cargo $cargo_action --no-default-features --features $features"
 cargo $cargo_action --no-default-features --features "$features" --bin fluxheim --bin fluxheim-config-tester
+
+mkdir -p "$work_dir"
+
+cat >"$backend_mismatch_config" <<EOF
+[tls]
+enabled = true
+backend = "rustls"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+[tls.fips]
+required = true
+EOF
+
+cat >"$non_fips_policy_config" <<EOF
+[tls]
+enabled = true
+backend = "openssl"
+curve_preferences = ["X25519", "CurveP256"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256"]
+
+[tls.fips]
+required = true
+EOF
+
+echo "fips openssl: fail-closed backend mismatch fixture"
+if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+    --config "$backend_mismatch_config" \
+    --profile fips-openssl \
+    --no-runtime-paths >/dev/null 2>&1; then
+    echo "fips openssl: backend mismatch fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+echo "fips openssl: fail-closed non-FIPS TLS policy fixture"
+if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+    --config "$non_fips_policy_config" \
+    --profile fips-openssl \
+    --no-runtime-paths >/dev/null 2>&1; then
+    echo "fips openssl: non-FIPS TLS policy fixture unexpectedly passed" >&2
+    exit 1
+fi
 
 echo "fips openssl: OpenSSL provider list"
 if command -v openssl >/dev/null 2>&1; then
@@ -68,7 +112,6 @@ cargo run -q $cargo_run_release --no-default-features --features "$features" --b
     --no-runtime-paths \
     --crypto
 
-mkdir -p "$work_dir"
 cat >"$runtime_config" <<EOF
 [server]
 listen = ["127.0.0.1:0"]

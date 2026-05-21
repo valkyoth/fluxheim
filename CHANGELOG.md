@@ -36,6 +36,8 @@ behavior when the change improves security or project direction.
 - Added `scripts/validate-fips-openssl.sh` to build/check the FIPS-capable
   OpenSSL profile, capture provider diagnostics, validate the fixture, and
   optionally require a working provider with `FLUXHEIM_REQUIRE_FIPS_PROVIDER=1`.
+- Added fail-closed backend-mismatch and non-FIPS TLS-policy fixtures to the
+  OpenSSL FIPS-capable validation script.
 - Wired OpenSSL FIPS-capable validation into the optional stable release gate
   with `FLUXHEIM_GATE_FIPS_OPENSSL=1`.
 - Added OpenSSL FIPS-capable evidence capture to `scripts/release_evidence.sh`,
