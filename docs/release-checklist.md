@@ -149,6 +149,13 @@ For faster iteration before release week, run the same local gate in check mode:
 scripts/stable_release_gate.sh check
 ```
 
+Run the mapped OWASP Top 10 2025 baseline when the release touches request
+handling, admin, PHP, TLS, logging, cache, dependency, or error-handling code:
+
+```bash
+scripts/validate-owasp-top10-2025.sh run
+```
+
 The stable gate includes the promoted cache and observability smoke tests for
 the `1.2` line. Optional gates below still cover slower or environment-specific
 checks such as TLS backend matrices, load testing, fuzz target compilation, and

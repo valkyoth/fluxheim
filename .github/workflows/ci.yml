@@ -93,6 +93,9 @@ jobs:
       - name: Run default tests
         run: cargo test
 
+      - name: Validate OWASP Top 10 2025 baseline
+        run: scripts/validate-owasp-top10-2025.sh check
+
       - name: Validate 1.0 core feature matrix
         run: scripts/validate-1-0-core.sh check
 

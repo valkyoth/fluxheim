@@ -367,6 +367,7 @@ full release ladder.
 - [Build, Containers, And Rootless Podman](docs/build-and-podman.md)
 - [Production Readiness](docs/production-readiness.md)
 - [Feature Matrix](docs/features.md)
+- [OWASP Top 10 2025 Baseline](docs/owasp-top10-2025-baseline.md)
 - [FIPS-Capable Deployments](docs/fips.md)
 - [Config Reference](docs/config-reference.md)
 - [Gateway Recipes](docs/gateway-recipes.md)
@@ -400,6 +401,8 @@ Fluxheim uses:
 - GitHub CI and CodeQL scanning;
 - `cargo deny` for license and dependency policy;
 - `cargo audit` for advisory checks;
+- `scripts/validate-owasp-top10-2025.sh` for a mapped OWASP Top 10 2025
+  baseline over Fluxheim-owned controls;
 - rootless Podman smoke tests before container releases.
 
 Before publishing or merging security-sensitive changes:

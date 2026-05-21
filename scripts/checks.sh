@@ -124,6 +124,7 @@ cargo clippy --no-default-features --features profile-proxy-edge --all-targets -
 cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-fips-openssl --all-targets -- -D warnings
 cargo test
+scripts/validate-owasp-top10-2025.sh check
 cargo test --no-default-features --features proxy,load-balancer
 cargo test --no-default-features --features proxy,cache
 cargo test --no-default-features --features cache

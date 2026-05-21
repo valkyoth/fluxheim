@@ -47,6 +47,8 @@ behavior when the change improves security or project direction.
   availability with safe `fips=yes` queries, while OpenSSL-wide default-property
   enforcement remains a `1.3.5` hardening item unless supplied by the
   operator's OpenSSL configuration.
+- Added a mapped OWASP Top 10 2025 baseline document and validation script that
+  checks Fluxheim-owned controls for the categories that can be tested in-repo.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 
