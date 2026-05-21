@@ -249,6 +249,10 @@ collect the release evidence block:
 scripts/release_evidence.sh "${RELEASE_VERSION}"
 ```
 
+The helper includes OpenSSL FIPS-capable evidence by running
+`scripts/validate-fips-openssl.sh release`. Use `--skip-fips` only for release
+lines that did not touch FIPS-capable code or documentation.
+
 ## 7. Publish And Verify Container Images
 
 The image workflow publishes the configured image variants after the tag push.

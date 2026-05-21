@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: scripts/release_evidence.sh VERSION [--skip-builds] [--skip-sbom] [--skip-reproducible] [--skip-containers]" >&2
+    echo "usage: scripts/release_evidence.sh VERSION [--skip-builds] [--skip-sbom] [--skip-reproducible] [--skip-fips] [--skip-containers]" >&2
 }
 
 version="${1:-}"
@@ -22,12 +22,14 @@ esac
 skip_builds=0
 skip_sbom=0
 skip_reproducible=0
+skip_fips=0
 skip_containers=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --skip-builds) skip_builds=1 ;;
         --skip-sbom) skip_sbom=1 ;;
         --skip-reproducible) skip_reproducible=1 ;;
+        --skip-fips) skip_fips=1 ;;
         --skip-containers) skip_containers=1 ;;
         *)
             usage
@@ -122,6 +124,12 @@ else
     fi
 fi
 
+if [ "$skip_fips" -eq 1 ]; then
+    fips_output="not collected (--skip-fips)"
+else
+    fips_output="$(scripts/validate-fips-openssl.sh release 2>&1)"
+fi
+
 container_lines=""
 if [ "$skip_containers" -eq 1 ]; then
     container_lines="
@@ -172,6 +180,10 @@ cat <<EOF
 - SBOM checksums:${sbom_lines}
 - Reproducible build:
   - \`${reproducible_line}\`
+- OpenSSL FIPS-capable evidence:
+\`\`\`text
+${fips_output}
+\`\`\`
 - Container digests:${container_lines}
 - Tag signature:
   - \`${signature}\`
