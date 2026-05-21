@@ -48,6 +48,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$tmp/cache"
+mkdir -p "$tmp/run"
 
 python3 - "$upstream_port" >"$tmp/upstream.log" 2>&1 <<'PY' &
 import http.server
@@ -92,6 +93,11 @@ cat > "$config" <<EOF
 [server]
 listen = ["127.0.0.1:$fluxheim_port"]
 trusted_proxies = ["127.0.0.1/32"]
+
+[server.process]
+pid_file = "$tmp/run/fluxheim.pid"
+upgrade_sock = "$tmp/run/fluxheim-upgrade.sock"
+certificate_reload_sock = "$tmp/run/fluxheim-cert-reload.sock"
 
 [logging]
 level = "warn"

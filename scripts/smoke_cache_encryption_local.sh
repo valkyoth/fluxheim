@@ -128,6 +128,7 @@ listen = ["127.0.0.1:${FLUXHEIM_PORT}"]
 [server.process]
 pid_file = "${TMP_DIR}/run/fluxheim.pid"
 upgrade_sock = "${TMP_DIR}/run/fluxheim-upgrade.sock"
+certificate_reload_sock = "${TMP_DIR}/run/fluxheim-cert-reload.sock"
 threads = 1
 
 [logging]

@@ -92,6 +92,7 @@ trusted_proxies = []
 daemon = false
 pid_file = "$TMP_DIR/run/fluxheim.pid"
 upgrade_sock = "$TMP_DIR/run/fluxheim-upgrade.sock"
+certificate_reload_sock = "$TMP_DIR/run/fluxheim-cert-reload.sock"
 
 [server.limits]
 max_request_header_bytes = "64KiB"

@@ -86,6 +86,7 @@ trusted_proxies = []
 [server.process]
 pid_file = "$tmp/run/fluxheim.pid"
 upgrade_sock = "$tmp/run/fluxheim-upgrade.sock"
+certificate_reload_sock = "$tmp/run/fluxheim-cert-reload.sock"
 daemon = false
 threads = 2
 

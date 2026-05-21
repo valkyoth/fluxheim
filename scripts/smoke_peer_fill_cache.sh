@@ -170,6 +170,7 @@ default_vhost = "cache.test"
 [server.process]
 pid_file = "${TMP_DIR}/run/${node_name}.pid"
 upgrade_sock = "${TMP_DIR}/run/${node_name}-upgrade.sock"
+certificate_reload_sock = "${TMP_DIR}/run/${node_name}-cert-reload.sock"
 threads = 1
 
 [logging]
