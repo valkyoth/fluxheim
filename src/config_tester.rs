@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
 
-use crate::config::{CacheConfig, Config, PhpConfig, ProxyConfig, WebConfig};
+use crate::config::{CacheConfig, Config, PhpConfig, ProxyConfig, TlsBackend, WebConfig};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -50,6 +50,7 @@ pub enum ConfigTesterProfile {
     Full,
     Cache,
     Proxy,
+    FipsOpenssl,
     WebPhp,
     Development,
     LoadBalancer,
@@ -139,6 +140,9 @@ fn validate_profile_config(
     if !policy.proxy {
         reject_proxy_config(config)?;
     }
+    if profile == ConfigTesterProfile::FipsOpenssl {
+        validate_fips_openssl_profile_config(config)?;
+    }
     Ok(())
 }
 
@@ -165,7 +169,9 @@ impl ProfilePolicy {
                 cache: true,
                 php: false,
             },
-            ConfigTesterProfile::Proxy | ConfigTesterProfile::LoadBalancer => Self {
+            ConfigTesterProfile::Proxy
+            | ConfigTesterProfile::FipsOpenssl
+            | ConfigTesterProfile::LoadBalancer => Self {
                 proxy: true,
                 web: false,
                 cache: false,
@@ -187,6 +193,7 @@ impl ConfigTesterProfile {
             Self::Full => "full",
             Self::Cache => "cache",
             Self::Proxy => "proxy",
+            Self::FipsOpenssl => "fips-openssl",
             Self::WebPhp => "web-php",
             Self::Development => "development",
             Self::LoadBalancer => "load-balancer",
@@ -215,6 +222,18 @@ fn reject_web_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>
                 .into());
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_fips_openssl_profile_config(
+    config: &Config,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if config.tls.backend != TlsBackend::Openssl {
+        return Err("target profile fips-openssl requires [tls] backend = \"openssl\"".into());
+    }
+    if !config.tls.fips.required {
+        return Err("target profile fips-openssl requires [tls.fips] required = true".into());
     }
     Ok(())
 }
@@ -461,6 +480,52 @@ mod tests {
         let error = validate_profile_config(&config, ConfigTesterProfile::Full).unwrap_err();
 
         assert!(error.to_string().contains("does not include php-fpm"));
+    }
+
+    #[test]
+    fn fips_openssl_profile_requires_openssl_backend() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "rustls"
+
+            [tls.fips]
+            required = true
+            "#,
+        );
+
+        let error = validate_profile_config(&config, ConfigTesterProfile::FipsOpenssl).unwrap_err();
+
+        assert!(error.to_string().contains("backend = \"openssl\""));
+    }
+
+    #[test]
+    fn fips_openssl_profile_requires_fips_guard() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "openssl"
+            "#,
+        );
+
+        let error = validate_profile_config(&config, ConfigTesterProfile::FipsOpenssl).unwrap_err();
+
+        assert!(error.to_string().contains("required = true"));
+    }
+
+    #[test]
+    fn fips_openssl_profile_accepts_fips_required_openssl() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "openssl"
+
+            [tls.fips]
+            required = true
+            "#,
+        );
+
+        validate_profile_config(&config, ConfigTesterProfile::FipsOpenssl).unwrap();
     }
 
     fn write_test_config(label: &str, contents: &str) -> std::path::PathBuf {

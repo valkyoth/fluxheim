@@ -202,27 +202,17 @@ provider package needed for local testing. Full-system FIPS mode packages,
 boot loader changes, and initramfs changes are deployment decisions, not
 required for normal Fluxheim development.
 
-Minimal FIPS-required runtime validation example:
-
-```toml
-[server]
-listen = ["127.0.0.1:0"]
-
-[tls]
-enabled = true
-backend = "openssl"
-curve_preferences = ["CurveP256", "CurveP384"]
-cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
-
-[tls.fips]
-required = true
-```
-
-Validate it with a `tls-openssl-fips` build:
+The repository includes `examples/fips-openssl.toml` as a minimal
+FIPS-required validation fixture. Validate it with a `profile-fips-openssl`
+build:
 
 ```bash
 cargo run --no-default-features --features profile-fips-openssl \
-  --bin fluxheim-config-tester -- --config fips-example.toml --crypto
+  --bin fluxheim-config-tester -- \
+  --config examples/fips-openssl.toml \
+  --profile fips-openssl \
+  --no-runtime-paths \
+  --crypto
 ```
 
 ### rustls With AWS-LC FIPS

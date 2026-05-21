@@ -147,7 +147,10 @@ cargo build --no-default-features --features profile-fips-openssl
 ```
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
-binary can load the provider in the current environment. See
+binary can load the provider in the current environment. The
+`fips-openssl` config-tester profile validates that a fixture uses
+`backend = "openssl"` and `[tls.fips] required = true`; see
+`examples/fips-openssl.toml`. See
 [FIPS-Capable Deployments](fips.md) before using this for regulated systems.
 
 Focused image profile status:
