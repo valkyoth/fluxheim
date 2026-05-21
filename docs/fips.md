@@ -14,11 +14,10 @@ published Security Policy.
 
 Current stable line: `1.3.3`.
 
-Planned `1.3.4` direction: FIPS-capable TLS foundation and compliance
+Planned `1.3.4` direction: OpenSSL FIPS-capable TLS validation and compliance
 evidence plumbing. The target is not a broad "FIPS compliant" claim. The
-target is to add enough backend-specific validation, diagnostics, and
-documentation that the later FIPS-required profiles can fail closed instead of
-silently accepting non-approved cryptography.
+target is to complete the OpenSSL backend proof path while leaving rustls,
+BoringSSL, s2n, and non-TLS internal crypto work explicitly staged.
 
 ## Official References
 
@@ -130,14 +129,16 @@ curve_preferences = ["CurveP256", "CurveP384"]
 required = true
 ```
 
-`tls.fips.required` is present as a fail-closed planning guard. It validates
+`tls.fips.required` is present as a fail-closed OpenSSL guard. It validates
 the obvious non-FIPS TLS choices and rejects startup unless the build has a
-backend-specific proof path. The initial proof path is
+backend-specific proof path. The first proof path is
 `tls-openssl-fips` with `backend = "openssl"`, which checks that the OpenSSL
 FIPS provider can be loaded and that a `fips=yes` property query can fetch an
-approved cipher. The exact schema may grow when more backend proof fields are
-implemented. The important rule is fail closed: a FIPS-required config must
-not silently fall back to a non-FIPS provider or non-approved cipher.
+approved cipher, enables OpenSSL default FIPS properties for the process, and
+verifies that the default fetch path rejects a non-FIPS cipher. The exact
+schema may grow when more backend proof fields are implemented. The important
+rule is fail closed: a FIPS-required config must not silently fall back to a
+non-FIPS provider or non-approved cipher.
 
 ## Backend Paths
 
@@ -182,20 +183,23 @@ Operator responsibilities:
 Important caveat:
 
 Linking to OpenSSL is not enough. A Fluxheim binary built with
-`tls-openssl-fips` must still refuse to run in FIPS-required mode if the
-validated provider cannot be proven active.
+`tls-openssl-fips` refuses to run in FIPS-required mode if the validated
+provider and OpenSSL default FIPS property path cannot be proven active.
 
-Fluxheim `1.3.4` proves provider availability with safe `openssl` crate APIs:
-it loads the `fips` provider and resolves `AES-256-GCM` through an explicit
-`fips=yes` property query. It does not yet call OpenSSL's process/default
-property APIs such as `EVP_default_properties_enable_fips` or
-`EVP_default_properties_is_fips_enabled`, because those APIs are only exposed
-through raw FFI in the current Rust bindings and Fluxheim forbids unsafe code.
-Operators who need stronger OpenSSL-wide default-property enforcement must use
-the OpenSSL configuration mechanism required by their module Security Policy,
-for example a provider config that activates the FIPS provider and sets default
-properties. Fluxheim `1.3.5` tracks adding a safe, auditable way to verify or
-enforce those default properties.
+Fluxheim `1.3.4` loads the `fips` provider, resolves `AES-256-GCM` through an
+explicit `fips=yes` property query, enables OpenSSL default FIPS properties for
+the process-default library context, verifies
+`EVP_default_properties_is_fips_enabled`, checks that `AES-256-GCM` can be
+fetched through the default property path, and checks that `CHACHA20-POLY1305`
+is rejected through that same default path. The raw OpenSSL default-property
+calls are contained in a small local support crate so the main Fluxheim crate
+can keep `#![forbid(unsafe_code)]`.
+
+Operators still need to install and configure OpenSSL according to the chosen
+module Security Policy, including provider installation and integrity setup
+such as `openssl fipsinstall` where that policy requires it. Fluxheim verifies
+the process behavior it can observe; it does not replace CMVP certificate,
+platform, or operational evidence.
 
 Local provider sanity check:
 
@@ -313,10 +317,10 @@ Known current blockers:
 
 ## Release Roadmap After 1.3.4
 
-### 1.3.4 - FIPS Foundation
+### 1.3.4 - OpenSSL FIPS-Capable TLS
 
-Goal: prepare Fluxheim for real FIPS-required profiles without claiming
-compliance.
+Goal: complete the OpenSSL FIPS-capable TLS path without claiming that
+Fluxheim itself is a validated cryptographic module.
 
 Deliverables:
 
@@ -330,39 +334,27 @@ Deliverables:
   config-tester/runtime command.
 - Initial `fluxheim crypto` and `fluxheim-config-tester --crypto` output that
   reports compiled TLS backends and OpenSSL FIPS provider availability.
-- Initial `tls-openssl-fips` feature for OpenSSL 3 provider diagnostics and
-  fail-closed `tls.fips.required` startup validation.
+- `tls-openssl-fips` feature for OpenSSL 3 provider diagnostics,
+  fail-closed `tls.fips.required` startup validation, default FIPS property
+  enablement, and observable default-property verification.
 - `profile-fips-openssl` as a narrow proxy/security/OpenSSL-FIPS feature alias
   for release and local validation.
-
-Exit criteria:
-
-- Documentation does not overclaim.
-- Operators can see which pieces remain blockers before they attempt a
-  regulated deployment.
-- The next implementation PR has a clear release-evidence path for OpenSSL and
-  a separate rustls/AWS-LC path.
-
-### 1.3.5 - OpenSSL FIPS Candidate Hardening
-
-Goal: harden the first OpenSSL FIPS-capable runtime path using OpenSSL 3.x with
-a validated FIPS provider.
-
-Deliverables:
-
 - Evidence-focused config-tester fixtures for provider failure, non-FIPS TLS
   settings, and backend mismatch.
-- A safe strategy for OpenSSL default-property enforcement or verification,
-  such as a vetted safe wrapper around `EVP_default_properties_enable_fips` /
-  `EVP_default_properties_is_fips_enabled`, or a strict documented requirement
-  that the selected module Security Policy's OpenSSL config enables
-  `default_properties = fips=yes`.
-- Optional operator-supplied OpenSSL config/module path diagnostics where the
-  platform exposes them cleanly.
 - Release evidence template listing OpenSSL version, provider config, module
   certificate, and Security Policy.
 - Documentation for systemd, RPM, and container operation using an
   operator-installed validated OpenSSL provider.
+
+Exit criteria:
+
+- Documentation does not overclaim.
+- OpenSSL FIPS-required startup fails if provider loading, explicit `fips=yes`
+  fetch, default FIPS property enablement, or default-property verification
+  fails.
+- Operators can see which non-OpenSSL pieces remain blockers before they
+  attempt a regulated deployment.
+- The next implementation PR has a separate rustls/AWS-LC path.
 
 Likely limitations:
 
@@ -371,7 +363,7 @@ Likely limitations:
 - Local cache encryption may be disabled in FIPS-required mode until migrated
   away from ring.
 
-### 1.3.6 - rustls/AWS-LC FIPS Candidate
+### 1.3.5 - rustls/AWS-LC FIPS Candidate
 
 Goal: provider-aware rustls implementation using AWS-LC FIPS through rustls.
 
@@ -389,7 +381,7 @@ Likely limitations:
 - Exact module Security Policy and platform matching must be operator-provided
   unless Fluxheim publishes a dedicated validated-container recipe.
 
-### 1.3.7 - Internal Crypto Closure
+### 1.3.6 - Internal Crypto Closure
 
 Goal: remove or gate non-validated crypto paths from FIPS-required builds.
 
@@ -404,7 +396,7 @@ Deliverables:
 - Test coverage proving `fips.required = true` fails closed for incompatible
   feature combinations.
 
-### 1.3.8 Or Later - Compliance Evidence Package
+### 1.3.7 Or Later - Compliance Evidence Package
 
 Goal: make regulated operators' audit work practical.
 
@@ -425,7 +417,7 @@ Before claiming a Fluxheim deployment uses FIPS-validated cryptography:
 2. Download the exact Security Policy for that certificate.
 3. Install the module exactly as the Security Policy requires.
 4. Configure Fluxheim with a FIPS-capable backend that can prove approved mode.
-5. Enable Fluxheim's future FIPS-required guard.
+5. Enable Fluxheim's FIPS-required guard.
 6. Run `fluxheim-config-tester` and the runtime crypto diagnostic command.
 7. Verify TLS protocol/cipher/group behavior with an external scanner.
 8. Confirm ACME, cache encryption, telemetry, and other crypto features are

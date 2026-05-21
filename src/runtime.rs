@@ -79,6 +79,14 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     crate::tls::install_rustls_crypto_provider();
+    #[cfg(any(
+        feature = "tls",
+        feature = "tls-rustls",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    crate::tls::validate_fips_runtime_config(&config)?;
 
     let pingora_conf = pingora_server_conf(&config);
     let mut server = pingora::server::Server::new_with_opt_and_conf(None, pingora_conf);

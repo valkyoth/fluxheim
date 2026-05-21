@@ -13,14 +13,21 @@ behavior when the change improves security or project direction.
 
 - Added a standalone FIPS-capable deployment plan covering NIST/CMVP
   references, compliance boundaries, backend-specific OpenSSL and rustls/AWS-LC
-  paths, internal crypto blockers, and the post-`1.3.4` roadmap needed before
-  any FIPS-required profile can be described as deployment-ready.
-- Added the initial `tls.fips.required` fail-closed planning guard,
+  paths, internal crypto blockers, and the post-`1.3.4` roadmap for rustls and
+  broader internal-crypto closure.
+- Added the `tls.fips.required` fail-closed OpenSSL guard,
   `fluxheim crypto`, and `fluxheim-config-tester --crypto` diagnostics for the
-  `1.3.4` FIPS foundation line.
+  `1.3.4` OpenSSL FIPS-capable TLS line.
 - Added an opt-in `tls-openssl-fips` feature that accepts
   `tls.fips.required` only with `backend = "openssl"` and verifies that the
-  OpenSSL FIPS provider can be loaded and queried with `fips=yes` at runtime.
+  OpenSSL FIPS provider can be loaded, queried with `fips=yes`, and selected
+  through OpenSSL default properties at runtime.
+- Added a small local OpenSSL FIPS support crate that wraps OpenSSL 3 default
+  property APIs outside Fluxheim's `#![forbid(unsafe_code)]` crate boundary.
+- FIPS-required OpenSSL startup now enables and verifies
+  `EVP_default_properties_enable_fips` / `EVP_default_properties_is_fips_enabled`
+  before Pingora TLS services are built, and rejects startup if non-FIPS
+  algorithms remain available through the default fetch path.
 - Patched the vendored `pingora-openssl` compatibility crate to stop forcing
   `openssl/vendored`, allowing OpenSSL builds to link against the operator's
   system OpenSSL provider.
@@ -46,9 +53,9 @@ behavior when the change improves security or project direction.
   feature alias, config tester fixture, provider diagnostics, and fail-closed
   behavior are exercised before release.
 - Documented the `1.3.4` OpenSSL FIPS boundary: Fluxheim proves provider
-  availability with safe `fips=yes` queries, while OpenSSL-wide default-property
-  enforcement remains a `1.3.5` hardening item unless supplied by the
-  operator's OpenSSL configuration.
+  availability, enables OpenSSL default FIPS properties for the process-default
+  library context, and records the operator evidence still needed for the
+  selected module Security Policy.
 - Added a mapped OWASP Top 10 2025 baseline document and validation script that
   checks Fluxheim-owned controls for the categories that can be tested in-repo.
 - Wired the OWASP Top 10 2025 baseline into stable release gates and release

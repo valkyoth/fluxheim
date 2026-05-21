@@ -671,28 +671,33 @@ pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Se
 }
 
 fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if !config.tls.fips.required {
-        return Ok(());
+    #[cfg(any(
+        feature = "tls",
+        feature = "tls-rustls",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    {
+        crate::tls::validate_fips_runtime_config(config)
     }
 
-    #[cfg(feature = "tls-openssl-fips")]
+    #[cfg(not(any(
+        feature = "tls",
+        feature = "tls-rustls",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    )))]
     {
-        let status = crate::tls::validate_openssl_fips_provider().map_err(|error| {
-            format!("tls.fips.required OpenSSL FIPS provider check failed: {error}")
-        })?;
-        log::info!(
-            "OpenSSL FIPS provider check passed using {}",
-            status.openssl_version
-        );
-        Ok(())
-    }
-
-    #[cfg(not(feature = "tls-openssl-fips"))]
-    {
-        Err(
-            "tls.fips.required requires a FIPS-capable TLS backend feature such as tls-openssl-fips"
-                .into(),
-        )
+        if config.tls.fips.required {
+            Err(
+                "tls.fips.required requires a FIPS-capable TLS backend feature such as tls-openssl-fips"
+                    .into(),
+            )
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -955,8 +960,8 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     #[cfg(feature = "tls-openssl-fips")]
     match crate::tls::validate_openssl_fips_provider() {
         Ok(status) => println!(
-            "    openssl_fips_provider: available ({})",
-            status.openssl_version
+            "    openssl_fips_provider: available ({}; default_properties_fips_enabled={})",
+            status.openssl_version, status.default_properties_fips_enabled
         ),
         Err(error) => println!("    openssl_fips_provider: unavailable ({error})"),
     }

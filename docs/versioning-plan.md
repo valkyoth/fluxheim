@@ -766,16 +766,14 @@ Exit criteria:
 Follow-up `1.3.x` FIPS-capable TLS build plan:
 
 The standalone operator and implementation reference is
-[FIPS-Capable Deployments](fips.md). `1.3.4` should be treated as the FIPS
-foundation release: terminology guardrails, compliance-boundary documentation,
-crypto inventory, backend diagnostics design, and fail-closed TLS-policy design.
-The first foundation slice adds `[tls.fips] required = true` as a fail-closed
-planning guard, `fluxheim crypto` as a compiled-backend diagnostic, and an
-initial `tls-openssl-fips` OpenSSL provider proof path.
-Actual FIPS-required deployment readiness should remain staged after `1.3.4`:
-OpenSSL FIPS provider evidence first, rustls/AWS-LC FIPS after provider-aware
-rustls helpers exist, and internal crypto closure before any broad
-FIPS-required profile is recommended for production.
+[FIPS-Capable Deployments](fips.md). `1.3.4` should complete the OpenSSL
+FIPS-capable TLS path: terminology guardrails, compliance-boundary
+documentation, crypto inventory, backend diagnostics, fail-closed TLS-policy
+validation, OpenSSL provider proof, OpenSSL default FIPS property enablement,
+and release evidence. Broader FIPS-required deployment readiness should remain
+staged after `1.3.4`: rustls/AWS-LC FIPS after provider-aware rustls helpers
+exist, and internal crypto closure before any broad FIPS-required profile is
+recommended for production.
 
 - Add an explicit FIPS-capable compile/profile line without claiming that
   Fluxheim itself is a validated cryptographic module. The release wording must
@@ -816,10 +814,10 @@ FIPS-required profile is recommended for production.
     Fluxheim should support an operator-supplied OpenSSL config path or
     environment contract, require provider/config diagnostics, and fail closed
     when FIPS-required mode cannot prove the FIPS provider/default properties
-    are active. The initial `1.3.4` path proves provider availability with a
-    safe explicit `fips=yes` fetch; OpenSSL-wide default-property enforcement is
-    still a `1.3.5` hardening item because Fluxheim currently forbids unsafe
-    calls to raw OpenSSL default-property APIs.
+    are active. The `1.3.4` path proves provider availability with an explicit
+    `fips=yes` fetch, enables OpenSSL default FIPS properties through a small
+    local support crate, verifies those properties, and checks that a non-FIPS
+    cipher is rejected through the default fetch path.
   - `tls-boringssl-fips`: research-only until Fluxheim can prove it is linked
     to a BoringCrypto validated module stream, can query the module/version, and
     can document the exact CMVP certificate/security-policy boundary. Normal
@@ -858,23 +856,15 @@ FIPS-required profile is recommended for production.
 
 Post-`1.3.4` implementation ladder:
 
-- `1.3.5`: OpenSSL FIPS candidate hardening. Expand the initial
-  `tls-openssl-fips` provider probe with release-evidence fixtures,
-  config-tester failure cases, OpenSSL default-property verification or an
-  explicit Security-Policy-backed config requirement, optional OpenSSL
-  config/module path diagnostics, and operator docs for OpenSSL 3.x FIPS
-  provider installation according to the selected module Security Policy.
-  Managed ACME and local cache encryption may be rejected in FIPS-required mode
-  until their crypto paths are rerouted or externally evidenced.
-- `1.3.6`: rustls/AWS-LC FIPS candidate. Refactor current ring-specific rustls
+- `1.3.5`: rustls/AWS-LC FIPS candidate. Refactor current ring-specific rustls
   helpers into provider-aware helpers, use rustls' AWS-LC FIPS provider path,
   verify rustls FIPS status on generated configs, and document AWS-LC FIPS
   build requirements and CMVP Security Policy evidence.
-- `1.3.7`: internal crypto closure. Classify ACME, EAB, admin tokens,
+- `1.3.6`: internal crypto closure. Classify ACME, EAB, admin tokens,
   request IDs, temp names, cache encryption, OpenBao Transit, OTLP HTTPS, and
   future signing/session features as validated-backend-routed, externally
   evidenced, non-security-sensitive, or disabled in FIPS-required builds.
-- `1.3.8` or later: compliance evidence package. Publish a repeatable release
+- `1.3.7` or later: compliance evidence package. Publish a repeatable release
   evidence template with SBOM notes, build command, module certificate,
   Security Policy, provider config, runtime crypto diagnostics, and scanner
   output checklist.

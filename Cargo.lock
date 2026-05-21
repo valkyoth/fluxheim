@@ -1014,6 +1014,7 @@ dependencies = [
  "clap",
  "env_logger",
  "fastcgi-client",
+ "fluxheim-openssl-fips-support",
  "getrandom 0.4.2",
  "http",
  "httpdate",
@@ -1040,6 +1041,13 @@ dependencies = [
  "ureq",
  "x509-parser 0.18.1",
  "zeroize",
+]
+
+[[package]]
+name = "fluxheim-openssl-fips-support"
+version = "0.1.0"
+dependencies = [
+ "openssl-sys",
 ]
 
 [[package]]

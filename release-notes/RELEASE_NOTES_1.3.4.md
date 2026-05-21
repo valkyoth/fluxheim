@@ -2,10 +2,10 @@
 
 ## Summary
 
-Fluxheim 1.3.4 is the FIPS-capable foundation release for the 1.3 line. It
-adds strict terminology, OpenSSL-provider diagnostics, fail-closed
-configuration validation, and release evidence plumbing for future
-FIPS-required deployment profiles.
+Fluxheim 1.3.4 is the OpenSSL FIPS-capable TLS release for the 1.3 line. It
+adds strict terminology, OpenSSL-provider diagnostics, OpenSSL default-property
+enforcement for FIPS-required TLS startup, fail-closed configuration
+validation, and release evidence plumbing.
 
 This release does not claim that Fluxheim is FIPS certified or that enabling a
 Cargo feature makes a deployment compliant. FIPS validation belongs to the
@@ -13,10 +13,10 @@ selected cryptographic module and its tested operating environment. Fluxheim's
 role is to enforce configuration boundaries, verify provider status where the
 backend exposes it, and produce useful evidence for operators.
 
-- Release type: FIPS-capable foundation and validation tooling
+- Release type: OpenSSL FIPS-capable TLS validation and release tooling
 - Compatibility: no broad config break intended
-- Primary area: OpenSSL FIPS provider diagnostics, `tls.fips.required`, release
-  evidence, and FIPS documentation
+- Primary area: OpenSSL FIPS provider diagnostics, OpenSSL default FIPS
+  properties, `tls.fips.required`, release evidence, and FIPS documentation
 
 ## Highlights
 
@@ -29,6 +29,13 @@ backend exposes it, and produce useful evidence for operators.
 - Added `tls-openssl-fips`, an opt-in OpenSSL 3 provider proof path that
   checks that the OpenSSL FIPS provider can be loaded and that an approved
   cipher can be fetched with the `fips=yes` property query.
+- FIPS-required OpenSSL startup now enables and verifies OpenSSL default FIPS
+  properties through `EVP_default_properties_enable_fips` and
+  `EVP_default_properties_is_fips_enabled` before Pingora TLS services are
+  built.
+- The OpenSSL FIPS-capable runtime check verifies that approved AES-GCM can be
+  fetched through the default property path and that a non-FIPS cipher is
+  rejected there.
 - Patched the vendored `pingora-openssl` compatibility crate to stop forcing
   `openssl/vendored`, so FIPS-capable OpenSSL builds can link against the
   operator-selected system OpenSSL provider.
@@ -75,12 +82,13 @@ Fluxheim does not hardcode provider module directories. Provider discovery uses
 OpenSSL's normal configuration and environment model, including `OPENSSL_CONF`,
 `OPENSSL_MODULES`, distro crypto policies, and compiled-in defaults.
 
-The 1.3.4 OpenSSL path proves provider availability with safe Rust APIs by
-loading the `fips` provider and fetching an approved cipher with `fips=yes`.
-It does not yet enforce OpenSSL-wide default properties from inside Fluxheim;
-operators needing that boundary must configure OpenSSL according to the chosen
-module Security Policy. Default-property verification/enforcement is tracked
-for the next OpenSSL FIPS hardening slice.
+The 1.3.4 OpenSSL path loads the `fips` provider, fetches an approved cipher
+with `fips=yes`, enables OpenSSL default FIPS properties for the process-default
+library context, verifies that those default properties are active, and checks
+that the default fetch path rejects a non-FIPS cipher. Operators still need to
+install and configure a validated OpenSSL provider according to the selected
+module Security Policy; Fluxheim is not itself a validated cryptographic
+module.
 
 ## Build
 

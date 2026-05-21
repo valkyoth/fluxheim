@@ -229,7 +229,8 @@ for operators who want the older convenience bundles.
 FIPS-capable OpenSSL testing is available with `tls-openssl-fips`, which
 requires `backend = "openssl"` and an operator-installed OpenSSL 3 FIPS
 provider. Use the `profile-fips-openssl` alias for local validation, run
-`fluxheim crypto` to inspect provider availability, and read
+`fluxheim crypto` to inspect provider availability and OpenSSL default FIPS
+property status, and read
 [FIPS-Capable Deployments](docs/fips.md) before treating a deployment as
 regulated evidence.
 

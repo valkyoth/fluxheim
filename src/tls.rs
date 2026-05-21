@@ -21,6 +21,7 @@ static OPENSSL_FIPS_PROVIDER_LOADED: std::sync::atomic::AtomicBool =
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct OpenSslFipsStatus {
     pub openssl_version: String,
+    pub default_properties_fips_enabled: bool,
 }
 
 #[cfg(feature = "tls-openssl-fips")]
@@ -39,8 +40,21 @@ pub fn validate_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
         OPENSSL_FIPS_PROVIDER_LOADED.store(true, Ordering::Release);
     }
 
+    fluxheim_openssl_fips_support::enable_default_properties_fips()
+        .map_err(|error| format!("OpenSSL FIPS default-property enable failed: {error}"))?;
+    let default_properties_fips_enabled =
+        fluxheim_openssl_fips_support::default_properties_fips_enabled();
+    if !default_properties_fips_enabled {
+        return Err("OpenSSL FIPS default properties are not enabled".to_owned());
+    }
+
     openssl_fips_property_query_check()?;
-    Ok(OpenSslFipsStatus { openssl_version })
+    openssl_fips_default_fetch_check()?;
+    openssl_non_fips_default_fetch_rejected()?;
+    Ok(OpenSslFipsStatus {
+        openssl_version,
+        default_properties_fips_enabled,
+    })
 }
 
 #[cfg(feature = "tls-openssl-fips")]
@@ -50,6 +64,55 @@ fn openssl_fips_property_query_check() -> Result<(), String> {
         .map_err(|error| {
             format!("OpenSSL FIPS property query failed for AES-256-GCM with fips=yes: {error}")
         })
+}
+
+#[cfg(feature = "tls-openssl-fips")]
+fn openssl_fips_default_fetch_check() -> Result<(), String> {
+    openssl::cipher::Cipher::fetch(None, "AES-256-GCM", None)
+        .map(|_| ())
+        .map_err(|error| {
+            format!("OpenSSL FIPS default-property fetch failed for AES-256-GCM: {error}")
+        })
+}
+
+#[cfg(feature = "tls-openssl-fips")]
+fn openssl_non_fips_default_fetch_rejected() -> Result<(), String> {
+    match openssl::cipher::Cipher::fetch(None, "CHACHA20-POLY1305", None) {
+        Ok(_) => Err(
+            "OpenSSL FIPS default properties still allow CHACHA20-POLY1305 without an explicit property query"
+                .to_owned(),
+        ),
+        Err(_) => Ok(()),
+    }
+}
+
+pub fn validate_fips_runtime_config(
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if !config.tls.fips.required {
+        return Ok(());
+    }
+
+    #[cfg(feature = "tls-openssl-fips")]
+    {
+        let status = validate_openssl_fips_provider().map_err(|error| {
+            format!("tls.fips.required OpenSSL FIPS provider check failed: {error}")
+        })?;
+        log::info!(
+            "OpenSSL FIPS provider check passed using {}; default_properties_fips_enabled={}",
+            status.openssl_version,
+            status.default_properties_fips_enabled
+        );
+        Ok(())
+    }
+
+    #[cfg(not(feature = "tls-openssl-fips"))]
+    {
+        Err(
+            "tls.fips.required requires a FIPS-capable TLS backend feature such as tls-openssl-fips"
+                .into(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

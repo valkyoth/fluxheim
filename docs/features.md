@@ -137,17 +137,18 @@ tarballs add `acme-client` to the full, cache, and proxy profiles by default.
 ## FIPS-Capable TLS Features
 
 `tls-openssl-fips` is an opt-in OpenSSL 3 FIPS-provider proof path. It expands
-to `tls-openssl` and adds OpenSSL provider diagnostics for configurations that
-set `[tls.fips] required = true`. The build still depends on the operator
-installing and configuring a validated OpenSSL FIPS provider according to that
-module's CMVP Security Policy.
+to `tls-openssl` and adds OpenSSL provider diagnostics plus default FIPS
+property enforcement for configurations that set `[tls.fips] required = true`.
+The build still depends on the operator installing and configuring a validated
+OpenSSL FIPS provider according to that module's CMVP Security Policy.
 
 ```bash
 cargo build --no-default-features --features profile-fips-openssl
 ```
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
-binary can load the provider in the current environment. The
+binary can load the provider and enable OpenSSL default FIPS properties in the
+current environment. The
 `fips-openssl` config-tester profile validates that a fixture uses
 `backend = "openssl"` and `[tls.fips] required = true`; see
 `examples/fips-openssl.toml`. See
