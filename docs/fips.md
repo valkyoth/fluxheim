@@ -197,14 +197,15 @@ Linking to OpenSSL is not enough. A Fluxheim binary built with
 `tls-openssl-fips` refuses to run in FIPS-required mode if the validated
 provider and OpenSSL default FIPS property path cannot be proven active.
 
-Fluxheim `1.3.4` loads the `fips` provider, resolves `AES-256-GCM` through an
-explicit `fips=yes` property query, enables OpenSSL default FIPS properties for
-the process-default library context, verifies
-`EVP_default_properties_is_fips_enabled`, checks that `AES-256-GCM` can be
-fetched through the default property path, and checks that `CHACHA20-POLY1305`
-is rejected through that same default path. The raw OpenSSL default-property
-calls are contained in a small local support crate so the main Fluxheim crate
-can keep `#![forbid(unsafe_code)]`.
+Fluxheim `1.3.4` diagnostics load the `fips` provider and resolve
+`AES-256-GCM` through an explicit `fips=yes` property query without enabling
+OpenSSL global FIPS default properties. FIPS-required runtime startup then
+enables OpenSSL default FIPS properties for the process-default library
+context, verifies `EVP_default_properties_is_fips_enabled`, checks that
+`AES-256-GCM` can be fetched through the default property path, and checks that
+`CHACHA20-POLY1305` is rejected through that same default path. The raw OpenSSL
+default-property calls are contained in a small local support crate so the main
+Fluxheim crate can keep `#![forbid(unsafe_code)]`.
 
 Provider handles are intentionally kept loaded for the process lifetime.
 Moving between FIPS-required and non-FIPS TLS operation is a process-restart

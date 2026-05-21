@@ -113,6 +113,9 @@ pub fn classify_reload(old: &Config, new: &Config) -> ReloadImpact {
     if old.tls.profile != new.tls.profile
         || old.tls.min_protocol != new.tls.min_protocol
         || old.tls.alpn != new.tls.alpn
+        || old.tls.curve_preferences != new.tls.curve_preferences
+        || old.tls.cipher_suites != new.tls.cipher_suites
+        || old.tls.fips != new.tls.fips
     {
         reasons.push(ReloadReason::TlsModeChanged);
     }
@@ -178,7 +181,8 @@ mod tests {
     use crate::config::{
         AdminConfig, Config, HttpsRedirectConfig, LoggingConfig, LoggingFileConfig, LoggingFormat,
         LoggingLevel, LoggingTarget, MetricsConfig, ProxyConfig, ServerConfig, ServerProcessConfig,
-        TlsBackend, TlsConfig, TlsPolicyProfile, VhostConfig, WebConfig,
+        TlsBackend, TlsCipherSuite, TlsConfig, TlsCurvePreference, TlsFipsConfig, TlsPolicyProfile,
+        VhostConfig, WebConfig,
     };
 
     use super::{ReloadImpact, ReloadReason, classify_reload};
@@ -452,6 +456,45 @@ mod tests {
         let new = Config {
             tls: TlsConfig {
                 profile: TlsPolicyProfile::Modern,
+                ..TlsConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::TlsModeChanged]
+            }
+        );
+    }
+
+    #[test]
+    fn tls_fips_change_requires_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            tls: TlsConfig {
+                fips: TlsFipsConfig { required: true },
+                ..TlsConfig::default()
+            },
+            ..Config::default()
+        };
+
+        assert_eq!(
+            classify_reload(&old, &new),
+            ReloadImpact::ProcessUpgrade {
+                reasons: vec![ReloadReason::TlsModeChanged]
+            }
+        );
+    }
+
+    #[test]
+    fn tls_cipher_and_curve_changes_require_process_upgrade() {
+        let old = Config::default();
+        let new = Config {
+            tls: TlsConfig {
+                curve_preferences: vec![TlsCurvePreference::P256],
+                cipher_suites: vec![TlsCipherSuite::Tls13Aes256GcmSha384],
                 ..TlsConfig::default()
             },
             ..Config::default()

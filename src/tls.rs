@@ -25,7 +25,20 @@ pub struct OpenSslFipsStatus {
 }
 
 #[cfg(feature = "tls-openssl-fips")]
-pub fn validate_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
+pub fn probe_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
+    let openssl_version = openssl::version::version().to_owned();
+    load_openssl_fips_providers_once()?;
+    openssl_fips_property_query_check()?;
+
+    Ok(OpenSslFipsStatus {
+        openssl_version,
+        default_properties_fips_enabled:
+            fluxheim_openssl_fips_support::default_properties_fips_enabled(),
+    })
+}
+
+#[cfg(feature = "tls-openssl-fips")]
+pub fn activate_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
     let openssl_version = openssl::version::version().to_owned();
     load_openssl_fips_providers_once()?;
 
@@ -108,7 +121,7 @@ pub fn validate_fips_runtime_config(
 
     #[cfg(feature = "tls-openssl-fips")]
     {
-        let status = validate_openssl_fips_provider().map_err(|error| {
+        let status = activate_openssl_fips_provider().map_err(|error| {
             format!("tls.fips.required OpenSSL FIPS provider check failed: {error}")
         })?;
         log::info!(

@@ -958,7 +958,7 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
         cfg!(feature = "tls-openssl-fips")
     );
     #[cfg(feature = "tls-openssl-fips")]
-    match crate::tls::validate_openssl_fips_provider() {
+    match crate::tls::probe_openssl_fips_provider() {
         Ok(status) => println!(
             "    openssl_fips_provider: available ({}; default_properties_fips_enabled={})",
             status.openssl_version, status.default_properties_fips_enabled
