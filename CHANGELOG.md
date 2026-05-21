@@ -52,6 +52,12 @@ behavior when the change improves security or project direction.
 - Wired the OWASP Top 10 2025 baseline into stable release gates and release
   evidence capture.
 
+### Changed
+
+- Updated the release runbook for the `1.3.4` release line, corrected the
+  local formatting preflight command, and documented explicit OWASP baseline
+  evidence capture.
+
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 
 Released: 2026-05-20

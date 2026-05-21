@@ -7,7 +7,7 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.3.3
+RELEASE_VERSION=1.3.4
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
@@ -28,13 +28,14 @@ git status --short --branch
 Run the local release checks that match the release scope:
 
 ```bash
-cargo fmt --all -- --check
+cargo fmt --all --check
 cargo test --locked
 cargo clippy --locked -- -D warnings
 cargo audit
 scripts/generate-sbom.sh
 scripts/reproducible_build_check.sh
 scripts/validate-release-metadata.sh
+scripts/validate-owasp-top10-2025.sh check
 scripts/podman_smoke.sh
 ```
 
@@ -205,6 +206,20 @@ path, and the selected module Security Policy reference. If the release builder
 does not have a FIPS provider installed, record the expected fail-closed output
 instead. Set `FLUXHEIM_REQUIRE_FIPS_PROVIDER=1` when the release builder is
 expected to have a working provider and absence should fail the release gate.
+
+### OWASP Baseline Evidence
+
+For releases that changed request parsing, TLS, authentication-adjacent
+controls, PHP-FPM handling, config validation, or observability, capture the
+mapped in-repo OWASP Top 10 2025 baseline:
+
+```bash
+scripts/validate-owasp-top10-2025.sh run
+```
+
+Record the script output as release evidence. This is an engineering baseline
+for Fluxheim-owned controls, not an OWASP compliance claim for applications
+served behind Fluxheim.
 
 ## 5. Draft The GitHub Release
 
