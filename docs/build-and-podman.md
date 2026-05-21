@@ -33,11 +33,11 @@ grouped build profiles as normal feature aliases such as `profile-core`,
 `profile-static-site`, `profile-reverse-proxy`, `profile-cache-server`,
 `profile-load-balancer`, `profile-observability`, and `profile-privacy`.
 Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
-`profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`, and
-`profile-load-balancer-edge`. `profile-development` is a broad development
-profile with all compatible production modules enabled: full proxy/web/cache
-and load-balancer support, PHP-FPM, ACME, Prometheus, OTLP metrics, and OTel
-tracing.
+`profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`,
+`profile-load-balancer-edge`, and `profile-fips-openssl`.
+`profile-development` is a broad development profile with all compatible
+production modules enabled: full proxy/web/cache and load-balancer support,
+PHP-FPM, ACME, Prometheus, OTLP metrics, and OTel tracing.
 
 TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
 `tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls` is the default and
@@ -49,7 +49,7 @@ default rustls backend and configure `[tls] backend = "openssl"` plus
 with a validated FIPS provider installed and configured by the operator:
 
 ```bash
-cargo build --release --no-default-features --features proxy,security,tls-openssl-fips
+cargo build --release --no-default-features --features profile-fips-openssl
 fluxheim crypto
 ```
 

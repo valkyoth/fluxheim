@@ -108,6 +108,7 @@ profile-web-server = ["proxy", "web", "tls-rustls", "security"]
 profile-cache-edge = ["proxy", "cache", "tls-rustls", "security"]
 profile-proxy-edge = ["proxy", "tls-rustls", "security"]
 profile-load-balancer-edge = ["proxy", "load-balancer", "tls-rustls", "security"]
+profile-fips-openssl = ["proxy", "security", "tls-openssl-fips"]
 
 [dependencies]
 arc-swap = "1.9.1"

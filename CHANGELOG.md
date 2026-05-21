@@ -29,6 +29,8 @@ behavior when the change improves security or project direction.
   capture.
 - Extended crypto diagnostics to report the OpenSSL configuration and module
   environment visible to the Fluxheim process without hardcoding distro paths.
+- Added `profile-fips-openssl` as a narrow proxy/security/OpenSSL-FIPS build
+  alias for local and release validation.
 
 ## 1.3.3 - PHP-FPM Hardening And Compatibility
 

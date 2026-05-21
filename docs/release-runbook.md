@@ -198,14 +198,14 @@ installed:
 
 ```bash
 openssl list -providers -provider fips -provider base
-cargo run --release --locked --no-default-features --features proxy,security,tls-openssl-fips --bin fluxheim -- crypto
+cargo run --release --locked --no-default-features --features profile-fips-openssl --bin fluxheim -- crypto
 ```
 
 Create a minimal `tls.fips.required` config that uses `backend = "openssl"` and
 safe runtime paths on the release builder, then validate it:
 
 ```bash
-cargo run --release --locked --no-default-features --features proxy,security,tls-openssl-fips --bin fluxheim-config-tester -- --config /path/to/fips-example.toml --crypto
+cargo run --release --locked --no-default-features --features profile-fips-openssl --bin fluxheim-config-tester -- --config /path/to/fips-example.toml --crypto
 ```
 
 Record the command output, OpenSSL package/provider version, provider config

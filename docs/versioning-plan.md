@@ -836,10 +836,10 @@ FIPS-required profile is recommended for production.
   either route through the selected validated backend or be disabled/rejected in
   FIPS-required builds. Pure RustCrypto, ring, or other non-validated fallback
   paths cannot remain reachable for those operations in a FIPS-required binary.
-- Add `profile-fips-rustls` and optionally `profile-fips-openssl` once CI can
-  build them reproducibly. These profiles should be separate from default,
-  cache, proxy, PHP, and load-balancer profiles so non-FIPS operators do not
-  inherit large FIPS build dependencies.
+- Add `profile-fips-rustls` once CI can build it reproducibly. Keep
+  `profile-fips-openssl` separate from default, cache, PHP, and load-balancer
+  profiles so non-FIPS operators do not inherit OpenSSL FIPS build and provider
+  requirements.
 - Add release evidence:
   - compile logs and lockfile for the selected backend;
   - runtime `--version --crypto` or equivalent output showing backend, provider,

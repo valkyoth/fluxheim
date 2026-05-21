@@ -43,6 +43,9 @@ expand_fluxheim_feature() {
         profile-load-balancer-edge)
             echo "proxy,load-balancer,tls-rustls,security"
             ;;
+        profile-fips-openssl)
+            echo "proxy,security,tls-openssl-fips"
+            ;;
         profile-observability)
             echo "proxy,web,cache,tls-rustls,security,metrics,metrics-otlp,otel-tracing,otel-otlp"
             ;;

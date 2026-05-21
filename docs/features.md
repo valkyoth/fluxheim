@@ -116,6 +116,7 @@ feature aliases for common deployment shapes.
 | `profile-cache-edge` | `proxy`, `cache`, `tls-rustls`, `security` | Cache edge without local static web serving. |
 | `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
 | `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
+| `profile-fips-openssl` | `proxy`, `security`, `tls-openssl-fips` | FIPS-capable OpenSSL proxy build that links to the operator-selected OpenSSL provider. |
 
 Examples that match the official release artifacts:
 
@@ -126,6 +127,7 @@ cargo build --no-default-features --features profile-cache-edge,acme-client
 cargo build --no-default-features --features profile-proxy-edge,acme-client
 cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 cargo build --no-default-features --features profile-privacy
+cargo build --no-default-features --features profile-fips-openssl
 ```
 
 The raw profile aliases do not force `acme-client`; that is intentional for
@@ -141,7 +143,7 @@ installing and configuring a validated OpenSSL FIPS provider according to that
 module's CMVP Security Policy.
 
 ```bash
-cargo build --no-default-features --features proxy,security,tls-openssl-fips
+cargo build --no-default-features --features profile-fips-openssl
 ```
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the

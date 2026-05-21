@@ -189,7 +189,7 @@ Local provider sanity check:
 
 ```bash
 openssl list -providers -provider fips -provider base
-cargo run --no-default-features --features proxy,security,tls-openssl-fips --bin fluxheim -- crypto
+cargo run --no-default-features --features profile-fips-openssl --bin fluxheim -- crypto
 ```
 
 Fluxheim does not hardcode a provider directory. It lets OpenSSL use the
@@ -221,7 +221,7 @@ required = true
 Validate it with a `tls-openssl-fips` build:
 
 ```bash
-cargo run --no-default-features --features proxy,security,tls-openssl-fips \
+cargo run --no-default-features --features profile-fips-openssl \
   --bin fluxheim-config-tester -- --config fips-example.toml --crypto
 ```
 
@@ -336,6 +336,8 @@ Deliverables:
   reports compiled TLS backends and OpenSSL FIPS provider availability.
 - Initial `tls-openssl-fips` feature for OpenSSL 3 provider diagnostics and
   fail-closed `tls.fips.required` startup validation.
+- `profile-fips-openssl` as a narrow proxy/security/OpenSSL-FIPS feature alias
+  for release and local validation.
 
 Exit criteria:
 
