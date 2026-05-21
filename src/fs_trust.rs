@@ -1,5 +1,10 @@
 use std::path::Path;
 
+#[cfg(not(unix))]
+compile_error!(
+    "Fluxheim filesystem trust checks require a Unix target; implement platform ACL and ownership checks before enabling non-Unix builds"
+);
+
 #[cfg(unix)]
 pub(crate) fn existing_parent_has_insecure_write_permissions(path: &Path) -> std::io::Result<bool> {
     let mut current = path
@@ -36,20 +41,6 @@ fn existing_path_has_insecure_write_permissions(
             Err(error) => return Err(error),
         }
     }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn existing_parent_has_insecure_write_permissions(
-    _path: &Path,
-) -> std::io::Result<bool> {
-    Ok(false)
-}
-
-#[cfg(not(unix))]
-pub(crate) fn existing_path_or_parent_has_insecure_write_permissions(
-    _path: &Path,
-) -> std::io::Result<bool> {
-    Ok(false)
 }
 
 #[cfg(all(test, unix))]

@@ -14,8 +14,8 @@ pub fn install_rustls_crypto_provider() {
 }
 
 #[cfg(feature = "tls-openssl-fips")]
-static OPENSSL_FIPS_PROVIDER_LOADED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static OPENSSL_FIPS_PROVIDER_RESULT: std::sync::OnceLock<Result<(), String>> =
+    std::sync::OnceLock::new();
 
 #[cfg(feature = "tls-openssl-fips")]
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -26,19 +26,8 @@ pub struct OpenSslFipsStatus {
 
 #[cfg(feature = "tls-openssl-fips")]
 pub fn validate_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
-    use std::sync::atomic::Ordering;
-
     let openssl_version = openssl::version::version().to_owned();
-    if !OPENSSL_FIPS_PROVIDER_LOADED.load(Ordering::Acquire) {
-        let fips_provider = openssl::provider::Provider::try_load(None, "fips", true)
-            .map_err(|error| format!("OpenSSL FIPS provider could not be loaded: {error}"))?;
-        let base_provider = openssl::provider::Provider::try_load(None, "base", true).ok();
-        let _ = Box::leak(Box::new(fips_provider));
-        if let Some(base_provider) = base_provider {
-            let _ = Box::leak(Box::new(base_provider));
-        }
-        OPENSSL_FIPS_PROVIDER_LOADED.store(true, Ordering::Release);
-    }
+    load_openssl_fips_providers_once()?;
 
     fluxheim_openssl_fips_support::enable_default_properties_fips()
         .map_err(|error| format!("OpenSSL FIPS default-property enable failed: {error}"))?;
@@ -55,6 +44,25 @@ pub fn validate_openssl_fips_provider() -> Result<OpenSslFipsStatus, String> {
         openssl_version,
         default_properties_fips_enabled,
     })
+}
+
+#[cfg(feature = "tls-openssl-fips")]
+fn load_openssl_fips_providers_once() -> Result<(), String> {
+    OPENSSL_FIPS_PROVIDER_RESULT
+        .get_or_init(|| {
+            // OpenSSL provider handles must remain loaded for the process
+            // lifetime. Serialize loading so concurrent diagnostics/startup
+            // checks cannot double-load or cache inconsistent global state.
+            let fips_provider = openssl::provider::Provider::try_load(None, "fips", true)
+                .map_err(|error| format!("OpenSSL FIPS provider could not be loaded: {error}"))?;
+            let base_provider = openssl::provider::Provider::try_load(None, "base", true).ok();
+            let _ = Box::leak(Box::new(fips_provider));
+            if let Some(base_provider) = base_provider {
+                let _ = Box::leak(Box::new(base_provider));
+            }
+            Ok(())
+        })
+        .clone()
 }
 
 #[cfg(feature = "tls-openssl-fips")]
@@ -82,7 +90,12 @@ fn openssl_non_fips_default_fetch_rejected() -> Result<(), String> {
             "OpenSSL FIPS default properties still allow CHACHA20-POLY1305 without an explicit property query"
                 .to_owned(),
         ),
-        Err(_) => Ok(()),
+        Err(error) => {
+            log::debug!(
+                "OpenSSL FIPS default properties rejected CHACHA20-POLY1305 as expected: {error}"
+            );
+            Ok(())
+        }
     }
 }
 
@@ -636,6 +649,11 @@ fn validate_static_certificate_storage(
     certificate: &StaticCertificateConfig,
     issues: &mut Vec<TlsStorageIssue>,
 ) {
+    // These storage checks are an operator-facing preflight, not the final
+    // file open used by the TLS backend. Parent writability and symlink
+    // rejection make local replacement races require control of already
+    // untrusted paths; Unix deployments that need a stricter descriptor-bound
+    // check should keep keys below root-owned, non-writable parents.
     if !push_certificate_world_writable_parent_issue(scope, &certificate.cert_path, issues) {
         match path_contains_symlink(&certificate.cert_path) {
             Ok(true) => issues.push(TlsStorageIssue::CertificatePathIsNotFile {
@@ -947,15 +965,6 @@ fn validate_key_permissions(
     }
 }
 
-#[cfg(not(unix))]
-fn validate_key_permissions(
-    _scope: &str,
-    _path: &Path,
-    _metadata: &fs::Metadata,
-    _issues: &mut Vec<TlsStorageIssue>,
-) {
-}
-
 #[cfg(unix)]
 fn validate_acme_storage_permissions(
     path: &Path,
@@ -1016,27 +1025,9 @@ fn validate_acme_eab_secret_permissions(
     }
 }
 
-#[cfg(not(unix))]
-fn validate_acme_eab_secret_permissions(
-    _issuer: &str,
-    _field: &'static str,
-    _path: &Path,
-    _metadata: &fs::Metadata,
-    _issues: &mut Vec<TlsStorageIssue>,
-) {
-}
-
 #[cfg(unix)]
 fn current_effective_uid() -> u32 {
     rustix::process::geteuid().as_raw()
-}
-
-#[cfg(not(unix))]
-fn validate_acme_storage_permissions(
-    _path: &Path,
-    _metadata: &fs::Metadata,
-    _issues: &mut Vec<TlsStorageIssue>,
-) {
 }
 
 fn error_message(error: io::Error) -> String {

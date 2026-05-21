@@ -19,11 +19,26 @@ case "$mode" in
 esac
 
 features="profile-fips-openssl"
-require_provider="${FLUXHEIM_REQUIRE_FIPS_PROVIDER:-0}"
+case "$mode" in
+    release)
+        require_provider="${FLUXHEIM_REQUIRE_FIPS_PROVIDER:-1}"
+        ;;
+    *)
+        require_provider="${FLUXHEIM_REQUIRE_FIPS_PROVIDER:-0}"
+        ;;
+esac
 work_dir="target/fips-openssl-validation"
 runtime_config="$work_dir/config.toml"
 backend_mismatch_config="$work_dir/backend-mismatch.toml"
 non_fips_policy_config="$work_dir/non-fips-policy.toml"
+repo_root="$(pwd -P)"
+
+case "$repo_root" in
+    *\"*|*\\*)
+        echo "fips openssl: repository path contains characters unsafe for generated TOML" >&2
+        exit 2
+        ;;
+esac
 
 scripts/validate-features.sh "$features"
 
@@ -31,6 +46,7 @@ echo "fips openssl: cargo $cargo_action --no-default-features --features $featur
 cargo $cargo_action --no-default-features --features "$features" --bin fluxheim --bin fluxheim-config-tester
 
 mkdir -p "$work_dir"
+chmod 0700 "$work_dir"
 
 cat >"$backend_mismatch_config" <<EOF
 [tls]
@@ -75,10 +91,10 @@ fi
 echo "fips openssl: OpenSSL provider list"
 if command -v openssl >/dev/null 2>&1; then
     if ! openssl list -providers -provider fips -provider base; then
-        echo "fips openssl: openssl provider list failed; continuing unless FLUXHEIM_REQUIRE_FIPS_PROVIDER=1"
+        echo "fips openssl: openssl provider list failed; provider availability will be enforced by mode"
     fi
 else
-    echo "fips openssl: openssl command not found; continuing unless FLUXHEIM_REQUIRE_FIPS_PROVIDER=1"
+    echo "fips openssl: openssl command not found; provider availability will be enforced by mode"
 fi
 
 echo "fips openssl: fluxheim crypto diagnostics"
@@ -99,9 +115,10 @@ esac
 if [ "$provider_available" != "1" ]; then
     if [ "$require_provider" = "1" ]; then
         echo "fips openssl: OpenSSL FIPS provider is required but not available" >&2
+        echo "fips openssl: set FLUXHEIM_REQUIRE_FIPS_PROVIDER=0 only for explicit stub-only validation environments" >&2
         exit 1
     fi
-    echo "fips openssl: provider unavailable; verified fail-closed diagnostics only"
+    echo "fips openssl: provider unavailable; stub-only validation allowed by FLUXHEIM_REQUIRE_FIPS_PROVIDER=0"
     exit 0
 fi
 
@@ -117,9 +134,9 @@ cat >"$runtime_config" <<EOF
 listen = ["127.0.0.1:0"]
 
 [server.process]
-pid_file = "$PWD/$work_dir/fluxheim.pid"
-upgrade_sock = "$PWD/$work_dir/fluxheim-upgrade.sock"
-certificate_reload_sock = "$PWD/$work_dir/fluxheim-cert-reload.sock"
+pid_file = "$repo_root/$work_dir/fluxheim.pid"
+upgrade_sock = "$repo_root/$work_dir/fluxheim-upgrade.sock"
+certificate_reload_sock = "$repo_root/$work_dir/fluxheim-cert-reload.sock"
 
 [tls]
 enabled = true

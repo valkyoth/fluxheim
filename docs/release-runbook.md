@@ -204,8 +204,9 @@ scripts/validate-fips-openssl.sh release
 Record the command output, OpenSSL package/provider version, provider config
 path, and the selected module Security Policy reference. If the release builder
 does not have a FIPS provider installed, record the expected fail-closed output
-instead. Set `FLUXHEIM_REQUIRE_FIPS_PROVIDER=1` when the release builder is
-expected to have a working provider and absence should fail the release gate.
+instead. `release` mode fails closed by default; set
+`FLUXHEIM_REQUIRE_FIPS_PROVIDER=0` only for explicit stub-only validation
+environments where provider evidence is intentionally not being collected.
 
 ### OWASP Baseline Evidence
 

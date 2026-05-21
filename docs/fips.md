@@ -206,6 +206,10 @@ is rejected through that same default path. The raw OpenSSL default-property
 calls are contained in a small local support crate so the main Fluxheim crate
 can keep `#![forbid(unsafe_code)]`.
 
+Provider handles are intentionally kept loaded for the process lifetime.
+Moving between FIPS-required and non-FIPS TLS operation is a process-restart
+boundary, not a hot-reload boundary.
+
 Operators still need to install and configure OpenSSL according to the chosen
 module Security Policy, including provider installation and integrity setup
 such as `openssl fipsinstall` where that policy requires it. Fluxheim verifies
@@ -430,10 +434,13 @@ Before claiming a Fluxheim deployment uses FIPS-validated cryptography:
 4. Configure Fluxheim with a FIPS-capable backend that can prove approved mode.
 5. Enable Fluxheim's FIPS-required guard.
 6. Run `fluxheim-config-tester` and the runtime crypto diagnostic command.
-7. Verify TLS protocol/cipher/group behavior with an external scanner.
-8. Confirm ACME, cache encryption, telemetry, and other crypto features are
+7. Use a Unix target. Fluxheim's storage trust checks rely on Unix ownership,
+   mode bits, `O_NOFOLLOW`-style path handling, and Unix-domain control
+   sockets; non-Unix ACL and descriptor-rights checks are not implemented.
+8. Verify TLS protocol/cipher/group behavior with an external scanner.
+9. Confirm ACME, cache encryption, telemetry, and other crypto features are
    either FIPS-routed, externally evidenced, or disabled.
-9. Archive the Fluxheim version, build command, Cargo.lock, SBOM, module
+10. Archive the Fluxheim version, build command, Cargo.lock, SBOM, module
    certificate, Security Policy, provider config, and runtime diagnostic output.
 
 ## Evidence Capture Template
