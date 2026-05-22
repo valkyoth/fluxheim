@@ -191,18 +191,20 @@ Use `tls-rustls-fips` instead of `tls-openssl-fips` in the raw feature examples
 when you want the rustls/AWS-LC candidate path.
 
 These combinations make Fluxheim's TLS boundary FIPS/ISO-capable when the
-operator provides a validated OpenSSL provider. They do not automatically make
-the whole deployment FIPS compliant: PHP application cryptography, ACME account
-operations, local cache encryption, OTLP export, and other non-TLS crypto paths
-must be separately routed through validated modules, externally evidenced, or
-disabled for a strict FIPS-required deployment.
+operator provides the selected backend's validated provider evidence. They do
+not automatically make the whole deployment FIPS compliant: PHP application
+cryptography, ACME account operations, local cache encryption, OTLP export, and
+other non-TLS crypto paths must be separately routed through validated modules,
+externally evidenced, or disabled for a strict FIPS-required deployment.
 
 For the cleanest regulated boundary, prefer local/static certificates that were
 issued and renewed outside Fluxheim through an approved process. You can compile
-`acme-client` into a FIPS-capable TLS build if you need managed issuance, but
-that only means the TLS listener uses the OpenSSL FIPS proof path. It does not
-prove the ACME account, JWS, HTTP client, or CA workflow is inside the same
-validated cryptographic boundary.
+`acme-client` into a FIPS-capable TLS build for non-required configs, but
+`[tls.fips] required = true` and `[tls.iso19790] required = true` now reject
+managed ACME at config validation time. Use externally issued static
+certificates, or keep ACME outside the strict FIPS/ISO-required Fluxheim
+boundary until ACME account signing, EAB, and challenge certificate generation
+are rerouted or separately evidenced.
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
 binary can load or report the selected FIPS-capable provider in the current

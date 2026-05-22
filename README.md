@@ -353,6 +353,9 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
 - `1.3.5` adds the rustls/AWS-LC FIPS-capable candidate path, ISO/IEC 19790
   terminology aliases, provider-aware rustls setup, and supported-builder
   evidence workflow for rustls FIPS builds.
+- `1.3.6` is the current development line for FIPS/ISO internal-crypto
+  closure: fail-closed guards for managed ACME, admin auth, local cache
+  encryption, and outbound telemetry in FIPS/ISO-required configs.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

@@ -1195,6 +1195,18 @@ TLS backend diagnostics. Use [FIPS-Capable Deployments](fips.md) for the full
 compliance boundary and roadmap. Do not treat a Cargo feature or this config
 block alone as a FIPS compliance claim.
 
+FIPS/ISO-required mode also applies internal-crypto guards outside the TLS
+listener. Config validation rejects managed ACME (`[tls.acme] enabled = true`)
+because ACME account signing, EAB handling, and TLS-ALPN certificate generation
+are not yet routed through the selected validated module. It rejects
+`admin.enabled = true` because admin bearer-token verification currently uses a
+ring HMAC path. It rejects local disk-cache encryption because that path uses
+ring AES-GCM. `provider = "openbao-transit"` cache encryption is allowed only
+as an external evidence boundary, and OTLP metrics/traces export is allowed only
+to local `http://` loopback collectors until outbound TLS can be
+provider-aligned. Request IDs and temporary object names are treated as
+non-secret operational identifiers, not SSPs.
+
 Check certificate storage permissions separately:
 
 ```bash

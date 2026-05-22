@@ -410,7 +410,8 @@ can restrict configured s2n security policies to approved cryptography.
 TLS is the visible part, but FIPS-required mode also has to account for
 security-sensitive cryptography outside TLS.
 
-Current Fluxheim areas to inventory before a FIPS-required release:
+Fluxheim tracks these internal crypto areas before widening any FIPS-required
+deployment claims:
 
 - TLS key exchange, signatures, symmetric encryption, and secure random.
 - ACME account/order/challenge signing and ACME TLS-ALPN certificate handling.
@@ -445,19 +446,53 @@ For ISO/IEC 19790-facing evidence, the same inventory should also identify:
 - The exact error state and operator action when a provider check, self-test,
   or configuration guard fails.
 
-Known current blockers:
+`1.3.6` adds the first fail-closed internal-crypto closure layer. When
+`[tls.fips] required = true` or `[tls.iso19790] required = true` is active,
+config validation now applies these classifications:
 
-- `instant-acme` and `rcgen` currently use ring-backed paths in Fluxheim's ACME
-  feature set. A FIPS-required profile may need to disable managed ACME at
-  first or replace the affected signing/certificate-generation paths.
-- Local cache encryption currently uses ring AES-GCM. A FIPS-required profile
-  should initially reject local cache encryption unless it is rerouted through
-  the selected validated backend. OpenBao Transit may be acceptable only when
-  the operator can provide validated-module evidence for OpenBao's crypto
-  boundary.
-- OTLP export currently uses a rustls-backed HTTP client. FIPS-required
-  outbound TLS needs provider alignment or a local-only collector exception
-  with clear documentation.
+- TLS listener cryptography is routed through the selected FIPS/ISO-capable
+  backend and remains subject to backend proof checks.
+- Managed ACME (`[tls.acme] enabled = true`) is rejected. ACME account signing,
+  EAB handling, and TLS-ALPN certificate generation still use ring-backed ACME
+  paths, so a strict evidence boundary should use externally issued static
+  certificates or an external renewal process.
+- ACME HTTP-01 challenge proxying is not itself a cryptographic operation; it
+  can remain part of a deployment when managed ACME is disabled and certificate
+  issuance is handled outside Fluxheim.
+- The admin API (`[admin] enabled = true`) is rejected. Bearer-token
+  verification currently uses ring HMAC and must be rerouted through the
+  selected validated backend before it can be inside FIPS/ISO-required mode.
+- Local disk-cache encryption is rejected because it currently uses ring
+  AES-GCM.
+- OpenBao Transit disk-cache encryption is accepted as an externally delegated
+  cryptographic service boundary. Operators must provide OpenBao module,
+  platform, policy, and deployment evidence; Fluxheim does not validate that
+  external boundary for them.
+- OTLP metrics/traces export is accepted only for `http://` loopback collectors
+  such as `http://127.0.0.1:4318/v1/traces` or
+  `http://localhost:4318/v1/metrics`. Remote OTLP endpoints and HTTPS OTLP
+  endpoints are rejected until Fluxheim's outbound HTTP/TLS client can be
+  routed through the selected validated backend or separately evidenced.
+- Request IDs and trace correlation IDs are treated as non-secret diagnostic
+  identifiers. They are not used as authentication tokens, authorization
+  decisions, key material, or SSPs.
+- Temporary object names are used for collision resistance and race hardening,
+  not for authentication or cryptographic secrecy. The OS RNG remains part of
+  the deployment environment evidence.
+- Test and development certificate generation is not production evidence and
+  must not be used to claim a regulated deployment boundary.
+
+Known remaining blockers after `1.3.6`:
+
+- Admin authentication needs a provider-routed MAC or a different
+  externally-evidenced authentication boundary.
+- Managed ACME needs provider-routed account signing, EAB, and challenge
+  certificate handling, or it must remain outside strict FIPS/ISO-required
+  deployments.
+- Local cache encryption needs an OpenSSL/AWS-LC-backed implementation before
+  it can be enabled inside FIPS/ISO-required mode.
+- Remote OTLP over TLS needs outbound provider-aligned TLS support and
+  documentation before it can be enabled inside FIPS/ISO-required mode.
 
 ## Release Roadmap After 1.3.4
 
@@ -537,14 +572,19 @@ Goal: remove or gate non-validated crypto paths from FIPS-required builds.
 
 Deliverables:
 
-- ACME FIPS decision: reroute, disable, or document external issuance workflow.
-- Cache encryption FIPS decision: OpenSSL/AWS-LC backend, OpenBao-only
-  evidence path, or disabled.
-- Outbound telemetry TLS FIPS decision.
-- Request ID/temp-name/randomness classification and backend routing where
-  needed.
-- Test coverage proving `fips.required = true` fails closed for incompatible
-  feature combinations.
+- Managed ACME is rejected in FIPS/ISO-required mode, with documentation
+  pointing operators to externally issued static certificates or external
+  renewal workflows.
+- Local cache encryption is rejected in FIPS/ISO-required mode; OpenBao Transit
+  cache encryption is allowed only as an externally evidenced service boundary.
+- OTLP export is limited to local `http://` loopback collectors in
+  FIPS/ISO-required mode until outbound TLS can be routed through the selected
+  validated backend.
+- Request IDs and temporary object names are classified as non-secret
+  operational identifiers rather than SSPs.
+- Test coverage proves FIPS/ISO-required mode fails closed for managed ACME,
+  admin API, and local cache encryption, and accepts OpenBao Transit cache
+  encryption as an external evidence boundary.
 
 ### 1.3.7 Or Later - Compliance Evidence Package
 

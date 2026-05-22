@@ -98,7 +98,9 @@ These examples intentionally omit `acme-client`. For stricter FIPS/ISO
 deployment boundaries, prefer local/static certificate files generated and
 renewed by an approved external process. If you add `acme-client`, treat ACME
 account keys, JWS signing, HTTP client behavior, and CA policy as a separate
-evidence area outside the TLS provider proof.
+evidence area outside the TLS provider proof. In FIPS/ISO-required configs,
+Fluxheim rejects `[tls.acme] enabled = true`; compile-time availability of
+`acme-client` does not make managed ACME part of the approved boundary.
 
 The OpenSSL feature makes Fluxheim fail closed, loads the OpenSSL FIPS
 provider, enables default FIPS properties for the process, and exposes
@@ -107,6 +109,11 @@ passes the rustls FIPS provider and checks rustls' FIPS indicators for required
 configs. Either deployment still needs the selected module's CMVP certificate,
 Security Policy, provider/build configuration, and platform evidence. See
 [FIPS-Capable Deployments](fips.md).
+
+`1.3.6` also fails closed for other non-TLS crypto paths in FIPS/ISO-required
+mode: the admin API, local cache encryption, managed ACME, and remote/HTTPS
+OTLP export are rejected unless the path is non-secret, local-loopback-only, or
+externally evidenced as documented in the FIPS guide.
 
 PHP support starts with `php-fpm` in `1.3.1`. It is never compiled by default;
 build it explicitly with `profile-web-server,php-fpm` when Fluxheim should

@@ -255,6 +255,7 @@ impl Config {
         self.cache_purger.validate()?;
         self.web.validate()?;
         self.validate_vhosts()?;
+        self.validate_compliance_internal_crypto()?;
         Ok(())
     }
 
@@ -287,6 +288,69 @@ impl Config {
         }
         if !self.has_tls_listener_fallback_certificate() {
             return Err(ConfigError::TlsListenerWithoutStaticCertificate);
+        }
+
+        Ok(())
+    }
+
+    fn validate_compliance_internal_crypto(&self) -> Result<(), ConfigError> {
+        let compliance_mode = self.tls.compliance_mode();
+        if !compliance_mode.required() {
+            return Ok(());
+        }
+
+        if self.admin.enabled {
+            return Err(ConfigError::InvalidCompliancePolicy {
+                field: "admin.enabled",
+                reason: "FIPS/ISO-required mode currently rejects the admin API because bearer-token verification uses ring HMAC; disable admin or use a non-FIPS-required build until admin auth is routed through the selected validated module",
+            });
+        }
+
+        if self.tls.acme.enabled {
+            return Err(ConfigError::InvalidCompliancePolicy {
+                field: "tls.acme.enabled",
+                reason: "FIPS/ISO-required mode currently rejects managed ACME because account signing, EAB handling, and TLS-ALPN certificate generation use ring-backed ACME paths; use externally issued static certificates for the FIPS evidence boundary",
+            });
+        }
+
+        if self.metrics.otlp.enabled
+            && !fips_allowed_local_otlp_endpoint(&self.metrics.otlp.endpoint)
+        {
+            return Err(ConfigError::InvalidCompliancePolicy {
+                field: "metrics.otlp.endpoint",
+                reason: "FIPS/ISO-required mode allows OTLP metrics export only to a local http:// loopback collector; remote or HTTPS OTLP export needs provider-aligned outbound TLS evidence first",
+            });
+        }
+
+        if self.tracing.otlp.enabled
+            && !fips_allowed_local_otlp_endpoint(&self.tracing.otlp.endpoint)
+        {
+            return Err(ConfigError::InvalidCompliancePolicy {
+                field: "tracing.otlp.endpoint",
+                reason: "FIPS/ISO-required mode allows OTLP trace export only to a local http:// loopback collector; remote or HTTPS OTLP export needs provider-aligned outbound TLS evidence first",
+            });
+        }
+
+        validate_cache_compliance_internal_crypto(&self.cache, "cache")?;
+        for vhost in &self.vhosts {
+            validate_cache_compliance_internal_crypto(&vhost.cache, "vhosts.cache").map_err(
+                |source| ConfigError::VhostSection {
+                    vhost: vhost.name.clone(),
+                    section: "cache",
+                    source: Box::new(source),
+                },
+            )?;
+            for route in &vhost.routes {
+                if let Some(cache) = &route.cache {
+                    validate_cache_compliance_internal_crypto(cache, "vhosts.routes.cache")
+                        .map_err(|source| ConfigError::RouteSection {
+                            vhost: vhost.name.clone(),
+                            route: route.name.clone(),
+                            section: "cache",
+                            source: Box::new(source),
+                        })?;
+                }
+            }
         }
 
         Ok(())
@@ -4726,6 +4790,23 @@ impl CacheConfig {
     }
 }
 
+fn validate_cache_compliance_internal_crypto(
+    cache: &CacheConfig,
+    scope: &'static str,
+) -> Result<(), ConfigError> {
+    if !cache.disk.enabled || !cache.disk.encryption.enabled {
+        return Ok(());
+    }
+
+    match cache.disk.encryption.provider {
+        CacheDiskEncryptionProvider::Local => Err(ConfigError::InvalidCompliancePolicy {
+            field: scope,
+            reason: "FIPS/ISO-required mode rejects local cache encryption because it currently uses ring AES-GCM; use provider = \"openbao-transit\" with external validation evidence or disable cache encryption",
+        }),
+        CacheDiskEncryptionProvider::OpenbaoTransit => Ok(()),
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CacheRangeConfig {
@@ -5384,21 +5465,45 @@ fn valid_cache_peer_hostname(host: &str) -> bool {
 }
 
 fn cache_peer_authority_is_loopback(authority: &str) -> bool {
+    http_authority_is_loopback(authority)
+}
+
+fn http_authority_is_loopback(authority: &str) -> bool {
+    if authority.contains('@') {
+        return false;
+    }
     let host = if authority.starts_with('[') {
         let Some(end) = authority.find(']') else {
             return false;
         };
+        let tail = &authority[end + 1..];
+        if !tail.is_empty() && !http_authority_valid_port_tail(tail) {
+            return false;
+        }
         &authority[1..end]
     } else {
-        let Some((host, _port)) = authority.rsplit_once(':') else {
-            return false;
-        };
-        host
+        match authority.rsplit_once(':') {
+            Some((host, port)) => {
+                if host.contains(':') || !valid_u16_port(port) {
+                    return false;
+                }
+                host
+            }
+            None => authority,
+        }
     };
     host.eq_ignore_ascii_case("localhost")
         || host
             .parse::<IpAddr>()
             .is_ok_and(|address| address.is_loopback())
+}
+
+fn http_authority_valid_port_tail(tail: &str) -> bool {
+    tail.strip_prefix(':').is_some_and(valid_u16_port)
+}
+
+fn valid_u16_port(port: &str) -> bool {
+    port.parse::<u16>().is_ok_and(|port| port != 0)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -6680,6 +6785,10 @@ pub enum ConfigError {
         field: &'static str,
         reason: &'static str,
     },
+    InvalidCompliancePolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
     InvalidPhpConfig {
         field: &'static str,
         reason: &'static str,
@@ -7207,6 +7316,9 @@ impl Display for ConfigError {
                 "tracing.otlp.enabled requires building Fluxheim with the otel-otlp feature"
             ),
             Self::InvalidTracingPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
+            Self::InvalidCompliancePolicy { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
             }
             Self::InvalidPhpConfig { field, reason } => {
@@ -7855,6 +7967,16 @@ fn default_cache_purger_limit() -> usize {
 
 fn default_cache_purger_batches() -> usize {
     1
+}
+
+fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
+    let Some(rest) = endpoint.strip_prefix("http://") else {
+        return false;
+    };
+    let Some((authority, path)) = rest.split_once('/') else {
+        return false;
+    };
+    !path.is_empty() && http_authority_is_loopback(authority)
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
@@ -11206,6 +11328,188 @@ mod tests {
                 reason: "tls.fips.required rejects non-FIPS cipher suites such as ChaCha20; use AES-GCM/SHA-2 suites from the selected validated provider",
             })
         );
+    }
+
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn fips_capable_backend_for_tests() -> &'static str {
+        #[cfg(feature = "tls-openssl-fips")]
+        {
+            "openssl"
+        }
+        #[cfg(all(not(feature = "tls-openssl-fips"), feature = "tls-rustls-fips"))]
+        {
+            "rustls"
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn fips_required_rejects_admin_api_internal_crypto() {
+        let snapshot_store = secure_test_dir("config-fips-admin-snapshot-store");
+        let backend = fips_capable_backend_for_tests();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [admin]
+            enabled = true
+            token_env = "FLUXHEIM_ADMIN_TOKEN"
+            snapshot_store = "{}"
+
+            [tls]
+            backend = "{backend}"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+            "#,
+            snapshot_store.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCompliancePolicy {
+                field: "admin.enabled",
+                reason: "FIPS/ISO-required mode currently rejects the admin API because bearer-token verification uses ring HMAC; disable admin or use a non-FIPS-required build until admin auth is routed through the selected validated module",
+            })
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn fips_required_rejects_managed_acme_internal_crypto() {
+        let storage = secure_test_dir("config-fips-managed-acme");
+        let backend = fips_capable_backend_for_tests();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            backend = "{backend}"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+
+            [tls.acme]
+            enabled = true
+            storage = "{}"
+            contact_email = "admin@example.test"
+            "#,
+            storage.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCompliancePolicy {
+                field: "tls.acme.enabled",
+                reason: "FIPS/ISO-required mode currently rejects managed ACME because account signing, EAB handling, and TLS-ALPN certificate generation use ring-backed ACME paths; use externally issued static certificates for the FIPS evidence boundary",
+            })
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn fips_required_rejects_local_cache_encryption() {
+        let root = secure_test_dir("config-fips-local-cache-encryption");
+        let backend = fips_capable_backend_for_tests();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            backend = "{backend}"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "local"
+            key_credential = "fluxheim-cache-key"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCompliancePolicy {
+                field: "cache",
+                reason: "FIPS/ISO-required mode rejects local cache encryption because it currently uses ring AES-GCM; use provider = \"openbao-transit\" with external validation evidence or disable cache encryption",
+            })
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn fips_required_allows_openbao_transit_cache_encryption_boundary() {
+        let root = secure_test_dir("config-fips-openbao-cache-encryption");
+        let backend = fips_capable_backend_for_tests();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            backend = "{backend}"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "openbao-transit"
+
+            [cache.disk.encryption.openbao]
+            address = "http://127.0.0.1:8200"
+            mount = "transit"
+            key_name = "fluxheim-cache"
+            token_credential = "openbao-token"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(config.validate(), Ok(()));
+    }
+
+    #[test]
+    fn fips_otlp_local_collector_exception_accepts_loopback_http_only() {
+        assert!(super::fips_allowed_local_otlp_endpoint(
+            "http://127.0.0.1:4318/v1/traces"
+        ));
+        assert!(super::fips_allowed_local_otlp_endpoint(
+            "http://localhost/v1/traces"
+        ));
+        assert!(super::fips_allowed_local_otlp_endpoint(
+            "http://[::1]:4318/v1/traces"
+        ));
+        assert!(!super::fips_allowed_local_otlp_endpoint(
+            "https://127.0.0.1:4318/v1/traces"
+        ));
+        assert!(!super::fips_allowed_local_otlp_endpoint(
+            "http://collector.example.test/v1/traces"
+        ));
+        assert!(!super::fips_allowed_local_otlp_endpoint(
+            "http://[::1]example.test/v1/traces"
+        ));
+        assert!(!super::fips_allowed_local_otlp_endpoint(
+            "http://127.0.0.1:0/v1/traces"
+        ));
     }
 
     #[test]

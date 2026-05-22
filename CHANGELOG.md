@@ -7,6 +7,34 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.3.6 - Unreleased
+
+### Added
+
+- Added FIPS/ISO-required internal-crypto guards that fail closed for
+  security-sensitive non-TLS cryptography that is not yet routed through the
+  selected validated module or externally evidenced service.
+- Added validation tests proving FIPS/ISO-required mode rejects managed ACME,
+  the admin API, and local disk-cache encryption, while allowing OpenBao
+  Transit cache encryption as an external evidence boundary.
+- Added a documented local-loopback-only OTLP exception for FIPS/ISO-required
+  mode so operators can export metrics/traces to a local collector without
+  making outbound TLS part of Fluxheim's approved cryptographic boundary.
+- Extended the OpenSSL and rustls FIPS validation scripts with fail-closed
+  fixtures for admin auth, managed ACME, and local cache encryption.
+
+### Changed
+
+- FIPS/ISO-required mode now prefers externally issued static certificates and
+  rejects `[tls.acme] enabled = true` until ACME account signing, EAB, and
+  TLS-ALPN certificate generation are routed through validated cryptography or
+  separately evidenced.
+- FIPS/ISO-required mode now rejects `admin.enabled = true` until admin
+  bearer-token verification is migrated away from the current ring HMAC path.
+- FIPS/ISO-required mode now rejects local cache encryption and requires either
+  no cache encryption or `provider = "openbao-transit"` with operator evidence
+  for the external OpenBao crypto boundary.
+
 ## 1.3.5 - rustls/AWS-LC FIPS Candidate
 
 Released: 2026-05-22

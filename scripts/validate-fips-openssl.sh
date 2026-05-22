@@ -31,6 +31,9 @@ work_dir="target/fips-openssl-validation"
 runtime_config="$work_dir/config.toml"
 backend_mismatch_config="$work_dir/backend-mismatch.toml"
 non_fips_policy_config="$work_dir/non-fips-policy.toml"
+admin_config="$work_dir/admin-internal-crypto.toml"
+acme_config="$work_dir/acme-internal-crypto.toml"
+cache_config="$work_dir/cache-internal-crypto.toml"
 repo_root="$(pwd -P)"
 
 case "$repo_root" in
@@ -69,6 +72,61 @@ cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256"]
 required = true
 EOF
 
+cat >"$admin_config" <<EOF
+[admin]
+enabled = true
+token_env = "FLUXHEIM_ADMIN_TOKEN"
+snapshot_store = "$repo_root/$work_dir/admin-snapshots"
+
+[tls]
+enabled = true
+backend = "openssl"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+[tls.fips]
+required = true
+EOF
+
+cat >"$acme_config" <<EOF
+[tls]
+enabled = true
+backend = "openssl"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+[tls.fips]
+required = true
+
+[tls.acme]
+enabled = true
+storage = "$repo_root/$work_dir/acme"
+contact_email = "admin@example.test"
+EOF
+
+cat >"$cache_config" <<EOF
+[tls]
+enabled = true
+backend = "openssl"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+[tls.fips]
+required = true
+
+[cache]
+enabled = true
+
+[cache.disk]
+enabled = true
+path = "$repo_root/$work_dir/cache"
+
+[cache.disk.encryption]
+enabled = true
+provider = "local"
+key_credential = "fluxheim-cache-key"
+EOF
+
 echo "fips openssl: fail-closed backend mismatch fixture"
 if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
     --config "$backend_mismatch_config" \
@@ -84,6 +142,33 @@ if cargo run -q $cargo_run_release --no-default-features --features "$features" 
     --profile fips-openssl \
     --no-runtime-paths >/dev/null 2>&1; then
     echo "fips openssl: non-FIPS TLS policy fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+echo "fips openssl: fail-closed admin internal-crypto fixture"
+if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+    --config "$admin_config" \
+    --profile fips-openssl \
+    --no-runtime-paths >/dev/null 2>&1; then
+    echo "fips openssl: admin internal-crypto fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+echo "fips openssl: fail-closed managed ACME internal-crypto fixture"
+if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+    --config "$acme_config" \
+    --profile fips-openssl \
+    --no-runtime-paths >/dev/null 2>&1; then
+    echo "fips openssl: managed ACME internal-crypto fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+echo "fips openssl: fail-closed local cache-encryption fixture"
+if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+    --config "$cache_config" \
+    --profile fips-openssl \
+    --no-runtime-paths >/dev/null 2>&1; then
+    echo "fips openssl: local cache-encryption fixture unexpectedly passed" >&2
     exit 1
 fi
 
