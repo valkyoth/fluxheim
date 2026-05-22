@@ -392,6 +392,12 @@ compatibility tests, framework compatibility tests, extension behavior
 analysis, security tests, performance benchmarks, and a clear upstream
 maintenance signal.
 
+The same later `1.3.x` release should also clean up admin API JSON response
+generation. This is not part of the PHP runtime, but it fits the same hardening
+window: replace hand-written `format!` JSON response bodies with serde-backed
+response structs and `serde_json::to_vec`, while preserving existing admin API
+schemas and regression coverage.
+
 ## Reload And Operations
 
 PHP runtime selection and PHP runtime process settings should be classified as
