@@ -208,6 +208,19 @@ instead. `release` mode fails closed by default; set
 `FLUXHEIM_REQUIRE_FIPS_PROVIDER=0` only for explicit stub-only validation
 environments where provider evidence is intentionally not being collected.
 
+### Optional Common Criteria-Aligned Evidence
+
+For releases that changed security-enforcing behavior, record any relevant
+notes from [Common Criteria Readiness Roadmap](common-criteria-roadmap.md):
+
+- TOE boundary assumptions affected by the release.
+- Security-relevant interfaces changed by the release.
+- Validation scripts or pentest regressions that provide evidence.
+- External dependencies and operational-environment assumptions.
+
+This is evidence organization only. Do not describe the release as Common
+Criteria certified, Protection Profile compliant, or EAL compliant.
+
 ### OWASP Baseline Evidence
 
 For releases that changed request parsing, TLS, authentication-adjacent

@@ -51,6 +51,11 @@ certification body states otherwise for a selected module, FIPS evidence should
 continue to reference the certificate, Implementation Guidance, and Security
 Policy that apply to that exact module.
 
+For product-level evaluation planning, keep this document separate from the
+[Common Criteria readiness roadmap](common-criteria-roadmap.md). ISO/IEC 15408
+can help structure Fluxheim's product security evidence, but it does not replace
+cryptographic-module validation.
+
 ## Compliance Boundary
 
 FIPS validation attaches to a cryptographic module and its tested operating
