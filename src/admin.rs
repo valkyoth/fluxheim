@@ -5,7 +5,7 @@ use std::fs;
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use arc_swap::ArcSwap;
@@ -149,16 +149,26 @@ impl AdminAuthThrottle {
         }
     }
 
+    fn lock_state(&self) -> MutexGuard<'_, AdminAuthThrottleState> {
+        match self.state.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "admin auth throttle lock poisoned; aborting to avoid using inconsistent security state"
+                );
+                std::process::abort();
+            }
+        }
+    }
+
     fn pre_auth_check(&self, source: Option<IpAddr>) -> Option<AdminAuthThrottleScope> {
         if !self.config.enabled {
             return None;
         }
         let now = unix_secs();
         let source = AuthSource::from(source);
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.lock_state();
         state.prune(now, &self.config);
 
         if state.global_locked_until > now {
@@ -178,10 +188,7 @@ impl AdminAuthThrottle {
         }
         let now = unix_secs();
         let source = AuthSource::from(source);
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.lock_state();
         state.prune(now, &self.config);
         state.global_failures.push_back(now);
         if source == AuthSource::Unknown {
@@ -244,10 +251,7 @@ impl AdminAuthThrottle {
         if source == AuthSource::Unknown {
             return;
         }
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self.lock_state();
         state.sources.remove(&source);
     }
 }
@@ -1758,10 +1762,16 @@ impl AdminApp {
     }
 
     fn lock_runtime_state(&self) -> std::sync::MutexGuard<'_, AdminRuntimeState> {
-        self.state.lock().unwrap_or_else(|poisoned| {
-            log::error!("admin runtime state lock poisoned; recovering state");
-            poisoned.into_inner()
-        })
+        match self.state.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "admin runtime state lock poisoned; aborting to avoid using inconsistent management state"
+                );
+                std::process::abort();
+            }
+        }
     }
 }
 
@@ -2933,10 +2943,16 @@ fn parse_health_signal(value: &str) -> Option<bool> {
 }
 
 fn unix_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::security",
+                "system clock is before Unix epoch; using fail-closed admin throttle timestamp: {error}"
+            );
+            0
+        }
+    }
 }
 
 fn json_escape(input: &str) -> String {

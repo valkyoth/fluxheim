@@ -39,6 +39,17 @@ reviews.
   scanner output checklist, and vulnerability-analysis records.
 - `scripts/release_evidence.sh` now emits a compliance evidence package section
   that points to the template and records the required follow-up fields.
+- Runtime Pingora cache storage, tiered storage, cache locks, and cache
+  predictors are reused for identical cache plans across authenticated reloads,
+  reducing process-lifetime allocations required by Pingora's `'static` cache
+  API.
+- Admin runtime/auth-throttle mutex poisoning now aborts instead of recovering
+  potentially inconsistent state in debug/test builds, matching the production
+  fail-closed model.
+- Peer-fill concurrency counters now use checked arithmetic and refuse permits
+  if a counter saturates.
+- The `RUSTSEC-2024-0437` suppression now has release-metadata enforcement so
+  it must be reviewed when Pingora moves off Prometheus `0.13.4`.
 
 ## Validation
 

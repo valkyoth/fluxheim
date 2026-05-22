@@ -80,6 +80,10 @@ type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 const PEER_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
 static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
+#[cfg(feature = "cache")]
+static CACHE_PREDICTOR_REGISTRY: OnceLock<
+    Mutex<HashMap<usize, &'static (dyn CacheablePredictor + Sync)>>,
+> = OnceLock::new();
 #[cfg(feature = "php-fpm")]
 static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -2733,10 +2737,19 @@ fn cache_predictor_from_config(
         .capacity
         .div_ceil(CACHE_PREDICTOR_SHARDS)
         .max(1);
-    Some(Box::leak(Box::new(FluxCachePredictor::new(
+    let registry = CACHE_PREDICTOR_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut predictors = registry
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = predictors.get(&shard_capacity) {
+        return Some(*existing);
+    }
+    let created = Box::leak(Box::new(FluxCachePredictor::new(
         shard_capacity,
         Some(skip_fluxheim_predictor_custom_reason),
-    ))) as &'static (dyn CacheablePredictor + Sync))
+    ))) as &'static (dyn CacheablePredictor + Sync);
+    predictors.insert(shard_capacity, created);
+    Some(created)
 }
 
 #[cfg(feature = "cache")]
@@ -6042,10 +6055,19 @@ fn acquire_peer_fill_concurrency_permit(
     max_concurrent_requests: usize,
 ) -> Option<PeerFillConcurrencyPermit> {
     let counter = {
-        let mut counters = PEER_FILL_CONCURRENCY
+        let mut counters = match PEER_FILL_CONCURRENCY
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "peer-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
+                );
+                std::process::abort();
+            }
+        };
         prune_inactive_peer_fill_concurrency_counters(
             &mut counters,
             PEER_FILL_CONCURRENCY_MAX_KEYS,
@@ -6054,7 +6076,7 @@ fn acquire_peer_fill_concurrency_permit(
             return None;
         }
         counters
-            .entry(key)
+            .entry(key.clone())
             .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
             .clone()
     };
@@ -6064,12 +6086,14 @@ fn acquire_peer_fill_concurrency_permit(
         if current >= max_concurrent_requests {
             return None;
         }
-        match counter.compare_exchange_weak(
-            current,
-            current + 1,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
+        let Some(next) = current.checked_add(1) else {
+            log::error!(
+                target: "fluxheim::security",
+                "peer-fill concurrency counter saturated for {key}; refusing permit"
+            );
+            return None;
+        };
+        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
             Ok(_) => return Some(PeerFillConcurrencyPermit { counter }),
             Err(observed) => current = observed,
         }

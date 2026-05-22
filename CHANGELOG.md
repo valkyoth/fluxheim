@@ -24,6 +24,12 @@ behavior when the change improves security or project direction.
   including candidate TOE boundary, Security Target-style draft,
   operational-environment assumptions, validation-script identifiers, and
   vulnerability-analysis records.
+- Added hot-reload reuse for runtime Pingora cache storage, cache locks, tiered
+  storage, and cache predictors so identical cache plans do not allocate a new
+  leaked `'static` backend on every authenticated reload.
+- Added a release-metadata guard for the `RUSTSEC-2024-0437` suppression so the
+  protobuf advisory has to be reviewed when Pingora moves off Prometheus
+  `0.13.4`.
 - Added a documented local-loopback-only OTLP exception for FIPS/ISO-required
   mode so operators can export metrics/traces to a local collector without
   making outbound TLS part of Fluxheim's approved cryptographic boundary.
@@ -44,6 +50,11 @@ behavior when the change improves security or project direction.
 - The compliance evidence package is folded into `1.3.6` so regulated
   operators get the fail-closed gates and the evidence workflow in the same
   release.
+- Admin runtime/auth-throttle mutex poisoning now aborts instead of recovering
+  potentially inconsistent management state, matching release-mode fail-closed
+  behavior in debug/test builds.
+- Peer-fill concurrency permit accounting now uses checked arithmetic and
+  refuses permits if the counter saturates.
 
 ## 1.3.5 - rustls/AWS-LC FIPS Candidate
 
