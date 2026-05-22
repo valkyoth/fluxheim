@@ -215,6 +215,16 @@ ${fips_rustls_output}
 \`\`\`text
 ${owasp_output}
 \`\`\`
+- Compliance evidence package:
+  - Template: \`docs/compliance-evidence-template.md\`
+  - Evidence script ID: \`FH-RELEASE-EVID-001\`
+  - Candidate TOE boundary: \`fill in: gateway binary / RPM profile / container image / FIPS-ISO profile\`
+  - Security Target-style draft: \`fill in security problem, objectives, and security-relevant interfaces from the template\`
+  - Operational-environment assumptions: \`fill in OS, service user, filesystem ownership, external crypto modules, OpenBao/PHP-FPM/ACME/OTLP dependencies\`
+  - Crypto module evidence: \`attach CMVP certificate, Security Policy, provider config, and runtime crypto diagnostics where applicable\`
+  - Validation script identifiers: \`FH-REL-001, FH-FEAT-001, FH-FIPS-OPENSSL-001/FH-FIPS-RUSTLS-001, FH-OWASP-2025-001, FH-SBOM-001, FH-REPRO-001\`
+  - Vulnerability-analysis records: \`attach pentest/CodeQL/audit findings with fixed/accepted/false-positive/deferred decisions and remediation commits\`
+  - Common Criteria note: \`evidence-aligned only; no Common Criteria, Protection Profile, Security Target, or EAL claim\`
 - Container digests:${container_lines}
 - Tag signature:
   - \`${signature}\`

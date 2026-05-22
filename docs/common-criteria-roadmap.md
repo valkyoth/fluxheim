@@ -225,9 +225,14 @@ Practical near-term approach:
 
 ### Phase 1 - Evidence Alignment
 
-- Add a release evidence manifest with sections for TOE boundary, assumptions,
-  security functions, operational environment, and external dependencies.
-- Add stable IDs to security validation scripts and pentest regression checks.
+- Added in `1.3.6`: [Compliance Evidence Package Template](compliance-evidence-template.md)
+  provides sections for TOE boundary, assumptions, security functions,
+  operational environment, external dependencies, cryptographic module
+  evidence, scanner output, and vulnerability-analysis records.
+- Added in `1.3.6`: stable validation-script identifiers are documented in the
+  evidence template for release metadata, feature validation, FIPS OpenSSL,
+  FIPS rustls, OWASP baseline, SBOM, reproducible-build, cargo-audit,
+  cargo-deny, CodeQL, and aggregated release evidence.
 - Expand docs so each security feature has operator guidance and test evidence.
 
 ### Phase 2 - Security Target Draft

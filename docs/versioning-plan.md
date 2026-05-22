@@ -862,19 +862,19 @@ Post-`1.3.4` implementation ladder:
   verify rustls FIPS status on provider/server configs, add rustls FIPS/ISO
   profiles and examples, and document AWS-LC FIPS build requirements and CMVP
   Security Policy evidence.
-- `1.3.6`: internal crypto closure. Classify ACME, EAB, admin tokens,
+- `1.3.6`: internal crypto closure and compliance evidence package. Classify
+  ACME, EAB, admin tokens,
   request IDs, temp names, cache encryption, OpenBao Transit, OTLP HTTPS, and
   future signing/session features as validated-backend-routed, externally
   evidenced, non-security-sensitive, or disabled in FIPS-required builds. The
   implementation starts by rejecting managed ACME, the admin API, local cache
   encryption, and remote/HTTPS OTLP in FIPS/ISO-required configs, while
-  allowing OpenBao Transit cache encryption only as an external evidence
-  boundary and documenting request IDs/temp names as non-secret operational
-  identifiers.
-- `1.3.7` or later: compliance evidence package. Publish a repeatable release
-  evidence template with SBOM notes, build command, module certificate,
-  Security Policy, provider config, runtime crypto diagnostics, and scanner
-  output checklist. Include Common Criteria evidence alignment from
+  allowing OpenBao Transit cache encryption only through local numeric loopback
+  HTTP as an external evidence boundary and documenting request IDs/temp names
+  as non-secret operational identifiers. Publish a repeatable release evidence
+  template with SBOM notes, build command, module certificate, Security Policy,
+  provider config, runtime crypto diagnostics, and scanner output checklist.
+  Include Common Criteria evidence alignment from
   `common-criteria-roadmap.md`: candidate TOE boundary, Security Target-style
   draft, security-relevant interfaces, operational-environment assumptions,
   validation-script identifiers, and vulnerability-analysis records. This is

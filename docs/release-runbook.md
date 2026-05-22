@@ -227,13 +227,20 @@ environments where provider evidence is intentionally not being collected.
 
 ### Optional Common Criteria-Aligned Evidence
 
-For releases that changed security-enforcing behavior, record any relevant
-notes from [Common Criteria Readiness Roadmap](common-criteria-roadmap.md):
+For releases that changed security-enforcing behavior, complete the relevant
+sections of [Compliance Evidence Package Template](compliance-evidence-template.md)
+and record any relevant notes from
+[Common Criteria Readiness Roadmap](common-criteria-roadmap.md):
 
 - TOE boundary assumptions affected by the release.
+- Security Target-style draft notes: security problem, objectives, and
+  security-relevant interfaces affected by the release.
 - Security-relevant interfaces changed by the release.
 - Validation scripts or pentest regressions that provide evidence.
 - External dependencies and operational-environment assumptions.
+- Vulnerability-analysis records for pentest, CodeQL, audit, or internal
+  findings, including the fixed/accepted/false-positive/deferred decision and
+  remediation commit.
 
 This is evidence organization only. Do not describe the release as Common
 Criteria certified, Protection Profile compliant, or EAL compliant.

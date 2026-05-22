@@ -355,7 +355,8 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
   evidence workflow for rustls FIPS builds.
 - `1.3.6` is the current development line for FIPS/ISO internal-crypto
   closure: fail-closed guards for managed ACME, admin auth, local cache
-  encryption, and outbound telemetry in FIPS/ISO-required configs.
+  encryption, OpenBao transport, and outbound telemetry in FIPS/ISO-required
+  configs, plus the repeatable compliance evidence package template.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

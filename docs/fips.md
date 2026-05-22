@@ -574,7 +574,7 @@ Likely limitations:
 - Exact module Security Policy and platform matching must be operator-provided
   unless Fluxheim publishes a dedicated validated-container recipe.
 
-### 1.3.6 - Internal Crypto Closure
+### 1.3.6 - Internal Crypto Closure And Evidence Package
 
 Goal: remove or gate non-validated crypto paths from FIPS-required builds.
 
@@ -595,11 +595,7 @@ Deliverables:
   admin API, and local cache encryption, and accepts OpenBao Transit cache
   encryption as an external evidence boundary.
 
-### 1.3.7 Or Later - Compliance Evidence Package
-
-Goal: make regulated operators' audit work practical.
-
-Deliverables:
+Evidence package deliverables:
 
 - Release evidence bundle template.
 - SBOM notes identifying the selected crypto module path.
@@ -611,6 +607,15 @@ Deliverables:
   boundary, module type, operational environment, roles, approved and
   non-approved services, status indicators, SSP management, self-tests,
   lifecycle evidence, and mitigation-of-other-attacks claims.
+
+The evidence template lives in
+[Compliance Evidence Package Template](compliance-evidence-template.md). It
+includes the Common Criteria-aligned candidate TOE boundary,
+Security Target-style draft fields, security-relevant interfaces,
+operational-environment assumptions, validation-script identifiers, and
+vulnerability-analysis records. This remains an actionable evidence track, not
+a Common Criteria certification, Protection Profile, Security Target, or EAL
+claim.
 
 ## Operator Checklist
 

@@ -17,6 +17,13 @@ behavior when the change improves security or project direction.
 - Added validation tests proving FIPS/ISO-required mode rejects managed ACME,
   the admin API, and local disk-cache encryption, while allowing OpenBao
   Transit cache encryption as an external evidence boundary.
+- Added a compliance evidence package template covering release artifacts,
+  SBOMs, build commands, cryptographic module evidence, runtime diagnostics,
+  scanner output, and Common Criteria-aligned evidence records.
+- Added compliance evidence sections to `scripts/release_evidence.sh`,
+  including candidate TOE boundary, Security Target-style draft,
+  operational-environment assumptions, validation-script identifiers, and
+  vulnerability-analysis records.
 - Added a documented local-loopback-only OTLP exception for FIPS/ISO-required
   mode so operators can export metrics/traces to a local collector without
   making outbound TLS part of Fluxheim's approved cryptographic boundary.
@@ -34,6 +41,9 @@ behavior when the change improves security or project direction.
 - FIPS/ISO-required mode now rejects local cache encryption and requires either
   no cache encryption or `provider = "openbao-transit"` with operator evidence
   for the external OpenBao crypto boundary.
+- The compliance evidence package is folded into `1.3.6` so regulated
+  operators get the fail-closed gates and the evidence workflow in the same
+  release.
 
 ## 1.3.5 - rustls/AWS-LC FIPS Candidate
 
