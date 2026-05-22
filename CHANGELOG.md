@@ -7,7 +7,9 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.3.5 - Unreleased
+## 1.3.5 - rustls/AWS-LC FIPS Candidate
+
+Released: 2026-05-22
 
 ### Added
 

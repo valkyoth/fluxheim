@@ -372,7 +372,7 @@ Stable scope:
   tier while the rest of the vhost remains uncached.
 - Cache completion work promoted into 1.2:
   - `1.2` is the stable cache-completion release. The main cache safety and
-    operations concerns are now in the current development line: the documented
+    operations concerns are now in the 1.2 release line: the documented
     proxied `304 Not Modified` metadata merge edge, very large disk-cache
     loader/purger pacing and visibility, cache-debug/release-gate coverage,
     and production validation for stampede protection. Remaining work before
@@ -1424,7 +1424,7 @@ they land.
 
 Current implementation status:
 
-- Implemented in the current 1.2 development line:
+- Implemented in the 1.2 release line:
   - memory, disk, and tiered memory+disk Pingora cache storage;
   - route-scoped cache policies for selective production paths such as
     repository avatars/assets;
