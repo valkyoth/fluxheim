@@ -23,13 +23,14 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.3.4`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.3.5`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
 application serving for WordPress-style deployments, PHP-FPM hardening and
 application recipes, the `fluxheim-acme` companion, release-page config tester
-diagnostics, and an OpenSSL FIPS-capable TLS build path.
+diagnostics, an OpenSSL FIPS-capable TLS build path, and a rustls/AWS-LC
+FIPS-capable candidate path.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -238,7 +239,7 @@ inspect provider availability and OpenSSL default FIPS property status, and read
 [FIPS / ISO-Capable Deployments](docs/fips.md) before treating a deployment as
 regulated evidence.
 
-The `1.3.5` development line also has a rustls/AWS-LC candidate path with
+The `1.3.5` release line also has a rustls/AWS-LC candidate path with
 `tls-rustls-fips`, the ISO/IEC terminology alias `tls-rustls-iso19790`,
 `profile-fips-rustls`, and `profile-iso19790-rustls`. It builds
 `aws-lc-fips-sys`, so local validation requires CMake, Go, and a C compiler,
@@ -261,8 +262,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.3.4-wolfi`, `v1.3.4-cache-wolfi`, `v1.3.4-proxy-wolfi`, and
-`v1.3.4-php-wolfi`.
+`v1.3.5-wolfi`, `v1.3.5-cache-wolfi`, `v1.3.5-proxy-wolfi`, and
+`v1.3.5-php-wolfi`.
 
 Manual feature selection also works:
 
@@ -327,20 +328,11 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
 - `1.1` is the certificate operations line: TLS policy profiles, multi-cert
   rustls SNI, managed ACME issuance/renewal, EAB-capable issuers, file-backed
   secrets, `acme-init`, and packaged renewal units.
-- `1.2.0` is the cache and observability baseline: vhost/route cache policy,
-  memory/disk/tiered cache, cache locks, stale serving, purge/status endpoints,
-  cache warm/key/lookup tooling, Prometheus metrics, and OpenTelemetry export
-  profiles.
-- `1.2.1` adds opt-in local static-file caching through `local_static = true`.
-- `1.2.2` adds the storage-bin disk cache backend for larger high-churn caches.
-- `1.2.3` adds optional disk cache encryption with local keys or OpenBao
-  Transit.
-- `1.2.4` adds distributed cache peer fill with safe `only-if-cached` peer
-  fetches and bounded fail-open/fail-closed behavior.
-- `1.2.5` adds opt-in bounded range caching for large proxy-cache objects.
-- `1.2.6` adds opt-in fixed-slice range-cache composition, including
-  open-ended, suffix, and multipart byte-range responses from compatible cached
-  slices.
+- `1.2.x` completed the production cache and observability line: vhost/route
+  cache policy, memory/disk/tiered cache, local static-file caching,
+  storage-bin disk cache, optional disk-cache encryption, peer fill, bounded
+  range caching, fixed-slice range composition, cache operations tooling,
+  Prometheus metrics, and OpenTelemetry export profiles.
 - `1.3.0` starts the shared ingress/TLS feature-graph split and focused
   container/build profiles. Full packages still include the broad production
   feature set, while cache-edge and proxy-edge builds can use TLS and managed
@@ -358,6 +350,9 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
 - `1.3.4` adds the OpenSSL FIPS-capable TLS build path, fail-closed provider
   validation for FIPS-required configs, crypto diagnostics, and release-gate
   evidence for FIPS-capable builds.
+- `1.3.5` adds the rustls/AWS-LC FIPS-capable candidate path, ISO/IEC 19790
+  terminology aliases, provider-aware rustls setup, and supported-builder
+  evidence workflow for rustls FIPS builds.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

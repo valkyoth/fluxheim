@@ -203,7 +203,7 @@ validated cryptographic module; operators still need the selected module's CMVP
 certificate, Security Policy, provider configuration, platform evidence, and
 operational records.
 
-The `1.3.5` development line adds a rustls/AWS-LC FIPS candidate through
+The `1.3.5` release line adds a rustls/AWS-LC FIPS candidate through
 `profile-fips-rustls`, `tls-rustls-fips`, and the ISO/IEC 19790 terminology
 alias `profile-iso19790-rustls`. It requires `[tls] backend = "rustls"` plus a
 FIPS/ISO-required guard, uses rustls' AWS-LC FIPS provider path, and requires

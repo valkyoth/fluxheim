@@ -2560,6 +2560,8 @@ the exception while the cache server is being completed as a focused sequence:
   release-page config tester binaries.
 - `v1.3.3`: focused php-fpm hardening and compatibility fixes.
 - `v1.3.4`: OpenSSL FIPS-capable TLS build path and release evidence.
+- `v1.3.5`: rustls/AWS-LC FIPS-capable candidate build path and evidence
+  workflow.
 - Later `v1.3.x`: experimental pure-Rust PHP research behind
   `experimental-pure-php`; Turbine-style PHP app servers stay proxy upstreams.
 - `v1.4.1`: fixes for advanced proxy parity.

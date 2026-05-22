@@ -12,11 +12,11 @@ published Security Policy.
 
 ## Status
 
-Current stable line: `1.3.4`.
+Current stable line: `1.3.5`.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
 ISO/IEC 19790 terminology aliases for compliance evidence plumbing. The
-`1.3.5` development line adds a rustls/AWS-LC FIPS candidate path. Neither is a
+`1.3.5` release line adds a rustls/AWS-LC FIPS candidate path. Neither is a
 broad "FIPS compliant" or "ISO/IEC 19790 compliant" claim. The implemented
 targets are backend proof paths, while BoringSSL, s2n, and non-TLS internal
 crypto work remain explicitly staged.
@@ -323,7 +323,7 @@ scripts/validate-fips-openssl.sh check
 
 ### rustls With AWS-LC FIPS
 
-The `1.3.5` development line includes a rustls/AWS-LC FIPS candidate. It is a
+The `1.3.5` release line includes a rustls/AWS-LC FIPS candidate. It is a
 compile-time alternative to the default rustls/ring backend:
 
 ```toml

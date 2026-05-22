@@ -2,7 +2,8 @@
 
 ## Status
 
-Draft notes for the `1.3.5` development line.
+Fluxheim 1.3.5 adds the rustls/AWS-LC FIPS-capable candidate path for source
+builds and release evidence.
 
 ## Highlights
 

@@ -35,7 +35,7 @@ grouped build profiles as normal feature aliases such as `profile-core`,
 Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
 `profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`,
 `profile-load-balancer-edge`, `profile-fips-openssl`, and
-`profile-iso19790-openssl`. The `1.3.5` development line also has
+`profile-iso19790-openssl`. The `1.3.5` release line also has
 `profile-fips-rustls` and `profile-iso19790-rustls` for the rustls/AWS-LC FIPS
 candidate path.
 `profile-development` is a broad development profile with all compatible
@@ -430,15 +430,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.3.4-wolfi`, `v1.3.4-alpine`, `v1.3.4-suse-micro`, `v1.3.4-debian`
+- `v1.3.5-wolfi`, `v1.3.5-alpine`, `v1.3.5-suse-micro`, `v1.3.5-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.3.4`
-- `v1.3.4-base`
+- `v1.3.5`
+- `v1.3.5-base`
 - `latest`
 - `latest-base`
 
@@ -447,17 +447,17 @@ automation. They point at the full/default image profile.
 
 The cache and proxy image profiles publish tags with a profile segment:
 
-- `v1.3.4-cache-wolfi`, `v1.3.4-cache-alpine`,
-  `v1.3.4-cache-suse-micro`, `v1.3.4-cache-debian`
-- `v1.3.4-proxy-wolfi`, `v1.3.4-proxy-alpine`,
-  `v1.3.4-proxy-suse-micro`, `v1.3.4-proxy-debian`
-- `v1.3.4-php-wolfi`, `v1.3.4-php-alpine`,
-  `v1.3.4-php-suse-micro`, `v1.3.4-php-debian`
+- `v1.3.5-cache-wolfi`, `v1.3.5-cache-alpine`,
+  `v1.3.5-cache-suse-micro`, `v1.3.5-cache-debian`
+- `v1.3.5-proxy-wolfi`, `v1.3.5-proxy-alpine`,
+  `v1.3.5-proxy-suse-micro`, `v1.3.5-proxy-debian`
+- `v1.3.5-php-wolfi`, `v1.3.5-php-alpine`,
+  `v1.3.5-php-suse-micro`, `v1.3.5-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`, `latest-php-wolfi`, etc. when
   run from the default branch
-- Wolfi short aliases: `v1.3.4-cache`, `v1.3.4-proxy`, `v1.3.4-php`,
+- Wolfi short aliases: `v1.3.5-cache`, `v1.3.5-proxy`, `v1.3.5-php`,
   `latest-cache`, `latest-proxy`, and `latest-php`
 
 The load-balancer image profile is prepared for the `1.5` line. It is skipped
@@ -872,8 +872,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.3.4 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.3.4 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.3.5 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.3.5 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date
