@@ -807,16 +807,10 @@ mod tests {
             .permissions()
             .mode()
             & 0o777;
-        let config_mode = std::fs::metadata(&snapshot.config_path)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
-        let metadata_mode = std::fs::metadata(&snapshot.metadata_path)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777;
+        let config_name = format!("{}.toml", snapshot.id);
+        let metadata_name = format!("{}.meta.toml", snapshot.id);
+        let (config_mode, metadata_mode) =
+            snapshot_file_modes_by_name(&store, &config_name, &metadata_name);
         let current_mode = std::fs::metadata(store.root().join("current"))
             .unwrap()
             .permissions()
@@ -828,6 +822,32 @@ mod tests {
         assert_eq!(config_mode, super::SNAPSHOT_FILE_MODE);
         assert_eq!(metadata_mode, super::SNAPSHOT_FILE_MODE);
         assert_eq!(current_mode, super::SNAPSHOT_FILE_MODE);
+    }
+
+    #[cfg(unix)]
+    fn snapshot_file_modes_by_name(
+        store: &SnapshotStore,
+        config_name: &str,
+        metadata_name: &str,
+    ) -> (u32, u32) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut config_mode = None;
+        let mut metadata_mode = None;
+        for entry in std::fs::read_dir(store.root().join("configs")).unwrap() {
+            let entry = entry.unwrap();
+            let mode = entry.metadata().unwrap().permissions().mode() & 0o777;
+            if entry.file_name() == config_name {
+                config_mode = Some(mode);
+            } else if entry.file_name() == metadata_name {
+                metadata_mode = Some(mode);
+            }
+        }
+
+        (
+            config_mode.expect("snapshot config file mode"),
+            metadata_mode.expect("snapshot metadata file mode"),
+        )
     }
 
     #[test]
