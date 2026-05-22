@@ -207,18 +207,18 @@ Examples:
 ```bash
 # FIPS/ISO-capable static web server
 cargo build --release --locked --no-default-features \
-  --features proxy,web,security,tls-openssl-fips,acme-client \
-  --bin fluxheim --bin fluxheim-acme
+  --features proxy,web,security,tls-openssl-fips \
+  --bin fluxheim
 
 # FIPS/ISO-capable cache edge
 cargo build --release --locked --no-default-features \
-  --features proxy,cache,security,tls-openssl-fips,acme-client \
-  --bin fluxheim --bin fluxheim-acme
+  --features proxy,cache,security,tls-openssl-fips \
+  --bin fluxheim
 
 # FIPS/ISO-capable PHP-FPM web server
 cargo build --release --locked --no-default-features \
-  --features php-fpm,security,tls-openssl-fips,acme-client \
-  --bin fluxheim --bin fluxheim-acme
+  --features php-fpm,security,tls-openssl-fips \
+  --bin fluxheim
 ```
 
 These examples make Fluxheim's TLS listener use the OpenSSL FIPS proof path.
@@ -228,6 +228,15 @@ account operations, local cache encryption, outbound OTLP TLS, and any
 application-level token/signature logic need their own evidence, validated
 backend routing, or must be disabled before claiming a strict FIPS-required
 deployment boundary.
+
+The recommended strict-boundary pattern is to use local/static certificate
+files generated and renewed by an approved external process. Managed ACME can
+still be compiled into a FIPS-capable TLS binary by adding `acme-client` and
+building `fluxheim-acme`, but that adds a separate cryptographic workflow that
+requires its own evidence. Fluxheim must not imply that ACME account keys, ACME
+JWS signing, CA communication, or certificate issuance policy are covered by the
+OpenSSL TLS provider proof merely because the listener is in FIPS-required
+mode.
 
 Current Fluxheim enforcement:
 

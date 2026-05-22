@@ -162,11 +162,11 @@ only one Pingora TLS backend per binary. Select the raw modules instead:
 ```bash
 # FIPS/ISO-capable cache edge
 cargo build --no-default-features \
-  --features proxy,cache,security,tls-openssl-fips,acme-client
+  --features proxy,cache,security,tls-openssl-fips
 
 # FIPS/ISO-capable PHP-FPM web build
 cargo build --no-default-features \
-  --features php-fpm,security,tls-openssl-fips,acme-client
+  --features php-fpm,security,tls-openssl-fips
 ```
 
 These combinations make Fluxheim's TLS boundary FIPS/ISO-capable when the
@@ -175,6 +175,13 @@ the whole deployment FIPS compliant: PHP application cryptography, ACME account
 operations, local cache encryption, OTLP export, and other non-TLS crypto paths
 must be separately routed through validated modules, externally evidenced, or
 disabled for a strict FIPS-required deployment.
+
+For the cleanest regulated boundary, prefer local/static certificates that were
+issued and renewed outside Fluxheim through an approved process. You can compile
+`acme-client` into a FIPS-capable TLS build if you need managed issuance, but
+that only means the TLS listener uses the OpenSSL FIPS proof path. It does not
+prove the ACME account, JWS, HTTP client, or CA workflow is inside the same
+validated cryptographic boundary.
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
 binary can load the provider and enable OpenSSL default FIPS properties in the

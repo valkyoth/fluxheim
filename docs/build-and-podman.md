@@ -64,12 +64,18 @@ binary has exactly one TLS backend:
 ```bash
 # FIPS/ISO-capable cache edge
 cargo build --release --no-default-features \
-  --features proxy,cache,security,tls-openssl-fips,acme-client
+  --features proxy,cache,security,tls-openssl-fips
 
 # FIPS/ISO-capable PHP-FPM web build
 cargo build --release --no-default-features \
-  --features php-fpm,security,tls-openssl-fips,acme-client
+  --features php-fpm,security,tls-openssl-fips
 ```
+
+These examples intentionally omit `acme-client`. For stricter FIPS/ISO
+deployment boundaries, prefer local/static certificate files generated and
+renewed by an approved external process. If you add `acme-client`, treat ACME
+account keys, JWS signing, HTTP client behavior, and CA policy as a separate
+evidence area outside the TLS provider proof.
 
 This feature makes Fluxheim fail closed, loads the OpenSSL FIPS provider,
 enables default FIPS properties for the process, and exposes provider/default

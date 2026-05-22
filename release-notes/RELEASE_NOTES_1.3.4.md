@@ -128,13 +128,13 @@ profiles that already enable `tls-rustls`:
 ```bash
 # FIPS/ISO-capable cache edge
 cargo build --release --locked --no-default-features \
-  --features proxy,cache,security,tls-openssl-fips,acme-client \
-  --bin fluxheim --bin fluxheim-acme
+  --features proxy,cache,security,tls-openssl-fips \
+  --bin fluxheim
 
 # FIPS/ISO-capable PHP-FPM web build
 cargo build --release --locked --no-default-features \
-  --features php-fpm,security,tls-openssl-fips,acme-client \
-  --bin fluxheim --bin fluxheim-acme
+  --features php-fpm,security,tls-openssl-fips \
+  --bin fluxheim
 ```
 
 These combinations put Fluxheim's TLS listener on the OpenSSL FIPS proof path.
@@ -143,6 +143,13 @@ PHP application cryptography, managed ACME account operations, local cache
 encryption, OTLP export, and other non-TLS crypto paths still need separate
 validated-module evidence, external handling, or disabling for strict
 FIPS-required deployments.
+
+The examples intentionally omit `acme-client`. For a cleaner FIPS/ISO evidence
+boundary, use local/static certificates issued and renewed by an approved
+external process. If `acme-client` is added to a FIPS-capable TLS build, ACME
+account keys, ACME JWS signing, HTTP client behavior, and CA issuance workflow
+must be documented as separate evidence rather than being implied by the TLS
+provider proof.
 
 ## Checksums And Signatures
 
