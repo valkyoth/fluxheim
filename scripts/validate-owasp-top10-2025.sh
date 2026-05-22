@@ -15,7 +15,7 @@ require_file_contains() {
     file="$1"
     pattern="$2"
     label="$3"
-    if ! rg -q "$pattern" "$file"; then
+    if ! grep -Eq "$pattern" "$file"; then
         echo "owasp baseline failed: missing $label in $file" >&2
         echo "pattern: $pattern" >&2
         exit 1
@@ -24,7 +24,7 @@ require_file_contains() {
 
 require_test() {
     name="$1"
-    if ! printf '%s\n' "$test_list" | rg -q "(^|::)$name: test$"; then
+    if ! printf '%s\n' "$test_list" | grep -E "(^|::)$name: test$" >/dev/null; then
         echo "owasp baseline failed: missing representative test: $name" >&2
         exit 1
     fi
