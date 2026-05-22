@@ -38,10 +38,11 @@ When using a custom feature set, run the feature preflight first:
 scripts/validate-features.sh proxy,web,tls-rustls
 ```
 
-For OpenSSL FIPS-capable changes, run the dedicated fail-closed profile check:
+For FIPS-capable TLS changes, run the dedicated fail-closed profile checks:
 
 ```bash
 scripts/validate-fips-openssl.sh check
+scripts/validate-fips-rustls.sh check
 ```
 
 ## Checks

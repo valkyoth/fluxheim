@@ -181,6 +181,7 @@ Individual module features:
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `security` | Yes | Security helpers and release hardening checks. |
 | `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
+| `tls-rustls-fips` | No | rustls/AWS-LC FIPS-capable TLS backend candidate for source builds. |
 
 For checked TLS policy examples, see
 [`examples/tls-modern.toml`](examples/tls-modern.toml) and
@@ -216,6 +217,8 @@ Recommended profile features:
 | `profile-cache-edge` | `proxy`, `cache`, `tls-rustls`, `security` | Cache edge without local static web serving. |
 | `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
 | `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
+| `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | rustls/AWS-LC FIPS-capable candidate build. |
+| `profile-iso19790-rustls` | `profile-fips-rustls` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
 Fluxheim 1.3 starts the focused image split. The `profile-cache-edge` and
 `profile-proxy-edge` aliases are TLS-capable without compiling local static web
@@ -234,6 +237,13 @@ validated provider path. Use the `profile-fips-openssl` or
 inspect provider availability and OpenSSL default FIPS property status, and read
 [FIPS / ISO-Capable Deployments](docs/fips.md) before treating a deployment as
 regulated evidence.
+
+The `1.3.5` development line also has a rustls/AWS-LC candidate path with
+`tls-rustls-fips`, the ISO/IEC terminology alias `tls-rustls-iso19790`,
+`profile-fips-rustls`, and `profile-iso19790-rustls`. It builds
+`aws-lc-fips-sys`, so local validation requires CMake, Go, and a C compiler,
+plus the AWS-LC module certificate/Security Policy evidence for any regulated
+deployment.
 
 Example grouped builds that match the official release artifacts:
 

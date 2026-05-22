@@ -461,7 +461,7 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     crate::tls::install_rustls_crypto_provider();
@@ -673,7 +673,7 @@ pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Se
 fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(any(
         feature = "tls",
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl",
         feature = "tls-s2n"
@@ -684,7 +684,7 @@ fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + S
 
     #[cfg(not(any(
         feature = "tls",
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl",
         feature = "tls-s2n"
@@ -693,7 +693,7 @@ fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + S
         let compliance_mode = config.tls.compliance_mode();
         if compliance_mode.required() {
             Err(format!(
-                "{} required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790",
+                "{} required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790",
                 compliance_mode.label()
             )
             .into())
@@ -949,12 +949,16 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     println!("  version: {}", env!("FLUXHEIM_VERSION"));
     println!("  tls compiled: {}", cfg!(feature = "tls"));
     println!("  tls backends:");
-    println!("    rustls: {}", cfg!(feature = "tls-rustls"));
+    println!("    rustls: {}", cfg!(feature = "tls-rustls-backend"));
     println!("    openssl: {}", cfg!(feature = "tls-openssl"));
     println!("    boringssl: {}", cfg!(feature = "tls-boringssl"));
     println!("    s2n: {}", cfg!(feature = "tls-s2n"));
     println!("  fips-capable features:");
-    println!("    tls-rustls-fips: false");
+    println!("    tls-rustls-fips: {}", cfg!(feature = "tls-rustls-fips"));
+    println!(
+        "    tls-rustls-iso19790: {}",
+        cfg!(feature = "tls-rustls-iso19790")
+    );
     println!(
         "    tls-openssl-fips: {}",
         cfg!(feature = "tls-openssl-fips")
@@ -973,6 +977,16 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     }
     #[cfg(not(feature = "tls-openssl-fips"))]
     println!("    openssl_fips_provider: unavailable (build lacks tls-openssl-fips)");
+    #[cfg(feature = "tls-rustls-fips")]
+    match crate::tls::probe_rustls_fips_provider() {
+        Ok(status) => println!(
+            "    rustls_fips_provider: available (provider_fips={})",
+            status.provider_fips
+        ),
+        Err(error) => println!("    rustls_fips_provider: unavailable ({error})"),
+    }
+    #[cfg(not(feature = "tls-rustls-fips"))]
+    println!("    rustls_fips_provider: unavailable (build lacks tls-rustls-fips)");
     print_openssl_environment_diagnostics();
     println!("  notes:");
     println!(
@@ -3215,7 +3229,7 @@ pub fn run_acme_renew_command(
     config_path: Option<&std::path::Path>,
     force_renew: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    #[cfg(feature = "tls-rustls")]
+    #[cfg(feature = "tls-rustls-backend")]
     crate::tls::install_rustls_crypto_provider();
 
     let config = Config::load(config_path)?;
@@ -3808,7 +3822,7 @@ fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
 
 #[cfg(any(
     feature = "tls",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     feature = "tls-openssl",
     feature = "tls-boringssl",
     feature = "tls-s2n"
@@ -3833,7 +3847,7 @@ pub fn check_tls_storage(config: &Config) -> Result<(), Box<dyn Error + Send + S
 
 #[cfg(not(any(
     feature = "tls",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     feature = "tls-openssl",
     feature = "tls-boringssl",
     feature = "tls-s2n"
@@ -3846,7 +3860,7 @@ pub fn check_tls_storage(_config: &Config) -> Result<(), Box<dyn Error + Send + 
     test,
     any(
         feature = "tls",
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl",
         feature = "tls-s2n"

@@ -799,14 +799,13 @@ recommended for production.
   a feature flag was enabled.
 - Add backend-specific feature gates rather than one vague `fips` switch:
   - `tls-rustls-fips`: rustls backend using rustls' `fips` feature and the
-    AWS-LC FIPS provider path. This requires replacing current ring-specific
-    rustls helpers with provider-aware helpers, installing
-    `rustls::crypto::default_fips_provider()` at startup, and failing startup
-    if generated `ServerConfig` / `ClientConfig` objects do not report FIPS
-    status where rustls exposes that check. The feature should route builds to
-    the AWS-LC FIPS crate path, document the CMake, Go, and C compiler build
-    requirements, and explicitly construct rustls server/client configs from
-    provider suites permitted by NIST SP 800-52 Rev. 2.
+    AWS-LC FIPS provider path. The `1.3.5` candidate replaces ring-specific
+    rustls helpers with provider-aware helpers, installs/passes
+    `rustls::crypto::default_fips_provider()`, and fails startup if a
+    FIPS-required generated `ServerConfig` does not report FIPS status. The
+    feature routes builds to the AWS-LC FIPS crate path, documents the CMake,
+    Go, and C compiler build requirements, and constrains configured rustls
+    suites/groups through the Fluxheim FIPS TLS policy.
   - `tls-openssl-fips`: OpenSSL backend built and linked against OpenSSL 3.x
     with a validated FIPS provider. Operators remain responsible for installing
     the validated provider and running the provider setup expected by the
@@ -837,10 +836,12 @@ recommended for production.
   either route through the selected validated backend or be disabled/rejected in
   FIPS-required builds. Pure RustCrypto, ring, or other non-validated fallback
   paths cannot remain reachable for those operations in a FIPS-required binary.
-- Add `profile-fips-rustls` once CI can build it reproducibly. Keep
-  `profile-fips-openssl` separate from default, cache, PHP, and load-balancer
-  profiles so non-FIPS operators do not inherit OpenSSL FIPS build and provider
-  requirements.
+- Add narrow FIPS/ISO profile aliases separately from default, cache, PHP, and
+  load-balancer profiles so non-FIPS operators do not inherit OpenSSL or AWS-LC
+  FIPS build/provider requirements. `profile-fips-openssl` and
+  `profile-iso19790-openssl` ship with the `1.3.4` OpenSSL path;
+  `tls-rustls-iso19790`, `profile-fips-rustls`, and
+  `profile-iso19790-rustls` are part of the `1.3.5` rustls/AWS-LC candidate.
 - Add release evidence:
   - compile logs and lockfile for the selected backend;
   - runtime `--version --crypto` or equivalent output showing backend, provider,
@@ -858,8 +859,9 @@ Post-`1.3.4` implementation ladder:
 
 - `1.3.5`: rustls/AWS-LC FIPS candidate. Refactor current ring-specific rustls
   helpers into provider-aware helpers, use rustls' AWS-LC FIPS provider path,
-  verify rustls FIPS status on generated configs, and document AWS-LC FIPS
-  build requirements and CMVP Security Policy evidence.
+  verify rustls FIPS status on provider/server configs, add rustls FIPS/ISO
+  profiles and examples, and document AWS-LC FIPS build requirements and CMVP
+  Security Policy evidence.
 - `1.3.6`: internal crypto closure. Classify ACME, EAB, admin tokens,
   request IDs, temp names, cache encryption, OpenBao Transit, OTLP HTTPS, and
   future signing/session features as validated-backend-routed, externally
@@ -2464,8 +2466,10 @@ web = [...]
 cache = [...]
 load-balancer = ["proxy", ...] # transitional until the 1.5 load-balancer line
 tls = ["ingress", "dep:rustix"]
-tls-rustls = ["tls", "pingora/rustls", "dep:rustls", "rustls/ring"]
-tls-rustls-fips = ["tls", "pingora/rustls", "dep:rustls", "rustls/fips"] # planned; provider-aware AWS-LC FIPS path
+tls-rustls-backend = ["tls", "pingora/rustls", "dep:rustls"]
+tls-rustls = ["tls-rustls-backend", "rustls/ring"]
+tls-rustls-fips = ["tls-rustls-backend", "rustls/fips"] # rustls/AWS-LC FIPS candidate path
+tls-rustls-iso19790 = ["tls-rustls-fips"] # terminology alias for ISO/IEC 19790 evidence
 fips-required = [] # planned guard after backend/provider checks and internal crypto routing exist
 acme = ["tls", ...]
 ```

@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-    echo "usage: scripts/release_evidence.sh VERSION [--skip-builds] [--skip-sbom] [--skip-reproducible] [--skip-fips] [--skip-owasp] [--skip-containers]" >&2
+    echo "usage: scripts/release_evidence.sh VERSION [--skip-builds] [--skip-sbom] [--skip-reproducible] [--skip-fips] [--skip-fips-openssl] [--skip-fips-rustls] [--skip-owasp] [--skip-containers]" >&2
 }
 
 version="${1:-}"
@@ -23,6 +23,8 @@ skip_builds=0
 skip_sbom=0
 skip_reproducible=0
 skip_fips=0
+skip_fips_openssl=0
+skip_fips_rustls=0
 skip_owasp=0
 skip_containers=0
 while [ "$#" -gt 0 ]; do
@@ -31,6 +33,8 @@ while [ "$#" -gt 0 ]; do
         --skip-sbom) skip_sbom=1 ;;
         --skip-reproducible) skip_reproducible=1 ;;
         --skip-fips) skip_fips=1 ;;
+        --skip-fips-openssl) skip_fips_openssl=1 ;;
+        --skip-fips-rustls) skip_fips_rustls=1 ;;
         --skip-owasp) skip_owasp=1 ;;
         --skip-containers) skip_containers=1 ;;
         *)
@@ -127,9 +131,20 @@ else
 fi
 
 if [ "$skip_fips" -eq 1 ]; then
-    fips_output="not collected (--skip-fips)"
+    fips_openssl_output="not collected (--skip-fips)"
+    fips_rustls_output="not collected (--skip-fips)"
 else
-    fips_output="$(scripts/validate-fips-openssl.sh release 2>&1)"
+    if [ "$skip_fips_openssl" -eq 1 ]; then
+        fips_openssl_output="not collected (--skip-fips-openssl)"
+    else
+        fips_openssl_output="$(scripts/validate-fips-openssl.sh release 2>&1)"
+    fi
+
+    if [ "$skip_fips_rustls" -eq 1 ]; then
+        fips_rustls_output="not collected (--skip-fips-rustls)"
+    else
+        fips_rustls_output="$(scripts/validate-fips-rustls.sh release 2>&1)"
+    fi
 fi
 
 if [ "$skip_owasp" -eq 1 ]; then
@@ -190,7 +205,11 @@ cat <<EOF
   - \`${reproducible_line}\`
 - OpenSSL FIPS-capable evidence:
 \`\`\`text
-${fips_output}
+${fips_openssl_output}
+\`\`\`
+- rustls/AWS-LC FIPS-capable evidence:
+\`\`\`text
+${fips_rustls_output}
 \`\`\`
 - OWASP Top 10 2025 baseline evidence:
 \`\`\`text

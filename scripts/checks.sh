@@ -124,6 +124,8 @@ cargo clippy --no-default-features --features profile-proxy-edge --all-targets -
 cargo clippy --no-default-features --features profile-load-balancer-edge --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-fips-openssl --all-targets -- -D warnings
 cargo clippy --no-default-features --features profile-iso19790-openssl --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-fips-rustls --all-targets -- -D warnings
+cargo clippy --no-default-features --features profile-iso19790-rustls --all-targets -- -D warnings
 cargo test
 scripts/validate-owasp-top10-2025.sh check
 cargo test --no-default-features --features proxy,load-balancer
@@ -148,6 +150,8 @@ cargo check --no-default-features --features profile-observability
 cargo check --no-default-features --features profile-privacy
 cargo check --no-default-features --features profile-fips-openssl
 cargo check --no-default-features --features profile-iso19790-openssl
+cargo check --no-default-features --features profile-fips-rustls
+cargo check --no-default-features --features profile-iso19790-rustls
 cargo check --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 cargo check --no-default-features --features profile-cache-edge,acme-client
 cargo check --no-default-features --features profile-proxy-edge,acme-client
@@ -161,6 +165,7 @@ expect_feature_validation_failure "profile-privacy,otel-otlp" "privacy-mode cann
 expect_feature_validation_failure "php-fpm,experimental-pure-php" "select only one Fluxheim PHP runtime feature"
 expect_feature_validation_failure "profile-core,tls-openssl" "select only one Fluxheim TLS backend feature"
 expect_feature_validation_failure "tls-rustls,tls-openssl" "select only one Fluxheim TLS backend feature"
+expect_feature_validation_failure "tls-rustls,tls-rustls-fips" "select only one Fluxheim TLS backend feature"
 cargo test --no-default-features --features proxy,metrics
 cargo test --no-default-features --features proxy,metrics-otlp
 cargo test --no-default-features --features proxy,otel-tracing
@@ -171,6 +176,7 @@ cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
 cargo check --no-default-features --features proxy,tls
 cargo check --no-default-features --features proxy,tls-rustls
 scripts/validate-fips-openssl.sh check
+scripts/validate-fips-rustls.sh check
 python3 -m py_compile scripts/prepare-server.py scripts/build_fluxheim_rpm.py
 scripts/validate-tls-backends.sh check
 config_tester examples/fluxheim.toml

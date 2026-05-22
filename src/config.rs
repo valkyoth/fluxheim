@@ -2430,6 +2430,7 @@ impl TlsConfig {
                 reason: "the BoringSSL backend does not expose Fluxheim-controlled TLS 1.3 cipher-suite allow-lists; omit TLS 1.3 cipher_suites or use the OpenSSL/rustls backend",
             });
         }
+        #[cfg(not(feature = "tls-rustls-fips"))]
         if self.backend == TlsBackend::Rustls
             && self
                 .effective_curve_preferences()
@@ -2474,7 +2475,7 @@ impl TlsConfig {
             });
         }
 
-        #[cfg(not(feature = "tls-openssl-fips"))]
+        #[cfg(not(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips")))]
         {
             Err(ConfigError::InvalidTlsPolicy {
                 field: compliance_mode.config_field(),
@@ -2482,15 +2483,20 @@ impl TlsConfig {
             })
         }
 
-        #[cfg(feature = "tls-openssl-fips")]
+        #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
         {
-            if self.backend != TlsBackend::Openssl {
-                return Err(ConfigError::InvalidTlsPolicy {
-                    field: "tls.backend",
-                    reason: compliance_mode.openssl_backend_reason(),
-                });
+            #[cfg(feature = "tls-rustls-fips")]
+            if self.backend == TlsBackend::Rustls {
+                return Ok(());
             }
-            Ok(())
+            #[cfg(feature = "tls-openssl-fips")]
+            if self.backend == TlsBackend::Openssl {
+                return Ok(());
+            }
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.backend",
+                reason: compliance_mode.backend_reason(),
+            })
         }
     }
 
@@ -2642,26 +2648,26 @@ impl TlsComplianceMode {
         }
     }
 
-    #[cfg(not(feature = "tls-openssl-fips"))]
+    #[cfg(not(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips")))]
     fn missing_feature_reason(self) -> &'static str {
         match self {
             Self::Iso19790 => {
-                "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790; see docs/fips.md"
+                "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790; see docs/fips.md"
             }
             Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => {
-                "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-openssl-fips; see docs/fips.md"
+                "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-rustls-fips or tls-openssl-fips; see docs/fips.md"
             }
         }
     }
 
-    #[cfg(feature = "tls-openssl-fips")]
-    fn openssl_backend_reason(self) -> &'static str {
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn backend_reason(self) -> &'static str {
         match self {
             Self::Iso19790 => {
-                "tls.iso19790.required with this build requires backend = \"openssl\""
+                "tls.iso19790.required requires a configured backend supported by this FIPS/ISO-capable build"
             }
             Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => {
-                "tls.fips.required with this build requires backend = \"openssl\""
+                "tls.fips.required requires a configured backend supported by this FIPS-capable build"
             }
         }
     }
@@ -11060,17 +11066,26 @@ mod tests {
         assert!(config.tls.fips.required);
         assert_eq!(config.tls.compliance_mode().label(), "FIPS 140-3");
 
-        #[cfg(not(feature = "tls-openssl-fips"))]
+        #[cfg(not(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips")))]
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidTlsPolicy {
                 field: "tls.fips.required",
-                reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-openssl-fips; see docs/fips.md",
+                reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-rustls-fips or tls-openssl-fips; see docs/fips.md",
             })
         );
 
         #[cfg(feature = "tls-openssl-fips")]
         assert_eq!(config.validate(), Ok(()));
+
+        #[cfg(all(feature = "tls-rustls-fips", not(feature = "tls-openssl-fips")))]
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.backend",
+                reason: "tls.fips.required requires a configured backend supported by this FIPS-capable build",
+            })
+        );
     }
 
     #[test]
@@ -11096,41 +11111,54 @@ mod tests {
         assert!(config.tls.iso19790.required);
         assert_eq!(config.tls.compliance_mode().label(), "ISO/IEC 19790");
 
-        #[cfg(not(feature = "tls-openssl-fips"))]
+        #[cfg(not(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips")))]
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidTlsPolicy {
                 field: "tls.iso19790.required",
-                reason: "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790; see docs/fips.md",
+                reason: "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790; see docs/fips.md",
             })
         );
 
         #[cfg(feature = "tls-openssl-fips")]
         assert_eq!(config.validate(), Ok(()));
+
+        #[cfg(all(feature = "tls-rustls-fips", not(feature = "tls-openssl-fips")))]
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.backend",
+                reason: "tls.iso19790.required requires a configured backend supported by this FIPS/ISO-capable build",
+            })
+        );
     }
 
     #[test]
-    #[cfg(feature = "tls-openssl-fips")]
-    fn rejects_tls_fips_policy_with_non_openssl_backend() {
-        let config: Config = toml::from_str(
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn rejects_tls_fips_policy_with_unsupported_backend_for_build() {
+        #[cfg(feature = "tls-openssl-fips")]
+        let backend = "rustls";
+        #[cfg(all(feature = "tls-rustls-fips", not(feature = "tls-openssl-fips")))]
+        let backend = "openssl";
+        let config: Config = toml::from_str(&format!(
             r#"
             [tls]
             enabled = true
-            backend = "rustls"
+            backend = "{backend}"
             curve_preferences = ["CurveP256", "CurveP384"]
             cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
 
             [tls.fips]
             required = true
-            "#,
-        )
+            "#
+        ))
         .unwrap();
 
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidTlsPolicy {
                 field: "tls.backend",
-                reason: "tls.fips.required with this build requires backend = \"openssl\"",
+                reason: "tls.fips.required requires a configured backend supported by this FIPS-capable build",
             })
         );
     }

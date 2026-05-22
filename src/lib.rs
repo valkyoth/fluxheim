@@ -36,7 +36,7 @@ pub mod security;
 pub mod snapshot;
 #[cfg(any(
     feature = "tls",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     feature = "tls-openssl",
     feature = "tls-boringssl",
     feature = "tls-s2n"
@@ -53,16 +53,23 @@ pub mod runtime;
 pub(crate) mod test_support;
 
 #[cfg(any(
-    all(feature = "tls-rustls", feature = "tls-openssl"),
-    all(feature = "tls-rustls", feature = "tls-boringssl"),
-    all(feature = "tls-rustls", feature = "tls-s2n"),
+    all(feature = "tls-rustls", feature = "tls-rustls-fips"),
+    all(feature = "tls-rustls-backend", feature = "tls-openssl"),
+    all(feature = "tls-rustls-backend", feature = "tls-boringssl"),
+    all(feature = "tls-rustls-backend", feature = "tls-s2n"),
     all(feature = "tls-openssl", feature = "tls-boringssl"),
     all(feature = "tls-openssl", feature = "tls-s2n"),
     all(feature = "tls-boringssl", feature = "tls-s2n"),
 ))]
 compile_error!(
-    "select only one Fluxheim TLS backend feature: tls-rustls, tls-openssl, tls-boringssl, or tls-s2n"
+    "select only one Fluxheim TLS backend feature: tls-rustls, tls-rustls-fips, tls-openssl, tls-boringssl, or tls-s2n"
 );
+
+#[cfg(all(
+    feature = "tls-rustls-backend",
+    not(any(feature = "tls-rustls", feature = "tls-rustls-fips"))
+))]
+compile_error!("tls-rustls-backend is an internal feature; select tls-rustls or tls-rustls-fips");
 
 #[cfg(all(feature = "privacy-mode", feature = "cache"))]
 compile_error!(

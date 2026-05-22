@@ -41,6 +41,7 @@ pub struct TlsSettings {
     key_path: String,
     client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
     cert_resolver: Option<Arc<dyn ResolvesServerCert>>,
+    require_fips: bool,
 }
 
 pub struct Acceptor {
@@ -87,6 +88,9 @@ impl TlsSettings {
         if let Some(alpn_protocols) = self.alpn_protocols {
             config.alpn_protocols = alpn_protocols;
         }
+        if self.require_fips && !config.fips() {
+            panic!("Rustls listener configuration does not report FIPS mode");
+        }
 
         Acceptor {
             acceptor: RusTlsAcceptor::from(Arc::new(config)),
@@ -123,6 +127,11 @@ impl TlsSettings {
         self.crypto_provider.cipher_suites = cipher_suites;
     }
 
+    /// Set the rustls crypto provider for this endpoint.
+    pub fn set_crypto_provider(&mut self, crypto_provider: CryptoProvider) {
+        self.crypto_provider = crypto_provider;
+    }
+
     /// Set the supported key exchange groups for this endpoint.
     pub fn set_kx_groups(&mut self, kx_groups: Vec<&'static dyn SupportedKxGroup>) {
         self.crypto_provider.kx_groups = kx_groups;
@@ -131,6 +140,11 @@ impl TlsSettings {
     /// Configure mTLS by providing a rustls client certificate verifier.
     pub fn set_client_cert_verifier(&mut self, verifier: Arc<dyn ClientCertVerifier>) {
         self.client_cert_verifier = Some(verifier);
+    }
+
+    /// Require rustls to report FIPS mode for the generated server config.
+    pub fn set_require_fips(&mut self, require_fips: bool) {
+        self.require_fips = require_fips;
     }
 
     pub fn intermediate(cert_path: &str, key_path: &str) -> Result<Self>
@@ -145,6 +159,7 @@ impl TlsSettings {
             key_path: key_path.to_string(),
             client_cert_verifier: None,
             cert_resolver: None,
+            require_fips: false,
         })
     }
 
@@ -160,6 +175,7 @@ impl TlsSettings {
             key_path: String::new(),
             client_cert_verifier: None,
             cert_resolver: Some(cert_resolver),
+            require_fips: false,
         })
     }
 

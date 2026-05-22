@@ -14646,7 +14646,7 @@ mod tests {
     #[cfg(feature = "load-balancer")]
     #[test]
     fn builds_load_balancer_background_services_for_configured_pools() {
-        #[cfg(feature = "tls-rustls")]
+        #[cfg(feature = "tls-rustls-backend")]
         crate::tls::install_rustls_crypto_provider();
 
         let config = Config {

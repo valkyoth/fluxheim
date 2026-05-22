@@ -52,6 +52,8 @@ pub enum ConfigTesterProfile {
     Proxy,
     FipsOpenssl,
     Iso19790Openssl,
+    FipsRustls,
+    Iso19790Rustls,
     WebPhp,
     Development,
     LoadBalancer,
@@ -67,7 +69,7 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     crate::tls::install_rustls_crypto_provider();
@@ -147,6 +149,12 @@ fn validate_profile_config(
     ) {
         validate_fips_openssl_profile_config(config, profile)?;
     }
+    if matches!(
+        profile,
+        ConfigTesterProfile::FipsRustls | ConfigTesterProfile::Iso19790Rustls
+    ) {
+        validate_fips_rustls_profile_config(config, profile)?;
+    }
     Ok(())
 }
 
@@ -176,6 +184,8 @@ impl ProfilePolicy {
             ConfigTesterProfile::Proxy
             | ConfigTesterProfile::FipsOpenssl
             | ConfigTesterProfile::Iso19790Openssl
+            | ConfigTesterProfile::FipsRustls
+            | ConfigTesterProfile::Iso19790Rustls
             | ConfigTesterProfile::LoadBalancer => Self {
                 proxy: true,
                 web: false,
@@ -200,6 +210,8 @@ impl ConfigTesterProfile {
             Self::Proxy => "proxy",
             Self::FipsOpenssl => "fips-openssl",
             Self::Iso19790Openssl => "iso19790-openssl",
+            Self::FipsRustls => "fips-rustls",
+            Self::Iso19790Rustls => "iso19790-rustls",
             Self::WebPhp => "web-php",
             Self::Development => "development",
             Self::LoadBalancer => "load-balancer",
@@ -239,6 +251,27 @@ fn validate_fips_openssl_profile_config(
     if config.tls.backend != TlsBackend::Openssl {
         return Err(format!(
             "target profile {} requires [tls] backend = \"openssl\"",
+            profile.as_str()
+        )
+        .into());
+    }
+    if !config.tls.compliance_mode().required() {
+        return Err(format!(
+            "target profile {} requires [tls.fips] required = true or [tls.iso19790] required = true",
+            profile.as_str()
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn validate_fips_rustls_profile_config(
+    config: &Config,
+    profile: ConfigTesterProfile,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if config.tls.backend != TlsBackend::Rustls {
+        return Err(format!(
+            "target profile {} requires [tls] backend = \"rustls\"",
             profile.as_str()
         )
         .into());
@@ -556,6 +589,67 @@ mod tests {
         );
 
         validate_profile_config(&config, ConfigTesterProfile::Iso19790Openssl).unwrap();
+    }
+
+    #[test]
+    fn fips_rustls_profile_requires_rustls_backend() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "openssl"
+
+            [tls.fips]
+            required = true
+            "#,
+        );
+
+        let error = validate_profile_config(&config, ConfigTesterProfile::FipsRustls).unwrap_err();
+
+        assert!(error.to_string().contains("backend = \"rustls\""));
+    }
+
+    #[test]
+    fn fips_rustls_profile_requires_fips_guard() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "rustls"
+            "#,
+        );
+
+        let error = validate_profile_config(&config, ConfigTesterProfile::FipsRustls).unwrap_err();
+
+        assert!(error.to_string().contains("required = true"));
+    }
+
+    #[test]
+    fn fips_rustls_profile_accepts_fips_required_rustls() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "rustls"
+
+            [tls.fips]
+            required = true
+            "#,
+        );
+
+        validate_profile_config(&config, ConfigTesterProfile::FipsRustls).unwrap();
+    }
+
+    #[test]
+    fn iso19790_rustls_profile_accepts_iso19790_required_rustls() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "rustls"
+
+            [tls.iso19790]
+            required = true
+            "#,
+        );
+
+        validate_profile_config(&config, ConfigTesterProfile::Iso19790Rustls).unwrap();
     }
 
     fn write_test_config(label: &str, contents: &str) -> std::path::PathBuf {

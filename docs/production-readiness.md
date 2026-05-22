@@ -203,6 +203,13 @@ validated cryptographic module; operators still need the selected module's CMVP
 certificate, Security Policy, provider configuration, platform evidence, and
 operational records.
 
+The `1.3.5` development line adds a rustls/AWS-LC FIPS candidate through
+`profile-fips-rustls`, `tls-rustls-fips`, and the ISO/IEC 19790 terminology
+alias `profile-iso19790-rustls`. It requires `[tls] backend = "rustls"` plus a
+FIPS/ISO-required guard, uses rustls' AWS-LC FIPS provider path, and requires
+the `aws-lc-fips-sys` build toolchain including CMake, Go, and a C compiler.
+Treat it as backend evidence only, with the same non-TLS crypto caveats.
+
 ## Operator Checks
 
 Before using a Fluxheim build for a real site, run the stable gate from the repo
@@ -225,12 +232,19 @@ deployment:
 ```bash
 FLUXHEIM_GATE_TLS_BACKENDS=1 \
 FLUXHEIM_GATE_FIPS_OPENSSL=1 \
+FLUXHEIM_GATE_FIPS_RUSTLS=1 \
 FLUXHEIM_GATE_TLS_SCAN=1 \
 FLUXHEIM_GATE_LOAD=1 \
 FLUXHEIM_GATE_FRAMING=1 \
 FLUXHEIM_GATE_FUZZ_CHECK=1 \
 scripts/stable_release_gate.sh check
 ```
+
+Use `check` mode for local development on rolling distributions. For release
+mode rustls/AWS-LC FIPS evidence, prefer the supported builder workflow in
+[FIPS-Capable Deployments](fips.md); otherwise set
+`FLUXHEIM_GATE_FIPS_RUSTLS=0` locally and attach the rustls evidence from that
+builder.
 
 Run the Podman smoke when container paths or image definitions change:
 

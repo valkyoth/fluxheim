@@ -167,11 +167,20 @@ checks such as TLS backend matrices, load testing, fuzz target compilation, and
 Podman image smoke tests.
 
 For release-candidate validation, run the deeper local gate. It enables the TLS
-backend matrix, local TLS scan, local load smoke, raw request-framing smoke, and
+backend matrix, OpenSSL FIPS-capable validation, rustls/AWS-LC FIPS-capable
+validation, local TLS scan, local load smoke, raw request-framing smoke, and
 fuzz target compile check:
 
 ```bash
 scripts/stable_release_deep_gate.sh release
+```
+
+If the local release builder can run the rest of the deep gate but is not an
+AWS-LC-supported rustls FIPS builder, disable only that gate and attach rustls
+evidence from the supported builder separately:
+
+```bash
+FLUXHEIM_GATE_FIPS_RUSTLS=0 scripts/stable_release_deep_gate.sh release
 ```
 
 Enable optional local matrices when the release includes those deliverables:
@@ -179,6 +188,7 @@ Enable optional local matrices when the release includes those deliverables:
 ```bash
 FLUXHEIM_GATE_TLS_BACKENDS=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_FIPS_OPENSSL=1 scripts/stable_release_gate.sh release
+FLUXHEIM_GATE_FIPS_RUSTLS=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_OWASP_RUN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_TLS_SCAN=1 scripts/stable_release_gate.sh release
 FLUXHEIM_GATE_LOAD=1 scripts/stable_release_gate.sh release
@@ -393,6 +403,7 @@ cargo build --release --no-default-features --features profile-cache-edge
 cargo build --release --no-default-features --features profile-proxy-edge
 cargo build --release --no-default-features --features profile-observability
 scripts/validate-fips-openssl.sh check
+scripts/validate-fips-rustls.sh check
 scripts/smoke_peer_fill_cache.sh
 scripts/smoke_observability_local.sh
 ```
@@ -408,6 +419,29 @@ FLUXHEIM_REQUIRE_BORINGSSL=1 scripts/validate-tls-backends.sh release
 Use the second command on release builders that are expected to support
 `tls-boringssl`; otherwise the helper validates Rustls, OpenSSL, and s2n and
 prints an explicit skip when `libclang` is unavailable.
+
+The rustls/AWS-LC FIPS validation helper requires the `aws-lc-fips-sys` build
+toolchain, including CMake, Go, and a C compiler. Skip it on release builders
+that are not intended to produce rustls/AWS-LC FIPS candidate evidence.
+
+For release evidence, use an AWS-LC-supported FIPS builder. Rolling
+distribution compilers can be too new for `aws-lc-fips-sys`; the helper fails
+early for known newer GCC/Clang families unless the investigation-only
+`FLUXHEIM_ALLOW_EXPERIMENTAL_AWS_LC_FIPS_TOOLCHAIN=1` override is set.
+
+If local OpenSSL FIPS evidence works but rustls/AWS-LC evidence must be
+collected elsewhere, run `scripts/release_evidence.sh VERSION
+--skip-fips-rustls` locally and attach the rustls/AWS-LC evidence captured from
+the supported builder separately. Use `--skip-fips-openssl` for the opposite
+case, or `--skip-fips` only when no FIPS evidence is relevant to that release.
+
+For a clean container check on common stable tooling, run the helper inside a
+Debian Bookworm Rust image with CMake, Go, Clang/libclang, and pkg-config:
+
+```bash
+podman run --rm -v "$PWD:/work:Z" -w /work docker.io/library/rust:1-bookworm \
+  bash -c 'set -e; export PATH=/usr/local/cargo/bin:$PATH; apt-get update; apt-get install -y --no-install-recommends cmake golang-go clang libclang-dev pkg-config perl ca-certificates; CARGO_TARGET_DIR=/tmp/fluxheim-target scripts/validate-fips-rustls.sh release'
+```
 
 For hardware-specific local binaries, use `target-cpu=native` only for the
 machine that will run the binary. Do not publish those binaries as portable

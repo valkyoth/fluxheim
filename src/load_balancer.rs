@@ -113,7 +113,7 @@ mod tests {
     use super::UpstreamLoadBalancer;
 
     fn install_test_crypto_provider() {
-        #[cfg(feature = "tls-rustls")]
+        #[cfg(feature = "tls-rustls-backend")]
         crate::tls::install_rustls_crypto_provider();
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.3.4"
+version = "1.3.5"
 edition = "2024"
 rust-version = "1.95"
 license = "EUPL-1.2"
@@ -44,7 +44,10 @@ web = [
     "dep:percent-encoding",
 ]
 tls = ["ingress", "dep:rustix"]
-tls-rustls = ["tls", "pingora/rustls", "dep:rustls", "rustls/ring"]
+tls-rustls-backend = ["tls", "pingora/rustls", "dep:rustls"]
+tls-rustls = ["tls-rustls-backend", "rustls/ring"]
+tls-rustls-fips = ["tls-rustls-backend", "rustls/fips"]
+tls-rustls-iso19790 = ["tls-rustls-fips"]
 tls-openssl = ["tls", "pingora/openssl"]
 tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl"]
 tls-openssl-iso19790 = ["tls-openssl-fips"]
@@ -111,6 +114,8 @@ profile-proxy-edge = ["proxy", "tls-rustls", "security"]
 profile-load-balancer-edge = ["proxy", "load-balancer", "tls-rustls", "security"]
 profile-fips-openssl = ["proxy", "security", "tls-openssl-fips"]
 profile-iso19790-openssl = ["profile-fips-openssl", "tls-openssl-iso19790"]
+profile-fips-rustls = ["proxy", "security", "tls-rustls-fips"]
+profile-iso19790-rustls = ["profile-fips-rustls", "tls-rustls-iso19790"]
 
 [dependencies]
 arc-swap = "1.9.1"

@@ -202,8 +202,9 @@ Every major security check should have:
 - Rationale linking the check to a threat, requirement, or release gate.
 
 Existing scripts that fit this pattern include release metadata validation,
-OWASP baseline checks, FIPS/OpenSSL validation, config fixture validation,
-fuzzing targets, cargo-audit, cargo-deny, CodeQL, and PHP-FPM regression tests.
+OWASP baseline checks, FIPS-capable OpenSSL and rustls/AWS-LC validation,
+config fixture validation, fuzzing targets, cargo-audit, cargo-deny, CodeQL,
+and PHP-FPM regression tests.
 
 ## Package Strategy
 

@@ -1,0 +1,37 @@
+# Minimal FIPS-capable rustls/AWS-LC validation example.
+#
+# Build a matching binary with:
+#   cargo build --no-default-features --features profile-fips-rustls
+#
+# The rustls FIPS path builds aws-lc-fips-sys and therefore requires the
+# toolchain documented by that crate, including CMake, Go, and a C compiler.
+#
+# Validate the profile and provider availability with:
+#   cargo run --no-default-features --features profile-fips-rustls \
+#     --bin fluxheim-config-tester -- \
+#     --config examples/fips-rustls.toml \
+#     --profile fips-rustls \
+#     --no-runtime-paths \
+#     --crypto
+#
+# This file is an evidence/diagnostic fixture. Real deployments still need
+# vhosts, certificates, a validated AWS-LC FIPS module path, and the module
+# Security Policy evidence described in docs/fips.md.
+
+[server]
+listen = ["127.0.0.1:8080"]
+
+[tls]
+enabled = true
+backend = "rustls"
+profile = "intermediate"
+min_protocol = "tls1.2"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = [
+  "TLS_AES_256_GCM_SHA384",
+  "TLS_AES_128_GCM_SHA256",
+  "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+]
+
+[tls.fips]
+required = true

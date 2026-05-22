@@ -7,6 +7,29 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.3.5 - Unreleased
+
+### Added
+
+- Added the rustls/AWS-LC FIPS-capable candidate backend feature:
+  `tls-rustls-fips`, with `tls-rustls-iso19790`, `profile-fips-rustls`, and
+  `profile-iso19790-rustls` validation/terminology aliases.
+- Added provider-aware rustls TLS setup so default rustls builds keep using
+  ring while FIPS rustls builds use `rustls::crypto::default_fips_provider()`.
+- Added rustls FIPS diagnostics to `fluxheim crypto` and
+  `fluxheim-config-tester --crypto`.
+- Added `examples/fips-rustls.toml`, `examples/iso19790-rustls.toml`, and
+  `scripts/validate-fips-rustls.sh` for local/manual AWS-LC FIPS candidate
+  validation.
+
+### Changed
+
+- Split the internal rustls backend feature from the public `tls-rustls`
+  provider selection so `tls-rustls` and `tls-rustls-fips` remain mutually
+  exclusive public choices.
+- Documented that rustls/AWS-LC FIPS candidate builds require the
+  `aws-lc-fips-sys` build toolchain, including CMake, Go, and a C compiler.
+
 ## 1.3.4 - OpenSSL FIPS-Capable TLS
 
 Released: 2026-05-21

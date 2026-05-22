@@ -13,6 +13,37 @@ pub fn install_rustls_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
+#[cfg(feature = "tls-rustls-fips")]
+pub fn install_rustls_crypto_provider() {
+    let _ = rustls::crypto::default_fips_provider().install_default();
+}
+
+#[cfg(feature = "tls-rustls")]
+pub fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
+    rustls::crypto::ring::default_provider()
+}
+
+#[cfg(feature = "tls-rustls-fips")]
+pub fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
+    rustls::crypto::default_fips_provider()
+}
+
+#[cfg(feature = "tls-rustls-fips")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RustlsFipsStatus {
+    pub provider_fips: bool,
+}
+
+#[cfg(feature = "tls-rustls-fips")]
+pub fn probe_rustls_fips_provider() -> Result<RustlsFipsStatus, String> {
+    let provider = rustls::crypto::default_fips_provider();
+    let provider_fips = provider.fips();
+    if !provider_fips {
+        return Err("rustls AWS-LC FIPS provider does not report FIPS mode".to_owned());
+    }
+    Ok(RustlsFipsStatus { provider_fips })
+}
+
 #[cfg(feature = "tls-openssl-fips")]
 static OPENSSL_FIPS_PROVIDER_RESULT: std::sync::OnceLock<Result<(), String>> =
     std::sync::OnceLock::new();
@@ -120,8 +151,24 @@ pub fn validate_fips_runtime_config(
         return Ok(());
     }
 
+    #[cfg(feature = "tls-rustls-fips")]
+    if config.tls.backend == crate::config::TlsBackend::Rustls {
+        let status = probe_rustls_fips_provider().map_err(|error| {
+            format!(
+                "{} required mode rustls/AWS-LC provider check failed: {error}",
+                compliance_mode.label()
+            )
+        })?;
+        log::info!(
+            "{} required mode rustls/AWS-LC provider check passed; provider_fips={}",
+            compliance_mode.label(),
+            status.provider_fips
+        );
+        return Ok(());
+    }
+
     #[cfg(feature = "tls-openssl-fips")]
-    {
+    if config.tls.backend == crate::config::TlsBackend::Openssl {
         let status = activate_openssl_fips_provider().map_err(|error| {
             format!(
                 "{} required mode OpenSSL provider check failed: {error}",
@@ -134,13 +181,22 @@ pub fn validate_fips_runtime_config(
             status.openssl_version,
             status.default_properties_fips_enabled
         );
-        Ok(())
+        return Ok(());
     }
 
-    #[cfg(not(feature = "tls-openssl-fips"))]
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
     {
         Err(format!(
-            "{} required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790",
+            "{} required mode is not supported by the configured TLS backend in this build",
+            compliance_mode.label()
+        )
+        .into())
+    }
+
+    #[cfg(not(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips")))]
+    {
+        Err(format!(
+            "{} required mode requires a FIPS/ISO-capable TLS backend feature such as tls-rustls-fips, tls-openssl-fips, or tls-openssl-iso19790",
             compliance_mode.label()
         )
         .into())

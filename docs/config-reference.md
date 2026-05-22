@@ -1161,16 +1161,15 @@ The global `[[tls.certificates]]` table is capped at 1024 certificate pairs.
 Release validation must still scan every release candidate with a TLS scanner
 before publishing a stable release.
 
-### FIPS / ISO-Capable OpenSSL Guard
+### FIPS / ISO-Capable TLS Guard
 
 `[tls.fips] required = true` is accepted by the config schema as a fail-closed
-guard for the `1.3.4` OpenSSL FIPS-capable TLS line. `[tls.iso19790]
-required = true` is an ISO/IEC 19790 terminology alias for the same
-validated-provider enforcement path. Neither setting is a blanket FIPS or
-ISO/IEC 19790 compliance claim. When enabled, Fluxheim rejects non-NIST or
-unproven groups such as `X25519` and `X25519MLKEM768`, rejects non-approved
-cipher choices such as ChaCha20 suites, and requires a backend-specific proof
-path.
+guard for FIPS/ISO-capable TLS builds. `[tls.iso19790] required = true` is an
+ISO/IEC 19790 terminology alias for the same validated-provider enforcement
+path. Neither setting is a blanket FIPS or ISO/IEC 19790 compliance claim. When
+enabled, Fluxheim rejects non-NIST or unproven groups such as `X25519` and
+`X25519MLKEM768`, rejects non-approved cipher choices such as ChaCha20 suites,
+and requires a backend-specific proof path.
 
 Default builds fail closed because they do not contain a FIPS/ISO-capable proof
 path. Builds compiled with `tls-openssl-fips` or the
@@ -1180,15 +1179,21 @@ cipher can be fetched with the `fips=yes` property query, enables OpenSSL
 default FIPS properties for the process-default library context, verifies those
 default properties, and checks that the default fetch path rejects a non-FIPS
 cipher.
+Builds compiled with `tls-rustls-fips` may use `backend = "rustls"`: runtime
+validation checks the rustls AWS-LC FIPS provider, TLS setup uses
+`rustls::crypto::default_fips_provider()`, and listener startup rejects a
+FIPS/ISO-required config unless `ServerConfig::fips()` reports true.
 Operators still need the selected module's CMVP certificate, Security Policy,
-OpenSSL provider configuration, platform evidence, and deployment records.
-Fluxheim does not hardcode an OpenSSL provider path; provider discovery follows
-the platform OpenSSL configuration and environment visible to the process.
+provider/build configuration, platform evidence, and deployment records.
+Fluxheim does not hardcode an OpenSSL provider path; OpenSSL provider discovery
+follows the platform OpenSSL configuration and environment visible to the
+process. The rustls/AWS-LC FIPS path follows rustls and aws-lc-fips-sys build
+requirements, including CMake, Go, and a C compiler.
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to print compiled
 TLS backend diagnostics. Use [FIPS-Capable Deployments](fips.md) for the full
-compliance boundary and post-`1.3.4` implementation plan. Do not treat a Cargo
-feature or this config block alone as a FIPS compliance claim.
+compliance boundary and roadmap. Do not treat a Cargo feature or this config
+block alone as a FIPS compliance claim.
 
 Check certificate storage permissions separately:
 

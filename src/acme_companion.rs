@@ -66,7 +66,7 @@ where
     T: Into<std::ffi::OsString> + Clone,
 {
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     crate::tls::install_rustls_crypto_provider();
@@ -100,7 +100,7 @@ fn run_renew(
     vhost: Option<&str>,
     reload_after_renewal: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    #[cfg(feature = "tls-rustls")]
+    #[cfg(feature = "tls-rustls-backend")]
     crate::tls::install_rustls_crypto_provider();
 
     let config = load_validated_config(config_path)?;

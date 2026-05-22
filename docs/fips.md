@@ -15,10 +15,11 @@ published Security Policy.
 Current stable line: `1.3.4`.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
-ISO/IEC 19790 terminology aliases for compliance evidence plumbing. This is not
-a broad "FIPS compliant" or "ISO/IEC 19790 compliant" claim. The implemented
-target is the OpenSSL backend proof path, while rustls, BoringSSL, s2n, and
-non-TLS internal crypto work remain explicitly staged.
+ISO/IEC 19790 terminology aliases for compliance evidence plumbing. The
+`1.3.5` development line adds a rustls/AWS-LC FIPS candidate path. Neither is a
+broad "FIPS compliant" or "ISO/IEC 19790 compliant" claim. The implemented
+targets are backend proof paths, while BoringSSL, s2n, and non-TLS internal
+crypto work remain explicitly staged.
 
 ## Official References
 
@@ -322,40 +323,60 @@ scripts/validate-fips-openssl.sh check
 
 ### rustls With AWS-LC FIPS
 
-This is desirable, but it requires more Fluxheim refactoring than OpenSSL.
-
-Current blocker:
-
-- Fluxheim's rustls path currently uses ring-specific helpers in TLS setup.
-  Real rustls FIPS support needs provider-aware helpers before a clean
-  `tls-rustls-fips` feature can be implemented.
-
-Planned feature shape:
+The `1.3.5` development line includes a rustls/AWS-LC FIPS candidate. It is a
+compile-time alternative to the default rustls/ring backend:
 
 ```toml
-tls-rustls-fips = ["tls", "pingora/rustls", "dep:rustls", "rustls/fips"]
+tls-rustls-fips = ["tls-rustls-backend", "rustls/fips"]
+tls-rustls-iso19790 = ["tls-rustls-fips"]
+profile-fips-rustls = ["proxy", "security", "tls-rustls-fips"]
+profile-iso19790-rustls = ["profile-fips-rustls", "tls-rustls-iso19790"]
 ```
 
-Expected implementation work:
+Build and validation examples:
 
-- Replace ring-specific rustls provider calls with provider-aware helper
-  functions.
-- Install or pass the rustls AWS-LC FIPS provider rather than the ring
-  provider.
-- Construct server and client configs from provider-supported suites filtered
-  through the Fluxheim FIPS TLS policy.
-- Verify `ServerConfig::fips()` and `ClientConfig::fips()` where rustls
-  exposes those checks.
-- Document build requirements for `aws-lc-fips-sys`, including CMake, Go, and
-  a C compiler.
-- Prove the AWS-LC module certificate and Security Policy boundary in release
-  evidence.
+```bash
+cargo build --no-default-features --features profile-fips-rustls
+cargo build --no-default-features --features profile-iso19790-rustls
+scripts/validate-fips-rustls.sh check
+```
+
+`tls-rustls-fips` enables rustls' `fips` feature, which routes rustls through
+AWS-LC FIPS support and pulls in `aws-lc-fips-sys`. Building it requires the
+toolchain documented by that crate, including CMake, Go, and a C compiler.
+Fluxheim installs or passes `rustls::crypto::default_fips_provider()` instead
+of the ring provider, maps configured suites/groups through the AWS-LC rustls
+provider, and rejects startup when a FIPS/ISO-required rustls listener does not
+report `ServerConfig::fips()`.
+
+Release-mode rustls/AWS-LC FIPS evidence should be generated on an
+AWS-LC-supported FIPS builder, not an arbitrary rolling distribution compiler.
+Upstream `aws-lc-fips-sys` has known build failures with newer compiler
+families such as GCC >= 14 and newer Clang releases. Fluxheim's validation
+script therefore fails early in `release` mode for those toolchains unless
+`FLUXHEIM_ALLOW_EXPERIMENTAL_AWS_LC_FIPS_TOOLCHAIN=1` is set. That override is
+for investigation only; compliance evidence still has to match the selected
+module Security Policy.
+
+A practical smoke path that avoids rolling-host compiler drift is to run the
+release helper in `docker.io/library/rust:1-bookworm` after installing CMake,
+Go, Clang/libclang, pkg-config, Perl, and CA certificates. This has been
+verified to build both `profile-fips-rustls` and `profile-iso19790-rustls` in
+release mode and to report `rustls_fips_provider: available
+(provider_fips=true)`.
+
+The repository includes `examples/fips-rustls.toml` and
+`examples/iso19790-rustls.toml` for config-tester validation. Those fixtures
+intentionally use local/static certificate assumptions and do not prove ACME,
+application, cache, or telemetry cryptography.
 
 Important caveat:
 
 The rustls `fips` feature can make rustls use the AWS-LC FIPS path, but
-Fluxheim still has to ensure all selected suites/groups and all non-TLS crypto
-paths are compatible with FIPS-required mode.
+regulated operators still have to match the AWS-LC module certificate, Security
+Policy, platform, and build procedure. Fluxheim's check proves that its rustls
+TLS listener is built from a provider and config that report FIPS mode; it does
+not prove the whole deployment or every non-TLS crypto path.
 
 ### BoringSSL And s2n
 
@@ -480,10 +501,15 @@ Deliverables:
 
 - Refactor rustls code away from ring-specific helpers.
 - `tls-rustls-fips` feature using rustls' FIPS/AWS-LC provider path.
-- Runtime FIPS status checks on rustls server/client configs.
-- Build documentation for AWS-LC FIPS dependencies.
+- Runtime FIPS status checks on rustls provider and server configs.
+- `profile-fips-rustls` and `profile-iso19790-rustls` aliases.
+- `examples/fips-rustls.toml`, `examples/iso19790-rustls.toml`, and
+  `scripts/validate-fips-rustls.sh`.
+- Build documentation for AWS-LC FIPS dependencies, including Go.
 - CI build coverage where feasible, or a documented manual evidence workflow
   if CI cannot reasonably host the validated environment.
+- Release-mode evidence guard for unsupported/newer compiler families, with an
+  explicit override only for investigation builds.
 
 Likely limitations:
 

@@ -35,14 +35,16 @@ grouped build profiles as normal feature aliases such as `profile-core`,
 Fluxheim 1.3 also adds focused profile aliases: `profile-full`,
 `profile-web-server`, `profile-cache-edge`, `profile-proxy-edge`,
 `profile-load-balancer-edge`, `profile-fips-openssl`, and
-`profile-iso19790-openssl`.
+`profile-iso19790-openssl`. The `1.3.5` development line also has
+`profile-fips-rustls` and `profile-iso19790-rustls` for the rustls/AWS-LC FIPS
+candidate path.
 `profile-development` is a broad development profile with all compatible
 production modules enabled: full proxy/web/cache and load-balancer support,
 PHP-FPM, ACME, Prometheus, OTLP metrics, and OTel tracing.
 
 TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
-`tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls` is the default and
-recommended backend.
+`tls-rustls-fips`, `tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls`
+is the default and recommended non-FIPS backend.
 
 For FIPS/ISO-capable OpenSSL testing, build with `tls-openssl-fips` or the
 `tls-openssl-iso19790` alias instead of the default rustls backend and
@@ -57,9 +59,27 @@ cargo build --release --no-default-features --features profile-iso19790-openssl
 fluxheim crypto
 ```
 
-`profile-fips-openssl` is a narrow proof profile, not a limitation of the FIPS
-feature. For custom cache or PHP-FPM builds, select raw modules so that the
-binary has exactly one TLS backend:
+For rustls/AWS-LC FIPS candidate testing, build with `tls-rustls-fips` or a
+matching profile and configure `[tls] backend = "rustls"` plus `[tls.fips]
+required = true` or `[tls.iso19790] required = true`. This path builds
+`aws-lc-fips-sys`, so the build host needs CMake, Go, and a C compiler:
+
+```bash
+cargo build --release --no-default-features --features profile-fips-rustls
+cargo build --release --no-default-features --features profile-iso19790-rustls
+scripts/validate-fips-rustls.sh check
+```
+
+Use an AWS-LC-supported FIPS builder for
+`scripts/validate-fips-rustls.sh release`. Rolling distribution compilers can be
+ahead of AWS-LC FIPS support; newer GCC/Clang families may fail inside
+`aws-lc-fips-sys` before Fluxheim code is compiled. The helper fails early for
+known newer compiler families and documents the investigation-only override in
+[FIPS-Capable Deployments](fips.md).
+
+The FIPS/ISO profile aliases are narrow proof profiles, not a limitation of the
+FIPS features. For custom cache or PHP-FPM builds, select raw modules so that
+the binary has exactly one TLS backend:
 
 ```bash
 # FIPS/ISO-capable cache edge
@@ -71,16 +91,21 @@ cargo build --release --no-default-features \
   --features php-fpm,security,tls-openssl-fips
 ```
 
+For the rustls/AWS-LC candidate, replace `tls-openssl-fips` with
+`tls-rustls-fips` in those raw feature examples.
+
 These examples intentionally omit `acme-client`. For stricter FIPS/ISO
 deployment boundaries, prefer local/static certificate files generated and
 renewed by an approved external process. If you add `acme-client`, treat ACME
 account keys, JWS signing, HTTP client behavior, and CA policy as a separate
 evidence area outside the TLS provider proof.
 
-This feature makes Fluxheim fail closed, loads the OpenSSL FIPS provider,
-enables default FIPS properties for the process, and exposes provider/default
-property diagnostics. The deployment still needs the selected module's CMVP
-certificate, Security Policy, OpenSSL provider config, and platform evidence. See
+The OpenSSL feature makes Fluxheim fail closed, loads the OpenSSL FIPS
+provider, enables default FIPS properties for the process, and exposes
+provider/default property diagnostics. The rustls/AWS-LC candidate installs or
+passes the rustls FIPS provider and checks rustls' FIPS indicators for required
+configs. Either deployment still needs the selected module's CMVP certificate,
+Security Policy, provider/build configuration, and platform evidence. See
 [FIPS-Capable Deployments](fips.md).
 
 PHP support starts with `php-fpm` in `1.3.1`. It is never compiled by default;

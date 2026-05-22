@@ -7,7 +7,7 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.3.4
+RELEASE_VERSION=1.3.5
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
@@ -37,6 +37,17 @@ scripts/reproducible_build_check.sh
 scripts/validate-release-metadata.sh
 scripts/validate-owasp-top10-2025.sh check
 scripts/podman_smoke.sh
+```
+
+When collecting release evidence on a host that cannot build every FIPS
+backend, use the per-backend evidence skips and attach the missing backend
+evidence from its supported builder. For example, rolling distro compilers may
+be too new for `aws-lc-fips-sys`, so rustls/AWS-LC FIPS evidence can be
+collected in the Bookworm container documented in
+[Release Checklist](release-checklist.md):
+
+```bash
+scripts/release_evidence.sh "${RELEASE_VERSION}" --skip-fips-rustls
 ```
 
 For stable or release-candidate builds, prefer the stable gate:
@@ -194,17 +205,23 @@ Do not commit `dist/`; it is local release output.
 ### Optional FIPS-Capable Evidence
 
 For releases that changed FIPS-capable TLS code or docs, capture the local
-OpenSSL provider evidence when the release builder has a validated provider
+backend evidence when the release builder has the selected provider/toolchain
 installed:
 
 ```bash
 scripts/validate-fips-openssl.sh release
+scripts/validate-fips-rustls.sh release
 ```
 
-Record the command output, OpenSSL package/provider version, provider config
-path, and the selected module Security Policy reference. If the release builder
-does not have a FIPS provider installed, record the expected fail-closed output
-instead. `release` mode fails closed by default; set
+Record the command output, package/provider version, provider or build config,
+and the selected module Security Policy reference. The rustls/AWS-LC validation
+requires the `aws-lc-fips-sys` build toolchain, including CMake, Go, and a C
+compiler. If the local builder can collect OpenSSL FIPS evidence but not
+rustls/AWS-LC evidence, use `scripts/release_evidence.sh VERSION
+--skip-fips-rustls` locally and attach rustls/AWS-LC evidence from the
+supported builder separately. If the release builder does not have a FIPS
+provider/toolchain installed, record the expected fail-closed output instead.
+OpenSSL `release` mode fails closed by default; set
 `FLUXHEIM_REQUIRE_FIPS_PROVIDER=0` only for explicit stub-only validation
 environments where provider evidence is intentionally not being collected.
 
@@ -278,11 +295,13 @@ collect the release evidence block:
 scripts/release_evidence.sh "${RELEASE_VERSION}"
 ```
 
-The helper includes OpenSSL FIPS-capable evidence by running
-`scripts/validate-fips-openssl.sh release`, and OWASP Top 10 2025 baseline
+The helper includes OpenSSL and rustls/AWS-LC FIPS-capable evidence by running
+`scripts/validate-fips-openssl.sh release` and
+`scripts/validate-fips-rustls.sh release`, and OWASP Top 10 2025 baseline
 evidence by running `scripts/validate-owasp-top10-2025.sh run`. Use
-`--skip-fips` or `--skip-owasp` only for release lines where that evidence is
-not relevant.
+`--skip-fips-openssl` or `--skip-fips-rustls` when that backend's evidence is
+collected on another builder. Use `--skip-fips` or `--skip-owasp` only for
+release lines where that evidence is not relevant.
 
 ## 7. Publish And Verify Container Images
 

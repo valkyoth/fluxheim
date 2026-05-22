@@ -25,6 +25,7 @@ before Cargo starts compiling Pingora.
 | `cache` | Yes | Image cache module. Runtime caching still requires config. |
 | `ingress` | Yes, through `proxy`/TLS profiles | Shared Pingora/Tokio ingress primitives used by proxy, TLS, and ACME-capable focused builds. |
 | `tls-rustls` | Yes | rustls TLS backend. |
+| `tls-rustls-fips` | No | rustls/AWS-LC FIPS-capable TLS backend candidate. |
 | `security` | Yes | Security and release hardening helpers. |
 
 ## Optional Implemented Features
@@ -48,6 +49,8 @@ Select at most one:
 | Feature | Status |
 | --- | --- |
 | `tls-rustls` | Default and recommended. |
+| `tls-rustls-fips` | Optional rustls/AWS-LC FIPS-capable candidate. |
+| `tls-rustls-iso19790` | ISO/IEC 19790 terminology alias for `tls-rustls-fips`. |
 | `tls-openssl` | Optional OpenSSL backend. |
 | `tls-boringssl` | Optional BoringSSL backend. |
 | `tls-s2n` | Optional s2n-tls backend. |
@@ -118,6 +121,8 @@ feature aliases for common deployment shapes.
 | `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
 | `profile-fips-openssl` | `proxy`, `security`, `tls-openssl-fips` | FIPS-capable OpenSSL proxy build that links to the operator-selected OpenSSL provider. |
 | `profile-iso19790-openssl` | `profile-fips-openssl`, `tls-openssl-iso19790` | ISO/IEC 19790 terminology alias for the same OpenSSL validated-provider proof path. |
+| `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | FIPS-capable rustls/AWS-LC candidate build. |
+| `profile-iso19790-rustls` | `profile-fips-rustls`, `tls-rustls-iso19790` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
 Examples that match the official release artifacts:
 
@@ -130,6 +135,8 @@ cargo build --no-default-features --features profile-web-server,php-fpm,acme-cli
 cargo build --no-default-features --features profile-privacy
 cargo build --no-default-features --features profile-fips-openssl
 cargo build --no-default-features --features profile-iso19790-openssl
+cargo build --no-default-features --features profile-fips-rustls
+cargo build --no-default-features --features profile-iso19790-rustls
 ```
 
 The raw profile aliases do not force `acme-client`; that is intentional for
@@ -147,17 +154,28 @@ operator evidence; they use the same validated-provider enforcement path. The
 build still depends on the operator installing and configuring a validated
 OpenSSL FIPS/ISO provider according to that module's Security Policy.
 
+`tls-rustls-fips` is the rustls/AWS-LC FIPS-capable candidate path. It enables
+rustls' `fips` feature, uses `rustls::crypto::default_fips_provider()`, and
+checks rustls provider/server-config FIPS indicators when FIPS or ISO-required
+mode is active. Building this path pulls in `aws-lc-fips-sys` and requires
+CMake, Go, and a C compiler. `tls-rustls-iso19790` and
+`profile-iso19790-rustls` are terminology aliases for European/international
+operator evidence; they use the same rustls/AWS-LC FIPS candidate logic.
+
 ```bash
 cargo build --no-default-features --features profile-fips-openssl
 cargo build --no-default-features --features profile-iso19790-openssl
+cargo build --no-default-features --features profile-fips-rustls
+cargo build --no-default-features --features profile-iso19790-rustls
 ```
 
 Those profile aliases are deliberately narrow proof builds. FIPS/ISO-capable
 TLS is not limited to those aliases: custom builds can combine
-`tls-openssl-fips` with cache, static web serving, reverse proxying, or
-PHP-FPM. Do not add `tls-openssl-fips` to an existing profile alias that already
-enables `tls-rustls`, because Cargo features are additive and Fluxheim supports
-only one Pingora TLS backend per binary. Select the raw modules instead:
+`tls-openssl-fips` or `tls-rustls-fips` with cache, static web serving, reverse
+proxying, or PHP-FPM. Do not add a FIPS-capable TLS backend to an existing
+profile alias that already enables `tls-rustls`, because Cargo features are
+additive and Fluxheim supports only one Pingora TLS backend per binary. Select
+the raw modules instead:
 
 ```bash
 # FIPS/ISO-capable cache edge
@@ -168,6 +186,9 @@ cargo build --no-default-features \
 cargo build --no-default-features \
   --features php-fpm,security,tls-openssl-fips
 ```
+
+Use `tls-rustls-fips` instead of `tls-openssl-fips` in the raw feature examples
+when you want the rustls/AWS-LC candidate path.
 
 These combinations make Fluxheim's TLS boundary FIPS/ISO-capable when the
 operator provides a validated OpenSSL provider. They do not automatically make
@@ -184,12 +205,15 @@ prove the ACME account, JWS, HTTP client, or CA workflow is inside the same
 validated cryptographic boundary.
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
-binary can load the provider and enable OpenSSL default FIPS properties in the
-current environment. The
+binary can load or report the selected FIPS-capable provider in the current
+environment. The
 `fips-openssl` and `iso19790-openssl` config-tester profiles validate that a
 fixture uses `backend = "openssl"` and either `[tls.fips] required = true` or
 `[tls.iso19790] required = true`; see `examples/fips-openssl.toml` and
-`examples/iso19790-openssl.toml`. See
+`examples/iso19790-openssl.toml`. The `fips-rustls` and `iso19790-rustls`
+profiles validate the same guard with `backend = "rustls"`; see
+`examples/fips-rustls.toml`, `examples/iso19790-rustls.toml`, and
+`scripts/validate-fips-rustls.sh`. See
 [FIPS-Capable Deployments](fips.md) before using this for regulated systems.
 
 Focused image profile status:

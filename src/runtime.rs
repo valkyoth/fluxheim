@@ -17,7 +17,7 @@ use crate::config::AcmeAutomationMode;
 #[cfg(all(
     feature = "acme",
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 use crate::config::AcmeChallenge;
@@ -33,7 +33,7 @@ const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
     feature = "proxy",
     any(
         all(
-            feature = "tls-rustls",
+            feature = "tls-rustls-backend",
             not(any(feature = "tls-openssl", feature = "tls-boringssl"))
         ),
         feature = "tls-openssl",
@@ -41,7 +41,7 @@ const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
         all(
             feature = "tls-s2n",
             not(any(
-                feature = "tls-rustls",
+                feature = "tls-rustls-backend",
                 feature = "tls-openssl",
                 feature = "tls-boringssl"
             ))
@@ -53,7 +53,7 @@ use crate::config::{TlsAlpnPolicy, TlsConfig, TlsProtocolVersion};
     feature = "proxy",
     any(
         all(
-            feature = "tls-rustls",
+            feature = "tls-rustls-backend",
             not(any(feature = "tls-openssl", feature = "tls-boringssl"))
         ),
         feature = "tls-openssl",
@@ -75,13 +75,13 @@ use pingora::tls::{
 pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     init_logging(&config)?;
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     crate::tls::install_rustls_crypto_provider();
     #[cfg(any(
         feature = "tls",
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl",
         feature = "tls-s2n"
@@ -869,7 +869,7 @@ mod tests {
     }
 
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "acme",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
@@ -896,7 +896,7 @@ mod tests {
     }
 
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     #[test]
@@ -931,7 +931,7 @@ mod tests {
     }
 
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "acme",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
@@ -997,7 +997,7 @@ mod tests {
 #[cfg(all(
     feature = "proxy",
     any(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl",
         feature = "tls-s2n"
@@ -1043,13 +1043,14 @@ fn tls_alpn_policy(policy: TlsAlpnPolicy) -> pingora::protocols::ALPN {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn apply_tls_policy(
     settings: &mut pingora::listeners::tls::TlsSettings,
     tls: &TlsConfig,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    settings.set_crypto_provider(crate::tls::rustls_crypto_provider());
     settings.set_alpn_protocols(rustls_alpn_protocols(tls));
     settings.set_cipher_suites(
         tls.effective_cipher_suites()
@@ -1067,12 +1068,13 @@ fn apply_tls_policy(
         TlsProtocolVersion::Tls12 => settings.set_min_protocol_tls12(),
         TlsProtocolVersion::Tls13 => settings.set_min_protocol_tls13(),
     }
+    settings.set_require_fips(tls.compliance_mode().required());
     Ok(())
 }
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
@@ -1097,55 +1099,152 @@ fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn rustls_cipher_suite(cipher: TlsCipherSuite) -> rustls::SupportedCipherSuite {
     match cipher {
         TlsCipherSuite::Tls13Aes256GcmSha384 => {
-            rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_256_GCM_SHA384
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384
+            }
         }
         TlsCipherSuite::Tls13Chacha20Poly1305Sha256 => {
-            rustls::crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256
+            }
         }
         TlsCipherSuite::Tls13Aes128GcmSha256 => {
-            rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256
+            }
         }
         TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256 => {
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            }
         }
         TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256 => {
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            }
         }
         TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384 => {
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+            }
         }
         TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384 => {
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            }
         }
         TlsCipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256 => {
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+            }
         }
         TlsCipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256 => {
-            rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+            }
         }
     }
 }
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn rustls_kx_group(
     curve: TlsCurvePreference,
 ) -> Result<&'static dyn rustls::crypto::SupportedKxGroup, Box<dyn Error + Send + Sync>> {
     match curve {
-        TlsCurvePreference::X25519 => Ok(rustls::crypto::ring::kx_group::X25519),
-        TlsCurvePreference::P256 => Ok(rustls::crypto::ring::kx_group::SECP256R1),
-        TlsCurvePreference::P384 => Ok(rustls::crypto::ring::kx_group::SECP384R1),
+        TlsCurvePreference::X25519 => {
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                Ok(rustls::crypto::aws_lc_rs::kx_group::X25519)
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                Ok(rustls::crypto::ring::kx_group::X25519)
+            }
+        }
+        TlsCurvePreference::P256 => {
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                Ok(rustls::crypto::aws_lc_rs::kx_group::SECP256R1)
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                Ok(rustls::crypto::ring::kx_group::SECP256R1)
+            }
+        }
+        TlsCurvePreference::P384 => {
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                Ok(rustls::crypto::aws_lc_rs::kx_group::SECP384R1)
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                Ok(rustls::crypto::ring::kx_group::SECP384R1)
+            }
+        }
         TlsCurvePreference::X25519MlKem768 => {
-            Err("X25519MLKEM768 is not available with the default rustls/ring backend".into())
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                Ok(rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768)
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                Err("X25519MLKEM768 is not available with the default rustls/ring backend".into())
+            }
         }
     }
 }
@@ -1253,7 +1352,7 @@ fn openssl_cipher_lists(ciphers: &[TlsCipherSuite]) -> (String, String) {
     feature = "proxy",
     feature = "tls-s2n",
     not(any(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl"
     ))
@@ -1273,7 +1372,7 @@ fn apply_tls_policy(
 #[derive(Clone)]
 enum DownstreamCertificateReloader {
     #[cfg(all(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
     Rustls(std::sync::Arc<RustlsSniCertificateResolver>),
@@ -1288,7 +1387,7 @@ impl DownstreamCertificateReloader {
     fn reload(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         match self {
             #[cfg(all(
-                feature = "tls-rustls",
+                feature = "tls-rustls-backend",
                 not(any(feature = "tls-openssl", feature = "tls-boringssl"))
             ))]
             Self::Rustls(resolver) => resolver.reload(),
@@ -1296,7 +1395,7 @@ impl DownstreamCertificateReloader {
             Self::Openssl(callback) => callback.reload(),
             #[cfg(not(any(
                 all(
-                    feature = "tls-rustls",
+                    feature = "tls-rustls-backend",
                     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
                 ),
                 feature = "tls-openssl",
@@ -1348,7 +1447,7 @@ where
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn add_downstream_tls_listeners<S>(
@@ -1387,7 +1486,7 @@ where
     feature = "proxy",
     feature = "tls-s2n",
     not(any(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl"
     ))
@@ -1421,7 +1520,7 @@ where
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 struct RustlsSniCertificateResolver {
@@ -1433,7 +1532,7 @@ struct RustlsSniCertificateResolver {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 impl std::fmt::Debug for RustlsSniCertificateResolver {
@@ -1447,7 +1546,7 @@ impl std::fmt::Debug for RustlsSniCertificateResolver {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 impl RustlsSniCertificateResolver {
@@ -1486,7 +1585,7 @@ impl RustlsSniCertificateResolver {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
@@ -1513,7 +1612,7 @@ impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
@@ -1530,7 +1629,7 @@ fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     feature = "acme",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
@@ -1544,7 +1643,7 @@ fn rustls_client_hello_requests_acme_tls_alpn(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     feature = "acme",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
@@ -1567,7 +1666,7 @@ impl RustlsSniCertificateResolver {
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn load_rustls_certified_key(
@@ -1579,7 +1678,7 @@ fn load_rustls_certified_key(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn load_rustls_certified_keys(
@@ -1608,7 +1707,7 @@ fn load_rustls_certified_keys(
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-rustls",
+    feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
 fn load_rustls_certified_key_from_paths(
@@ -1625,7 +1724,7 @@ fn load_rustls_certified_key_from_paths(
         return Err("TLS certificate chain and private key must be readable PEM files".into());
     };
 
-    let provider = rustls::crypto::ring::default_provider();
+    let provider = crate::tls::rustls_crypto_provider();
     let certified_key = rustls::sign::CertifiedKey::from_der(certs, key, &provider)?;
     Ok(certified_key)
 }
@@ -1801,7 +1900,7 @@ impl CallbackCertificate {
 #[cfg(all(
     feature = "proxy",
     any(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl",
         feature = "tls-s2n"
@@ -1825,7 +1924,7 @@ fn downstream_certificate_paths(
 #[cfg(all(
     feature = "proxy",
     any(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl"
     )
@@ -1839,7 +1938,7 @@ fn certificate_paths_are_absent(
 #[cfg(all(
     feature = "proxy",
     not(any(
-        feature = "tls-rustls",
+        feature = "tls-rustls-backend",
         feature = "tls-openssl",
         feature = "tls-boringssl",
         feature = "tls-s2n"
