@@ -28,6 +28,13 @@ acme_config="$work_dir/acme-internal-crypto.toml"
 cache_config="$work_dir/cache-internal-crypto.toml"
 repo_root="$(pwd -P)"
 
+case "$repo_root" in
+    *\"*|*\\*)
+        echo "fips rustls: repository path contains characters unsafe for generated TOML" >&2
+        exit 2
+        ;;
+esac
+
 scripts/validate-features.sh "$features"
 scripts/validate-features.sh "$iso_features"
 

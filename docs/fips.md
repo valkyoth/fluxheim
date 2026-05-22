@@ -464,6 +464,11 @@ config validation now applies these classifications:
   selected validated backend before it can be inside FIPS/ISO-required mode.
 - Local disk-cache encryption is rejected because it currently uses ring
   AES-GCM.
+- Disk cache without encryption is allowed, but Fluxheim logs a compliance
+  warning because cached response bodies are written at rest without a
+  Fluxheim-managed encryption boundary. Deployments with data-at-rest
+  encryption requirements should disable disk cache or use an externally
+  evidenced encryption boundary.
 - OpenBao Transit disk-cache encryption is accepted as an externally delegated
   cryptographic service boundary. Operators must provide OpenBao module,
   platform, policy, and deployment evidence; Fluxheim does not validate that

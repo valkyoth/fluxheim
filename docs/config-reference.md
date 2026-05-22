@@ -1204,8 +1204,10 @@ ring HMAC path. It rejects local disk-cache encryption because that path uses
 ring AES-GCM. `provider = "openbao-transit"` cache encryption is allowed only
 as an external evidence boundary, and OTLP metrics/traces export is allowed only
 to local `http://` loopback collectors until outbound TLS can be
-provider-aligned. Request IDs and temporary object names are treated as
-non-secret operational identifiers, not SSPs.
+provider-aligned. Disk cache without encryption is still allowed, but Fluxheim
+logs a compliance warning because cached response bodies are written at rest
+without a Fluxheim-managed encryption boundary. Request IDs and temporary object
+names are treated as non-secret operational identifiers, not SSPs.
 
 Check certificate storage permissions separately:
 

@@ -16,6 +16,10 @@ as non-secret, or rejected.
   verification currently uses ring HMAC.
 - FIPS/ISO-required configs now reject local disk-cache encryption because the
   local path currently uses ring AES-GCM.
+- FIPS/ISO-required configs warn when disk cache is enabled without
+  encryption. This is allowed for operator-controlled policies, but cached
+  response bodies are written at rest without a Fluxheim-managed encryption
+  boundary.
 - OpenBao Transit cache encryption remains allowed as an external evidence
   boundary. Operators must provide OpenBao module, platform, and deployment
   evidence.

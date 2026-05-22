@@ -4794,7 +4794,14 @@ fn validate_cache_compliance_internal_crypto(
     cache: &CacheConfig,
     scope: &'static str,
 ) -> Result<(), ConfigError> {
-    if !cache.disk.enabled || !cache.disk.encryption.enabled {
+    if !cache.disk.enabled {
+        return Ok(());
+    }
+
+    if !cache.disk.encryption.enabled {
+        log::warn!(
+            "{scope}.disk.enabled is true in FIPS/ISO-required mode without disk cache encryption; cached response bodies are written at rest without a Fluxheim-managed encryption boundary"
+        );
         return Ok(());
     }
 
@@ -5925,9 +5932,34 @@ fn invalid_cache_encryption_openbao_address(value: &str) -> bool {
         return true;
     };
     let authority = rest.split('/').next().unwrap_or_default();
-    !(authority == "127.0.0.1"
-        || authority.starts_with("127.0.0.1:")
-        || authority.starts_with("[::1]"))
+    !openbao_plain_http_authority_is_loopback(authority)
+}
+
+fn openbao_plain_http_authority_is_loopback(authority: &str) -> bool {
+    if authority.contains('@') {
+        return false;
+    }
+    let host = if authority.starts_with('[') {
+        let Some(end) = authority.find(']') else {
+            return false;
+        };
+        let tail = &authority[end + 1..];
+        if !tail.is_empty() && !http_authority_valid_port_tail(tail) {
+            return false;
+        }
+        &authority[1..end]
+    } else {
+        match authority.rsplit_once(':') {
+            Some((host, port)) => {
+                if host.contains(':') || !valid_u16_port(port) {
+                    return false;
+                }
+                host
+            }
+            None => authority,
+        }
+    };
+    host == "127.0.0.1" || host == "::1"
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -7973,6 +8005,15 @@ fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
         return false;
     };
+    if rest.contains('@')
+        || rest.contains('?')
+        || rest.contains('#')
+        || rest
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
+        return false;
+    }
     let Some((authority, path)) = rest.split_once('/') else {
         return false;
     };
@@ -11509,6 +11550,15 @@ mod tests {
         ));
         assert!(!super::fips_allowed_local_otlp_endpoint(
             "http://127.0.0.1:0/v1/traces"
+        ));
+        assert!(!super::fips_allowed_local_otlp_endpoint(
+            "http://127.0.0.1:4318/v1/traces?debug=true"
+        ));
+        assert!(!super::fips_allowed_local_otlp_endpoint(
+            "http://127.0.0.1:4318/v1/traces#fragment"
+        ));
+        assert!(!super::fips_allowed_local_otlp_endpoint(
+            "http://127.0.0.1:4318/v1/traces\n"
         ));
     }
 
@@ -15419,6 +15469,45 @@ mod tests {
 
             [cache.disk.encryption.openbao]
             address = "http://openbao.internal.example"
+            mount = "transit"
+            key_name = "fluxheim-cache"
+            token_credential = "openbao-token"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCacheEncryptionPolicy {
+                scope: "cache",
+                field: "disk.encryption.openbao.address",
+                reason: "must be an http://127.0.0.1, http://[::1], or https:// URL without credentials, query, or fragment",
+            })
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_plain_http_openbao_malformed_ipv6_loopback_authority() {
+        let root = unique_temp_path("config-cache-encryption-openbao-ipv6-tail");
+        std::fs::create_dir_all(&root).unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "openbao-transit"
+
+            [cache.disk.encryption.openbao]
+            address = "http://[::1]attacker.example.test/v1"
             mount = "transit"
             key_name = "fluxheim-cache"
             token_credential = "openbao-token"
