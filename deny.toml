@@ -34,6 +34,11 @@ exceptions = [
     # do not globally allow CDLA-Permissive-2.0 for code.
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    # The opt-in rustls/AWS-LC FIPS build path pulls the validated native
+    # aws-lc-fips-sys module, whose upstream license expression includes
+    # OpenSSL. Keep this exception scoped to that crate instead of globally
+    # allowing OpenSSL-licensed dependencies.
+    { allow = ["OpenSSL"], crate = "aws-lc-fips-sys" },
 ]
 
 [licenses.private]

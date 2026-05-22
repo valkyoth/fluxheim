@@ -45,8 +45,7 @@ scripts/validate-features.sh "$features"
 echo "fips openssl: cargo $cargo_action --no-default-features --features $features"
 cargo $cargo_action --no-default-features --features "$features" --bin fluxheim --bin fluxheim-config-tester
 
-mkdir -p "$work_dir"
-chmod 0700 "$work_dir"
+install -d -m 0700 "$work_dir"
 
 cat >"$backend_mismatch_config" <<EOF
 [tls]

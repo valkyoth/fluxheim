@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::listeners::TlsAcceptCallbacks;
 use crate::protocols::tls::{server::handshake, server::handshake_with_callback, TlsStream};
-use log::debug;
+use log::{debug, error};
 use pingora_error::ErrorType::InternalError;
 use pingora_error::{Error, OrErr, Result};
 use pingora_rustls::load_certs_and_key_files;
@@ -58,6 +58,7 @@ impl TlsSettings {
     ///
     /// Todo: Return a result instead of panicking XD
     pub fn build(self) -> Acceptor {
+        let has_cert_resolver = self.cert_resolver.is_some();
         let builder = ServerConfig::builder_with_provider(Arc::new(self.crypto_provider))
             .with_protocol_versions(self.protocol_versions)
             .unwrap();
@@ -89,6 +90,12 @@ impl TlsSettings {
             config.alpn_protocols = alpn_protocols;
         }
         if self.require_fips && !config.fips() {
+            error!(
+                "Rustls listener configuration does not report FIPS mode; cert_path=\"{}\" key_path=\"{}\" cert_resolver={}",
+                self.cert_path,
+                self.key_path,
+                has_cert_resolver
+            );
             panic!("Rustls listener configuration does not report FIPS mode");
         }
 

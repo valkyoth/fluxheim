@@ -1050,25 +1050,26 @@ fn apply_tls_policy(
     settings: &mut pingora::listeners::tls::TlsSettings,
     tls: &TlsConfig,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let fips_required = tls.compliance_mode().required();
     settings.set_crypto_provider(crate::tls::rustls_crypto_provider());
     settings.set_alpn_protocols(rustls_alpn_protocols(tls));
     settings.set_cipher_suites(
         tls.effective_cipher_suites()
             .into_iter()
-            .map(rustls_cipher_suite)
-            .collect(),
+            .map(|cipher| rustls_cipher_suite(cipher, fips_required))
+            .collect::<Result<Vec<_>, _>>()?,
     );
     settings.set_kx_groups(
         tls.effective_curve_preferences()
             .into_iter()
-            .map(rustls_kx_group)
+            .map(|curve| rustls_kx_group(curve, fips_required))
             .collect::<Result<Vec<_>, _>>()?,
     );
     match tls.effective_min_protocol() {
         TlsProtocolVersion::Tls12 => settings.set_min_protocol_tls12(),
         TlsProtocolVersion::Tls13 => settings.set_min_protocol_tls13(),
     }
-    settings.set_require_fips(tls.compliance_mode().required());
+    settings.set_require_fips(fips_required);
     Ok(())
 }
 
@@ -1102,96 +1103,114 @@ fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
     feature = "tls-rustls-backend",
     not(any(feature = "tls-openssl", feature = "tls-boringssl"))
 ))]
-fn rustls_cipher_suite(cipher: TlsCipherSuite) -> rustls::SupportedCipherSuite {
+fn rustls_cipher_suite(
+    cipher: TlsCipherSuite,
+    fips_required: bool,
+) -> Result<rustls::SupportedCipherSuite, Box<dyn Error + Send + Sync>> {
+    #[cfg(not(feature = "tls-rustls-fips"))]
+    let _ = fips_required;
+
     match cipher {
         TlsCipherSuite::Tls13Aes256GcmSha384 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_256_GCM_SHA384
+                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_256_GCM_SHA384)
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384
+                Ok(rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384)
             }
         }
         TlsCipherSuite::Tls13Chacha20Poly1305Sha256 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256
+                if fips_required {
+                    Err("TLS_CHACHA20_POLY1305_SHA256 is not allowed when rustls FIPS/ISO mode is required".into())
+                } else {
+                    Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256)
+                }
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256
+                Ok(rustls::crypto::ring::cipher_suite::TLS13_CHACHA20_POLY1305_SHA256)
             }
         }
         TlsCipherSuite::Tls13Aes128GcmSha256 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256
+                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256)
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256
+                Ok(rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256)
             }
         }
         TlsCipherSuite::TlsEcdheEcdsaWithAes128GcmSha256 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256)
             }
         }
         TlsCipherSuite::TlsEcdheRsaWithAes128GcmSha256 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
             }
         }
         TlsCipherSuite::TlsEcdheEcdsaWithAes256GcmSha384 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384)
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384)
             }
         }
         TlsCipherSuite::TlsEcdheRsaWithAes256GcmSha384 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+                Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384)
             }
         }
         TlsCipherSuite::TlsEcdheEcdsaWithChacha20Poly1305Sha256 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+                if fips_required {
+                    Err("TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 is not allowed when rustls FIPS/ISO mode is required".into())
+                } else {
+                    Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256)
+                }
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256)
             }
         }
         TlsCipherSuite::TlsEcdheRsaWithChacha20Poly1305Sha256 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+                if fips_required {
+                    Err("TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 is not allowed when rustls FIPS/ISO mode is required".into())
+                } else {
+                    Ok(rustls::crypto::aws_lc_rs::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256)
+                }
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
-                rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+                Ok(rustls::crypto::ring::cipher_suite::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256)
             }
         }
     }
@@ -1204,12 +1223,20 @@ fn rustls_cipher_suite(cipher: TlsCipherSuite) -> rustls::SupportedCipherSuite {
 ))]
 fn rustls_kx_group(
     curve: TlsCurvePreference,
+    fips_required: bool,
 ) -> Result<&'static dyn rustls::crypto::SupportedKxGroup, Box<dyn Error + Send + Sync>> {
+    #[cfg(not(feature = "tls-rustls-fips"))]
+    let _ = fips_required;
+
     match curve {
         TlsCurvePreference::X25519 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                Ok(rustls::crypto::aws_lc_rs::kx_group::X25519)
+                if fips_required {
+                    Err("X25519 is not allowed when rustls FIPS/ISO mode is required".into())
+                } else {
+                    Ok(rustls::crypto::aws_lc_rs::kx_group::X25519)
+                }
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {
@@ -1239,7 +1266,14 @@ fn rustls_kx_group(
         TlsCurvePreference::X25519MlKem768 => {
             #[cfg(feature = "tls-rustls-fips")]
             {
-                Ok(rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768)
+                if fips_required {
+                    Err(
+                        "X25519MLKEM768 is not allowed when rustls FIPS/ISO mode is required"
+                            .into(),
+                    )
+                } else {
+                    Ok(rustls::crypto::aws_lc_rs::kx_group::X25519MLKEM768)
+                }
             }
             #[cfg(not(feature = "tls-rustls-fips"))]
             {

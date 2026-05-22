@@ -8,24 +8,60 @@ use crate::config::{AcmeConfig, Config, StaticCertificateConfig, normalize_host}
 pub const PRIVATE_KEY_MODE: u32 = 0o600;
 pub const ACME_STORAGE_MODE: u32 = 0o700;
 
-#[cfg(feature = "tls-rustls")]
+#[cfg(feature = "tls-rustls-backend")]
 pub fn install_rustls_crypto_provider() {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    ensure_rustls_crypto_provider_installed()
+        .unwrap_or_else(|error| panic!("rustls CryptoProvider installation failed: {error}"));
 }
 
-#[cfg(feature = "tls-rustls-fips")]
-pub fn install_rustls_crypto_provider() {
-    let _ = rustls::crypto::default_fips_provider().install_default();
-}
-
-#[cfg(feature = "tls-rustls")]
+#[cfg(feature = "tls-rustls-backend")]
 pub fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
-    rustls::crypto::ring::default_provider()
+    #[cfg(feature = "tls-rustls-fips")]
+    {
+        rustls::crypto::default_fips_provider()
+    }
+    #[cfg(not(feature = "tls-rustls-fips"))]
+    {
+        rustls::crypto::ring::default_provider()
+    }
 }
 
-#[cfg(feature = "tls-rustls-fips")]
-pub fn rustls_crypto_provider() -> rustls::crypto::CryptoProvider {
-    rustls::crypto::default_fips_provider()
+#[cfg(feature = "tls-rustls-backend")]
+fn ensure_rustls_crypto_provider_installed() -> Result<(), String> {
+    match rustls_crypto_provider().install_default() {
+        Ok(()) => Ok(()),
+        Err(candidate) => {
+            let installed = rustls::crypto::CryptoProvider::get_default()
+                .ok_or_else(|| {
+                    format!(
+                        "rustls rejected candidate CryptoProvider but no installed provider is visible; candidate_fips={}",
+                        candidate.fips()
+                    )
+                })?;
+            #[cfg(feature = "tls-rustls-fips")]
+            {
+                if !installed.fips() {
+                    return Err(format!(
+                        "non-FIPS process-default CryptoProvider is already installed; installed_provider_fips={}, candidate_provider_fips={}",
+                        installed.fips(),
+                        candidate.fips()
+                    ));
+                }
+                log::debug!(
+                    "rustls process-default CryptoProvider is already installed and reports FIPS mode"
+                );
+            }
+            #[cfg(not(feature = "tls-rustls-fips"))]
+            {
+                log::debug!(
+                    "rustls process-default CryptoProvider is already installed; installed_provider_fips={}, candidate_provider_fips={}",
+                    installed.fips(),
+                    candidate.fips()
+                );
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(feature = "tls-rustls-fips")]
@@ -36,10 +72,12 @@ pub struct RustlsFipsStatus {
 
 #[cfg(feature = "tls-rustls-fips")]
 pub fn probe_rustls_fips_provider() -> Result<RustlsFipsStatus, String> {
-    let provider = rustls::crypto::default_fips_provider();
+    ensure_rustls_crypto_provider_installed()?;
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .ok_or_else(|| "no process-default rustls CryptoProvider is installed".to_owned())?;
     let provider_fips = provider.fips();
     if !provider_fips {
-        return Err("rustls AWS-LC FIPS provider does not report FIPS mode".to_owned());
+        return Err("installed rustls CryptoProvider does not report FIPS mode".to_owned());
     }
     Ok(RustlsFipsStatus { provider_fips })
 }
