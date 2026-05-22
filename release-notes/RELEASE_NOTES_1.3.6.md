@@ -21,8 +21,9 @@ as non-secret, or rejected.
   response bodies are written at rest without a Fluxheim-managed encryption
   boundary.
 - OpenBao Transit cache encryption remains allowed as an external evidence
-  boundary. Operators must provide OpenBao module, platform, and deployment
-  evidence.
+  boundary only through local numeric loopback HTTP. Operators must provide
+  OpenBao module, platform, and deployment evidence. Remote or HTTPS OpenBao
+  transport remains blocked until outbound TLS evidence is added.
 - OTLP metrics/traces export is allowed only to local `http://` loopback
   collectors in FIPS/ISO-required configs. Remote OTLP and HTTPS OTLP remain
   blocked until outbound TLS can be routed through the selected validated

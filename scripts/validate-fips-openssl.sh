@@ -34,6 +34,7 @@ non_fips_policy_config="$work_dir/non-fips-policy.toml"
 admin_config="$work_dir/admin-internal-crypto.toml"
 acme_config="$work_dir/acme-internal-crypto.toml"
 cache_config="$work_dir/cache-internal-crypto.toml"
+openbao_remote_config="$work_dir/openbao-remote-internal-crypto.toml"
 repo_root="$(pwd -P)"
 
 case "$repo_root" in
@@ -127,6 +128,34 @@ provider = "local"
 key_credential = "fluxheim-cache-key"
 EOF
 
+cat >"$openbao_remote_config" <<EOF
+[tls]
+enabled = true
+backend = "openssl"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+[tls.fips]
+required = true
+
+[cache]
+enabled = true
+
+[cache.disk]
+enabled = true
+path = "$repo_root/$work_dir/openbao-cache"
+
+[cache.disk.encryption]
+enabled = true
+provider = "openbao-transit"
+
+[cache.disk.encryption.openbao]
+address = "https://openbao.internal.example"
+mount = "transit"
+key_name = "fluxheim-cache"
+token_credential = "openbao-token"
+EOF
+
 echo "fips openssl: fail-closed backend mismatch fixture"
 if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
     --config "$backend_mismatch_config" \
@@ -169,6 +198,15 @@ if cargo run -q $cargo_run_release --no-default-features --features "$features" 
     --profile fips-openssl \
     --no-runtime-paths >/dev/null 2>&1; then
     echo "fips openssl: local cache-encryption fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+echo "fips openssl: fail-closed remote OpenBao internal-crypto fixture"
+if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+    --config "$openbao_remote_config" \
+    --profile fips-openssl \
+    --no-runtime-paths >/dev/null 2>&1; then
+    echo "fips openssl: remote OpenBao internal-crypto fixture unexpectedly passed" >&2
     exit 1
 fi
 

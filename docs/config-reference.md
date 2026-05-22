@@ -751,6 +751,11 @@ configured key id plus combined cache key are passed as associated data, so a
 stored ciphertext is bound to the cache object identity. The default local-key
 provider does not require OpenBao.
 
+In FIPS/ISO-required mode, OpenBao Transit is further restricted to local
+numeric loopback HTTP (`http://127.0.0.1` or `http://[::1]`). Remote OpenBao
+and HTTPS OpenBao endpoints require outbound TLS evidence that Fluxheim does
+not provide yet.
+
 For local validation, `examples/podman-compose-openbao.yml` starts an OpenBao
 development server and `scripts/smoke_openbao_cache_encryption.sh` runs an
 end-to-end proxy-cache test against OpenBao Transit. The smoke test enables the
@@ -1202,12 +1207,13 @@ are not yet routed through the selected validated module. It rejects
 `admin.enabled = true` because admin bearer-token verification currently uses a
 ring HMAC path. It rejects local disk-cache encryption because that path uses
 ring AES-GCM. `provider = "openbao-transit"` cache encryption is allowed only
-as an external evidence boundary, and OTLP metrics/traces export is allowed only
-to local `http://` loopback collectors until outbound TLS can be
-provider-aligned. Disk cache without encryption is still allowed, but Fluxheim
-logs a compliance warning because cached response bodies are written at rest
-without a Fluxheim-managed encryption boundary. Request IDs and temporary object
-names are treated as non-secret operational identifiers, not SSPs.
+through local numeric loopback HTTP as an external evidence boundary, and OTLP
+metrics/traces export is allowed only to local `http://` loopback collectors
+until outbound TLS can be provider-aligned. Disk cache without encryption is
+still allowed, but Fluxheim logs a compliance warning because cached response
+bodies are written at rest without a Fluxheim-managed encryption boundary.
+Request IDs and temporary object names are treated as non-secret operational
+identifiers, not SSPs.
 
 Check certificate storage permissions separately:
 

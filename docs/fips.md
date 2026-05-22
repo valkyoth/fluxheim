@@ -470,9 +470,12 @@ config validation now applies these classifications:
   encryption requirements should disable disk cache or use an externally
   evidenced encryption boundary.
 - OpenBao Transit disk-cache encryption is accepted as an externally delegated
-  cryptographic service boundary. Operators must provide OpenBao module,
-  platform, policy, and deployment evidence; Fluxheim does not validate that
-  external boundary for them.
+  cryptographic service boundary only through local numeric loopback HTTP
+  (`http://127.0.0.1` or `http://[::1]`). Operators must provide OpenBao
+  module, platform, policy, and deployment evidence; Fluxheim does not validate
+  that external boundary for them. Remote OpenBao and HTTPS OpenBao transport
+  are rejected until Fluxheim's outbound HTTP/TLS client can be routed through
+  the selected validated backend or separately evidenced.
 - OTLP metrics/traces export is accepted only for `http://` loopback collectors
   such as `http://127.0.0.1:4318/v1/traces` or
   `http://localhost:4318/v1/metrics`. Remote OTLP endpoints and HTTPS OTLP
@@ -581,7 +584,8 @@ Deliverables:
   pointing operators to externally issued static certificates or external
   renewal workflows.
 - Local cache encryption is rejected in FIPS/ISO-required mode; OpenBao Transit
-  cache encryption is allowed only as an externally evidenced service boundary.
+  cache encryption is allowed only through local numeric loopback HTTP as an
+  externally evidenced service boundary.
 - OTLP export is limited to local `http://` loopback collectors in
   FIPS/ISO-required mode until outbound TLS can be routed through the selected
   validated backend.

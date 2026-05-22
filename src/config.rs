@@ -4810,7 +4810,22 @@ fn validate_cache_compliance_internal_crypto(
             field: scope,
             reason: "FIPS/ISO-required mode rejects local cache encryption because it currently uses ring AES-GCM; use provider = \"openbao-transit\" with external validation evidence or disable cache encryption",
         }),
-        CacheDiskEncryptionProvider::OpenbaoTransit => Ok(()),
+        CacheDiskEncryptionProvider::OpenbaoTransit => {
+            let address = cache
+                .disk
+                .encryption
+                .openbao
+                .address
+                .as_deref()
+                .unwrap_or_default();
+            if !fips_allowed_local_openbao_endpoint(address) {
+                return Err(ConfigError::InvalidCompliancePolicy {
+                    field: scope,
+                    reason: "FIPS/ISO-required mode allows OpenBao Transit only through local http://127.0.0.1 or http://[::1] loopback; remote or HTTPS OpenBao transport needs provider-aligned outbound TLS evidence first",
+                });
+            }
+            Ok(())
+        }
     }
 }
 
@@ -5960,6 +5975,26 @@ fn openbao_plain_http_authority_is_loopback(authority: &str) -> bool {
         }
     };
     host == "127.0.0.1" || host == "::1"
+}
+
+fn fips_allowed_local_openbao_endpoint(endpoint: &str) -> bool {
+    let Some(rest) = endpoint.strip_prefix("http://") else {
+        return false;
+    };
+    if rest.is_empty()
+        || rest.contains('@')
+        || rest.contains('?')
+        || rest.contains('#')
+        || rest
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
+        return false;
+    }
+    let authority = rest
+        .split_once('/')
+        .map_or(rest, |(authority, _path)| authority);
+    !authority.is_empty() && openbao_plain_http_authority_is_loopback(authority)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -11529,6 +11564,51 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn fips_required_rejects_remote_openbao_transit_cache_encryption_boundary() {
+        let root = secure_test_dir("config-fips-remote-openbao-cache-encryption");
+        let backend = fips_capable_backend_for_tests();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            backend = "{backend}"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+
+            [cache.disk.encryption]
+            enabled = true
+            provider = "openbao-transit"
+
+            [cache.disk.encryption.openbao]
+            address = "https://openbao.internal.example"
+            mount = "transit"
+            key_name = "fluxheim-cache"
+            token_credential = "openbao-token"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCompliancePolicy {
+                field: "cache",
+                reason: "FIPS/ISO-required mode allows OpenBao Transit only through local http://127.0.0.1 or http://[::1] loopback; remote or HTTPS OpenBao transport needs provider-aligned outbound TLS evidence first",
+            })
+        );
+    }
+
+    #[test]
     fn fips_otlp_local_collector_exception_accepts_loopback_http_only() {
         assert!(super::fips_allowed_local_otlp_endpoint(
             "http://127.0.0.1:4318/v1/traces"
@@ -11559,6 +11639,28 @@ mod tests {
         ));
         assert!(!super::fips_allowed_local_otlp_endpoint(
             "http://127.0.0.1:4318/v1/traces\n"
+        ));
+    }
+
+    #[test]
+    fn fips_openbao_endpoint_accepts_numeric_loopback_http_only() {
+        assert!(super::fips_allowed_local_openbao_endpoint(
+            "http://127.0.0.1:8200"
+        ));
+        assert!(super::fips_allowed_local_openbao_endpoint(
+            "http://[::1]:8200"
+        ));
+        assert!(!super::fips_allowed_local_openbao_endpoint(
+            "http://localhost:8200"
+        ));
+        assert!(!super::fips_allowed_local_openbao_endpoint(
+            "https://127.0.0.1:8200"
+        ));
+        assert!(!super::fips_allowed_local_openbao_endpoint(
+            "https://openbao.internal.example"
+        ));
+        assert!(!super::fips_allowed_local_openbao_endpoint(
+            "http://[::1]attacker.example.test"
         ));
     }
 
