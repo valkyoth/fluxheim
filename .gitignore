@@ -15,6 +15,9 @@ logs/
 release-reports/
 *.pid
 
+# Local licensed standards/reference documents
+ISO_IEC_*.pdf
+
 # Python local bytecode
 __pycache__/
 *.py[cod]

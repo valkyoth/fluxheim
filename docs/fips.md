@@ -42,6 +42,15 @@ validation is interpreted and managed. NIST SP 800-52 Rev. 2 defines the TLS
 policy shape for web servers and clients. The selected module Security Policy
 is the binding operator manual for installing and invoking the validated module.
 
+ISO/IEC 19790:2025 and ISO/IEC 24759:2025 are the current ISO editions for the
+international cryptographic-module requirements and test-method structure. They
+are useful for Fluxheim's ISO-facing roadmap and evidence terminology, but they
+do not by themselves update an existing FIPS 140-3 CMVP certificate or replace
+the NIST CMVP transition documents for a FIPS deployment. Until NIST or a
+certification body states otherwise for a selected module, FIPS evidence should
+continue to reference the certificate, Implementation Guidance, and Security
+Policy that apply to that exact module.
+
 ## Compliance Boundary
 
 FIPS validation attaches to a cryptographic module and its tested operating
@@ -61,6 +70,9 @@ Fluxheim can be responsible for:
   data where available.
 - Keeping Fluxheim-owned security-sensitive cryptography off non-validated
   fallback crates in FIPS-required builds.
+- Exposing application-level status indicators such as the configured
+  `tls.compliance_mode`, backend, provider checks, and fail-closed validation
+  result.
 
 Operators remain responsible for:
 
@@ -74,6 +86,14 @@ Operators remain responsible for:
 - Ensuring the OS, container image, package source, CPU/platform, and runtime
   environment match the module validation boundary.
 - Maintaining operational evidence for auditors.
+- Mapping Fluxheim's application evidence to the selected cryptographic
+  module's Security Policy, including the module boundary, approved services,
+  non-approved services, roles, self-tests, operational environment, and SSP
+  handling described by that Security Policy.
+
+Fluxheim's status and diagnostic output are application indicators. They are not
+a replacement for the validated module's own service indicators, self-test
+status, or laboratory evidence.
 
 Fluxheim release notes must therefore use wording such as:
 
@@ -325,6 +345,19 @@ FIPS-required mode should classify each area as one of:
 - Non-security-sensitive and documented as such.
 - Disabled/rejected in FIPS-required builds.
 
+For ISO/IEC 19790-facing evidence, the same inventory should also identify:
+
+- The Fluxheim feature and configuration option that enables or disables the
+  service.
+- Whether the service is security-relevant or non-security-relevant to the
+  approved operation.
+- Which SSPs, if any, are generated, imported, stored, output, or zeroized by
+  Fluxheim itself.
+- Whether the approved-mode indicator comes from Fluxheim, the validated crypto
+  module, or an external service.
+- The exact error state and operator action when a provider check, self-test,
+  or configuration guard fails.
+
 Known current blockers:
 
 - `instant-acme` and `rcgen` currently use ring-backed paths in Fluxheim's ACME
@@ -433,6 +466,10 @@ Deliverables:
 - Example systemd and container deployment checklists.
 - Clear "not validated by Fluxheim" language unless a future sponsor funds a
   full CMVP validation for a Fluxheim-controlled module boundary.
+- ISO/IEC 19790 / 24759 evidence crosswalk for operators, covering module
+  boundary, module type, operational environment, roles, approved and
+  non-approved services, status indicators, SSP management, self-tests,
+  lifecycle evidence, and mitigation-of-other-attacks claims.
 
 ## Operator Checklist
 
@@ -480,6 +517,19 @@ Module Security Policy title/version:
 Operating system and OpenSSL package versions:
 TLS scanner output:
 Non-TLS crypto decision log:
+
+ISO/IEC evidence vocabulary used:
+Cryptographic module boundary:
+Module type:
+Operational environment:
+Approved services used:
+Non-approved services disabled or separated:
+Roles and authentication model:
+Status/service indicators:
+SSP inventory and zeroization notes:
+Self-test evidence and failure behavior:
+Lifecycle/release evidence location:
+Mitigation-of-other-attacks claims:
 ```
 
 The `fluxheim crypto` provider check proves only that the process can load a
@@ -492,15 +542,21 @@ evidence required by the deployment boundary.
 Use:
 
 - "FIPS-capable"
+- "ISO/IEC 19790-capable"
 - "FIPS-required mode"
+- "ISO/IEC 19790-required mode"
 - "validated cryptographic module"
 - "approved mode"
 - "operator evidence required"
+- "application-level indicator" when referring to Fluxheim's own diagnostics
 
 Avoid:
 
 - "FIPS compliant" without a named deployment boundary.
+- "ISO/IEC 19790 compliant" without a named deployment boundary.
 - "FIPS certified Fluxheim."
 - "Compile this feature and you are compliant."
 - Any statement that treats a Cargo feature as a substitute for CMVP validation
   and the module Security Policy.
+- Any statement that treats Fluxheim's status endpoint as the validated
+  module's laboratory service indicator.
