@@ -57,6 +57,20 @@ cargo build --release --no-default-features --features profile-iso19790-openssl
 fluxheim crypto
 ```
 
+`profile-fips-openssl` is a narrow proof profile, not a limitation of the FIPS
+feature. For custom cache or PHP-FPM builds, select raw modules so that the
+binary has exactly one TLS backend:
+
+```bash
+# FIPS/ISO-capable cache edge
+cargo build --release --no-default-features \
+  --features proxy,cache,security,tls-openssl-fips,acme-client
+
+# FIPS/ISO-capable PHP-FPM web build
+cargo build --release --no-default-features \
+  --features php-fpm,security,tls-openssl-fips,acme-client
+```
+
 This feature makes Fluxheim fail closed, loads the OpenSSL FIPS provider,
 enables default FIPS properties for the process, and exposes provider/default
 property diagnostics. The deployment still needs the selected module's CMVP

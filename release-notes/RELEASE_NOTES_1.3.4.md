@@ -121,13 +121,28 @@ cargo build --release --locked --no-default-features \
   --bin fluxheim --bin fluxheim-config-tester
 ```
 
-Build the normal PHP-FPM release profile as before:
+The profile aliases above are narrow proof builds. FIPS/ISO-capable TLS can
+also be combined with cache or PHP-FPM by selecting raw modules and avoiding
+profiles that already enable `tls-rustls`:
 
 ```bash
+# FIPS/ISO-capable cache edge
 cargo build --release --locked --no-default-features \
-  --features profile-web-server,php-fpm,acme-client \
+  --features proxy,cache,security,tls-openssl-fips,acme-client \
+  --bin fluxheim --bin fluxheim-acme
+
+# FIPS/ISO-capable PHP-FPM web build
+cargo build --release --locked --no-default-features \
+  --features php-fpm,security,tls-openssl-fips,acme-client \
   --bin fluxheim --bin fluxheim-acme
 ```
+
+These combinations put Fluxheim's TLS listener on the OpenSSL FIPS proof path.
+They do not make a blanket FIPS-compliance claim for the entire deployment.
+PHP application cryptography, managed ACME account operations, local cache
+encryption, OTLP export, and other non-TLS crypto paths still need separate
+validated-module evidence, external handling, or disabling for strict
+FIPS-required deployments.
 
 ## Checksums And Signatures
 

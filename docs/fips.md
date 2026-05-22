@@ -192,6 +192,43 @@ tls-openssl-fips = [
 ]
 ```
 
+`profile-fips-openssl` and `profile-iso19790-openssl` are intentionally small
+proof profiles. They are useful for local provider validation and release
+evidence, but they are not the only valid way to build a FIPS/ISO-capable
+Fluxheim binary.
+
+For custom deployments, combine `tls-openssl-fips` with the raw modules you
+need. Do not combine it with a broad profile alias that already enables
+`tls-rustls`, because Cargo features are additive and Fluxheim supports only one
+Pingora TLS backend per binary.
+
+Examples:
+
+```bash
+# FIPS/ISO-capable static web server
+cargo build --release --locked --no-default-features \
+  --features proxy,web,security,tls-openssl-fips,acme-client \
+  --bin fluxheim --bin fluxheim-acme
+
+# FIPS/ISO-capable cache edge
+cargo build --release --locked --no-default-features \
+  --features proxy,cache,security,tls-openssl-fips,acme-client \
+  --bin fluxheim --bin fluxheim-acme
+
+# FIPS/ISO-capable PHP-FPM web server
+cargo build --release --locked --no-default-features \
+  --features php-fpm,security,tls-openssl-fips,acme-client \
+  --bin fluxheim --bin fluxheim-acme
+```
+
+These examples make Fluxheim's TLS listener use the OpenSSL FIPS proof path.
+They do not prove that every cryptographic operation in the full deployment is
+inside a validated module. In particular, PHP applications, managed ACME
+account operations, local cache encryption, outbound OTLP TLS, and any
+application-level token/signature logic need their own evidence, validated
+backend routing, or must be disabled before claiming a strict FIPS-required
+deployment boundary.
+
 Current Fluxheim enforcement:
 
 - Adds a direct `openssl` crate dependency only for OpenSSL FIPS diagnostics

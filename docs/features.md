@@ -152,6 +152,30 @@ cargo build --no-default-features --features profile-fips-openssl
 cargo build --no-default-features --features profile-iso19790-openssl
 ```
 
+Those profile aliases are deliberately narrow proof builds. FIPS/ISO-capable
+TLS is not limited to those aliases: custom builds can combine
+`tls-openssl-fips` with cache, static web serving, reverse proxying, or
+PHP-FPM. Do not add `tls-openssl-fips` to an existing profile alias that already
+enables `tls-rustls`, because Cargo features are additive and Fluxheim supports
+only one Pingora TLS backend per binary. Select the raw modules instead:
+
+```bash
+# FIPS/ISO-capable cache edge
+cargo build --no-default-features \
+  --features proxy,cache,security,tls-openssl-fips,acme-client
+
+# FIPS/ISO-capable PHP-FPM web build
+cargo build --no-default-features \
+  --features php-fpm,security,tls-openssl-fips,acme-client
+```
+
+These combinations make Fluxheim's TLS boundary FIPS/ISO-capable when the
+operator provides a validated OpenSSL provider. They do not automatically make
+the whole deployment FIPS compliant: PHP application cryptography, ACME account
+operations, local cache encryption, OTLP export, and other non-TLS crypto paths
+must be separately routed through validated modules, externally evidenced, or
+disabled for a strict FIPS-required deployment.
+
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
 binary can load the provider and enable OpenSSL default FIPS properties in the
 current environment. The
