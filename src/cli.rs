@@ -690,11 +690,13 @@ fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + S
         feature = "tls-s2n"
     )))]
     {
-        if config.tls.fips.required {
-            Err(
-                "tls.fips.required requires a FIPS-capable TLS backend feature such as tls-openssl-fips"
-                    .into(),
+        let compliance_mode = config.tls.compliance_mode();
+        if compliance_mode.required() {
+            Err(format!(
+                "{} required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790",
+                compliance_mode.label()
             )
+            .into())
         } else {
             Ok(())
         }
@@ -957,6 +959,10 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
         "    tls-openssl-fips: {}",
         cfg!(feature = "tls-openssl-fips")
     );
+    println!(
+        "    tls-openssl-iso19790: {}",
+        cfg!(feature = "tls-openssl-iso19790")
+    );
     #[cfg(feature = "tls-openssl-fips")]
     match crate::tls::probe_openssl_fips_provider() {
         Ok(status) => println!(
@@ -970,7 +976,7 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     print_openssl_environment_diagnostics();
     println!("  notes:");
     println!(
-        "    FIPS-required mode fails closed unless a configured backend can prove provider status."
+        "    FIPS/ISO-required mode fails closed unless a configured backend can prove provider status."
     );
     println!("    See docs/fips.md for the validated-module and operator-evidence model.");
 
@@ -986,7 +992,15 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
             "    tls.min_protocol: {}",
             tls_protocol_name(config.tls.effective_min_protocol())
         );
+        println!(
+            "    tls.compliance_mode: {}",
+            config.tls.compliance_mode().label()
+        );
         println!("    tls.fips.required: {}", config.tls.fips.required);
+        println!(
+            "    tls.iso19790.required: {}",
+            config.tls.iso19790.required
+        );
     }
 }
 

@@ -1,9 +1,9 @@
-# FIPS-Capable Deployments
+# FIPS / ISO-Capable Deployments
 
-This document defines Fluxheim's FIPS direction. It is intentionally strict
-about language: Fluxheim can provide FIPS-capable builds and fail-closed
-configuration enforcement, but Fluxheim itself is not a validated
-cryptographic module.
+This document defines Fluxheim's FIPS 140-3 and ISO/IEC 19790 direction. It is
+intentionally strict about language: Fluxheim can provide FIPS/ISO-capable
+builds and fail-closed configuration enforcement, but Fluxheim itself is not a
+validated cryptographic module.
 
 For a real FIPS-required deployment, the operator must use a cryptographic
 module validated by the NIST/CCCS Cryptographic Module Validation Program
@@ -15,15 +15,17 @@ published Security Policy.
 Current stable line: `1.3.4`.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
-compliance evidence plumbing. This is not a broad "FIPS compliant" claim. The
-implemented target is the OpenSSL backend proof path, while rustls, BoringSSL,
-s2n, and non-TLS internal crypto work remain explicitly staged.
+ISO/IEC 19790 terminology aliases for compliance evidence plumbing. This is not
+a broad "FIPS compliant" or "ISO/IEC 19790 compliant" claim. The implemented
+target is the OpenSSL backend proof path, while rustls, BoringSSL, s2n, and
+non-TLS internal crypto work remain explicitly staged.
 
 ## Official References
 
 Fluxheim's FIPS work should be tracked against these primary sources:
 
 - [FIPS PUB 140-3, Security Requirements for Cryptographic Modules](https://csrc.nist.gov/pubs/fips/140-3/final)
+- [FIPS 140-3 Adopts ISO/IEC Standards](https://www.nist.gov/publications/fips-140-3-adopts-isoiec-standards)
 - [FIPS 140-3 CMVP documents and Implementation Guidance](https://csrc.nist.gov/Projects/fips-140-3-transition-effort/fips-140-3-docs)
 - [NIST SP 800-52 Rev. 2, Guidelines for TLS Implementations](https://csrc.nist.gov/pubs/sp/800/52/r2/final)
 - The selected module's CMVP entry and Security Policy, such as
@@ -33,12 +35,12 @@ Fluxheim's FIPS work should be tracked against these primary sources:
 - [rustls FIPS guidance](https://docs.rs/rustls/latest/rustls/manual/_06_fips/index.html)
 - [rustls CryptoProvider documentation](https://docs.rs/rustls/latest/rustls/crypto/struct.CryptoProvider.html)
 
-These documents have different roles. FIPS 140-3 defines module security
-requirements. The CMVP documentation and Implementation Guidance explain how
+These documents have different roles. FIPS 140-3 references ISO/IEC
+19790:2012 requirements and ISO/IEC 24759 test methods for cryptographic
+modules. The CMVP documentation and Implementation Guidance explain how
 validation is interpreted and managed. NIST SP 800-52 Rev. 2 defines the TLS
 policy shape for web servers and clients. The selected module Security Policy
-is the binding operator manual for installing and invoking the validated
-module.
+is the binding operator manual for installing and invoking the validated module.
 
 ## Compliance Boundary
 
@@ -127,18 +129,24 @@ curve_preferences = ["CurveP256", "CurveP384"]
 
 [tls.fips]
 required = true
+
+# European/international terminology alias for the same enforcement path:
+# [tls.iso19790]
+# required = true
 ```
 
-`tls.fips.required` is present as a fail-closed OpenSSL guard. It validates
-the obvious non-FIPS TLS choices and rejects startup unless the build has a
-backend-specific proof path. The first proof path is
-`tls-openssl-fips` with `backend = "openssl"`, which checks that the OpenSSL
-FIPS provider can be loaded and that a `fips=yes` property query can fetch an
-approved cipher, enables OpenSSL default FIPS properties for the process, and
-verifies that the default fetch path rejects a non-FIPS cipher. The exact
-schema may grow when more backend proof fields are implemented. The important
-rule is fail closed: a FIPS-required config must not silently fall back to a
-non-FIPS provider or non-approved cipher.
+`tls.fips.required` is present as a fail-closed OpenSSL guard.
+`tls.iso19790.required` is an ISO/IEC 19790 terminology alias for the same
+validated-provider enforcement path. They validate the obvious non-approved TLS
+choices and reject startup unless the build has a backend-specific proof path.
+The first proof path is `tls-openssl-fips` or the `tls-openssl-iso19790`
+alias with `backend = "openssl"`, which checks that the OpenSSL FIPS provider
+can be loaded and that a `fips=yes` property query can fetch an approved
+cipher, enables OpenSSL default FIPS properties for the process, and verifies
+that the default fetch path rejects a non-FIPS cipher. The exact schema may
+grow when more backend proof fields are implemented. The important rule is fail
+closed: a FIPS/ISO-required config must not silently fall back to a
+non-validated provider or non-approved cipher.
 
 ## Backend Paths
 
@@ -233,9 +241,9 @@ provider package needed for local testing. Full-system FIPS mode packages,
 boot loader changes, and initramfs changes are deployment decisions, not
 required for normal Fluxheim development.
 
-The repository includes `examples/fips-openssl.toml` as a minimal
-FIPS-required validation fixture. Validate it with a `profile-fips-openssl`
-build:
+The repository includes `examples/fips-openssl.toml` and
+`examples/iso19790-openssl.toml` as minimal validation fixtures. Validate them
+with a `profile-fips-openssl` or `profile-iso19790-openssl` build:
 
 ```bash
 scripts/validate-fips-openssl.sh check
@@ -350,11 +358,12 @@ Deliverables:
   config-tester/runtime command.
 - Initial `fluxheim crypto` and `fluxheim-config-tester --crypto` output that
   reports compiled TLS backends and OpenSSL FIPS provider availability.
-- `tls-openssl-fips` feature for OpenSSL 3 provider diagnostics,
-  fail-closed `tls.fips.required` startup validation, default FIPS property
-  enablement, and observable default-property verification.
-- `profile-fips-openssl` as a narrow proxy/security/OpenSSL-FIPS feature alias
-  for release and local validation.
+- `tls-openssl-fips` feature plus `tls-openssl-iso19790` terminology alias for
+  OpenSSL 3 provider diagnostics, fail-closed `tls.fips.required` /
+  `tls.iso19790.required` startup validation, default FIPS property enablement,
+  and observable default-property verification.
+- `profile-fips-openssl` and `profile-iso19790-openssl` as narrow
+  proxy/security/OpenSSL feature aliases for release and local validation.
 - Evidence-focused config-tester fixtures for provider failure, non-FIPS TLS
   settings, and backend mismatch.
 - Release evidence template listing OpenSSL version, provider config, module

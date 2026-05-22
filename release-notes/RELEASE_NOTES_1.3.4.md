@@ -2,21 +2,23 @@
 
 ## Summary
 
-Fluxheim 1.3.4 is the OpenSSL FIPS-capable TLS release for the 1.3 line. It
-adds strict terminology, OpenSSL-provider diagnostics, OpenSSL default-property
-enforcement for FIPS-required TLS startup, fail-closed configuration
-validation, and release evidence plumbing.
+Fluxheim 1.3.4 is the OpenSSL FIPS/ISO-capable TLS release for the 1.3 line.
+It adds strict terminology, OpenSSL-provider diagnostics, OpenSSL
+default-property enforcement for FIPS/ISO-required TLS startup, fail-closed
+configuration validation, and release evidence plumbing.
 
-This release does not claim that Fluxheim is FIPS certified or that enabling a
-Cargo feature makes a deployment compliant. FIPS validation belongs to the
-selected cryptographic module and its tested operating environment. Fluxheim's
-role is to enforce configuration boundaries, verify provider status where the
-backend exposes it, and produce useful evidence for operators.
+This release does not claim that Fluxheim is FIPS certified, ISO/IEC 19790
+certified, or that enabling a Cargo feature makes a deployment compliant.
+Validation belongs to the selected cryptographic module and its tested
+operating environment. Fluxheim's role is to enforce configuration boundaries,
+verify provider status where the backend exposes it, and produce useful
+evidence for operators.
 
-- Release type: OpenSSL FIPS-capable TLS validation and release tooling
+- Release type: OpenSSL FIPS/ISO-capable TLS validation and release tooling
 - Compatibility: no broad config break intended
 - Primary area: OpenSSL FIPS provider diagnostics, OpenSSL default FIPS
-  properties, `tls.fips.required`, release evidence, and FIPS documentation
+  properties, `tls.fips.required`, `tls.iso19790.required`, release evidence,
+  and FIPS/ISO documentation
 
 ## Highlights
 
@@ -26,6 +28,10 @@ backend exposes it, and produce useful evidence for operators.
 - Added `[tls.fips] required = true` as a fail-closed guard for FIPS-required
   configuration. Default builds reject it because they cannot prove a
   validated provider path.
+- Added `[tls.iso19790] required = true`, `tls-openssl-iso19790`,
+  `profile-iso19790-openssl`, `examples/iso19790-openssl.toml`, and the
+  `iso19790-openssl` config-tester profile as ISO/IEC 19790 terminology
+  aliases over the same validated-provider enforcement path.
 - Added `tls-openssl-fips`, an opt-in OpenSSL 3 provider proof path that
   checks that the OpenSSL FIPS provider can be loaded and that an approved
   cipher can be fetched with the `fips=yes` property query.
@@ -41,12 +47,17 @@ backend exposes it, and produce useful evidence for operators.
   operator-selected system OpenSSL provider.
 - Added `profile-fips-openssl` as a narrow proxy/security/OpenSSL-FIPS feature
   alias for local and release validation.
+- Added `profile-iso19790-openssl` as the matching ISO/IEC 19790 terminology
+  alias.
 - Added `fluxheim crypto` and `fluxheim-config-tester --crypto` diagnostics
   showing compiled TLS backends, OpenSSL FIPS provider availability, OpenSSL
   version, and visible `OPENSSL_CONF` / `OPENSSL_MODULES` environment.
 - Added `examples/fips-openssl.toml` and
   `fluxheim-config-tester --profile fips-openssl` so operators and CI can
   validate the expected OpenSSL FIPS configuration shape.
+- Added `examples/iso19790-openssl.toml` and
+  `fluxheim-config-tester --profile iso19790-openssl` for the same validation
+  path using ISO/IEC 19790 terminology.
 - Added `scripts/validate-fips-openssl.sh` for local and release checks. It
   builds the FIPS-capable profile, captures provider diagnostics, validates the
   FIPS fixture, and optionally fails if no provider is available with
@@ -98,11 +109,15 @@ module.
 
 ## Build
 
-Build the OpenSSL FIPS-capable profile explicitly:
+Build the OpenSSL FIPS/ISO-capable profile explicitly:
 
 ```bash
 cargo build --release --locked --no-default-features \
   --features profile-fips-openssl \
+  --bin fluxheim --bin fluxheim-config-tester
+
+cargo build --release --locked --no-default-features \
+  --features profile-iso19790-openssl \
   --bin fluxheim --bin fluxheim-config-tester
 ```
 

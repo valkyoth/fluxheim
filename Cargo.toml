@@ -47,6 +47,7 @@ tls = ["ingress", "dep:rustix"]
 tls-rustls = ["tls", "pingora/rustls", "dep:rustls", "rustls/ring"]
 tls-openssl = ["tls", "pingora/openssl"]
 tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl"]
+tls-openssl-iso19790 = ["tls-openssl-fips"]
 tls-boringssl = ["tls", "pingora/boringssl"]
 tls-s2n = ["tls", "pingora/s2n"]
 acme = [
@@ -109,6 +110,7 @@ profile-cache-edge = ["proxy", "cache", "tls-rustls", "security"]
 profile-proxy-edge = ["proxy", "tls-rustls", "security"]
 profile-load-balancer-edge = ["proxy", "load-balancer", "tls-rustls", "security"]
 profile-fips-openssl = ["proxy", "security", "tls-openssl-fips"]
+profile-iso19790-openssl = ["profile-fips-openssl", "tls-openssl-iso19790"]
 
 [dependencies]
 arc-swap = "1.9.1"

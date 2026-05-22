@@ -115,17 +115,22 @@ fn openssl_non_fips_default_fetch_rejected() -> Result<(), String> {
 pub fn validate_fips_runtime_config(
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if !config.tls.fips.required {
+    let compliance_mode = config.tls.compliance_mode();
+    if !compliance_mode.required() {
         return Ok(());
     }
 
     #[cfg(feature = "tls-openssl-fips")]
     {
         let status = activate_openssl_fips_provider().map_err(|error| {
-            format!("tls.fips.required OpenSSL FIPS provider check failed: {error}")
+            format!(
+                "{} required mode OpenSSL provider check failed: {error}",
+                compliance_mode.label()
+            )
         })?;
         log::info!(
-            "OpenSSL FIPS provider check passed using {}; default_properties_fips_enabled={}",
+            "{} required mode OpenSSL provider check passed using {}; default_properties_fips_enabled={}",
+            compliance_mode.label(),
             status.openssl_version,
             status.default_properties_fips_enabled
         );
@@ -134,10 +139,11 @@ pub fn validate_fips_runtime_config(
 
     #[cfg(not(feature = "tls-openssl-fips"))]
     {
-        Err(
-            "tls.fips.required requires a FIPS-capable TLS backend feature such as tls-openssl-fips"
-                .into(),
+        Err(format!(
+            "{} required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790",
+            compliance_mode.label()
         )
+        .into())
     }
 }
 

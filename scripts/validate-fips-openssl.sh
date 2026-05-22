@@ -88,6 +88,12 @@ if cargo run -q $cargo_run_release --no-default-features --features "$features" 
     exit 1
 fi
 
+echo "fips openssl: ISO/IEC 19790 config alias fixture"
+cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+    --config examples/iso19790-openssl.toml \
+    --profile iso19790-openssl \
+    --no-runtime-paths
+
 echo "fips openssl: OpenSSL provider list"
 if command -v openssl >/dev/null 2>&1; then
     if ! openssl list -providers -provider fips -provider base; then

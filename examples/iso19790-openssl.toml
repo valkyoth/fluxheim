@@ -1,0 +1,34 @@
+# Minimal ISO/IEC 19790-capable OpenSSL validation example.
+#
+# Build a matching binary with:
+#   cargo build --no-default-features --features profile-iso19790-openssl
+#
+# Validate the profile and provider availability with:
+#   cargo run --no-default-features --features profile-iso19790-openssl \
+#     --bin fluxheim-config-tester -- \
+#     --config examples/iso19790-openssl.toml \
+#     --profile iso19790-openssl \
+#     --no-runtime-paths \
+#     --crypto
+#
+# This file is an evidence/diagnostic fixture. Real deployments still need
+# vhosts, certificates, a validated OpenSSL FIPS/ISO provider path, and the
+# module Security Policy evidence described in docs/fips.md.
+
+[server]
+listen = ["127.0.0.1:8080"]
+
+[tls]
+enabled = true
+backend = "openssl"
+profile = "intermediate"
+min_protocol = "tls1.2"
+curve_preferences = ["CurveP256", "CurveP384"]
+cipher_suites = [
+  "TLS_AES_256_GCM_SHA384",
+  "TLS_AES_128_GCM_SHA256",
+  "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+]
+
+[tls.iso19790]
+required = true

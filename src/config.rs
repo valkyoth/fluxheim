@@ -2303,6 +2303,8 @@ pub struct TlsConfig {
     #[serde(default)]
     pub fips: TlsFipsConfig,
     #[serde(default)]
+    pub iso19790: TlsIso19790Config,
+    #[serde(default)]
     pub acme: AcmeConfig,
 }
 
@@ -2318,6 +2320,7 @@ struct TlsConfigFragment {
     cipher_suites: Option<Vec<TlsCipherSuite>>,
     certificates: Option<Vec<StaticCertificateConfig>>,
     fips: Option<TlsFipsConfigFragment>,
+    iso19790: Option<TlsIso19790ConfigFragment>,
     acme: Option<AcmeConfigFragment>,
 }
 
@@ -2349,6 +2352,9 @@ impl TlsConfig {
         }
         if let Some(fips) = fragment.fips {
             self.fips.merge(fips);
+        }
+        if let Some(iso19790) = fragment.iso19790 {
+            self.iso19790.merge(iso19790);
         }
         if let Some(acme) = fragment.acme {
             self.acme.merge(acme);
@@ -2443,7 +2449,8 @@ impl TlsConfig {
     }
 
     fn validate_fips_policy(&self) -> Result<(), ConfigError> {
-        if !self.fips.required {
+        let compliance_mode = self.compliance_mode();
+        if !compliance_mode.required() {
             return Ok(());
         }
         if self
@@ -2453,7 +2460,7 @@ impl TlsConfig {
         {
             return Err(ConfigError::InvalidTlsPolicy {
                 field: "tls.curve_preferences",
-                reason: "tls.fips.required rejects non-NIST or unproven hybrid groups; use CurveP256 and/or CurveP384 until a validated provider supports more",
+                reason: compliance_mode.non_nist_group_reason(),
             });
         }
         if self
@@ -2463,15 +2470,15 @@ impl TlsConfig {
         {
             return Err(ConfigError::InvalidTlsPolicy {
                 field: "tls.cipher_suites",
-                reason: "tls.fips.required rejects non-FIPS cipher suites such as ChaCha20; use AES-GCM/SHA-2 suites from the selected validated provider",
+                reason: compliance_mode.non_approved_cipher_reason(),
             });
         }
 
         #[cfg(not(feature = "tls-openssl-fips"))]
         {
             Err(ConfigError::InvalidTlsPolicy {
-                field: "tls.fips.required",
-                reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-openssl-fips; see docs/fips.md",
+                field: compliance_mode.config_field(),
+                reason: compliance_mode.missing_feature_reason(),
             })
         }
 
@@ -2480,10 +2487,19 @@ impl TlsConfig {
             if self.backend != TlsBackend::Openssl {
                 return Err(ConfigError::InvalidTlsPolicy {
                     field: "tls.backend",
-                    reason: "tls.fips.required with this build requires backend = \"openssl\"",
+                    reason: compliance_mode.openssl_backend_reason(),
                 });
             }
             Ok(())
+        }
+    }
+
+    pub fn compliance_mode(&self) -> TlsComplianceMode {
+        match (self.fips.required, self.iso19790.required) {
+            (false, false) => TlsComplianceMode::None,
+            (true, false) => TlsComplianceMode::Fips1403,
+            (false, true) => TlsComplianceMode::Iso19790,
+            (true, true) => TlsComplianceMode::Fips1403AndIso19790,
         }
     }
 
@@ -2542,7 +2558,20 @@ pub struct TlsFipsConfig {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct TlsIso19790Config {
+    #[serde(default)]
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct TlsFipsConfigFragment {
+    required: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TlsIso19790ConfigFragment {
     required: Option<bool>,
 }
 
@@ -2550,6 +2579,90 @@ impl TlsFipsConfig {
     fn merge(&mut self, fragment: TlsFipsConfigFragment) {
         if let Some(required) = fragment.required {
             self.required = required;
+        }
+    }
+}
+
+impl TlsIso19790Config {
+    fn merge(&mut self, fragment: TlsIso19790ConfigFragment) {
+        if let Some(required) = fragment.required {
+            self.required = required;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum TlsComplianceMode {
+    None,
+    Fips1403,
+    Iso19790,
+    Fips1403AndIso19790,
+}
+
+impl TlsComplianceMode {
+    pub fn required(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Fips1403 => "FIPS 140-3",
+            Self::Iso19790 => "ISO/IEC 19790",
+            Self::Fips1403AndIso19790 => "FIPS 140-3 / ISO/IEC 19790",
+        }
+    }
+
+    pub fn config_field(self) -> &'static str {
+        match self {
+            Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => "tls.fips.required",
+            Self::Iso19790 => "tls.iso19790.required",
+        }
+    }
+
+    fn non_nist_group_reason(self) -> &'static str {
+        match self {
+            Self::Iso19790 => {
+                "tls.iso19790.required rejects non-NIST or unproven hybrid groups; use CurveP256 and/or CurveP384 until a validated provider supports more"
+            }
+            Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => {
+                "tls.fips.required rejects non-NIST or unproven hybrid groups; use CurveP256 and/or CurveP384 until a validated provider supports more"
+            }
+        }
+    }
+
+    fn non_approved_cipher_reason(self) -> &'static str {
+        match self {
+            Self::Iso19790 => {
+                "tls.iso19790.required rejects non-approved cipher suites such as ChaCha20; use AES-GCM/SHA-2 suites from the selected validated provider"
+            }
+            Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => {
+                "tls.fips.required rejects non-FIPS cipher suites such as ChaCha20; use AES-GCM/SHA-2 suites from the selected validated provider"
+            }
+        }
+    }
+
+    #[cfg(not(feature = "tls-openssl-fips"))]
+    fn missing_feature_reason(self) -> &'static str {
+        match self {
+            Self::Iso19790 => {
+                "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790; see docs/fips.md"
+            }
+            Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => {
+                "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-openssl-fips; see docs/fips.md"
+            }
+        }
+    }
+
+    #[cfg(feature = "tls-openssl-fips")]
+    fn openssl_backend_reason(self) -> &'static str {
+        match self {
+            Self::Iso19790 => {
+                "tls.iso19790.required with this build requires backend = \"openssl\""
+            }
+            Self::None | Self::Fips1403 | Self::Fips1403AndIso19790 => {
+                "tls.fips.required with this build requires backend = \"openssl\""
+            }
         }
     }
 }
@@ -10945,6 +11058,7 @@ mod tests {
         .unwrap();
 
         assert!(config.tls.fips.required);
+        assert_eq!(config.tls.compliance_mode().label(), "FIPS 140-3");
 
         #[cfg(not(feature = "tls-openssl-fips"))]
         assert_eq!(
@@ -10952,6 +11066,42 @@ mod tests {
             Err(ConfigError::InvalidTlsPolicy {
                 field: "tls.fips.required",
                 reason: "FIPS-required mode requires a FIPS-capable TLS backend feature such as tls-openssl-fips; see docs/fips.md",
+            })
+        );
+
+        #[cfg(feature = "tls-openssl-fips")]
+        assert_eq!(config.validate(), Ok(()));
+    }
+
+    #[test]
+    fn parses_tls_iso19790_config_as_required_compliance_alias() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            enabled = true
+            backend = "openssl"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = [
+              "TLS_AES_256_GCM_SHA384",
+              "TLS_AES_128_GCM_SHA256",
+              "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+            ]
+
+            [tls.iso19790]
+            required = true
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.tls.iso19790.required);
+        assert_eq!(config.tls.compliance_mode().label(), "ISO/IEC 19790");
+
+        #[cfg(not(feature = "tls-openssl-fips"))]
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.iso19790.required",
+                reason: "ISO/IEC 19790-required mode requires a FIPS/ISO-capable TLS backend feature such as tls-openssl-fips or tls-openssl-iso19790; see docs/fips.md",
             })
         );
 

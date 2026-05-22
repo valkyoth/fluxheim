@@ -652,9 +652,15 @@ impl AdminApp {
             .map(|id| format!(r#""{}""#, json_escape(&id)))
             .unwrap_or_else(|| "null".to_owned());
         let runtime_state = self.runtime_state();
+        let current_config = self.current_config.load();
+        let tls = &current_config.tls;
+        let tls_compliance_mode = tls.compliance_mode();
         let body = format!(
-            r#"{{"status":"ok","snapshot_current":{current},"snapshots":{snapshots},"self_healing_enabled":{},"runtime_snapshot":{},"known_good_snapshot":{},"pending_validation":{}}}"#,
+            r#"{{"status":"ok","snapshot_current":{current},"snapshots":{snapshots},"self_healing_enabled":{},"tls_compliance_mode":"{}","tls_fips_required":{},"tls_iso19790_required":{},"runtime_snapshot":{},"known_good_snapshot":{},"pending_validation":{}}}"#,
             self.self_healing_enabled,
+            json_escape(tls_compliance_mode.label()),
+            tls.fips.required,
+            tls.iso19790.required,
             optional_json_string(runtime_state.runtime_snapshot.as_deref()),
             optional_json_string(runtime_state.known_good_snapshot.as_deref()),
             pending_validation_json(runtime_state.pending_validation.as_ref())
@@ -3086,6 +3092,24 @@ mod tests {
                 .unwrap()
                 .contains(r#""pending_validation":null"#)
         );
+    }
+
+    #[test]
+    fn status_endpoint_reports_tls_compliance_mode() {
+        let config = Config {
+            tls: crate::config::TlsConfig {
+                iso19790: crate::config::TlsIso19790Config { required: true },
+                ..crate::config::TlsConfig::default()
+            },
+            ..Config::default()
+        };
+        let response =
+            app_with_config(config).handle("GET", "/_fluxheim/status", None, &auth_headers());
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""tls_compliance_mode":"ISO/IEC 19790""#));
+        assert!(body.contains(r#""tls_iso19790_required":true"#));
     }
 
     #[test]

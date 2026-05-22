@@ -46,6 +46,9 @@ expand_fluxheim_feature() {
         profile-fips-openssl)
             echo "proxy,security,tls-openssl-fips"
             ;;
+        profile-iso19790-openssl)
+            echo "proxy,security,tls-openssl-fips,tls-openssl-iso19790"
+            ;;
         profile-observability)
             echo "proxy,web,cache,tls-rustls,security,metrics,metrics-otlp,otel-tracing,otel-otlp"
             ;;
@@ -54,6 +57,9 @@ expand_fluxheim_feature() {
             ;;
         tls-openssl-fips)
             echo "tls-openssl,tls-openssl-fips"
+            ;;
+        tls-openssl-iso19790)
+            echo "tls-openssl,tls-openssl-fips,tls-openssl-iso19790"
             ;;
         *)
             echo "$1"

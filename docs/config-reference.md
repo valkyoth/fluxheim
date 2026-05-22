@@ -1084,6 +1084,9 @@ cipher_suites = [
 [tls.fips]
 required = false
 
+[tls.iso19790]
+required = false
+
 [[tls.certificates]]
 cert_path = "tls/fullchain.pem"
 key_path = "tls/key.pem"
@@ -1158,21 +1161,25 @@ The global `[[tls.certificates]]` table is capped at 1024 certificate pairs.
 Release validation must still scan every release candidate with a TLS scanner
 before publishing a stable release.
 
-### FIPS-Capable OpenSSL Guard
+### FIPS / ISO-Capable OpenSSL Guard
 
 `[tls.fips] required = true` is accepted by the config schema as a fail-closed
-guard for the `1.3.4` OpenSSL FIPS-capable TLS line. It is not a blanket FIPS compliance
-claim. When enabled, Fluxheim rejects non-NIST or unproven groups such as
-`X25519` and `X25519MLKEM768`, rejects non-FIPS cipher choices such as
-ChaCha20 suites, and requires a backend-specific proof path.
+guard for the `1.3.4` OpenSSL FIPS-capable TLS line. `[tls.iso19790]
+required = true` is an ISO/IEC 19790 terminology alias for the same
+validated-provider enforcement path. Neither setting is a blanket FIPS or
+ISO/IEC 19790 compliance claim. When enabled, Fluxheim rejects non-NIST or
+unproven groups such as `X25519` and `X25519MLKEM768`, rejects non-approved
+cipher choices such as ChaCha20 suites, and requires a backend-specific proof
+path.
 
-Default builds fail closed because they do not contain a FIPS-capable proof
-path. Builds compiled with `tls-openssl-fips` may use `backend = "openssl"`:
-runtime validation then checks that the OpenSSL FIPS provider can be loaded and
-that an approved cipher can be fetched with the `fips=yes` property query,
-enables OpenSSL default FIPS properties for the process-default library
-context, verifies those default properties, and checks that the default fetch
-path rejects a non-FIPS cipher.
+Default builds fail closed because they do not contain a FIPS/ISO-capable proof
+path. Builds compiled with `tls-openssl-fips` or the
+`tls-openssl-iso19790` alias may use `backend = "openssl"`: runtime validation
+then checks that the OpenSSL FIPS provider can be loaded and that an approved
+cipher can be fetched with the `fips=yes` property query, enables OpenSSL
+default FIPS properties for the process-default library context, verifies those
+default properties, and checks that the default fetch path rejects a non-FIPS
+cipher.
 Operators still need the selected module's CMVP certificate, Security Policy,
 OpenSSL provider configuration, platform evidence, and deployment records.
 Fluxheim does not hardcode an OpenSSL provider path; provider discovery follows

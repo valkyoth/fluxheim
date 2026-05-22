@@ -51,6 +51,7 @@ pub enum ConfigTesterProfile {
     Cache,
     Proxy,
     FipsOpenssl,
+    Iso19790Openssl,
     WebPhp,
     Development,
     LoadBalancer,
@@ -140,8 +141,11 @@ fn validate_profile_config(
     if !policy.proxy {
         reject_proxy_config(config)?;
     }
-    if profile == ConfigTesterProfile::FipsOpenssl {
-        validate_fips_openssl_profile_config(config)?;
+    if matches!(
+        profile,
+        ConfigTesterProfile::FipsOpenssl | ConfigTesterProfile::Iso19790Openssl
+    ) {
+        validate_fips_openssl_profile_config(config, profile)?;
     }
     Ok(())
 }
@@ -171,6 +175,7 @@ impl ProfilePolicy {
             },
             ConfigTesterProfile::Proxy
             | ConfigTesterProfile::FipsOpenssl
+            | ConfigTesterProfile::Iso19790Openssl
             | ConfigTesterProfile::LoadBalancer => Self {
                 proxy: true,
                 web: false,
@@ -194,6 +199,7 @@ impl ConfigTesterProfile {
             Self::Cache => "cache",
             Self::Proxy => "proxy",
             Self::FipsOpenssl => "fips-openssl",
+            Self::Iso19790Openssl => "iso19790-openssl",
             Self::WebPhp => "web-php",
             Self::Development => "development",
             Self::LoadBalancer => "load-balancer",
@@ -228,12 +234,21 @@ fn reject_web_config(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>
 
 fn validate_fips_openssl_profile_config(
     config: &Config,
+    profile: ConfigTesterProfile,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if config.tls.backend != TlsBackend::Openssl {
-        return Err("target profile fips-openssl requires [tls] backend = \"openssl\"".into());
+        return Err(format!(
+            "target profile {} requires [tls] backend = \"openssl\"",
+            profile.as_str()
+        )
+        .into());
     }
-    if !config.tls.fips.required {
-        return Err("target profile fips-openssl requires [tls.fips] required = true".into());
+    if !config.tls.compliance_mode().required() {
+        return Err(format!(
+            "target profile {} requires [tls.fips] required = true or [tls.iso19790] required = true",
+            profile.as_str()
+        )
+        .into());
     }
     Ok(())
 }
@@ -526,6 +541,21 @@ mod tests {
         );
 
         validate_profile_config(&config, ConfigTesterProfile::FipsOpenssl).unwrap();
+    }
+
+    #[test]
+    fn iso19790_openssl_profile_accepts_iso19790_required_openssl() {
+        let config = config_from_toml(
+            r#"
+            [tls]
+            backend = "openssl"
+
+            [tls.iso19790]
+            required = true
+            "#,
+        );
+
+        validate_profile_config(&config, ConfigTesterProfile::Iso19790Openssl).unwrap();
     }
 
     fn write_test_config(label: &str, contents: &str) -> std::path::PathBuf {

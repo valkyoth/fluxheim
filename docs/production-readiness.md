@@ -188,14 +188,16 @@ port `80`, and the background renewal worker reloads the SNI certificate set
 after the certificate files are installed. Static certificate paths remain
 fail-closed.
 
-The `1.3.4` support promise adds an OpenSSL FIPS-capable TLS build path for
+The `1.3.4` support promise adds an OpenSSL FIPS/ISO-capable TLS build path for
 operators who need to validate a deployment against an externally validated
-OpenSSL 3 FIPS provider. This path is opt-in through `profile-fips-openssl` /
-`tls-openssl-fips` and requires `[tls] backend = "openssl"` plus
-`[tls.fips] required = true`. Fluxheim validates the TLS policy, loads the
-FIPS provider, enables OpenSSL default FIPS properties for the process-default
-library context, verifies those default properties, and exposes release
-evidence through `fluxheim crypto`, `fluxheim-config-tester --crypto`, and
+OpenSSL 3 provider. This path is opt-in through `profile-fips-openssl` /
+`tls-openssl-fips` or the ISO/IEC 19790 aliases
+`profile-iso19790-openssl` / `tls-openssl-iso19790`, and requires `[tls]
+backend = "openssl"` plus `[tls.fips] required = true` or `[tls.iso19790]
+required = true`. Fluxheim validates the TLS policy, loads the FIPS provider,
+enables OpenSSL default FIPS properties for the process-default library
+context, verifies those default properties, and exposes release evidence
+through `fluxheim crypto`, `fluxheim-config-tester --crypto`, and
 `scripts/validate-fips-openssl.sh`. It does not make Fluxheim itself a
 validated cryptographic module; operators still need the selected module's CMVP
 certificate, Security Policy, provider configuration, platform evidence, and

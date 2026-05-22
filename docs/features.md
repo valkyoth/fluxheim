@@ -117,6 +117,7 @@ feature aliases for common deployment shapes.
 | `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
 | `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
 | `profile-fips-openssl` | `proxy`, `security`, `tls-openssl-fips` | FIPS-capable OpenSSL proxy build that links to the operator-selected OpenSSL provider. |
+| `profile-iso19790-openssl` | `profile-fips-openssl`, `tls-openssl-iso19790` | ISO/IEC 19790 terminology alias for the same OpenSSL validated-provider proof path. |
 
 Examples that match the official release artifacts:
 
@@ -128,6 +129,7 @@ cargo build --no-default-features --features profile-proxy-edge,acme-client
 cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 cargo build --no-default-features --features profile-privacy
 cargo build --no-default-features --features profile-fips-openssl
+cargo build --no-default-features --features profile-iso19790-openssl
 ```
 
 The raw profile aliases do not force `acme-client`; that is intentional for
@@ -138,20 +140,25 @@ tarballs add `acme-client` to the full, cache, and proxy profiles by default.
 
 `tls-openssl-fips` is an opt-in OpenSSL 3 FIPS-provider proof path. It expands
 to `tls-openssl` and adds OpenSSL provider diagnostics plus default FIPS
-property enforcement for configurations that set `[tls.fips] required = true`.
-The build still depends on the operator installing and configuring a validated
-OpenSSL FIPS provider according to that module's CMVP Security Policy.
+property enforcement for configurations that set `[tls.fips] required = true`
+or `[tls.iso19790] required = true`. `tls-openssl-iso19790` and
+`profile-iso19790-openssl` are terminology aliases for European/international
+operator evidence; they use the same validated-provider enforcement path. The
+build still depends on the operator installing and configuring a validated
+OpenSSL FIPS/ISO provider according to that module's Security Policy.
 
 ```bash
 cargo build --no-default-features --features profile-fips-openssl
+cargo build --no-default-features --features profile-iso19790-openssl
 ```
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
 binary can load the provider and enable OpenSSL default FIPS properties in the
 current environment. The
-`fips-openssl` config-tester profile validates that a fixture uses
-`backend = "openssl"` and `[tls.fips] required = true`; see
-`examples/fips-openssl.toml`. See
+`fips-openssl` and `iso19790-openssl` config-tester profiles validate that a
+fixture uses `backend = "openssl"` and either `[tls.fips] required = true` or
+`[tls.iso19790] required = true`; see `examples/fips-openssl.toml` and
+`examples/iso19790-openssl.toml`. See
 [FIPS-Capable Deployments](fips.md) before using this for regulated systems.
 
 Focused image profile status:
