@@ -148,6 +148,9 @@ jobs:
           cargo test --no-default-features --features proxy,web,tls-rustls,privacy-mode
           cargo check --no-default-features --features proxy,tls-rustls
 
+      - name: Clean build artifacts before config validation
+        run: cargo clean
+
       - name: Validate example configs
         run: |
           cargo run --quiet -- --check-config --config examples/fluxheim.toml
