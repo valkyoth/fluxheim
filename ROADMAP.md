@@ -607,6 +607,14 @@ without parsing text fixtures for every module.
      operating procedure.
      See `docs/fips.md` for the detailed post-`1.3.4` FIPS implementation
      ladder and operator evidence model.
+   - Future Common Criteria evidence alignment should turn
+     `docs/common-criteria-roadmap.md` into actionable release artifacts:
+     define a candidate TOE boundary, record security-relevant interfaces,
+     maintain a Security Target-style draft, map Fluxheim controls to
+     Common Criteria-style functional areas, and attach validation scripts to
+     release evidence. This is product-evaluation evidence planning only; do
+     not claim Common Criteria certification, Protection Profile conformance,
+     or EAL compliance without an accredited evaluation.
   - ACME account/order/challenge runtime. Implemented as one-shot and
     background `acme-client` paths for HTTP-01.
   - Background renewal queue service. Implemented for due-only checks on the

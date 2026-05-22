@@ -867,7 +867,12 @@ Post-`1.3.4` implementation ladder:
 - `1.3.7` or later: compliance evidence package. Publish a repeatable release
   evidence template with SBOM notes, build command, module certificate,
   Security Policy, provider config, runtime crypto diagnostics, and scanner
-  output checklist.
+  output checklist. Include Common Criteria evidence alignment from
+  `common-criteria-roadmap.md`: candidate TOE boundary, Security Target-style
+  draft, security-relevant interfaces, operational-environment assumptions,
+  validation-script identifiers, and vulnerability-analysis records. This is
+  an actionable evidence track, not a Common Criteria certification or EAL
+  claim.
 
 Follow-up `1.3.x` PHP runtime plan:
 
