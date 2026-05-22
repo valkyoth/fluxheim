@@ -25,12 +25,18 @@ try to analyze the same repository.
 The full release gate is documented in
 [Release Checklist](docs/release-checklist.md). Use it before publishing
 artifacts, changing dependency versions, or changing TLS/cache/proxy behavior.
+The Rust dependency threat model and review rules are documented in
+[Rust Supply-Chain Security](docs/supply-chain-security.md).
 
 ## Dependency Policy
 
 The dependency policy lives in `deny.toml`. Unknown registries and git sources
 are denied by default. License exceptions must be narrow, named, versioned, and
 documented with the reason for acceptance.
+
+Build scripts, procedural macros, `*-sys` crates, vendored native code, Cargo
+aliases, CI workflow edits, and release script edits are treated as executable
+supply-chain changes. Review them before merging dependency updates.
 
 Reviewed advisory exceptions are allowed only when there is no compatible
 upgrade and the affected API is not reachable in Fluxheim. Each exception must

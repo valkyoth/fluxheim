@@ -391,6 +391,7 @@ full release ladder.
 - [External Authorization Request](docs/auth-request.md)
 - [Zero-Retention Privacy Mode](docs/zero-retention-privacy-mode.md)
 - [WAF Architecture](docs/waf-architecture.md)
+- [Rust Supply-Chain Security](docs/supply-chain-security.md)
 - [Cloudflare Origin Support](docs/cloudflare-origin-support.md)
 - [PHP Runtime Support](docs/php-runtime-support.md)
 - [Perl CGI Support](docs/perl-cgi-support.md)
@@ -406,6 +407,7 @@ Fluxheim uses:
 - GitHub CI and CodeQL scanning;
 - `cargo deny` for license and dependency policy;
 - `cargo audit` for advisory checks;
+- SBOM and reproducible-build evidence for stable releases;
 - `scripts/validate-owasp-top10-2025.sh` for a mapped OWASP Top 10 2025
   baseline over Fluxheim-owned controls;
 - rootless Podman smoke tests before container releases.
@@ -416,7 +418,9 @@ Before publishing or merging security-sensitive changes:
 scripts/release_checks.sh
 ```
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and
+[Rust Supply-Chain Security](docs/supply-chain-security.md) for dependency
+review policy.
 
 ## License
 

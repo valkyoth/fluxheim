@@ -36,6 +36,9 @@ cargo install --locked cargo-sbom --version 0.10.0
 
 - Run `cargo update` only as a deliberate dependency maintenance step.
 - Review every new dependency for maintenance status and SPDX license metadata.
+- Review every new build script, procedural macro, `*-sys` crate, vendored
+  native source, native tool invocation, Cargo alias, and CI workflow edit as
+  build-host code execution.
 - Keep `deny.toml` strict: unknown registries, git sources, and unknown licenses
   stay denied.
 - Keep `.cargo/audit.toml` exceptions narrow, versioned, and documented with a
@@ -242,6 +245,10 @@ scripts/smoke_1_0_core.sh
   builder can reproduce its own release artifact from the tagged source and
   pinned lockfile. Cross-distro/container reproducibility remains a future
   hardening goal.
+- Human dependency review. Track the `cargo-vet` adoption path in
+  [Rust Supply-Chain Security](supply-chain-security.md). Do not make `cargo-vet`
+  a blocking release gate until the initial exemption set and trusted audit
+  imports have been reviewed.
 
 - Request framing and smuggling regression tests. The unit suite must keep
   coverage for ambiguous `Content-Length` and `Transfer-Encoding`, invalid

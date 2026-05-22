@@ -615,6 +615,13 @@ without parsing text fixtures for every module.
      release evidence. This is product-evaluation evidence planning only; do
      not claim Common Criteria certification, Protection Profile conformance,
      or EAL compliance without an accredited evaluation.
+   - Future Rust supply-chain hardening should add human dependency review on
+     top of the existing lockfile, `cargo-deny`, `cargo-audit`, SBOM, and
+     reproducible-build gates. Planned direction: adopt `cargo-vet` with an
+     explicit `supply-chain/` policy, require review for new build scripts,
+     procedural macros, `*-sys` crates, and native dependencies, and evaluate
+     `cargo-auditable` or native embedded SBOM metadata for release binaries.
+     See `docs/supply-chain-security.md` for the staged adoption plan.
   - ACME account/order/challenge runtime. Implemented as one-shot and
     background `acme-client` paths for HTTP-01.
   - Background renewal queue service. Implemented for due-only checks on the
