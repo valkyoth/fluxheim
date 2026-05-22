@@ -233,6 +233,11 @@ scripts/smoke_1_0_core.sh
   deny production `unwrap()`, `expect()`, and `panic!()` through clippy. Keep
   operational errors on `Result` or explicit fallback responses. Test-only
   assertions may continue using panicking helpers.
+- Native dependency policy. FIPS-capable profiles can intentionally pull native
+  cryptographic modules such as OpenSSL providers or `aws-lc-fips-sys`. Record
+  the provider/module certificate, compiler, platform, and Security Policy in
+  release evidence, and run sanitizer builds where supported by that native
+  dependency and target platform.
 - Secret handling policy. Admin bearer tokens are read into zeroizing buffers,
   hashed, and compared through a vetted constant-time equality primitive.
   Keep new long-lived credentials in `zeroize`/`ZeroizeOnDrop` types, and use

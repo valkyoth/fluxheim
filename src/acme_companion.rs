@@ -69,7 +69,7 @@ where
         feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
-    crate::tls::install_rustls_crypto_provider();
+    crate::tls::install_rustls_crypto_provider()?;
 
     let cli = AcmeCompanionCli::parse_from(args);
     match cli.command {
@@ -101,7 +101,7 @@ fn run_renew(
     reload_after_renewal: bool,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(feature = "tls-rustls-backend")]
-    crate::tls::install_rustls_crypto_provider();
+    crate::tls::install_rustls_crypto_provider()?;
 
     let config = load_validated_config(config_path)?;
     if let Some(vhost) = vhost {

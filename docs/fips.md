@@ -349,6 +349,21 @@ of the ring provider, maps configured suites/groups through the AWS-LC rustls
 provider, and rejects startup when a FIPS/ISO-required rustls listener does not
 report `ServerConfig::fips()`.
 
+This is a native-code dependency boundary. `aws-lc-fips-sys` builds the
+validated AWS-LC FIPS module from C/assembly and therefore does not inherit
+Rust's memory-safety guarantees. Treat rustls/AWS-LC FIPS evidence as evidence
+for the selected validated module, compiler, platform, and Security Policy, not
+as a pure-Rust cryptographic implementation claim.
+
+The rustls listener also has a final fail-closed assertion in Fluxheim's
+vendored Pingora rustls listener path. Fluxheim validates provider status,
+cipher suites, and key-exchange groups before listener construction, and logs
+certificate/resolver context before that final assertion. If this assertion is
+ever reached, the process terminates rather than continuing with a listener
+that cannot report rustls FIPS mode. That is an accepted reliability tradeoff
+for the FIPS/ISO-required rustls candidate path until Pingora exposes a fully
+recoverable listener-build API.
+
 Release-mode rustls/AWS-LC FIPS evidence should be generated on an
 AWS-LC-supported FIPS builder, not an arbitrary rolling distribution compiler.
 Upstream `aws-lc-fips-sys` has known build failures with newer compiler

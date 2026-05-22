@@ -22,6 +22,13 @@ impl TraceExporter {
                 "invalid OTLP trace endpoint",
             )
         })?;
+        if endpoint.url.starts_with("http://") {
+            log::warn!(
+                target: "fluxheim::security",
+                "OTLP trace endpoint uses plaintext HTTP for host {}; use HTTPS to protect trace metadata in transit",
+                endpoint.host
+            );
+        }
         let service_name = config.service_name.clone();
         let timeout = Duration::from_secs(config.timeout_secs);
         let agent = crate::otlp_http::agent(timeout, config.tls_ca_cert_path.as_deref())?;

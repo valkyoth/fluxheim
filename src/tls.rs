@@ -9,9 +9,13 @@ pub const PRIVATE_KEY_MODE: u32 = 0o600;
 pub const ACME_STORAGE_MODE: u32 = 0o700;
 
 #[cfg(feature = "tls-rustls-backend")]
-pub fn install_rustls_crypto_provider() {
-    ensure_rustls_crypto_provider_installed()
-        .unwrap_or_else(|error| panic!("rustls CryptoProvider installation failed: {error}"));
+pub fn install_rustls_crypto_provider() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ensure_rustls_crypto_provider_installed().map_err(|error| {
+        std::io::Error::other(format!(
+            "rustls CryptoProvider installation failed: {error}"
+        ))
+        .into()
+    })
 }
 
 #[cfg(feature = "tls-rustls-backend")]

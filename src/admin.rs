@@ -3044,6 +3044,18 @@ mod tests {
         }
     }
 
+    fn set_test_runtime_state(
+        app: &AdminApp,
+        runtime_snapshot: Option<String>,
+        known_good_snapshot: Option<String>,
+        pending_validation: Option<super::PendingValidation>,
+    ) {
+        let mut state = app.state.lock().unwrap();
+        state.runtime_snapshot = runtime_snapshot;
+        state.known_good_snapshot = known_good_snapshot;
+        state.pending_validation = pending_validation;
+    }
+
     #[test]
     fn health_endpoint_requires_auth_by_default() {
         let response = app().handle("GET", "/_fluxheim/health", None, &HeaderMap::new());
@@ -5151,8 +5163,12 @@ mod tests {
             .store
             .snapshot_config(&Config::default(), Some("baseline"))
             .unwrap();
-        app.state.lock().unwrap().runtime_snapshot = Some(baseline.id.clone());
-        app.state.lock().unwrap().known_good_snapshot = Some(baseline.id.clone());
+        set_test_runtime_state(
+            &app,
+            Some(baseline.id.clone()),
+            Some(baseline.id.clone()),
+            None,
+        );
 
         let new_config = Config {
             vhosts: vec![VhostConfig {
@@ -5194,14 +5210,19 @@ mod tests {
             .store
             .snapshot_config(&Config::default(), Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: snapshot.id.clone(),
-            previous_snapshot: None,
-            impact: "noop".to_owned(),
-            expires_unix_secs: super::unix_secs().saturating_add(30),
-            successful_checks: 0,
-            failed_checks: 0,
-        });
+        set_test_runtime_state(
+            &app,
+            None,
+            None,
+            Some(super::PendingValidation {
+                target_snapshot: snapshot.id.clone(),
+                previous_snapshot: None,
+                impact: "noop".to_owned(),
+                expires_unix_secs: super::unix_secs().saturating_add(30),
+                successful_checks: 0,
+                failed_checks: 0,
+            }),
+        );
 
         let response = app.handle(
             "POST",
@@ -5224,14 +5245,19 @@ mod tests {
             .store
             .snapshot_config(&Config::default(), Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: snapshot.id.clone(),
-            previous_snapshot: None,
-            impact: "noop".to_owned(),
-            expires_unix_secs: super::unix_secs().saturating_add(30),
-            successful_checks: 0,
-            failed_checks: 0,
-        });
+        set_test_runtime_state(
+            &app,
+            None,
+            None,
+            Some(super::PendingValidation {
+                target_snapshot: snapshot.id.clone(),
+                previous_snapshot: None,
+                impact: "noop".to_owned(),
+                expires_unix_secs: super::unix_secs().saturating_add(30),
+                successful_checks: 0,
+                failed_checks: 0,
+            }),
+        );
 
         let response = app.handle(
             "POST",
@@ -5311,16 +5337,19 @@ mod tests {
             .store
             .snapshot_config(&candidate_config, Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().runtime_snapshot = Some(candidate.id.clone());
-        app.state.lock().unwrap().known_good_snapshot = Some(baseline.id.clone());
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: candidate.id.clone(),
-            previous_snapshot: Some(baseline.id.clone()),
-            impact: "snapshot".to_owned(),
-            expires_unix_secs: super::unix_secs().saturating_add(30),
-            successful_checks: 0,
-            failed_checks: 0,
-        });
+        set_test_runtime_state(
+            &app,
+            Some(candidate.id.clone()),
+            Some(baseline.id.clone()),
+            Some(super::PendingValidation {
+                target_snapshot: candidate.id.clone(),
+                previous_snapshot: Some(baseline.id.clone()),
+                impact: "snapshot".to_owned(),
+                expires_unix_secs: super::unix_secs().saturating_add(30),
+                successful_checks: 0,
+                failed_checks: 0,
+            }),
+        );
         app.proxy.reload_from_config(&candidate_config).unwrap();
 
         let response = app.handle(
@@ -5348,14 +5377,19 @@ mod tests {
             .store
             .snapshot_config(&Config::default(), Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: snapshot.id.clone(),
-            previous_snapshot: None,
-            impact: "noop".to_owned(),
-            expires_unix_secs: super::unix_secs().saturating_add(30),
-            successful_checks: 1,
-            failed_checks: 0,
-        });
+        set_test_runtime_state(
+            &app,
+            None,
+            None,
+            Some(super::PendingValidation {
+                target_snapshot: snapshot.id.clone(),
+                previous_snapshot: None,
+                impact: "noop".to_owned(),
+                expires_unix_secs: super::unix_secs().saturating_add(30),
+                successful_checks: 1,
+                failed_checks: 0,
+            }),
+        );
 
         ProxyHealthReporter::record_proxy_health_signal(&app, ProxyHealthSignal::Success);
 
@@ -5409,16 +5443,19 @@ mod tests {
             .store
             .snapshot_config(&candidate_config, Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().runtime_snapshot = Some(candidate.id.clone());
-        app.state.lock().unwrap().known_good_snapshot = Some(baseline.id.clone());
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: candidate.id.clone(),
-            previous_snapshot: Some(baseline.id.clone()),
-            impact: "snapshot".to_owned(),
-            expires_unix_secs: super::unix_secs().saturating_add(30),
-            successful_checks: 0,
-            failed_checks: 0,
-        });
+        set_test_runtime_state(
+            &app,
+            Some(candidate.id.clone()),
+            Some(baseline.id.clone()),
+            Some(super::PendingValidation {
+                target_snapshot: candidate.id.clone(),
+                previous_snapshot: Some(baseline.id.clone()),
+                impact: "snapshot".to_owned(),
+                expires_unix_secs: super::unix_secs().saturating_add(30),
+                successful_checks: 0,
+                failed_checks: 0,
+            }),
+        );
         app.proxy.reload_from_config(&candidate_config).unwrap();
 
         ProxyHealthReporter::record_proxy_health_signal(&app, ProxyHealthSignal::Failure);
@@ -5475,16 +5512,19 @@ mod tests {
             .store
             .snapshot_config(&candidate_config, Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().runtime_snapshot = Some(candidate.id.clone());
-        app.state.lock().unwrap().known_good_snapshot = Some(baseline.id.clone());
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: candidate.id.clone(),
-            previous_snapshot: Some(baseline.id.clone()),
-            impact: "snapshot".to_owned(),
-            expires_unix_secs: super::unix_secs().saturating_add(30),
-            successful_checks: 0,
-            failed_checks: 1,
-        });
+        set_test_runtime_state(
+            &app,
+            Some(candidate.id.clone()),
+            Some(baseline.id.clone()),
+            Some(super::PendingValidation {
+                target_snapshot: candidate.id.clone(),
+                previous_snapshot: Some(baseline.id.clone()),
+                impact: "snapshot".to_owned(),
+                expires_unix_secs: super::unix_secs().saturating_add(30),
+                successful_checks: 0,
+                failed_checks: 1,
+            }),
+        );
         app.proxy.reload_from_config(&candidate_config).unwrap();
 
         let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
@@ -5542,16 +5582,19 @@ mod tests {
             .store
             .snapshot_config(&candidate_config, Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().runtime_snapshot = Some(candidate.id.clone());
-        app.state.lock().unwrap().known_good_snapshot = Some(baseline.id.clone());
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: candidate.id.clone(),
-            previous_snapshot: Some(baseline.id.clone()),
-            impact: "snapshot".to_owned(),
-            expires_unix_secs: 1,
-            successful_checks: 0,
-            failed_checks: 0,
-        });
+        set_test_runtime_state(
+            &app,
+            Some(candidate.id.clone()),
+            Some(baseline.id.clone()),
+            Some(super::PendingValidation {
+                target_snapshot: candidate.id.clone(),
+                previous_snapshot: Some(baseline.id.clone()),
+                impact: "snapshot".to_owned(),
+                expires_unix_secs: 1,
+                successful_checks: 0,
+                failed_checks: 0,
+            }),
+        );
         app.proxy.reload_from_config(&candidate_config).unwrap();
 
         let response = app.handle("POST", "/_fluxheim/self-heal/fail", None, &auth_headers());
@@ -5609,16 +5652,19 @@ mod tests {
             .store
             .snapshot_config(&candidate_config, Some("candidate"))
             .unwrap();
-        app.state.lock().unwrap().runtime_snapshot = Some(candidate.id.clone());
-        app.state.lock().unwrap().known_good_snapshot = Some(baseline.id.clone());
-        app.state.lock().unwrap().pending_validation = Some(super::PendingValidation {
-            target_snapshot: candidate.id.clone(),
-            previous_snapshot: Some(baseline.id.clone()),
-            impact: "snapshot".to_owned(),
-            expires_unix_secs: 0,
-            successful_checks: 0,
-            failed_checks: 0,
-        });
+        set_test_runtime_state(
+            &app,
+            Some(candidate.id.clone()),
+            Some(baseline.id.clone()),
+            Some(super::PendingValidation {
+                target_snapshot: candidate.id.clone(),
+                previous_snapshot: Some(baseline.id.clone()),
+                impact: "snapshot".to_owned(),
+                expires_unix_secs: 0,
+                successful_checks: 0,
+                failed_checks: 0,
+            }),
+        );
         app.proxy.reload_from_config(&candidate_config).unwrap();
 
         let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());

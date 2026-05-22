@@ -114,7 +114,7 @@ mod tests {
 
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
-        crate::tls::install_rustls_crypto_provider();
+        let _ = crate::tls::install_rustls_crypto_provider();
     }
 
     #[test]

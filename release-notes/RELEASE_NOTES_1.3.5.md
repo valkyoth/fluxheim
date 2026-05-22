@@ -38,6 +38,13 @@ evidence before making regulated claims.
 The rustls/AWS-LC FIPS candidate build requires the `aws-lc-fips-sys` toolchain,
 including CMake, Go, and a C compiler.
 
+This path intentionally adds a native C/assembly cryptographic module boundary.
+It is not a pure-Rust FIPS claim: operators must collect evidence for the exact
+validated AWS-LC module, toolchain, platform, and module Security Policy.
+Fluxheim fails closed if a FIPS/ISO-required rustls listener cannot report
+rustls FIPS mode; the vendored Pingora listener keeps a final panic assertion
+with structured context after Fluxheim's normal provider and TLS-policy checks.
+
 ## Example
 
 ```bash

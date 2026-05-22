@@ -72,7 +72,7 @@ where
         feature = "tls-rustls-backend",
         not(any(feature = "tls-openssl", feature = "tls-boringssl"))
     ))]
-    crate::tls::install_rustls_crypto_provider();
+    crate::tls::install_rustls_crypto_provider()?;
 
     let cli = ConfigTesterCli::parse_from(args);
     run(cli)
