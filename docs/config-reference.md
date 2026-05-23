@@ -1447,6 +1447,10 @@ upstream_tls = false
 [vhosts.headers.response.add]
 access-control-allow-origin = "https://example.test"
 
+[vhosts.access]
+allow = ["198.51.100.0/24", "2001:db8:100::/48"]
+deny = ["198.51.100.66"]
+
 # Second vhost. The tables below belong to api.example.test.
 [[vhosts]]
 name = "api.example.test"
@@ -1464,6 +1468,15 @@ aliases and 256 routes.
 `max_request_body_bytes` is optional on a vhost and overrides the global
 `server.limits.max_request_body_bytes` for that host. Route-level
 `max_request_body_bytes` still wins when a matching route sets its own limit.
+
+`[vhosts.access]` and `[vhosts.routes.access]` provide the first `1.4` IP ACL
+surface. Rules accept exact IP addresses or CIDR ranges. `deny` entries win
+first. When `allow` is non-empty, the effective client IP must match at least
+one allow entry. The effective client IP is the direct peer address unless the
+direct peer matches `server.trusted_proxies`; only then does Fluxheim inspect
+`X-Forwarded-For` recursively. A vhost policy is evaluated before any matching
+route policy, so route ACLs can further restrict traffic but cannot bypass a
+vhost-level denial.
 
 Vhosts can also contain ordered route tables. Exact matches win first, then the
 longest prefix match, then one optional fallback route. A route must define one

@@ -3580,6 +3580,8 @@ pub struct VhostConfig {
     #[serde(default)]
     pub max_request_body_bytes: Option<ByteSize>,
     #[serde(default)]
+    pub access: AccessPolicyConfig,
+    #[serde(default)]
     pub tls: VhostTlsConfig,
     #[serde(default)]
     pub acme_challenge: VhostAcmeChallengeConfig,
@@ -3654,6 +3656,13 @@ impl VhostConfig {
             })?;
         self.acme_challenge.validate(&self.name)?;
         self.redirect.validate(&self.name)?;
+        self.access
+            .validate("vhosts.access")
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "access",
+                source: Box::new(source),
+            })?;
         self.cache
             .validate("vhosts.cache")
             .map_err(|source| ConfigError::VhostSection {
@@ -3737,6 +3746,74 @@ impl VhostConfig {
     }
 }
 
+const MAX_ACCESS_RULES: usize = 256;
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccessPolicyConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+}
+
+impl Default for AccessPolicyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allow: Vec::new(),
+            deny: Vec::new(),
+        }
+    }
+}
+
+impl AccessPolicyConfig {
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        validate_access_rule_list(scope, "allow", &self.allow)?;
+        validate_access_rule_list(scope, "deny", &self.deny)?;
+        Ok(())
+    }
+}
+
+fn validate_access_rule_list(
+    scope: &'static str,
+    field: &'static str,
+    values: &[String],
+) -> Result<(), ConfigError> {
+    validate_config_list_len(format!("{scope}.{field}"), values.len(), MAX_ACCESS_RULES)?;
+
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed != value || !valid_ip_matcher(trimmed) {
+            return Err(ConfigError::InvalidAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.clone(),
+            });
+        }
+        if !seen.insert(trimmed.to_ascii_lowercase()) {
+            return Err(ConfigError::DuplicateAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
+    match (scope, field) {
+        ("vhosts.access", "allow") => "vhosts.access.allow",
+        ("vhosts.access", "deny") => "vhosts.access.deny",
+        ("vhosts.routes.access", "allow") => "vhosts.routes.access.allow",
+        ("vhosts.routes.access", "deny") => "vhosts.routes.access.deny",
+        _ => "access",
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouteConfig {
@@ -3753,6 +3830,8 @@ pub struct RouteConfig {
     pub strip_prefix: Option<String>,
     #[serde(default)]
     pub max_request_body_bytes: Option<ByteSize>,
+    #[serde(default)]
+    pub access: AccessPolicyConfig,
     #[serde(default)]
     pub redirect: Option<RouteRedirectConfig>,
     #[serde(default)]
@@ -3852,6 +3931,14 @@ impl RouteConfig {
                 field: "max_request_body_bytes",
             });
         }
+        self.access
+            .validate("vhosts.routes.access")
+            .map_err(|source| ConfigError::RouteSection {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                section: "access",
+                source: Box::new(source),
+            })?;
 
         let action_count = usize::from(self.redirect.is_some())
             + usize::from(self.proxy.is_some())
@@ -4012,6 +4099,7 @@ impl VhostRedirectConfig {
             https_redirect_exempt: false,
             strip_prefix: None,
             max_request_body_bytes: None,
+            access: AccessPolicyConfig::default(),
             redirect: Some(RouteRedirectConfig {
                 to,
                 status: self.status,
@@ -4237,6 +4325,7 @@ impl VhostAcmeChallengeConfig {
             https_redirect_exempt: true,
             strip_prefix: None,
             max_request_body_bytes: None,
+            access: AccessPolicyConfig::default(),
             redirect: None,
             proxy: Some(ProxyConfig {
                 upstream: self.upstream.clone(),
@@ -7752,6 +7841,14 @@ pub enum ConfigError {
         vhost: String,
         field: &'static str,
     },
+    InvalidAccessRule {
+        field: &'static str,
+        value: String,
+    },
+    DuplicateAccessRule {
+        field: &'static str,
+        value: String,
+    },
     MissingVhostRedirectTarget {
         vhost: String,
     },
@@ -8398,6 +8495,13 @@ impl Display for ConfigError {
                     formatter,
                     "vhost {vhost:?} {field} must be greater than zero"
                 )
+            }
+            Self::InvalidAccessRule { field, value } => write!(
+                formatter,
+                "{field} entries must be IP addresses or CIDR ranges, got {value:?}"
+            ),
+            Self::DuplicateAccessRule { field, value } => {
+                write!(formatter, "{field} contains duplicate entry {value:?}")
             }
             Self::MissingVhostRedirectTarget { vhost } => write!(
                 formatter,
@@ -9168,6 +9272,10 @@ fn valid_authority(authority: &str) -> bool {
 }
 
 fn valid_trusted_proxy(value: &str) -> bool {
+    valid_ip_matcher(value)
+}
+
+fn valid_ip_matcher(value: &str) -> bool {
     let value = value.trim();
     if value.is_empty() || value.chars().any(char::is_whitespace) {
         return false;
@@ -17494,6 +17602,7 @@ mod tests {
                 name: "example".to_owned(),
                 hosts: vec!["example.test".to_owned()],
                 max_request_body_bytes: None,
+                access: Default::default(),
                 tls: VhostTlsConfig {
                     enabled: true,
                     certificate: Some(certificate),
@@ -17538,6 +17647,7 @@ mod tests {
                 name: "example".to_owned(),
                 hosts: vec!["example.test".to_owned()],
                 max_request_body_bytes: None,
+                access: Default::default(),
                 tls: VhostTlsConfig {
                     enabled: true,
                     acme: super::VhostAcmeConfig {
@@ -17938,6 +18048,61 @@ mod tests {
             ["example.com".to_owned(), "www.example.com".to_owned()]
         );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_vhost_and_route_access_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [vhosts.access]
+            allow = ["10.0.0.0/8", "2001:db8::/32"]
+            deny = ["10.9.0.0/16"]
+
+            [[vhosts.routes]]
+            name = "admin"
+            path_prefix = "/admin/"
+
+            [vhosts.routes.access]
+            allow = ["10.1.2.3"]
+
+            [vhosts.routes.proxy]
+            upstream = "127.0.0.1:3000"
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(
+            config.vhosts[0].access.allow,
+            ["10.0.0.0/8", "2001:db8::/32"]
+        );
+        assert_eq!(config.vhosts[0].access.deny, ["10.9.0.0/16"]);
+        assert_eq!(config.vhosts[0].routes[0].access.allow, ["10.1.2.3"]);
+    }
+
+    #[test]
+    fn rejects_invalid_vhost_access_rule() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [vhosts.access]
+            allow = ["10.0.0.0/99"]
+
+            [vhosts.proxy]
+            upstream = "127.0.0.1:3000"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("vhosts.access.allow"), "{error}");
     }
 
     #[test]
@@ -18437,6 +18602,7 @@ mod tests {
                     name: "first.example".to_owned(),
                     hosts: vec!["Example.com".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
@@ -18451,6 +18617,7 @@ mod tests {
                     name: "second.example".to_owned(),
                     hosts: vec!["example.com:443".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
@@ -18487,6 +18654,7 @@ mod tests {
                 name: "known".to_owned(),
                 hosts: vec!["known.example".to_owned()],
                 max_request_body_bytes: None,
+                access: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),
@@ -18518,6 +18686,7 @@ mod tests {
                 name: "wild".to_owned(),
                 hosts: vec!["*.example.com".to_owned()],
                 max_request_body_bytes: None,
+                access: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),

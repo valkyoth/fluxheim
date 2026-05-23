@@ -1498,6 +1498,7 @@ mod tests {
                     name: "exact".to_owned(),
                     hosts: vec!["Example.TEST".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
@@ -1516,6 +1517,7 @@ mod tests {
                     name: "wildcard".to_owned(),
                     hosts: vec!["*.api.example.test".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
@@ -1576,6 +1578,7 @@ mod tests {
                     name: "default".to_owned(),
                     hosts: vec!["default.example.test".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
@@ -1594,6 +1597,7 @@ mod tests {
                     name: "other".to_owned(),
                     hosts: vec!["other.example.test".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
@@ -1648,6 +1652,7 @@ mod tests {
                     name: "default".to_owned(),
                     hosts: vec!["default.example.test".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
@@ -1673,6 +1678,7 @@ mod tests {
                     name: "www-default".to_owned(),
                     hosts: vec!["www.default.example.test".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {
@@ -1690,6 +1696,7 @@ mod tests {
                     name: "other".to_owned(),
                     hosts: vec!["other.example.test".to_owned()],
                     max_request_body_bytes: None,
+                    access: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: VhostTlsConfig {

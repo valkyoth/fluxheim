@@ -9,6 +9,12 @@ behavior when the change improves security or project direction.
 
 ## 1.4.0-dev - Unreleased
 
+### Added
+
+- Added the first production proxy parity edge-policy primitive:
+  trusted-proxy-aware IP ACLs through `[vhosts.access]` and
+  `[vhosts.routes.access]`, with exact IP/CIDR `allow` and `deny` lists.
+
 ### Planned
 
 - Start the production proxy parity line with edge policy and compression:
