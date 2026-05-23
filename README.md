@@ -23,14 +23,15 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.3.5`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.3.6`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
 application serving for WordPress-style deployments, PHP-FPM hardening and
 application recipes, the `fluxheim-acme` companion, release-page config tester
 diagnostics, an OpenSSL FIPS-capable TLS build path, and a rustls/AWS-LC
-FIPS-capable candidate path.
+FIPS-capable candidate path with fail-closed internal-crypto gates and
+compliance evidence templates.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -239,7 +240,7 @@ inspect provider availability and OpenSSL default FIPS property status, and read
 [FIPS / ISO-Capable Deployments](docs/fips.md) before treating a deployment as
 regulated evidence.
 
-The `1.3.5` release line also has a rustls/AWS-LC candidate path with
+The `1.3.5` release line added a rustls/AWS-LC candidate path with
 `tls-rustls-fips`, the ISO/IEC terminology alias `tls-rustls-iso19790`,
 `profile-fips-rustls`, and `profile-iso19790-rustls`. It builds
 `aws-lc-fips-sys`, so local validation requires CMake, Go, and a C compiler,
@@ -262,8 +263,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.3.5-wolfi`, `v1.3.5-cache-wolfi`, `v1.3.5-proxy-wolfi`, and
-`v1.3.5-php-wolfi`.
+`v1.3.6-wolfi`, `v1.3.6-cache-wolfi`, `v1.3.6-proxy-wolfi`, and
+`v1.3.6-php-wolfi`.
 
 Manual feature selection also works:
 
@@ -353,10 +354,10 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
 - `1.3.5` adds the rustls/AWS-LC FIPS-capable candidate path, ISO/IEC 19790
   terminology aliases, provider-aware rustls setup, and supported-builder
   evidence workflow for rustls FIPS builds.
-- `1.3.6` is the current development line for FIPS/ISO internal-crypto
-  closure: fail-closed guards for managed ACME, admin auth, local cache
-  encryption, OpenBao transport, and outbound telemetry in FIPS/ISO-required
-  configs, plus the repeatable compliance evidence package template.
+- `1.3.6` completes the FIPS/ISO internal-crypto closure for the 1.3 line:
+  fail-closed guards for managed ACME, admin auth, local cache encryption,
+  OpenBao transport, and outbound telemetry in FIPS/ISO-required configs, plus
+  the repeatable compliance evidence package template.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

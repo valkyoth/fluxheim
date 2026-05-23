@@ -12,7 +12,7 @@ published Security Policy.
 
 ## Status
 
-Current stable line: `1.3.5`.
+Current stable line: `1.3.6`.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
 ISO/IEC 19790 terminology aliases for compliance evidence plumbing. The

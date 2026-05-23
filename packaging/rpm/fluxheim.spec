@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.3.5
+Version:        1.3.6
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -152,6 +152,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat May 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.6-1
+- FIPS/ISO internal-crypto closure and compliance evidence release.
+- Add provider-backed admin auth in FIPS builds, fail-closed managed ACME and
+  local cache encryption gates, numeric-loopback-only FIPS telemetry/KMS
+  exceptions, and compliance evidence templates.
+
 * Fri May 22 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.5-1
 - rustls/AWS-LC FIPS-capable candidate release.
 - Add rustls FIPS/ISO feature profiles, provider diagnostics, release evidence
