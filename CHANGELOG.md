@@ -7,6 +7,15 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.4.0-dev - Unreleased
+
+### Planned
+
+- Start the production proxy parity line with edge policy and compression:
+  local rate limiting, connection limits, IP ACLs, opt-in response compression,
+  and the groundwork for the later `1.4.x` upstream resilience, TLS/protocol,
+  discovery, mirroring, and operator-hook work.
+
 ## 1.3.7 - Production PHP-FPM Completion
 
 Released: 2026-05-23

@@ -7,8 +7,8 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.3.7
-Release:        1%{?dist}
+Version:        1.4.0
+Release:        0.dev%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
 URL:            https://github.com/valkyoth/fluxheim
@@ -152,6 +152,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat May 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.0-0.dev
+- Start the 1.4 production proxy parity development line.
+
 * Sat May 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.7-1
 - Add managed php-fpm process supervision under the existing php-fpm feature.
 - Keep external php-fpm as the default PHP-FPM deployment mode.

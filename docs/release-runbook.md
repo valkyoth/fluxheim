@@ -7,7 +7,7 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.3.7
+RELEASE_VERSION=1.4.0
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"

@@ -327,7 +327,8 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 ## Current Stable: 1.3 Split Profiles
 
 Fluxheim does not treat every planned idea as stable. The current stable line is
-`1.3.x`, which means:
+`1.3.x`, and active development has moved to the `1.4.x` production proxy
+parity line.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -340,35 +341,16 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
   storage-bin disk cache, optional disk-cache encryption, peer fill, bounded
   range caching, fixed-slice range composition, cache operations tooling,
   Prometheus metrics, and OpenTelemetry export profiles.
-- `1.3.0` starts the shared ingress/TLS feature-graph split and focused
-  container/build profiles. Full packages still include the broad production
-  feature set, while cache-edge and proxy-edge builds can use TLS and managed
-  ACME without compiling unrelated static-web or cache modules.
-- `1.3.1` adds opt-in PHP-FPM application serving, WordPress-style
-  front-controller support, and browser-tested WordPress proxy/PHP cookie
-  compatibility fixes.
-- `1.3.2` adds the ACME companion workflow and release-page config tester:
-  `fluxheim-acme` handles external renewal/status/reload operations for
-  service-manager and container deployments, while `fluxheim-config-tester`
-  validates mounted configs without starting the gateway.
-- `1.3.3` adds PHP-FPM hardening and production compatibility, including
-  opt-in keepalive pooling, safe custom FastCGI params, PHP response/offload
-  controls, PHP metrics, WordPress cache helpers, and PHP-FPM app recipes.
-- `1.3.4` adds the OpenSSL FIPS-capable TLS build path, fail-closed provider
-  validation for FIPS-required configs, crypto diagnostics, and release-gate
-  evidence for FIPS-capable builds.
-- `1.3.5` adds the rustls/AWS-LC FIPS-capable candidate path, ISO/IEC 19790
-  terminology aliases, provider-aware rustls setup, and supported-builder
-  evidence workflow for rustls FIPS builds.
-- `1.3.6` completes the FIPS/ISO internal-crypto closure for the 1.3 line:
-  fail-closed guards for managed ACME, admin auth, local cache encryption,
-  OpenBao transport, and outbound telemetry in FIPS/ISO-required configs, plus
-  the repeatable compliance evidence package template.
-- `1.3.7` completes the production PHP-FPM line with Fluxheim-managed php-fpm
-  supervision, private generated pools, static/dynamic/ondemand process-manager
-  modes, php-fpm crash respawn, WordPress smoke coverage for external and
-  managed pools, a self-contained Wolfi PHP image, and removal of the reserved
-  pure-Rust PHP/phprs track.
+- `1.3.x` completed the split-profile and application-serving line: shared
+  ingress/TLS feature profiles, focused full/cache/proxy/PHP images, the
+  `fluxheim-acme` companion, release-page `fluxheim-config-tester`, production
+  PHP-FPM support with WordPress-compatible front-controller behavior and
+  Fluxheim-managed php-fpm supervision, OpenSSL and rustls/AWS-LC FIPS/ISO
+  build paths, internal-crypto compliance guards, and the repeatable compliance
+  evidence package template.
+- `1.4.x` is now the active development line for production proxy parity:
+  edge policy and compression first, followed by upstream resilience, TLS and
+  protocol parity, dynamic discovery, traffic mirroring, and operator hooks.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -376,10 +358,8 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next lines are planned separately: `1.4` for production proxy parity across
-edge policy, compression, load balancing, mTLS, PROXY protocol, gRPC-safe
-proxying, discovery, and mirroring; `1.5` for enterprise load-balancer
-operations at larger estate scale; and `1.6` for shared Wasm
+Next lines are planned separately after `1.4`: `1.5` for enterprise
+load-balancer operations at larger estate scale, and `1.6` for shared Wasm
 extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
