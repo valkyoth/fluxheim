@@ -47,13 +47,12 @@ managed-certificate vhost can move from pending issuance to active HTTPS
 without a second manual gateway restart, plus downloadable
 `fluxheim-config-tester` release assets for diagnosing configs when a container
 cannot start.
-Later `1.3.x` releases continue the PHP runtime line: php-fpm production
-compatibility against the practical Apache, NGINX, and Caddy PHP surfaces
-(`try_files`/front-controller presets, path-info splitting, FastCGI params,
-FPM pooling/retry/failover, X-Accel/X-Sendfile offload, cache-plugin migration
-presets, and WordPress smoke coverage), embedded Rust PHP/Turbine-style
-integration if it passes the security and licensing review, and pure-Rust PHP
-interpreter experiments behind separate feature gates.
+`1.3.7` continues the production PHP-FPM line with managed php-fpm process
+supervision as an opt-in runtime mode under the existing `php-fpm` feature.
+`1.3.8` is reserved for experimental pure-Rust PHP interpreter research behind
+`experimental-pure-php`. Turbine-style PHP app servers stay reverse-proxy
+upstreams unless a future embeddable library API proves safer than that
+boundary.
 `1.4` is planned as the advanced proxy parity release. Its target is
 HAProxy/nginx-style reverse-proxy migration coverage that is not fundamentally
 load-balancing: queue/backpressure controls, upstream keepalive pool tuning,
@@ -1084,18 +1083,17 @@ without parsing text fixtures for every module.
 12. **Future PHP Runtime Support**
    - Architecture and security plan documented in
      [PHP Runtime Support](docs/php-runtime-support.md).
-   - PHP must be optional and compile-time gated. Planned mutually exclusive
-     features:
-     - `php-turbine`: preferred future integration target if Turbine exposes an
-       auditable Rust/library interface with compatible licensing and maintained
-       security posture.
-     - `php-phprs`: experimental pure-Rust PHP interpreter path for research and
-       compatibility tests, not production WordPress/Laravel hosting until the
-       interpreter matures.
-     - `php-fpm`: backwards-compatible FastCGI bridge to php-fpm over Unix or
-       TCP sockets.
-   - Add `compile_error!` guards so only one PHP runtime feature can be selected
-     in a binary.
+   - PHP must be optional and compile-time gated. Production PHP uses
+     `php-fpm`: the backwards-compatible FastCGI bridge to php-fpm over Unix or
+     TCP sockets.
+   - `1.3.7` managed php-fpm keeps the same `php-fpm` Cargo feature and adds a
+     runtime config mode where Fluxheim starts and supervises a private php-fpm
+     pool. External php-fpm remains the default.
+   - `1.3.8` experimental pure PHP uses the reserved `experimental-pure-php`
+     feature for research and compatibility tests, not production WordPress or
+     Laravel hosting until the interpreter matures.
+   - `compile_error!` guards must keep incompatible PHP runtime features from
+     being selected together.
    - Add typed PHP config per vhost: enabled runtime, document root, index file,
      allowed extensions, socket/upstream, request timeout, body limit override,
      environment allow-list, and path-info policy.
@@ -1110,13 +1108,12 @@ without parsing text fixtures for every module.
      to FastCGI params, support Unix sockets first, parse CGI response headers
      strictly, and include integration tests against a rootless php-fpm
      container.
-   - `php-turbine` plan:
-     first evaluate whether Turbine is available as a Rust library or only as a
-     standalone/container runtime. If only standalone, integrate as a managed
-     upstream/sidecar instead of embedding it into Fluxheim. If embeddable,
-     require a license/security audit and isolate unsafe PHP SAPI/FFI surfaces.
-   - `php-phprs` plan:
-     keep behind `php-phprs-experimental` docs and CI checks only; do not mark
+   - Turbine-style PHP app servers are not Fluxheim runtime targets. Treat them
+     as HTTP upstreams that Fluxheim can reverse-proxy to unless a future
+     project exposes a small, auditable library API with a clearly safer
+     boundary than reverse proxying.
+   - `experimental-pure-php` plan:
+     keep behind warning-heavy docs and CI checks only; do not mark
      production-ready until PHP language/framework compatibility and security
      behavior are proven.
    - PHP runtime changes should be process-upgrade changes, not snapshot-only

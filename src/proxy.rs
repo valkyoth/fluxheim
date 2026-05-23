@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(feature = "cache")]
+#[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::sync::Mutex;
 #[cfg(feature = "cache")]
 use std::sync::OnceLock;
@@ -2794,6 +2794,46 @@ struct RuntimePhp {
     error_pages: Vec<RuntimeErrorPage>,
     fpm_pools: Vec<Arc<PhpFpmPool>>,
     fpm_next: Arc<AtomicUsize>,
+    _managed_fpm: Option<Arc<ManagedPhpFpmProcess>>,
+}
+
+#[cfg(feature = "php-fpm")]
+struct ManagedPhpFpmProcess {
+    child: Mutex<Option<std::process::Child>>,
+    socket: std::path::PathBuf,
+    config_path: std::path::PathBuf,
+    pid_path: std::path::PathBuf,
+}
+
+#[cfg(feature = "php-fpm")]
+impl std::fmt::Debug for ManagedPhpFpmProcess {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ManagedPhpFpmProcess")
+            .field("socket", &self.socket)
+            .field("config_path", &self.config_path)
+            .field("pid_path", &self.pid_path)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+impl Drop for ManagedPhpFpmProcess {
+    fn drop(&mut self) {
+        let child = match self.child.get_mut() {
+            Ok(child) => child,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(child) = child.as_mut()
+            && let Ok(None) = child.try_wait()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let _ = std::fs::remove_file(&self.socket);
+        let _ = std::fs::remove_file(&self.config_path);
+        let _ = std::fs::remove_file(&self.pid_path);
+    }
 }
 
 #[cfg(feature = "php-fpm")]
@@ -2989,11 +3029,15 @@ impl RuntimePhp {
             .iter()
             .map(|error_page| RuntimeErrorPage::from_config(&scope, error_page))
             .collect::<io::Result<Vec<_>>>()?;
-        let fpm_pools = php_fpm_keepalive_pools_from_config(config, metric_vhost, metric_pool);
+        let mut runtime_config = config.clone();
+        let managed_fpm = managed_php_fpm_from_config(&scope, metric_pool, &mut runtime_config)?;
+        let fpm_pools =
+            php_fpm_keepalive_pools_from_config(&runtime_config, metric_vhost, metric_pool);
         Ok(Some(Self {
             fpm_pools,
             fpm_next: Arc::new(AtomicUsize::new(0)),
-            config: config.clone(),
+            _managed_fpm: managed_fpm,
+            config: runtime_config,
             root,
             fpm_root,
             files,
@@ -3003,6 +3047,412 @@ impl RuntimePhp {
 
     fn error_page(&self, status: u16) -> Option<&RuntimeErrorPage> {
         self.error_pages.iter().find(|page| page.status == status)
+    }
+}
+
+#[cfg(feature = "php-fpm")]
+fn managed_php_fpm_from_config(
+    scope: &str,
+    metric_pool: &str,
+    config: &mut crate::config::PhpConfig,
+) -> io::Result<Option<Arc<ManagedPhpFpmProcess>>> {
+    if !matches!(config.fpm.mode, crate::config::PhpFpmMode::Managed) {
+        return Ok(None);
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (scope, metric_pool, config);
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "managed php-fpm requires Unix sockets",
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        let process = ManagedPhpFpmProcess::start(scope, metric_pool, config)?;
+        config.fpm.socket = Some(process.socket.clone());
+        config.fpm.tcp = None;
+        config.fpm.tcp_upstreams.clear();
+        Ok(Some(Arc::new(process)))
+    }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+impl ManagedPhpFpmProcess {
+    fn start(
+        scope: &str,
+        metric_pool: &str,
+        config: &crate::config::PhpConfig,
+    ) -> io::Result<Self> {
+        let binary = config.fpm.php_fpm_binary.as_deref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{scope}: managed php-fpm requires php_fpm_binary"),
+            )
+        })?;
+        let socket_dir = config.fpm.socket_dir.as_deref().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{scope}: managed php-fpm requires socket_dir"),
+            )
+        })?;
+        create_php_request_body_spool_dir_sync(socket_dir).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "{scope}: failed to create managed php-fpm socket_dir {}: {error}",
+                    socket_dir.display()
+                ),
+            )
+        })?;
+        ensure_php_request_body_spool_dir(socket_dir).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "{scope}: managed php-fpm socket_dir {} is unsafe: {error}",
+                    socket_dir.display()
+                ),
+            )
+        })?;
+
+        let name = managed_php_fpm_instance_name(metric_pool)?;
+        let socket = socket_dir.join(format!("{name}.sock"));
+        let config_path = socket_dir.join(format!("{name}.conf"));
+        let pid_path = socket_dir.join(format!("{name}.pid"));
+        let error_log = socket_dir.join(format!("{name}.log"));
+        let slow_log = config
+            .fpm
+            .request_slowlog_timeout_secs
+            .map(|_| socket_dir.join(format!("{name}.slow.log")));
+        ensure_managed_php_fpm_directory(
+            scope,
+            "php.fpm.session_save_path",
+            config.fpm.session_save_path.as_deref(),
+        )?;
+        ensure_managed_php_fpm_directory(
+            scope,
+            "php.fpm.upload_tmp_dir",
+            config.fpm.upload_tmp_dir.as_deref(),
+        )?;
+        let php_config = managed_php_fpm_config(
+            &socket,
+            &pid_path,
+            &error_log,
+            slow_log.as_deref(),
+            &config.fpm,
+        )?;
+        write_managed_php_fpm_config_file(&config_path, php_config.as_bytes()).map_err(
+            |error| {
+                io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{scope}: failed to write managed php-fpm config {}: {error}",
+                        config_path.display()
+                    ),
+                )
+            },
+        )?;
+
+        let mut child = std::process::Command::new(binary)
+            .arg("-F")
+            .arg("-y")
+            .arg(&config_path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{scope}: failed to start managed php-fpm binary {}: {error}",
+                        binary.display()
+                    ),
+                )
+            })?;
+
+        match wait_for_managed_php_fpm_socket(&mut child, &socket, config.fpm.connect_timeout_secs)
+        {
+            Ok(()) => Ok(Self {
+                child: Mutex::new(Some(child)),
+                socket,
+                config_path,
+                pid_path,
+            }),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_file(&socket);
+                let _ = std::fs::remove_file(&config_path);
+                let _ = std::fs::remove_file(&pid_path);
+                Err(io::Error::new(
+                    error.kind(),
+                    format!("{scope}: managed php-fpm failed to become ready: {error}"),
+                ))
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn write_managed_php_fpm_config_file(path: &std::path::Path, contents: &[u8]) -> io::Result<()> {
+    use rustix::fs::{Mode, OFlags};
+    use std::io::Write;
+
+    let file = rustix::fs::openat(
+        rustix::fs::CWD,
+        path,
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::from_raw_mode(0o600),
+    )
+    .map_err(io::Error::from)?;
+    let mut file = std::fs::File::from(file);
+    file.write_all(contents)?;
+    file.sync_all()
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn managed_php_fpm_instance_name(metric_pool: &str) -> io::Result<String> {
+    let counter = PHP_REQUEST_BODY_SPOOL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut random = [0_u8; 8];
+    getrandom::fill(&mut random).map_err(|error| {
+        io::Error::other(format!(
+            "failed to generate managed php-fpm instance entropy: {error}"
+        ))
+    })?;
+    let random = u64::from_le_bytes(random);
+    let sanitized = metric_pool
+        .bytes()
+        .map(|byte| match byte {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' => byte as char,
+            _ => '-',
+        })
+        .take(48)
+        .collect::<String>();
+    let sanitized = if sanitized.is_empty() {
+        "php".to_owned()
+    } else {
+        sanitized
+    };
+    Ok(format!(
+        "fluxheim-php-fpm-{sanitized}-{}-{counter}-{random:016x}",
+        std::process::id()
+    ))
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn managed_php_fpm_config(
+    socket: &std::path::Path,
+    pid_path: &std::path::Path,
+    error_log: &std::path::Path,
+    slow_log: Option<&std::path::Path>,
+    fpm: &crate::config::PhpFpmConfig,
+) -> io::Result<String> {
+    let socket = php_fpm_config_path_value(socket)?;
+    let pid_path = php_fpm_config_path_value(pid_path)?;
+    let error_log = php_fpm_config_path_value(error_log)?;
+    let slow_log = slow_log.map(php_fpm_config_path_value).transpose()?;
+    let session_save_path = fpm
+        .session_save_path
+        .as_deref()
+        .map(php_fpm_config_path_value)
+        .transpose()?;
+    let upload_tmp_dir = fpm
+        .upload_tmp_dir
+        .as_deref()
+        .map(php_fpm_config_path_value)
+        .transpose()?;
+
+    let mut config = String::new();
+    config.push_str("[global]\n");
+    config.push_str("daemonize = no\n");
+    config.push_str(&format!("pid = {pid_path}\n"));
+    config.push_str(&format!("error_log = {error_log}\n"));
+    config.push('\n');
+    config.push_str("[fluxheim]\n");
+    config.push_str(&format!("listen = {socket}\n"));
+    config.push_str("listen.mode = 0600\n");
+    if let Some(listen_backlog) = fpm.listen_backlog {
+        config.push_str(&format!("listen.backlog = {listen_backlog}\n"));
+    }
+    config.push_str(&managed_php_fpm_identity_config(
+        fpm.user.as_deref(),
+        fpm.group.as_deref(),
+    ));
+    config.push_str(&managed_php_fpm_pool_config(fpm));
+    if let Some(request_terminate_timeout_secs) = fpm.request_terminate_timeout_secs {
+        config.push_str(&format!(
+            "request_terminate_timeout = {request_terminate_timeout_secs}s\n"
+        ));
+    }
+    if fpm.request_terminate_timeout_track_finished {
+        config.push_str("request_terminate_timeout_track_finished = yes\n");
+    }
+    if let Some(request_slowlog_timeout_secs) = fpm.request_slowlog_timeout_secs {
+        if let Some(slow_log) = slow_log {
+            config.push_str(&format!("slowlog = {slow_log}\n"));
+        }
+        config.push_str(&format!(
+            "request_slowlog_timeout = {request_slowlog_timeout_secs}s\n"
+        ));
+        config.push_str(&format!(
+            "request_slowlog_trace_depth = {}\n",
+            fpm.request_slowlog_trace_depth
+        ));
+    }
+    config.push_str(&format!(
+        "clear_env = {}\n",
+        managed_php_fpm_bool(fpm.clear_env)
+    ));
+    config.push_str(&format!(
+        "catch_workers_output = {}\n",
+        managed_php_fpm_bool(fpm.catch_workers_output)
+    ));
+    config.push_str(&format!(
+        "decorate_workers_output = {}\n",
+        managed_php_fpm_bool(fpm.decorate_workers_output)
+    ));
+    config.push_str("chdir = /\n");
+    config.push_str("security.limit_extensions = .php\n");
+    if let Some(session_save_path) = session_save_path {
+        config.push_str(&format!(
+            "php_value[session.save_path] = {session_save_path}\n"
+        ));
+    }
+    if let Some(upload_tmp_dir) = upload_tmp_dir {
+        config.push_str(&format!(
+            "php_admin_value[upload_tmp_dir] = {upload_tmp_dir}\n"
+        ));
+    }
+    Ok(config)
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn managed_php_fpm_pool_config(fpm: &crate::config::PhpFpmConfig) -> String {
+    let mut config = String::new();
+    match fpm.process_manager {
+        crate::config::PhpFpmProcessManager::Static => {
+            config.push_str("pm = static\n");
+            config.push_str(&format!("pm.max_children = {}\n", fpm.workers));
+        }
+        crate::config::PhpFpmProcessManager::Dynamic => {
+            let min_spare = fpm.min_spare_servers.unwrap_or(1);
+            let max_spare = fpm.max_spare_servers.unwrap_or(fpm.workers.max(min_spare));
+            let start_servers = fpm
+                .start_servers
+                .unwrap_or_else(|| (min_spare.saturating_add(max_spare) / 2).max(1));
+            config.push_str("pm = dynamic\n");
+            config.push_str(&format!("pm.max_children = {}\n", fpm.workers));
+            config.push_str(&format!("pm.start_servers = {start_servers}\n"));
+            config.push_str(&format!("pm.min_spare_servers = {min_spare}\n"));
+            config.push_str(&format!("pm.max_spare_servers = {max_spare}\n"));
+            if let Some(max_spawn_rate) = fpm.max_spawn_rate {
+                config.push_str(&format!("pm.max_spawn_rate = {max_spawn_rate}\n"));
+            }
+        }
+        crate::config::PhpFpmProcessManager::Ondemand => {
+            config.push_str("pm = ondemand\n");
+            config.push_str(&format!("pm.max_children = {}\n", fpm.workers));
+            if let Some(process_idle_timeout_secs) = fpm.process_idle_timeout_secs {
+                config.push_str(&format!(
+                    "pm.process_idle_timeout = {process_idle_timeout_secs}s\n"
+                ));
+            }
+        }
+    }
+    config.push_str(&format!(
+        "pm.max_requests = {}\n",
+        fpm.max_requests_per_worker
+    ));
+    config
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn managed_php_fpm_bool(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn ensure_managed_php_fpm_directory(
+    scope: &str,
+    field: &str,
+    path: Option<&std::path::Path>,
+) -> io::Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    create_php_request_body_spool_dir_sync(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "{scope}: failed to create managed php-fpm {field} {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    ensure_php_request_body_spool_dir(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!(
+                "{scope}: managed php-fpm {field} {} is unsafe: {error}",
+                path.display()
+            ),
+        )
+    })
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn managed_php_fpm_identity_config(user: Option<&str>, group: Option<&str>) -> String {
+    match (user, group) {
+        (Some(user), Some(group)) => format!("user = {user}\ngroup = {group}\n"),
+        _ => String::new(),
+    }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn php_fpm_config_path_value(path: &std::path::Path) -> io::Result<&str> {
+    let value = path.to_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "managed php-fpm path is not valid UTF-8",
+        )
+    })?;
+    if value
+        .bytes()
+        .any(|byte| matches!(byte, 0..=31 | 127 | b'\'' | b'"'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "managed php-fpm path contains bytes unsafe for php-fpm config",
+        ));
+    }
+    Ok(value)
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn wait_for_managed_php_fpm_socket(
+    child: &mut std::process::Child,
+    socket: &std::path::Path,
+    connect_timeout_secs: Option<u64>,
+) -> io::Result<()> {
+    let deadline =
+        Instant::now() + Duration::from_secs(connect_timeout_secs.unwrap_or(5).clamp(1, 60));
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Err(io::Error::other(format!(
+                "php-fpm exited before creating socket with status {status}"
+            )));
+        }
+        let error = match std::os::unix::net::UnixStream::connect(socket) {
+            Ok(_) => return Ok(()),
+            Err(error) => error,
+        };
+        if Instant::now() >= deadline {
+            return Err(error);
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -10735,8 +11185,8 @@ mod tests {
         RuntimePhp, add_php_custom_params, add_php_host_param, add_php_request_header_params,
         apply_php_x_accel_expires, create_php_request_body_spool_file,
         directory_slash_redirect_location, explicit_authority_port,
-        ignore_php_origin_cache_headers, parse_php_fpm_output, parse_php_response,
-        php_content_type_param, php_fpm_effective_connect_timeout,
+        ignore_php_origin_cache_headers, managed_php_fpm_config, parse_php_fpm_output,
+        parse_php_response, php_content_type_param, php_fpm_effective_connect_timeout,
         php_fpm_effective_request_timeout, php_fpm_endpoints_from_config, php_fpm_error_outcome,
         php_fpm_keepalive_pools_from_config, php_fpm_path_translated, php_fpm_retry_attempts,
         php_fpm_retry_attempts_for_endpoint_count, php_fpm_retryable_error,
@@ -10849,6 +11299,7 @@ mod tests {
             error_pages: Vec::new(),
             fpm_pools: Vec::new(),
             fpm_next: Arc::new(AtomicUsize::new(0)),
+            _managed_fpm: None,
         }
     }
 
@@ -11590,6 +12041,85 @@ mod tests {
         assert_eq!(pools.len(), 2);
         assert_eq!(pools[0].metric_pool, "default-0");
         assert_eq!(pools[1].metric_pool, "default-1");
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn managed_php_fpm_config_contains_private_pool_settings() {
+        let fpm = crate::config::PhpFpmConfig {
+            mode: crate::config::PhpFpmMode::Managed,
+            user: Some("fluxheim".to_owned()),
+            group: Some("fluxheim".to_owned()),
+            workers: 4,
+            max_requests_per_worker: 250,
+            process_manager: crate::config::PhpFpmProcessManager::Dynamic,
+            start_servers: Some(2),
+            min_spare_servers: Some(1),
+            max_spare_servers: Some(3),
+            max_spawn_rate: Some(8),
+            listen_backlog: Some(128),
+            request_terminate_timeout_secs: Some(30),
+            request_terminate_timeout_track_finished: true,
+            request_slowlog_timeout_secs: Some(5),
+            request_slowlog_trace_depth: 16,
+            decorate_workers_output: false,
+            session_save_path: Some(std::path::PathBuf::from("/run/fluxheim/php/session")),
+            upload_tmp_dir: Some(std::path::PathBuf::from("/run/fluxheim/php/upload")),
+            ..crate::config::PhpFpmConfig::default()
+        };
+        let config = managed_php_fpm_config(
+            std::path::Path::new("/run/fluxheim/php/site.sock"),
+            std::path::Path::new("/run/fluxheim/php/site.pid"),
+            std::path::Path::new("/run/fluxheim/php/site.log"),
+            Some(std::path::Path::new("/run/fluxheim/php/site.slow.log")),
+            &fpm,
+        )
+        .unwrap();
+
+        assert!(config.contains("daemonize = no"));
+        assert!(config.contains("listen = /run/fluxheim/php/site.sock"));
+        assert!(config.contains("listen.mode = 0600"));
+        assert!(config.contains("listen.backlog = 128"));
+        assert!(config.contains("user = fluxheim"));
+        assert!(config.contains("group = fluxheim"));
+        assert!(config.contains("pm = dynamic"));
+        assert!(config.contains("pm.max_children = 4"));
+        assert!(config.contains("pm.start_servers = 2"));
+        assert!(config.contains("pm.min_spare_servers = 1"));
+        assert!(config.contains("pm.max_spare_servers = 3"));
+        assert!(config.contains("pm.max_spawn_rate = 8"));
+        assert!(config.contains("pm.max_requests = 250"));
+        assert!(config.contains("request_terminate_timeout = 30s"));
+        assert!(config.contains("request_terminate_timeout_track_finished = yes"));
+        assert!(config.contains("slowlog = /run/fluxheim/php/site.slow.log"));
+        assert!(config.contains("request_slowlog_timeout = 5s"));
+        assert!(config.contains("request_slowlog_trace_depth = 16"));
+        assert!(config.contains("clear_env = yes"));
+        assert!(config.contains("catch_workers_output = yes"));
+        assert!(config.contains("decorate_workers_output = no"));
+        assert!(config.contains("security.limit_extensions = .php"));
+        assert!(config.contains("php_value[session.save_path] = /run/fluxheim/php/session"));
+        assert!(config.contains("php_admin_value[upload_tmp_dir] = /run/fluxheim/php/upload"));
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn managed_php_fpm_config_rejects_unsafe_path_bytes() {
+        let fpm = crate::config::PhpFpmConfig {
+            mode: crate::config::PhpFpmMode::Managed,
+            ..crate::config::PhpFpmConfig::default()
+        };
+        let error = managed_php_fpm_config(
+            std::path::Path::new("/run/fluxheim/php/bad\"site.sock"),
+            std::path::Path::new("/run/fluxheim/php/site.pid"),
+            std::path::Path::new("/run/fluxheim/php/site.log"),
+            None,
+            &fpm,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("unsafe for php-fpm config"), "{error}");
     }
 
     #[cfg(feature = "php-fpm")]

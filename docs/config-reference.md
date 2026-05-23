@@ -1581,7 +1581,11 @@ APP_ENV = "production"
 PHP_VALUE = "memory_limit=256M"
 
 [vhosts.routes.php.fpm]
+# Default mode. Fluxheim connects to an operator-managed php-fpm pool.
+mode = "external"
 tcp = "php-fpm:9000"
+# Or use a private Unix socket:
+# socket = "/run/php/php-fpm.sock"
 # Or list multiple TCP endpoints for simple safe-method failover:
 # tcp_upstreams = ["php-fpm-a:9000", "php-fpm-b:9000"]
 connect_timeout_secs = 5
@@ -1596,6 +1600,44 @@ retry_timeout_secs = 5
 retry_methods = ["GET", "HEAD", "OPTIONS"]
 retry_invalid_response = false
 retry_statuses = [500, 502, 503, 504]
+
+# Managed mode keeps the same FastCGI/php-fpm protocol but lets Fluxheim start
+# and supervise a private php-fpm master process. Do not set socket, tcp, or
+# tcp_upstreams in managed mode; Fluxheim creates the socket itself.
+# mode = "managed"
+# php_fpm_binary = "/usr/sbin/php-fpm"
+# socket_dir = "/run/fluxheim/php"
+# workers = 4
+# max_requests_per_worker = 1000
+# process_manager = "static" # "static", "dynamic", or "ondemand"
+# listen_backlog = 128
+#
+# Dynamic pool sizing, only when process_manager = "dynamic":
+# start_servers = 2
+# min_spare_servers = 1
+# max_spare_servers = 4
+# max_spawn_rate = 8
+#
+# Ondemand pool sizing, only when process_manager = "ondemand":
+# process_idle_timeout_secs = 10
+#
+# Request lifecycle and diagnostics:
+# request_terminate_timeout_secs = 30
+# request_terminate_timeout_track_finished = false
+# request_slowlog_timeout_secs = 5
+# request_slowlog_trace_depth = 20
+# clear_env = true
+# catch_workers_output = true
+# decorate_workers_output = true
+# session_save_path = "/run/fluxheim/php/session"
+# upload_tmp_dir = "/run/fluxheim/php/upload"
+#
+# Optional, configure both together when php-fpm starts as root and should drop
+# worker privileges.
+# user = "fluxheim"
+# group = "fluxheim"
+# Generated socket/config/pid/log files live under socket_dir. Forced process
+# termination can leave stale files; remove them only while Fluxheim is stopped.
 
 [vhosts.acme_challenge]
 enabled = true

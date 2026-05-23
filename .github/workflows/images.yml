@@ -63,22 +63,32 @@ jobs:
             tag: ""
             features: profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
             config: packaging/container/fluxheim.toml
+            wolfi_config: ""
+            wolfi_runtime_packages: ""
           - name: cache
             tag: cache
             features: profile-cache-edge,acme-client
             config: packaging/container/cache.toml
+            wolfi_config: ""
+            wolfi_runtime_packages: ""
           - name: proxy
             tag: proxy
             features: profile-proxy-edge,acme-client
             config: packaging/container/proxy.toml
+            wolfi_config: ""
+            wolfi_runtime_packages: ""
           - name: php
             tag: php
             features: profile-web-server,php-fpm,acme-client
             config: packaging/container/php.toml
+            wolfi_config: packaging/container/php-managed.toml
+            wolfi_runtime_packages: php-8.5-fpm
           - name: load-balancer
             tag: load-balancer
             features: profile-load-balancer-edge,acme-client
             config: packaging/container/proxy.toml
+            wolfi_config: ""
+            wolfi_runtime_packages: ""
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -260,6 +270,35 @@ jobs:
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Resolve build inputs
+        if: ${{ steps.profile.outputs.build == 'true' }}
+        id: build-inputs
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+          MATRIX_FEATURES: ${{ matrix.profile.features }}
+          MATRIX_CONFIG: ${{ matrix.profile.config }}
+          MATRIX_WOLFI_CONFIG: ${{ matrix.profile.wolfi_config || '' }}
+          MATRIX_WOLFI_RUNTIME_PACKAGES: ${{ matrix.profile.wolfi_runtime_packages || '' }}
+          INPUT_FEATURES: ${{ inputs.features || '' }}
+          INPUT_CONFIG: ${{ inputs.config || '' }}
+        run: |
+          set -euo pipefail
+          features="${INPUT_FEATURES:-$MATRIX_FEATURES}"
+          config="${INPUT_CONFIG:-$MATRIX_CONFIG}"
+          runtime_packages=""
+          if [[ "${VARIANT}" == "wolfi" && -z "${INPUT_CONFIG}" ]]; then
+            if [[ -n "${MATRIX_WOLFI_CONFIG}" ]]; then
+              config="${MATRIX_WOLFI_CONFIG}"
+            fi
+            runtime_packages="${MATRIX_WOLFI_RUNTIME_PACKAGES}"
+          fi
+          {
+            echo "features=${features}"
+            echo "config=${config}"
+            echo "runtime_packages=${runtime_packages}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Build and publish image
         if: ${{ steps.profile.outputs.build == 'true' }}
         uses: docker/build-push-action@v7
@@ -269,8 +308,9 @@ jobs:
           platforms: ${{ inputs.platforms || 'linux/amd64' }}
           push: true
           build-args: |
-            FLUXHEIM_FEATURES=${{ inputs.features || matrix.profile.features }}
-            FLUXHEIM_CONFIG=${{ inputs.config || matrix.profile.config }}
+            FLUXHEIM_FEATURES=${{ steps.build-inputs.outputs.features }}
+            FLUXHEIM_CONFIG=${{ steps.build-inputs.outputs.config }}
+            FLUXHEIM_RUNTIME_PACKAGES=${{ steps.build-inputs.outputs.runtime_packages }}
             FLUXHEIM_RUNTIME_UID=${{ inputs.runtime_uid || '65532' }}
             FLUXHEIM_RUNTIME_GID=${{ inputs.runtime_gid || '65532' }}
           cache-from: type=gha,scope=images-${{ matrix.profile.name }}-${{ matrix.variant }}

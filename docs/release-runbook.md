@@ -7,7 +7,7 @@ Use this from a clean `main` checkout. Set the release variables once, then
 reuse them through the commands below:
 
 ```bash
-RELEASE_VERSION=1.3.6
+RELEASE_VERSION=1.3.7
 TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
@@ -37,6 +37,13 @@ scripts/reproducible_build_check.sh
 scripts/validate-release-metadata.sh
 scripts/validate-owasp-top10-2025.sh check
 scripts/podman_smoke.sh
+```
+
+For PHP-FPM releases, also run:
+
+```bash
+scripts/smoke_wordpress_php_fpm.sh both
+scripts/smoke_fluxheim_php_wolfi.sh
 ```
 
 When collecting release evidence on a host that cannot build every FIPS

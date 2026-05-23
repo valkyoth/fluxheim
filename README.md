@@ -23,15 +23,15 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.3.6`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.3.7`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
 application serving for WordPress-style deployments, PHP-FPM hardening and
-application recipes, the `fluxheim-acme` companion, release-page config tester
-diagnostics, an OpenSSL FIPS-capable TLS build path, and a rustls/AWS-LC
-FIPS-capable candidate path with fail-closed internal-crypto gates and
-compliance evidence templates.
+application recipes, managed php-fpm process supervision, the `fluxheim-acme`
+companion, release-page config tester diagnostics, an OpenSSL FIPS-capable TLS
+build path, and a rustls/AWS-LC FIPS-capable candidate path with fail-closed
+internal-crypto gates and compliance evidence templates.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -263,8 +263,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.3.6-wolfi`, `v1.3.6-cache-wolfi`, `v1.3.6-proxy-wolfi`, and
-`v1.3.6-php-wolfi`.
+`v1.3.7-wolfi`, `v1.3.7-cache-wolfi`, `v1.3.7-proxy-wolfi`, and
+`v1.3.7-php-wolfi`.
 
 Manual feature selection also works:
 
@@ -278,6 +278,12 @@ and explicit `.php` scripts to php-fpm. See
 [`docs/php-runtime-support.md`](docs/php-runtime-support.md),
 [`docs/php-fpm-app-recipes.md`](docs/php-fpm-app-recipes.md), and
 [`examples/php-fpm.toml`](examples/php-fpm.toml).
+Fluxheim `1.3.7` is the production PHP-FPM completion release with managed
+php-fpm supervision as an opt-in runtime mode. The Wolfi `v1.3.7-php` image is
+self-contained for managed PHP-FPM and includes the Wolfi `php-8.5-fpm`
+runtime; non-Wolfi PHP image variants keep the external php-fpm container
+config unless customized. Experimental pure-Rust PHP research is reserved for
+`1.3.8` behind `experimental-pure-php`.
 
 TLS backends are mutually exclusive. Select exactly one backend when TLS is
 needed:

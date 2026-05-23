@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.3.6
+Version:        1.3.7
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -152,6 +152,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat May 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.7-1
+- Add managed php-fpm process supervision under the existing php-fpm feature.
+- Keep external php-fpm as the default PHP-FPM deployment mode.
+- Add managed static/dynamic/ondemand pool knobs, lifecycle limits, slowlog
+  controls, and WordPress smoke coverage for both PHP-FPM modes.
+
 * Sat May 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.6-1
 - FIPS/ISO internal-crypto closure and compliance evidence release.
 - Add provider-backed admin auth in FIPS builds, fail-closed managed ACME and

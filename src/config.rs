@@ -6522,15 +6522,81 @@ pub enum PhpStderrLogLevel {
     Debug,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PhpFpmMode {
+    #[default]
+    #[serde(rename = "external")]
+    External,
+    #[serde(rename = "managed")]
+    Managed,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub enum PhpFpmProcessManager {
+    #[default]
+    #[serde(rename = "static")]
+    Static,
+    #[serde(rename = "dynamic")]
+    Dynamic,
+    #[serde(rename = "ondemand")]
+    Ondemand,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhpFpmConfig {
+    #[serde(default)]
+    pub mode: PhpFpmMode,
     #[serde(default)]
     pub socket: Option<PathBuf>,
     #[serde(default)]
     pub tcp: Option<String>,
     #[serde(default)]
     pub tcp_upstreams: Vec<String>,
+    #[serde(default)]
+    pub php_fpm_binary: Option<PathBuf>,
+    #[serde(default)]
+    pub socket_dir: Option<PathBuf>,
+    #[serde(default = "default_php_fpm_managed_workers")]
+    pub workers: usize,
+    #[serde(default = "default_php_fpm_managed_max_requests")]
+    pub max_requests_per_worker: usize,
+    #[serde(default)]
+    pub process_manager: PhpFpmProcessManager,
+    #[serde(default)]
+    pub start_servers: Option<usize>,
+    #[serde(default)]
+    pub min_spare_servers: Option<usize>,
+    #[serde(default)]
+    pub max_spare_servers: Option<usize>,
+    #[serde(default)]
+    pub max_spawn_rate: Option<usize>,
+    #[serde(default)]
+    pub process_idle_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub listen_backlog: Option<i32>,
+    #[serde(default)]
+    pub request_terminate_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub request_terminate_timeout_track_finished: bool,
+    #[serde(default)]
+    pub request_slowlog_timeout_secs: Option<u64>,
+    #[serde(default = "default_php_fpm_slowlog_trace_depth")]
+    pub request_slowlog_trace_depth: usize,
+    #[serde(default = "default_true")]
+    pub clear_env: bool,
+    #[serde(default = "default_true")]
+    pub catch_workers_output: bool,
+    #[serde(default = "default_true")]
+    pub decorate_workers_output: bool,
+    #[serde(default)]
+    pub session_save_path: Option<PathBuf>,
+    #[serde(default)]
+    pub upload_tmp_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
     #[serde(default)]
     pub keepalive: bool,
     #[serde(default = "default_php_fpm_pool_max_idle")]
@@ -6555,12 +6621,62 @@ pub struct PhpFpmConfig {
     pub retry_statuses: Vec<u16>,
 }
 
+impl Default for PhpFpmConfig {
+    fn default() -> Self {
+        Self {
+            mode: PhpFpmMode::External,
+            socket: None,
+            tcp: None,
+            tcp_upstreams: Vec::new(),
+            php_fpm_binary: None,
+            socket_dir: None,
+            workers: default_php_fpm_managed_workers(),
+            max_requests_per_worker: default_php_fpm_managed_max_requests(),
+            process_manager: PhpFpmProcessManager::Static,
+            start_servers: None,
+            min_spare_servers: None,
+            max_spare_servers: None,
+            max_spawn_rate: None,
+            process_idle_timeout_secs: None,
+            listen_backlog: None,
+            request_terminate_timeout_secs: None,
+            request_terminate_timeout_track_finished: false,
+            request_slowlog_timeout_secs: None,
+            request_slowlog_trace_depth: default_php_fpm_slowlog_trace_depth(),
+            clear_env: true,
+            catch_workers_output: true,
+            decorate_workers_output: true,
+            session_save_path: None,
+            upload_tmp_dir: None,
+            user: None,
+            group: None,
+            keepalive: false,
+            pool_max_idle: default_php_fpm_pool_max_idle(),
+            idle_timeout_secs: default_php_fpm_idle_timeout_secs(),
+            connect_timeout_secs: None,
+            read_timeout_secs: None,
+            write_timeout_secs: None,
+            max_retries: 0,
+            retry_timeout_secs: None,
+            retry_methods: default_php_fpm_retry_methods(),
+            retry_invalid_response: false,
+            retry_statuses: Vec::new(),
+        }
+    }
+}
+
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
 const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
 const PHP_FPM_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
 const MAX_PHP_FPM_TCP_UPSTREAMS: usize = 64;
+const MAX_PHP_FPM_MANAGED_WORKERS: usize = 256;
+const MAX_PHP_FPM_MANAGED_MAX_REQUESTS: usize = 1_000_000;
+const MAX_PHP_FPM_MANAGED_MAX_SPAWN_RATE: usize = 1024;
+const MAX_PHP_FPM_MANAGED_BACKLOG: i32 = 65_535;
+const MAX_PHP_FPM_MANAGED_TIMEOUT_SECS: u64 = 86_400;
+const MAX_PHP_FPM_SLOWLOG_TRACE_DEPTH: usize = 512;
 const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
 const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
 const MAX_PHP_ERROR_PAGES: usize = 64;
@@ -6582,25 +6698,91 @@ impl PhpFpmConfig {
         {
             *socket = base_dir.join(&socket);
         }
+        if let Some(socket_dir) = &mut self.socket_dir
+            && socket_dir.is_relative()
+        {
+            *socket_dir = base_dir.join(&socket_dir);
+        }
+        if let Some(session_save_path) = &mut self.session_save_path
+            && session_save_path.is_relative()
+        {
+            *session_save_path = base_dir.join(&session_save_path);
+        }
+        if let Some(upload_tmp_dir) = &mut self.upload_tmp_dir
+            && upload_tmp_dir.is_relative()
+        {
+            *upload_tmp_dir = base_dir.join(&upload_tmp_dir);
+        }
     }
 
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         let endpoint_count = usize::from(self.socket.is_some())
             + usize::from(self.tcp.is_some())
             + usize::from(!self.tcp_upstreams.is_empty());
-        match endpoint_count {
-            1 => {}
-            0 => {
-                return Err(ConfigError::InvalidPhpConfig {
-                    field: "php.fpm",
-                    reason: "enabled PHP requires php-fpm socket, tcp, or tcp_upstreams",
-                });
+        match self.mode {
+            PhpFpmMode::External => {
+                match endpoint_count {
+                    1 => {}
+                    0 => {
+                        return Err(ConfigError::InvalidPhpConfig {
+                            field: "php.fpm",
+                            reason: "enabled PHP requires php-fpm socket, tcp, or tcp_upstreams",
+                        });
+                    }
+                    _ => {
+                        return Err(ConfigError::InvalidPhpConfig {
+                            field: "php.fpm",
+                            reason: "configure only one of socket, tcp, or tcp_upstreams",
+                        });
+                    }
+                }
+                if self.php_fpm_binary.is_some()
+                    || self.socket_dir.is_some()
+                    || self.workers != default_php_fpm_managed_workers()
+                    || self.max_requests_per_worker != default_php_fpm_managed_max_requests()
+                    || self.process_manager != PhpFpmProcessManager::Static
+                    || self.start_servers.is_some()
+                    || self.min_spare_servers.is_some()
+                    || self.max_spare_servers.is_some()
+                    || self.max_spawn_rate.is_some()
+                    || self.process_idle_timeout_secs.is_some()
+                    || self.listen_backlog.is_some()
+                    || self.request_terminate_timeout_secs.is_some()
+                    || self.request_terminate_timeout_track_finished
+                    || self.request_slowlog_timeout_secs.is_some()
+                    || self.request_slowlog_trace_depth != default_php_fpm_slowlog_trace_depth()
+                    || !self.clear_env
+                    || !self.catch_workers_output
+                    || !self.decorate_workers_output
+                    || self.session_save_path.is_some()
+                    || self.upload_tmp_dir.is_some()
+                    || self.user.is_some()
+                    || self.group.is_some()
+                {
+                    return Err(ConfigError::InvalidPhpConfig {
+                        field: "php.fpm.mode",
+                        reason: "managed php-fpm fields require mode = \"managed\"",
+                    });
+                }
             }
-            _ => {
-                return Err(ConfigError::InvalidPhpConfig {
-                    field: "php.fpm",
-                    reason: "configure only one of socket, tcp, or tcp_upstreams",
-                });
+            PhpFpmMode::Managed => {
+                if endpoint_count != 0 {
+                    return Err(ConfigError::InvalidPhpConfig {
+                        field: "php.fpm.mode",
+                        reason: "managed php-fpm creates its own private socket; do not set socket, tcp, or tcp_upstreams",
+                    });
+                }
+                #[cfg(not(unix))]
+                {
+                    return Err(ConfigError::InvalidPhpConfig {
+                        field: "php.fpm.mode",
+                        reason: "managed php-fpm requires Unix sockets",
+                    });
+                }
+                #[cfg(unix)]
+                {
+                    validate_php_fpm_managed_config(self, scope)?;
+                }
             }
         }
 
@@ -6674,6 +6856,304 @@ impl PhpFpmConfig {
         }
         Ok(())
     }
+}
+
+fn default_php_fpm_managed_workers() -> usize {
+    4
+}
+
+fn default_php_fpm_managed_max_requests() -> usize {
+    1000
+}
+
+fn default_php_fpm_slowlog_trace_depth() -> usize {
+    20
+}
+
+#[cfg(unix)]
+fn validate_php_fpm_managed_config(
+    config: &PhpFpmConfig,
+    scope: &'static str,
+) -> Result<(), ConfigError> {
+    let Some(binary) = &config.php_fpm_binary else {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.php_fpm_binary",
+            reason: "managed php-fpm requires php_fpm_binary",
+        });
+    };
+    if binary.as_os_str().is_empty() || !binary.is_absolute() {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.php_fpm_binary",
+            reason: "must be an absolute path",
+        });
+    }
+    if binary
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(ConfigError::UnsafePath {
+            field: format!("{scope}.fpm.php_fpm_binary"),
+            path: binary.to_path_buf(),
+        });
+    }
+    validate_non_world_writable_parent(format!("{scope}.fpm.php_fpm_binary"), Some(binary))?;
+    let metadata = fs::metadata(binary).map_err(|error| {
+        path_inspection_failed(format!("{scope}.fpm.php_fpm_binary"), binary, error)
+    })?;
+    if !metadata.is_file() {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.php_fpm_binary",
+            reason: "must point to a regular executable file",
+        });
+    }
+
+    let Some(socket_dir) = &config.socket_dir else {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.socket_dir",
+            reason: "managed php-fpm requires socket_dir",
+        });
+    };
+    if socket_dir.as_os_str().is_empty() || !socket_dir.is_absolute() {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.socket_dir",
+            reason: "must be an absolute path",
+        });
+    }
+    if !valid_php_fpm_managed_config_path_value(socket_dir) {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.socket_dir",
+            reason: "must be valid UTF-8 without control characters or quotes",
+        });
+    }
+    validate_path(format!("{scope}.fpm.socket_dir"), Some(socket_dir))?;
+    validate_non_world_writable_parent(
+        format!("{scope}.fpm.socket_dir"),
+        Some(&socket_dir.join("fluxheim-managed.sock")),
+    )?;
+
+    if config.workers == 0 || config.workers > MAX_PHP_FPM_MANAGED_WORKERS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.workers",
+            reason: "must be between 1 and 256",
+        });
+    }
+    validate_php_fpm_process_manager(config)?;
+    validate_optional_managed_timeout(
+        "php.fpm.process_idle_timeout_secs",
+        config.process_idle_timeout_secs,
+    )?;
+    validate_optional_managed_timeout(
+        "php.fpm.request_terminate_timeout_secs",
+        config.request_terminate_timeout_secs,
+    )?;
+    validate_optional_managed_timeout(
+        "php.fpm.request_slowlog_timeout_secs",
+        config.request_slowlog_timeout_secs,
+    )?;
+    if let Some(listen_backlog) = config.listen_backlog
+        && !(-1..=MAX_PHP_FPM_MANAGED_BACKLOG).contains(&listen_backlog)
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.listen_backlog",
+            reason: "must be -1 or between 0 and 65535",
+        });
+    }
+    if config.max_requests_per_worker > MAX_PHP_FPM_MANAGED_MAX_REQUESTS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.max_requests_per_worker",
+            reason: "must be between 0 and 1000000",
+        });
+    }
+    if config.request_slowlog_trace_depth == 0
+        || config.request_slowlog_trace_depth > MAX_PHP_FPM_SLOWLOG_TRACE_DEPTH
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.request_slowlog_trace_depth",
+            reason: "must be between 1 and 512",
+        });
+    }
+    match (&config.user, &config.group) {
+        (Some(user), Some(group)) => {
+            validate_php_fpm_managed_identity("php.fpm.user", user)?;
+            validate_php_fpm_managed_identity("php.fpm.group", group)?;
+        }
+        (None, None) => {}
+        _ => {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.user",
+                reason: "managed php-fpm user and group must be configured together",
+            });
+        }
+    }
+    validate_php_fpm_managed_optional_directory(
+        scope,
+        "php.fpm.session_save_path",
+        &config.session_save_path,
+    )?;
+    validate_php_fpm_managed_optional_directory(
+        scope,
+        "php.fpm.upload_tmp_dir",
+        &config.upload_tmp_dir,
+    )?;
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_php_fpm_process_manager(config: &PhpFpmConfig) -> Result<(), ConfigError> {
+    match config.process_manager {
+        PhpFpmProcessManager::Static => {
+            if config.start_servers.is_some()
+                || config.min_spare_servers.is_some()
+                || config.max_spare_servers.is_some()
+                || config.max_spawn_rate.is_some()
+                || config.process_idle_timeout_secs.is_some()
+            {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.process_manager",
+                    reason: "static mode accepts workers and max_requests_per_worker only",
+                });
+            }
+        }
+        PhpFpmProcessManager::Dynamic => {
+            let min_spare = config
+                .min_spare_servers
+                .ok_or(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.min_spare_servers",
+                    reason: "dynamic mode requires min_spare_servers",
+                })?;
+            let max_spare = config
+                .max_spare_servers
+                .ok_or(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.max_spare_servers",
+                    reason: "dynamic mode requires max_spare_servers",
+                })?;
+            if min_spare == 0 || min_spare > config.workers {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.min_spare_servers",
+                    reason: "must be between 1 and workers",
+                });
+            }
+            if max_spare < min_spare || max_spare > config.workers {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.max_spare_servers",
+                    reason: "must be between min_spare_servers and workers",
+                });
+            }
+            let start_servers = config.start_servers.unwrap_or_else(|| {
+                let midpoint = min_spare.saturating_add(max_spare) / 2;
+                midpoint.clamp(min_spare, max_spare)
+            });
+            if start_servers == 0 || start_servers > config.workers {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.start_servers",
+                    reason: "must be between 1 and workers",
+                });
+            }
+            if let Some(max_spawn_rate) = config.max_spawn_rate
+                && (max_spawn_rate == 0 || max_spawn_rate > MAX_PHP_FPM_MANAGED_MAX_SPAWN_RATE)
+            {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.max_spawn_rate",
+                    reason: "must be between 1 and 1024",
+                });
+            }
+            if config.process_idle_timeout_secs.is_some() {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.process_idle_timeout_secs",
+                    reason: "only ondemand mode uses process_idle_timeout_secs",
+                });
+            }
+        }
+        PhpFpmProcessManager::Ondemand => {
+            if config.start_servers.is_some()
+                || config.min_spare_servers.is_some()
+                || config.max_spare_servers.is_some()
+                || config.max_spawn_rate.is_some()
+            {
+                return Err(ConfigError::InvalidPhpConfig {
+                    field: "php.fpm.process_manager",
+                    reason: "ondemand mode accepts workers, process_idle_timeout_secs, and max_requests_per_worker only",
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_optional_managed_timeout(
+    field: &'static str,
+    value: Option<u64>,
+) -> Result<(), ConfigError> {
+    if let Some(value) = value
+        && value > MAX_PHP_FPM_MANAGED_TIMEOUT_SECS
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "must be less than or equal to 86400 seconds",
+        });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_php_fpm_managed_optional_directory(
+    scope: &'static str,
+    field: &'static str,
+    path: &Option<PathBuf>,
+) -> Result<(), ConfigError> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if path.as_os_str().is_empty() || !path.is_absolute() {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "must be an absolute path",
+        });
+    }
+    if !valid_php_fpm_managed_config_path_value(path) {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "must be valid UTF-8 without control characters or quotes",
+        });
+    }
+    let scoped_field = format!(
+        "{scope}.fpm.{}",
+        field.strip_prefix("php.fpm.").unwrap_or(field)
+    );
+    validate_path(scoped_field.clone(), Some(path))?;
+    validate_non_world_writable_parent(scoped_field, Some(path))
+}
+
+#[cfg(unix)]
+fn valid_php_fpm_managed_config_path_value(path: &Path) -> bool {
+    path.to_str().is_some_and(|value| {
+        !value
+            .bytes()
+            .any(|byte| matches!(byte, 0..=31 | 127 | b'\'' | b'"'))
+    })
+}
+
+#[cfg(unix)]
+fn validate_php_fpm_managed_identity(field: &'static str, value: &str) -> Result<(), ConfigError> {
+    if value.is_empty() || value.len() > 64 {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "must be 1 to 64 bytes",
+        });
+    }
+    if value.starts_with('-')
+        || !value.bytes().all(
+            |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-'),
+        )
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field,
+            reason: "must contain only letters, numbers, underscore, dot, or dash and cannot start with dash",
+        });
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -12563,6 +13043,261 @@ mod tests {
             config.vhosts[0].php.fpm.tcp_upstreams,
             ["127.0.0.1:9000".to_owned(), "127.0.0.1:9001".to_owned()]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_managed_php_fpm_config() {
+        let root = secure_test_dir("config-php-fpm-managed-root");
+        let socket_dir = secure_test_dir("config-php-fpm-managed-socket");
+        let session_dir = secure_test_dir("config-php-fpm-managed-session");
+        let upload_dir = secure_test_dir("config-php-fpm-managed-upload");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "/bin/sh"
+            socket_dir = "{}"
+            workers = 4
+            max_requests_per_worker = 250
+            process_manager = "dynamic"
+            start_servers = 2
+            min_spare_servers = 1
+            max_spare_servers = 3
+            max_spawn_rate = 8
+            listen_backlog = 128
+            request_terminate_timeout_secs = 30
+            request_terminate_timeout_track_finished = true
+            request_slowlog_timeout_secs = 5
+            request_slowlog_trace_depth = 16
+            decorate_workers_output = false
+            session_save_path = "{}"
+            upload_tmp_dir = "{}"
+            user = "fluxheim"
+            group = "fluxheim"
+            "#,
+            test_process_config_toml("config-php-fpm-managed-process"),
+            root.display(),
+            socket_dir.display(),
+            session_dir.display(),
+            upload_dir.display()
+        ))
+        .unwrap();
+
+        config.validate().unwrap();
+        let php = &config.vhosts[0].php;
+        assert_eq!(php.fpm.mode, super::PhpFpmMode::Managed);
+        assert_eq!(
+            php.fpm.php_fpm_binary.as_deref(),
+            Some(Path::new("/bin/sh"))
+        );
+        assert_eq!(php.fpm.socket_dir.as_deref(), Some(socket_dir.as_path()));
+        assert_eq!(php.fpm.workers, 4);
+        assert_eq!(php.fpm.max_requests_per_worker, 250);
+        assert_eq!(
+            php.fpm.process_manager,
+            super::PhpFpmProcessManager::Dynamic
+        );
+        assert_eq!(php.fpm.start_servers, Some(2));
+        assert_eq!(php.fpm.min_spare_servers, Some(1));
+        assert_eq!(php.fpm.max_spare_servers, Some(3));
+        assert_eq!(php.fpm.max_spawn_rate, Some(8));
+        assert_eq!(php.fpm.listen_backlog, Some(128));
+        assert_eq!(php.fpm.request_terminate_timeout_secs, Some(30));
+        assert!(php.fpm.request_terminate_timeout_track_finished);
+        assert_eq!(php.fpm.request_slowlog_timeout_secs, Some(5));
+        assert_eq!(php.fpm.request_slowlog_trace_depth, 16);
+        assert!(!php.fpm.decorate_workers_output);
+        assert_eq!(
+            php.fpm.session_save_path.as_deref(),
+            Some(session_dir.as_path())
+        );
+        assert_eq!(
+            php.fpm.upload_tmp_dir.as_deref(),
+            Some(upload_dir.as_path())
+        );
+        assert_eq!(php.fpm.user.as_deref(), Some("fluxheim"));
+        assert_eq!(php.fpm.group.as_deref(), Some("fluxheim"));
+        assert!(php.fpm.socket.is_none());
+        assert!(php.fpm.tcp.is_none());
+        assert!(php.fpm.tcp_upstreams.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_managed_php_fpm_dynamic_without_spare_bounds() {
+        let root = secure_test_dir("config-php-fpm-managed-dynamic-root");
+        let socket_dir = secure_test_dir("config-php-fpm-managed-dynamic-socket");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "/bin/sh"
+            socket_dir = "{}"
+            process_manager = "dynamic"
+            "#,
+            test_process_config_toml("config-php-fpm-managed-dynamic-process"),
+            root.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.min_spare_servers"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_managed_php_fpm_dynamic_inverted_spare_bounds() {
+        let root = secure_test_dir("config-php-fpm-managed-dynamic-inverted-root");
+        let socket_dir = secure_test_dir("config-php-fpm-managed-dynamic-inverted-socket");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "/bin/sh"
+            socket_dir = "{}"
+            workers = 4
+            process_manager = "dynamic"
+            min_spare_servers = 3
+            max_spare_servers = 2
+            "#,
+            test_process_config_toml("config-php-fpm-managed-dynamic-inverted-process"),
+            root.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.max_spare_servers"), "{error}");
+        assert!(error.contains("min_spare_servers"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_managed_php_fpm_with_external_endpoint() {
+        let root = secure_test_dir("config-php-fpm-managed-endpoint-root");
+        let socket_dir = secure_test_dir("config-php-fpm-managed-endpoint-socket");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "/bin/sh"
+            socket_dir = "{}"
+            tcp = "127.0.0.1:9000"
+            "#,
+            test_process_config_toml("config-php-fpm-managed-endpoint-process"),
+            root.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.mode"), "{error}");
+        assert!(error.contains("private socket"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_managed_php_fpm_user_without_group() {
+        let root = secure_test_dir("config-php-fpm-managed-user-root");
+        let socket_dir = secure_test_dir("config-php-fpm-managed-user-socket");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "/bin/sh"
+            socket_dir = "{}"
+            user = "fluxheim"
+            "#,
+            test_process_config_toml("config-php-fpm-managed-user-process"),
+            root.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.user"), "{error}");
+        assert!(error.contains("user and group"), "{error}");
+    }
+
+    #[test]
+    fn rejects_external_php_fpm_with_managed_fields() {
+        let root = secure_test_dir("config-php-fpm-external-managed-root");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            user = "fluxheim"
+            "#,
+            test_process_config_toml("config-php-fpm-external-managed-process"),
+            root.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.mode"), "{error}");
+        assert!(error.contains("managed php-fpm fields"), "{error}");
     }
 
     #[test]

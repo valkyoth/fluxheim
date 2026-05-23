@@ -1011,7 +1011,7 @@ Follow-up `1.3.x` PHP runtime plan:
 - `1.3.4`: OpenSSL FIPS-capable TLS build path, fail-closed provider
   validation for FIPS-required configs, runtime crypto diagnostics, and
   release-gate evidence for FIPS-capable builds.
-- Later `1.3.x`: managed php-fpm mode under the existing `php-fpm` feature.
+- `1.3.7`: managed php-fpm mode under the existing `php-fpm` feature.
   This should be a runtime config choice, not a separate `php-fpm-managed`
   Cargo feature, because it still uses the same FastCGI bridge and security
   model. The target operator experience is `mode = "managed"` plus a small
@@ -1024,10 +1024,13 @@ Follow-up `1.3.x` PHP runtime plan:
     `php-cli` stdin/stdout worker protocol, for production apps. Persistent
     CLI workers do not provide the request isolation expected by WordPress,
     Laravel, Symfony, phpBB, XenForo, MediaWiki, and similar applications.
-  - The generated pool config should expose only a small, auditable subset:
-    binary path, worker count, max requests per worker, optional user/group
-    where safe, environment allow-list, php_admin_value overrides for session
-    path and upload temp path, socket directory, and timeout controls.
+  - The generated pool config exposes only a small, auditable subset: binary
+    path, private socket directory, static/dynamic/ondemand process manager
+    mode, worker count, dynamic spare/start sizing, ondemand idle timeout,
+    listen backlog, max requests per worker, request terminate timeout,
+    slowlog controls, worker stdout/stderr decoration, `clear_env`,
+    session-save and upload-temp directories, and optional user/group where
+    safe.
   - The generated socket, config, pid, logs, and temporary directories must use
     the same safe-path ownership, symlink, and writable-parent checks used by
     ACME/cache/runtime paths.
@@ -1038,7 +1041,7 @@ Follow-up `1.3.x` PHP runtime plan:
   - Future php-cgi support can be evaluated separately for tiny deployments,
     but it should not block managed php-fpm because php-cgi process-per-request
     behavior is a different performance and compatibility tradeoff.
-- Later `1.3.x`: pure-Rust PHP interpreter experiment behind
+- `1.3.8`: pure-Rust PHP interpreter experiment behind
   `experimental-pure-php`, test-only until compatibility, security, and
   maintenance are proven. The feature must warn operators at startup that it is
   intended for testing and zero-dependency edge microservices only, and that
@@ -1076,7 +1079,8 @@ Exit criteria:
   FastCGI response, timeout, oversized body, and STDERR-size tests pass.
 - WordPress-style front-controller routing, login/admin cookies, plugin/theme
   install/update/delete flows, and common cache-plugin bypass patterns are smoke
-  tested against php-fpm.
+  tested against php-fpm. For `1.3.7`, the local WordPress smoke must pass in
+  both `external` and `managed` php-fpm modes.
 - Config validation makes unsafe PHP roots, sockets, and runtime combinations
   actionable.
 
@@ -2575,7 +2579,9 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.3.4`: OpenSSL FIPS-capable TLS build path and release evidence.
 - `v1.3.5`: rustls/AWS-LC FIPS-capable candidate build path and evidence
   workflow.
-- Later `v1.3.x`: experimental pure-Rust PHP research behind
+- `v1.3.7`: managed php-fpm process supervision under the existing `php-fpm`
+  feature.
+- `v1.3.8`: experimental pure-Rust PHP research behind
   `experimental-pure-php`; Turbine-style PHP app servers stay proxy upstreams.
 - `v1.4.1`: fixes for advanced proxy parity.
 - `v1.5.1`: fixes for load balancer.

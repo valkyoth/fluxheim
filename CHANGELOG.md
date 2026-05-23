@@ -7,6 +7,28 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.3.7 - Unreleased
+
+### Added
+
+- Added managed php-fpm process supervision under the existing `php-fpm`
+  feature. External php-fpm remains the default.
+- Added a small audited `[vhosts.php.fpm] mode = "managed"` config surface for
+  Fluxheim-owned private php-fpm pools, generated pool config, private Unix
+  socket paths, bounded worker counts, static/dynamic/ondemand process manager
+  modes, max-request recycling, request lifecycle controls, slowlog support,
+  output/env toggles, session/upload temp paths, and clear startup/runtime
+  diagnostics.
+- Extended the local WordPress PHP-FPM smoke test so the same install, login,
+  redirect, cookie, and admin-dashboard flow can run against external,
+  managed-static, managed-dynamic, managed-ondemand, all managed, or all
+  external plus managed PHP-FPM modes.
+- Added a self-contained Wolfi PHP image path that installs `php-8.5-fpm`,
+  uses the managed php-fpm container config, and has a smoke test proving
+  `/index.php` executes through the Fluxheim-supervised pool.
+- Keep production PHP guidance on `php-fpm`; defer pure-Rust PHP/phprs work to
+  `1.3.8` behind `experimental-pure-php`.
+
 ## 1.3.6 - FIPS/ISO Internal Crypto Closure
 
 Released: 2026-05-23

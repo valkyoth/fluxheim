@@ -53,11 +53,11 @@ Release order:
   normalization, and browser-validated WordPress login/admin flows.
 - `1.3.3`: focused php-fpm hardening and compatibility fixes found during
   production tests.
-- Later `1.3.x`: managed php-fpm mode as a config option under the existing
+- `1.3.7`: managed php-fpm mode as a config option under the existing
   `php-fpm` feature, not as a separate Cargo runtime. The goal is a
   single-binary operator experience while retaining normal php-fpm request
   isolation and compatibility.
-- Later `1.3.x`: `experimental-pure-php` pure-Rust interpreter research,
+- `1.3.8`: `experimental-pure-php` pure-Rust interpreter research,
   test-only unless compatibility, security, and maintenance are proven.
 
 ## Config Shape
@@ -103,7 +103,7 @@ tcp = "127.0.0.1:9000"
 # socket = "/run/php/php-fpm.sock"
 ```
 
-A future managed php-fpm mode should keep the runtime selection in
+Managed php-fpm mode keeps the runtime selection in
 `[vhosts.php.fpm]` instead of adding a new compile-time PHP runtime:
 
 ```toml
@@ -113,14 +113,50 @@ php_fpm_binary = "/usr/sbin/php-fpm"
 workers = 4
 max_requests_per_worker = 1000
 socket_dir = "/run/fluxheim/php"
+process_manager = "static" # "static", "dynamic", or "ondemand"
+# listen_backlog = 128
+# request_terminate_timeout_secs = 30
+# request_slowlog_timeout_secs = 5
+# clear_env = true
+# catch_workers_output = true
+# decorate_workers_output = true
+# Optional, configure both together when php-fpm starts as root and should drop
+# worker privileges.
+user = "fluxheim"
+group = "fluxheim"
 ```
 
-Managed mode should generate a minimal private php-fpm config, create a
-Fluxheim-owned Unix socket, supervise the php-fpm master process, restart it on
-failure, and shut it down cleanly on reload or gateway shutdown. It should not
-be implemented as a persistent `php-cli` stdin/stdout worker pool for production
-apps, because normal WordPress, Laravel, Symfony, forum, and wiki applications
-expect per-request PHP isolation.
+Managed mode generates a minimal private php-fpm config, creates a
+Fluxheim-owned Unix socket, supervises the php-fpm master process, and shuts it
+down cleanly on reload or gateway shutdown. It is not implemented as a
+persistent `php-cli` stdin/stdout worker pool for production apps, because
+normal WordPress, Laravel, Symfony, forum, and wiki applications expect
+per-request PHP isolation.
+
+The generated socket, config, pid, and php-fpm log files live under
+`socket_dir`. Normal reload/drop cleanup removes the generated control files,
+but forced process termination can leave stale files behind because destructors
+do not run. They are safe to remove when Fluxheim is stopped.
+
+Managed pools support the php-fpm process manager modes operators usually tune
+in `www.conf`:
+
+- `process_manager = "static"` starts exactly `workers` children.
+- `process_manager = "dynamic"` uses `workers` as `pm.max_children` and
+  requires `min_spare_servers` and `max_spare_servers`; `start_servers` and
+  `max_spawn_rate` are optional.
+- `process_manager = "ondemand"` uses `workers` as `pm.max_children` and can
+  set `process_idle_timeout_secs`.
+
+Fluxheim also writes bounded php-fpm directives for `listen_backlog`,
+`request_terminate_timeout_secs`,
+`request_terminate_timeout_track_finished`, `request_slowlog_timeout_secs`,
+`request_slowlog_trace_depth`, `clear_env`, `catch_workers_output`,
+`decorate_workers_output`, `session_save_path`, and `upload_tmp_dir`.
+`session_save_path` and `upload_tmp_dir` are created with owner-only
+permissions when missing; if the managed pool drops to another `user`/`group`,
+make those directories writable by that PHP worker identity before starting
+Fluxheim.
 
 The PHP handler runs before static fallback. Existing non-PHP files under the
 PHP root are declined so the normal static server can serve assets. Missing
@@ -241,7 +277,12 @@ classification, spooled request-body replay and cleanup, and bounded STDERR
 handling. Local WordPress php-fpm and proxied WordPress TLS smoke tests live in
 `scripts/smoke_wordpress_php_fpm.sh` and
 `scripts/smoke_wordpress_proxy_tls.sh`; keep running them as release evidence
-when PHP behavior changes.
+when PHP behavior changes. The local WordPress smoke accepts `external`,
+`managed-static`, `managed-dynamic`, `managed-ondemand`, `managed-all`, or
+`both` so the same install/login/admin flow can verify an operator-managed
+php-fpm container and every Fluxheim-managed php-fpm process manager mode.
+`scripts/smoke_fluxheim_php_wolfi.sh` verifies the self-contained Wolfi PHP
+image path with bundled `php-8.5-fpm` and managed php-fpm enabled.
 
 `1.3.3` php-fpm hardening status:
 

@@ -27,13 +27,14 @@ FROM ${RUNTIME_IMAGE}
 ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 ARG FLUXHEIM_RUNTIME_UID=65532
 ARG FLUXHEIM_RUNTIME_GID=65532
+ARG FLUXHEIM_RUNTIME_PACKAGES=""
 
 LABEL org.opencontainers.image.title="Fluxheim"
 LABEL org.opencontainers.image.description="Fluxheim static web server and reverse proxy on Wolfi"
 LABEL org.opencontainers.image.licenses="EUPL-1.2"
 LABEL org.opencontainers.image.source="https://github.com/valkyoth/fluxheim"
 
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache ca-certificates ${FLUXHEIM_RUNTIME_PACKAGES} \
     && mkdir -p /etc/fluxheim /run/fluxheim /var/lib/fluxheim/acme /var/cache/fluxheim /var/log/fluxheim /srv/fluxheim \
     && chown -R ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID} /etc/fluxheim /run/fluxheim /var/lib/fluxheim /var/cache/fluxheim /var/log/fluxheim /srv/fluxheim
 
@@ -41,6 +42,7 @@ COPY --from=builder /usr/src/fluxheim/target/release/fluxheim /usr/local/bin/flu
 COPY --from=builder /usr/src/fluxheim/target/release/fluxheim-acme /usr/local/bin/fluxheim-acme
 COPY ${FLUXHEIM_CONFIG} /etc/fluxheim/fluxheim.toml
 COPY packaging/default/index.html /srv/fluxheim/index.html
+COPY packaging/default/index.php /srv/fluxheim/index.php
 
 USER ${FLUXHEIM_RUNTIME_UID}:${FLUXHEIM_RUNTIME_GID}
 EXPOSE 8080 8443

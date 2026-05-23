@@ -261,8 +261,13 @@ These focused profiles use TLS/ACME as shared ingress capabilities. The
 `cache` image is TLS-capable and omits local static web serving. The `proxy`
 image is TLS-capable and omits cache and static web serving. The `php` image is
 TLS-capable, includes static web serving and PHP-FPM support, and omits cache
-and proxy-edge extras. The `load-balancer` image is TLS-capable and omits cache
-and static web serving,
+and proxy-edge extras. Starting with `1.3.7`, the recommended Wolfi `php` image
+also installs `php-8.5-fpm` and uses
+[packaging/container/php-managed.toml](../packaging/container/php-managed.toml)
+so `mode = "managed"` works out of the box for content mounted under
+`/srv/fluxheim`. The non-Wolfi PHP image variants keep the external php-fpm
+container config unless their runtime packages are customized. The
+`load-balancer` image is TLS-capable and omits cache and static web serving,
 but is only published automatically for the `1.5` load-balancer line. The
 focused images still reuse the shared proxy runtime internally until lower-level
 serving internals are split further. Override `FLUXHEIM_FEATURES` only when you
@@ -317,6 +322,24 @@ podman build \
   --build-arg FLUXHEIM_CONFIG=examples/php-fpm.toml \
   -t fluxheim:php-fpm-wolfi \
   -f containers/Containerfile.wolfi .
+```
+
+Build the self-contained managed PHP-FPM Wolfi profile locally:
+
+```bash
+podman build \
+  --build-arg FLUXHEIM_FEATURES=profile-web-server,php-fpm,acme-client \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/php-managed.toml \
+  --build-arg FLUXHEIM_RUNTIME_PACKAGES=php-8.5-fpm \
+  -t fluxheim:php-wolfi \
+  -f containers/Containerfile.wolfi .
+```
+
+The matching smoke test builds that image when needed and verifies `/index.php`
+is executed through Fluxheim-managed php-fpm:
+
+```bash
+scripts/smoke_fluxheim_php_wolfi.sh
 ```
 
 Build the development Wolfi profile locally:
@@ -440,15 +463,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.3.6-wolfi`, `v1.3.6-alpine`, `v1.3.6-suse-micro`, `v1.3.6-debian`
+- `v1.3.7-wolfi`, `v1.3.7-alpine`, `v1.3.7-suse-micro`, `v1.3.7-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.3.6`
-- `v1.3.6-base`
+- `v1.3.7`
+- `v1.3.7-base`
 - `latest`
 - `latest-base`
 
@@ -457,17 +480,17 @@ automation. They point at the full/default image profile.
 
 The cache and proxy image profiles publish tags with a profile segment:
 
-- `v1.3.6-cache-wolfi`, `v1.3.6-cache-alpine`,
-  `v1.3.6-cache-suse-micro`, `v1.3.6-cache-debian`
-- `v1.3.6-proxy-wolfi`, `v1.3.6-proxy-alpine`,
-  `v1.3.6-proxy-suse-micro`, `v1.3.6-proxy-debian`
-- `v1.3.6-php-wolfi`, `v1.3.6-php-alpine`,
-  `v1.3.6-php-suse-micro`, `v1.3.6-php-debian`
+- `v1.3.7-cache-wolfi`, `v1.3.7-cache-alpine`,
+  `v1.3.7-cache-suse-micro`, `v1.3.7-cache-debian`
+- `v1.3.7-proxy-wolfi`, `v1.3.7-proxy-alpine`,
+  `v1.3.7-proxy-suse-micro`, `v1.3.7-proxy-debian`
+- `v1.3.7-php-wolfi`, `v1.3.7-php-alpine`,
+  `v1.3.7-php-suse-micro`, `v1.3.7-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`, `latest-php-wolfi`, etc. when
   run from the default branch
-- Wolfi short aliases: `v1.3.6-cache`, `v1.3.6-proxy`, `v1.3.6-php`,
+- Wolfi short aliases: `v1.3.7-cache`, `v1.3.7-proxy`, `v1.3.7-php`,
   `latest-cache`, `latest-proxy`, and `latest-php`
 
 The load-balancer image profile is prepared for the `1.5` line. It is skipped
@@ -882,8 +905,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.3.6 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.3.6 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.3.7 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.3.7 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date

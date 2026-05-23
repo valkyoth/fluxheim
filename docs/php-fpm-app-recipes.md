@@ -42,6 +42,14 @@ FastCGI and backend connectivity:
   `FCGI_RESPONDER` web-serving subset.
 - `php.fpm.socket`, `php.fpm.tcp`, and `php.fpm.tcp_upstreams` cover Unix
   sockets, a single TCP endpoint, or multiple TCP php-fpm backends.
+- `php.fpm.mode = "external"` is the default and connects to an
+  operator-managed php-fpm pool. `php.fpm.mode = "managed"` makes Fluxheim
+  generate a private php-fpm pool config, start the configured php-fpm binary,
+  and connect to the private Unix socket it creates.
+- Managed mode supports `process_manager = "static"`, `"dynamic"`, or
+  `"ondemand"` plus the bounded pool sizing, slowlog, terminate-timeout,
+  session-save, and upload-temp knobs documented in
+  [PHP Runtime Support](php-runtime-support.md).
 - `php.fpm.keepalive`, `pool_max_idle`, and `idle_timeout_secs` enable
   optional FastCGI keep-connection pooling.
 - `php.fpm.connect_timeout_secs`, `read_timeout_secs`,
