@@ -967,6 +967,19 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
         "    tls-openssl-iso19790: {}",
         cfg!(feature = "tls-openssl-iso19790")
     );
+    println!(
+        "    admin_auth_hmac_provider: {}",
+        crate::internal_crypto::admin_mac_provider_label()
+    );
+    println!(
+        "    admin_auth_hmac_fips_capable: {}",
+        crate::internal_crypto::admin_mac_is_compliance_capable()
+    );
+    println!(
+        "    acme_client_compiled: {}",
+        cfg!(feature = "acme-client")
+    );
+    println!("    managed_acme_fips_capable: false");
     #[cfg(feature = "tls-openssl-fips")]
     match crate::tls::probe_openssl_fips_provider() {
         Ok(status) => println!(
@@ -1009,6 +1022,13 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
         println!(
             "    tls.compliance_mode: {}",
             config.tls.compliance_mode().label()
+        );
+        println!(
+            "    admin_auth_hmac_effective_provider: {}",
+            crate::internal_crypto::admin_mac_provider_for_compliance_required(
+                config.tls.compliance_mode().required()
+            )
+            .label()
         );
         println!("    tls.fips.required: {}", config.tls.fips.required);
         println!(

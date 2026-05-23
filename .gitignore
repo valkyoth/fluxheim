@@ -7,6 +7,7 @@
 # Local tool/runtime state
 /.agents/
 /.codex/
+/.cargo-deny-advisory-dbs/
 README.internal.md
 
 # Logs and diagnostics

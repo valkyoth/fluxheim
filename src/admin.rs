@@ -15,7 +15,6 @@ use pingora::apps::http_app::{HttpServer, ServeHttp};
 use pingora::protocols::http::ServerSession;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::services::listening::Service;
-use ring::hmac;
 use serde::Serialize;
 use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
@@ -74,13 +73,18 @@ pub struct AdminApp {
 struct AdminToken {
     len: usize,
     digest: [u8; 32],
+    #[zeroize(skip)]
+    mac_provider: crate::internal_crypto::AdminMacProvider,
 }
 
 impl AdminToken {
-    fn new(token: &str) -> Self {
+    fn new(token: &str, compliance_required: bool) -> Self {
+        let mac_provider =
+            crate::internal_crypto::admin_mac_provider_for_compliance_required(compliance_required);
         Self {
             len: token.len(),
-            digest: digest_admin_token(token.as_bytes()),
+            digest: digest_admin_token(token.as_bytes(), mac_provider),
+            mac_provider,
         }
     }
 }
@@ -355,7 +359,7 @@ impl AdminApp {
         proxy: FluxProxy,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let token_secret = load_admin_token(&config.admin)?;
-        let token = AdminToken::new(&token_secret);
+        let token = AdminToken::new(&token_secret, config.tls.compliance_mode().required());
         let snapshot_store = config
             .admin
             .snapshot_store
@@ -2068,18 +2072,17 @@ fn authorized(header: Option<&str>, token: &AdminToken) -> bool {
 }
 
 fn constant_time_eq(candidate: &[u8], token: &AdminToken) -> bool {
-    let candidate_digest = digest_admin_token(candidate);
+    let candidate_digest = digest_admin_token(candidate, token.mac_provider);
     let candidate_len = (candidate.len() as u64).to_le_bytes();
     let token_len = (token.len as u64).to_le_bytes();
     bool::from(candidate_digest.ct_eq(&token.digest) & candidate_len.ct_eq(&token_len))
 }
 
-fn digest_admin_token(token: &[u8]) -> [u8; 32] {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, token_mac_key());
-    let tag = hmac::sign(&key, token);
-    let mut digest = [0_u8; 32];
-    digest.copy_from_slice(tag.as_ref());
-    digest
+fn digest_admin_token(
+    token: &[u8],
+    mac_provider: crate::internal_crypto::AdminMacProvider,
+) -> [u8; 32] {
+    crate::internal_crypto::admin_hmac_sha256_or_abort(mac_provider, token_mac_key(), token)
 }
 
 fn token_mac_key() -> &'static [u8; 32] {
@@ -2118,14 +2121,6 @@ fn json_response_value(status: StatusCode, body: &impl Serialize) -> AdminRespon
         Ok(body) => json_response(status, &body),
         Err(error) => internal_error_response(&error),
     }
-}
-
-fn json_object(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
-    let mut object = serde_json::Map::new();
-    for (name, value) in fields {
-        object.insert(name.to_owned(), value);
-    }
-    Value::Object(object)
 }
 
 fn empty_response(status: StatusCode) -> AdminResponse {
@@ -2247,157 +2242,175 @@ fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Vec<V
 
 #[cfg(feature = "cache")]
 fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> Value {
-    json_object([
-        ("vhosts", json!(totals.vhosts)),
-        ("enabled_vhosts", json!(totals.enabled_vhosts)),
-        (
-            "enabled_vhost_ratio_per_mille",
-            json!(ratio_per_mille(totals.enabled_vhosts, totals.vhosts)),
-        ),
-        ("tiered_vhosts", json!(totals.tiered_vhosts)),
-        (
-            "tiered_vhost_ratio_per_mille",
-            json!(ratio_per_mille(totals.tiered_vhosts, totals.vhosts)),
-        ),
-        ("configured_routes", json!(totals.configured_routes)),
-        ("routes_total", json!(totals.routes_total)),
-        (
-            "cache_route_coverage_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.routes_total,
-                totals.configured_routes
-            )),
-        ),
-        ("enabled_routes", json!(totals.enabled_routes)),
-        (
-            "enabled_route_ratio_per_mille",
-            json!(ratio_per_mille(totals.enabled_routes, totals.routes_total)),
-        ),
-        ("tiered_routes", json!(totals.tiered_routes)),
-        (
-            "tiered_route_ratio_per_mille",
-            json!(ratio_per_mille(totals.tiered_routes, totals.routes_total)),
-        ),
-        ("lock_enabled_policies", json!(totals.lock_enabled_policies)),
-        (
-            "lock_enabled_policy_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.lock_enabled_policies,
-                totals.enabled_cache_policies()
-            )),
-        ),
-        (
-            "peer_fill_enabled_policies",
-            json!(totals.peer_fill_enabled_policies),
-        ),
-        (
-            "peer_fill_enabled_policy_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.peer_fill_enabled_policies,
-                totals.enabled_cache_policies()
-            )),
-        ),
-        ("peer_fill_peers", json!(totals.peer_fill_peers)),
-        (
-            "peer_fill_max_concurrent_requests",
-            json!(totals.peer_fill_max_concurrent_requests),
-        ),
-        ("memory_tiers", json!(totals.memory_tiers)),
-        ("memory_entries", json!(totals.memory_entries)),
-        (
-            "memory_weighted_size_bytes",
-            json!(totals.memory_weighted_size_bytes),
-        ),
-        (
-            "memory_average_weighted_size_bytes",
-            json!(average_bytes(
-                totals.memory_weighted_size_bytes,
-                totals.memory_entries
-            )),
-        ),
-        ("memory_max_size_bytes", json!(totals.memory_max_size_bytes)),
-        (
-            "memory_fill_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.memory_weighted_size_bytes,
-                totals.memory_max_size_bytes
-            )),
-        ),
-        (
-            "memory_purge_index_entries",
-            json!(totals.memory_purge_index_entries),
-        ),
-        (
-            "memory_purge_index_max_entries",
-            json!(totals.memory_purge_index_max_entries),
-        ),
-        (
-            "memory_purge_index_fill_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.memory_purge_index_entries,
-                totals.memory_purge_index_max_entries
-            )),
-        ),
-        ("disk_tiers", json!(totals.disk_tiers)),
-        ("disk_entries", json!(totals.disk_entries)),
-        ("disk_size_bytes", json!(totals.disk_size_bytes)),
-        (
-            "disk_average_object_size_bytes",
-            json!(average_bytes(totals.disk_size_bytes, totals.disk_entries)),
-        ),
-        (
-            "disk_allocated_size_bytes",
-            json!(totals.disk_allocated_size_bytes),
-        ),
-        ("disk_free_size_bytes", json!(totals.disk_free_size_bytes)),
-        (
-            "disk_free_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.disk_free_size_bytes,
-                totals.disk_allocated_size_bytes
-            )),
-        ),
-        ("disk_free_range_count", json!(totals.disk_free_range_count)),
-        (
-            "disk_largest_free_range_bytes",
-            json!(totals.disk_largest_free_range_bytes),
-        ),
-        ("disk_bin_files", json!(totals.disk_bin_files)),
-        ("disk_max_size_bytes", json!(totals.disk_max_size_bytes)),
-        (
-            "disk_fill_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.disk_size_bytes,
-                totals.disk_max_size_bytes
-            )),
-        ),
-        (
-            "disk_purge_index_entries",
-            json!(totals.disk_purge_index_entries),
-        ),
-        (
-            "disk_purge_index_max_entries",
-            json!(totals.disk_purge_index_max_entries),
-        ),
-        (
-            "disk_purge_index_fill_ratio_per_mille",
-            json!(ratio_per_mille(
-                totals.disk_purge_index_entries,
-                totals.disk_purge_index_max_entries
-            )),
-        ),
-        (
-            "activity",
-            cache_activity_json(&crate::cache::CacheActivityStats {
-                hits: totals.hits,
-                misses: totals.misses,
-                stores: totals.stores,
-                store_refusals: totals.store_refusals,
-                evictions: totals.evictions,
-                purges: totals.purges,
-            }),
-        ),
-    ])
+    let mut object = serde_json::Map::new();
+    object.insert("vhosts".to_owned(), json!(totals.vhosts));
+    object.insert("enabled_vhosts".to_owned(), json!(totals.enabled_vhosts));
+    object.insert(
+        "enabled_vhost_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(totals.enabled_vhosts, totals.vhosts)),
+    );
+    object.insert("tiered_vhosts".to_owned(), json!(totals.tiered_vhosts));
+    object.insert(
+        "tiered_vhost_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(totals.tiered_vhosts, totals.vhosts)),
+    );
+    object.insert(
+        "configured_routes".to_owned(),
+        json!(totals.configured_routes),
+    );
+    object.insert("routes_total".to_owned(), json!(totals.routes_total));
+    object.insert(
+        "cache_route_coverage_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.routes_total,
+            totals.configured_routes
+        )),
+    );
+    object.insert("enabled_routes".to_owned(), json!(totals.enabled_routes));
+    object.insert(
+        "enabled_route_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(totals.enabled_routes, totals.routes_total)),
+    );
+    object.insert("tiered_routes".to_owned(), json!(totals.tiered_routes));
+    object.insert(
+        "tiered_route_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(totals.tiered_routes, totals.routes_total)),
+    );
+    object.insert(
+        "lock_enabled_policies".to_owned(),
+        json!(totals.lock_enabled_policies),
+    );
+    object.insert(
+        "lock_enabled_policy_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.lock_enabled_policies,
+            totals.enabled_cache_policies()
+        )),
+    );
+    object.insert(
+        "peer_fill_enabled_policies".to_owned(),
+        json!(totals.peer_fill_enabled_policies),
+    );
+    object.insert(
+        "peer_fill_enabled_policy_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.peer_fill_enabled_policies,
+            totals.enabled_cache_policies()
+        )),
+    );
+    object.insert("peer_fill_peers".to_owned(), json!(totals.peer_fill_peers));
+    object.insert(
+        "peer_fill_max_concurrent_requests".to_owned(),
+        json!(totals.peer_fill_max_concurrent_requests),
+    );
+    object.insert("memory_tiers".to_owned(), json!(totals.memory_tiers));
+    object.insert("memory_entries".to_owned(), json!(totals.memory_entries));
+    object.insert(
+        "memory_weighted_size_bytes".to_owned(),
+        json!(totals.memory_weighted_size_bytes),
+    );
+    object.insert(
+        "memory_average_weighted_size_bytes".to_owned(),
+        json!(average_bytes(
+            totals.memory_weighted_size_bytes,
+            totals.memory_entries
+        )),
+    );
+    object.insert(
+        "memory_max_size_bytes".to_owned(),
+        json!(totals.memory_max_size_bytes),
+    );
+    object.insert(
+        "memory_fill_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.memory_weighted_size_bytes,
+            totals.memory_max_size_bytes
+        )),
+    );
+    object.insert(
+        "memory_purge_index_entries".to_owned(),
+        json!(totals.memory_purge_index_entries),
+    );
+    object.insert(
+        "memory_purge_index_max_entries".to_owned(),
+        json!(totals.memory_purge_index_max_entries),
+    );
+    object.insert(
+        "memory_purge_index_fill_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.memory_purge_index_entries,
+            totals.memory_purge_index_max_entries
+        )),
+    );
+    object.insert("disk_tiers".to_owned(), json!(totals.disk_tiers));
+    object.insert("disk_entries".to_owned(), json!(totals.disk_entries));
+    object.insert("disk_size_bytes".to_owned(), json!(totals.disk_size_bytes));
+    object.insert(
+        "disk_average_object_size_bytes".to_owned(),
+        json!(average_bytes(totals.disk_size_bytes, totals.disk_entries)),
+    );
+    object.insert(
+        "disk_allocated_size_bytes".to_owned(),
+        json!(totals.disk_allocated_size_bytes),
+    );
+    object.insert(
+        "disk_free_size_bytes".to_owned(),
+        json!(totals.disk_free_size_bytes),
+    );
+    object.insert(
+        "disk_free_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.disk_free_size_bytes,
+            totals.disk_allocated_size_bytes
+        )),
+    );
+    object.insert(
+        "disk_free_range_count".to_owned(),
+        json!(totals.disk_free_range_count),
+    );
+    object.insert(
+        "disk_largest_free_range_bytes".to_owned(),
+        json!(totals.disk_largest_free_range_bytes),
+    );
+    object.insert("disk_bin_files".to_owned(), json!(totals.disk_bin_files));
+    object.insert(
+        "disk_max_size_bytes".to_owned(),
+        json!(totals.disk_max_size_bytes),
+    );
+    object.insert(
+        "disk_fill_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.disk_size_bytes,
+            totals.disk_max_size_bytes
+        )),
+    );
+    object.insert(
+        "disk_purge_index_entries".to_owned(),
+        json!(totals.disk_purge_index_entries),
+    );
+    object.insert(
+        "disk_purge_index_max_entries".to_owned(),
+        json!(totals.disk_purge_index_max_entries),
+    );
+    object.insert(
+        "disk_purge_index_fill_ratio_per_mille".to_owned(),
+        json!(ratio_per_mille(
+            totals.disk_purge_index_entries,
+            totals.disk_purge_index_max_entries
+        )),
+    );
+    object.insert(
+        "activity".to_owned(),
+        cache_activity_json(&crate::cache::CacheActivityStats {
+            hits: totals.hits,
+            misses: totals.misses,
+            stores: totals.stores,
+            store_refusals: totals.store_refusals,
+            evictions: totals.evictions,
+            purges: totals.purges,
+        }),
+    );
+    Value::Object(object)
 }
 
 #[cfg(feature = "cache")]
@@ -3061,7 +3074,7 @@ mod tests {
         let health_unauthenticated = config.admin.health.unauthenticated;
         let health_response = config.admin.health.response;
         AdminApp {
-            token: AdminToken::new("secret-token"),
+            token: AdminToken::new("secret-token", false),
             store: SnapshotStore::new(store),
             current_config: Arc::new(ArcSwap::from_pointee(config)),
             proxy,
@@ -3143,7 +3156,10 @@ mod tests {
     fn status_endpoint_reports_tls_compliance_mode() {
         let config = Config {
             tls: crate::config::TlsConfig {
-                iso19790: crate::config::TlsIso19790Config { required: true },
+                iso19790: crate::config::TlsIso19790Config {
+                    required: true,
+                    require_disk_cache_encryption: false,
+                },
                 ..crate::config::TlsConfig::default()
             },
             ..Config::default()
@@ -5798,7 +5814,7 @@ mod tests {
 
     #[test]
     fn bearer_token_comparison_checks_full_string() {
-        let token = AdminToken::new("secret-token");
+        let token = AdminToken::new("secret-token", false);
         assert!(authorized(Some("Bearer secret-token"), &token));
         assert!(!authorized(Some("Bearer secret"), &token));
         assert!(!constant_time_eq(b"secret", &token));

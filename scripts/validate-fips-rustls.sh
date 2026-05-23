@@ -194,23 +194,28 @@ if cargo run -q $cargo_run_release --no-default-features --features "$features" 
     exit 1
 fi
 
-echo "fips rustls: fail-closed admin internal-crypto fixture"
-if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+echo "fips rustls: provider-backed admin auth fixture"
+cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
     --config "$admin_config" \
     --profile fips-rustls \
-    --no-runtime-paths >/dev/null 2>&1; then
-    echo "fips rustls: admin internal-crypto fixture unexpectedly passed" >&2
-    exit 1
-fi
+    --no-runtime-paths >/dev/null
 
 echo "fips rustls: fail-closed managed ACME internal-crypto fixture"
-if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
+if acme_output="$(cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \
     --config "$acme_config" \
     --profile fips-rustls \
-    --no-runtime-paths >/dev/null 2>&1; then
+    --no-runtime-paths 2>&1)"; then
     echo "fips rustls: managed ACME internal-crypto fixture unexpectedly passed" >&2
     exit 1
 fi
+case "$acme_output" in
+    *"account key generation, JWS account signing, EAB handling, outbound ACME HTTPS transport"*) ;;
+    *)
+        echo "fips rustls: managed ACME fixture failed for the wrong reason" >&2
+        printf '%s\n' "$acme_output" >&2
+        exit 1
+        ;;
+esac
 
 echo "fips rustls: fail-closed local cache-encryption fixture"
 if cargo run -q $cargo_run_release --no-default-features --features "$features" --bin fluxheim-config-tester -- \

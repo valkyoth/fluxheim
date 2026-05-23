@@ -534,6 +534,29 @@ Latest checked ACME runtime candidates:
   certificate management, but less aligned with Fluxheim's multiple Pingora TLS
   backend targets.
 
+## FIPS/ISO-Required Deployments
+
+Managed Fluxheim ACME is intentionally outside the strict FIPS/ISO-required
+runtime boundary in `1.3.6`. A config with `[tls.fips] required = true` or
+`[tls.iso19790] required = true` rejects `[tls.acme] enabled = true` because
+ACME account key generation, JWS account signing, External Account Binding
+HMAC, outbound ACME HTTPS transport, and TLS-ALPN challenge certificate
+generation are not fully routed through the selected validated provider.
+
+For regulated deployments, use local static certificate files in
+`[vhosts.tls.certificate]` and renew them with an external process that has its
+own evidence package. If that external process is ACME-based, keep the ACME
+client version, host FIPS/ISO mode, key-generation policy, CA/audit evidence,
+and renewal logs with the deployment evidence. Conservative public-Web PKI
+profiles should request RSA 2048 or RSA 3072 certificate keys unless the
+assessor explicitly accepts the selected ECDSA certificate profile and chain.
+
+The Fluxheim ACME storage path hashing uses SHA-256 and does not use MD5 for
+local account or certificate directory labels, but that is not enough to make
+managed ACME part of the approved cryptographic boundary. Treat `fluxheim-acme`
+as a normal automation tool unless and until managed ACME has provider-routed
+signing, key generation, EAB, and outbound TLS evidence.
+
 ## Retry Policy
 
 Failed renewal attempts should retry with bounded backoff:

@@ -76,13 +76,13 @@ const MAX_CACHE_TAG_LEN: usize = 128;
 #[cfg(feature = "proxy")]
 const MAX_CACHE_TAG_BYTES_PER_OBJECT: usize = 4096;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct CacheStoragePlan {
     pub memory: Option<MemoryTierPlan>,
     pub disk: Option<DiskTierPlan>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct MemoryTierPlan {
     pub max_size_bytes: ByteSize,
     pub max_object_bytes: ByteSize,
@@ -90,7 +90,7 @@ pub struct MemoryTierPlan {
     pub cache_tag_headers: Vec<String>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct DiskTierPlan {
     pub backend: CacheDiskBackend,
     pub path: PathBuf,
@@ -103,23 +103,85 @@ pub struct DiskTierPlan {
 
 #[cfg(feature = "proxy")]
 static PINGORA_MEMORY_STORAGE_REGISTRY: OnceLock<
-    Mutex<HashMap<String, &'static PingoraMemoryStorage>>,
+    Mutex<HashMap<MemoryStorageRegistryKey, &'static PingoraMemoryStorage>>,
 > = OnceLock::new();
 #[cfg(feature = "proxy")]
 static PINGORA_DISK_STORAGE_REGISTRY: OnceLock<
-    Mutex<HashMap<String, &'static PingoraDiskStorage>>,
+    Mutex<HashMap<DiskStorageRegistryKey, &'static PingoraDiskStorage>>,
 > = OnceLock::new();
 #[cfg(feature = "proxy")]
 static PINGORA_DISK_STORAGE_BACKEND_REGISTRY: OnceLock<
-    Mutex<HashMap<String, &'static PingoraDiskStorageBackend>>,
+    Mutex<HashMap<DiskStorageRegistryKey, &'static PingoraDiskStorageBackend>>,
 > = OnceLock::new();
 #[cfg(feature = "proxy")]
 static PINGORA_TIERED_STORAGE_REGISTRY: OnceLock<
     Mutex<HashMap<String, &'static PingoraTieredStorage>>,
 > = OnceLock::new();
 #[cfg(feature = "proxy")]
-static PINGORA_CACHE_LOCK_REGISTRY: OnceLock<Mutex<HashMap<u64, &'static CacheKeyLockImpl>>> =
-    OnceLock::new();
+static PINGORA_CACHE_LOCK_REGISTRY: OnceLock<
+    Mutex<HashMap<(u64, u32), &'static CacheKeyLockImpl>>,
+> = OnceLock::new();
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+enum StorageRegistryNamespace {
+    Global,
+    Scope {
+        vhost: String,
+        route: Option<String>,
+    },
+}
+
+#[cfg(feature = "proxy")]
+impl StorageRegistryNamespace {
+    fn from_parts(vhost: Option<&str>, route: Option<&str>) -> Self {
+        match vhost {
+            Some(vhost) => Self::Scope {
+                vhost: vhost.to_owned(),
+                route: route.map(str::to_owned),
+            },
+            None => Self::Global,
+        }
+    }
+
+    fn metric_scope(&self) -> Option<(&str, Option<&str>)> {
+        match self {
+            Self::Global => None,
+            Self::Scope { vhost, route } => Some((vhost.as_str(), route.as_deref())),
+        }
+    }
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+struct MemoryStorageRegistryKey {
+    namespace: StorageRegistryNamespace,
+    plan: MemoryTierPlan,
+}
+
+#[cfg(feature = "proxy")]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+struct DiskStorageRegistryKey {
+    namespace: StorageRegistryNamespace,
+    plan: DiskTierPlan,
+}
+
+#[cfg(feature = "proxy")]
+fn lock_cache_registry<'a, T>(
+    registry: &'a Mutex<T>,
+    name: &'static str,
+) -> std::sync::MutexGuard<'a, T> {
+    match registry.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            log::error!(
+                target: "fluxheim::security",
+                "cache storage registry '{name}' lock poisoned; aborting to avoid inconsistent cache state"
+            );
+            std::process::abort();
+        }
+    }
+}
 
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone)]
@@ -6284,9 +6346,9 @@ fn remove_disk_cache_object(root: &Path, path: &Path) -> std::io::Result<bool> {
 pub fn pingora_memory_storage_from_config(
     config: &CacheConfig,
 ) -> Option<&'static PingoraMemoryStorage> {
-    storage_plan(config)
-        .memory
-        .map(|plan| pingora_memory_storage_from_plan_with_key(plan, "global", None, None))
+    storage_plan(config).memory.map(|plan| {
+        pingora_memory_storage_from_plan_with_key(plan, StorageRegistryNamespace::Global)
+    })
 }
 
 #[cfg(feature = "proxy")]
@@ -6295,9 +6357,10 @@ pub fn pingora_memory_storage_from_config_with_metric_scope(
     vhost: &str,
     route: Option<&str>,
 ) -> Option<&'static PingoraMemoryStorage> {
+    let namespace = StorageRegistryNamespace::from_parts(Some(vhost), route);
     storage_plan(config)
         .memory
-        .map(|plan| pingora_memory_storage_from_plan_with_key(plan, "scope", Some(vhost), route))
+        .map(|plan| pingora_memory_storage_from_plan_with_key(plan, namespace))
 }
 
 #[cfg(feature = "proxy")]
@@ -6308,23 +6371,20 @@ pub fn pingora_memory_storage_from_plan(plan: MemoryTierPlan) -> &'static Pingor
 #[cfg(feature = "proxy")]
 fn pingora_memory_storage_from_plan_with_key(
     plan: MemoryTierPlan,
-    namespace: &str,
-    vhost: Option<&str>,
-    route: Option<&str>,
+    namespace: StorageRegistryNamespace,
 ) -> &'static PingoraMemoryStorage {
-    let key = format!("{namespace}:{vhost:?}:{route:?}:{plan:?}");
+    let key = MemoryStorageRegistryKey {
+        namespace,
+        plan: plan.clone(),
+    };
     let registry = PINGORA_MEMORY_STORAGE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut storage = registry
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut storage = lock_cache_registry(registry, "memory-storage");
     if let Some(existing) = storage.get(&key) {
         return existing;
     }
-    let created = if namespace == "scope" {
+    let created = if let Some((vhost, route)) = key.namespace.metric_scope() {
         Box::leak(Box::new(PingoraMemoryStorage::from_plan_with_metric_scope(
-            plan,
-            vhost.unwrap_or_default(),
-            route,
+            plan, vhost, route,
         ))) as &'static PingoraMemoryStorage
     } else {
         Box::leak(Box::new(PingoraMemoryStorage::from_plan(plan))) as &'static PingoraMemoryStorage
@@ -6339,7 +6399,7 @@ pub fn pingora_disk_storage_from_config(
 ) -> std::io::Result<Option<&'static PingoraDiskStorage>> {
     storage_plan(config)
         .disk
-        .map(|plan| pingora_disk_storage_from_plan_with_key(plan, "global", None, None))
+        .map(|plan| pingora_disk_storage_from_plan_with_key(plan, StorageRegistryNamespace::Global))
         .transpose()
 }
 
@@ -6349,9 +6409,10 @@ pub fn pingora_disk_storage_from_config_with_metric_scope(
     vhost: &str,
     route: Option<&str>,
 ) -> std::io::Result<Option<&'static PingoraDiskStorage>> {
+    let namespace = StorageRegistryNamespace::from_parts(Some(vhost), route);
     storage_plan(config)
         .disk
-        .map(|plan| pingora_disk_storage_from_plan_with_key(plan, "scope", Some(vhost), route))
+        .map(|plan| pingora_disk_storage_from_plan_with_key(plan, namespace))
         .transpose()
 }
 
@@ -6366,20 +6427,19 @@ pub fn pingora_disk_storage_from_plan(
 #[cfg(feature = "proxy")]
 fn pingora_disk_storage_from_plan_with_key(
     plan: DiskTierPlan,
-    namespace: &str,
-    vhost: Option<&str>,
-    route: Option<&str>,
+    namespace: StorageRegistryNamespace,
 ) -> std::io::Result<&'static PingoraDiskStorage> {
-    let key = format!("{namespace}:{vhost:?}:{route:?}:{plan:?}");
+    let key = DiskStorageRegistryKey {
+        namespace,
+        plan: plan.clone(),
+    };
     let registry = PINGORA_DISK_STORAGE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut storage = registry
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut storage = lock_cache_registry(registry, "disk-storage");
     if let Some(existing) = storage.get(&key) {
         return Ok(*existing);
     }
-    let created = if namespace == "scope" {
-        PingoraDiskStorage::from_plan_with_metric_scope(plan, vhost.unwrap_or_default(), route)
+    let created = if let Some((vhost, route)) = key.namespace.metric_scope() {
+        PingoraDiskStorage::from_plan_with_metric_scope(plan, vhost, route)
     } else {
         PingoraDiskStorage::from_plan(plan)
     }
@@ -6394,11 +6454,10 @@ pub fn pingora_disk_storage_backend_from_config_with_metric_scope(
     vhost: &str,
     route: Option<&str>,
 ) -> std::io::Result<Option<&'static PingoraDiskStorageBackend>> {
+    let namespace = StorageRegistryNamespace::from_parts(Some(vhost), route);
     storage_plan(config)
         .disk
-        .map(|plan| {
-            pingora_disk_storage_backend_from_plan_with_key(plan, "scope", Some(vhost), route)
-        })
+        .map(|plan| pingora_disk_storage_backend_from_plan_with_key(plan, namespace))
         .transpose()
 }
 
@@ -6413,24 +6472,19 @@ pub fn pingora_disk_storage_backend_from_plan(
 #[cfg(feature = "proxy")]
 fn pingora_disk_storage_backend_from_plan_with_key(
     plan: DiskTierPlan,
-    namespace: &str,
-    vhost: Option<&str>,
-    route: Option<&str>,
+    namespace: StorageRegistryNamespace,
 ) -> std::io::Result<&'static PingoraDiskStorageBackend> {
-    let key = format!("{namespace}:{vhost:?}:{route:?}:{plan:?}");
+    let key = DiskStorageRegistryKey {
+        namespace,
+        plan: plan.clone(),
+    };
     let registry = PINGORA_DISK_STORAGE_BACKEND_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut storage = registry
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut storage = lock_cache_registry(registry, "disk-storage-backend");
     if let Some(existing) = storage.get(&key) {
         return Ok(*existing);
     }
-    let created = if namespace == "scope" {
-        PingoraDiskStorageBackend::from_plan_with_metric_scope(
-            plan,
-            vhost.unwrap_or_default(),
-            route,
-        )
+    let created = if let Some((vhost, route)) = key.namespace.metric_scope() {
+        PingoraDiskStorageBackend::from_plan_with_metric_scope(plan, vhost, route)
     } else {
         PingoraDiskStorageBackend::from_plan(plan)
     }
@@ -6446,9 +6500,7 @@ pub fn pingora_tiered_storage_from_parts(
 ) -> &'static PingoraTieredStorage {
     let key = format!("{:p}:{:p}", memory, disk);
     let registry = PINGORA_TIERED_STORAGE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut storage = registry
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut storage = lock_cache_registry(registry, "tiered-storage");
     if let Some(existing) = storage.get(&key) {
         return existing;
     }
@@ -6459,11 +6511,9 @@ pub fn pingora_tiered_storage_from_parts(
 
 #[cfg(feature = "proxy")]
 pub fn pingora_cache_lock(age_timeout: std::time::Duration) -> &'static CacheKeyLockImpl {
-    let key = age_timeout.as_secs();
+    let key = (age_timeout.as_secs(), age_timeout.subsec_nanos());
     let registry = PINGORA_CACHE_LOCK_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut locks = registry
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut locks = lock_cache_registry(registry, "cache-lock");
     if let Some(existing) = locks.get(&key) {
         return *existing;
     }
@@ -8429,9 +8479,11 @@ mod tests {
         let first = super::pingora_cache_lock(std::time::Duration::from_secs(30));
         let second = super::pingora_cache_lock(std::time::Duration::from_secs(30));
         let other = super::pingora_cache_lock(std::time::Duration::from_secs(31));
+        let subsecond = super::pingora_cache_lock(std::time::Duration::new(30, 500_000_000));
 
         assert!(std::ptr::addr_eq(first, second));
         assert!(!std::ptr::addr_eq(first, other));
+        assert!(!std::ptr::addr_eq(first, subsecond));
     }
 
     #[cfg(feature = "proxy")]

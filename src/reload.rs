@@ -474,7 +474,10 @@ mod tests {
         let old = Config::default();
         let new = Config {
             tls: TlsConfig {
-                fips: TlsFipsConfig { required: true },
+                fips: TlsFipsConfig {
+                    required: true,
+                    require_disk_cache_encryption: false,
+                },
                 ..TlsConfig::default()
             },
             ..Config::default()

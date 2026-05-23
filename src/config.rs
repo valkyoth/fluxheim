@@ -299,17 +299,17 @@ impl Config {
             return Ok(());
         }
 
-        if self.admin.enabled {
+        if self.admin.enabled && !crate::internal_crypto::admin_mac_is_compliance_capable() {
             return Err(ConfigError::InvalidCompliancePolicy {
                 field: "admin.enabled",
-                reason: "FIPS/ISO-required mode currently rejects the admin API because bearer-token verification uses ring HMAC; disable admin or use a non-FIPS-required build until admin auth is routed through the selected validated module",
+                reason: "FIPS/ISO-required mode allows the admin API only when bearer-token verification is routed through a validated provider; rebuild with tls-openssl-fips or tls-rustls-fips, or disable admin.enabled",
             });
         }
 
         if self.tls.acme.enabled {
             return Err(ConfigError::InvalidCompliancePolicy {
                 field: "tls.acme.enabled",
-                reason: "FIPS/ISO-required mode currently rejects managed ACME because account signing, EAB handling, and TLS-ALPN certificate generation use ring-backed ACME paths; use externally issued static certificates for the FIPS evidence boundary",
+                reason: "FIPS/ISO-required mode currently rejects managed ACME because account key generation, JWS account signing, EAB handling, outbound ACME HTTPS transport, and TLS-ALPN challenge certificate generation are not fully routed through the selected validated provider; use externally issued static certificates or an externally evidenced renewal process for the FIPS evidence boundary",
             });
         }
 
@@ -318,7 +318,7 @@ impl Config {
         {
             return Err(ConfigError::InvalidCompliancePolicy {
                 field: "metrics.otlp.endpoint",
-                reason: "FIPS/ISO-required mode allows OTLP metrics export only to a local http:// loopback collector; remote or HTTPS OTLP export needs provider-aligned outbound TLS evidence first",
+                reason: "FIPS/ISO-required mode allows OTLP metrics export only to a numeric local http://127.0.0.1 or http://[::1] loopback collector; remote, localhost, or HTTPS OTLP export needs provider-aligned outbound TLS evidence first",
             });
         }
 
@@ -327,28 +327,42 @@ impl Config {
         {
             return Err(ConfigError::InvalidCompliancePolicy {
                 field: "tracing.otlp.endpoint",
-                reason: "FIPS/ISO-required mode allows OTLP trace export only to a local http:// loopback collector; remote or HTTPS OTLP export needs provider-aligned outbound TLS evidence first",
+                reason: "FIPS/ISO-required mode allows OTLP trace export only to a numeric local http://127.0.0.1 or http://[::1] loopback collector; remote, localhost, or HTTPS OTLP export needs provider-aligned outbound TLS evidence first",
             });
         }
 
-        validate_cache_compliance_internal_crypto(&self.cache, "cache")?;
+        let require_disk_cache_encryption = self.tls.fips.require_disk_cache_encryption
+            || self.tls.iso19790.require_disk_cache_encryption;
+
+        validate_cache_compliance_internal_crypto(
+            &self.cache,
+            "cache",
+            require_disk_cache_encryption,
+        )?;
         for vhost in &self.vhosts {
-            validate_cache_compliance_internal_crypto(&vhost.cache, "vhosts.cache").map_err(
-                |source| ConfigError::VhostSection {
-                    vhost: vhost.name.clone(),
-                    section: "cache",
-                    source: Box::new(source),
-                },
-            )?;
+            validate_cache_compliance_internal_crypto(
+                &vhost.cache,
+                "vhosts.cache",
+                require_disk_cache_encryption,
+            )
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: vhost.name.clone(),
+                section: "cache",
+                source: Box::new(source),
+            })?;
             for route in &vhost.routes {
                 if let Some(cache) = &route.cache {
-                    validate_cache_compliance_internal_crypto(cache, "vhosts.routes.cache")
-                        .map_err(|source| ConfigError::RouteSection {
-                            vhost: vhost.name.clone(),
-                            route: route.name.clone(),
-                            section: "cache",
-                            source: Box::new(source),
-                        })?;
+                    validate_cache_compliance_internal_crypto(
+                        cache,
+                        "vhosts.routes.cache",
+                        require_disk_cache_encryption,
+                    )
+                    .map_err(|source| ConfigError::RouteSection {
+                        vhost: vhost.name.clone(),
+                        route: route.name.clone(),
+                        section: "cache",
+                        source: Box::new(source),
+                    })?;
                 }
             }
         }
@@ -2207,7 +2221,7 @@ impl Default for ServerLimitsConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ByteSize(u64);
 
 impl ByteSize {
@@ -2624,6 +2638,8 @@ impl TlsConfigFragment {
 pub struct TlsFipsConfig {
     #[serde(default)]
     pub required: bool,
+    #[serde(default)]
+    pub require_disk_cache_encryption: bool,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -2631,24 +2647,31 @@ pub struct TlsFipsConfig {
 pub struct TlsIso19790Config {
     #[serde(default)]
     pub required: bool,
+    #[serde(default)]
+    pub require_disk_cache_encryption: bool,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct TlsFipsConfigFragment {
     required: Option<bool>,
+    require_disk_cache_encryption: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct TlsIso19790ConfigFragment {
     required: Option<bool>,
+    require_disk_cache_encryption: Option<bool>,
 }
 
 impl TlsFipsConfig {
     fn merge(&mut self, fragment: TlsFipsConfigFragment) {
         if let Some(required) = fragment.required {
             self.required = required;
+        }
+        if let Some(require_disk_cache_encryption) = fragment.require_disk_cache_encryption {
+            self.require_disk_cache_encryption = require_disk_cache_encryption;
         }
     }
 }
@@ -2657,6 +2680,9 @@ impl TlsIso19790Config {
     fn merge(&mut self, fragment: TlsIso19790ConfigFragment) {
         if let Some(required) = fragment.required {
             self.required = required;
+        }
+        if let Some(require_disk_cache_encryption) = fragment.require_disk_cache_encryption {
+            self.require_disk_cache_encryption = require_disk_cache_encryption;
         }
     }
 }
@@ -4793,12 +4819,19 @@ impl CacheConfig {
 fn validate_cache_compliance_internal_crypto(
     cache: &CacheConfig,
     scope: &'static str,
+    require_disk_cache_encryption: bool,
 ) -> Result<(), ConfigError> {
     if !cache.disk.enabled {
         return Ok(());
     }
 
     if !cache.disk.encryption.enabled {
+        if require_disk_cache_encryption {
+            return Err(ConfigError::InvalidCompliancePolicy {
+                field: scope,
+                reason: "FIPS/ISO-required mode requires disk cache encryption because tls.fips.require_disk_cache_encryption or tls.iso19790.require_disk_cache_encryption is enabled",
+            });
+        }
         log::warn!(
             "{scope}.disk.enabled is true in FIPS/ISO-required mode without disk cache encryption; cached response bodies are written at rest without a Fluxheim-managed encryption boundary"
         );
@@ -5585,7 +5618,7 @@ pub struct CacheDiskConfig {
     pub encryption: CacheDiskEncryptionConfig,
 }
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CacheDiskBackend {
     #[default]
@@ -5645,7 +5678,7 @@ impl CacheDiskConfig {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CacheDiskEncryptionConfig {
     #[serde(default)]
@@ -5664,7 +5697,7 @@ pub struct CacheDiskEncryptionConfig {
     pub openbao: CacheDiskEncryptionOpenBaoConfig,
 }
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CacheDiskEncryptionProvider {
     #[default]
@@ -5672,7 +5705,7 @@ pub enum CacheDiskEncryptionProvider {
     OpenbaoTransit,
 }
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CacheDiskEncryptionAlgorithm {
     #[default]
@@ -5769,7 +5802,7 @@ impl CacheDiskEncryptionConfig {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CacheDiskEncryptionOpenBaoConfig {
     #[serde(default)]
@@ -5997,7 +6030,7 @@ fn fips_allowed_local_openbao_endpoint(endpoint: &str) -> bool {
     !authority.is_empty() && openbao_plain_http_authority_is_loopback(authority)
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CacheDiskStorageBinConfig {
     #[serde(default = "default_cache_storage_bin_size_bytes")]
@@ -8052,7 +8085,7 @@ fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
     let Some((authority, path)) = rest.split_once('/') else {
         return false;
     };
-    !path.is_empty() && http_authority_is_loopback(authority)
+    !path.is_empty() && openbao_plain_http_authority_is_loopback(authority)
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
@@ -11420,7 +11453,7 @@ mod tests {
 
     #[test]
     #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
-    fn fips_required_rejects_admin_api_internal_crypto() {
+    fn fips_required_accepts_provider_backed_admin_auth() {
         let snapshot_store = secure_test_dir("config-fips-admin-snapshot-store");
         let backend = fips_capable_backend_for_tests();
         let config: Config = toml::from_str(&format!(
@@ -11442,13 +11475,7 @@ mod tests {
         ))
         .unwrap();
 
-        assert_eq!(
-            config.validate(),
-            Err(ConfigError::InvalidCompliancePolicy {
-                field: "admin.enabled",
-                reason: "FIPS/ISO-required mode currently rejects the admin API because bearer-token verification uses ring HMAC; disable admin or use a non-FIPS-required build until admin auth is routed through the selected validated module",
-            })
-        );
+        assert_eq!(config.validate(), Ok(()));
     }
 
     #[test]
@@ -11479,7 +11506,43 @@ mod tests {
             config.validate(),
             Err(ConfigError::InvalidCompliancePolicy {
                 field: "tls.acme.enabled",
-                reason: "FIPS/ISO-required mode currently rejects managed ACME because account signing, EAB handling, and TLS-ALPN certificate generation use ring-backed ACME paths; use externally issued static certificates for the FIPS evidence boundary",
+                reason: "FIPS/ISO-required mode currently rejects managed ACME because account key generation, JWS account signing, EAB handling, outbound ACME HTTPS transport, and TLS-ALPN challenge certificate generation are not fully routed through the selected validated provider; use externally issued static certificates or an externally evidenced renewal process for the FIPS evidence boundary",
+            })
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "tls-rustls-fips", feature = "tls-openssl-fips"))]
+    fn fips_required_can_require_disk_cache_encryption() {
+        let root = secure_test_dir("config-fips-require-disk-cache-encryption");
+        let backend = fips_capable_backend_for_tests();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [tls]
+            backend = "{backend}"
+            curve_preferences = ["CurveP256", "CurveP384"]
+            cipher_suites = ["TLS_AES_256_GCM_SHA384", "TLS_AES_128_GCM_SHA256"]
+
+            [tls.fips]
+            required = true
+            require_disk_cache_encryption = true
+
+            [cache]
+            enabled = true
+
+            [cache.disk]
+            enabled = true
+            path = "{}"
+            "#,
+            root.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidCompliancePolicy {
+                field: "cache",
+                reason: "FIPS/ISO-required mode requires disk cache encryption because tls.fips.require_disk_cache_encryption or tls.iso19790.require_disk_cache_encryption is enabled",
             })
         );
     }
@@ -11613,7 +11676,7 @@ mod tests {
         assert!(super::fips_allowed_local_otlp_endpoint(
             "http://127.0.0.1:4318/v1/traces"
         ));
-        assert!(super::fips_allowed_local_otlp_endpoint(
+        assert!(!super::fips_allowed_local_otlp_endpoint(
             "http://localhost/v1/traces"
         ));
         assert!(super::fips_allowed_local_otlp_endpoint(

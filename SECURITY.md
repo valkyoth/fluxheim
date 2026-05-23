@@ -83,7 +83,10 @@ mode bits. They do not parse POSIX extended ACLs yet. Regulated or multi-tenant
 deployments should audit sensitive Fluxheim paths with platform tools such as
 `getfacl`, keep parent directories private to the service user, and disable
 swap/core dumps for processes that handle admin bearer tokens, EAB secrets, TLS
-private keys, or cache encryption credentials.
+private keys, or cache encryption credentials. The process-local admin token
+MAC key is generated at startup and intentionally remains resident for the
+process lifetime, so high-assurance deployments should also disable core dumps,
+avoid swap, and use service isolation that prevents `/proc/<pid>/mem` access.
 
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage

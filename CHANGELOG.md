@@ -14,9 +14,10 @@ behavior when the change improves security or project direction.
 - Added FIPS/ISO-required internal-crypto guards that fail closed for
   security-sensitive non-TLS cryptography that is not yet routed through the
   selected validated module or externally evidenced service.
-- Added validation tests proving FIPS/ISO-required mode rejects managed ACME,
-  the admin API, and local disk-cache encryption, while allowing OpenBao
-  Transit cache encryption as an external evidence boundary.
+- Added validation tests proving FIPS/ISO-required mode rejects managed ACME
+  for the intended provider-boundary reason, accepts provider-backed admin
+  auth, and rejects local disk-cache encryption, while allowing OpenBao Transit
+  cache encryption as an external evidence boundary.
 - Added a compliance evidence package template covering release artifacts,
   SBOMs, build commands, cryptographic module evidence, runtime diagnostics,
   scanner output, and Common Criteria-aligned evidence records.
@@ -30,23 +31,32 @@ behavior when the change improves security or project direction.
 - Added a release-metadata guard for the `RUSTSEC-2024-0437` suppression so the
   protobuf advisory has to be reviewed when Pingora moves off Prometheus
   `0.13.4`.
-- Added a documented local-loopback-only OTLP exception for FIPS/ISO-required
-  mode so operators can export metrics/traces to a local collector without
-  making outbound TLS part of Fluxheim's approved cryptographic boundary.
-- Extended the OpenSSL and rustls FIPS validation scripts with fail-closed
-  fixtures for admin auth, managed ACME, and local cache encryption.
+- Added a documented numeric-local-loopback-only OTLP exception for
+  FIPS/ISO-required mode so operators can export metrics/traces to a local
+  collector without making outbound TLS part of Fluxheim's approved
+  cryptographic boundary.
+- Extended the OpenSSL and rustls FIPS validation scripts with provider-backed
+  admin-auth fixtures plus fail-closed fixtures for managed ACME and local
+  cache encryption. The managed ACME fixture now checks the specific ACME
+  rejection text instead of treating any config-tester failure as evidence.
 
 ### Changed
 
 - FIPS/ISO-required mode now prefers externally issued static certificates and
-  rejects `[tls.acme] enabled = true` until ACME account signing, EAB, and
-  TLS-ALPN certificate generation are routed through validated cryptography or
-  separately evidenced.
-- FIPS/ISO-required mode now rejects `admin.enabled = true` until admin
-  bearer-token verification is migrated away from the current ring HMAC path.
+  rejects `[tls.acme] enabled = true` until ACME account key generation, JWS
+  account signing, EAB, outbound ACME HTTPS transport, and TLS-ALPN certificate
+  generation are routed through validated cryptography or separately evidenced.
+- FIPS/ISO-required mode now allows `admin.enabled = true` in
+  `tls-openssl-fips` and `tls-rustls-fips` builds because bearer-token HMAC is
+  routed through OpenSSL FIPS or AWS-LC FIPS respectively. Non-FIPS builds still
+  reject admin in FIPS/ISO-required configs.
 - FIPS/ISO-required mode now rejects local cache encryption and requires either
   no cache encryption or `provider = "openbao-transit"` with operator evidence
   for the external OpenBao crypto boundary.
+- Added `tls.fips.require_disk_cache_encryption` and
+  `tls.iso19790.require_disk_cache_encryption` so operators can promote the
+  unencrypted disk-cache warning to a hard config error in stricter
+  data-at-rest deployments.
 - The compliance evidence package is folded into `1.3.6` so regulated
   operators get the fail-closed gates and the evidence workflow in the same
   release.

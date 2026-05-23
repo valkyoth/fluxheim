@@ -18,6 +18,7 @@ pub mod config_tester;
 mod fs_trust;
 #[cfg(feature = "proxy")]
 pub mod headers;
+pub mod internal_crypto;
 #[cfg(feature = "load-balancer")]
 pub mod load_balancer;
 #[cfg(feature = "metrics")]

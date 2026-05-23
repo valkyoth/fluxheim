@@ -50,7 +50,7 @@ wildcards = "allow"
 highlight = "all"
 
 [advisories]
-db-path = "/tmp/fluxheim-cargo-deny-advisory-dbs"
+db-path = ".cargo-deny-advisory-dbs"
 yanked = "deny"
 unmaintained = "workspace"
 unsound = "workspace"

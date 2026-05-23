@@ -867,7 +867,8 @@ Post-`1.3.4` implementation ladder:
   request IDs, temp names, cache encryption, OpenBao Transit, OTLP HTTPS, and
   future signing/session features as validated-backend-routed, externally
   evidenced, non-security-sensitive, or disabled in FIPS-required builds. The
-  implementation starts by rejecting managed ACME, the admin API, local cache
+  implementation routes admin bearer-token HMAC through OpenSSL FIPS or AWS-LC
+  FIPS in the matching FIPS builds, rejects managed ACME, local cache
   encryption, and remote/HTTPS OTLP in FIPS/ISO-required configs, while
   allowing OpenBao Transit cache encryption only through local numeric loopback
   HTTP as an external evidence boundary and documenting request IDs/temp names

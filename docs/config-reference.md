@@ -1088,9 +1088,11 @@ cipher_suites = [
 
 [tls.fips]
 required = false
+require_disk_cache_encryption = false
 
 [tls.iso19790]
 required = false
+require_disk_cache_encryption = false
 
 [[tls.certificates]]
 cert_path = "tls/fullchain.pem"
@@ -1202,16 +1204,21 @@ block alone as a FIPS compliance claim.
 
 FIPS/ISO-required mode also applies internal-crypto guards outside the TLS
 listener. Config validation rejects managed ACME (`[tls.acme] enabled = true`)
-because ACME account signing, EAB handling, and TLS-ALPN certificate generation
-are not yet routed through the selected validated module. It rejects
-`admin.enabled = true` because admin bearer-token verification currently uses a
-ring HMAC path. It rejects local disk-cache encryption because that path uses
-ring AES-GCM. `provider = "openbao-transit"` cache encryption is allowed only
-through local numeric loopback HTTP as an external evidence boundary, and OTLP
-metrics/traces export is allowed only to local `http://` loopback collectors
-until outbound TLS can be provider-aligned. Disk cache without encryption is
-still allowed, but Fluxheim logs a compliance warning because cached response
-bodies are written at rest without a Fluxheim-managed encryption boundary.
+because ACME account key generation, JWS account signing, EAB handling,
+outbound ACME HTTPS transport, and TLS-ALPN certificate generation are not yet
+routed through the selected validated module. It allows
+`admin.enabled = true` only in `tls-openssl-fips` or `tls-rustls-fips` builds,
+where bearer-token HMAC is routed through OpenSSL FIPS or AWS-LC FIPS. It
+rejects local disk-cache encryption because that path uses ring AES-GCM.
+`provider = "openbao-transit"` cache encryption is allowed only through local
+numeric loopback HTTP as an external evidence boundary, and OTLP metrics/traces
+export is allowed only to numeric local `http://` loopback collectors
+(`127.0.0.1` or `[::1]`) until outbound TLS can be provider-aligned. Disk cache
+without encryption is still allowed, but Fluxheim logs a compliance warning
+because cached response bodies are written at rest without a Fluxheim-managed
+encryption boundary. Set `tls.fips.require_disk_cache_encryption = true` or
+`tls.iso19790.require_disk_cache_encryption = true` to promote that warning to
+a hard config error.
 Request IDs and temporary object names are treated as non-secret operational
 identifiers, not SSPs.
 

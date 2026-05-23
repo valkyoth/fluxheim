@@ -203,8 +203,9 @@ issued and renewed outside Fluxheim through an approved process. You can compile
 `[tls.fips] required = true` and `[tls.iso19790] required = true` now reject
 managed ACME at config validation time. Use externally issued static
 certificates, or keep ACME outside the strict FIPS/ISO-required Fluxheim
-boundary until ACME account signing, EAB, and challenge certificate generation
-are rerouted or separately evidenced.
+boundary until ACME account key generation, JWS account signing, EAB, outbound
+ACME HTTPS transport, and challenge certificate generation are rerouted or
+separately evidenced.
 
 Use `fluxheim crypto` or `fluxheim-config-tester --crypto` to see whether the
 binary can load or report the selected FIPS-capable provider in the current
