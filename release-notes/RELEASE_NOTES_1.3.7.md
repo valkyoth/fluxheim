@@ -8,7 +8,8 @@ defers pure-Rust PHP interpreter research to `1.3.8`.
 
 - External php-fpm remains the default and fully supported deployment mode.
 - Added managed php-fpm process supervision under the existing `php-fpm` feature,
-  not as a new Cargo runtime feature.
+  not as a new Cargo runtime feature. Managed mode now includes a watchdog that
+  respawns the php-fpm master after post-start crashes with bounded backoff.
 - Exposed managed mode as a runtime config choice in `[vhosts.php.fpm]`, with a
   small auditable surface for binary path, private socket directory, worker
   count, max-request recycling, static/dynamic/ondemand pool sizing, request
@@ -21,12 +22,13 @@ defers pure-Rust PHP interpreter research to `1.3.8`.
 - Added clear config-tester and runtime diagnostics for missing php-fpm binaries,
   unsafe managed directories, process start failures, and FastCGI request
   failures.
-- Extended `scripts/smoke_wordpress_php_fpm.sh` with `external`, `managed`, and
-- `both` modes, plus explicit `managed-static`, `managed-dynamic`,
-  `managed-ondemand`, and `managed-all` coverage. The `both` mode now runs the
-  same WordPress install, login, cookie, redirect, and admin-dashboard flow
-  against operator-managed php-fpm and all Fluxheim-managed php-fpm process
-  manager modes.
+- Extended `scripts/smoke_wordpress_php_fpm.sh` with `external`, `managed`,
+  `both`, `managed-static`, `managed-dynamic`, `managed-ondemand`,
+  `managed-respawn`, and `managed-all` coverage. The `both` mode runs the same
+  WordPress install, login, cookie, redirect, and admin-dashboard flow against
+  operator-managed php-fpm and all Fluxheim-managed php-fpm process manager
+  modes, while `managed-respawn` kills the php-fpm master and verifies recovery
+  without a Fluxheim reload.
 - The recommended Wolfi PHP image now installs `php-8.5-fpm` and uses a
   managed php-fpm container config by default, making it directly usable for
   single-container PHP sites that mount content under `/srv/fluxheim`.

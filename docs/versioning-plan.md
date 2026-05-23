@@ -1032,6 +1032,9 @@ Follow-up `1.3.x` PHP runtime plan:
     decoration, `clear_env`,
     session-save and upload-temp directories, and optional user/group where
     safe.
+  - A managed php-fpm watchdog should respawn the php-fpm master after
+    post-start crashes with bounded backoff, while reload/shutdown paths must
+    terminate the old master gracefully without blocking async worker threads.
   - The generated socket, config, pid, logs, and temporary directories must use
     the same safe-path ownership, symlink, and writable-parent checks used by
     ACME/cache/runtime paths.
@@ -1081,7 +1084,7 @@ Exit criteria:
 - WordPress-style front-controller routing, login/admin cookies, plugin/theme
   install/update/delete flows, and common cache-plugin bypass patterns are smoke
   tested against php-fpm. For `1.3.7`, the local WordPress smoke must pass in
-  both `external` and `managed` php-fpm modes.
+  `external`, all managed process-manager modes, and `managed-respawn` mode.
 - Config validation makes unsafe PHP roots, sockets, and runtime combinations
   actionable.
 

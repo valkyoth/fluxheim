@@ -30,6 +30,7 @@ cleanup() {
     podman network rm "fh_wp_${run_id}_ms" >/dev/null 2>&1 || true
     podman network rm "fh_wp_${run_id}_my" >/dev/null 2>&1 || true
     podman network rm "fh_wp_${run_id}_mo" >/dev/null 2>&1 || true
+    podman network rm "fh_wp_${run_id}_mr" >/dev/null 2>&1 || true
     rm -rf "$tmp"
 }
 
@@ -56,14 +57,14 @@ stop_server() {
 
 is_managed_smoke() {
     case "$1" in
-        managed|managed-static|managed-dynamic|managed-ondemand) return 0 ;;
+        managed|managed-static|managed-dynamic|managed-ondemand|managed-respawn) return 0 ;;
         *) return 1 ;;
     esac
 }
 
 managed_process_manager() {
     case "$1" in
-        managed-static) echo "static" ;;
+        managed-static|managed-respawn) echo "static" ;;
         managed|managed-dynamic) echo "dynamic" ;;
         managed-ondemand) echo "ondemand" ;;
         *)
@@ -82,9 +83,9 @@ require_command podman
 require_command tar
 
 case "$mode" in
-    external|managed|managed-static|managed-dynamic|managed-ondemand|managed-all|both) ;;
+    external|managed|managed-static|managed-dynamic|managed-ondemand|managed-respawn|managed-all|both) ;;
     *)
-        echo "wordpress php-fpm smoke failed: mode must be external, managed, managed-static, managed-dynamic, managed-ondemand, managed-all, or both" >&2
+        echo "wordpress php-fpm smoke failed: mode must be external, managed, managed-static, managed-dynamic, managed-ondemand, managed-respawn, managed-all, or both" >&2
         exit 1
         ;;
 esac
@@ -115,6 +116,7 @@ run_wordpress_smoke() {
         managed-static) smoke_slug="ms" ;;
         managed-dynamic) smoke_slug="my" ;;
         managed-ondemand) smoke_slug="mo" ;;
+        managed-respawn) smoke_slug="mr" ;;
         *) smoke_slug="$smoke_mode" ;;
     esac
     wp_port=$((port_base + offset))
@@ -415,6 +417,42 @@ EOF
         exit 1
     fi
 
+    if [ "$smoke_mode" = "managed-respawn" ]; then
+        managed_pid_file=""
+        for candidate in "$run_dir"/php-fpm/*.pid; do
+            [ -f "$candidate" ] || continue
+            managed_pid_file="$candidate"
+            break
+        done
+        if [ -z "$managed_pid_file" ]; then
+            echo "wordpress php-fpm smoke ($smoke_mode) failed: managed php-fpm pid file missing" >&2
+            exit 1
+        fi
+        managed_pid="$(cat "$managed_pid_file")"
+        kill -9 "$managed_pid" 2>/dev/null || true
+
+        respawn_status=""
+        for _ in $(seq 1 45); do
+            respawn_status="$(
+                curl_wp \
+                    -b "$cookie_jar" \
+                    -D "$mode_tmp/admin-respawn.headers" \
+                    -o "$mode_tmp/admin-respawn.html" \
+                    "$base_url/wp-admin/" \
+                    -w '%{http_code}' 2>/dev/null || true
+            )"
+            if [ "$respawn_status" = "200" ] && grep -q 'Dashboard' "$mode_tmp/admin-respawn.html"; then
+                break
+            fi
+            sleep 1
+        done
+        if [ "$respawn_status" != "200" ] || ! grep -q 'Dashboard' "$mode_tmp/admin-respawn.html"; then
+            echo "wordpress php-fpm smoke ($smoke_mode) failed: managed php-fpm did not respawn, status=${respawn_status:-none}" >&2
+            cat "$mode_tmp/admin-respawn.headers" >&2 2>/dev/null || true
+            exit 1
+        fi
+    fi
+
     stop_server
     podman rm -f "$fpm_container" "$db_container" >/dev/null 2>&1 || true
     podman network rm "$network" >/dev/null 2>&1 || true
@@ -437,6 +475,9 @@ case "$mode" in
         ;;
     managed-ondemand)
         run_wordpress_smoke managed-ondemand 30
+        ;;
+    managed-respawn)
+        run_wordpress_smoke managed-respawn 40
         ;;
     managed-all)
         run_wordpress_smoke managed-static 10

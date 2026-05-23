@@ -286,8 +286,9 @@ handling. Local WordPress php-fpm and proxied WordPress TLS smoke tests live in
 `scripts/smoke_wordpress_proxy_tls.sh`; keep running them as release evidence
 when PHP behavior changes. The local WordPress smoke accepts `external`,
 `managed-static`, `managed-dynamic`, `managed-ondemand`, `managed-all`, or
-`both` so the same install/login/admin flow can verify an operator-managed
-php-fpm container and every Fluxheim-managed php-fpm process manager mode.
+`managed-respawn`, or `both` so the same install/login/admin flow can verify an
+operator-managed php-fpm container, every Fluxheim-managed php-fpm process
+manager mode, and the managed php-fpm post-start crash respawn watchdog.
 `scripts/smoke_fluxheim_php_wolfi.sh` verifies the self-contained Wolfi PHP
 image path with bundled `php-8.5-fpm` and managed php-fpm enabled.
 
@@ -295,7 +296,9 @@ Managed php-fpm starts the php-fpm master with a cleared environment and a
 minimal `PATH`, so Fluxheim process secrets such as admin tokens are not
 inherited by the child process. On reload/shutdown, Fluxheim asks the managed
 php-fpm master to terminate gracefully before escalating to a forced kill after
-a short deadline.
+a short deadline. A per-pool watchdog monitors the php-fpm master after startup
+and respawns it with bounded backoff if it crashes, so managed PHP service can
+recover without a Fluxheim config reload.
 
 When a managed php-fpm pool drops workers to a different `user`/`group`,
 configure `listen_owner` and `listen_group` when the php-fpm master should chown
