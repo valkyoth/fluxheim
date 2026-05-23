@@ -88,6 +88,8 @@ static CACHE_PREDICTOR_REGISTRY: OnceLock<
 > = OnceLock::new();
 #[cfg(feature = "php-fpm")]
 static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "php-fpm")]
+const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
 
 #[derive(Clone)]
 pub struct FluxProxy {
@@ -3269,7 +3271,7 @@ impl ManagedPhpFpmProcess {
             pid_path,
             connect_timeout_secs: config.fpm.connect_timeout_secs,
         });
-        let child = spawn_managed_php_fpm_child(&plan)?;
+        let child = spawn_managed_php_fpm_child(&plan, None)?;
         let child = Arc::new(Mutex::new(Some(child)));
         let shutdown = Arc::new(AtomicBool::new(false));
         if let Err(error) = spawn_managed_php_fpm_watchdog(
@@ -3298,7 +3300,10 @@ impl ManagedPhpFpmProcess {
 }
 
 #[cfg(all(feature = "php-fpm", unix))]
-fn spawn_managed_php_fpm_child(plan: &ManagedPhpFpmSpawnPlan) -> io::Result<std::process::Child> {
+fn spawn_managed_php_fpm_child(
+    plan: &ManagedPhpFpmSpawnPlan,
+    shutdown: Option<&AtomicBool>,
+) -> io::Result<std::process::Child> {
     let _ = std::fs::remove_file(&plan.socket);
     let _ = std::fs::remove_file(&plan.pid_path);
 
@@ -3323,7 +3328,12 @@ fn spawn_managed_php_fpm_child(plan: &ManagedPhpFpmSpawnPlan) -> io::Result<std:
             )
         })?;
 
-    match wait_for_managed_php_fpm_socket(&mut child, &plan.socket, plan.connect_timeout_secs) {
+    match wait_for_managed_php_fpm_socket(
+        &mut child,
+        &plan.socket,
+        plan.connect_timeout_secs,
+        shutdown,
+    ) {
         Ok(()) => Ok(child),
         Err(error) => {
             terminate_managed_php_fpm_child(&mut child);
@@ -3362,6 +3372,7 @@ fn run_managed_php_fpm_watchdog(
     plan: Arc<ManagedPhpFpmSpawnPlan>,
 ) {
     let mut restart_failures = 0_usize;
+    let mut last_started = Instant::now();
     loop {
         if managed_php_fpm_shutdown_requested(&shutdown) {
             return;
@@ -3391,7 +3402,9 @@ fn run_managed_php_fpm_watchdog(
         };
 
         let Some(reason) = exited else {
-            restart_failures = 0;
+            if last_started.elapsed() >= Duration::from_secs(MANAGED_PHP_FPM_STABLE_RESTART_SECS) {
+                restart_failures = 0;
+            }
             continue;
         };
 
@@ -3405,11 +3418,17 @@ fn run_managed_php_fpm_watchdog(
             plan.scope
         );
 
+        if last_started.elapsed() < Duration::from_secs(MANAGED_PHP_FPM_STABLE_RESTART_SECS) {
+            restart_failures = restart_failures.saturating_add(1);
+        } else {
+            restart_failures = 0;
+        }
+
         if !managed_php_fpm_sleep_until_restart(&shutdown, restart_failures) {
             return;
         }
 
-        match spawn_managed_php_fpm_child(&plan) {
+        match spawn_managed_php_fpm_child(&plan, Some(shutdown.as_ref())) {
             Ok(new_child) => {
                 let mut guard = match child.lock() {
                     Ok(guard) => guard,
@@ -3422,7 +3441,7 @@ fn run_managed_php_fpm_watchdog(
                     return;
                 }
                 *guard = Some(new_child);
-                restart_failures = 0;
+                last_started = Instant::now();
                 log::info!(
                     target: "fluxheim::php_fpm",
                     "{}: managed php-fpm restarted",
@@ -3765,10 +3784,17 @@ fn wait_for_managed_php_fpm_socket(
     child: &mut std::process::Child,
     socket: &std::path::Path,
     connect_timeout_secs: Option<u64>,
+    shutdown: Option<&AtomicBool>,
 ) -> io::Result<()> {
     let deadline =
         Instant::now() + Duration::from_secs(connect_timeout_secs.unwrap_or(5).clamp(1, 60));
     loop {
+        if shutdown.is_some_and(managed_php_fpm_shutdown_requested) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "managed php-fpm shutdown requested",
+            ));
+        }
         if let Some(status) = child.try_wait()? {
             return Err(io::Error::other(format!(
                 "php-fpm exited before creating socket with status {status}"
