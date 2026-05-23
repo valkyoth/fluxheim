@@ -10,6 +10,12 @@ the reserved pure-Rust PHP/phprs track from the release plan.
 - Added managed php-fpm process supervision under the existing `php-fpm` feature,
   not as a new Cargo runtime feature. Managed mode now includes a watchdog that
   respawns the php-fpm master after post-start crashes with bounded backoff.
+- Managed php-fpm starts with a cleared inherited environment and sanitized
+  `PATH`, generates private pool state, and shuts down with SIGTERM before
+  SIGKILL.
+- Managed php-fpm teardown is detached from Tokio worker threads, shutdown is
+  observed during respawn socket waits, and restart backoff uses the actual
+  successful socket-ready timestamp so crash-loop detection is stable.
 - Exposed managed mode as a runtime config choice in `[vhosts.php.fpm]`, with a
   small auditable surface for binary path, private socket directory, worker
   count, max-request recycling, static/dynamic/ondemand pool sizing, request
@@ -32,6 +38,9 @@ the reserved pure-Rust PHP/phprs track from the release plan.
 - The recommended Wolfi PHP image now installs `php-8.5-fpm` and uses a
   managed php-fpm container config by default, making it directly usable for
   single-container PHP sites that mount content under `/srv/fluxheim`.
+- The `1.4` roadmap now consolidates production proxy parity into a compact
+  line: edge policy/compression, upstream resilience, TLS/protocol parity, and
+  discovery/mirroring/operator hooks.
 
 ## Out Of Scope
 

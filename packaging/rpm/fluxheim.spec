@@ -157,6 +157,8 @@ fi
 - Keep external php-fpm as the default PHP-FPM deployment mode.
 - Add managed static/dynamic/ondemand pool knobs, lifecycle limits, slowlog
   controls, and WordPress smoke coverage for both PHP-FPM modes.
+- Add managed php-fpm crash respawn, sanitized worker environment, and graceful
+  detached child shutdown.
 
 * Sat May 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.3.6-1
 - FIPS/ISO internal-crypto closure and compliance evidence release.

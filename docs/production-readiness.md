@@ -210,6 +210,14 @@ FIPS/ISO-required guard, uses rustls' AWS-LC FIPS provider path, and requires
 the `aws-lc-fips-sys` build toolchain including CMake, Go, and a C compiler.
 Treat it as backend evidence only, with the same non-TLS crypto caveats.
 
+The `1.3.7` support promise completes the production PHP-FPM line. External
+php-fpm remains the default, while `mode = "managed"` lets Fluxheim generate a
+private php-fpm pool, supervise the php-fpm master, respawn it after post-start
+crashes with bounded backoff, and run WordPress-compatible PHP through the same
+FastCGI request path. The recommended Wolfi PHP image includes `php-8.5-fpm`
+for this managed mode; other image variants keep the external php-fpm
+deployment shape unless customized.
+
 ## Operator Checks
 
 Before using a Fluxheim build for a real site, run the stable gate from the repo

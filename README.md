@@ -364,6 +364,11 @@ Fluxheim does not treat every planned idea as stable. The current stable line is
   fail-closed guards for managed ACME, admin auth, local cache encryption,
   OpenBao transport, and outbound telemetry in FIPS/ISO-required configs, plus
   the repeatable compliance evidence package template.
+- `1.3.7` completes the production PHP-FPM line with Fluxheim-managed php-fpm
+  supervision, private generated pools, static/dynamic/ondemand process-manager
+  modes, php-fpm crash respawn, WordPress smoke coverage for external and
+  managed pools, a self-contained Wolfi PHP image, and removal of the reserved
+  pure-Rust PHP/phprs track.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

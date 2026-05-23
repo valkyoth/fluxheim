@@ -7,7 +7,9 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.3.7 - Unreleased
+## 1.3.7 - Production PHP-FPM Completion
+
+Released: 2026-05-23
 
 ### Added
 
@@ -30,6 +32,19 @@ behavior when the change improves security or project direction.
   `/index.php` executes through the Fluxheim-supervised pool.
 - Dropped the reserved pure-Rust PHP/phprs track. Managed php-fpm is the
   supported zero-admin PHP direction for the 1.3 line.
+
+### Changed
+
+- Managed php-fpm now starts with a cleared inherited environment and a
+  sanitized `PATH`, generates private pool state, and keeps external php-fpm as
+  the default deployment mode.
+- Managed php-fpm teardown now sends SIGTERM before SIGKILL, detaches blocking
+  child cleanup from Tokio worker threads, observes shutdown during respawn
+  socket waits, and tracks stable restart windows from the actual successful
+  php-fpm socket-ready timestamp.
+- The `1.4` roadmap is now the compact production proxy parity line covering
+  edge policy/compression, upstream resilience, TLS/protocol parity, and
+  discovery/mirroring/operator hooks.
 
 ## 1.3.6 - FIPS/ISO Internal Crypto Closure
 
