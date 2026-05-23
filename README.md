@@ -371,9 +371,10 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next lines are planned separately: later `1.3.x` releases for PHP-FPM
-follow-ups, `1.4` for advanced proxy parity, `1.5` for load-balancer parity,
-and `1.6` for shared Wasm
+Next lines are planned separately: `1.4` for production proxy parity across
+edge policy, compression, load balancing, mTLS, PROXY protocol, gRPC-safe
+proxying, discovery, and mirroring; `1.5` for enterprise load-balancer
+operations at larger estate scale; and `1.6` for shared Wasm
 extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.

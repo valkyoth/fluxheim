@@ -53,25 +53,25 @@ Pure-Rust PHP/phprs support is no longer planned for the 1.3 line; managed
 php-fpm now covers the zero-admin PHP deployment goal without adopting an
 immature interpreter. Turbine-style PHP app servers stay reverse-proxy upstreams
 unless a future embeddable library API proves safer than that boundary.
-`1.4` is planned as the advanced proxy parity release. Its target is
-HAProxy/nginx-style reverse-proxy migration coverage that is not fundamentally
-load-balancing: queue/backpressure controls, upstream keepalive pool tuning,
-proxy buffering and streaming controls, protocol translation, stream/TCP/UDP
-proxy foundations, PROXY protocol support, request mirroring, richer variables,
-structured logging, host/header/cookie/redirect rewrite policy, DNS-refreshing
-upstreams for container service names, upstream TLS controls, and local
-Unix-socket operational visibility. `1.5` is
-planned as the enterprise load-balancer stabilization release. Its target is
-HAProxy/nginx/F5-style pool and traffic-distribution coverage on top of
-Pingora's load-balancing primitives: named upstream pools, weighted
-round-robin, least-connections, least-time/adaptive policies, power-of-two
-choices, bounded-load consistent hashing, active/passive/adaptive health
-checks, circuit breakers, retry/redispatch, backup/drain/slow-start behavior,
-session persistence, mTLS/TLS policy controls, and
-Prometheus/OpenTelemetry/admin visibility. Palo Alto-style security asks are
-tracked as policy integrations around the load balancer: rate limits,
-reputation/Geo decisions, TLS fingerprint signals, and future WAF/App-ID-like
-classification hooks without turning the `1.5` release into a full firewall.
+`1.4` is planned as the production proxy parity release. Its target is the set
+of operational features operators expect when migrating from NGINX, HAProxy,
+Envoy, or Caddy: rate limits, connection limits, IP ACLs, response compression,
+advanced upstream selection, passive health/outlier detection, mTLS/client
+certificate authentication, PROXY protocol, gRPC-safe HTTP/2 proxying, request
+mirroring, DNS/service discovery, proxy buffering/streaming controls, structured
+logging, host/header/cookie/redirect rewrite policy, upstream TLS controls, and
+local Unix-socket operational visibility. The `1.4.x` line should use a few
+larger releases instead of many small ones: `1.4.0` edge policy and
+compression, `1.4.1` upstream selection and resilience, `1.4.2` TLS/protocol
+parity, and `1.4.3` discovery, mirroring, and extension hooks. Palo
+Alto-style security asks are tracked as policy integrations around this proxy
+surface: reputation/Geo decisions, TLS fingerprint signals, and future
+WAF/App-ID-like classification hooks without turning Fluxheim into a full
+firewall.
+`1.5` is planned as enterprise load-balancer stabilization after the `1.4`
+proxy primitives are present: multi-site state, cluster coordination, runtime
+pool mutation, richer admin operations, deeper active/adaptive health policy,
+and migration tooling for HAProxy/F5 estates.
 `1.6` is planned as the shared Wasm
 extensibility release for
 nginx-Lua-style request/response hooks and VCL-like cache policy hooks through
@@ -861,9 +861,11 @@ without parsing text fixtures for every module.
    - Cache activity reset. Implemented through protected
      `POST /_fluxheim/cache/activity/reset` without clearing cached objects.
 
-6a. **Future Optional Compression**
+6a. **1.4 Optional Compression**
    - Architecture and security plan documented in
      [Compression](docs/compression.md).
+   - Compression is pulled into the `1.4` production proxy parity line because
+     NGINX, HAProxy, Envoy, and Caddy operators expect it from a reverse proxy.
    - Compression must be optional, compile-time gated, and disabled by default
      until body-filter resource limits and cache-variant behavior are proven.
    - Planned features:
@@ -1429,10 +1431,10 @@ without parsing text fixtures for every module.
      semantic-cache isolation tests, jailbreak/prompt-guard dry-run tests, and
      default/privacy build absence checks.
 
-21. **Future Traffic Mirroring**
-   - Plan as an optional compile-time `traffic-mirror` module after reverse
-     proxy, load balancing, metrics, privacy profiles, and request body
-     streaming limits are stable.
+21. **1.4 Traffic Mirroring**
+   - Plan as an optional compile-time `traffic-mirror` module in the `1.4`
+     production proxy parity line after route buffering, metrics, privacy
+     profiles, and request body streaming limits are stable.
    - Goal: safely shadow a bounded portion of production traffic to a test or
      analysis upstream while the live client receives only the primary
      response.
