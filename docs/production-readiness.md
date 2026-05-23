@@ -272,9 +272,15 @@ Before starting the server:
   such as `upstreams`;
 - keep TLS private keys, ACME storage, log files, cache roots, runtime paths,
   admin token files, and snapshot stores outside group- or world-writable directories;
+- audit POSIX extended ACLs on those same sensitive paths. Fluxheim rejects
+  unsafe Unix mode bits and symlinks, but it does not yet parse extended ACL
+  entries that can grant write access without setting `020` or `002`;
 - run Fluxheim with a restrictive umask such as `0077` or `0027`; Fluxheim sets
   private modes for its snapshot store, but a restrictive service umask remains
   useful defense in depth for operator-created paths and future state files;
+- disable swap and core dumps, or use equivalent host controls, for deployments
+  that treat admin bearer tokens, EAB credentials, TLS private keys, or cache
+  encryption credentials as high-assurance secrets;
 - keep admin and metrics listeners loopback-only unless a trusted local
   sidecar or network policy protects them;
 - set `[admin.transport] mode = "trusted_tls_terminator"` only when a trusted

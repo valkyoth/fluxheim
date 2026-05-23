@@ -26,7 +26,7 @@ before Cargo starts compiling Pingora.
 | `ingress` | Yes, through `proxy`/TLS profiles | Shared Pingora/Tokio ingress primitives used by proxy, TLS, and ACME-capable focused builds. |
 | `tls-rustls` | Yes | rustls TLS backend. |
 | `tls-rustls-fips` | No | rustls/AWS-LC FIPS-capable TLS backend candidate. |
-| `security` | Yes | Security and release hardening helpers. |
+| `security` | Yes | Compile-time security profile marker plus release hardening checks. Runtime enforcement lives in the concrete config, TLS, filesystem, admin, and request-handling modules. |
 
 ## Optional Implemented Features
 

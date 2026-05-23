@@ -1819,7 +1819,10 @@ Stable scope:
 - Hardened filesystem trust checks inspect sensitive path ownership and write
   permissions consistently across config, TLS, ACME, admin token, snapshot,
   process, log, and cache paths. POSIX ACL inspection is tracked here as the
-  next strict-profile hardening step after mode-bit enforcement.
+  next strict-profile hardening step after mode-bit enforcement. Linux
+  `openat2(RESOLVE_NO_SYMLINKS)` support is also tracked for collapsing
+  remaining check/open windows on secret files where the platform can provide
+  it.
 
 Beta scope:
 

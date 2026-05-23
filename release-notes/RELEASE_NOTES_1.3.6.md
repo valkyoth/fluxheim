@@ -46,13 +46,19 @@ reviews.
 - Dynamic admin API JSON responses now serialize through `serde_json::to_vec`
   instead of hand-written `format!` response bodies, preserving existing schemas
   while reducing future JSON escaping risk.
+- Admin bearer-token authorization avoids length-check short-circuiting,
+  zeroizes the temporary candidate copy used for comparison, and aborts on
+  impossible system-clock failures instead of falling back to epoch timestamps.
+- Snapshot ID generation now aborts on system-clock failure rather than
+  generating `s0-...` identifiers.
 - Admin runtime/auth-throttle mutex poisoning now aborts instead of recovering
   potentially inconsistent state in debug/test builds, matching the production
   fail-closed model.
 - Peer-fill concurrency counters now use checked arithmetic and refuse permits
   if a counter saturates.
 - The `RUSTSEC-2024-0437` suppression now has release-metadata enforcement so
-  it must be reviewed when Pingora moves off Prometheus `0.13.4`.
+  it must be reviewed when Pingora moves off Prometheus `0.13.4` or when the
+  scheduled review date is reached.
 
 ## Validation
 

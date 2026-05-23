@@ -74,4 +74,12 @@ if grep -q 'RUSTSEC-2024-0437' deny.toml .cargo/audit.toml \
     exit 1
 fi
 
+if grep -q 'RUSTSEC-2024-0437' deny.toml .cargo/audit.toml; then
+    current_utc_date="$(date -u +%Y%m%d)"
+    if [ "$current_utc_date" -ge 20260801 ]; then
+        echo "release metadata: RUSTSEC-2024-0437 suppression passed its scheduled manual review date 2026-08-01" >&2
+        exit 1
+    fi
+fi
+
 echo "release metadata: ok"

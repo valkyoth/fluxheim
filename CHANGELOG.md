@@ -56,8 +56,18 @@ behavior when the change improves security or project direction.
 - Dynamic admin API JSON responses now serialize through `serde_json::to_vec`
   instead of hand-written `format!` response bodies, preserving the existing
   response schemas while reducing future JSON escaping risk.
+- Admin bearer-token authorization now avoids length-check short-circuiting,
+  zeroizes the temporary candidate copy used for comparison, and aborts on
+  impossible system-clock failures instead of falling back to epoch timestamps.
+- Snapshot ID generation now aborts on system-clock failure rather than
+  generating `s0-...` identifiers.
 - Peer-fill concurrency permit accounting now uses checked arithmetic and
   refuses permits if the counter saturates.
+- The `security` feature runtime marker was renamed to
+  `security::feature_compiled_in()` so it is not mistaken for an enforcement
+  gate.
+- The `RUSTSEC-2024-0437` release metadata guard now fails after the scheduled
+  manual review date if the advisory exception is still present.
 
 ## 1.3.5 - rustls/AWS-LC FIPS Candidate
 

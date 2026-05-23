@@ -180,7 +180,7 @@ Individual module features:
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |
 | `php-fpm` | No | PHP-FPM FastCGI bridge for WordPress-style PHP applications. Implies `proxy` and `web`; not included in default/focused images. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
-| `security` | Yes | Security helpers and release hardening checks. |
+| `security` | Yes | Compile-time security profile marker plus release hardening checks. Runtime enforcement lives in the concrete config, TLS, filesystem, admin, and request-handling modules. |
 | `tls` | No | Internal TLS marker used by TLS/ACME code; select a concrete backend for serving. |
 | `tls-rustls-fips` | No | rustls/AWS-LC FIPS-capable TLS backend candidate for source builds. |
 

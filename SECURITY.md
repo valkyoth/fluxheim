@@ -46,7 +46,9 @@ Current reviewed dependency warnings:
 
 - `RUSTSEC-2024-0437` for `protobuf 2.28.0`: transitive through Pingora's
   dependency stack. Fluxheim does not parse protobuf input. Remove the exception
-  when Pingora no longer pulls vulnerable protobuf 2.x.
+  when Pingora no longer pulls vulnerable protobuf 2.x. The release metadata
+  gate also fails after the scheduled manual review date `2026-08-01` while the
+  exception remains present.
 - `RUSTSEC-2025-0069` for `daemonize 0.5.0`: warning-only unmaintained
   transitive through Pingora. Recheck on every Pingora upgrade.
 - `RUSTSEC-2024-0388` for `derivative 2.2.0`: warning-only unmaintained
@@ -75,6 +77,13 @@ storage directories should be owner-only (`0700`). Fluxheim's TLS storage helper
 checks these permissions separately from config parsing so operators can validate
 configuration before certificates are provisioned and then validate filesystem
 state before startup or renewal.
+
+Fluxheim's Unix filesystem trust checks inspect ownership, symlinks, and classic
+mode bits. They do not parse POSIX extended ACLs yet. Regulated or multi-tenant
+deployments should audit sensitive Fluxheim paths with platform tools such as
+`getfacl`, keep parent directories private to the service user, and disable
+swap/core dumps for processes that handle admin bearer tokens, EAB secrets, TLS
+private keys, or cache encryption credentials.
 
 ```bash
 fluxheim --config path/to/fluxheim.toml --check-tls-storage

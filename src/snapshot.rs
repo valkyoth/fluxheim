@@ -461,9 +461,16 @@ fn unix_secs() -> u64 {
 }
 
 fn unix_duration() -> Duration {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration,
+        Err(error) => {
+            log::error!(
+                target: "fluxheim::security",
+                "system clock is before Unix epoch; aborting because snapshot identifiers require monotonic Unix-time input: {error}"
+            );
+            std::process::abort();
+        }
+    }
 }
 
 fn snapshot_message(message: Option<&str>) -> Result<Option<String>, SnapshotError> {

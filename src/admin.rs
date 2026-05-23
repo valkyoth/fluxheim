@@ -2062,7 +2062,9 @@ fn authorized(header: Option<&str>, token: &AdminToken) -> bool {
         return false;
     };
     let candidate = candidate.trim();
-    candidate.len() <= MAX_ADMIN_TOKEN_BYTES && constant_time_eq(candidate.as_bytes(), token)
+    let candidate = Zeroizing::new(candidate.as_bytes().to_vec());
+    let within_limit = candidate.len() <= MAX_ADMIN_TOKEN_BYTES;
+    constant_time_eq(candidate.as_slice(), token) & within_limit
 }
 
 fn constant_time_eq(candidate: &[u8], token: &AdminToken) -> bool {
@@ -2982,9 +2984,9 @@ fn unix_secs() -> u64 {
         Err(error) => {
             log::error!(
                 target: "fluxheim::security",
-                "system clock is before Unix epoch; using fail-closed admin throttle timestamp: {error}"
+                "system clock is before Unix epoch; aborting because admin time-based controls are unreliable: {error}"
             );
-            0
+            std::process::abort();
         }
     }
 }
