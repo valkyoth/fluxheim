@@ -1611,6 +1611,11 @@ retry_statuses = [500, 502, 503, 504]
 # max_requests_per_worker = 1000
 # process_manager = "static" # "static", "dynamic", or "ondemand"
 # listen_backlog = 128
+# Optional socket ownership controls for managed pools that drop privileges.
+# Defaults to a private 0600 socket.
+# listen_owner = "fluxheim"
+# listen_group = "php"
+# listen_mode = "0660" # "0600" or "0660"
 #
 # Dynamic pool sizing, only when process_manager = "dynamic":
 # start_servers = 2
@@ -1633,7 +1638,8 @@ retry_statuses = [500, 502, 503, 504]
 # upload_tmp_dir = "/run/fluxheim/php/upload"
 #
 # Optional, configure both together when php-fpm starts as root and should drop
-# worker privileges.
+# worker privileges. Pair with listen_owner/listen_group/listen_mode when
+# Fluxheim itself is not running as the same user.
 # user = "fluxheim"
 # group = "fluxheim"
 # Generated socket/config/pid/log files live under socket_dir. Forced process

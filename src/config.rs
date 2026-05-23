@@ -6576,6 +6576,12 @@ pub struct PhpFpmConfig {
     #[serde(default)]
     pub listen_backlog: Option<i32>,
     #[serde(default)]
+    pub listen_owner: Option<String>,
+    #[serde(default)]
+    pub listen_group: Option<String>,
+    #[serde(default)]
+    pub listen_mode: Option<String>,
+    #[serde(default)]
     pub request_terminate_timeout_secs: Option<u64>,
     #[serde(default)]
     pub request_terminate_timeout_track_finished: bool,
@@ -6639,6 +6645,9 @@ impl Default for PhpFpmConfig {
             max_spawn_rate: None,
             process_idle_timeout_secs: None,
             listen_backlog: None,
+            listen_owner: None,
+            listen_group: None,
+            listen_mode: None,
             request_terminate_timeout_secs: None,
             request_terminate_timeout_track_finished: false,
             request_slowlog_timeout_secs: None,
@@ -6747,6 +6756,9 @@ impl PhpFpmConfig {
                     || self.max_spawn_rate.is_some()
                     || self.process_idle_timeout_secs.is_some()
                     || self.listen_backlog.is_some()
+                    || self.listen_owner.is_some()
+                    || self.listen_group.is_some()
+                    || self.listen_mode.is_some()
                     || self.request_terminate_timeout_secs.is_some()
                     || self.request_terminate_timeout_track_finished
                     || self.request_slowlog_timeout_secs.is_some()
@@ -6958,6 +6970,22 @@ fn validate_php_fpm_managed_config(
             reason: "must be -1 or between 0 and 65535",
         });
     }
+    match (&config.listen_owner, &config.listen_group) {
+        (Some(owner), Some(group)) => {
+            validate_php_fpm_managed_identity("php.fpm.listen_owner", owner)?;
+            validate_php_fpm_managed_identity("php.fpm.listen_group", group)?;
+        }
+        (None, None) => {}
+        _ => {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.listen_owner",
+                reason: "managed php-fpm listen_owner and listen_group must be configured together",
+            });
+        }
+    }
+    if let Some(listen_mode) = &config.listen_mode {
+        validate_php_fpm_managed_listen_mode(listen_mode)?;
+    }
     if config.max_requests_per_worker > MAX_PHP_FPM_MANAGED_MAX_REQUESTS {
         return Err(ConfigError::InvalidPhpConfig {
             field: "php.fpm.max_requests_per_worker",
@@ -7154,6 +7182,17 @@ fn validate_php_fpm_managed_identity(field: &'static str, value: &str) -> Result
         });
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn validate_php_fpm_managed_listen_mode(value: &str) -> Result<(), ConfigError> {
+    match value {
+        "0600" | "0660" => Ok(()),
+        _ => Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.listen_mode",
+            reason: "must be \"0600\" or \"0660\"",
+        }),
+    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -13076,6 +13115,9 @@ mod tests {
             max_spare_servers = 3
             max_spawn_rate = 8
             listen_backlog = 128
+            listen_owner = "fluxheim"
+            listen_group = "php"
+            listen_mode = "0660"
             request_terminate_timeout_secs = 30
             request_terminate_timeout_track_finished = true
             request_slowlog_timeout_secs = 5
@@ -13113,6 +13155,9 @@ mod tests {
         assert_eq!(php.fpm.max_spare_servers, Some(3));
         assert_eq!(php.fpm.max_spawn_rate, Some(8));
         assert_eq!(php.fpm.listen_backlog, Some(128));
+        assert_eq!(php.fpm.listen_owner.as_deref(), Some("fluxheim"));
+        assert_eq!(php.fpm.listen_group.as_deref(), Some("php"));
+        assert_eq!(php.fpm.listen_mode.as_deref(), Some("0660"));
         assert_eq!(php.fpm.request_terminate_timeout_secs, Some(30));
         assert!(php.fpm.request_terminate_timeout_track_finished);
         assert_eq!(php.fpm.request_slowlog_timeout_secs, Some(5));
@@ -13269,6 +13314,74 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("php.fpm.user"), "{error}");
         assert!(error.contains("user and group"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_managed_php_fpm_listen_owner_without_group() {
+        let root = secure_test_dir("config-php-fpm-managed-listen-owner-root");
+        let socket_dir = secure_test_dir("config-php-fpm-managed-listen-owner-socket");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "/bin/sh"
+            socket_dir = "{}"
+            listen_owner = "fluxheim"
+            "#,
+            test_process_config_toml("config-php-fpm-managed-listen-owner-process"),
+            root.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.listen_owner"), "{error}");
+        assert!(error.contains("listen_owner and listen_group"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_managed_php_fpm_unsafe_listen_mode() {
+        let root = secure_test_dir("config-php-fpm-managed-listen-mode-root");
+        let socket_dir = secure_test_dir("config-php-fpm-managed-listen-mode-socket");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            {}
+
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "{}"
+
+            [vhosts.php.fpm]
+            mode = "managed"
+            php_fpm_binary = "/bin/sh"
+            socket_dir = "{}"
+            listen_mode = "0666"
+            "#,
+            test_process_config_toml("config-php-fpm-managed-listen-mode-process"),
+            root.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("php.fpm.listen_mode"), "{error}");
+        assert!(error.contains("0600"), "{error}");
     }
 
     #[test]
@@ -19156,6 +19269,50 @@ mod tests {
             Some(symlink_root.as_path())
         );
         assert!(config.vhosts[0].php.resolve_root_symlink);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_existing_php_fpm_root_symlink() {
+        let dir = TestDir::new("php-fpm-root-symlink");
+        let local_root = dir.child("local-public");
+        let fpm_real_root = dir.child("fpm-real-public");
+        let fpm_symlink_root = dir.child("fpm-public");
+        fs::create_dir_all(&local_root).unwrap();
+        fs::create_dir_all(&fpm_real_root).unwrap();
+        std::os::unix::fs::symlink(&fpm_real_root, &fpm_symlink_root).unwrap();
+        fs::write(
+            dir.child("fluxheim.toml"),
+            r#"
+            [[vhosts]]
+            name = "php"
+            hosts = ["php.example.test"]
+
+            [vhosts.php]
+            enabled = true
+            root = "local-public"
+            fpm_root = "fpm-public"
+
+            [vhosts.php.fpm]
+            tcp = "127.0.0.1:9000"
+            "#,
+        )
+        .unwrap();
+
+        let error = Config::load(Some(&dir.child("fluxheim.toml"))).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigLoadError::Validate(ConfigError::VhostSection {
+                vhost,
+                section: "php",
+                source,
+            }) if vhost == "php"
+                && matches!(
+                    *source,
+                    ConfigError::UnsafePath { ref field, .. } if field == "vhosts.php.fpm_root"
+                )
+        ));
     }
 
     #[cfg(unix)]

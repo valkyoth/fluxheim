@@ -1028,7 +1028,8 @@ Follow-up `1.3.x` PHP runtime plan:
     path, private socket directory, static/dynamic/ondemand process manager
     mode, worker count, dynamic spare/start sizing, ondemand idle timeout,
     listen backlog, max requests per worker, request terminate timeout,
-    slowlog controls, worker stdout/stderr decoration, `clear_env`,
+    slowlog controls, private socket owner/group/mode, worker stdout/stderr
+    decoration, `clear_env`,
     session-save and upload-temp directories, and optional user/group where
     safe.
   - The generated socket, config, pid, logs, and temporary directories must use

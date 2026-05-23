@@ -48,7 +48,7 @@ FastCGI and backend connectivity:
   and connect to the private Unix socket it creates.
 - Managed mode supports `process_manager = "static"`, `"dynamic"`, or
   `"ondemand"` plus the bounded pool sizing, slowlog, terminate-timeout,
-  session-save, and upload-temp knobs documented in
+  socket ownership, session-save, and upload-temp knobs documented in
   [PHP Runtime Support](php-runtime-support.md).
 - `php.fpm.keepalive`, `pool_max_idle`, and `idle_timeout_secs` enable
   optional FastCGI keep-connection pooling.

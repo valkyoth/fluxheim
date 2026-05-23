@@ -2824,15 +2824,44 @@ impl Drop for ManagedPhpFpmProcess {
             Ok(child) => child,
             Err(poisoned) => poisoned.into_inner(),
         };
-        if let Some(child) = child.as_mut()
-            && let Ok(None) = child.try_wait()
-        {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(mut child) = child.take() {
+            terminate_managed_php_fpm_child(&mut child);
         }
         let _ = std::fs::remove_file(&self.socket);
         let _ = std::fs::remove_file(&self.config_path);
         let _ = std::fs::remove_file(&self.pid_path);
+    }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn terminate_managed_php_fpm_child(child: &mut std::process::Child) {
+    match child.try_wait() {
+        Ok(Some(_)) => return,
+        Ok(None) => {}
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return;
+        }
+    }
+
+    let _ = rustix::process::kill_process(
+        rustix::process::Pid::from_child(child),
+        rustix::process::Signal::TERM,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+        }
     }
 }
 
@@ -3159,6 +3188,8 @@ impl ManagedPhpFpmProcess {
             .arg("-F")
             .arg("-y")
             .arg(&config_path)
+            .env_clear()
+            .env("PATH", managed_php_fpm_path_env())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -3182,8 +3213,7 @@ impl ManagedPhpFpmProcess {
                 pid_path,
             }),
             Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_managed_php_fpm_child(&mut child);
                 let _ = std::fs::remove_file(&socket);
                 let _ = std::fs::remove_file(&config_path);
                 let _ = std::fs::remove_file(&pid_path);
@@ -3194,6 +3224,22 @@ impl ManagedPhpFpmProcess {
             }
         }
     }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn managed_php_fpm_path_env() -> String {
+    managed_php_fpm_path_env_from(std::env::var("PATH").ok())
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn managed_php_fpm_path_env_from(value: Option<String>) -> String {
+    const DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+    value
+        .filter(|value| {
+            !value.is_empty() && value.bytes().all(|byte| !matches!(byte, 0..=31 | 127))
+        })
+        .unwrap_or_else(|| DEFAULT_PATH.to_owned())
 }
 
 #[cfg(all(feature = "php-fpm", unix))]
@@ -3273,14 +3319,24 @@ fn managed_php_fpm_config(
     config.push('\n');
     config.push_str("[fluxheim]\n");
     config.push_str(&format!("listen = {socket}\n"));
-    config.push_str("listen.mode = 0600\n");
+    let listen_mode = match fpm.listen_mode.as_deref() {
+        Some(value) => php_fpm_config_listen_mode_value(value)?,
+        None => "0600",
+    };
+    config.push_str(&format!("listen.mode = {}\n", listen_mode));
+    if let (Some(listen_owner), Some(listen_group)) = (&fpm.listen_owner, &fpm.listen_group) {
+        let listen_owner = php_fpm_config_identity_value(listen_owner)?;
+        let listen_group = php_fpm_config_identity_value(listen_group)?;
+        config.push_str(&format!("listen.owner = {listen_owner}\n"));
+        config.push_str(&format!("listen.group = {listen_group}\n"));
+    }
     if let Some(listen_backlog) = fpm.listen_backlog {
         config.push_str(&format!("listen.backlog = {listen_backlog}\n"));
     }
     config.push_str(&managed_php_fpm_identity_config(
         fpm.user.as_deref(),
         fpm.group.as_deref(),
-    ));
+    )?);
     config.push_str(&managed_php_fpm_pool_config(fpm));
     if let Some(request_terminate_timeout_secs) = fpm.request_terminate_timeout_secs {
         config.push_str(&format!(
@@ -3404,10 +3460,42 @@ fn ensure_managed_php_fpm_directory(
 }
 
 #[cfg(all(feature = "php-fpm", unix))]
-fn managed_php_fpm_identity_config(user: Option<&str>, group: Option<&str>) -> String {
+fn managed_php_fpm_identity_config(user: Option<&str>, group: Option<&str>) -> io::Result<String> {
     match (user, group) {
-        (Some(user), Some(group)) => format!("user = {user}\ngroup = {group}\n"),
-        _ => String::new(),
+        (Some(user), Some(group)) => {
+            let user = php_fpm_config_identity_value(user)?;
+            let group = php_fpm_config_identity_value(group)?;
+            Ok(format!("user = {user}\ngroup = {group}\n"))
+        }
+        _ => Ok(String::new()),
+    }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn php_fpm_config_identity_value(value: &str) -> io::Result<&str> {
+    if value.is_empty()
+        || value.len() > 64
+        || value.starts_with('-')
+        || !value.bytes().all(
+            |byte| matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-'),
+        )
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "managed php-fpm identity contains bytes unsafe for php-fpm config",
+        ));
+    }
+    Ok(value)
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn php_fpm_config_listen_mode_value(value: &str) -> io::Result<&str> {
+    match value {
+        "0600" | "0660" => Ok(value),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "managed php-fpm listen mode must be 0600 or 0660",
+        )),
     }
 }
 
@@ -11155,6 +11243,8 @@ mod tests {
 
     #[cfg(feature = "cache")]
     use super::CacheRangeRequest;
+    #[cfg(all(feature = "php-fpm", unix))]
+    use super::managed_php_fpm_path_env_from;
     #[cfg(feature = "cache")]
     use super::{
         CACHE_PASS_REASON, CacheClientRange, CacheSliceBounds, CacheStaleEvent,
@@ -12058,6 +12148,9 @@ mod tests {
             max_spare_servers: Some(3),
             max_spawn_rate: Some(8),
             listen_backlog: Some(128),
+            listen_owner: Some("fluxheim".to_owned()),
+            listen_group: Some("php".to_owned()),
+            listen_mode: Some("0660".to_owned()),
             request_terminate_timeout_secs: Some(30),
             request_terminate_timeout_track_finished: true,
             request_slowlog_timeout_secs: Some(5),
@@ -12078,7 +12171,9 @@ mod tests {
 
         assert!(config.contains("daemonize = no"));
         assert!(config.contains("listen = /run/fluxheim/php/site.sock"));
-        assert!(config.contains("listen.mode = 0600"));
+        assert!(config.contains("listen.mode = 0660"));
+        assert!(config.contains("listen.owner = fluxheim"));
+        assert!(config.contains("listen.group = php"));
         assert!(config.contains("listen.backlog = 128"));
         assert!(config.contains("user = fluxheim"));
         assert!(config.contains("group = fluxheim"));
@@ -12120,6 +12215,15 @@ mod tests {
         .to_string();
 
         assert!(error.contains("unsafe for php-fpm config"), "{error}");
+    }
+
+    #[cfg(all(feature = "php-fpm", unix))]
+    #[test]
+    fn managed_php_fpm_path_env_falls_back_for_control_bytes() {
+        assert_eq!(
+            managed_php_fpm_path_env_from(Some("/usr/bin\n/tmp".to_owned())),
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        );
     }
 
     #[cfg(feature = "php-fpm")]

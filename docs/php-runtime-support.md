@@ -115,13 +115,19 @@ max_requests_per_worker = 1000
 socket_dir = "/run/fluxheim/php"
 process_manager = "static" # "static", "dynamic", or "ondemand"
 # listen_backlog = 128
+# Optional socket ownership controls when php-fpm changes socket ownership
+# after dropping privileges. Defaults to a private 0600 socket.
+# listen_owner = "fluxheim"
+# listen_group = "php"
+# listen_mode = "0660"
 # request_terminate_timeout_secs = 30
 # request_slowlog_timeout_secs = 5
 # clear_env = true
 # catch_workers_output = true
 # decorate_workers_output = true
 # Optional, configure both together when php-fpm starts as root and should drop
-# worker privileges.
+# worker privileges. Pair with listen_owner/listen_group/listen_mode when
+# Fluxheim itself is not running as the same user.
 user = "fluxheim"
 group = "fluxheim"
 ```
@@ -149,6 +155,7 @@ in `www.conf`:
   set `process_idle_timeout_secs`.
 
 Fluxheim also writes bounded php-fpm directives for `listen_backlog`,
+`listen_owner`, `listen_group`, `listen_mode`,
 `request_terminate_timeout_secs`,
 `request_terminate_timeout_track_finished`, `request_slowlog_timeout_secs`,
 `request_slowlog_trace_depth`, `clear_env`, `catch_workers_output`,
@@ -284,6 +291,18 @@ php-fpm container and every Fluxheim-managed php-fpm process manager mode.
 `scripts/smoke_fluxheim_php_wolfi.sh` verifies the self-contained Wolfi PHP
 image path with bundled `php-8.5-fpm` and managed php-fpm enabled.
 
+Managed php-fpm starts the php-fpm master with a cleared environment and a
+minimal `PATH`, so Fluxheim process secrets such as admin tokens are not
+inherited by the child process. On reload/shutdown, Fluxheim asks the managed
+php-fpm master to terminate gracefully before escalating to a forced kill after
+a short deadline.
+
+When a managed php-fpm pool drops workers to a different `user`/`group`,
+configure `listen_owner` and `listen_group` when the php-fpm master should chown
+the private socket for Fluxheim, and use `listen_mode = "0660"` only when a
+shared service group is intentional. The default remains `listen_mode = "0600"`
+for single-user/rootless deployments.
+
 `1.3.3` php-fpm hardening status:
 
 - Connection pooling to php-fpm with idle pruning. Implemented as opt-in
@@ -305,7 +324,10 @@ image path with bundled `php-8.5-fpm` and managed php-fpm enabled.
   `[vhosts.routes.php.params]` with protected core CGI params.
 - Path mapping for separate Fluxheim/php-fpm container filesystem roots.
   Implemented as `php.fpm_root` for FastCGI `DOCUMENT_ROOT`,
-  `SCRIPT_FILENAME`, and `PATH_TRANSLATED` mapping.
+  `SCRIPT_FILENAME`, and `PATH_TRANSLATED` mapping. Existing local
+  `php.fpm_root` paths are rejected when they include symlink components; missing
+  absolute values are allowed for split-container paths that exist only inside
+  the php-fpm environment.
 - PHP root override for split container filesystem layouts. Implemented with
   `php.fpm_root` for the path sent to php-fpm and
   `php.resolve_root_symlink` for opt-in final `php.root` symlink resolution in

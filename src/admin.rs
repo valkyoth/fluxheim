@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::error::Error;
 use std::fs;
-use std::io::Read;
+use std::io::{self, Read};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -1474,7 +1474,7 @@ impl AdminApp {
             ));
         }
 
-        if let Err(error) = self.proxy.reload_from_config(&new_config) {
+        if let Err(error) = self.reload_proxy_from_config(&new_config) {
             return Err(internal_error_response(&error));
         }
         self.current_config.store(Arc::new(new_config));
@@ -1483,6 +1483,20 @@ impl AdminApp {
         self.record_applied_snapshot(snapshot.id.clone(), impact.clone(), mode);
 
         Ok(impact)
+    }
+
+    fn reload_proxy_from_config(&self, new_config: &Config) -> io::Result<()> {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle)
+                if matches!(
+                    handle.runtime_flavor(),
+                    tokio::runtime::RuntimeFlavor::MultiThread
+                ) =>
+            {
+                tokio::task::block_in_place(|| self.proxy.reload_from_config(new_config))
+            }
+            _ => self.proxy.reload_from_config(new_config),
+        }
     }
 
     fn self_heal_confirm_response(&self) -> AdminResponse {
