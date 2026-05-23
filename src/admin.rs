@@ -16,6 +16,8 @@ use pingora::protocols::http::ServerSession;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::services::listening::Service;
 use ring::hmac;
+use serde::Serialize;
+use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -652,39 +654,39 @@ impl AdminApp {
             Ok(snapshots) => snapshots.len(),
             Err(error) => return internal_error_response(&error),
         };
-        let current = current
-            .map(|id| format!(r#""{}""#, json_escape(&id)))
-            .unwrap_or_else(|| "null".to_owned());
         let runtime_state = self.runtime_state();
         let current_config = self.current_config.load();
         let tls = &current_config.tls;
         let tls_compliance_mode = tls.compliance_mode();
-        let body = format!(
-            r#"{{"status":"ok","snapshot_current":{current},"snapshots":{snapshots},"self_healing_enabled":{},"tls_compliance_mode":"{}","tls_fips_required":{},"tls_iso19790_required":{},"runtime_snapshot":{},"known_good_snapshot":{},"pending_validation":{}}}"#,
-            self.self_healing_enabled,
-            json_escape(tls_compliance_mode.label()),
-            tls.fips.required,
-            tls.iso19790.required,
-            optional_json_string(runtime_state.runtime_snapshot.as_deref()),
-            optional_json_string(runtime_state.known_good_snapshot.as_deref()),
-            pending_validation_json(runtime_state.pending_validation.as_ref())
-        );
-        json_response(StatusCode::OK, body.as_bytes())
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "snapshot_current": current,
+                "snapshots": snapshots,
+                "self_healing_enabled": self.self_healing_enabled,
+                "tls_compliance_mode": tls_compliance_mode.label(),
+                "tls_fips_required": tls.fips.required,
+                "tls_iso19790_required": tls.iso19790.required,
+                "runtime_snapshot": runtime_state.runtime_snapshot.as_deref(),
+                "known_good_snapshot": runtime_state.known_good_snapshot.as_deref(),
+                "pending_validation": pending_validation_json(runtime_state.pending_validation.as_ref()),
+            }),
+        )
     }
 
     fn snapshots_response(&self) -> AdminResponse {
         match self.store.list() {
             Ok(snapshots) => {
                 let current = self.store.current_id().ok().flatten();
-                let mut body = String::from(r#"{"status":"ok","snapshots":["#);
-                for (index, snapshot) in snapshots.iter().enumerate() {
-                    if index > 0 {
-                        body.push(',');
-                    }
-                    body.push_str(&snapshot_json(snapshot, current.as_deref()));
-                }
-                body.push_str("]}");
-                json_response(StatusCode::OK, body.as_bytes())
+                let snapshots = snapshots
+                    .iter()
+                    .map(|snapshot| snapshot_json(snapshot, current.as_deref()))
+                    .collect::<Vec<_>>();
+                json_response_value(
+                    StatusCode::OK,
+                    &json!({"status": "ok", "snapshots": snapshots}),
+                )
             }
             Err(error) => internal_error_response(&error),
         }
@@ -693,14 +695,14 @@ impl AdminApp {
     #[cfg(feature = "cache")]
     fn cache_status_response(&self) -> AdminResponse {
         match self.proxy.cache_runtime_stats() {
-            Ok(stats) => {
-                let body = format!(
-                    r#"{{"status":"ok","totals":{},"vhosts":[{}]}}"#,
-                    cache_totals_json(&stats.totals),
-                    cache_vhost_stats_json(&stats.vhosts)
-                );
-                json_response(StatusCode::OK, body.as_bytes())
-            }
+            Ok(stats) => json_response_value(
+                StatusCode::OK,
+                &json!({
+                    "status": "ok",
+                    "totals": cache_totals_json(&stats.totals),
+                    "vhosts": cache_vhost_stats_json(&stats.vhosts),
+                }),
+            ),
             Err(error) => internal_error_response(&error),
         }
     }
@@ -713,24 +715,26 @@ impl AdminApp {
     #[cfg(feature = "cache")]
     fn cache_activity_reset_response(&self) -> AdminResponse {
         let result = self.proxy.reset_cache_activity();
-        let body = format!(
-            r#"{{"status":"ok","vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory_tiers":{},"disk_tiers":{}}}"#,
-            result.vhosts,
-            result.enabled_vhosts,
-            ratio_per_mille(result.enabled_vhosts, result.vhosts),
-            result.tiered_vhosts,
-            ratio_per_mille(result.tiered_vhosts, result.vhosts),
-            result.configured_routes,
-            result.routes_total,
-            ratio_per_mille(result.routes_total, result.configured_routes),
-            result.enabled_routes,
-            ratio_per_mille(result.enabled_routes, result.routes_total),
-            result.tiered_routes,
-            ratio_per_mille(result.tiered_routes, result.routes_total),
-            result.memory_tiers,
-            result.disk_tiers
-        );
-        json_response(StatusCode::OK, body.as_bytes())
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "vhosts": result.vhosts,
+                "enabled_vhosts": result.enabled_vhosts,
+                "enabled_vhost_ratio_per_mille": ratio_per_mille(result.enabled_vhosts, result.vhosts),
+                "tiered_vhosts": result.tiered_vhosts,
+                "tiered_vhost_ratio_per_mille": ratio_per_mille(result.tiered_vhosts, result.vhosts),
+                "configured_routes": result.configured_routes,
+                "routes_total": result.routes_total,
+                "cache_route_coverage_ratio_per_mille": ratio_per_mille(result.routes_total, result.configured_routes),
+                "enabled_routes": result.enabled_routes,
+                "enabled_route_ratio_per_mille": ratio_per_mille(result.enabled_routes, result.routes_total),
+                "tiered_routes": result.tiered_routes,
+                "tiered_route_ratio_per_mille": ratio_per_mille(result.tiered_routes, result.routes_total),
+                "memory_tiers": result.memory_tiers,
+                "disk_tiers": result.disk_tiers,
+            }),
+        )
     }
 
     #[cfg(not(feature = "cache"))]
@@ -741,14 +745,14 @@ impl AdminApp {
     fn create_snapshot_response(&self, message: Option<&str>) -> AdminResponse {
         let config = self.current_config.load_full();
         match self.store.snapshot_config(&config, message) {
-            Ok(snapshot) => {
-                let body = format!(
-                    r#"{{"status":"ok","snapshot":"{}","config_path":"{}"}}"#,
-                    json_escape(&snapshot.id),
-                    json_escape(&snapshot.config_path.display().to_string())
-                );
-                json_response(StatusCode::CREATED, body.as_bytes())
-            }
+            Ok(snapshot) => json_response_value(
+                StatusCode::CREATED,
+                &json!({
+                    "status": "ok",
+                    "snapshot": snapshot.id,
+                    "config_path": snapshot.config_path.display().to_string(),
+                }),
+            ),
             Err(error @ SnapshotError::InvalidSnapshotMessage { .. }) => {
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
@@ -759,14 +763,15 @@ impl AdminApp {
     fn rollback_response(&self, target: Option<&str>, live_apply: bool) -> AdminResponse {
         if !live_apply {
             return match self.store.rollback_target(target) {
-                Ok(snapshot) => {
-                    let body = format!(
-                        r#"{{"status":"ok","rollback_target":"{}","config_path":"{}","live_apply":false}}"#,
-                        json_escape(&snapshot.id),
-                        json_escape(&snapshot.config_path.display().to_string())
-                    );
-                    json_response(StatusCode::OK, body.as_bytes())
-                }
+                Ok(snapshot) => json_response_value(
+                    StatusCode::OK,
+                    &json!({
+                        "status": "ok",
+                        "rollback_target": snapshot.id,
+                        "config_path": snapshot.config_path.display().to_string(),
+                        "live_apply": false,
+                    }),
+                ),
                 Err(error) => error_response(StatusCode::BAD_REQUEST, &error.to_string()),
             };
         }
@@ -787,13 +792,16 @@ impl AdminApp {
             return internal_error_response(&error);
         }
 
-        let body = format!(
-            r#"{{"status":"ok","rollback_target":"{}","config_path":"{}","impact":"{}","live_apply":true}}"#,
-            json_escape(&snapshot.id),
-            json_escape(&snapshot.config_path.display().to_string()),
-            json_escape(&impact)
-        );
-        json_response(StatusCode::OK, body.as_bytes())
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "rollback_target": snapshot.id,
+                "config_path": snapshot.config_path.display().to_string(),
+                "impact": impact,
+                "live_apply": true,
+            }),
+        )
     }
 
     fn reload_response(&self) -> AdminResponse {
@@ -817,12 +825,15 @@ impl AdminApp {
             Err(response) => return response,
         };
 
-        let body = format!(
-            r#"{{"status":"ok","snapshot":"{}","impact":"{}","live_apply":true}}"#,
-            json_escape(&snapshot.id),
-            json_escape(&impact)
-        );
-        json_response(StatusCode::OK, body.as_bytes())
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "snapshot": snapshot.id,
+                "impact": impact,
+                "live_apply": true,
+            }),
+        )
     }
 
     #[cfg(feature = "cache")]
@@ -869,24 +880,26 @@ impl AdminApp {
                     result.route.as_deref(),
                     "normal",
                 );
-                let body = format!(
-                    r#"{{"status":"ok","purged":{},"not_purged":{},"vhost":"{}","route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"memory_not_purged":{},"disk_purged":{},"disk_not_purged":{}}}"#,
-                    result.purged(),
-                    result.not_purged(),
-                    json_escape(&result.vhost),
-                    cache_route_json(result.route.as_deref()),
-                    cache_scope(result.route.as_deref()),
-                    json_escape(&result.host),
-                    json_escape(&result.method),
-                    json_escape(&result.path),
-                    cache_query_json(result.query.as_deref()),
-                    json_escape(&result.cache_key),
-                    result.memory_purged,
-                    result.memory_not_purged(),
-                    result.disk_purged,
-                    result.disk_not_purged()
-                );
-                json_response(StatusCode::OK, body.as_bytes())
+                json_response_value(
+                    StatusCode::OK,
+                    &json!({
+                        "status": "ok",
+                        "purged": result.purged(),
+                        "not_purged": result.not_purged(),
+                        "vhost": result.vhost,
+                        "route": result.route.as_deref(),
+                        "scope": cache_scope(result.route.as_deref()),
+                        "host": result.host,
+                        "method": result.method,
+                        "path": result.path,
+                        "query": result.query.as_deref(),
+                        "cache_key": result.cache_key,
+                        "memory_purged": result.memory_purged,
+                        "memory_not_purged": result.memory_not_purged(),
+                        "disk_purged": result.disk_purged,
+                        "disk_not_purged": result.disk_not_purged(),
+                    }),
+                )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
@@ -955,27 +968,29 @@ impl AdminApp {
             }) {
             Ok(result) => {
                 record_cache_purge_metric("bulk", &result.vhost, result.route(), "normal");
-                let body = format!(
-                    r#"{{"status":"ok","requested":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"vhost":"{}","route":{},"scope":"{}","memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"results":[{}]}}"#,
-                    result.requested(),
-                    result.purged(),
-                    result.not_purged(),
-                    ratio_per_mille_usize(result.purged(), result.requested()),
-                    ratio_per_mille_usize(result.not_purged(), result.requested()),
-                    json_escape(&result.vhost),
-                    cache_route_json(result.route()),
-                    cache_scope(result.route()),
-                    result.memory_purged(),
-                    result.memory_not_purged(),
-                    ratio_per_mille_usize(result.memory_purged(), result.requested()),
-                    ratio_per_mille_usize(result.memory_not_purged(), result.requested()),
-                    result.disk_purged(),
-                    result.disk_not_purged(),
-                    ratio_per_mille_usize(result.disk_purged(), result.requested()),
-                    ratio_per_mille_usize(result.disk_not_purged(), result.requested()),
-                    cache_purge_results_json(&result.results)
-                );
-                json_response(StatusCode::OK, body.as_bytes())
+                json_response_value(
+                    StatusCode::OK,
+                    &json!({
+                        "status": "ok",
+                        "requested": result.requested(),
+                        "purged": result.purged(),
+                        "not_purged": result.not_purged(),
+                        "purged_ratio_per_mille": ratio_per_mille_usize(result.purged(), result.requested()),
+                        "not_purged_ratio_per_mille": ratio_per_mille_usize(result.not_purged(), result.requested()),
+                        "vhost": result.vhost,
+                        "route": result.route(),
+                        "scope": cache_scope(result.route()),
+                        "memory_purged": result.memory_purged(),
+                        "memory_not_purged": result.memory_not_purged(),
+                        "memory_purged_ratio_per_mille": ratio_per_mille_usize(result.memory_purged(), result.requested()),
+                        "memory_not_purged_ratio_per_mille": ratio_per_mille_usize(result.memory_not_purged(), result.requested()),
+                        "disk_purged": result.disk_purged(),
+                        "disk_not_purged": result.disk_not_purged(),
+                        "disk_purged_ratio_per_mille": ratio_per_mille_usize(result.disk_purged(), result.requested()),
+                        "disk_not_purged_ratio_per_mille": ratio_per_mille_usize(result.disk_not_purged(), result.requested()),
+                        "results": cache_purge_results_json(&result.results),
+                    }),
+                )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
@@ -1028,37 +1043,10 @@ impl AdminApp {
                     result.route.as_deref(),
                     cache_indexed_purge_mode(soft),
                 );
-                let body = format!(
-                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
-                    soft,
-                    result.matched(),
-                    result.purged(),
-                    result.not_purged(),
-                    ratio_per_mille_usize(result.purged(), result.matched()),
-                    ratio_per_mille_usize(result.not_purged(), result.matched()),
-                    result.truncated(),
-                    result.truncated(),
-                    limit,
-                    result.batches,
-                    batches,
-                    result.truncated() && result.batches >= batches,
-                    json_escape(&result.vhost),
-                    cache_route_json(result.route.as_deref()),
-                    cache_scope(result.route.as_deref()),
-                    result.memory_matched,
-                    result.memory_purged,
-                    result.memory_not_purged(),
-                    ratio_per_mille_usize(result.memory_purged, result.memory_matched),
-                    ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
-                    result.memory_truncated,
-                    result.disk_matched,
-                    result.disk_purged,
-                    result.disk_not_purged(),
-                    ratio_per_mille_usize(result.disk_purged, result.disk_matched),
-                    ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
-                    result.disk_truncated
-                );
-                json_response(StatusCode::OK, body.as_bytes())
+                json_response_value(
+                    StatusCode::OK,
+                    &cache_indexed_purge_json(&result, soft, limit, batches, None, None, None),
+                )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
@@ -1118,38 +1106,18 @@ impl AdminApp {
                     result.route.as_deref(),
                     cache_indexed_purge_mode(soft),
                 );
-                let body = format!(
-                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_prefix":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
-                    soft,
-                    result.matched(),
-                    result.purged(),
-                    result.not_purged(),
-                    ratio_per_mille_usize(result.purged(), result.matched()),
-                    ratio_per_mille_usize(result.not_purged(), result.matched()),
-                    result.truncated(),
-                    result.truncated(),
-                    limit,
-                    result.batches,
-                    batches,
-                    result.truncated() && result.batches >= batches,
-                    json_escape(&result.vhost),
-                    cache_route_json(result.route.as_deref()),
-                    cache_scope(result.route.as_deref()),
-                    json_escape(path_prefix),
-                    result.memory_matched,
-                    result.memory_purged,
-                    result.memory_not_purged(),
-                    ratio_per_mille_usize(result.memory_purged, result.memory_matched),
-                    ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
-                    result.memory_truncated,
-                    result.disk_matched,
-                    result.disk_purged,
-                    result.disk_not_purged(),
-                    ratio_per_mille_usize(result.disk_purged, result.disk_matched),
-                    ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
-                    result.disk_truncated
-                );
-                json_response(StatusCode::OK, body.as_bytes())
+                json_response_value(
+                    StatusCode::OK,
+                    &cache_indexed_purge_json(
+                        &result,
+                        soft,
+                        limit,
+                        batches,
+                        Some(("path_prefix", path_prefix)),
+                        None,
+                        None,
+                    ),
+                )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
@@ -1205,38 +1173,18 @@ impl AdminApp {
                     result.route.as_deref(),
                     cache_indexed_purge_mode(soft),
                 );
-                let body = format!(
-                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","cache_tag":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
-                    soft,
-                    result.matched(),
-                    result.purged(),
-                    result.not_purged(),
-                    ratio_per_mille_usize(result.purged(), result.matched()),
-                    ratio_per_mille_usize(result.not_purged(), result.matched()),
-                    result.truncated(),
-                    result.truncated(),
-                    limit,
-                    result.batches,
-                    batches,
-                    result.truncated() && result.batches >= batches,
-                    json_escape(&result.vhost),
-                    cache_route_json(result.route.as_deref()),
-                    cache_scope(result.route.as_deref()),
-                    json_escape(cache_tag),
-                    result.memory_matched,
-                    result.memory_purged,
-                    result.memory_not_purged(),
-                    ratio_per_mille_usize(result.memory_purged, result.memory_matched),
-                    ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
-                    result.memory_truncated,
-                    result.disk_matched,
-                    result.disk_purged,
-                    result.disk_not_purged(),
-                    ratio_per_mille_usize(result.disk_purged, result.disk_matched),
-                    ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
-                    result.disk_truncated
-                );
-                json_response(StatusCode::OK, body.as_bytes())
+                json_response_value(
+                    StatusCode::OK,
+                    &cache_indexed_purge_json(
+                        &result,
+                        soft,
+                        limit,
+                        batches,
+                        None,
+                        Some(("cache_tag", cache_tag)),
+                        None,
+                    ),
+                )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
@@ -1289,44 +1237,45 @@ impl AdminApp {
                     result.route(),
                     cache_stale_purge_mode(dry_run),
                 );
-                let body = format!(
-                    r#"{{"status":"ok","dry_run":{},"scanned":{},"stale":{},"would_purge":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"increase_limit_required":{},"vhost":"{}","route":{},"scope":"{}","memory_scanned":{},"memory_stale":{},"memory_would_purge":{},"memory_purged":{},"memory_not_purged":{},"memory_truncated":{},"disk_scanned":{},"disk_stale":{},"disk_would_purge":{},"disk_purged":{},"disk_not_purged":{},"disk_truncated":{}}}"#,
-                    dry_run,
-                    result.scanned(),
-                    result.stale(),
-                    stale_would_purge(dry_run, result.stale()),
-                    result.purged(),
-                    result.not_purged(),
-                    ratio_per_mille_usize(result.purged(), result.stale()),
-                    ratio_per_mille_usize(result.not_purged(), result.stale()),
-                    result.truncated(),
-                    result.truncated()
-                        && !result.increase_limit_required
-                        && result.batches >= batches,
-                    limit,
-                    result.batches,
-                    batches,
-                    result.truncated()
-                        && !result.increase_limit_required
-                        && result.batches >= batches,
-                    result.increase_limit_required,
-                    json_escape(&result.vhost),
-                    cache_route_json(result.route()),
-                    cache_scope(result.route()),
-                    result.memory_scanned,
-                    result.memory_stale,
-                    stale_would_purge(dry_run, result.memory_stale),
-                    result.memory_purged,
-                    result.memory_stale.saturating_sub(result.memory_purged),
-                    result.memory_truncated,
-                    result.disk_scanned,
-                    result.disk_stale,
-                    stale_would_purge(dry_run, result.disk_stale),
-                    result.disk_purged,
-                    result.disk_stale.saturating_sub(result.disk_purged),
-                    result.disk_truncated
-                );
-                json_response(StatusCode::OK, body.as_bytes())
+                let repeat_required = result.truncated()
+                    && !result.increase_limit_required
+                    && result.batches >= batches;
+                json_response_value(
+                    StatusCode::OK,
+                    &json!({
+                        "status": "ok",
+                        "dry_run": dry_run,
+                        "scanned": result.scanned(),
+                        "stale": result.stale(),
+                        "would_purge": stale_would_purge(dry_run, result.stale()),
+                        "purged": result.purged(),
+                        "not_purged": result.not_purged(),
+                        "purged_ratio_per_mille": ratio_per_mille_usize(result.purged(), result.stale()),
+                        "not_purged_ratio_per_mille": ratio_per_mille_usize(result.not_purged(), result.stale()),
+                        "truncated": result.truncated(),
+                        "repeat_required": repeat_required,
+                        "limit": limit,
+                        "batches": result.batches,
+                        "batch_limit": batches,
+                        "batches_exhausted": repeat_required,
+                        "increase_limit_required": result.increase_limit_required,
+                        "vhost": result.vhost,
+                        "route": result.route(),
+                        "scope": cache_scope(result.route()),
+                        "memory_scanned": result.memory_scanned,
+                        "memory_stale": result.memory_stale,
+                        "memory_would_purge": stale_would_purge(dry_run, result.memory_stale),
+                        "memory_purged": result.memory_purged,
+                        "memory_not_purged": result.memory_stale.saturating_sub(result.memory_purged),
+                        "memory_truncated": result.memory_truncated,
+                        "disk_scanned": result.disk_scanned,
+                        "disk_stale": result.disk_stale,
+                        "disk_would_purge": stale_would_purge(dry_run, result.disk_stale),
+                        "disk_purged": result.disk_purged,
+                        "disk_not_purged": result.disk_stale.saturating_sub(result.disk_purged),
+                        "disk_truncated": result.disk_truncated,
+                    }),
+                )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
@@ -1386,38 +1335,18 @@ impl AdminApp {
                     result.route.as_deref(),
                     cache_indexed_purge_mode(soft),
                 );
-                let body = format!(
-                    r#"{{"status":"ok","soft":{},"matched":{},"purged":{},"not_purged":{},"purged_ratio_per_mille":{},"not_purged_ratio_per_mille":{},"truncated":{},"repeat_required":{},"limit":{},"batches":{},"batch_limit":{},"batches_exhausted":{},"vhost":"{}","route":{},"scope":"{}","path_pattern":"{}","memory_matched":{},"memory_purged":{},"memory_not_purged":{},"memory_purged_ratio_per_mille":{},"memory_not_purged_ratio_per_mille":{},"memory_truncated":{},"disk_matched":{},"disk_purged":{},"disk_not_purged":{},"disk_purged_ratio_per_mille":{},"disk_not_purged_ratio_per_mille":{},"disk_truncated":{}}}"#,
-                    soft,
-                    result.matched(),
-                    result.purged(),
-                    result.not_purged(),
-                    ratio_per_mille_usize(result.purged(), result.matched()),
-                    ratio_per_mille_usize(result.not_purged(), result.matched()),
-                    result.truncated(),
-                    result.truncated(),
-                    limit,
-                    result.batches,
-                    batches,
-                    result.truncated() && result.batches >= batches,
-                    json_escape(&result.vhost),
-                    cache_route_json(result.route.as_deref()),
-                    cache_scope(result.route.as_deref()),
-                    json_escape(path_pattern),
-                    result.memory_matched,
-                    result.memory_purged,
-                    result.memory_not_purged(),
-                    ratio_per_mille_usize(result.memory_purged, result.memory_matched),
-                    ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
-                    result.memory_truncated,
-                    result.disk_matched,
-                    result.disk_purged,
-                    result.disk_not_purged(),
-                    ratio_per_mille_usize(result.disk_purged, result.disk_matched),
-                    ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
-                    result.disk_truncated
-                );
-                json_response(StatusCode::OK, body.as_bytes())
+                json_response_value(
+                    StatusCode::OK,
+                    &cache_indexed_purge_json(
+                        &result,
+                        soft,
+                        limit,
+                        batches,
+                        None,
+                        None,
+                        Some(("path_pattern", path_pattern)),
+                    ),
+                )
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
@@ -1528,13 +1457,17 @@ impl AdminApp {
         let impact = classify_reload(&old_config, &new_config);
 
         if !impact.is_snapshot_safe() {
-            let body = format!(
-                r#"{{"status":"error","error":"process_upgrade_required","snapshot":"{}","impact":"{}","reasons":[{}],"live_apply":false}}"#,
-                json_escape(&snapshot.id),
-                impact.kind(),
-                reload_reasons_json(impact.reasons())
-            );
-            return Err(json_response(StatusCode::CONFLICT, body.as_bytes()));
+            return Err(json_response_value(
+                StatusCode::CONFLICT,
+                &json!({
+                    "status": "error",
+                    "error": "process_upgrade_required",
+                    "snapshot": snapshot.id,
+                    "impact": impact.kind(),
+                    "reasons": reload_reasons_json(impact.reasons()),
+                    "live_apply": false,
+                }),
+            ));
         }
 
         if let Err(error) = self.proxy.reload_from_config(&new_config) {
@@ -1560,12 +1493,14 @@ impl AdminApp {
         state.known_good_snapshot = Some(pending.target_snapshot.clone());
         state.runtime_snapshot = Some(pending.target_snapshot.clone());
 
-        let body = format!(
-            r#"{{"status":"ok","known_good_snapshot":"{}","confirmed_snapshot":"{}"}}"#,
-            json_escape(&pending.target_snapshot),
-            json_escape(&pending.target_snapshot)
-        );
-        json_response(StatusCode::OK, body.as_bytes())
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "known_good_snapshot": pending.target_snapshot,
+                "confirmed_snapshot": pending.target_snapshot,
+            }),
+        )
     }
 
     fn self_heal_fail_response(&self) -> AdminResponse {
@@ -1597,26 +1532,28 @@ impl AdminApp {
             HealthSignalOutcome::NoPendingValidation => {
                 error_response(StatusCode::BAD_REQUEST, "no pending validation")
             }
-            HealthSignalOutcome::Recorded { snapshot, metrics } => {
-                let body = format!(
-                    r#"{{"status":"ok","action":"recorded","snapshot":"{}","successful_checks":{},"failed_checks":{},"error_rate_per_mille":{}}}"#,
-                    json_escape(&snapshot),
-                    metrics.successful_checks,
-                    metrics.failed_checks,
-                    metrics.error_rate_per_mille()
-                );
-                json_response(StatusCode::OK, body.as_bytes())
-            }
-            HealthSignalOutcome::Confirm { snapshot, metrics } => {
-                let body = format!(
-                    r#"{{"status":"ok","action":"confirmed","known_good_snapshot":"{}","successful_checks":{},"failed_checks":{},"error_rate_per_mille":{}}}"#,
-                    json_escape(&snapshot),
-                    metrics.successful_checks,
-                    metrics.failed_checks,
-                    metrics.error_rate_per_mille()
-                );
-                json_response(StatusCode::OK, body.as_bytes())
-            }
+            HealthSignalOutcome::Recorded { snapshot, metrics } => json_response_value(
+                StatusCode::OK,
+                &json!({
+                    "status": "ok",
+                    "action": "recorded",
+                    "snapshot": snapshot,
+                    "successful_checks": metrics.successful_checks,
+                    "failed_checks": metrics.failed_checks,
+                    "error_rate_per_mille": metrics.error_rate_per_mille(),
+                }),
+            ),
+            HealthSignalOutcome::Confirm { snapshot, metrics } => json_response_value(
+                StatusCode::OK,
+                &json!({
+                    "status": "ok",
+                    "action": "confirmed",
+                    "known_good_snapshot": snapshot,
+                    "successful_checks": metrics.successful_checks,
+                    "failed_checks": metrics.failed_checks,
+                    "error_rate_per_mille": metrics.error_rate_per_mille(),
+                }),
+            ),
             HealthSignalOutcome::Rollback(pending) => {
                 self.rollback_pending_validation(&pending, "error-rate")
             }
@@ -1716,14 +1653,17 @@ impl AdminApp {
             return internal_error_response(&error);
         }
 
-        let body = format!(
-            r#"{{"status":"ok","reason":"{}","failed_snapshot":"{}","rollback_target":"{}","impact":"{}","live_apply":true}}"#,
-            json_escape(reason),
-            json_escape(&pending.target_snapshot),
-            json_escape(&snapshot.id),
-            json_escape(&impact)
-        );
-        json_response(StatusCode::OK, body.as_bytes())
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "reason": reason,
+                "failed_snapshot": pending.target_snapshot,
+                "rollback_target": snapshot.id,
+                "impact": impact,
+                "live_apply": true,
+            }),
+        )
     }
 
     fn record_applied_snapshot(&self, snapshot: String, impact: String, mode: ApplyMode) {
@@ -2171,6 +2111,21 @@ fn json_response(status: StatusCode, body: &[u8]) -> AdminResponse {
     }
 }
 
+fn json_response_value(status: StatusCode, body: &impl Serialize) -> AdminResponse {
+    match serde_json::to_vec(body) {
+        Ok(body) => json_response(status, &body),
+        Err(error) => internal_error_response(&error),
+    }
+}
+
+fn json_object(fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
+    let mut object = serde_json::Map::new();
+    for (name, value) in fields {
+        object.insert(name.to_owned(), value);
+    }
+    Value::Object(object)
+}
+
 fn empty_response(status: StatusCode) -> AdminResponse {
     AdminResponse {
         status,
@@ -2181,10 +2136,7 @@ fn empty_response(status: StatusCode) -> AdminResponse {
 
 fn error_response(status: StatusCode, error: &str) -> AdminResponse {
     let error = bounded_admin_error_message(error);
-    json_response(
-        status,
-        format!(r#"{{"status":"error","error":"{}"}}"#, json_escape(&error)).as_bytes(),
-    )
+    json_response_value(status, &json!({"status": "error", "error": error}))
 }
 
 fn internal_error_response(error: &impl std::fmt::Display) -> AdminResponse {
@@ -2211,66 +2163,37 @@ fn record_admin_auth_event(event: &str, scope: AdminAuthThrottleScope) {
 #[cfg(not(feature = "metrics"))]
 fn record_admin_auth_event(_event: &str, _scope: AdminAuthThrottleScope) {}
 
-fn snapshot_json(snapshot: &ConfigSnapshot, current: Option<&str>) -> String {
-    let message = snapshot
-        .metadata
-        .message
-        .as_deref()
-        .map(|message| format!(r#""{}""#, json_escape(message)))
-        .unwrap_or_else(|| "null".to_owned());
-    format!(
-        r#"{{"id":"{}","current":{},"created_unix_secs":{},"message":{message}}}"#,
-        json_escape(&snapshot.id),
-        current == Some(snapshot.id.as_str()),
-        snapshot.metadata.created_unix_secs,
-    )
+fn snapshot_json(snapshot: &ConfigSnapshot, current: Option<&str>) -> Value {
+    json!({
+        "id": snapshot.id,
+        "current": current == Some(snapshot.id.as_str()),
+        "created_unix_secs": snapshot.metadata.created_unix_secs,
+        "message": snapshot.metadata.message.as_deref(),
+    })
 }
 
-fn optional_json_string(value: Option<&str>) -> String {
-    value
-        .map(|value| format!(r#""{}""#, json_escape(value)))
-        .unwrap_or_else(|| "null".to_owned())
-}
-
-fn pending_validation_json(pending: Option<&PendingValidation>) -> String {
+fn pending_validation_json(pending: Option<&PendingValidation>) -> Value {
     let Some(pending) = pending else {
-        return "null".to_owned();
+        return Value::Null;
     };
 
-    format!(
-        r#"{{"target_snapshot":"{}","previous_snapshot":{},"impact":"{}","expires_unix_secs":{},"successful_checks":{},"failed_checks":{},"error_rate_per_mille":{}}}"#,
-        json_escape(&pending.target_snapshot),
-        optional_json_string(pending.previous_snapshot.as_deref()),
-        json_escape(&pending.impact),
-        pending.expires_unix_secs,
-        pending.successful_checks,
-        pending.failed_checks,
-        ValidationMetrics {
+    json!({
+        "target_snapshot": pending.target_snapshot,
+        "previous_snapshot": pending.previous_snapshot.as_deref(),
+        "impact": pending.impact,
+        "expires_unix_secs": pending.expires_unix_secs,
+        "successful_checks": pending.successful_checks,
+        "failed_checks": pending.failed_checks,
+        "error_rate_per_mille": ValidationMetrics {
             successful_checks: pending.successful_checks,
             failed_checks: pending.failed_checks,
         }
-        .error_rate_per_mille()
-    )
+        .error_rate_per_mille(),
+    })
 }
 
-fn reload_reasons_json(reasons: &[ReloadReason]) -> String {
-    let mut body = String::new();
-    for (index, reason) in reasons.iter().enumerate() {
-        if index > 0 {
-            body.push(',');
-        }
-        body.push('"');
-        body.push_str(&json_escape(&reason.to_string()));
-        body.push('"');
-    }
-    body
-}
-
-#[cfg(feature = "cache")]
-fn cache_route_json(route: Option<&str>) -> String {
-    route
-        .map(|route| format!(r#""{}""#, json_escape(route)))
-        .unwrap_or_else(|| "null".to_owned())
+fn reload_reasons_json(reasons: &[ReloadReason]) -> Vec<String> {
+    reasons.iter().map(ToString::to_string).collect()
 }
 
 #[cfg(feature = "cache")]
@@ -2297,172 +2220,236 @@ fn cache_stale_purge_mode(dry_run: bool) -> &'static str {
 }
 
 #[cfg(feature = "cache")]
-fn cache_query_json(query: Option<&str>) -> String {
-    query
-        .map(|query| format!(r#""{}""#, json_escape(query)))
-        .unwrap_or_else(|| "null".to_owned())
-}
-
-#[cfg(feature = "cache")]
-fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> String {
-    let mut body = String::new();
-    for (index, result) in results.iter().enumerate() {
-        if index > 0 {
-            body.push(',');
-        }
-        body.push_str(&format!(
-            r#"{{"purged":{},"not_purged":{},"route":{},"scope":"{}","host":"{}","method":"{}","path":"{}","query":{},"cache_key":"{}","memory_purged":{},"memory_not_purged":{},"disk_purged":{},"disk_not_purged":{}}}"#,
-            result.purged(),
-            result.not_purged(),
-            cache_route_json(result.route.as_deref()),
-            cache_scope(result.route.as_deref()),
-            json_escape(&result.host),
-            json_escape(&result.method),
-            json_escape(&result.path),
-            cache_query_json(result.query.as_deref()),
-            json_escape(&result.cache_key),
-            result.memory_purged,
-            result.memory_not_purged(),
-            result.disk_purged,
-            result.disk_not_purged()
-        ));
-    }
-    body
-}
-
-#[cfg(feature = "cache")]
-fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> String {
-    format!(
-        r#"{{"vhosts":{},"enabled_vhosts":{},"enabled_vhost_ratio_per_mille":{},"tiered_vhosts":{},"tiered_vhost_ratio_per_mille":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"lock_enabled_policies":{},"lock_enabled_policy_ratio_per_mille":{},"peer_fill_enabled_policies":{},"peer_fill_enabled_policy_ratio_per_mille":{},"peer_fill_peers":{},"peer_fill_max_concurrent_requests":{},"memory_tiers":{},"memory_entries":{},"memory_weighted_size_bytes":{},"memory_average_weighted_size_bytes":{},"memory_max_size_bytes":{},"memory_fill_ratio_per_mille":{},"memory_purge_index_entries":{},"memory_purge_index_max_entries":{},"memory_purge_index_fill_ratio_per_mille":{},"disk_tiers":{},"disk_entries":{},"disk_size_bytes":{},"disk_average_object_size_bytes":{},"disk_allocated_size_bytes":{},"disk_free_size_bytes":{},"disk_free_ratio_per_mille":{},"disk_free_range_count":{},"disk_largest_free_range_bytes":{},"disk_bin_files":{},"disk_max_size_bytes":{},"disk_fill_ratio_per_mille":{},"disk_purge_index_entries":{},"disk_purge_index_max_entries":{},"disk_purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
-        totals.vhosts,
-        totals.enabled_vhosts,
-        ratio_per_mille(totals.enabled_vhosts, totals.vhosts),
-        totals.tiered_vhosts,
-        ratio_per_mille(totals.tiered_vhosts, totals.vhosts),
-        totals.configured_routes,
-        totals.routes_total,
-        ratio_per_mille(totals.routes_total, totals.configured_routes),
-        totals.enabled_routes,
-        ratio_per_mille(totals.enabled_routes, totals.routes_total),
-        totals.tiered_routes,
-        ratio_per_mille(totals.tiered_routes, totals.routes_total),
-        totals.lock_enabled_policies,
-        ratio_per_mille(
-            totals.lock_enabled_policies,
-            totals.enabled_cache_policies()
-        ),
-        totals.peer_fill_enabled_policies,
-        ratio_per_mille(
-            totals.peer_fill_enabled_policies,
-            totals.enabled_cache_policies()
-        ),
-        totals.peer_fill_peers,
-        totals.peer_fill_max_concurrent_requests,
-        totals.memory_tiers,
-        totals.memory_entries,
-        totals.memory_weighted_size_bytes,
-        average_bytes(totals.memory_weighted_size_bytes, totals.memory_entries),
-        totals.memory_max_size_bytes,
-        ratio_per_mille(
-            totals.memory_weighted_size_bytes,
-            totals.memory_max_size_bytes
-        ),
-        totals.memory_purge_index_entries,
-        totals.memory_purge_index_max_entries,
-        ratio_per_mille(
-            totals.memory_purge_index_entries,
-            totals.memory_purge_index_max_entries,
-        ),
-        totals.disk_tiers,
-        totals.disk_entries,
-        totals.disk_size_bytes,
-        average_bytes(totals.disk_size_bytes, totals.disk_entries),
-        totals.disk_allocated_size_bytes,
-        totals.disk_free_size_bytes,
-        ratio_per_mille(
-            totals.disk_free_size_bytes,
-            totals.disk_allocated_size_bytes
-        ),
-        totals.disk_free_range_count,
-        totals.disk_largest_free_range_bytes,
-        totals.disk_bin_files,
-        totals.disk_max_size_bytes,
-        ratio_per_mille(totals.disk_size_bytes, totals.disk_max_size_bytes),
-        totals.disk_purge_index_entries,
-        totals.disk_purge_index_max_entries,
-        ratio_per_mille(
-            totals.disk_purge_index_entries,
-            totals.disk_purge_index_max_entries,
-        ),
-        cache_activity_json(&crate::cache::CacheActivityStats {
-            hits: totals.hits,
-            misses: totals.misses,
-            stores: totals.stores,
-            store_refusals: totals.store_refusals,
-            evictions: totals.evictions,
-            purges: totals.purges,
+fn cache_purge_results_json(results: &[crate::proxy::CachePurgeResult]) -> Vec<Value> {
+    results
+        .iter()
+        .map(|result| {
+            json!({
+                "purged": result.purged(),
+                "not_purged": result.not_purged(),
+                "route": result.route.as_deref(),
+                "scope": cache_scope(result.route.as_deref()),
+                "host": result.host,
+                "method": result.method,
+                "path": result.path,
+                "query": result.query.as_deref(),
+                "cache_key": result.cache_key,
+                "memory_purged": result.memory_purged,
+                "memory_not_purged": result.memory_not_purged(),
+                "disk_purged": result.disk_purged,
+                "disk_not_purged": result.disk_not_purged(),
+            })
         })
-    )
+        .collect()
 }
 
 #[cfg(feature = "cache")]
-fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> String {
-    let mut body = String::new();
-    for (index, vhost) in vhosts.iter().enumerate() {
-        if index > 0 {
-            body.push(',');
-        }
-        body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"peer_fill_enabled":{},"peer_fill_peers":{},"peer_fill_max_concurrent_requests":{},"peer_fill_fail_open":{},"storage_tiers":{},"configured_routes":{},"routes_total":{},"cache_route_coverage_ratio_per_mille":{},"enabled_routes":{},"enabled_route_ratio_per_mille":{},"tiered_routes":{},"tiered_route_ratio_per_mille":{},"memory":{},"disk":{},"routes":[{}]}}"#,
-            json_escape(&vhost.name),
-            vhost.enabled,
-            vhost.tiered,
-            vhost.lock_enabled,
-            vhost.lock_wait_timeout_secs,
-            vhost.peer_fill_enabled,
-            vhost.peer_fill_peers,
-            vhost.peer_fill_max_concurrent_requests,
-            vhost.peer_fill_fail_open,
-            cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
-            vhost.configured_routes,
-            vhost.routes_total,
-            ratio_per_mille(vhost.routes_total, vhost.configured_routes),
-            vhost.enabled_routes,
-            ratio_per_mille(vhost.enabled_routes, vhost.routes_total),
-            vhost.tiered_routes,
-            ratio_per_mille(vhost.tiered_routes, vhost.routes_total),
-            memory_cache_stats_json(vhost.memory.as_ref()),
-            disk_cache_stats_json(vhost.disk.as_ref()),
-            cache_route_stats_json(&vhost.routes)
-        ));
-    }
-    body
+fn cache_totals_json(totals: &crate::proxy::CacheRuntimeTotals) -> Value {
+    json_object([
+        ("vhosts", json!(totals.vhosts)),
+        ("enabled_vhosts", json!(totals.enabled_vhosts)),
+        (
+            "enabled_vhost_ratio_per_mille",
+            json!(ratio_per_mille(totals.enabled_vhosts, totals.vhosts)),
+        ),
+        ("tiered_vhosts", json!(totals.tiered_vhosts)),
+        (
+            "tiered_vhost_ratio_per_mille",
+            json!(ratio_per_mille(totals.tiered_vhosts, totals.vhosts)),
+        ),
+        ("configured_routes", json!(totals.configured_routes)),
+        ("routes_total", json!(totals.routes_total)),
+        (
+            "cache_route_coverage_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.routes_total,
+                totals.configured_routes
+            )),
+        ),
+        ("enabled_routes", json!(totals.enabled_routes)),
+        (
+            "enabled_route_ratio_per_mille",
+            json!(ratio_per_mille(totals.enabled_routes, totals.routes_total)),
+        ),
+        ("tiered_routes", json!(totals.tiered_routes)),
+        (
+            "tiered_route_ratio_per_mille",
+            json!(ratio_per_mille(totals.tiered_routes, totals.routes_total)),
+        ),
+        ("lock_enabled_policies", json!(totals.lock_enabled_policies)),
+        (
+            "lock_enabled_policy_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.lock_enabled_policies,
+                totals.enabled_cache_policies()
+            )),
+        ),
+        (
+            "peer_fill_enabled_policies",
+            json!(totals.peer_fill_enabled_policies),
+        ),
+        (
+            "peer_fill_enabled_policy_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.peer_fill_enabled_policies,
+                totals.enabled_cache_policies()
+            )),
+        ),
+        ("peer_fill_peers", json!(totals.peer_fill_peers)),
+        (
+            "peer_fill_max_concurrent_requests",
+            json!(totals.peer_fill_max_concurrent_requests),
+        ),
+        ("memory_tiers", json!(totals.memory_tiers)),
+        ("memory_entries", json!(totals.memory_entries)),
+        (
+            "memory_weighted_size_bytes",
+            json!(totals.memory_weighted_size_bytes),
+        ),
+        (
+            "memory_average_weighted_size_bytes",
+            json!(average_bytes(
+                totals.memory_weighted_size_bytes,
+                totals.memory_entries
+            )),
+        ),
+        ("memory_max_size_bytes", json!(totals.memory_max_size_bytes)),
+        (
+            "memory_fill_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.memory_weighted_size_bytes,
+                totals.memory_max_size_bytes
+            )),
+        ),
+        (
+            "memory_purge_index_entries",
+            json!(totals.memory_purge_index_entries),
+        ),
+        (
+            "memory_purge_index_max_entries",
+            json!(totals.memory_purge_index_max_entries),
+        ),
+        (
+            "memory_purge_index_fill_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.memory_purge_index_entries,
+                totals.memory_purge_index_max_entries
+            )),
+        ),
+        ("disk_tiers", json!(totals.disk_tiers)),
+        ("disk_entries", json!(totals.disk_entries)),
+        ("disk_size_bytes", json!(totals.disk_size_bytes)),
+        (
+            "disk_average_object_size_bytes",
+            json!(average_bytes(totals.disk_size_bytes, totals.disk_entries)),
+        ),
+        (
+            "disk_allocated_size_bytes",
+            json!(totals.disk_allocated_size_bytes),
+        ),
+        ("disk_free_size_bytes", json!(totals.disk_free_size_bytes)),
+        (
+            "disk_free_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.disk_free_size_bytes,
+                totals.disk_allocated_size_bytes
+            )),
+        ),
+        ("disk_free_range_count", json!(totals.disk_free_range_count)),
+        (
+            "disk_largest_free_range_bytes",
+            json!(totals.disk_largest_free_range_bytes),
+        ),
+        ("disk_bin_files", json!(totals.disk_bin_files)),
+        ("disk_max_size_bytes", json!(totals.disk_max_size_bytes)),
+        (
+            "disk_fill_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.disk_size_bytes,
+                totals.disk_max_size_bytes
+            )),
+        ),
+        (
+            "disk_purge_index_entries",
+            json!(totals.disk_purge_index_entries),
+        ),
+        (
+            "disk_purge_index_max_entries",
+            json!(totals.disk_purge_index_max_entries),
+        ),
+        (
+            "disk_purge_index_fill_ratio_per_mille",
+            json!(ratio_per_mille(
+                totals.disk_purge_index_entries,
+                totals.disk_purge_index_max_entries
+            )),
+        ),
+        (
+            "activity",
+            cache_activity_json(&crate::cache::CacheActivityStats {
+                hits: totals.hits,
+                misses: totals.misses,
+                stores: totals.stores,
+                store_refusals: totals.store_refusals,
+                evictions: totals.evictions,
+                purges: totals.purges,
+            }),
+        ),
+    ])
 }
 
 #[cfg(feature = "cache")]
-fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> String {
-    let mut body = String::new();
-    for (index, route) in routes.iter().enumerate() {
-        if index > 0 {
-            body.push(',');
-        }
-        body.push_str(&format!(
-            r#"{{"name":"{}","enabled":{},"tiered":{},"lock_enabled":{},"lock_wait_timeout_secs":{},"peer_fill_enabled":{},"peer_fill_peers":{},"peer_fill_max_concurrent_requests":{},"peer_fill_fail_open":{},"storage_tiers":{},"memory":{},"disk":{}}}"#,
-            json_escape(&route.name),
-            route.enabled,
-            route.tiered,
-            route.lock_enabled,
-            route.lock_wait_timeout_secs,
-            route.peer_fill_enabled,
-            route.peer_fill_peers,
-            route.peer_fill_max_concurrent_requests,
-            route.peer_fill_fail_open,
-            cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
-            memory_cache_stats_json(route.memory.as_ref()),
-            disk_cache_stats_json(route.disk.as_ref())
-        ));
-    }
-    body
+fn cache_vhost_stats_json(vhosts: &[crate::proxy::CacheVhostStats]) -> Vec<Value> {
+    vhosts
+        .iter()
+        .map(|vhost| {
+            json!({
+                "name": vhost.name,
+                "enabled": vhost.enabled,
+                "tiered": vhost.tiered,
+                "lock_enabled": vhost.lock_enabled,
+                "lock_wait_timeout_secs": vhost.lock_wait_timeout_secs,
+                "peer_fill_enabled": vhost.peer_fill_enabled,
+                "peer_fill_peers": vhost.peer_fill_peers,
+                "peer_fill_max_concurrent_requests": vhost.peer_fill_max_concurrent_requests,
+                "peer_fill_fail_open": vhost.peer_fill_fail_open,
+                "storage_tiers": cache_storage_tiers(vhost.memory.is_some(), vhost.disk.is_some()),
+                "configured_routes": vhost.configured_routes,
+                "routes_total": vhost.routes_total,
+                "cache_route_coverage_ratio_per_mille": ratio_per_mille(vhost.routes_total, vhost.configured_routes),
+                "enabled_routes": vhost.enabled_routes,
+                "enabled_route_ratio_per_mille": ratio_per_mille(vhost.enabled_routes, vhost.routes_total),
+                "tiered_routes": vhost.tiered_routes,
+                "tiered_route_ratio_per_mille": ratio_per_mille(vhost.tiered_routes, vhost.routes_total),
+                "memory": memory_cache_stats_json(vhost.memory.as_ref()),
+                "disk": disk_cache_stats_json(vhost.disk.as_ref()),
+                "routes": cache_route_stats_json(&vhost.routes),
+            })
+        })
+        .collect()
+}
+
+#[cfg(feature = "cache")]
+fn cache_route_stats_json(routes: &[crate::proxy::CacheRouteStats]) -> Vec<Value> {
+    routes
+        .iter()
+        .map(|route| {
+            json!({
+                "name": route.name,
+                "enabled": route.enabled,
+                "tiered": route.tiered,
+                "lock_enabled": route.lock_enabled,
+                "lock_wait_timeout_secs": route.lock_wait_timeout_secs,
+                "peer_fill_enabled": route.peer_fill_enabled,
+                "peer_fill_peers": route.peer_fill_peers,
+                "peer_fill_max_concurrent_requests": route.peer_fill_max_concurrent_requests,
+                "peer_fill_fail_open": route.peer_fill_fail_open,
+                "storage_tiers": cache_storage_tiers(route.memory.is_some(), route.disk.is_some()),
+                "memory": memory_cache_stats_json(route.memory.as_ref()),
+                "disk": disk_cache_stats_json(route.disk.as_ref()),
+            })
+        })
+        .collect()
 }
 
 #[cfg(feature = "cache")]
@@ -2471,52 +2458,50 @@ fn cache_storage_tiers(memory: bool, disk: bool) -> u8 {
 }
 
 #[cfg(feature = "cache")]
-fn memory_cache_stats_json(stats: Option<&crate::cache::MemoryCacheStats>) -> String {
-    stats
-        .map(|stats| {
-            format!(
-                r#"{{"entries":{},"weighted_size_bytes":{},"average_weighted_size_bytes":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
-                stats.entries,
-                stats.weighted_size_bytes,
-                average_bytes(stats.weighted_size_bytes, stats.entries),
-                stats.max_size_bytes.as_u64(),
-                ratio_per_mille(stats.weighted_size_bytes, stats.max_size_bytes.as_u64()),
-                stats.max_object_bytes.as_u64(),
-                stats.purge_index_entries,
-                stats.purge_index_max_entries,
-                ratio_per_mille(stats.purge_index_entries, stats.purge_index_max_entries),
-                cache_activity_json(&stats.activity)
-            )
-        })
-        .unwrap_or_else(|| "null".to_owned())
+fn memory_cache_stats_json(stats: Option<&crate::cache::MemoryCacheStats>) -> Value {
+    let Some(stats) = stats else {
+        return Value::Null;
+    };
+
+    json!({
+        "entries": stats.entries,
+        "weighted_size_bytes": stats.weighted_size_bytes,
+        "average_weighted_size_bytes": average_bytes(stats.weighted_size_bytes, stats.entries),
+        "max_size_bytes": stats.max_size_bytes.as_u64(),
+        "fill_ratio_per_mille": ratio_per_mille(stats.weighted_size_bytes, stats.max_size_bytes.as_u64()),
+        "max_object_bytes": stats.max_object_bytes.as_u64(),
+        "purge_index_entries": stats.purge_index_entries,
+        "purge_index_max_entries": stats.purge_index_max_entries,
+        "purge_index_fill_ratio_per_mille": ratio_per_mille(stats.purge_index_entries, stats.purge_index_max_entries),
+        "activity": cache_activity_json(&stats.activity),
+    })
 }
 
 #[cfg(feature = "cache")]
-fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> String {
-    stats
-        .map(|stats| {
-            format!(
-                r#"{{"backend":"{}","entries":{},"size_bytes":{},"average_object_size_bytes":{},"allocated_size_bytes":{},"free_size_bytes":{},"free_ratio_per_mille":{},"free_range_count":{},"largest_free_range_bytes":{},"bin_files":{},"max_size_bytes":{},"fill_ratio_per_mille":{},"max_object_bytes":{},"purge_index_entries":{},"purge_index_max_entries":{},"purge_index_fill_ratio_per_mille":{},"activity":{}}}"#,
-                stats.backend,
-                stats.entries,
-                stats.size_bytes,
-                average_bytes(stats.size_bytes, stats.entries),
-                stats.allocated_size_bytes,
-                stats.free_size_bytes,
-                ratio_per_mille(stats.free_size_bytes, stats.allocated_size_bytes),
-                stats.free_range_count,
-                stats.largest_free_range_bytes,
-                stats.bin_files,
-                stats.max_size_bytes.as_u64(),
-                ratio_per_mille(stats.size_bytes, stats.max_size_bytes.as_u64()),
-                stats.max_object_bytes.as_u64(),
-                stats.purge_index_entries,
-                stats.purge_index_max_entries,
-                ratio_per_mille(stats.purge_index_entries, stats.purge_index_max_entries),
-                cache_activity_json(&stats.activity)
-            )
-        })
-        .unwrap_or_else(|| "null".to_owned())
+fn disk_cache_stats_json(stats: Option<&crate::cache::DiskCacheStats>) -> Value {
+    let Some(stats) = stats else {
+        return Value::Null;
+    };
+
+    json!({
+        "backend": stats.backend,
+        "entries": stats.entries,
+        "size_bytes": stats.size_bytes,
+        "average_object_size_bytes": average_bytes(stats.size_bytes, stats.entries),
+        "allocated_size_bytes": stats.allocated_size_bytes,
+        "free_size_bytes": stats.free_size_bytes,
+        "free_ratio_per_mille": ratio_per_mille(stats.free_size_bytes, stats.allocated_size_bytes),
+        "free_range_count": stats.free_range_count,
+        "largest_free_range_bytes": stats.largest_free_range_bytes,
+        "bin_files": stats.bin_files,
+        "max_size_bytes": stats.max_size_bytes.as_u64(),
+        "fill_ratio_per_mille": ratio_per_mille(stats.size_bytes, stats.max_size_bytes.as_u64()),
+        "max_object_bytes": stats.max_object_bytes.as_u64(),
+        "purge_index_entries": stats.purge_index_entries,
+        "purge_index_max_entries": stats.purge_index_max_entries,
+        "purge_index_fill_ratio_per_mille": ratio_per_mille(stats.purge_index_entries, stats.purge_index_max_entries),
+        "activity": cache_activity_json(&stats.activity),
+    })
 }
 
 #[cfg(feature = "cache")]
@@ -2546,7 +2531,7 @@ fn average_bytes(total_bytes: u64, entries: u64) -> u64 {
 }
 
 #[cfg(feature = "cache")]
-fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
+fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> Value {
     let requests = activity.hits.saturating_add(activity.misses);
     let hit_ratio_per_mille = activity
         .hits
@@ -2570,22 +2555,71 @@ fn cache_activity_json(activity: &crate::cache::CacheActivityStats) -> String {
         .checked_div(store_attempts)
         .unwrap_or(0);
     let eviction_ratio_per_mille = ratio_per_mille(activity.evictions, activity.stores);
-    format!(
-        r#"{{"hits":{},"misses":{},"requests":{},"hit_ratio_per_mille":{},"miss_ratio_per_mille":{},"stores":{},"store_refusals":{},"store_attempts":{},"store_ratio_per_mille":{},"store_refusal_ratio_per_mille":{},"evictions":{},"eviction_ratio_per_mille":{},"purges":{}}}"#,
-        activity.hits,
-        activity.misses,
-        requests,
-        hit_ratio_per_mille,
-        miss_ratio_per_mille,
-        activity.stores,
-        activity.store_refusals,
-        store_attempts,
-        store_ratio_per_mille,
-        store_refusal_ratio_per_mille,
-        activity.evictions,
-        eviction_ratio_per_mille,
-        activity.purges
-    )
+    json!({
+        "hits": activity.hits,
+        "misses": activity.misses,
+        "requests": requests,
+        "hit_ratio_per_mille": hit_ratio_per_mille,
+        "miss_ratio_per_mille": miss_ratio_per_mille,
+        "stores": activity.stores,
+        "store_refusals": activity.store_refusals,
+        "store_attempts": store_attempts,
+        "store_ratio_per_mille": store_ratio_per_mille,
+        "store_refusal_ratio_per_mille": store_refusal_ratio_per_mille,
+        "evictions": activity.evictions,
+        "eviction_ratio_per_mille": eviction_ratio_per_mille,
+        "purges": activity.purges,
+    })
+}
+
+#[cfg(feature = "cache")]
+fn cache_indexed_purge_json(
+    result: &CacheIndexedPurgeBatchResult,
+    soft: bool,
+    limit: usize,
+    batches: usize,
+    path_prefix: Option<(&str, &str)>,
+    cache_tag: Option<(&str, &str)>,
+    path_pattern: Option<(&str, &str)>,
+) -> Value {
+    let mut body = json!({
+        "status": "ok",
+        "soft": soft,
+        "matched": result.matched(),
+        "purged": result.purged(),
+        "not_purged": result.not_purged(),
+        "purged_ratio_per_mille": ratio_per_mille_usize(result.purged(), result.matched()),
+        "not_purged_ratio_per_mille": ratio_per_mille_usize(result.not_purged(), result.matched()),
+        "truncated": result.truncated(),
+        "repeat_required": result.truncated(),
+        "limit": limit,
+        "batches": result.batches,
+        "batch_limit": batches,
+        "batches_exhausted": result.truncated() && result.batches >= batches,
+        "vhost": result.vhost,
+        "route": result.route.as_deref(),
+        "scope": cache_scope(result.route.as_deref()),
+        "memory_matched": result.memory_matched,
+        "memory_purged": result.memory_purged,
+        "memory_not_purged": result.memory_not_purged(),
+        "memory_purged_ratio_per_mille": ratio_per_mille_usize(result.memory_purged, result.memory_matched),
+        "memory_not_purged_ratio_per_mille": ratio_per_mille_usize(result.memory_not_purged(), result.memory_matched),
+        "memory_truncated": result.memory_truncated,
+        "disk_matched": result.disk_matched,
+        "disk_purged": result.disk_purged,
+        "disk_not_purged": result.disk_not_purged(),
+        "disk_purged_ratio_per_mille": ratio_per_mille_usize(result.disk_purged, result.disk_matched),
+        "disk_not_purged_ratio_per_mille": ratio_per_mille_usize(result.disk_not_purged(), result.disk_matched),
+        "disk_truncated": result.disk_truncated,
+    });
+
+    if let Some((key, value)) = path_prefix.or(cache_tag).or(path_pattern)
+        && let Some(object) = body.as_object_mut()
+    {
+        object.insert(key.to_owned(), Value::String(value.to_owned()));
+    }
+
+    body
 }
 
 #[cfg(feature = "cache")]
@@ -2953,25 +2987,6 @@ fn unix_secs() -> u64 {
             0
         }
     }
-}
-
-fn json_escape(input: &str) -> String {
-    let mut escaped = String::with_capacity(input.len());
-    for character in input.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control() => {
-                use std::fmt::Write;
-                let _ = write!(escaped, "\\u{:04x}", character as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 #[cfg(test)]
@@ -4341,7 +4356,21 @@ mod tests {
 
         assert_eq!(
             body,
-            r#"{"hits":7,"misses":3,"requests":10,"hit_ratio_per_mille":700,"miss_ratio_per_mille":300,"stores":4,"store_refusals":2,"store_attempts":6,"store_ratio_per_mille":666,"store_refusal_ratio_per_mille":333,"evictions":5,"eviction_ratio_per_mille":1250,"purges":1}"#
+            serde_json::json!({
+                "hits": 7,
+                "misses": 3,
+                "requests": 10,
+                "hit_ratio_per_mille": 700,
+                "miss_ratio_per_mille": 300,
+                "stores": 4,
+                "store_refusals": 2,
+                "store_attempts": 6,
+                "store_ratio_per_mille": 666,
+                "store_refusal_ratio_per_mille": 333,
+                "evictions": 5,
+                "eviction_ratio_per_mille": 1250,
+                "purges": 1,
+            })
         );
     }
 
@@ -4486,78 +4515,97 @@ mod tests {
         let response = app.handle("GET", "/_fluxheim/cache/status", None, &auth_headers());
 
         assert_eq!(response.status, StatusCode::OK);
-        let body = String::from_utf8(response.body).unwrap();
-        assert!(body.contains(r#""status":"ok""#));
-        assert!(body.contains(r#""totals":{"vhosts":1"#));
-        assert!(body.contains(r#""enabled_vhosts":1"#));
-        assert!(body.contains(r#""enabled_vhost_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""tiered_vhosts":1"#));
-        assert!(body.contains(r#""tiered_vhost_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""configured_routes":2"#));
-        assert!(body.contains(r#""routes_total":1"#));
-        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":500"#));
-        assert!(body.contains(r#""enabled_routes":1"#));
-        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""tiered_routes":0"#));
-        assert!(body.contains(r#""tiered_route_ratio_per_mille":0"#));
-        assert!(body.contains(r#""lock_enabled_policies":2"#));
-        assert!(body.contains(r#""lock_enabled_policy_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""peer_fill_enabled_policies":1"#));
-        assert!(body.contains(r#""peer_fill_enabled_policy_ratio_per_mille":500"#));
-        assert!(body.contains(r#""peer_fill_peers":1"#));
-        assert!(body.contains(r#""peer_fill_max_concurrent_requests":128"#));
-        assert!(body.contains(r#""memory_tiers":2"#));
-        assert!(body.contains(r#""memory_entries":0"#));
-        assert!(body.contains(r#""memory_average_weighted_size_bytes":0"#));
-        assert!(body.contains(r#""memory_fill_ratio_per_mille":0"#));
-        assert!(body.contains(r#""memory_purge_index_entries":0"#));
-        assert!(body.contains(r#""memory_purge_index_max_entries":18446744073709551615"#));
-        assert!(body.contains(r#""memory_purge_index_fill_ratio_per_mille":0"#));
-        assert!(body.contains(r#""disk_tiers":1"#));
-        assert!(body.contains(r#""disk_entries":0"#));
-        assert!(body.contains(r#""disk_average_object_size_bytes":0"#));
-        assert!(body.contains(r#""disk_fill_ratio_per_mille":0"#));
-        assert!(body.contains(r#""disk_purge_index_entries":0"#));
-        assert!(body.contains(r#""disk_purge_index_max_entries":18446744073709551615"#));
-        assert!(body.contains(r#""disk_purge_index_fill_ratio_per_mille":0"#));
-        assert!(body.contains(
-            r#""activity":{"hits":0,"misses":0,"requests":0,"hit_ratio_per_mille":0,"miss_ratio_per_mille":0,"stores":0,"store_refusals":0,"store_attempts":0,"store_ratio_per_mille":0,"store_refusal_ratio_per_mille":0,"evictions":0,"eviction_ratio_per_mille":0,"purges":0"#
-        ));
-        assert!(body.contains(r#""name":"cached""#));
-        assert!(body.contains(r#""enabled":true"#));
-        assert!(body.contains(r#""tiered":true"#));
-        assert!(body.contains(r#""lock_enabled":true"#));
-        assert!(body.contains(r#""lock_wait_timeout_secs":30"#));
-        assert!(body.contains(r#""peer_fill_enabled":true"#));
-        assert!(body.contains(r#""peer_fill_peers":1"#));
-        assert!(body.contains(r#""peer_fill_max_concurrent_requests":128"#));
-        assert!(body.contains(r#""peer_fill_fail_open":true"#));
-        assert!(body.contains(r#""storage_tiers":2"#));
-        assert!(body.contains(r#""configured_routes":2"#));
-        assert!(body.contains(r#""routes_total":1"#));
-        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":500"#));
-        assert!(body.contains(r#""enabled_routes":1"#));
-        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""tiered_routes":0"#));
-        assert!(body.contains(r#""tiered_route_ratio_per_mille":0"#));
-        assert!(body.contains(r#""memory":{"entries":0"#));
-        assert!(body.contains(r#""average_weighted_size_bytes":0"#));
-        assert!(body.contains(r#""fill_ratio_per_mille":0"#));
-        assert!(body.contains(r#""purge_index_entries":0"#));
-        assert!(body.contains(r#""purge_index_max_entries":18446744073709551615"#));
-        assert!(body.contains(r#""purge_index_fill_ratio_per_mille":0"#));
-        assert!(body.contains(r#""disk":{"backend":"filesystem","entries":0"#));
-        assert!(body.contains(r#""average_object_size_bytes":0"#));
-        assert!(body.contains(r#""allocated_size_bytes":0"#));
-        assert!(body.contains(r#""free_size_bytes":0"#));
-        assert!(body.contains(r#""free_ratio_per_mille":0"#));
-        assert!(body.contains(r#""free_range_count":0"#));
-        assert!(body.contains(r#""largest_free_range_bytes":0"#));
-        assert!(body.contains(r#""bin_files":0"#));
-        assert!(body.contains(r#""routes":[{"name":"assets""#));
-        assert!(body.contains(
-            r#""routes":[{"name":"assets","enabled":true,"tiered":false,"lock_enabled":true,"lock_wait_timeout_secs":30,"peer_fill_enabled":false,"peer_fill_peers":0,"peer_fill_max_concurrent_requests":64,"peer_fill_fail_open":true,"storage_tiers":1"#
-        ));
+        let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        let totals = &body["totals"];
+        assert_eq!(totals["vhosts"], 1);
+        assert_eq!(totals["enabled_vhosts"], 1);
+        assert_eq!(totals["enabled_vhost_ratio_per_mille"], 1000);
+        assert_eq!(totals["tiered_vhosts"], 1);
+        assert_eq!(totals["tiered_vhost_ratio_per_mille"], 1000);
+        assert_eq!(totals["configured_routes"], 2);
+        assert_eq!(totals["routes_total"], 1);
+        assert_eq!(totals["cache_route_coverage_ratio_per_mille"], 500);
+        assert_eq!(totals["enabled_routes"], 1);
+        assert_eq!(totals["enabled_route_ratio_per_mille"], 1000);
+        assert_eq!(totals["tiered_routes"], 0);
+        assert_eq!(totals["tiered_route_ratio_per_mille"], 0);
+        assert_eq!(totals["lock_enabled_policies"], 2);
+        assert_eq!(totals["lock_enabled_policy_ratio_per_mille"], 1000);
+        assert_eq!(totals["peer_fill_enabled_policies"], 1);
+        assert_eq!(totals["peer_fill_enabled_policy_ratio_per_mille"], 500);
+        assert_eq!(totals["peer_fill_peers"], 1);
+        assert_eq!(totals["peer_fill_max_concurrent_requests"], 128);
+        assert_eq!(totals["memory_tiers"], 2);
+        assert_eq!(totals["memory_entries"], 0);
+        assert_eq!(totals["memory_average_weighted_size_bytes"], 0);
+        assert_eq!(totals["memory_fill_ratio_per_mille"], 0);
+        assert_eq!(totals["memory_purge_index_entries"], 0);
+        assert_eq!(
+            totals["memory_purge_index_max_entries"],
+            serde_json::json!(u64::MAX)
+        );
+        assert_eq!(totals["memory_purge_index_fill_ratio_per_mille"], 0);
+        assert_eq!(totals["disk_tiers"], 1);
+        assert_eq!(totals["disk_entries"], 0);
+        assert_eq!(totals["disk_average_object_size_bytes"], 0);
+        assert_eq!(totals["disk_fill_ratio_per_mille"], 0);
+        assert_eq!(totals["disk_purge_index_entries"], 0);
+        assert_eq!(
+            totals["disk_purge_index_max_entries"],
+            serde_json::json!(u64::MAX)
+        );
+        assert_eq!(totals["disk_purge_index_fill_ratio_per_mille"], 0);
+        assert_eq!(totals["activity"]["requests"], 0);
+        assert_eq!(totals["activity"]["hit_ratio_per_mille"], 0);
+
+        let vhost = &body["vhosts"][0];
+        assert_eq!(vhost["name"], "cached");
+        assert_eq!(vhost["enabled"], true);
+        assert_eq!(vhost["tiered"], true);
+        assert_eq!(vhost["lock_enabled"], true);
+        assert_eq!(vhost["lock_wait_timeout_secs"], 30);
+        assert_eq!(vhost["peer_fill_enabled"], true);
+        assert_eq!(vhost["peer_fill_peers"], 1);
+        assert_eq!(vhost["peer_fill_max_concurrent_requests"], 128);
+        assert_eq!(vhost["peer_fill_fail_open"], true);
+        assert_eq!(vhost["storage_tiers"], 2);
+        assert_eq!(vhost["configured_routes"], 2);
+        assert_eq!(vhost["routes_total"], 1);
+        assert_eq!(vhost["cache_route_coverage_ratio_per_mille"], 500);
+        assert_eq!(vhost["enabled_routes"], 1);
+        assert_eq!(vhost["enabled_route_ratio_per_mille"], 1000);
+        assert_eq!(vhost["tiered_routes"], 0);
+        assert_eq!(vhost["tiered_route_ratio_per_mille"], 0);
+        assert_eq!(vhost["memory"]["entries"], 0);
+        assert_eq!(vhost["memory"]["average_weighted_size_bytes"], 0);
+        assert_eq!(vhost["memory"]["fill_ratio_per_mille"], 0);
+        assert_eq!(vhost["memory"]["purge_index_entries"], 0);
+        assert_eq!(
+            vhost["memory"]["purge_index_max_entries"],
+            serde_json::json!(u64::MAX)
+        );
+        assert_eq!(vhost["memory"]["purge_index_fill_ratio_per_mille"], 0);
+        assert_eq!(vhost["disk"]["backend"], "filesystem");
+        assert_eq!(vhost["disk"]["entries"], 0);
+        assert_eq!(vhost["disk"]["average_object_size_bytes"], 0);
+        assert_eq!(vhost["disk"]["allocated_size_bytes"], 0);
+        assert_eq!(vhost["disk"]["free_size_bytes"], 0);
+        assert_eq!(vhost["disk"]["free_ratio_per_mille"], 0);
+        assert_eq!(vhost["disk"]["free_range_count"], 0);
+        assert_eq!(vhost["disk"]["largest_free_range_bytes"], 0);
+        assert_eq!(vhost["disk"]["bin_files"], 0);
+        let route = &vhost["routes"][0];
+        assert_eq!(route["name"], "assets");
+        assert_eq!(route["enabled"], true);
+        assert_eq!(route["tiered"], false);
+        assert_eq!(route["lock_enabled"], true);
+        assert_eq!(route["lock_wait_timeout_secs"], 30);
+        assert_eq!(route["peer_fill_enabled"], false);
+        assert_eq!(route["peer_fill_peers"], 0);
+        assert_eq!(route["peer_fill_max_concurrent_requests"], 64);
+        assert_eq!(route["peer_fill_fail_open"], true);
+        assert_eq!(route["storage_tiers"], 1);
 
         std::fs::remove_dir_all(cache_path).unwrap();
     }
@@ -4588,32 +4636,44 @@ mod tests {
         let response = app.handle("GET", "/_fluxheim/cache/status", None, &auth_headers());
 
         assert_eq!(response.status, StatusCode::OK);
-        let body = String::from_utf8(response.body).unwrap();
-        assert!(body.contains(r#""totals":{"vhosts":1"#));
-        assert!(body.contains(r#""enabled_vhosts":0"#));
-        assert!(body.contains(r#""tiered_vhosts":0"#));
-        assert!(body.contains(r#""configured_routes":1"#));
-        assert!(body.contains(r#""routes_total":1"#));
-        assert!(body.contains(r#""cache_route_coverage_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""enabled_routes":1"#));
-        assert!(body.contains(r#""enabled_route_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""tiered_routes":1"#));
-        assert!(body.contains(r#""tiered_route_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""lock_enabled_policies":1"#));
-        assert!(body.contains(r#""lock_enabled_policy_ratio_per_mille":1000"#));
-        assert!(body.contains(r#""peer_fill_enabled_policies":0"#));
-        assert!(body.contains(r#""peer_fill_enabled_policy_ratio_per_mille":0"#));
-        assert!(body.contains(r#""memory_tiers":1"#));
-        assert!(body.contains(r#""disk_tiers":1"#));
-        assert!(
-            body.contains(r#""name":"cached","enabled":false,"tiered":false,"lock_enabled":false,"lock_wait_timeout_secs":30,"peer_fill_enabled":false,"peer_fill_peers":0,"peer_fill_max_concurrent_requests":64,"peer_fill_fail_open":true"#)
-        );
-        assert!(body.contains(
-            r#""routes":[{"name":"media","enabled":true,"tiered":true,"lock_enabled":true,"lock_wait_timeout_secs":30,"peer_fill_enabled":false,"peer_fill_peers":0,"peer_fill_max_concurrent_requests":64,"peer_fill_fail_open":true"#
-        ));
-        assert!(body.contains(r#""storage_tiers":2"#));
-        assert!(body.contains(r#""memory":{"entries":0"#));
-        assert!(body.contains(r#""disk":{"backend":"filesystem","entries":0"#));
+        let body: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
+        let totals = &body["totals"];
+        assert_eq!(totals["vhosts"], 1);
+        assert_eq!(totals["enabled_vhosts"], 0);
+        assert_eq!(totals["tiered_vhosts"], 0);
+        assert_eq!(totals["configured_routes"], 1);
+        assert_eq!(totals["routes_total"], 1);
+        assert_eq!(totals["cache_route_coverage_ratio_per_mille"], 1000);
+        assert_eq!(totals["enabled_routes"], 1);
+        assert_eq!(totals["enabled_route_ratio_per_mille"], 1000);
+        assert_eq!(totals["tiered_routes"], 1);
+        assert_eq!(totals["tiered_route_ratio_per_mille"], 1000);
+        assert_eq!(totals["lock_enabled_policies"], 1);
+        assert_eq!(totals["lock_enabled_policy_ratio_per_mille"], 1000);
+        assert_eq!(totals["peer_fill_enabled_policies"], 0);
+        assert_eq!(totals["peer_fill_enabled_policy_ratio_per_mille"], 0);
+        assert_eq!(totals["memory_tiers"], 1);
+        assert_eq!(totals["disk_tiers"], 1);
+
+        let vhost = &body["vhosts"][0];
+        assert_eq!(vhost["name"], "cached");
+        assert_eq!(vhost["enabled"], false);
+        assert_eq!(vhost["tiered"], false);
+        assert_eq!(vhost["lock_enabled"], false);
+        assert_eq!(vhost["lock_wait_timeout_secs"], 30);
+        assert_eq!(vhost["peer_fill_enabled"], false);
+        assert_eq!(vhost["peer_fill_peers"], 0);
+        assert_eq!(vhost["peer_fill_max_concurrent_requests"], 64);
+        assert_eq!(vhost["peer_fill_fail_open"], true);
+        let route = &vhost["routes"][0];
+        assert_eq!(route["name"], "media");
+        assert_eq!(route["enabled"], true);
+        assert_eq!(route["tiered"], true);
+        assert_eq!(route["lock_enabled"], true);
+        assert_eq!(route["storage_tiers"], 2);
+        assert_eq!(route["memory"]["entries"], 0);
+        assert_eq!(route["disk"]["backend"], "filesystem");
+        assert_eq!(route["disk"]["entries"], 0);
 
         std::fs::remove_dir_all(cache_path).unwrap();
     }

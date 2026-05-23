@@ -53,6 +53,9 @@ behavior when the change improves security or project direction.
 - Admin runtime/auth-throttle mutex poisoning now aborts instead of recovering
   potentially inconsistent management state, matching release-mode fail-closed
   behavior in debug/test builds.
+- Dynamic admin API JSON responses now serialize through `serde_json::to_vec`
+  instead of hand-written `format!` response bodies, preserving the existing
+  response schemas while reducing future JSON escaping risk.
 - Peer-fill concurrency permit accounting now uses checked arithmetic and
   refuses permits if the counter saturates.
 

@@ -43,6 +43,9 @@ reviews.
   predictors are reused for identical cache plans across authenticated reloads,
   reducing process-lifetime allocations required by Pingora's `'static` cache
   API.
+- Dynamic admin API JSON responses now serialize through `serde_json::to_vec`
+  instead of hand-written `format!` response bodies, preserving existing schemas
+  while reducing future JSON escaping risk.
 - Admin runtime/auth-throttle mutex poisoning now aborts instead of recovering
   potentially inconsistent state in debug/test builds, matching the production
   fail-closed model.

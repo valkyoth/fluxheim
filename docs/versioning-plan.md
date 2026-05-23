@@ -1043,12 +1043,10 @@ Follow-up `1.3.x` PHP runtime plan:
   intended for testing and zero-dependency edge microservices only, and that
   production applications such as WordPress, Laravel, Symfony, phpBB, XenForo,
   and MediaWiki should use the stable `php-fpm` module.
-- Same later `1.3.x` release: convert admin API response builders from
-  hand-written `format!` JSON strings to serde-backed response structs and
-  `serde_json::to_vec`. The current `json_escape` path is covered by tests and
-  response-size limits, but typed serialization should reduce future
-  maintenance risk as the admin API grows. Keep existing response schemas and
-  regression tests stable during the migration.
+- `1.3.6` completed the admin API JSON cleanup: dynamic admin responses now
+  serialize through `serde_json::to_vec` instead of hand-written `format!`
+  bodies, while retaining the existing response schemas and response-size
+  safety limit.
 - Turbine-style PHP app servers are not Fluxheim runtime targets. Treat them as
   HTTP upstreams that Fluxheim can reverse-proxy to unless a future project
   exposes a small, auditable library API with a clearly safer boundary than
