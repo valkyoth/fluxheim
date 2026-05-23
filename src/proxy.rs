@@ -2824,13 +2824,70 @@ impl Drop for ManagedPhpFpmProcess {
             Ok(child) => child,
             Err(poisoned) => poisoned.into_inner(),
         };
-        if let Some(mut child) = child.take() {
-            terminate_managed_php_fpm_child(&mut child);
+        if let Some(child) = child.take() {
+            let socket = self.socket.clone();
+            let config_path = self.config_path.clone();
+            let pid_path = self.pid_path.clone();
+            spawn_managed_php_fpm_cleanup(child, socket, config_path, pid_path);
+        } else {
+            cleanup_managed_php_fpm_files(&self.socket, &self.config_path, &self.pid_path);
         }
-        let _ = std::fs::remove_file(&self.socket);
-        let _ = std::fs::remove_file(&self.config_path);
-        let _ = std::fs::remove_file(&self.pid_path);
     }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn spawn_managed_php_fpm_cleanup(
+    child: std::process::Child,
+    socket: std::path::PathBuf,
+    config_path: std::path::PathBuf,
+    pid_path: std::path::PathBuf,
+) {
+    let child = Arc::new(Mutex::new(Some(child)));
+    let cleanup_child = Arc::clone(&child);
+    let cleanup_socket = socket.clone();
+    let cleanup_config_path = config_path.clone();
+    let cleanup_pid_path = pid_path.clone();
+
+    match std::thread::Builder::new()
+        .name("fluxheim-php-fpm-stop".to_owned())
+        .spawn(move || {
+            let child = match cleanup_child.lock() {
+                Ok(mut guard) => guard.take(),
+                Err(poisoned) => poisoned.into_inner().take(),
+            };
+            if let Some(mut child) = child {
+                terminate_managed_php_fpm_child(&mut child);
+            }
+            cleanup_managed_php_fpm_files(&cleanup_socket, &cleanup_config_path, &cleanup_pid_path);
+        }) {
+        Ok(_) => {}
+        Err(error) => {
+            log::warn!(
+                target: "fluxheim::php_fpm",
+                "failed to spawn managed php-fpm cleanup thread; forcing child termination inline: {error}"
+            );
+            let child = match child.lock() {
+                Ok(mut guard) => guard.take(),
+                Err(poisoned) => poisoned.into_inner().take(),
+            };
+            if let Some(mut child) = child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            cleanup_managed_php_fpm_files(&socket, &config_path, &pid_path);
+        }
+    }
+}
+
+#[cfg(all(feature = "php-fpm", unix))]
+fn cleanup_managed_php_fpm_files(
+    socket: &std::path::Path,
+    config_path: &std::path::Path,
+    pid_path: &std::path::Path,
+) {
+    let _ = std::fs::remove_file(socket);
+    let _ = std::fs::remove_file(config_path);
+    let _ = std::fs::remove_file(pid_path);
 }
 
 #[cfg(all(feature = "php-fpm", unix))]
