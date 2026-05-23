@@ -3271,13 +3271,14 @@ impl ManagedPhpFpmProcess {
             pid_path,
             connect_timeout_secs: config.fpm.connect_timeout_secs,
         });
-        let child = spawn_managed_php_fpm_child(&plan, None)?;
+        let (child, started_at) = spawn_managed_php_fpm_child(&plan, None)?;
         let child = Arc::new(Mutex::new(Some(child)));
         let shutdown = Arc::new(AtomicBool::new(false));
         if let Err(error) = spawn_managed_php_fpm_watchdog(
             Arc::clone(&child),
             Arc::clone(&shutdown),
             Arc::clone(&plan),
+            started_at,
         ) {
             shutdown.store(true, Ordering::Release);
             let child = match child.lock() {
@@ -3303,7 +3304,7 @@ impl ManagedPhpFpmProcess {
 fn spawn_managed_php_fpm_child(
     plan: &ManagedPhpFpmSpawnPlan,
     shutdown: Option<&AtomicBool>,
-) -> io::Result<std::process::Child> {
+) -> io::Result<(std::process::Child, Instant)> {
     let _ = std::fs::remove_file(&plan.socket);
     let _ = std::fs::remove_file(&plan.pid_path);
 
@@ -3334,7 +3335,7 @@ fn spawn_managed_php_fpm_child(
         plan.connect_timeout_secs,
         shutdown,
     ) {
-        Ok(()) => Ok(child),
+        Ok(()) => Ok((child, Instant::now())),
         Err(error) => {
             terminate_managed_php_fpm_child(&mut child);
             let _ = std::fs::remove_file(&plan.socket);
@@ -3355,10 +3356,11 @@ fn spawn_managed_php_fpm_watchdog(
     child: Arc<Mutex<Option<std::process::Child>>>,
     shutdown: Arc<AtomicBool>,
     plan: Arc<ManagedPhpFpmSpawnPlan>,
+    started_at: Instant,
 ) -> io::Result<()> {
     std::thread::Builder::new()
         .name("fluxheim-php-fpm-watchdog".to_owned())
-        .spawn(move || run_managed_php_fpm_watchdog(child, shutdown, plan))
+        .spawn(move || run_managed_php_fpm_watchdog(child, shutdown, plan, started_at))
         .map(|_| ())
         .map_err(|error| {
             io::Error::other(format!("failed to start managed php-fpm watchdog: {error}"))
@@ -3370,9 +3372,10 @@ fn run_managed_php_fpm_watchdog(
     child: Arc<Mutex<Option<std::process::Child>>>,
     shutdown: Arc<AtomicBool>,
     plan: Arc<ManagedPhpFpmSpawnPlan>,
+    started_at: Instant,
 ) {
     let mut restart_failures = 0_usize;
-    let mut last_started = Instant::now();
+    let mut last_started = started_at;
     loop {
         if managed_php_fpm_shutdown_requested(&shutdown) {
             return;
@@ -3429,7 +3432,7 @@ fn run_managed_php_fpm_watchdog(
         }
 
         match spawn_managed_php_fpm_child(&plan, Some(shutdown.as_ref())) {
-            Ok(new_child) => {
+            Ok((new_child, started_at)) => {
                 let mut guard = match child.lock() {
                     Ok(guard) => guard,
                     Err(poisoned) => poisoned.into_inner(),
@@ -3441,7 +3444,7 @@ fn run_managed_php_fpm_watchdog(
                     return;
                 }
                 *guard = Some(new_child);
-                last_started = Instant::now();
+                last_started = started_at;
                 log::info!(
                     target: "fluxheim::php_fpm",
                     "{}: managed php-fpm restarted",
