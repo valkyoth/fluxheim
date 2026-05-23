@@ -55,7 +55,7 @@ for runtime in $PHP_RUNTIMES; do
 done
 
 if [ "$php_count" -gt 1 ]; then
-    echo "select only one Fluxheim PHP runtime feature: php-fpm or experimental-pure-php; selected $php_selected" >&2
+    echo "select only one Fluxheim PHP runtime feature; selected $php_selected" >&2
     exit 1
 fi
 

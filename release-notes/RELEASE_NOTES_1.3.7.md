@@ -1,8 +1,8 @@
 # Fluxheim 1.3.7 Release Notes
 
 Fluxheim 1.3.7 is the production PHP-FPM completion release for the 1.3 line.
-It keeps real PHP application hosting on the stable FastCGI/php-fpm path and
-defers pure-Rust PHP interpreter research to `1.3.8`.
+It keeps PHP application hosting on the stable FastCGI/php-fpm path and removes
+the reserved pure-Rust PHP/phprs track from the release plan.
 
 ## Highlights
 
@@ -35,8 +35,8 @@ defers pure-Rust PHP interpreter research to `1.3.8`.
 
 ## Out Of Scope
 
-- `experimental-pure-php` / phprs integration. That belongs in `1.3.8` and must
-  remain explicitly experimental.
+- phprs / pure-Rust PHP integration. Managed php-fpm now covers the intended
+  zero-admin PHP deployment model without adopting an immature PHP interpreter.
 - Embedded PHP/libphp or Turbine-style in-process PHP runtimes. Turbine-style
   app servers remain normal HTTP upstreams for Fluxheim to reverse-proxy.
 - Persistent `php-cli` stdin/stdout worker protocols for production PHP apps.

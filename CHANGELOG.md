@@ -28,8 +28,8 @@ behavior when the change improves security or project direction.
 - Added a self-contained Wolfi PHP image path that installs `php-8.5-fpm`,
   uses the managed php-fpm container config, and has a smoke test proving
   `/index.php` executes through the Fluxheim-supervised pool.
-- Keep production PHP guidance on `php-fpm`; defer pure-Rust PHP/phprs work to
-  `1.3.8` behind `experimental-pure-php`.
+- Dropped the reserved pure-Rust PHP/phprs track. Managed php-fpm is the
+  supported zero-admin PHP direction for the 1.3 line.
 
 ## 1.3.6 - FIPS/ISO Internal Crypto Closure
 
@@ -352,9 +352,9 @@ Released: 2026-05-20
 - Updated the PHP-FPM example to use `php.preset = "wordpress"` and show the
   optional `cache.preset = "wordpress"` shared-cache migration block.
 - Removed `php-turbine` from the PHP runtime plan because Turbine-style app
-  servers are better handled as reverse-proxy upstreams, and renamed the
-  reserved pure-Rust PHP gate to `experimental-pure-php` with an explicit
-  startup warning that production PHP applications should use `php-fpm`.
+  servers are better handled as reverse-proxy upstreams. The later pure-Rust
+  PHP/phprs track has also been dropped from the `1.3.x` plan in favor of
+  managed php-fpm.
 - Added managed php-fpm process supervision to the future `1.3.x` PHP plan as
   a runtime config mode inside the existing `php-fpm` feature, while keeping
   external php-fpm as the default and rejecting persistent `php-cli` workers as

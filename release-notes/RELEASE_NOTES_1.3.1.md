@@ -14,7 +14,8 @@ of default, cache, proxy, and privacy builds.
 
 ## Highlights
 
-- Added `php`, `php-fpm`, `php-turbine`, and `php-phprs` feature gates.
+- Added `php` and `php-fpm` feature gates. Earlier exploratory PHP runtime
+  gates were later dropped in favor of the stable php-fpm path.
 - Implemented the production `php-fpm` path through `fastcgi-client`.
 - Added `[vhosts.php]` and `[vhosts.routes.php]` typed config.
 - Added strict PHP script resolution below the configured PHP root.

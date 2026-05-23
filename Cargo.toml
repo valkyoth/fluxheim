@@ -76,7 +76,6 @@ otel-tracing = ["proxy"]
 otel-otlp = ["otel-tracing", "dep:serde_json", "dep:ureq"]
 php = ["proxy", "web"]
 php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio"]
-experimental-pure-php = ["php"]
 privacy-mode = ["proxy", "web"]
 security = []
 

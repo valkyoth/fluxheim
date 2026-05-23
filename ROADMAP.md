@@ -49,10 +49,10 @@ without a second manual gateway restart, plus downloadable
 cannot start.
 `1.3.7` continues the production PHP-FPM line with managed php-fpm process
 supervision as an opt-in runtime mode under the existing `php-fpm` feature.
-`1.3.8` is reserved for experimental pure-Rust PHP interpreter research behind
-`experimental-pure-php`. Turbine-style PHP app servers stay reverse-proxy
-upstreams unless a future embeddable library API proves safer than that
-boundary.
+Pure-Rust PHP/phprs support is no longer planned for the 1.3 line; managed
+php-fpm now covers the zero-admin PHP deployment goal without adopting an
+immature interpreter. Turbine-style PHP app servers stay reverse-proxy upstreams
+unless a future embeddable library API proves safer than that boundary.
 `1.4` is planned as the advanced proxy parity release. Its target is
 HAProxy/nginx-style reverse-proxy migration coverage that is not fundamentally
 load-balancing: queue/backpressure controls, upstream keepalive pool tuning,
@@ -122,8 +122,9 @@ static/proxy serving to dynamic code execution. The `1.3.1` path is
 `php-fpm`/FastCGI first. `1.3.2` is an operational detour for the
 `fluxheim-acme` companion-agent model, smooth zero-downtime first issuance, and
 release-page config tester binaries for host/container diagnostics.
-Embedded or pure-Rust PHP runtimes are planned as later `1.3.x` feature-gated
-follow-ups after review.
+Embedded or pure-Rust PHP runtimes are not planned for the `1.3.x` line.
+Revisit only if an interpreter or embedded runtime has mature compatibility,
+security, and maintenance evidence.
 
 Legacy Perl CGI execution is also post-MVP application-server work. It should
 be modeled as a separate opt-in compile feature from PHP, disabled per vhost by
@@ -1089,11 +1090,9 @@ without parsing text fixtures for every module.
    - `1.3.7` managed php-fpm keeps the same `php-fpm` Cargo feature and adds a
      runtime config mode where Fluxheim starts and supervises a private php-fpm
      pool. External php-fpm remains the default.
-   - `1.3.8` experimental pure PHP uses the reserved `experimental-pure-php`
-     feature for research and compatibility tests, not production WordPress or
-     Laravel hosting until the interpreter matures.
-   - `compile_error!` guards must keep incompatible PHP runtime features from
-     being selected together.
+   - Pure-Rust PHP/phprs is intentionally out of scope for the 1.3 line. Revisit
+     only if an upstream interpreter has mature compatibility, maintenance, and
+     security evidence.
    - Add typed PHP config per vhost: enabled runtime, document root, index file,
      allowed extensions, socket/upstream, request timeout, body limit override,
      environment allow-list, and path-info policy.
@@ -1112,10 +1111,6 @@ without parsing text fixtures for every module.
      as HTTP upstreams that Fluxheim can reverse-proxy to unless a future
      project exposes a small, auditable library API with a clearly safer
      boundary than reverse proxying.
-   - `experimental-pure-php` plan:
-     keep behind warning-heavy docs and CI checks only; do not mark
-     production-ready until PHP language/framework compatibility and security
-     behavior are proven.
    - PHP runtime changes should be process-upgrade changes, not snapshot-only
      reloads, until each runtime proves safe reload semantics.
 

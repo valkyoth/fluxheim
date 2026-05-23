@@ -1045,12 +1045,9 @@ Follow-up `1.3.x` PHP runtime plan:
   - Future php-cgi support can be evaluated separately for tiny deployments,
     but it should not block managed php-fpm because php-cgi process-per-request
     behavior is a different performance and compatibility tradeoff.
-- `1.3.8`: pure-Rust PHP interpreter experiment behind
-  `experimental-pure-php`, test-only until compatibility, security, and
-  maintenance are proven. The feature must warn operators at startup that it is
-  intended for testing and zero-dependency edge microservices only, and that
-  production applications such as WordPress, Laravel, Symfony, phpBB, XenForo,
-  and MediaWiki should use the stable `php-fpm` module.
+- Pure-Rust PHP/phprs is no longer planned for the 1.3 line. Managed php-fpm
+  covers the zero-admin PHP deployment goal while preserving normal php-fpm
+  compatibility and isolation.
 - `1.3.6` completed the admin API JSON cleanup: dynamic admin responses now
   serialize through `serde_json::to_vec` instead of hand-written `format!`
   bodies, while retaining the existing response schemas and response-size
@@ -1065,11 +1062,8 @@ Compile-time feature shape stays:
 ```toml
 php = []
 php-fpm = ["php", "dep:fastcgi-client"]
-experimental-pure-php = ["php"] # add dep:phprs only after engine review
 ```
 
-Only one PHP runtime feature may be selected in one binary. Add compile-time
-guards for incompatible runtime combinations.
 Managed php-fpm is not a separate runtime feature; it belongs behind
 `php-fpm` because it changes process lifecycle, not the request protocol.
 
@@ -2585,8 +2579,6 @@ the exception while the cache server is being completed as a focused sequence:
   workflow.
 - `v1.3.7`: managed php-fpm process supervision under the existing `php-fpm`
   feature.
-- `v1.3.8`: experimental pure-Rust PHP research behind
-  `experimental-pure-php`; Turbine-style PHP app servers stay proxy upstreams.
 - `v1.4.1`: fixes for advanced proxy parity.
 - `v1.5.1`: fixes for load balancer.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.

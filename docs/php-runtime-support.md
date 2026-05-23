@@ -7,24 +7,22 @@ every PHP path is opt-in at compile time and opt-in per vhost or route.
 
 ## Current Recommendation
 
-Use this order for implementation and evaluation:
+Use this implementation model:
 
-1. `php-fpm`: stable backwards-compatible path for real PHP applications today.
-   This is implemented in `1.3.1`.
-2. Managed `php-fpm`: future zero-admin deployment mode inside the existing
-   `php-fpm` feature. Fluxheim would generate a minimal private php-fpm pool,
-   spawn and supervise php-fpm, and connect to its private socket, while still
-   using the same FastCGI request path as external php-fpm.
-3. `experimental-pure-php`: future pure-Rust interpreter path, likely based on
-   a reviewed `phprs`-style engine if compatibility and maintenance are proven.
-   This is useful for research, tests, and long-term optionality, not for
-   production PHP hosting yet.
+1. `php-fpm`: stable backwards-compatible path for PHP applications. This is
+   implemented in `1.3.1`.
+2. Managed `php-fpm`: zero-admin deployment mode inside the existing `php-fpm`
+   feature. Fluxheim generates a minimal private php-fpm pool, spawns and
+   supervises php-fpm, and connects to its private socket while still using the
+   same FastCGI request path as external php-fpm.
 
 As of the current review, `fastcgi-client 0.11.1` is available for the php-fpm
-path under Apache-2.0. `phprs 0.1.9` exists under Apache-2.0 but is still young.
-`ripht-php-sapi 0.1.0-rc.7` exists under MIT as an embedding reference. Turbine
-is no longer a Fluxheim runtime target; it is better treated as an external PHP
-application server that Fluxheim can reverse-proxy to if an operator chooses it.
+path under Apache-2.0. Pure-Rust PHP/phprs support is no longer planned for the
+1.3 line because managed php-fpm covers the useful zero-admin deployment goal
+without adopting an immature interpreter. `ripht-php-sapi 0.1.0-rc.7` remains an
+embedding reference only. Turbine is not a Fluxheim runtime target; it is better
+treated as an external PHP application server that Fluxheim can reverse-proxy to
+if an operator chooses it.
 
 ## Compile-Time Features
 
@@ -33,14 +31,11 @@ Implemented feature flags:
 ```toml
 php = ["proxy", "web"]
 php-fpm = ["php", "dep:fastcgi-client", "dep:tokio", "fastcgi-client/runtime-tokio"]
-experimental-pure-php = ["php"]
 ```
 
-Only one PHP runtime feature may be selected in one binary. Fluxheim enforces
-this at compile time and in `scripts/validate-features.sh`.
-`experimental-pure-php` is a reserved feature gate today; it does not add a
-production runtime until a pure-Rust engine passes review and integration
-tests.
+`php-fpm` is the only PHP runtime feature in the 1.3 line. Managed php-fpm is a
+runtime configuration mode under the same feature because it changes process
+lifecycle, not the request protocol.
 
 The default feature set must not include `php`.
 
@@ -57,8 +52,9 @@ Release order:
   `php-fpm` feature, not as a separate Cargo runtime. The goal is a
   single-binary operator experience while retaining normal php-fpm request
   isolation and compatibility.
-- `1.3.8`: `experimental-pure-php` pure-Rust interpreter research,
-  test-only unless compatibility, security, and maintenance are proven.
+- Pure-Rust PHP/phprs is intentionally out of scope for the 1.3 line. Revisit
+  only if an upstream interpreter has mature compatibility, maintenance, and
+  security evidence.
 
 ## Config Shape
 
@@ -438,25 +434,13 @@ Fluxheim should not duplicate that model as an embedded PHP runtime unless a
 future project exposes a small auditable library API with a clearly safer
 security boundary than reverse proxying.
 
-### `experimental-pure-php`
+### Pure-Rust PHP
 
-`phprs` is interesting because it points toward a pure-Rust PHP runtime, but it
-must stay experimental. The feature name is intentionally
-`experimental-pure-php`, not `php` or a project-specific crate name, so
-operators do not confuse it with normal PHP compatibility.
-
-When this feature is compiled, Fluxheim must warn at startup:
-
-```text
-WARNING: experimental pure-Rust PHP engine feature enabled.
-This is intended for testing and zero-dependency edge microservices.
-For production PHP apps such as WordPress, Laravel, Symfony, phpBB, XenForo, or MediaWiki, use the stable php-fpm module.
-```
-
-Before it is considered production-capable, Fluxheim needs language
-compatibility tests, framework compatibility tests, extension behavior
-analysis, security tests, performance benchmarks, and a clear upstream
-maintenance signal.
+Pure-Rust PHP/phprs is not a Fluxheim runtime target for the 1.3 line. Managed
+php-fpm provides the useful single-binary operational model while preserving the
+normal php-fpm compatibility and isolation boundary. Revisit only if a future
+interpreter has mature PHP/framework compatibility, security testing,
+performance evidence, and a clear maintenance signal.
 
 Fluxheim 1.3.6 also completed the adjacent admin API JSON cleanup. This is not
 part of the PHP runtime, but it landed in the same hardening window: dynamic

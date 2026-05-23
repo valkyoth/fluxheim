@@ -162,7 +162,6 @@ expect_feature_validation_failure "profile-privacy,metrics" "privacy-mode cannot
 expect_feature_validation_failure "profile-privacy,metrics-otlp" "privacy-mode cannot be combined with metrics-otlp"
 expect_feature_validation_failure "profile-privacy,otel-tracing" "privacy-mode cannot be combined with otel-tracing"
 expect_feature_validation_failure "profile-privacy,otel-otlp" "privacy-mode cannot be combined with otel-otlp"
-expect_feature_validation_failure "php-fpm,experimental-pure-php" "select only one Fluxheim PHP runtime feature"
 expect_feature_validation_failure "profile-core,tls-openssl" "select only one Fluxheim TLS backend feature"
 expect_feature_validation_failure "tls-rustls,tls-openssl" "select only one Fluxheim TLS backend feature"
 expect_feature_validation_failure "tls-rustls,tls-rustls-fips" "select only one Fluxheim TLS backend feature"

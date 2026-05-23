@@ -94,10 +94,8 @@ mode inside this same `php-fpm` feature, not as a separate Cargo feature. It
 still uses the FastCGI bridge; only php-fpm process lifecycle changes from
 operator-managed to Fluxheim-supervised.
 
-Only one PHP runtime feature may be selected in one binary. Fluxheim `1.3.8`
-reserves pure-Rust PHP work behind `experimental-pure-php`; it is not a
-production runtime and must warn operators to use `php-fpm` for real PHP
-applications until compatibility is proven.
+Fluxheim no longer reserves a pure-Rust PHP/phprs runtime for `1.3.8`. Managed
+php-fpm is the supported zero-admin PHP direction.
 
 ## Profile Aliases
 

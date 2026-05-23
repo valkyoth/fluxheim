@@ -282,8 +282,8 @@ Fluxheim `1.3.7` is the production PHP-FPM completion release with managed
 php-fpm supervision as an opt-in runtime mode. The Wolfi `v1.3.7-php` image is
 self-contained for managed PHP-FPM and includes the Wolfi `php-8.5-fpm`
 runtime; non-Wolfi PHP image variants keep the external php-fpm container
-config unless customized. Experimental pure-Rust PHP research is reserved for
-`1.3.8` behind `experimental-pure-php`.
+config unless customized. Pure-Rust PHP/phprs support is not planned for the
+1.3 line; managed php-fpm is the supported zero-admin PHP path.
 
 TLS backends are mutually exclusive. Select exactly one backend when TLS is
 needed:
@@ -372,8 +372,8 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Production Readiness](docs/production-readiness.md).
 
 Next lines are planned separately: later `1.3.x` releases for PHP-FPM
-follow-ups and experimental pure-Rust PHP research, `1.4` for advanced proxy
-parity, `1.5` for load-balancer parity, and `1.6` for shared Wasm
+follow-ups, `1.4` for advanced proxy parity, `1.5` for load-balancer parity,
+and `1.6` for shared Wasm
 extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
