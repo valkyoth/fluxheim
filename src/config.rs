@@ -3626,6 +3626,8 @@ pub struct LoadBalanceConfig {
     pub health_check: LoadBalanceHealthCheckConfig,
     #[serde(default)]
     pub passive_health: LoadBalancePassiveHealthConfig,
+    #[serde(default)]
+    pub retry: LoadBalanceRetryConfig,
 }
 
 impl Default for LoadBalanceConfig {
@@ -3637,6 +3639,7 @@ impl Default for LoadBalanceConfig {
             max_iterations: default_lb_max_iterations(),
             health_check: LoadBalanceHealthCheckConfig::default(),
             passive_health: LoadBalancePassiveHealthConfig::default(),
+            retry: LoadBalanceRetryConfig::default(),
         }
     }
 }
@@ -3682,6 +3685,7 @@ impl LoadBalanceConfig {
 
         self.health_check.validate()?;
         self.passive_health.validate()?;
+        self.retry.validate()?;
         Ok(())
     }
 }
@@ -3818,6 +3822,77 @@ fn default_lb_passive_consecutive_failure() -> usize {
 
 fn default_lb_passive_ejection_secs() -> u64 {
     30
+}
+
+const MAX_LB_RETRIES: u8 = 10;
+const MAX_LB_RETRY_METHODS: usize = 16;
+const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceRetryConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_lb_retry_max_retries")]
+    pub max_retries: u8,
+    #[serde(default = "default_lb_retry_methods")]
+    pub methods: Vec<String>,
+}
+
+impl Default for LoadBalanceRetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_retries: default_lb_retry_max_retries(),
+            methods: default_lb_retry_methods(),
+        }
+    }
+}
+
+impl LoadBalanceRetryConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.max_retries > MAX_LB_RETRIES {
+            return Err(ConfigError::InvalidLoadBalanceRetry {
+                field: "proxy.load_balance.retry.max_retries",
+            });
+        }
+        if self.methods.len() > MAX_LB_RETRY_METHODS {
+            return Err(ConfigError::InvalidLoadBalanceRetry {
+                field: "proxy.load_balance.retry.methods",
+            });
+        }
+        let mut seen = HashSet::new();
+        for method in &self.methods {
+            if method.is_empty()
+                || method.len() > 32
+                || !method
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
+            {
+                return Err(ConfigError::InvalidLoadBalanceRetry {
+                    field: "proxy.load_balance.retry.methods",
+                });
+            }
+            if !seen.insert(method.clone())
+                || !LB_SAFE_RETRY_METHODS
+                    .iter()
+                    .any(|safe_method| safe_method == method)
+            {
+                return Err(ConfigError::InvalidLoadBalanceRetry {
+                    field: "proxy.load_balance.retry.methods",
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_lb_retry_max_retries() -> u8 {
+    1
+}
+
+fn default_lb_retry_methods() -> Vec<String> {
+    vec!["GET".to_owned(), "HEAD".to_owned(), "OPTIONS".to_owned()]
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -8108,6 +8183,9 @@ pub enum ConfigError {
     InvalidLoadBalancePassiveHealth {
         field: &'static str,
     },
+    InvalidLoadBalanceRetry {
+        field: &'static str,
+    },
     EmptyCacheImageExtensions {
         scope: &'static str,
     },
@@ -8734,6 +8812,9 @@ impl Display for ConfigError {
                     formatter,
                     "{field} contains an invalid passive health value"
                 )
+            }
+            Self::InvalidLoadBalanceRetry { field } => {
+                write!(formatter, "{field} contains an invalid retry value")
             }
             Self::EmptyCacheImageExtensions { scope } => {
                 write!(formatter, "{scope}.image_extensions cannot be empty")
@@ -12370,6 +12451,35 @@ mod tests {
             invalid_status.validate(),
             Err(ConfigError::InvalidLoadBalancePassiveHealth {
                 field: "proxy.load_balance.passive_health.failure_statuses"
+            })
+        );
+    }
+
+    #[test]
+    fn validates_load_balance_retry_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.retry]
+            enabled = true
+            max_retries = 2
+            methods = ["GET", "HEAD"]
+            "#,
+        )
+        .unwrap();
+        config.validate().unwrap();
+
+        let unsafe_method: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.retry]
+            enabled = true
+            methods = ["POST"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            unsafe_method.validate(),
+            Err(ConfigError::InvalidLoadBalanceRetry {
+                field: "proxy.load_balance.retry.methods"
             })
         );
     }

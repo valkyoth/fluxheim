@@ -535,6 +535,12 @@ narrow the failure set to specific 5xx status codes. Active TCP health checks
 and passive ejection are combined; if no backend is currently selectable,
 Fluxheim returns a proxy error instead of falling back to a configured primary
 upstream.
+`proxy.load_balance.retry.enabled = true` enables bounded redispatch for
+connection failures that happen before the request is sent upstream. It is
+limited by `max_retries`, by Pingora's process-wide retry cap, and by
+`methods`, which accepts only safe method tokens such as `GET`, `HEAD`,
+`OPTIONS`, and `TRACE`. Fluxheim does not retry after response streaming has
+started; status-code retries remain a later buffering-aware feature.
 
 `upstreams` is the preferred proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

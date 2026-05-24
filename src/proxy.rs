@@ -4834,6 +4834,8 @@ pub struct RequestContext {
     upstream_load_balancer_reporter: Option<crate::load_balancer::LoadBalancedUpstreamReporter>,
     #[cfg(feature = "load-balancer")]
     upstream_load_balancer_outcome_recorded: bool,
+    #[cfg(feature = "load-balancer")]
+    upstream_load_balancer_retries: u8,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
     health_signal_recorded: bool,
@@ -5306,6 +5308,13 @@ impl ProxyHttp for FluxProxy {
         let proxy = selected_runtime_proxy(vhost, ctx);
 
         #[cfg(feature = "load-balancer")]
+        {
+            ctx.upstream_load_balancer_permit = None;
+            ctx.upstream_load_balancer_reporter = None;
+            ctx.upstream_load_balancer_outcome_recorded = false;
+        }
+
+        #[cfg(feature = "load-balancer")]
         if let Some(load_balancer) = &vhost.load_balancer
             && let Some(selected) = load_balancer.select(
                 session.req_header(),
@@ -5334,6 +5343,41 @@ impl ProxyHttp for FluxProxy {
         let peer = http_peer_for_proxy(upstream, &proxy.config)?;
 
         Ok(Box::new(peer))
+    }
+
+    fn fail_to_connect(
+        &self,
+        #[cfg_attr(not(feature = "load-balancer"), allow(unused_variables))] session: &mut Session,
+        _peer: &HttpPeer,
+        #[cfg_attr(not(feature = "load-balancer"), allow(unused_variables))] ctx: &mut Self::CTX,
+        error: Box<Error>,
+    ) -> Box<Error> {
+        #[cfg(feature = "load-balancer")]
+        {
+            let mut error = error;
+            record_load_balanced_upstream_failure(ctx);
+            let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
+            let vhost_index = ctx
+                .vhost_index
+                .unwrap_or_else(|| state.vhost_index(request_host(session)));
+            let vhost = state.vhost(vhost_index);
+            let proxy = selected_runtime_proxy(vhost, ctx);
+            let retry = &proxy.config.load_balance.retry;
+            if vhost.load_balancer.is_some()
+                && retry.enabled
+                && ctx.upstream_load_balancer_retries < retry.max_retries
+                && load_balance_retry_method_allowed(retry, session.req_header().method.as_str())
+            {
+                ctx.upstream_load_balancer_retries =
+                    ctx.upstream_load_balancer_retries.saturating_add(1);
+                error.set_retry(true);
+            }
+            error
+        }
+        #[cfg(not(feature = "load-balancer"))]
+        {
+            error
+        }
     }
 
     async fn upstream_request_filter(
@@ -11052,6 +11096,17 @@ fn record_load_balanced_upstream_failure(ctx: &mut RequestContext) {
         reporter.record_failure();
         ctx.upstream_load_balancer_outcome_recorded = true;
     }
+}
+
+#[cfg(feature = "load-balancer")]
+fn load_balance_retry_method_allowed(
+    retry: &crate::config::LoadBalanceRetryConfig,
+    method: &str,
+) -> bool {
+    retry
+        .methods
+        .iter()
+        .any(|configured| configured.eq_ignore_ascii_case(method))
 }
 
 fn proxy_error_status(error: &Error) -> u16 {

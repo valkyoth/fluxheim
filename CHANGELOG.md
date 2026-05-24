@@ -30,11 +30,14 @@ behavior when the change improves security or project direction.
 - Added opt-in `proxy.load_balance.passive_health` outlier detection for
   load-balanced upstreams, with bounded consecutive-failure ejection for proxy
   failures and selected 5xx response statuses.
+- Added opt-in `proxy.load_balance.retry` redispatch for load-balanced
+  connection failures before request forwarding, bounded by retry count and
+  safe HTTP method policy.
 
 ### Planned
 
-- Continue the production proxy parity line with retry/redispatch controls,
-  TLS/protocol, discovery, mirroring, and operator-hook work.
+- Continue the production proxy parity line with TLS/protocol, discovery,
+  mirroring, and operator-hook work.
 
 ## 1.3.7 - Production PHP-FPM Completion
 
