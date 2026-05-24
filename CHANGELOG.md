@@ -79,6 +79,10 @@ behavior when the change improves security or project direction.
   `upstream_client_key_path`. Rustls, OpenSSL, and BoringSSL are wired; s2n
   fails closed until its upstream PEM loaders can be exposed without
   panic-prone helpers.
+- Added opt-in upstream HAProxy PROXY protocol v1 send support through
+  `proxy.upstream_proxy_protocol = "v1"`, using the trusted-proxy-aware client
+  identity when available and falling back to `PROXY UNKNOWN` when a safe
+  TCP4/TCP6 line cannot be formed.
 
 ### Planned
 

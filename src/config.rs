@@ -3425,6 +3425,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_client_key_path: Option<PathBuf>,
     #[serde(default)]
+    pub upstream_proxy_protocol: UpstreamProxyProtocol,
+    #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default)]
     pub read_timeout_secs: Option<u64>,
@@ -3438,6 +3440,14 @@ pub struct ProxyConfig {
     pub error_pages: Vec<ProxyErrorPageConfig>,
     #[serde(default)]
     pub load_balance: LoadBalanceConfig,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpstreamProxyProtocol {
+    #[default]
+    Off,
+    V1,
 }
 
 const MAX_PROXY_UPSTREAMS: usize = 64;
@@ -3461,6 +3471,7 @@ impl Default for ProxyConfig {
             upstream_ca_path: None,
             upstream_client_cert_path: None,
             upstream_client_key_path: None,
+            upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             connect_timeout_secs: None,
             read_timeout_secs: None,
             send_timeout_secs: None,
@@ -3635,6 +3646,13 @@ impl ProxyConfig {
         ] {
             validate_path(field, path)?;
             validate_non_world_writable_parent(field, path)?;
+        }
+        if self.upstream_proxy_protocol != UpstreamProxyProtocol::Off
+            && !self.has_configured_upstream()
+        {
+            return Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream_proxy_protocol requires a configured proxy upstream",
+            });
         }
         #[cfg(all(
             feature = "tls-s2n",
@@ -11629,9 +11647,9 @@ mod tests {
         HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoggingConfig, MetricsConfig,
         ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig, StaticCertificateConfig,
         TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference, TlsPolicyProfile,
-        TlsProtocolVersion, TracingConfig, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig,
-        WebConfig, normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
-        validate_dynamic_header_template,
+        TlsProtocolVersion, TracingConfig, UpstreamProxyProtocol, VhostConfig,
+        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+        valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     #[cfg(feature = "cache")]
     use super::{CachePeerConfig, CachePeerFillConfig};
@@ -12052,6 +12070,7 @@ mod tests {
             upstream_ca_path = "tests/fixtures/tls/localhost-cert.pem"
             upstream_client_cert_path = "tests/fixtures/tls/localhost-cert.pem"
             upstream_client_key_path = "tests/fixtures/tls/localhost-key.pem"
+            upstream_proxy_protocol = "v1"
 
             [proxy.load_balance]
             max_iterations = 16
@@ -12114,6 +12133,10 @@ mod tests {
         assert_eq!(
             config.proxy.upstream_client_key_path.as_deref(),
             Some(Path::new("tests/fixtures/tls/localhost-key.pem"))
+        );
+        assert_eq!(
+            config.proxy.upstream_proxy_protocol,
+            UpstreamProxyProtocol::V1
         );
         assert_eq!(config.proxy.error_pages.len(), 1);
         assert_eq!(config.proxy.error_pages[0].status, 502);

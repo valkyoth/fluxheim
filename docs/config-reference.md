@@ -489,6 +489,7 @@ upstream_alternative_cn = "fallback-origin.example.test"
 upstream_ca_path = "/etc/fluxheim/upstreams/origin-ca.pem"
 upstream_client_cert_path = "/etc/fluxheim/upstreams/client-chain.pem"
 upstream_client_key_path = "/etc/fluxheim/upstreams/client-key.pem"
+upstream_proxy_protocol = "off"
 connect_timeout_secs = 5
 read_timeout_secs = 60
 send_timeout_secs = 30
@@ -559,6 +560,14 @@ reject symlinked existing path components, and reject group/world-writable
 existing parents. Rustls, OpenSSL, and BoringSSL builds support custom upstream
 trust roots and upstream client certificates. s2n builds currently reject these
 fields until Fluxheim has panic-free PEM loading for that backend.
+`upstream_proxy_protocol` defaults to `off`. Set it to `v1` to send a HAProxy
+PROXY protocol v1 line to the origin immediately after the upstream TCP/Unix
+connection is established and before any upstream TLS handshake. The source
+address is trusted-proxy-aware: if the direct peer is trusted and
+`X-Forwarded-For` restores a client IP, that restored IP is used with source
+port `0`; otherwise the direct downstream socket address is used. If Fluxheim
+cannot produce a same-family TCP4/TCP6 source and destination pair, it sends
+`PROXY UNKNOWN`.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must

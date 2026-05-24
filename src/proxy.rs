@@ -74,12 +74,13 @@ use pingora::{
 use crate::config::AccessLoggingConfig;
 use crate::config::{
     Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig, RateLimitMode,
-    RouteRedirectConfig, ServerLimitsConfig, normalize_host,
+    RouteRedirectConfig, ServerLimitsConfig, UpstreamProxyProtocol, normalize_host,
 };
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
 #[cfg(feature = "web")]
 use crate::web::{ResolveResult, StaticFileServer};
+use tokio::io::AsyncWriteExt as _;
 
 #[cfg(feature = "cache")]
 const MAX_VARY_HEADER_BYTES: usize = 2048;
@@ -6039,7 +6040,8 @@ impl ProxyHttp for FluxProxy {
             ctx.upstream_load_balancer_permit = selected.permit;
             ctx.upstream_load_balancer_reporter = selected.reporter;
             ctx.upstream_load_balancer_selected_at = Some(Instant::now());
-            let peer = http_peer_for_runtime_proxy(selected.backend, proxy)?;
+            let mut peer = http_peer_for_runtime_proxy(selected.backend, proxy)?;
+            apply_upstream_proxy_protocol(&mut peer, &proxy.config, session, &state);
             return Ok(Box::new(peer));
         }
         #[cfg(feature = "load-balancer")]
@@ -6056,7 +6058,8 @@ impl ProxyHttp for FluxProxy {
                 "proxy upstream is not configured for selected vhost or route",
             )
         })?;
-        let peer = http_peer_for_runtime_proxy(upstream, proxy)?;
+        let mut peer = http_peer_for_runtime_proxy(upstream, proxy)?;
+        apply_upstream_proxy_protocol(&mut peer, &proxy.config, session, &state);
 
         Ok(Box::new(peer))
     }
@@ -12949,6 +12952,128 @@ where
     }
 }
 
+fn apply_upstream_proxy_protocol(
+    peer: &mut HttpPeer,
+    proxy: &ProxyConfig,
+    session: &Session,
+    state: &ProxyRuntimeState,
+) {
+    if proxy.upstream_proxy_protocol != UpstreamProxyProtocol::V1 {
+        return;
+    }
+    let header = proxy_protocol_v1_header(
+        effective_proxy_protocol_source_addr(session, state),
+        session
+            .server_addr()
+            .and_then(|address| address.as_inet())
+            .copied(),
+    );
+    peer.options.custom_l4 = Some(Arc::new(ProxyProtocolV1Connector {
+        header,
+        connect_timeout: proxy
+            .connect_timeout_secs
+            .map(std::time::Duration::from_secs),
+    }));
+}
+
+fn effective_proxy_protocol_source_addr(
+    session: &Session,
+    state: &ProxyRuntimeState,
+) -> Option<std::net::SocketAddr> {
+    let direct = session
+        .client_addr()
+        .and_then(|address| address.as_inet())
+        .copied();
+    let Some(effective_ip) = effective_acl_client_ip(session, state) else {
+        return direct;
+    };
+    let port = direct
+        .filter(|direct| direct.ip() == effective_ip)
+        .map(|direct| direct.port())
+        .unwrap_or(0);
+    Some(std::net::SocketAddr::new(effective_ip, port))
+}
+
+fn proxy_protocol_v1_header(
+    source: Option<std::net::SocketAddr>,
+    destination: Option<std::net::SocketAddr>,
+) -> Vec<u8> {
+    let Some(source) = source else {
+        return b"PROXY UNKNOWN\r\n".to_vec();
+    };
+    let Some(destination) = destination else {
+        return b"PROXY UNKNOWN\r\n".to_vec();
+    };
+
+    match (source.ip(), destination.ip()) {
+        (IpAddr::V4(source_ip), IpAddr::V4(destination_ip)) => format!(
+            "PROXY TCP4 {source_ip} {destination_ip} {} {}\r\n",
+            source.port(),
+            destination.port()
+        )
+        .into_bytes(),
+        (IpAddr::V6(source_ip), IpAddr::V6(destination_ip)) => format!(
+            "PROXY TCP6 {source_ip} {destination_ip} {} {}\r\n",
+            source.port(),
+            destination.port()
+        )
+        .into_bytes(),
+        _ => b"PROXY UNKNOWN\r\n".to_vec(),
+    }
+}
+
+#[derive(Debug)]
+struct ProxyProtocolV1Connector {
+    header: Vec<u8>,
+    connect_timeout: Option<Duration>,
+}
+
+#[async_trait]
+impl pingora::connectors::L4Connect for ProxyProtocolV1Connector {
+    async fn connect(
+        &self,
+        addr: &pingora::protocols::l4::socket::SocketAddr,
+    ) -> Result<pingora::protocols::l4::stream::Stream> {
+        let connect = async {
+            match addr {
+                pingora::protocols::l4::socket::SocketAddr::Inet(addr) => {
+                    tokio::net::TcpStream::connect(addr).await.map(Into::into)
+                }
+                #[cfg(unix)]
+                pingora::protocols::l4::socket::SocketAddr::Unix(addr) => {
+                    let path = addr.as_pathname().ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "non-pathname Unix upstreams cannot use PROXY protocol",
+                        )
+                    })?;
+                    tokio::net::UnixStream::connect(path).await.map(Into::into)
+                }
+            }
+        };
+
+        let mut stream: pingora::protocols::l4::stream::Stream = match self.connect_timeout {
+            Some(timeout) => match tokio::time::timeout(timeout, connect).await {
+                Ok(result) => result,
+                Err(_) => {
+                    return Error::e_explain(
+                        ErrorType::ConnectTimedout,
+                        format!("timeout {timeout:?} connecting to server {addr}"),
+                    );
+                }
+            },
+            None => connect.await,
+        }
+        .map_err(|error| Error::because(ErrorType::ConnectError, "upstream connect", error))?;
+
+        stream
+            .write_all(&self.header)
+            .await
+            .map_err(|error| Error::because(ErrorType::WriteError, "write PROXY header", error))?;
+        Ok(stream)
+    }
+}
+
 fn http_peer_for_proxy_with_tls<A>(
     address: A,
     proxy: &ProxyConfig,
@@ -13185,8 +13310,8 @@ mod tests {
         append_fluxheim_via_to_response, approximate_request_header_bytes,
         count_response_body_chunk, effective_client_ip_from_forwarded_for, http_peer_for_proxy,
         http_peer_for_runtime_proxy, https_redirect_location, normalize_cookie_headers,
-        redirect_authority, request_body_chunk_limit_status, request_limit_status,
-        route_redirect_location, route_rewritten_path_and_query,
+        proxy_protocol_v1_header, redirect_authority, request_body_chunk_limit_status,
+        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -15813,6 +15938,37 @@ mod tests {
 
         assert!(peer.options.ca.is_some());
         assert!(peer.client_cert_key.is_some());
+    }
+
+    #[test]
+    fn proxy_protocol_v1_header_encodes_matching_ip_families() {
+        let source = "203.0.113.10:42300".parse().unwrap();
+        let destination = "192.0.2.20:443".parse().unwrap();
+        assert_eq!(
+            proxy_protocol_v1_header(Some(source), Some(destination)),
+            b"PROXY TCP4 203.0.113.10 192.0.2.20 42300 443\r\n"
+        );
+
+        let source = "[2001:db8::10]:42300".parse().unwrap();
+        let destination = "[2001:db8::20]:8443".parse().unwrap();
+        assert_eq!(
+            proxy_protocol_v1_header(Some(source), Some(destination)),
+            b"PROXY TCP6 2001:db8::10 2001:db8::20 42300 8443\r\n"
+        );
+    }
+
+    #[test]
+    fn proxy_protocol_v1_header_falls_back_to_unknown_for_ambiguous_inputs() {
+        let source = "203.0.113.10:42300".parse().unwrap();
+        let destination = "[2001:db8::20]:8443".parse().unwrap();
+        assert_eq!(
+            proxy_protocol_v1_header(Some(source), Some(destination)),
+            b"PROXY UNKNOWN\r\n"
+        );
+        assert_eq!(
+            proxy_protocol_v1_header(None, Some(destination)),
+            b"PROXY UNKNOWN\r\n"
+        );
     }
 
     #[test]

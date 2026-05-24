@@ -1146,7 +1146,9 @@ Release shape:
     upstream mTLS client certificates are implemented for rustls, OpenSSL, and
     BoringSSL. Remaining work is s2n parity and per-upstream protocol/cipher
     policy;
-  - PROXY protocol v1/v2 accept/send with explicit trust boundaries;
+  - PROXY protocol v1/v2 accept/send with explicit trust boundaries. Upstream
+    PROXY protocol v1 send is implemented through
+    `proxy.upstream_proxy_protocol`; listener receive and binary v2 remain;
   - gRPC-safe HTTP/2 proxying for trailers, status, timeouts, body limits, and
     streaming behavior. gRPC-Web/JSON transcoding remains out of scope unless a
     mature crate or small adapter is justified.
@@ -1253,7 +1255,9 @@ Stable scope:
   forwarding, allowed response headers, deny status, and metrics.
 - PROXY protocol support:
   - accept Proxy Protocol v1/v2 on configured listeners;
-  - send Proxy Protocol to upstreams on configured routes;
+  - send Proxy Protocol to upstreams on configured routes. Upstream v1 send is
+    implemented through `proxy.upstream_proxy_protocol`; v2 send remains future
+    work;
   - validate trust boundaries before restoring client identity.
 - Dynamic service discovery:
   - DNS refresh for upstream hostnames with TTL/refresh controls;
