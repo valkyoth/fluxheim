@@ -1,7 +1,9 @@
 # Pingora Patches
 
-Fluxheim vendors `pingora-core 0.8.0` only to expose one rustls listener hook
-that is required for the default `tls-rustls` build:
+Fluxheim vendors `pingora-core 0.8.0` for two narrow rustls fixes required by
+the default `tls-rustls` build.
+
+## Rustls Listener Certificate Resolver
 
 - `TlsSettings::with_cert_resolver(...)`
 - an internal `cert_resolver` field used by the rustls listener when building
@@ -11,14 +13,26 @@ The patch keeps Pingora's existing single-certificate path unchanged. It only
 allows Fluxheim to pass a rustls `ResolvesServerCert` implementation so
 per-vhost certificates can be selected by SNI in the default build.
 
+## Rustls Upstream Verification Policy
+
+Fluxheim also patches the rustls upstream connector so per-peer
+`verify_cert = false` and `verify_hostname = false` policies apply even when no
+other setting forced Pingora to clone the rustls client config. In Pingora 0.8,
+the dangerous verifier path was only installed when a cloned config already
+existed for ALPN or upstream mTLS. Fluxheim exposes explicit upstream TLS
+verification controls, so the connector must clone the config and install the
+custom verifier whenever verification is disabled or SNI is absent.
+
 This is a temporary compatibility patch, not a long-term fork. Keep it small,
-easy to audit, and limited to the rustls certificate resolver gap.
+easy to audit, and limited to the rustls certificate resolver and upstream
+verification-policy gaps.
 
 ## Removal Criteria
 
 Remove `vendor/pingora-core` and the `[patch.crates-io]` entry in
 `Cargo.toml` when an upstream Pingora release exposes equivalent rustls server
-certificate resolver support.
+certificate resolver support and applies per-peer rustls upstream verification
+policy without requiring ALPN or mTLS to clone the client config first.
 
 Before removing the patch, verify:
 
@@ -26,11 +40,14 @@ Before removing the patch, verify:
 - `scripts/smoke_1_0_core.sh`
 - the smoke assertion that `app.test` receives the `app.test` certificate via
   SNI
+- a rustls upstream with `upstream_verify_cert = false` can connect to a
+  self-signed or otherwise untrusted test origin without requiring unrelated
+  ALPN or mTLS settings
 
 ## Upstream Candidate
 
-This patch is small enough to propose upstream. The cleaner upstream shape would
-be:
+These patches are small enough to propose upstream. The cleaner upstream shape
+would be:
 
 - re-export the needed rustls server certificate resolver types from
   `pingora-rustls`, or add the direct rustls dependency in `pingora-core`;
@@ -39,6 +56,8 @@ be:
 - preserve the existing `TlsSettings::intermediate(cert, key)` behavior for
   single-certificate listeners;
 - keep ALPN handling through the existing `enable_h2` and `set_alpn` methods.
+- in the rustls connector, compute per-peer verification mode independently and
+  clone the client config when a custom verifier is needed.
 
 Fluxheim should keep the vendored patch narrow and avoid unrelated edits to
 vendored Pingora source.
