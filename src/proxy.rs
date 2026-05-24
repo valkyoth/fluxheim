@@ -60,6 +60,7 @@ use pingora::cache::predictor::{CacheablePredictor, Predictor};
 use pingora::http::StatusCode;
 use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::prelude::{HttpPeer, Result};
+use pingora::protocols::TcpKeepalive;
 #[cfg(feature = "cache")]
 use pingora::proxy::RangeType;
 use pingora::proxy::{FailToProxy, ProxyHttp, Session};
@@ -13151,6 +13152,7 @@ where
         peer.client_cert_key = upstream_tls.client_cert_key.clone();
     }
     apply_proxy_timeouts(&mut peer, proxy);
+    apply_proxy_upstream_socket_policy(&mut peer, proxy);
     apply_proxy_upstream_http_policy(&mut peer, proxy);
     apply_proxy_upstream_tls_policy(&mut peer, proxy);
     Ok(peer)
@@ -13168,6 +13170,29 @@ fn apply_proxy_timeouts(peer: &mut HttpPeer, proxy: &ProxyConfig) {
         .map(std::time::Duration::from_secs);
     peer.options.read_timeout = proxy.read_timeout_secs.map(std::time::Duration::from_secs);
     peer.options.write_timeout = proxy.send_timeout_secs.map(std::time::Duration::from_secs);
+}
+
+fn apply_proxy_upstream_socket_policy(peer: &mut HttpPeer, proxy: &ProxyConfig) {
+    if let (Some(idle_secs), Some(interval_secs), Some(count)) = (
+        proxy.upstream_tcp_keepalive_idle_secs,
+        proxy.upstream_tcp_keepalive_interval_secs,
+        proxy.upstream_tcp_keepalive_count,
+    ) {
+        peer.options.tcp_keepalive = Some(TcpKeepalive {
+            idle: Duration::from_secs(idle_secs),
+            interval: Duration::from_secs(interval_secs),
+            count,
+            #[cfg(target_os = "linux")]
+            user_timeout: Duration::from_millis(
+                proxy.upstream_tcp_user_timeout_ms.unwrap_or_default(),
+            ),
+        });
+    }
+    peer.options.tcp_recv_buf = proxy
+        .upstream_tcp_recv_buffer_bytes
+        .map(crate::config::ByteSize::as_usize);
+    peer.options.dscp = proxy.upstream_dscp;
+    peer.options.tcp_fast_open = proxy.upstream_tcp_fast_open;
 }
 
 fn apply_proxy_upstream_tls_policy(peer: &mut HttpPeer, proxy: &ProxyConfig) {
@@ -15939,6 +15964,13 @@ mod tests {
             connect_timeout_secs: Some(5),
             upstream_total_connection_timeout_secs: Some(10),
             upstream_idle_timeout_secs: Some(120),
+            upstream_tcp_keepalive_idle_secs: Some(30),
+            upstream_tcp_keepalive_interval_secs: Some(10),
+            upstream_tcp_keepalive_count: Some(3),
+            upstream_tcp_user_timeout_ms: Some(15000),
+            upstream_tcp_recv_buffer_bytes: Some(crate::config::ByteSize::from_bytes(1024 * 1024)),
+            upstream_dscp: Some(46),
+            upstream_tcp_fast_open: true,
             read_timeout_secs: Some(600),
             send_timeout_secs: Some(30),
             ..ProxyConfig::default()
@@ -15955,6 +15987,15 @@ mod tests {
             Some(Duration::from_secs(10))
         );
         assert_eq!(peer.options.idle_timeout, Some(Duration::from_secs(120)));
+        let keepalive = peer.options.tcp_keepalive.as_ref().unwrap();
+        assert_eq!(keepalive.idle, Duration::from_secs(30));
+        assert_eq!(keepalive.interval, Duration::from_secs(10));
+        assert_eq!(keepalive.count, 3);
+        #[cfg(target_os = "linux")]
+        assert_eq!(keepalive.user_timeout, Duration::from_millis(15000));
+        assert_eq!(peer.options.tcp_recv_buf, Some(1024 * 1024));
+        assert_eq!(peer.options.dscp, Some(46));
+        assert!(peer.options.tcp_fast_open);
         assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(600)));
         assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(30)));
     }

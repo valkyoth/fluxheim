@@ -1212,6 +1212,10 @@ Stable scope:
     `proxy.upstream_idle_timeout_secs`;
   - total connection establishment timeout is implemented through
     `proxy.upstream_total_connection_timeout_secs`;
+  - upstream TCP keepalive, Linux user timeout, receive-buffer size, DSCP, and
+    TCP Fast Open socket controls are implemented through `proxy.upstream_tcp_*`,
+    `proxy.upstream_tcp_recv_buffer_bytes`, `proxy.upstream_dscp`, and
+    `proxy.upstream_tcp_fast_open`;
   - remaining work: per-route pool limits, maximum reuse count or lifetime, and
     clear behavior documentation when an upstream closes an idle pooled
     connection.

@@ -3461,6 +3461,20 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_idle_timeout_secs: Option<u64>,
     #[serde(default)]
+    pub upstream_tcp_keepalive_idle_secs: Option<u64>,
+    #[serde(default)]
+    pub upstream_tcp_keepalive_interval_secs: Option<u64>,
+    #[serde(default)]
+    pub upstream_tcp_keepalive_count: Option<usize>,
+    #[serde(default)]
+    pub upstream_tcp_user_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub upstream_tcp_recv_buffer_bytes: Option<ByteSize>,
+    #[serde(default)]
+    pub upstream_dscp: Option<u8>,
+    #[serde(default)]
+    pub upstream_tcp_fast_open: bool,
+    #[serde(default)]
     pub read_timeout_secs: Option<u64>,
     #[serde(default)]
     pub send_timeout_secs: Option<u64>,
@@ -3497,6 +3511,9 @@ const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_ERROR_PAGES: usize = 64;
 const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
+const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
+const MAX_PROXY_UPSTREAM_TCP_RECV_BUFFER_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_PROXY_UPSTREAM_DSCP: u8 = 63;
 
 impl Default for ProxyConfig {
     fn default() -> Self {
@@ -3521,6 +3538,13 @@ impl Default for ProxyConfig {
             connect_timeout_secs: None,
             upstream_total_connection_timeout_secs: None,
             upstream_idle_timeout_secs: None,
+            upstream_tcp_keepalive_idle_secs: None,
+            upstream_tcp_keepalive_interval_secs: None,
+            upstream_tcp_keepalive_count: None,
+            upstream_tcp_user_timeout_ms: None,
+            upstream_tcp_recv_buffer_bytes: None,
+            upstream_dscp: None,
+            upstream_tcp_fast_open: false,
             read_timeout_secs: None,
             send_timeout_secs: None,
             downstream_write_timeout_secs: None,
@@ -3773,6 +3797,59 @@ impl ProxyConfig {
             "proxy.upstream_idle_timeout_secs",
             self.upstream_idle_timeout_secs,
         )?;
+        validate_optional_timeout_secs(
+            "proxy.upstream_tcp_keepalive_idle_secs",
+            self.upstream_tcp_keepalive_idle_secs,
+        )?;
+        validate_optional_timeout_secs(
+            "proxy.upstream_tcp_keepalive_interval_secs",
+            self.upstream_tcp_keepalive_interval_secs,
+        )?;
+        if self.upstream_tcp_keepalive_count.is_some()
+            || self.upstream_tcp_keepalive_idle_secs.is_some()
+            || self.upstream_tcp_keepalive_interval_secs.is_some()
+            || self.upstream_tcp_user_timeout_ms.is_some()
+        {
+            match (
+                self.upstream_tcp_keepalive_idle_secs,
+                self.upstream_tcp_keepalive_interval_secs,
+                self.upstream_tcp_keepalive_count,
+            ) {
+                (Some(_), Some(_), Some(count))
+                    if (1..=MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT).contains(&count) => {}
+                _ => {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_tcp_keepalive_count",
+                        reason: "TCP keepalive requires idle_secs, interval_secs, and count, with count between 1 and 128",
+                    });
+                }
+            }
+        }
+        if self
+            .upstream_tcp_user_timeout_ms
+            .is_some_and(|milliseconds| milliseconds == 0)
+        {
+            return Err(ConfigError::InvalidProxyTimeout {
+                field: "proxy.upstream_tcp_user_timeout_ms",
+            });
+        }
+        if self.upstream_tcp_recv_buffer_bytes.is_some_and(|bytes| {
+            bytes.as_u64() == 0 || bytes.as_u64() > MAX_PROXY_UPSTREAM_TCP_RECV_BUFFER_BYTES
+        }) {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_tcp_recv_buffer_bytes",
+                reason: "must be between 1 byte and 256MiB",
+            });
+        }
+        if self
+            .upstream_dscp
+            .is_some_and(|dscp| dscp > MAX_PROXY_UPSTREAM_DSCP)
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_dscp",
+                reason: "must be a DSCP value between 0 and 63",
+            });
+        }
         validate_optional_timeout_secs("proxy.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("proxy.send_timeout_secs", self.send_timeout_secs)?;
         validate_optional_timeout_secs(
@@ -12162,6 +12239,13 @@ mod tests {
             connect_timeout_secs = 5
             upstream_total_connection_timeout_secs = 10
             upstream_idle_timeout_secs = 120
+            upstream_tcp_keepalive_idle_secs = 30
+            upstream_tcp_keepalive_interval_secs = 10
+            upstream_tcp_keepalive_count = 3
+            upstream_tcp_user_timeout_ms = 15000
+            upstream_tcp_recv_buffer_bytes = "1MiB"
+            upstream_dscp = 46
+            upstream_tcp_fast_open = true
             read_timeout_secs = 60
             send_timeout_secs = 30
             upstream_tls = true
@@ -12219,6 +12303,19 @@ mod tests {
             Some(10)
         );
         assert_eq!(config.proxy.upstream_idle_timeout_secs, Some(120));
+        assert_eq!(config.proxy.upstream_tcp_keepalive_idle_secs, Some(30));
+        assert_eq!(config.proxy.upstream_tcp_keepalive_interval_secs, Some(10));
+        assert_eq!(config.proxy.upstream_tcp_keepalive_count, Some(3));
+        assert_eq!(config.proxy.upstream_tcp_user_timeout_ms, Some(15000));
+        assert_eq!(
+            config
+                .proxy
+                .upstream_tcp_recv_buffer_bytes
+                .map(ByteSize::as_u64),
+            Some(1024 * 1024)
+        );
+        assert_eq!(config.proxy.upstream_dscp, Some(46));
+        assert!(config.proxy.upstream_tcp_fast_open);
         assert_eq!(config.proxy.read_timeout_secs, Some(60));
         assert_eq!(config.proxy.send_timeout_secs, Some(30));
         assert!(config.proxy.upstream_tls);
@@ -12479,6 +12576,61 @@ mod tests {
         assert!(matches!(
             zero_upstream_idle_timeout.validate(),
             Err(ConfigError::InvalidProxyTimeout { .. })
+        ));
+
+        let incomplete_tcp_keepalive: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_tcp_keepalive_idle_secs = 30
+            upstream_tcp_keepalive_count = 3
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            incomplete_tcp_keepalive.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let invalid_tcp_keepalive_count: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_tcp_keepalive_idle_secs = 30
+            upstream_tcp_keepalive_interval_secs = 10
+            upstream_tcp_keepalive_count = 0
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid_tcp_keepalive_count.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let invalid_tcp_recv_buffer: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_tcp_recv_buffer_bytes = "512MiB"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid_tcp_recv_buffer.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let invalid_dscp: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_dscp = 64
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid_dscp.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
         ));
     }
 

@@ -505,6 +505,13 @@ upstream_http_version = "http1"
 connect_timeout_secs = 5
 upstream_total_connection_timeout_secs = 10
 upstream_idle_timeout_secs = 120
+upstream_tcp_keepalive_idle_secs = 30
+upstream_tcp_keepalive_interval_secs = 10
+upstream_tcp_keepalive_count = 3
+upstream_tcp_user_timeout_ms = 15000
+upstream_tcp_recv_buffer_bytes = "1MiB"
+upstream_dscp = 46
+upstream_tcp_fast_open = false
 read_timeout_secs = 60
 send_timeout_secs = 30
 downstream_write_timeout_secs = 30
@@ -595,6 +602,14 @@ pings. Both h2 settings require `upstream_http_version` to allow HTTP/2.
 including protocol/TLS setup where the selected connector exposes it.
 `upstream_idle_timeout_secs` controls how long reusable idle upstream
 connections remain in Pingora's keepalive pool before they are closed.
+`upstream_tcp_keepalive_idle_secs`, `upstream_tcp_keepalive_interval_secs`, and
+`upstream_tcp_keepalive_count` configure TCP keepalive probes on upstream
+connections and must be set together. `upstream_tcp_user_timeout_ms` maps to
+Linux `TCP_USER_TIMEOUT` through the same keepalive setting and is ignored by
+non-Linux kernels. `upstream_tcp_recv_buffer_bytes` requests a receive-buffer
+size for new upstream sockets, capped at 256MiB. `upstream_dscp` accepts a DSCP
+value from 0 through 63. `upstream_tcp_fast_open` enables upstream TCP Fast Open
+where the platform and kernel allow it.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must

@@ -100,6 +100,8 @@ behavior when the change improves security or project direction.
 - Added upstream connection establishment and keepalive-pool tuning through
   `proxy.upstream_total_connection_timeout_secs` and
   `proxy.upstream_idle_timeout_secs`.
+- Added upstream TCP socket tuning for proxy origins, including TCP keepalive,
+  Linux user timeout, receive-buffer size, DSCP, and TCP Fast Open controls.
 
 ### Planned
 
