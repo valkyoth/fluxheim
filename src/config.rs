@@ -3614,6 +3614,10 @@ fn default_compression_gzip_level() -> u32 {
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LoadBalanceConfig {
+    #[serde(default)]
+    pub selection: LoadBalanceSelection,
+    #[serde(default)]
+    pub hash_header: Option<String>,
     #[serde(default = "default_lb_max_iterations")]
     pub max_iterations: usize,
     #[serde(default)]
@@ -3623,6 +3627,8 @@ pub struct LoadBalanceConfig {
 impl Default for LoadBalanceConfig {
     fn default() -> Self {
         Self {
+            selection: LoadBalanceSelection::default(),
+            hash_header: None,
             max_iterations: default_lb_max_iterations(),
             health_check: LoadBalanceHealthCheckConfig::default(),
         }
@@ -3631,12 +3637,48 @@ impl Default for LoadBalanceConfig {
 
 impl LoadBalanceConfig {
     fn validate(&self) -> Result<(), ConfigError> {
+        if self.selection.requires_hash_header() {
+            let Some(header) = self.hash_header.as_deref() else {
+                return Err(ConfigError::InvalidLoadBalanceSelection {
+                    reason: "header-hash selections require proxy.load_balance.hash_header",
+                });
+            };
+            if !valid_http_header_name(header) {
+                return Err(ConfigError::InvalidHeaderName {
+                    field: "proxy.load_balance.hash_header",
+                    name: header.to_owned(),
+                });
+            }
+        } else if self.hash_header.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.hash_header can only be used with header-hash selections",
+            });
+        }
         if self.max_iterations == 0 {
             return Err(ConfigError::InvalidLoadBalanceMaxIterations);
         }
 
         self.health_check.validate()?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LoadBalanceSelection {
+    #[default]
+    RoundRobin,
+    SourceHash,
+    UriHash,
+    HeaderHash,
+    ConsistentSourceHash,
+    ConsistentUriHash,
+    ConsistentHeaderHash,
+}
+
+impl LoadBalanceSelection {
+    fn requires_hash_header(self) -> bool {
+        matches!(self, Self::HeaderHash | Self::ConsistentHeaderHash)
     }
 }
 
@@ -7968,6 +8010,9 @@ pub enum ConfigError {
         status: u16,
     },
     InvalidLoadBalanceMaxIterations,
+    InvalidLoadBalanceSelection {
+        reason: &'static str,
+    },
     InvalidLoadBalanceHealthCheck {
         field: &'static str,
     },
@@ -8581,6 +8626,12 @@ impl Display for ConfigError {
                 write!(
                     formatter,
                     "proxy.load_balance.max_iterations must be greater than zero"
+                )
+            }
+            Self::InvalidLoadBalanceSelection { reason } => {
+                write!(
+                    formatter,
+                    "proxy.load_balance.selection is invalid: {reason}"
                 )
             }
             Self::InvalidLoadBalanceHealthCheck { field } => {
@@ -12106,6 +12157,44 @@ mod tests {
             config.validate(),
             Err(ConfigError::InvalidLoadBalanceMaxIterations)
         );
+    }
+
+    #[test]
+    fn validates_load_balance_hash_selection() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy.load_balance]
+            selection = "consistent-header-hash"
+            hash_header = "x-session"
+            "#,
+        )
+        .unwrap();
+        config.validate().unwrap();
+
+        let missing_header: Config = toml::from_str(
+            r#"
+            [proxy.load_balance]
+            selection = "header-hash"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            missing_header.validate(),
+            Err(ConfigError::InvalidLoadBalanceSelection { .. })
+        ));
+
+        let unused_header: Config = toml::from_str(
+            r#"
+            [proxy.load_balance]
+            selection = "source-hash"
+            hash_header = "x-session"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            unused_header.validate(),
+            Err(ConfigError::InvalidLoadBalanceSelection { .. })
+        ));
     }
 
     #[test]

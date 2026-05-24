@@ -5301,7 +5301,10 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(feature = "load-balancer")]
         if let Some(load_balancer) = &vhost.load_balancer
-            && let Some(upstream) = load_balancer.select()
+            && let Some(upstream) = load_balancer.select(
+                session.req_header(),
+                effective_acl_client_ip(session, &state),
+            )
         {
             let peer = http_peer_for_proxy(upstream, &proxy.config)?;
             return Ok(Box::new(peer));

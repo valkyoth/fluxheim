@@ -488,6 +488,7 @@ downstream_write_timeout_secs = 30
 downstream_min_send_rate_bytes_per_sec = 8192
 
 [proxy.load_balance]
+selection = "round-robin"
 max_iterations = 256
 
 [proxy.load_balance.health_check]
@@ -511,9 +512,17 @@ Every `upstreams` entry must be an authority such as
 Proxy upstream lists are capped at 64 entries and reject duplicates
 case-insensitively. Proxy error-page lists are also capped at 64 entries.
 `upstream_weights` is optional and, when set, must contain one positive weight
-for each `upstreams` entry. It enables weighted round-robin in `load-balancer`
+for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
 fit in Pingora's weighted selector.
+`proxy.load_balance.selection` defaults to `round-robin`. It also accepts
+`source-hash`, `uri-hash`, `header-hash`, `consistent-source-hash`,
+`consistent-uri-hash`, and `consistent-header-hash`. Header-hash modes require
+`proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
+name. Hash modes use weighted FNV selection; consistent modes use Pingora's
+weighted Ketama ring for lower remapping when upstream membership changes.
+Least-connections and power-of-two choices remain planned because Pingora does
+not expose those selectors yet.
 
 `upstreams` is the preferred proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

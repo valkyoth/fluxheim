@@ -24,12 +24,14 @@ behavior when the change improves security or project direction.
   `Vary: Accept-Encoding` handling.
 - Added `proxy.upstream_weights` for weighted round-robin upstream selection in
   `load-balancer` builds.
+- Added `proxy.load_balance.selection` for weighted source, URI, header, and
+  consistent-hash upstream selection in `load-balancer` builds.
 
 ### Planned
 
-- Continue the production proxy parity line with least-connections/hash
-  selection, upstream resilience, TLS/protocol, discovery, mirroring, and
-  operator-hook work.
+- Continue the production proxy parity line with least-connections and
+  power-of-two selection, upstream resilience, TLS/protocol, discovery,
+  mirroring, and operator-hook work.
 
 ## 1.3.7 - Production PHP-FPM Completion
 

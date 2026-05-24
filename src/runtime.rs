@@ -134,7 +134,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(feature = "load-balancer")]
     for service in load_balancer_services {
         log::info!("load-balancer health-check service enabled");
-        server.add_service(service);
+        server.add_boxed_service(service);
     }
 
     if let Some(admin_services) = crate::admin::admin_services_from_config(&config, admin_proxy)? {
