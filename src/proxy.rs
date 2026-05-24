@@ -2718,11 +2718,17 @@ fn request_denied_by_access_policy(
     route_index: Option<usize>,
 ) -> bool {
     let client_ip = effective_acl_client_ip(session, state);
-    if !vhost.access.allows(client_ip) {
+    let tls_identity = downstream_tls_client_identity(session);
+    if !vhost.access.allows(client_ip, tls_identity.as_ref()) {
         return true;
     }
     route_index
-        .map(|route_index| !vhost.route(route_index).access.allows(client_ip))
+        .map(|route_index| {
+            !vhost
+                .route(route_index)
+                .access
+                .allows(client_ip, tls_identity.as_ref())
+        })
         .unwrap_or(false)
 }
 
@@ -3181,6 +3187,9 @@ struct RuntimeAccessPolicy {
     enabled: bool,
     allow: Vec<TrustedProxy>,
     deny: Vec<TrustedProxy>,
+    require_client_cert: bool,
+    allow_client_cert_sha256: Vec<String>,
+    deny_client_cert_sha256: Vec<String>,
 }
 
 impl RuntimeAccessPolicy {
@@ -3189,22 +3198,64 @@ impl RuntimeAccessPolicy {
             enabled: config.enabled,
             allow: parse_trusted_proxies(&config.allow)?,
             deny: parse_trusted_proxies(&config.deny)?,
+            require_client_cert: config.require_client_cert,
+            allow_client_cert_sha256: normalized_cert_fingerprints(
+                &config.allow_client_cert_sha256,
+            ),
+            deny_client_cert_sha256: normalized_cert_fingerprints(&config.deny_client_cert_sha256),
         })
     }
 
-    fn allows(&self, client_ip: Option<IpAddr>) -> bool {
+    fn allows(
+        &self,
+        client_ip: Option<IpAddr>,
+        tls_identity: Option<&crate::headers::RequestTlsClientIdentity>,
+    ) -> bool {
         if !self.enabled {
             return true;
         }
-        let restrictive = !self.allow.is_empty() || !self.deny.is_empty();
-        let Some(client_ip) = client_ip else {
-            return !restrictive;
-        };
-        if self.deny.iter().any(|rule| rule.contains(client_ip)) {
+        let ip_restrictive = !self.allow.is_empty() || !self.deny.is_empty();
+        if let Some(client_ip) = client_ip {
+            if self.deny.iter().any(|rule| rule.contains(client_ip)) {
+                return false;
+            }
+            if !self.allow.is_empty() && !self.allow.iter().any(|rule| rule.contains(client_ip)) {
+                return false;
+            }
+        } else if ip_restrictive {
             return false;
         }
-        self.allow.is_empty() || self.allow.iter().any(|rule| rule.contains(client_ip))
+
+        let cert_sha256 = tls_identity
+            .and_then(|identity| identity.cert_sha256.as_deref())
+            .map(str::to_ascii_lowercase);
+        if self.require_client_cert && cert_sha256.is_none() {
+            return false;
+        }
+        if let Some(cert_sha256) = cert_sha256.as_deref() {
+            if self
+                .deny_client_cert_sha256
+                .iter()
+                .any(|denied| denied == cert_sha256)
+            {
+                return false;
+            }
+            self.allow_client_cert_sha256.is_empty()
+                || self
+                    .allow_client_cert_sha256
+                    .iter()
+                    .any(|allowed| allowed == cert_sha256)
+        } else {
+            self.allow_client_cert_sha256.is_empty()
+        }
     }
+}
+
+fn normalized_cert_fingerprints(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
 }
 
 #[cfg(feature = "cache")]
@@ -14113,13 +14164,48 @@ mod tests {
             enabled: true,
             allow: vec!["10.0.0.0/8".to_owned()],
             deny: vec!["10.9.0.0/16".to_owned()],
+            ..crate::config::AccessPolicyConfig::default()
         })
         .unwrap();
 
-        assert!(policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3)))));
-        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 9, 2, 3)))));
-        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)))));
-        assert!(!policy.allows(None));
+        assert!(policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))), None));
+        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 9, 2, 3))), None));
+        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))), None));
+        assert!(!policy.allows(None, None));
+    }
+
+    #[test]
+    fn access_policy_can_require_client_certificate_fingerprint() {
+        let allowed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let denied = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let policy = RuntimeAccessPolicy::from_config(&crate::config::AccessPolicyConfig {
+            enabled: true,
+            require_client_cert: true,
+            allow_client_cert_sha256: vec![allowed.to_owned()],
+            deny_client_cert_sha256: vec![denied.to_owned()],
+            ..crate::config::AccessPolicyConfig::default()
+        })
+        .unwrap();
+        let client_ip = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
+        let allowed_identity = crate::headers::RequestTlsClientIdentity {
+            cert_sha256: Some(allowed.to_ascii_uppercase()),
+            ..crate::headers::RequestTlsClientIdentity::default()
+        };
+        let denied_identity = crate::headers::RequestTlsClientIdentity {
+            cert_sha256: Some(denied.to_owned()),
+            ..crate::headers::RequestTlsClientIdentity::default()
+        };
+        let unknown_identity = crate::headers::RequestTlsClientIdentity {
+            cert_sha256: Some(
+                "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_owned(),
+            ),
+            ..crate::headers::RequestTlsClientIdentity::default()
+        };
+
+        assert!(policy.allows(client_ip, Some(&allowed_identity)));
+        assert!(!policy.allows(client_ip, Some(&denied_identity)));
+        assert!(!policy.allows(client_ip, Some(&unknown_identity)));
+        assert!(!policy.allows(client_ip, None));
     }
 
     #[test]

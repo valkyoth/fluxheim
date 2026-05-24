@@ -105,6 +105,9 @@ behavior when the change improves security or project direction.
 - Added the same downstream TLS/client-certificate identity values to structured
   access logs as `tls_version`, `tls_cipher`, `tls_client_cert_sha256`,
   `tls_client_cert_serial`, and `tls_client_cert_organization`.
+- Added vhost and route access-policy controls for verified downstream client
+  certificate fingerprints through `require_client_cert`,
+  `allow_client_cert_sha256`, and `deny_client_cert_sha256`.
 - Added upstream TLS verification controls for proxy origins:
   `upstream_verify_cert`, `upstream_verify_hostname`, and
   `upstream_alternative_cn`, while keeping certificate and hostname validation

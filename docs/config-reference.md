@@ -1784,6 +1784,9 @@ access-control-allow-origin = "https://example.test"
 [vhosts.access]
 allow = ["198.51.100.0/24", "2001:db8:100::/48"]
 deny = ["198.51.100.66"]
+require_client_cert = false
+allow_client_cert_sha256 = []
+deny_client_cert_sha256 = []
 
 [vhosts.rate_limit]
 enabled = true
@@ -1816,13 +1819,19 @@ aliases and 256 routes.
 `server.limits.max_request_body_bytes` for that host. Route-level
 `max_request_body_bytes` still wins when a matching route sets its own limit.
 
-`[vhosts.access]` and `[vhosts.routes.access]` provide the first `1.4` IP ACL
-surface. Rules accept exact IP addresses or CIDR ranges. `deny` entries win
+`[vhosts.access]` and `[vhosts.routes.access]` provide the first `1.4` ACL
+surface. IP rules accept exact IP addresses or CIDR ranges. `deny` entries win
 first. When `allow` is non-empty, the effective client IP must match at least
 one allow entry. The effective client IP is the direct peer address unless the
 direct peer matches `server.trusted_proxies`; only then does Fluxheim inspect
-`X-Forwarded-For` recursively. A vhost policy is evaluated before any matching
-route policy, so route ACLs can further restrict traffic but cannot bypass a
+`X-Forwarded-For` recursively. Client-certificate rules use the verified
+downstream certificate SHA-256 fingerprint exposed by the TLS backend.
+`require_client_cert = true` rejects requests without a verified client
+certificate, `deny_client_cert_sha256` rejects matching fingerprints, and
+`allow_client_cert_sha256` restricts access to the listed fingerprints when it
+is non-empty. Fingerprints are 64-character hex SHA-256 values and are matched
+case-insensitively. A vhost policy is evaluated before any matching route
+policy, so route ACLs can further restrict traffic but cannot bypass a
 vhost-level denial. With metrics enabled, ACL denials are counted by
 `fluxheim_edge_policy_events_total` with bounded labels.
 

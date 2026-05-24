@@ -4821,6 +4821,12 @@ pub struct AccessPolicyConfig {
     pub allow: Vec<String>,
     #[serde(default)]
     pub deny: Vec<String>,
+    #[serde(default)]
+    pub require_client_cert: bool,
+    #[serde(default)]
+    pub allow_client_cert_sha256: Vec<String>,
+    #[serde(default)]
+    pub deny_client_cert_sha256: Vec<String>,
 }
 
 impl Default for AccessPolicyConfig {
@@ -4829,6 +4835,9 @@ impl Default for AccessPolicyConfig {
             enabled: true,
             allow: Vec::new(),
             deny: Vec::new(),
+            require_client_cert: false,
+            allow_client_cert_sha256: Vec::new(),
+            deny_client_cert_sha256: Vec::new(),
         }
     }
 }
@@ -4837,6 +4846,16 @@ impl AccessPolicyConfig {
     fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         validate_access_rule_list(scope, "allow", &self.allow)?;
         validate_access_rule_list(scope, "deny", &self.deny)?;
+        validate_client_cert_sha256_list(
+            scope,
+            "allow_client_cert_sha256",
+            &self.allow_client_cert_sha256,
+        )?;
+        validate_client_cert_sha256_list(
+            scope,
+            "deny_client_cert_sha256",
+            &self.deny_client_cert_sha256,
+        )?;
         Ok(())
     }
 }
@@ -4872,10 +4891,49 @@ fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
     match (scope, field) {
         ("vhosts.access", "allow") => "vhosts.access.allow",
         ("vhosts.access", "deny") => "vhosts.access.deny",
+        ("vhosts.access", "allow_client_cert_sha256") => "vhosts.access.allow_client_cert_sha256",
+        ("vhosts.access", "deny_client_cert_sha256") => "vhosts.access.deny_client_cert_sha256",
         ("vhosts.routes.access", "allow") => "vhosts.routes.access.allow",
         ("vhosts.routes.access", "deny") => "vhosts.routes.access.deny",
+        ("vhosts.routes.access", "allow_client_cert_sha256") => {
+            "vhosts.routes.access.allow_client_cert_sha256"
+        }
+        ("vhosts.routes.access", "deny_client_cert_sha256") => {
+            "vhosts.routes.access.deny_client_cert_sha256"
+        }
         _ => "access",
     }
+}
+
+fn validate_client_cert_sha256_list(
+    scope: &'static str,
+    field: &'static str,
+    values: &[String],
+) -> Result<(), ConfigError> {
+    validate_config_list_len(format!("{scope}.{field}"), values.len(), MAX_ACCESS_RULES)?;
+
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed != value || !valid_sha256_hex(trimmed) {
+            return Err(ConfigError::InvalidAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.clone(),
+            });
+        }
+        if !seen.insert(trimmed.to_ascii_lowercase()) {
+            return Err(ConfigError::DuplicateAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 const MAX_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 1_000_000;
@@ -20698,6 +20756,8 @@ mod tests {
             [vhosts.access]
             allow = ["10.0.0.0/8", "2001:db8::/32"]
             deny = ["10.9.0.0/16"]
+            require_client_cert = true
+            allow_client_cert_sha256 = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
 
             [vhosts.rate_limit]
             enabled = true
@@ -20741,6 +20801,11 @@ mod tests {
             ["10.0.0.0/8", "2001:db8::/32"]
         );
         assert_eq!(config.vhosts[0].access.deny, ["10.9.0.0/16"]);
+        assert!(config.vhosts[0].access.require_client_cert);
+        assert_eq!(
+            config.vhosts[0].access.allow_client_cert_sha256,
+            ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+        );
         assert_eq!(config.vhosts[0].routes[0].access.allow, ["10.1.2.3"]);
         assert_eq!(config.vhosts[0].rate_limit.requests_per_second, 10);
         assert_eq!(config.vhosts[0].rate_limit.mode, RateLimitMode::Delay);
@@ -20771,6 +20836,30 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("vhosts.access.allow"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_vhost_client_cert_access_fingerprint() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [vhosts.access]
+            allow_client_cert_sha256 = ["not-a-sha256"]
+
+            [vhosts.proxy]
+            upstream = "127.0.0.1:3000"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("vhosts.access.allow_client_cert_sha256"),
+            "{error}"
+        );
     }
 
     #[test]
