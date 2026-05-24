@@ -30,6 +30,7 @@ pub struct UpstreamLoadBalancer {
     inner: UpstreamLoadBalancerInner,
     key_source: LoadBalanceKeySource,
     passive_health: Option<Arc<PassiveHealthState>>,
+    backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
 }
 
@@ -190,6 +191,7 @@ impl UpstreamLoadBalancer {
             key.as_deref(),
             self.max_iterations,
             self.passive_health.as_deref(),
+            &self.backend_policy,
         )?;
         selected.reporter =
             self.passive_health
@@ -210,6 +212,7 @@ impl UpstreamLoadBalancer {
                     &config.load_balance.passive_health,
                 ))
             }),
+            backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
         }
     }
@@ -256,21 +259,29 @@ impl UpstreamLoadBalancerInner {
         key: Option<&[u8]>,
         max_iterations: usize,
         passive_health: Option<&PassiveHealthState>,
+        backend_policy: &BackendSelectionPolicy,
     ) -> Option<SelectedUpstream> {
         match self {
-            Self::RoundRobin(inner) => select_pingora(inner, b"", max_iterations, passive_health)
-                .map(SelectedUpstream::new),
+            Self::RoundRobin(inner) => {
+                select_pingora(inner, b"", max_iterations, passive_health, backend_policy)
+                    .map(SelectedUpstream::new)
+            }
             Self::LeastConnections { inner, counters } => {
-                select_least_connections(inner, counters, passive_health)
+                select_least_connections(inner, counters, passive_health, backend_policy)
             }
-            Self::PowerOfTwo { inner, counters } => {
-                select_power_of_two(inner, counters, max_iterations, passive_health)
-            }
+            Self::PowerOfTwo { inner, counters } => select_power_of_two(
+                inner,
+                counters,
+                max_iterations,
+                passive_health,
+                backend_policy,
+            ),
             Self::FnvHash(inner) => select_pingora(
                 inner,
                 key.unwrap_or_default(),
                 max_iterations,
                 passive_health,
+                backend_policy,
             )
             .map(SelectedUpstream::new),
             Self::ConsistentHash(inner) => select_pingora(
@@ -278,6 +289,7 @@ impl UpstreamLoadBalancerInner {
                 key.unwrap_or_default(),
                 max_iterations,
                 passive_health,
+                backend_policy,
             )
             .map(SelectedUpstream::new),
         }
@@ -471,33 +483,125 @@ fn backend_connection_key(backend: &Backend) -> u64 {
     hasher.finish()
 }
 
+#[derive(Clone, Debug, Default)]
+struct BackendSelectionPolicy {
+    backup: Arc<std::collections::HashSet<u64>>,
+    drain: Arc<std::collections::HashSet<u64>>,
+}
+
+impl BackendSelectionPolicy {
+    fn from_config(config: &ProxyConfig) -> Self {
+        Self {
+            backup: backend_policy_keys(&config.backup_upstreams).into(),
+            drain: backend_policy_keys(&config.drain_upstreams).into(),
+        }
+    }
+
+    fn permits(&self, backend: &Backend, allow_backup: bool) -> bool {
+        let key = backend_policy_key(backend);
+        !self.drain.contains(&key) && (allow_backup || !self.backup.contains(&key))
+    }
+}
+
+fn backend_policy_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
+    upstreams
+        .iter()
+        .filter_map(|upstream| Backend::new(upstream).ok())
+        .map(|backend| backend_policy_key(&backend))
+        .collect()
+}
+
+fn backend_policy_key(backend: &Backend) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    backend.addr.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn select_pingora<S>(
     inner: &LoadBalancer<S>,
     key: &[u8],
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
+    backend_policy: &BackendSelectionPolicy,
 ) -> Option<Backend>
 where
     S: BackendSelection + 'static,
     S::Iter: BackendIter,
 {
-    for _ in 0..max_iterations {
-        let backend = inner.select(key, max_iterations)?;
-        if passive_health.is_none_or(|health| !health.is_ejected(&backend)) {
-            return Some(backend);
-        }
-    }
-    None
+    select_pingora_with_backup_policy(
+        inner,
+        key,
+        max_iterations,
+        passive_health,
+        backend_policy,
+        false,
+    )
+    .or_else(|| {
+        select_pingora_with_backup_policy(
+            inner,
+            key,
+            max_iterations,
+            passive_health,
+            backend_policy,
+            true,
+        )
+    })
+}
+
+fn select_pingora_with_backup_policy<S>(
+    inner: &LoadBalancer<S>,
+    key: &[u8],
+    max_iterations: usize,
+    passive_health: Option<&PassiveHealthState>,
+    backend_policy: &BackendSelectionPolicy,
+    allow_backup: bool,
+) -> Option<Backend>
+where
+    S: BackendSelection + 'static,
+    S::Iter: BackendIter,
+{
+    inner.select_with(key, max_iterations, |backend, ready| {
+        ready
+            && backend_policy.permits(backend, allow_backup)
+            && passive_health.is_none_or(|health| !health.is_ejected(backend))
+    })
 }
 
 fn select_least_connections(
     inner: &LoadBalancer<RoundRobin>,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
+    backend_policy: &BackendSelectionPolicy,
+) -> Option<SelectedUpstream> {
+    select_least_connections_with_backup_policy(
+        inner,
+        counters,
+        passive_health,
+        backend_policy,
+        false,
+    )
+    .or_else(|| {
+        select_least_connections_with_backup_policy(
+            inner,
+            counters,
+            passive_health,
+            backend_policy,
+            true,
+        )
+    })
+}
+
+fn select_least_connections_with_backup_policy(
+    inner: &LoadBalancer<RoundRobin>,
+    counters: &BackendConnectionCounters,
+    passive_health: Option<&PassiveHealthState>,
+    backend_policy: &BackendSelectionPolicy,
+    allow_backup: bool,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
     for backend in inner.backends().get_backend().iter() {
         if !inner.backends().ready(backend)
+            || !backend_policy.permits(backend, allow_backup)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
         {
             continue;
@@ -524,11 +628,12 @@ fn select_power_of_two(
     counters: &BackendConnectionCounters,
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
+    backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
-    let first = select_pingora(inner, b"", max_iterations, passive_health)?;
+    let first = select_pingora(inner, b"", max_iterations, passive_health, backend_policy)?;
     let first_key = backend_connection_key(&first);
     let second = (0..max_iterations)
-        .filter_map(|_| select_pingora(inner, b"", max_iterations, passive_health))
+        .filter_map(|_| select_pingora(inner, b"", max_iterations, passive_health, backend_policy))
         .find(|backend| backend_connection_key(backend) != first_key)
         .unwrap_or_else(|| first.clone());
     let selected = if counters.count(&second) < counters.count(&first) {
@@ -890,6 +995,55 @@ mod tests {
         failed.reporter.unwrap().record_status(503);
         let next = balancer.select(&request(), None).unwrap();
         assert_ne!(failed_addr, next.backend.addr);
+    }
+
+    #[test]
+    fn backup_upstreams_are_used_after_primary_ejection() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            backup_upstreams: vec!["127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    failure_statuses: Vec::new(),
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let primary = balancer.select(&request(), None).unwrap();
+        assert_eq!(primary.backend.addr.to_string(), "127.0.0.1:3000");
+        primary.reporter.unwrap().record_failure();
+        let backup = balancer.select(&request(), None).unwrap();
+        assert_eq!(backup.backend.addr.to_string(), "127.0.0.1:3001");
+    }
+
+    #[test]
+    fn drained_upstreams_do_not_receive_new_selections() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            drain_upstreams: vec!["127.0.0.1:3000".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        for _ in 0..4 {
+            let selected = balancer.select(&request(), None).unwrap();
+            assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+        }
     }
 
     #[test]

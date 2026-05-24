@@ -479,6 +479,8 @@ operators who want a different banner can set one through
 [proxy]
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_weights = [1, 2]
+backup_upstreams = ["127.0.0.1:3001"]
+drain_upstreams = []
 upstream_tls = false
 upstream_sni = "origin.example.test"
 connect_timeout_secs = 5
@@ -515,6 +517,11 @@ case-insensitively. Proxy error-page lists are also capped at 64 entries.
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
 fit in Pingora's weighted selector.
+`backup_upstreams` and `drain_upstreams` are optional subsets of `upstreams`.
+Backups stay out of normal rotation and are selected only when no non-backup
+backend is currently selectable. Drained upstreams remain configured for
+health and operator visibility but receive no new selections. Backup and drain
+sets must not overlap, and at least one upstream must remain a normal primary.
 `proxy.load_balance.selection` defaults to `round-robin`. It also accepts
 `least-connections`, `power-of-two`, `source-hash`, `uri-hash`, `header-hash`,
 `cookie-hash`, `consistent-source-hash`, `consistent-uri-hash`,

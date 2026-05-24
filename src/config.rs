@@ -3318,6 +3318,10 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_weights: Vec<usize>,
     #[serde(default)]
+    pub backup_upstreams: Vec<String>,
+    #[serde(default)]
+    pub drain_upstreams: Vec<String>,
+    #[serde(default)]
     pub upstream_tls: bool,
     #[serde(default)]
     pub upstream_sni: Option<String>,
@@ -3348,6 +3352,8 @@ impl Default for ProxyConfig {
             upstream: Some(default_upstream()),
             upstreams: Vec::new(),
             upstream_weights: Vec::new(),
+            backup_upstreams: Vec::new(),
+            drain_upstreams: Vec::new(),
             upstream_tls: false,
             upstream_sni: None,
             connect_timeout_secs: None,
@@ -3459,6 +3465,7 @@ impl ProxyConfig {
                 });
             }
         }
+        self.validate_upstream_policy()?;
 
         if let Some(sni) = &self.upstream_sni
             && sni.trim().is_empty()
@@ -3495,6 +3502,76 @@ impl ProxyConfig {
         self.load_balance.validate()?;
         Ok(())
     }
+
+    fn validate_upstream_policy(&self) -> Result<(), ConfigError> {
+        if self.backup_upstreams.is_empty() && self.drain_upstreams.is_empty() {
+            return Ok(());
+        }
+        if self.upstreams.len() < 2 || self.upstream.is_some() {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstreams",
+                reason: "backup_upstreams and drain_upstreams require proxy.upstreams with at least two entries",
+            });
+        }
+        let configured = self
+            .upstreams
+            .iter()
+            .map(|upstream| upstream.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let backup = validate_proxy_upstream_subset(
+            "proxy.backup_upstreams",
+            &self.backup_upstreams,
+            &configured,
+        )?;
+        let drain = validate_proxy_upstream_subset(
+            "proxy.drain_upstreams",
+            &self.drain_upstreams,
+            &configured,
+        )?;
+        if !backup.is_disjoint(&drain) {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.backup_upstreams",
+                reason: "backup_upstreams and drain_upstreams must not overlap",
+            });
+        }
+        let primary_count = configured.len().saturating_sub(backup.len() + drain.len());
+        if primary_count == 0 {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstreams",
+                reason: "at least one upstream must remain primary and not drained",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn validate_proxy_upstream_subset(
+    field: &'static str,
+    values: &[String],
+    configured: &HashSet<String>,
+) -> Result<HashSet<String>, ConfigError> {
+    let mut seen = HashSet::new();
+    for upstream in values {
+        if !valid_authority(upstream) {
+            return Err(ConfigError::InvalidUpstream {
+                address: upstream.clone(),
+            });
+        }
+        let normalized = upstream.to_ascii_lowercase();
+        if !configured.contains(&normalized) {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field,
+                reason: "each entry must also be present in proxy.upstreams",
+            });
+        }
+        if !seen.insert(normalized) {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field,
+                reason: "duplicate upstream policy entries are not allowed",
+            });
+        }
+    }
+    Ok(seen)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -8148,6 +8225,10 @@ pub enum ConfigError {
     InvalidProxyUpstreamWeights {
         reason: &'static str,
     },
+    InvalidProxyUpstreamPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
     DuplicateProxyUpstream {
         upstream: String,
     },
@@ -8760,6 +8841,9 @@ impl Display for ConfigError {
             ),
             Self::InvalidProxyUpstreamWeights { reason } => {
                 write!(formatter, "proxy.upstream_weights is invalid: {reason}")
+            }
+            Self::InvalidProxyUpstreamPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
             }
             Self::DuplicateProxyUpstream { upstream } => write!(
                 formatter,
@@ -11374,6 +11458,7 @@ mod tests {
             [proxy]
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
             upstream_weights = [1, 3]
+            backup_upstreams = ["127.0.0.1:3002"]
             connect_timeout_secs = 5
             read_timeout_secs = 60
             send_timeout_secs = 30
@@ -11403,6 +11488,7 @@ mod tests {
             ["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()]
         );
         assert_eq!(config.proxy.upstream_weights, [1, 3]);
+        assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
         assert_eq!(config.proxy.connect_timeout_secs, Some(5));
         assert_eq!(config.proxy.read_timeout_secs, Some(60));
         assert_eq!(config.proxy.send_timeout_secs, Some(30));
@@ -11467,6 +11553,49 @@ mod tests {
         assert!(matches!(
             zero.validate(),
             Err(ConfigError::InvalidProxyUpstreamWeights { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_upstream_policy() {
+        let unknown_backup: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            backup_upstreams = ["127.0.0.1:3999"]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            unknown_backup.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let overlapping_policy: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            backup_upstreams = ["127.0.0.1:3002"]
+            drain_upstreams = ["127.0.0.1:3002"]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            overlapping_policy.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let no_primary: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            backup_upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            no_primary.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
         ));
     }
 

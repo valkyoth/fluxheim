@@ -35,6 +35,9 @@ behavior when the change improves security or project direction.
   safe HTTP method policy.
 - Extended load-balanced upstream selection, passive health, and retry policy
   to route-level proxy pools, not only vhost-level proxy pools.
+- Added load-balanced upstream `backup_upstreams` and `drain_upstreams`
+  policies so operators can keep standby origins out of normal rotation and
+  stop new traffic to draining origins without removing them from the pool.
 
 ### Planned
 
