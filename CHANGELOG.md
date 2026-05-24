@@ -74,6 +74,8 @@ behavior when the change improves security or project direction.
   route index label.
 - Access logs and OTLP trace spans now report the Fluxheim-applied response
   compression encoding when gzip, zstd, or brotli compression is used.
+- Added `fluxheim_response_compressions_total` to count Fluxheim-applied
+  response compression by vhost, route scope, and bounded encoding.
 - Added `compression.max_output_bytes` so encoded responses stay bounded even
   when a compressible input is within `max_input_bytes`.
 - Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and

@@ -5,6 +5,7 @@ use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeV
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static RESPONSE_COMPRESSIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -58,6 +59,7 @@ pub fn enabled() -> bool {
 pub fn init() -> Result<(), prometheus::Error> {
     proxy_requests_total()?;
     host_routing_rejections_total()?;
+    response_compressions_total()?;
     admin_auth_events_total()?;
     acme_events_total()?;
     php_requests_total()?;
@@ -196,6 +198,20 @@ pub fn record_host_routing_rejection(reason: &str) {
             .with_label_values(&[host_routing_reason_label(reason)])
             .inc(),
         Err(error) => log::debug!("metrics counter unavailable: {error}"),
+    }
+}
+
+pub fn record_response_compression(vhost: &str, route: Option<&str>, encoding: &str) {
+    match response_compressions_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                cache_scope_label(route),
+                vhost,
+                route.unwrap_or(""),
+                compression_encoding_label(encoding),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics response compression counter unavailable: {error}"),
     }
 }
 
@@ -531,6 +547,32 @@ fn host_routing_rejections_total() -> Result<&'static IntCounterVec, prometheus:
     let _ = HOST_ROUTING_REJECTIONS_TOTAL.set(counter);
     HOST_ROUTING_REJECTIONS_TOTAL.get().ok_or_else(|| {
         prometheus::Error::Msg("host routing counter failed to initialize".to_owned())
+    })
+}
+
+fn response_compressions_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = RESPONSE_COMPRESSIONS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_response_compressions_total",
+            "Total Fluxheim-applied response compressions by configured vhost, optional route, and bounded encoding.",
+        ),
+        &["scope", "vhost", "route", "encoding"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = RESPONSE_COMPRESSIONS_TOTAL.set(counter);
+    RESPONSE_COMPRESSIONS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_response_compressions_total failed to initialize".to_owned(),
+        )
     })
 }
 
@@ -1270,6 +1312,15 @@ fn cache_scope_label(route: Option<&str>) -> &'static str {
     if route.is_some() { "route" } else { "vhost" }
 }
 
+fn compression_encoding_label(encoding: &str) -> &'static str {
+    match encoding {
+        "gzip" => "gzip",
+        "zstd" => "zstd",
+        "br" => "br",
+        _ => "other",
+    }
+}
+
 fn cache_event_label(event: &str) -> &'static str {
     match event {
         "hit" => "hit",
@@ -1448,7 +1499,7 @@ mod tests {
         record_cache_purger_run, record_config, record_host_routing_rejection,
         record_metrics_otlp_export, record_php_fpm_pool_event, record_php_fpm_pool_idle,
         record_php_fpm_retry, record_php_request, record_php_stderr, record_proxy_outcome,
-        status_class,
+        record_response_compression, status_class,
     };
 
     #[test]
@@ -1470,6 +1521,32 @@ mod tests {
         assert!(output.contains(r#"class="server_error""#));
         assert!(output.contains(r#"status_class="5xx""#));
         assert!(!output.contains(r#"status="502""#));
+    }
+
+    #[test]
+    fn records_response_compression_metrics_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_response_compression("compression-test", Some("assets"), "gzip");
+        record_response_compression("compression-test", None, "br");
+        record_response_compression("compression-test", Some("assets"), "attacker-encoding");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_response_compressions_total"));
+        assert!(output.contains(r#"scope="route""#));
+        assert!(output.contains(r#"scope="vhost""#));
+        assert!(output.contains(r#"vhost="compression-test""#));
+        assert!(output.contains(r#"route="assets""#));
+        assert!(output.contains(r#"encoding="gzip""#));
+        assert!(output.contains(r#"encoding="br""#));
+        assert!(output.contains(r#"encoding="other""#));
+        assert!(!output.contains("attacker-encoding"));
     }
 
     #[test]
@@ -2038,6 +2115,7 @@ mod tests {
             fallback: false,
             https_redirect_exempt: false,
             strip_prefix: None,
+            rewrite_prefix: None,
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
@@ -2075,6 +2153,7 @@ mod tests {
             fallback: false,
             https_redirect_exempt: false,
             strip_prefix: None,
+            rewrite_prefix: None,
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),

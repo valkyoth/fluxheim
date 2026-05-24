@@ -109,6 +109,7 @@ Current cache baseline:
 - `fluxheim_cache_purger_runs_total{outcome}`
 - `fluxheim_cache_purger_entries_total{result}`
 - `fluxheim_cache_purger_duration_seconds{outcome}`
+- `fluxheim_response_compressions_total{scope,vhost,route,encoding}`
 
 The configuration gauges are aggregate, label-free, and populated from
 validated configuration when the metrics listener starts. The local

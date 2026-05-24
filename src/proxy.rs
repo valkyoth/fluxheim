@@ -6550,6 +6550,25 @@ impl ProxyHttp for FluxProxy {
             selected_compression_config(vhost, ctx),
             ctx,
         )?;
+        #[cfg(all(
+            feature = "metrics",
+            any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            )
+        ))]
+        if let Some(compression) = ctx.compression.as_ref() {
+            let route = ctx
+                .route_index
+                .and_then(|route_index| vhost.routes.get(route_index))
+                .map(|route| route.name.as_str());
+            crate::metrics::record_response_compression(
+                vhost.name.as_str(),
+                route,
+                compression.encoding,
+            );
+        }
         #[cfg(feature = "load-balancer")]
         record_load_balanced_upstream_status(ctx, response.status.as_u16());
         append_fluxheim_via_to_response(response)
