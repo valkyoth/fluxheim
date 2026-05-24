@@ -3668,6 +3668,7 @@ impl LoadBalanceConfig {
 pub enum LoadBalanceSelection {
     #[default]
     RoundRobin,
+    LeastConnections,
     SourceHash,
     UriHash,
     HeaderHash,

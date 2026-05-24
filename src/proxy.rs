@@ -4828,6 +4828,8 @@ pub struct RequestContext {
     route_index: Option<usize>,
     request_body_limit_bytes: Option<u64>,
     in_flight_permits: Vec<InFlightPermit>,
+    #[cfg(feature = "load-balancer")]
+    upstream_load_balancer_permit: Option<crate::load_balancer::LoadBalancedConnectionPermit>,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
     health_signal_recorded: bool,
@@ -5301,12 +5303,13 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(feature = "load-balancer")]
         if let Some(load_balancer) = &vhost.load_balancer
-            && let Some(upstream) = load_balancer.select(
+            && let Some(selected) = load_balancer.select(
                 session.req_header(),
                 effective_acl_client_ip(session, &state),
             )
         {
-            let peer = http_peer_for_proxy(upstream, &proxy.config)?;
+            ctx.upstream_load_balancer_permit = selected.permit;
+            let peer = http_peer_for_proxy(selected.backend, &proxy.config)?;
             return Ok(Box::new(peer));
         }
 

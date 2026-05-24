@@ -1,7 +1,11 @@
+use std::collections::hash_map::DefaultHasher;
 use std::fmt::{Debug, Formatter};
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures::FutureExt;
@@ -26,6 +30,22 @@ pub struct UpstreamLoadBalancer {
     max_iterations: usize,
 }
 
+pub struct SelectedUpstream {
+    pub backend: Backend,
+    pub permit: Option<LoadBalancedConnectionPermit>,
+}
+
+#[derive(Debug)]
+pub struct LoadBalancedConnectionPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for LoadBalancedConnectionPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 impl Debug for UpstreamLoadBalancer {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -44,6 +64,18 @@ impl UpstreamLoadBalancer {
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::RoundRobin(Arc::new(inner)),
+                    config,
+                )))
+            }
+            LoadBalanceSelection::LeastConnections => {
+                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                    return Ok(None);
+                };
+                Ok(Some(Self::from_inner(
+                    UpstreamLoadBalancerInner::LeastConnections {
+                        inner: Arc::new(inner),
+                        counters: Arc::new(BackendConnectionCounters::default()),
+                    },
                     config,
                 )))
             }
@@ -82,6 +114,14 @@ impl UpstreamLoadBalancer {
                 config,
                 UpstreamLoadBalancerInner::RoundRobin,
             ),
+            LoadBalanceSelection::LeastConnections => {
+                background_service_for::<RoundRobin>(name, config, |inner| {
+                    UpstreamLoadBalancerInner::LeastConnections {
+                        inner,
+                        counters: Arc::new(BackendConnectionCounters::default()),
+                    }
+                })
+            }
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash => {
@@ -97,7 +137,11 @@ impl UpstreamLoadBalancer {
         }
     }
 
-    pub fn select(&self, request: &RequestHeader, client_ip: Option<IpAddr>) -> Option<Backend> {
+    pub fn select(
+        &self,
+        request: &RequestHeader,
+        client_ip: Option<IpAddr>,
+    ) -> Option<SelectedUpstream> {
         let key = self.key_source.request_key(request, client_ip);
         self.inner.select(key.as_deref(), self.max_iterations)
     }
@@ -134,16 +178,25 @@ impl UpstreamLoadBalancer {
 #[derive(Clone)]
 enum UpstreamLoadBalancerInner {
     RoundRobin(Arc<LoadBalancer<RoundRobin>>),
+    LeastConnections {
+        inner: Arc<LoadBalancer<RoundRobin>>,
+        counters: Arc<BackendConnectionCounters>,
+    },
     FnvHash(Arc<LoadBalancer<FNVHash>>),
     ConsistentHash(Arc<LoadBalancer<Consistent>>),
 }
 
 impl UpstreamLoadBalancerInner {
-    fn select(&self, key: Option<&[u8]>, max_iterations: usize) -> Option<Backend> {
+    fn select(&self, key: Option<&[u8]>, max_iterations: usize) -> Option<SelectedUpstream> {
         match self {
-            Self::RoundRobin(inner) => inner.select(b"", max_iterations),
-            Self::FnvHash(inner) => inner.select(key.unwrap_or_default(), max_iterations),
-            Self::ConsistentHash(inner) => inner.select(key.unwrap_or_default(), max_iterations),
+            Self::RoundRobin(inner) => inner.select(b"", max_iterations).map(SelectedUpstream::new),
+            Self::LeastConnections { inner, counters } => select_least_connections(inner, counters),
+            Self::FnvHash(inner) => inner
+                .select(key.unwrap_or_default(), max_iterations)
+                .map(SelectedUpstream::new),
+            Self::ConsistentHash(inner) => inner
+                .select(key.unwrap_or_default(), max_iterations)
+                .map(SelectedUpstream::new),
         }
     }
 
@@ -151,6 +204,7 @@ impl UpstreamLoadBalancerInner {
     fn backend_count(&self) -> usize {
         match self {
             Self::RoundRobin(inner) => inner.backends().get_backend().len(),
+            Self::LeastConnections { inner, .. } => inner.backends().get_backend().len(),
             Self::FnvHash(inner) => inner.backends().get_backend().len(),
             Self::ConsistentHash(inner) => inner.backends().get_backend().len(),
         }
@@ -160,6 +214,7 @@ impl UpstreamLoadBalancerInner {
     fn backend_weights(&self) -> Vec<usize> {
         match self {
             Self::RoundRobin(inner) => backend_weights(inner),
+            Self::LeastConnections { inner, .. } => backend_weights(inner),
             Self::FnvHash(inner) => backend_weights(inner),
             Self::ConsistentHash(inner) => backend_weights(inner),
         }
@@ -169,6 +224,7 @@ impl UpstreamLoadBalancerInner {
     fn health_check_frequency(&self) -> Option<Duration> {
         match self {
             Self::RoundRobin(inner) => inner.health_check_frequency,
+            Self::LeastConnections { inner, .. } => inner.health_check_frequency,
             Self::FnvHash(inner) => inner.health_check_frequency,
             Self::ConsistentHash(inner) => inner.health_check_frequency,
         }
@@ -178,10 +234,86 @@ impl UpstreamLoadBalancerInner {
     fn parallel_health_check(&self) -> bool {
         match self {
             Self::RoundRobin(inner) => inner.parallel_health_check,
+            Self::LeastConnections { inner, .. } => inner.parallel_health_check,
             Self::FnvHash(inner) => inner.parallel_health_check,
             Self::ConsistentHash(inner) => inner.parallel_health_check,
         }
     }
+}
+
+impl SelectedUpstream {
+    fn new(backend: Backend) -> Self {
+        Self {
+            backend,
+            permit: None,
+        }
+    }
+}
+
+#[derive(Default)]
+struct BackendConnectionCounters {
+    counters: Mutex<std::collections::HashMap<u64, Arc<AtomicUsize>>>,
+}
+
+impl BackendConnectionCounters {
+    fn count(&self, backend: &Backend) -> usize {
+        self.counter(backend).load(Ordering::Acquire)
+    }
+
+    fn permit(&self, backend: &Backend) -> Option<LoadBalancedConnectionPermit> {
+        let counter = self.counter(backend);
+        let mut current = counter.load(Ordering::Acquire);
+        loop {
+            let next = current.checked_add(1)?;
+            match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return Some(LoadBalancedConnectionPermit { counter }),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    fn counter(&self, backend: &Backend) -> Arc<AtomicUsize> {
+        let mut counters = self
+            .counters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        counters
+            .entry(backend_connection_key(backend))
+            .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+            .clone()
+    }
+}
+
+fn backend_connection_key(backend: &Backend) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    backend.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn select_least_connections(
+    inner: &LoadBalancer<RoundRobin>,
+    counters: &BackendConnectionCounters,
+) -> Option<SelectedUpstream> {
+    let mut selected = None;
+    for backend in inner.backends().get_backend().iter() {
+        if !inner.backends().ready(backend) {
+            continue;
+        }
+        let connections = counters.count(backend);
+        if selected
+            .as_ref()
+            .is_none_or(|(_, selected_connections)| connections < *selected_connections)
+        {
+            selected = Some((backend.clone(), connections));
+        }
+    }
+    let backend = selected.map(|(backend, _)| backend)?;
+    let permit = counters.permit(&backend)?;
+    Some(SelectedUpstream {
+        permit: Some(permit),
+        backend,
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -196,6 +328,7 @@ impl LoadBalanceKeySource {
     fn from_config(config: &ProxyConfig) -> Self {
         match config.load_balance.selection {
             LoadBalanceSelection::RoundRobin => Self::None,
+            LoadBalanceSelection::LeastConnections => Self::None,
             LoadBalanceSelection::SourceHash | LoadBalanceSelection::ConsistentSourceHash => {
                 Self::SourceIp
             }
@@ -383,7 +516,7 @@ mod tests {
         let client_ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 42));
         let first = balancer.select(&request(), Some(client_ip)).unwrap();
         let second = balancer.select(&request(), Some(client_ip)).unwrap();
-        assert_eq!(first.addr, second.addr);
+        assert_eq!(first.backend.addr, second.backend.addr);
     }
 
     #[test]
@@ -406,7 +539,31 @@ mod tests {
         request.insert_header("x-session", "abc").unwrap();
         let first = balancer.select(&request, None).unwrap();
         let second = balancer.select(&request, None).unwrap();
-        assert_eq!(first.addr, second.addr);
+        assert_eq!(first.backend.addr, second.backend.addr);
+    }
+
+    #[test]
+    fn least_connections_tracks_held_permits() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::LeastConnections,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        let first_addr = first.backend.addr.clone();
+        let second = balancer.select(&request(), None).unwrap();
+        assert_ne!(&first_addr, &second.backend.addr);
+        drop(first);
+        let third = balancer.select(&request(), None).unwrap();
+        assert_eq!(third.backend.addr, first_addr);
     }
 
     #[test]
