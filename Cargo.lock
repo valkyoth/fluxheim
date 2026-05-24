@@ -1034,6 +1034,7 @@ dependencies = [
  "fastcgi-client",
  "flate2",
  "fluxheim-openssl-fips-support",
+ "futures",
  "getrandom 0.4.2",
  "http",
  "httpdate",

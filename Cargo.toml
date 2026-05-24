@@ -130,6 +130,7 @@ env_logger = "0.11.10"
 fastcgi-client = { version = "0.11.1", default-features = false, optional = true }
 fluxheim-openssl-fips-support = { path = "vendor/fluxheim-openssl-fips-support", optional = true }
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"], optional = true }
+futures = "0.3.32"
 getrandom = "0.4.2"
 httpdate = { version = "1.0.3", optional = true }
 http = { version = "1.4.0", optional = true }

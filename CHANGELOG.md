@@ -22,11 +22,14 @@ behavior when the change improves security or project direction.
 - Added opt-in gzip response compression behind the `compression-gzip` feature,
   with conservative MIME, size, cookie/auth, range, `no-transform`, and
   `Vary: Accept-Encoding` handling.
+- Added `proxy.upstream_weights` for weighted round-robin upstream selection in
+  `load-balancer` builds.
 
 ### Planned
 
-- Continue the production proxy parity line with upstream resilience,
-  TLS/protocol, discovery, mirroring, and operator-hook work.
+- Continue the production proxy parity line with least-connections/hash
+  selection, upstream resilience, TLS/protocol, discovery, mirroring, and
+  operator-hook work.
 
 ## 1.3.7 - Production PHP-FPM Completion
 

@@ -478,6 +478,7 @@ operators who want a different banner can set one through
 ```toml
 [proxy]
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
+upstream_weights = [1, 2]
 upstream_tls = false
 upstream_sni = "origin.example.test"
 connect_timeout_secs = 5
@@ -509,6 +510,10 @@ Every `upstreams` entry must be an authority such as
 `127.0.0.1:3000` or `origin.example.test:443`.
 Proxy upstream lists are capped at 64 entries and reject duplicates
 case-insensitively. Proxy error-page lists are also capped at 64 entries.
+`upstream_weights` is optional and, when set, must contain one positive weight
+for each `upstreams` entry. It enables weighted round-robin in `load-balancer`
+builds. Each weight must be at most 1000 and the total configured weight must
+fit in Pingora's weighted selector.
 
 `upstreams` is the preferred proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

@@ -3316,6 +3316,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstreams: Vec<String>,
     #[serde(default)]
+    pub upstream_weights: Vec<usize>,
+    #[serde(default)]
     pub upstream_tls: bool,
     #[serde(default)]
     pub upstream_sni: Option<String>,
@@ -3336,6 +3338,8 @@ pub struct ProxyConfig {
 }
 
 const MAX_PROXY_UPSTREAMS: usize = 64;
+const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
+const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_ERROR_PAGES: usize = 64;
 
 impl Default for ProxyConfig {
@@ -3343,6 +3347,7 @@ impl Default for ProxyConfig {
         Self {
             upstream: Some(default_upstream()),
             upstreams: Vec::new(),
+            upstream_weights: Vec::new(),
             upstream_tls: false,
             upstream_sni: None,
             connect_timeout_secs: None,
@@ -3400,6 +3405,32 @@ impl ProxyConfig {
             return Err(ConfigError::TooManyProxyUpstreams {
                 max: MAX_PROXY_UPSTREAMS,
             });
+        }
+        if !self.upstream_weights.is_empty() {
+            if self.upstream.is_some() || self.upstream_weights.len() != self.upstreams.len() {
+                return Err(ConfigError::InvalidProxyUpstreamWeights {
+                    reason: "upstream_weights must match proxy.upstreams and cannot be used with proxy.upstream",
+                });
+            }
+            let mut total_weight = 0usize;
+            for weight in &self.upstream_weights {
+                if *weight == 0 {
+                    return Err(ConfigError::InvalidProxyUpstreamWeights {
+                        reason: "weights must be greater than zero",
+                    });
+                }
+                if *weight > MAX_PROXY_UPSTREAM_WEIGHT {
+                    return Err(ConfigError::InvalidProxyUpstreamWeights {
+                        reason: "each weight must be at most 1000",
+                    });
+                }
+                total_weight = total_weight.saturating_add(*weight);
+            }
+            if total_weight > MAX_PROXY_UPSTREAM_TOTAL_WEIGHT {
+                return Err(ConfigError::InvalidProxyUpstreamWeights {
+                    reason: "total upstream weight is too large",
+                });
+            }
         }
         if self.error_pages.len() > MAX_PROXY_ERROR_PAGES {
             return Err(ConfigError::TooManyProxyErrorPages {
@@ -7908,6 +7939,9 @@ pub enum ConfigError {
     TooManyProxyUpstreams {
         max: usize,
     },
+    InvalidProxyUpstreamWeights {
+        reason: &'static str,
+    },
     DuplicateProxyUpstream {
         upstream: String,
     },
@@ -8509,6 +8543,9 @@ impl Display for ConfigError {
                 formatter,
                 "proxy.upstreams must contain at most {max} entries"
             ),
+            Self::InvalidProxyUpstreamWeights { reason } => {
+                write!(formatter, "proxy.upstream_weights is invalid: {reason}")
+            }
             Self::DuplicateProxyUpstream { upstream } => write!(
                 formatter,
                 "proxy.upstreams contains duplicate upstream {upstream:?}"
@@ -11106,6 +11143,7 @@ mod tests {
             r#"
             [proxy]
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_weights = [1, 3]
             connect_timeout_secs = 5
             read_timeout_secs = 60
             send_timeout_secs = 30
@@ -11134,6 +11172,7 @@ mod tests {
             config.proxy.upstreams,
             ["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()]
         );
+        assert_eq!(config.proxy.upstream_weights, [1, 3]);
         assert_eq!(config.proxy.connect_timeout_secs, Some(5));
         assert_eq!(config.proxy.read_timeout_secs, Some(60));
         assert_eq!(config.proxy.send_timeout_secs, Some(30));
@@ -11170,6 +11209,35 @@ mod tests {
             config.validate(),
             Err(ConfigError::ConflictingProxyUpstreams)
         );
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_upstream_weights() {
+        let mismatch: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_weights = [1]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            mismatch.validate(),
+            Err(ConfigError::InvalidProxyUpstreamWeights { .. })
+        ));
+
+        let zero: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_weights = [1, 0]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            zero.validate(),
+            Err(ConfigError::InvalidProxyUpstreamWeights { .. })
+        ));
     }
 
     #[test]

@@ -3,7 +3,10 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::FutureExt;
 use pingora::lb::Backend;
+use pingora::lb::Backends;
+use pingora::lb::discovery::Static;
 use pingora::lb::health_check::TcpHealthCheck;
 use pingora::lb::prelude::{LoadBalancer, RoundRobin};
 use pingora::services::background::GenBackgroundService;
@@ -69,6 +72,16 @@ impl UpstreamLoadBalancer {
     }
 
     #[cfg(test)]
+    fn backend_weights(&self) -> Vec<usize> {
+        self.inner
+            .backends()
+            .get_backend()
+            .iter()
+            .map(|backend| backend.weight)
+            .collect()
+    }
+
+    #[cfg(test)]
     fn health_check_frequency(&self) -> Option<Duration> {
         self.inner.health_check_frequency
     }
@@ -84,8 +97,13 @@ fn configured_load_balancer(config: &ProxyConfig) -> io::Result<Option<LoadBalan
         return Ok(None);
     }
 
-    let mut load_balancer =
-        LoadBalancer::try_from_iter(config.upstreams.iter().map(String::as_str))?;
+    let backends = configured_backends(config)?;
+    let mut load_balancer = LoadBalancer::from_backends(Backends::new(Static::new(backends)));
+    load_balancer
+        .update()
+        .now_or_never()
+        .ok_or_else(|| io::Error::other("static load balancer update blocked unexpectedly"))?
+        .map_err(|error| io::Error::other(error.to_string()))?;
     if config.load_balance.health_check.enabled {
         let mut health_check = if config.upstream_tls {
             TcpHealthCheck::new_tls(&config.upstream_sni())
@@ -102,6 +120,17 @@ fn configured_load_balancer(config: &ProxyConfig) -> io::Result<Option<LoadBalan
     }
 
     Ok(Some(load_balancer))
+}
+
+fn configured_backends(config: &ProxyConfig) -> io::Result<std::collections::BTreeSet<Backend>> {
+    let mut backends = std::collections::BTreeSet::new();
+    for (index, upstream) in config.upstreams.iter().enumerate() {
+        let weight = config.upstream_weights.get(index).copied().unwrap_or(1);
+        let backend = Backend::new_with_weight(upstream, weight)
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        backends.insert(backend);
+    }
+    Ok(backends)
 }
 
 #[cfg(test)]
@@ -132,6 +161,26 @@ mod tests {
         .unwrap();
 
         assert_eq!(balancer.backend_count(), 2);
+        assert!(balancer.select().is_some());
+    }
+
+    #[test]
+    fn builds_weighted_round_robin_from_proxy_upstreams() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_weights: vec![1, 4],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(balancer.backend_count(), 2);
+        assert_eq!(balancer.backend_weights(), [1, 4]);
         assert!(balancer.select().is_some());
     }
 
