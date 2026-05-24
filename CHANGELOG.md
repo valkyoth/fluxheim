@@ -52,6 +52,8 @@ behavior when the change improves security or project direction.
 - Added `fluxheim_load_balancer_events_total` to count load-balanced
   selections, unavailable pools, retries, and success/failure outcomes with
   bounded vhost/route labels.
+- Extended load-balancer metrics to count passive-health ejection transitions
+  without labeling raw upstream addresses.
 - Added `proxy.upstream_aliases` as optional safe low-cardinality backend labels
   for load-balancer metrics without exposing raw upstream addresses.
 - Added opt-in `compression-zstd` and `compression-brotli` codec features

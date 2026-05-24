@@ -192,11 +192,12 @@ Cache:
 Load balancer:
 
 - `fluxheim_load_balancer_events_total` counts selected upstreams, retries,
-  all-nodes-down/unavailable pools, and success/failure outcomes with bounded
-  configured vhost/route labels. The `upstream` label is empty unless the
-  operator configures a safe low-cardinality `proxy.upstream_aliases` entry.
-- upstream health state transition metrics remain planned; they should not
-  label raw upstream addresses unless an explicit low-cardinality alias is
+  all-nodes-down/unavailable pools, success/failure outcomes, and
+  passive-health ejections with bounded configured vhost/route labels. The
+  `upstream` label is empty unless the operator configures a safe
+  low-cardinality `proxy.upstream_aliases` entry.
+- richer upstream health state transition metrics remain planned; they should
+  not label raw upstream addresses unless an explicit low-cardinality alias is
   configured.
 
 Admin/security:

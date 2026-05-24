@@ -1143,8 +1143,9 @@ Release shape:
     and latency ejection; active HTTP health checks may land here if they fit;
   - Prometheus now counts load-balanced selections, unavailable pools, retries,
     and selected upstream success/failure outcomes through bounded vhost/route
-    labels. `proxy.upstream_aliases` now provides optional safe low-cardinality
-    backend labels for operator-facing metrics; per-backend health transition
+    labels. It also counts passive-health ejection transitions.
+    `proxy.upstream_aliases` now provides optional safe low-cardinality backend
+    labels for operator-facing metrics; richer per-backend health transition
     metrics remain later work.
 - `1.4.2` - TLS, identity, and protocol parity:
   - listener-level mTLS/client certificate auth with `off`, `optional`, and

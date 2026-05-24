@@ -47,6 +47,12 @@ pub struct SelectedUpstream {
     pub reporter: Option<LoadBalancedUpstreamReporter>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LoadBalancedUpstreamOutcome {
+    pub failed: bool,
+    pub ejected: bool,
+}
+
 #[derive(Debug)]
 pub struct LoadBalancedConnectionPermit {
     counter: Arc<AtomicUsize>,
@@ -385,20 +391,32 @@ impl SelectedUpstream {
 }
 
 impl LoadBalancedUpstreamReporter {
-    pub fn record_status(&self, status: u16, latency: Option<Duration>) -> bool {
+    pub fn record_status(
+        &self,
+        status: u16,
+        latency: Option<Duration>,
+    ) -> LoadBalancedUpstreamOutcome {
         let failed = self.passive_health.status_is_failure(status, latency);
-        if let Some(restart_at) =
-            self.passive_health
-                .record_status(self.backend_key, status, latency)
-        {
+        let ejected_at = self
+            .passive_health
+            .record_status(self.backend_key, status, latency);
+        if let Some(restart_at) = ejected_at {
             self.reset_slow_start(restart_at);
         }
-        failed
+        LoadBalancedUpstreamOutcome {
+            failed,
+            ejected: ejected_at.is_some(),
+        }
     }
 
-    pub fn record_failure(&self) {
-        if let Some(restart_at) = self.passive_health.record_failure(self.backend_key) {
+    pub fn record_failure(&self) -> LoadBalancedUpstreamOutcome {
+        let ejected_at = self.passive_health.record_failure(self.backend_key);
+        if let Some(restart_at) = ejected_at {
             self.reset_slow_start(restart_at);
+        }
+        LoadBalancedUpstreamOutcome {
+            failed: true,
+            ejected: ejected_at.is_some(),
         }
     }
 
@@ -1311,7 +1329,9 @@ mod tests {
             )),
             slow_start: Some(slow_start.clone()),
         };
-        reporter.record_failure();
+        let outcome = reporter.record_failure();
+        assert!(outcome.failed);
+        assert!(outcome.ejected);
 
         assert!(!slow_start.permits(&backend));
     }
@@ -1338,7 +1358,9 @@ mod tests {
 
         let failed = balancer.select(&request(), None).unwrap();
         let failed_addr = failed.backend.addr.clone();
-        failed.reporter.unwrap().record_status(503, None);
+        let outcome = failed.reporter.unwrap().record_status(503, None);
+        assert!(outcome.failed);
+        assert!(outcome.ejected);
         let next = balancer.select(&request(), None).unwrap();
         assert_ne!(failed_addr, next.backend.addr);
     }
@@ -1366,10 +1388,12 @@ mod tests {
 
         let failed = balancer.select(&request(), None).unwrap();
         let failed_addr = failed.backend.addr.clone();
-        failed
+        let outcome = failed
             .reporter
             .unwrap()
             .record_status(200, Some(Duration::from_millis(150)));
+        assert!(outcome.failed);
+        assert!(outcome.ejected);
         let next = balancer.select(&request(), None).unwrap();
         assert_ne!(failed_addr, next.backend.addr);
     }

@@ -691,10 +691,10 @@ permits and Pingora's current backend health state. `power-of-two` samples two
 healthy backends through Pingora's random weighted selector and chooses the
 lower in-flight count.
 With metrics enabled, load-balanced selections, unavailable pools, retries, and
-success/failure outcomes are counted by `fluxheim_load_balancer_events_total`
-with bounded configured vhost/route labels. The metric does not label raw
-upstream addresses; it uses `upstream_aliases` when present and otherwise leaves
-the upstream label empty.
+success/failure/ejection outcomes are counted by
+`fluxheim_load_balancer_events_total` with bounded configured vhost/route
+labels. The metric does not label raw upstream addresses; it uses
+`upstream_aliases` when present and otherwise leaves the upstream label empty.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send a `GET` request to `path`; by default only `200`

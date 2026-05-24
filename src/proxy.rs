@@ -79,7 +79,9 @@ use crate::config::{
     normalize_host,
 };
 #[cfg(feature = "load-balancer")]
-use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
+use crate::load_balancer::{
+    LoadBalancedUpstreamOutcome, UpstreamLoadBalancer, UpstreamLoadBalancerService,
+};
 #[cfg(feature = "web")]
 use crate::web::{ResolveResult, StaticFileServer};
 use tokio::io::AsyncWriteExt as _;
@@ -6199,9 +6201,16 @@ impl ProxyHttp for FluxProxy {
                 .vhost_index
                 .unwrap_or_else(|| state.vhost_index(request_host(session)));
             let vhost = state.vhost(vhost_index);
-            if record_load_balanced_upstream_failure(ctx) {
+            if let Some(outcome) = record_load_balanced_upstream_failure(ctx) {
                 #[cfg(feature = "metrics")]
-                record_load_balancer_metric(vhost, ctx, "failure");
+                {
+                    record_load_balancer_metric(vhost, ctx, "failure");
+                    if outcome.ejected {
+                        record_load_balancer_metric(vhost, ctx, "ejected");
+                    }
+                }
+                #[cfg(not(feature = "metrics"))]
+                let _ = outcome;
             }
             let proxy = selected_runtime_proxy(vhost, ctx);
             let retry = &proxy.config.load_balance.retry;
@@ -6616,11 +6625,20 @@ impl ProxyHttp for FluxProxy {
             );
         }
         #[cfg(feature = "load-balancer")]
-        if let Some(failed) = record_load_balanced_upstream_status(ctx, response.status.as_u16()) {
+        if let Some(outcome) = record_load_balanced_upstream_status(ctx, response.status.as_u16()) {
             #[cfg(feature = "metrics")]
-            record_load_balancer_metric(vhost, ctx, if failed { "failure" } else { "success" });
+            {
+                record_load_balancer_metric(
+                    vhost,
+                    ctx,
+                    if outcome.failed { "failure" } else { "success" },
+                );
+                if outcome.ejected {
+                    record_load_balancer_metric(vhost, ctx, "ejected");
+                }
+            }
             #[cfg(not(feature = "metrics"))]
-            let _ = failed;
+            let _ = outcome;
         }
         append_fluxheim_via_to_response(response)
     }
@@ -12130,7 +12148,10 @@ fn append_fluxheim_via_to_response(response: &mut ResponseHeader) -> Result<()> 
 }
 
 #[cfg(feature = "load-balancer")]
-fn record_load_balanced_upstream_status(ctx: &mut RequestContext, status: u16) -> Option<bool> {
+fn record_load_balanced_upstream_status(
+    ctx: &mut RequestContext,
+    status: u16,
+) -> Option<LoadBalancedUpstreamOutcome> {
     if ctx.upstream_load_balancer_outcome_recorded {
         return None;
     }
@@ -12138,32 +12159,40 @@ fn record_load_balanced_upstream_status(ctx: &mut RequestContext, status: u16) -
         .upstream_load_balancer_selected_at
         .map(|selected_at| selected_at.elapsed());
     if let Some(reporter) = &ctx.upstream_load_balancer_reporter {
-        let failed = reporter.record_status(status, latency);
+        let outcome = reporter.record_status(status, latency);
         ctx.upstream_load_balancer_outcome_recorded = true;
-        return Some(failed);
+        return Some(outcome);
     }
     if ctx.upstream_load_balancer_selected_at.is_some() {
         ctx.upstream_load_balancer_outcome_recorded = true;
-        return Some((500..=599).contains(&status));
+        return Some(LoadBalancedUpstreamOutcome {
+            failed: (500..=599).contains(&status),
+            ejected: false,
+        });
     }
     None
 }
 
 #[cfg(feature = "load-balancer")]
-fn record_load_balanced_upstream_failure(ctx: &mut RequestContext) -> bool {
+fn record_load_balanced_upstream_failure(
+    ctx: &mut RequestContext,
+) -> Option<LoadBalancedUpstreamOutcome> {
     if ctx.upstream_load_balancer_outcome_recorded {
-        return false;
+        return None;
     }
     if let Some(reporter) = &ctx.upstream_load_balancer_reporter {
-        reporter.record_failure();
+        let outcome = reporter.record_failure();
         ctx.upstream_load_balancer_outcome_recorded = true;
-        return true;
+        return Some(outcome);
     }
     if ctx.upstream_load_balancer_selected_at.is_some() {
         ctx.upstream_load_balancer_outcome_recorded = true;
-        return true;
+        return Some(LoadBalancedUpstreamOutcome {
+            failed: true,
+            ejected: false,
+        });
     }
-    false
+    None
 }
 
 #[cfg(all(feature = "load-balancer", feature = "metrics"))]

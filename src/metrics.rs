@@ -1435,6 +1435,7 @@ fn load_balancer_event_label(event: &str) -> &'static str {
         "retry" => "retry",
         "success" => "success",
         "failure" => "failure",
+        "ejected" => "ejected",
         _ => "other",
     }
 }
@@ -1731,6 +1732,7 @@ mod tests {
         record_load_balancer_event("lb-test", None, None, "unavailable");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "success");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "failure");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "ejected");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "attacker-event");
         record_load_balancer_event("lb-test", Some("api"), Some("http://raw:3000"), "selected");
 
@@ -1752,6 +1754,7 @@ mod tests {
         assert!(output.contains(r#"event="retry""#));
         assert!(output.contains(r#"event="success""#));
         assert!(output.contains(r#"event="failure""#));
+        assert!(output.contains(r#"event="ejected""#));
         assert!(output.contains(r#"event="other""#));
         assert!(!output.contains("attacker-event"));
         assert!(!output.contains("http://raw:3000"));
