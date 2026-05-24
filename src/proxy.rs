@@ -388,6 +388,15 @@ impl FluxProxy {
                 } else {
                     None
                 },
+                #[cfg(any(
+                    feature = "compression-brotli",
+                    feature = "compression-gzip",
+                    feature = "compression-zstd"
+                ))]
+                compression_encoding: ctx
+                    .compression
+                    .as_ref()
+                    .map(|compression| compression.encoding),
                 vhost,
                 route: if state.access_log.include_route {
                     route
@@ -473,6 +482,21 @@ impl FluxProxy {
             .map(|duration| duration.as_secs_f64() * 1000.0);
         #[cfg(not(feature = "cache"))]
         let cache_lock_wait_duration_ms = None;
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        let compression_encoding = ctx
+            .compression
+            .as_ref()
+            .map(|compression| compression.encoding.to_owned());
+        #[cfg(not(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        )))]
+        let compression_encoding = None;
         exporter.try_export(crate::otel_otlp::TraceSpan {
             trace_id: trace_context.trace_id_hex(),
             span_id: trace_context.span_id_hex(),
@@ -490,6 +514,7 @@ impl FluxProxy {
             cache_phase,
             cache_lookup_duration_ms,
             cache_lock_wait_duration_ms,
+            compression_encoding,
             #[cfg(feature = "php-fpm")]
             php_runtime: ctx.php_outcome.map(|_| "php-fpm".to_owned()),
             #[cfg(not(feature = "php-fpm"))]
@@ -5481,6 +5506,7 @@ pub struct RequestContext {
     feature = "compression-zstd"
 ))]
 struct ResponseCompressionEncoder {
+    encoding: &'static str,
     inner: ResponseCompressionEncoderInner,
     emitted: usize,
     max_output_bytes: usize,
@@ -5509,6 +5535,7 @@ impl std::fmt::Debug for ResponseCompressionEncoder {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("ResponseCompressionEncoder")
+            .field("encoding", &self.encoding)
             .field("emitted", &self.emitted)
             .finish_non_exhaustive()
     }
@@ -5523,6 +5550,7 @@ impl ResponseCompressionEncoder {
     #[cfg(feature = "compression-brotli")]
     fn brotli(quality: u32, max_output_bytes: usize) -> Self {
         Self {
+            encoding: "br",
             inner: ResponseCompressionEncoderInner::Brotli(Box::new(Some(CompressorWriter::new(
                 Vec::new(),
                 4096,
@@ -5537,6 +5565,7 @@ impl ResponseCompressionEncoder {
     #[cfg(feature = "compression-gzip")]
     fn gzip(level: u32, max_output_bytes: usize) -> Self {
         Self {
+            encoding: "gzip",
             inner: ResponseCompressionEncoderInner::Gzip(GzEncoder::new(
                 Vec::new(),
                 Compression::new(level),
@@ -5549,6 +5578,7 @@ impl ResponseCompressionEncoder {
     #[cfg(feature = "compression-zstd")]
     fn zstd(level: i32, max_output_bytes: usize) -> io::Result<Self> {
         Ok(Self {
+            encoding: "zstd",
             inner: ResponseCompressionEncoderInner::Zstd(Some(zstd::stream::write::Encoder::new(
                 Vec::new(),
                 level,
@@ -12349,6 +12379,12 @@ struct AccessLogEvent<'a> {
     client_ip: Option<String>,
     #[cfg(feature = "cache")]
     cache_phase: Option<&'static str>,
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    compression_encoding: Option<&'static str>,
     vhost: &'a str,
     route: &'a str,
     upstream: Option<&'a str>,
@@ -12377,15 +12413,28 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
     let cache_phase = event.cache_phase.unwrap_or("");
     #[cfg(not(feature = "cache"))]
     let cache_phase = "";
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    let compression_encoding = event.compression_encoding.unwrap_or("");
+    #[cfg(not(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    )))]
+    let compression_encoding = "";
     let upstream = event.upstream.unwrap_or("");
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     let body = format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"cache_phase\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"cache_phase\":\"{}\",\"compression_encoding\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
         json_escape(client_ip),
         json_escape(cache_phase),
+        json_escape(compression_encoding),
         json_escape(event.vhost),
         json_escape(event.route),
         json_escape(upstream),
@@ -13698,6 +13747,12 @@ mod tests {
         assert!(vary.contains(&"accept-language".to_owned()));
         assert!(vary.contains(&"accept-encoding".to_owned()));
         assert!(ctx.compression.is_some());
+        assert_eq!(
+            ctx.compression
+                .as_ref()
+                .map(|compression| compression.encoding),
+            Some("gzip")
+        );
     }
 
     #[cfg(feature = "compression-gzip")]
@@ -20487,6 +20542,12 @@ mod tests {
             client_ip: Some("203.0.113.10".to_owned()),
             #[cfg(feature = "cache")]
             cache_phase: Some("hit"),
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression_encoding: Some("gzip"),
             vhost: "main\"site",
             route: "assets",
             upstream: Some("127.0.0.1:3000"),
@@ -20507,6 +20568,12 @@ mod tests {
         assert!(log.contains("\"client_ip\":\"203.0.113.10\""));
         #[cfg(feature = "cache")]
         assert!(log.contains("\"cache_phase\":\"hit\""));
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        assert!(log.contains("\"compression_encoding\":\"gzip\""));
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
         assert!(log.contains("\"route\":\"assets\""));
         assert!(log.contains("\"upstream\":\"127.0.0.1:3000\""));
@@ -20526,6 +20593,12 @@ mod tests {
             client_ip: None,
             #[cfg(feature = "cache")]
             cache_phase: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression_encoding: None,
             vhost: "main",
             route: "private",
             upstream: None,
@@ -20543,6 +20616,7 @@ mod tests {
 
         assert!(log.contains("\"path\":\"\""));
         assert!(log.contains("\"cache_phase\":\"\""));
+        assert!(log.contains("\"compression_encoding\":\"\""));
         assert!(!log.contains("/private"));
     }
 
@@ -20555,6 +20629,12 @@ mod tests {
             client_ip: None,
             #[cfg(feature = "cache")]
             cache_phase: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression_encoding: None,
             vhost: "main",
             route: "root",
             upstream: None,
@@ -20583,6 +20663,12 @@ mod tests {
             client_ip: None,
             #[cfg(feature = "cache")]
             cache_phase: None,
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "compression-gzip",
+                feature = "compression-zstd"
+            ))]
+            compression_encoding: None,
             vhost: "main",
             route: "root",
             upstream: None,

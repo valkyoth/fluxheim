@@ -111,7 +111,9 @@ Implemented in the first exporter:
 - optional `tracing.otlp.tls_ca_cert_path` PEM CA bundle for private-PKI HTTPS
   collectors;
 - request-level server spans with trace ID, regenerated span ID, optional parent
-  span ID, method, vhost, route index, status, error flag, and body byte counts.
+  span ID, method, vhost, resolved route name, status, error flag, body byte
+  counts, cache phase/timing, compression encoding, and PHP-FPM outcome when
+  those modules are compiled in.
 
 Requirements:
 

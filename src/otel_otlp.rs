@@ -80,6 +80,7 @@ pub struct TraceSpan {
     pub cache_phase: Option<String>,
     pub cache_lookup_duration_ms: Option<f64>,
     pub cache_lock_wait_duration_ms: Option<f64>,
+    pub compression_encoding: Option<String>,
     pub php_runtime: Option<String>,
     pub php_outcome: Option<String>,
 }
@@ -210,6 +211,17 @@ fn build_trace_payload(span: TraceSpan, service_name: &str) -> String {
         attributes.push(double_attr(
             "fluxheim.cache.lock_wait.duration_ms",
             duration_ms,
+        ));
+    }
+    if let Some(compression_encoding) = span.compression_encoding
+        && let Some(attributes) = span_json
+            .as_object_mut()
+            .and_then(|object| object.get_mut("attributes"))
+            .and_then(|attributes| attributes.as_array_mut())
+    {
+        attributes.push(string_attr(
+            "fluxheim.compression.encoding",
+            compression_encoding,
         ));
     }
     if let Some(php_runtime) = span.php_runtime
@@ -351,6 +363,7 @@ mod tests {
                 cache_phase: Some("hit".to_owned()),
                 cache_lookup_duration_ms: Some(1.5),
                 cache_lock_wait_duration_ms: Some(0.25),
+                compression_encoding: Some("gzip".to_owned()),
                 php_runtime: Some("php-fpm".to_owned()),
                 php_outcome: Some("response".to_owned()),
             },
@@ -363,6 +376,7 @@ mod tests {
         assert!(payload.contains(r#""key":"fluxheim.vhost""#));
         assert!(payload.contains(r#""key":"fluxheim.cache.phase""#));
         assert!(payload.contains(r#""key":"fluxheim.cache.lookup.duration_ms""#));
+        assert!(payload.contains(r#""key":"fluxheim.compression.encoding""#));
         assert!(payload.contains(r#""key":"fluxheim.cache.lock_wait.duration_ms""#));
         assert!(payload.contains(r#""key":"fluxheim.php.runtime""#));
         assert!(payload.contains(r#""key":"fluxheim.php.outcome""#));

@@ -369,6 +369,10 @@ by access policy and rate limiting.
 When enabled in cache-capable builds, Fluxheim logs the effective request cache
 phase, such as `hit`, `miss`, `bypass`, or `disabled`.
 
+Access log events include `compression_encoding` when Fluxheim applies response
+compression; the field is empty when the response is served without a Fluxheim
+compression encoder.
+
 Access log events also include the resolved route name and selected upstream
 address when a request reaches a proxy action; fallback, local static, or
 unrouted requests emit empty `route` or `upstream` fields as applicable.
