@@ -3291,7 +3291,7 @@ fn cert_fingerprint_list_contains(values: &[String], fingerprint: &str) -> bool 
     let fingerprint = fingerprint.as_bytes();
     let mut matched = 0u8;
     for value in values {
-        matched |= bool::from(value.as_bytes().ct_eq(fingerprint)) as u8;
+        matched |= value.as_bytes().ct_eq(fingerprint).unwrap_u8();
     }
     matched == 1
 }
