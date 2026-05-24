@@ -3484,6 +3484,7 @@ mod tests {
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                 }],
             }],
@@ -6144,6 +6145,7 @@ mod tests {
                 max_object_bytes: ByteSize::from_bytes(512),
                 ..CacheConfig::default()
             }),
+            compression: None,
             headers: crate::config::VhostHeaderPolicyConfig::default(),
         }
     }
@@ -6180,6 +6182,7 @@ mod tests {
                 max_object_bytes: ByteSize::from_bytes(512),
                 ..CacheConfig::default()
             }),
+            compression: None,
             headers: crate::config::VhostHeaderPolicyConfig::default(),
         }
     }
@@ -6202,6 +6205,7 @@ mod tests {
             web: None,
             php: None,
             cache: None,
+            compression: None,
             headers: crate::config::VhostHeaderPolicyConfig::default(),
         }
     }

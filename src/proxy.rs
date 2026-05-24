@@ -2775,6 +2775,8 @@ struct RuntimeRoute {
     load_balancer: Option<UpstreamLoadBalancer>,
     #[cfg(feature = "cache")]
     cache: Option<RuntimeRouteCache>,
+    #[cfg(feature = "compression")]
+    compression: Option<crate::config::CompressionConfig>,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
 }
@@ -4568,6 +4570,8 @@ impl RuntimeRoute {
                 .as_ref()
                 .map(|cache| RuntimeRouteCache::from_config(vhost_name, &route.name, cache))
                 .transpose()?,
+            #[cfg(feature = "compression")]
+            compression: route.compression.clone(),
             request_headers: headers.request,
             response_headers: headers.response,
         })
@@ -4594,6 +4598,8 @@ impl RuntimeRoute {
             load_balancer: None,
             #[cfg(feature = "cache")]
             cache: None,
+            #[cfg(feature = "compression")]
+            compression: None,
             request_headers: base_headers.request.clone(),
             response_headers: base_headers.response.clone(),
         }
@@ -5936,7 +5942,12 @@ impl ProxyHttp for FluxProxy {
             feature = "compression-gzip",
             feature = "compression-zstd"
         ))]
-        prepare_response_compression(session.req_header(), response, &vhost.compression, ctx)?;
+        prepare_response_compression(
+            session.req_header(),
+            response,
+            selected_compression_config(vhost, ctx),
+            ctx,
+        )?;
         #[cfg(feature = "load-balancer")]
         record_load_balanced_upstream_status(ctx, response.status.as_u16());
         append_fluxheim_via_to_response(response)
@@ -10558,6 +10569,16 @@ fn selected_response_headers<'a>(
         .unwrap_or(&vhost.response_headers)
 }
 
+#[cfg(feature = "compression")]
+fn selected_compression_config<'a>(
+    vhost: &'a RuntimeVhost,
+    ctx: &RequestContext,
+) -> &'a crate::config::CompressionConfig {
+    ctx.route_index
+        .and_then(|route_index| vhost.route(route_index).compression.as_ref())
+        .unwrap_or(&vhost.compression)
+}
+
 #[cfg(feature = "cache")]
 fn selected_cache_config<'a>(
     vhost: &'a RuntimeVhost,
@@ -12590,7 +12611,10 @@ mod tests {
         feature = "compression-gzip",
         feature = "compression-zstd"
     ))]
-    use super::{RequestContext, prepare_response_compression, selected_response_compression};
+    use super::{
+        RequestContext, prepare_response_compression, selected_compression_config,
+        selected_response_compression,
+    };
     #[cfg(feature = "compression-gzip")]
     use super::{
         ResponseCompressionEncoder, ResponseCompressionEncoding, gzip_response_eligible,
@@ -12694,6 +12718,55 @@ mod tests {
                 &compression_request(),
                 &compression_response(),
                 &vhost.compression
+            ),
+            Some(ResponseCompressionEncoding::Gzip)
+        );
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn route_compression_overrides_vhost_disabled_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = false
+
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [vhosts.compression]
+            enabled = false
+
+            [[vhosts.routes]]
+            name = "uploads"
+            path_prefix = "/wp-content/uploads/"
+
+            [vhosts.routes.proxy]
+            upstream = "127.0.0.1:8080"
+
+            [vhosts.routes.compression]
+            enabled = true
+            gzip = true
+            min_bytes = "1KiB"
+            max_input_bytes = "4KiB"
+            "#,
+        )
+        .unwrap();
+        config.validate().unwrap();
+        let state = ProxyRuntimeState::from_config(&config).unwrap();
+        let vhost = state.vhost(state.vhost_index(Some("site.example")));
+        let ctx = RequestContext {
+            route_index: Some(0),
+            ..RequestContext::default()
+        };
+
+        assert!(!vhost.compression.enabled);
+        assert_eq!(
+            selected_response_compression(
+                &compression_request(),
+                &compression_response(),
+                selected_compression_config(vhost, &ctx)
             ),
             Some(ResponseCompressionEncoding::Gzip)
         );
@@ -14828,6 +14901,7 @@ mod tests {
                         web: None,
                         php: None,
                         cache: None,
+                        compression: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                     RouteConfig {
@@ -14850,6 +14924,7 @@ mod tests {
                         web: None,
                         php: None,
                         cache: None,
+                        compression: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                     RouteConfig {
@@ -14872,6 +14947,7 @@ mod tests {
                         web: None,
                         php: None,
                         cache: None,
+                        compression: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                     RouteConfig {
@@ -14894,6 +14970,7 @@ mod tests {
                         web: None,
                         php: None,
                         cache: None,
+                        compression: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     },
                 ],
@@ -14950,6 +15027,8 @@ mod tests {
             load_balancer: None,
             #[cfg(feature = "cache")]
             cache: None,
+            #[cfg(feature = "compression")]
+            compression: None,
             request_headers: crate::config::RequestHeaderPolicyConfig::default(),
             response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
         };
@@ -14977,6 +15056,8 @@ mod tests {
             load_balancer: None,
             #[cfg(feature = "cache")]
             cache: None,
+            #[cfg(feature = "compression")]
+            compression: None,
             request_headers: crate::config::RequestHeaderPolicyConfig::default(),
             response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
         };
@@ -15459,6 +15540,7 @@ mod tests {
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                 }],
             }],
@@ -15551,6 +15633,7 @@ mod tests {
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                 }],
             }],
@@ -16056,6 +16139,7 @@ mod tests {
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                 }],
             }],
@@ -16725,6 +16809,7 @@ mod tests {
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                 }],
             }],
@@ -16838,6 +16923,7 @@ mod tests {
                         max_object_bytes: ByteSize::from_bytes(512),
                         ..CacheConfig::default()
                     }),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                 }],
             }],
@@ -17178,6 +17264,7 @@ mod tests {
                         web: None,
                         php: None,
                         cache: None,
+                        compression: None,
                         headers: crate::config::VhostHeaderPolicyConfig::default(),
                     }],
                 },
@@ -17257,6 +17344,7 @@ mod tests {
                     web: None,
                     php: None,
                     cache: None,
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                 }],
             }],

@@ -4470,6 +4470,8 @@ pub struct RouteConfig {
     #[serde(default)]
     pub cache: Option<CacheConfig>,
     #[serde(default)]
+    pub compression: Option<CompressionConfig>,
+    #[serde(default)]
     pub headers: VhostHeaderPolicyConfig,
 }
 
@@ -4646,6 +4648,16 @@ impl RouteConfig {
                     source: Box::new(source),
                 })?;
         }
+        if let Some(compression) = &self.compression {
+            compression
+                .validate()
+                .map_err(|source| ConfigError::RouteSection {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                    section: "compression",
+                    source: Box::new(source),
+                })?;
+        }
         self.headers
             .validate()
             .map_err(|source| ConfigError::RouteSection {
@@ -4753,6 +4765,7 @@ impl VhostRedirectConfig {
             web: None,
             php: None,
             cache: None,
+            compression: None,
             headers: VhostHeaderPolicyConfig::default(),
         })
     }
@@ -4986,6 +4999,7 @@ impl VhostAcmeChallengeConfig {
             web: None,
             php: None,
             cache: None,
+            compression: None,
             headers: VhostHeaderPolicyConfig::default(),
         })
     }
@@ -11438,6 +11452,41 @@ mod tests {
         assert!(compression.enabled);
         assert!(!compression.gzip);
         assert!(compression.zstd);
+
+        let route_override: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = false
+
+            [[vhosts]]
+            name = "site"
+            hosts = ["site.example"]
+
+            [vhosts.compression]
+            enabled = false
+
+            [[vhosts.routes]]
+            name = "uploads"
+            path_prefix = "/wp-content/uploads/"
+
+            [vhosts.routes.proxy]
+            upstream = "127.0.0.1:8080"
+
+            [vhosts.routes.compression]
+            enabled = true
+            gzip = true
+            min_bytes = "1KiB"
+            max_input_bytes = "2MiB"
+            "#,
+        )
+        .unwrap();
+        route_override.validate().unwrap();
+        let route_compression = route_override.vhosts[0].routes[0]
+            .compression
+            .as_ref()
+            .unwrap();
+        assert!(route_compression.enabled);
+        assert!(route_compression.gzip);
     }
 
     #[test]

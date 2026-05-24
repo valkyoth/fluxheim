@@ -43,6 +43,9 @@ behavior when the change improves security or project direction.
   then `gzip`.
 - Added vhost-level compression overrides so operators can keep compression
   disabled globally and enable it only for selected sites.
+- Added route-level compression overrides so path prefixes such as
+  `/wp-content/uploads/` can opt into or out of compression independently from
+  the rest of the vhost.
 
 ### Planned
 

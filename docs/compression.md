@@ -141,8 +141,10 @@ brotli_quality = 4
 ```
 
 The global block is the default for every vhost. A vhost can override it with
-`[vhosts.compression]`, which is useful when only selected sites should compress
-responses:
+`[vhosts.compression]`, and a route can override the vhost with
+`[vhosts.routes.compression]`. This lets one site enable compression while
+another site keeps identity responses, or lets one path prefix opt in while the
+rest of the vhost stays uncompressed.
 
 ```toml
 [compression]
@@ -161,7 +163,36 @@ min_bytes = "1KiB"
 max_input_bytes = "2MiB"
 ```
 
-Per-route compression policy is tracked for later `1.4.x` work.
+Path-scoped compression can be modeled as a route override:
+
+```toml
+[compression]
+enabled = false
+
+[[vhosts]]
+name = "wordpress"
+hosts = ["www.example.com"]
+
+[vhosts.compression]
+enabled = false
+
+[[vhosts.routes]]
+name = "uploads"
+path_prefix = "/wp-content/uploads/"
+
+[vhosts.routes.proxy]
+upstream = "127.0.0.1:8080"
+
+[vhosts.routes.compression]
+enabled = true
+gzip = true
+zstd = true
+min_bytes = "1KiB"
+max_input_bytes = "2MiB"
+```
+
+Eligibility checks still apply inside that path: already-compressed media types
+such as JPEG, PNG, WebP, AVIF, and most archives are served as identity.
 
 ## Test Plan
 

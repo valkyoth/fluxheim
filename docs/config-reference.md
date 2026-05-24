@@ -602,8 +602,10 @@ brotli_quality = 4
 ```
 
 Each vhost inherits the global compression policy unless it declares
-`[vhosts.compression]`. This lets one site enable compression while another site
-continues to serve identity responses:
+`[vhosts.compression]`. Each route inherits the vhost compression policy unless
+it declares `[vhosts.routes.compression]`. This lets one site enable
+compression while another site continues to serve identity responses, or lets a
+specific path prefix opt in or out:
 
 ```toml
 [[vhosts]]
@@ -615,6 +617,20 @@ enabled = true
 gzip = true
 zstd = true
 brotli = false
+min_bytes = "1KiB"
+max_input_bytes = "2MiB"
+
+[[vhosts.routes]]
+name = "uploads"
+path_prefix = "/wp-content/uploads/"
+
+[vhosts.routes.proxy]
+upstream = "127.0.0.1:8080"
+
+[vhosts.routes.compression]
+enabled = true
+gzip = true
+zstd = true
 min_bytes = "1KiB"
 max_input_bytes = "2MiB"
 ```

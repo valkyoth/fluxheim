@@ -2062,6 +2062,7 @@ mod tests {
                 },
                 ..CacheConfig::default()
             }),
+            compression: None,
             headers: VhostHeaderPolicyConfig::default(),
         }
     }
@@ -2083,6 +2084,7 @@ mod tests {
             web: None,
             php: None,
             cache: None,
+            compression: None,
             headers: VhostHeaderPolicyConfig::default(),
         }
     }
