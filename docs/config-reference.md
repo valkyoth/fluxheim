@@ -456,6 +456,13 @@ Request header values can use a small safe dynamic template set:
 - `{path}`: current request path.
 - `{query}`: current request query without `?`, or empty.
 - `{request_id}`: Fluxheim request ID when access request IDs are enabled.
+- `{tls.cipher}` and `{tls.version}`: downstream TLS cipher and protocol when
+  the request arrived over TLS.
+- `{tls.client_cert_sha256}`: lowercase SHA-256 fingerprint of the verified
+  downstream client certificate when one was presented.
+- `{tls.client_cert_serial}` and `{tls.client_cert_organization}`: serial number
+  and organization parsed from the verified downstream client certificate when
+  the TLS backend exposes them.
 - `{http.<header-name>}`: safe request-header forwarding, for example
   `{http.upgrade}`.
 
@@ -471,6 +478,7 @@ x-real-ip = "{remote_addr}"
 x-forwarded-for = "{remote_addr}"
 x-forwarded-proto = "{scheme}"
 x-forwarded-host = "{host}"
+x-client-cert-sha256 = "{tls.client_cert_sha256}"
 upgrade = "{http.upgrade}"
 connection = "upgrade"
 ```
@@ -1479,9 +1487,11 @@ parent-directory traversal, no symlinked path components, and no group- or
 world-writable existing parent directory. The current implementation wires
 rustls and OpenSSL/BoringSSL listeners. The s2n backend fails closed when client
 auth is enabled until Fluxheim exposes panic-free CA bundle loading for that
-backend. Certificate-derived routing variables and forwarded identity headers
-remain future 1.4 work; do not forward client identity from TLS termination to
-upstreams unless a later release documents that exact behavior.
+backend. Verified client-certificate identity can be forwarded explicitly with
+request header templates such as `{tls.client_cert_sha256}`. Route decisions
+based on certificate identity remain future work; do not rely on client-cert
+attributes for routing or authorization unless a later release documents that
+exact policy surface.
 
 Release validation must still scan every release candidate with a TLS scanner
 before publishing a stable release.

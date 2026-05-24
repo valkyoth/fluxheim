@@ -98,6 +98,10 @@ behavior when the change improves security or project direction.
   CA bundle path. The first implementation wires rustls and OpenSSL/BoringSSL
   listeners and fails closed for s2n until its CA loader can be exposed without
   panic-prone helpers.
+- Added downstream TLS/client-certificate request header template variables,
+  including `{tls.version}`, `{tls.cipher}`, `{tls.client_cert_sha256}`,
+  `{tls.client_cert_serial}`, and `{tls.client_cert_organization}`, so verified
+  mTLS identity can be forwarded explicitly to trusted origins.
 - Added upstream TLS verification controls for proxy origins:
   `upstream_verify_cert`, `upstream_verify_hostname`, and
   `upstream_alternative_cn`, while keeping certificate and hostname validation

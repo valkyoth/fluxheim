@@ -1150,9 +1150,11 @@ Release shape:
 - `1.4.2` - TLS, identity, and protocol parity:
   - listener-level mTLS/client certificate auth with `off`, `optional`, and
     `required` modes plus safe CA file handling for rustls and
-    OpenSSL/BoringSSL is implemented; remaining work is s2n parity and
-    certificate-derived identity variables for logs, headers, route policy, and
-    admin hardening;
+    OpenSSL/BoringSSL is implemented. Verified downstream TLS/client
+    certificate identity can now be forwarded through explicit request header
+    templates such as `{tls.client_cert_sha256}`; remaining work is s2n parity
+    and certificate-derived identity variables for logs, route policy, and admin
+    hardening;
   - upstream TLS controls: SNI override, trust roots, upstream mTLS client cert,
     protocol/cipher policy where supported, and auditable insecure-skip-verify
     behavior. SNI override already existed; certificate verification, hostname

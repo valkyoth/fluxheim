@@ -23,35 +23,54 @@ const DEFAULT_SERVER_HEADER: &str = "fluxheim";
 pub fn apply_upstream_request_policy(
     request: &mut pingora::http::RequestHeader,
     policy: &RequestHeaderPolicyConfig,
-    client_addr: Option<&SocketAddr>,
-    trusted_proxy: bool,
-    trusted_proxy_matcher: Option<&dyn Fn(IpAddr) -> bool>,
-    downstream_tls: bool,
-    request_id: Option<&str>,
+    context: UpstreamRequestPolicyContext<'_>,
 ) -> pingora::Result<()> {
     #[cfg(feature = "privacy-mode")]
     {
-        let _ = (
-            client_addr,
-            trusted_proxy,
-            trusted_proxy_matcher,
-            downstream_tls,
-            request_id,
-        );
-        apply_privacy_upstream_request_policy(request, policy, request_id)
+        let _ = context;
+        apply_privacy_upstream_request_policy(request, policy, context.request_id)
     }
 
     #[cfg(not(feature = "privacy-mode"))]
     {
-        apply_standard_upstream_request_policy(
-            request,
-            policy,
-            client_addr,
-            trusted_proxy,
-            trusted_proxy_matcher,
-            downstream_tls,
-            request_id,
-        )
+        apply_standard_upstream_request_policy(request, policy, context)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct UpstreamRequestPolicyContext<'a> {
+    pub client_addr: Option<&'a SocketAddr>,
+    pub trusted_proxy: bool,
+    pub trusted_proxy_matcher: Option<&'a dyn Fn(IpAddr) -> bool>,
+    pub downstream_tls: bool,
+    pub request_id: Option<&'a str>,
+    pub tls_identity: Option<&'a RequestTlsClientIdentity>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RequestTlsClientIdentity {
+    pub cipher: Option<String>,
+    pub version: Option<String>,
+    pub organization: Option<String>,
+    pub serial_number: Option<String>,
+    pub cert_sha256: Option<String>,
+}
+
+impl RequestTlsClientIdentity {
+    pub fn from_ssl_digest(digest: &pingora::protocols::tls::SslDigest) -> Self {
+        Self {
+            cipher: (!digest.cipher.is_empty()).then(|| digest.cipher.to_string()),
+            version: (!digest.version.is_empty()).then(|| digest.version.to_string()),
+            organization: digest
+                .organization
+                .clone()
+                .filter(|value| !value.is_empty()),
+            serial_number: digest
+                .serial_number
+                .clone()
+                .filter(|value| !value.is_empty()),
+            cert_sha256: (!digest.cert_digest.is_empty()).then(|| hex_lower(&digest.cert_digest)),
+        }
     }
 }
 
@@ -64,7 +83,7 @@ fn apply_privacy_upstream_request_policy(
     if policy.enabled {
         let unset = policy.effective_unset();
         let set = policy.effective_set();
-        let context = RequestHeaderTemplateContext::new(request, None, false, request_id);
+        let context = RequestHeaderTemplateContext::new(request, None, false, request_id, None);
         apply_request_mutations(request, &unset, &set, &policy.append, &context)?;
     }
     for header in SPOOFABLE_CLIENT_IP_HEADERS {
@@ -77,11 +96,7 @@ fn apply_privacy_upstream_request_policy(
 fn apply_standard_upstream_request_policy(
     request: &mut pingora::http::RequestHeader,
     policy: &RequestHeaderPolicyConfig,
-    client_addr: Option<&SocketAddr>,
-    trusted_proxy: bool,
-    trusted_proxy_matcher: Option<&dyn Fn(IpAddr) -> bool>,
-    downstream_tls: bool,
-    request_id: Option<&str>,
+    context: UpstreamRequestPolicyContext<'_>,
 ) -> pingora::Result<()> {
     if !policy.enabled {
         return Ok(());
@@ -101,7 +116,11 @@ fn apply_standard_upstream_request_policy(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
-    let proto = if downstream_tls { "https" } else { "http" };
+    let proto = if context.downstream_tls {
+        "https"
+    } else {
+        "http"
+    };
 
     if policy.strip_inbound_client_ip_headers {
         for header in SPOOFABLE_CLIENT_IP_HEADERS {
@@ -109,12 +128,12 @@ fn apply_standard_upstream_request_policy(
         }
     }
 
-    let effective_client_ip = client_addr.map(|client_addr| {
+    let effective_client_ip = context.client_addr.map(|client_addr| {
         effective_client_ip(
             client_addr.ip(),
-            trusted_proxy,
+            context.trusted_proxy,
             original_x_forwarded_for.as_deref(),
-            trusted_proxy_matcher,
+            context.trusted_proxy_matcher,
         )
     });
 
@@ -130,7 +149,8 @@ fn apply_standard_upstream_request_policy(
         apply_x_forwarded_for(
             request,
             policy.x_forwarded_for,
-            trusted_proxy
+            context
+                .trusted_proxy
                 .then_some(original_x_forwarded_for.as_deref())
                 .flatten(),
             client_ip,
@@ -162,8 +182,13 @@ fn apply_standard_upstream_request_policy(
 
     let unset = policy.effective_unset();
     let set = policy.effective_set();
-    let context =
-        RequestHeaderTemplateContext::new(request, effective_client_ip, downstream_tls, request_id);
+    let context = RequestHeaderTemplateContext::new(
+        request,
+        effective_client_ip,
+        context.downstream_tls,
+        context.request_id,
+        context.tls_identity,
+    );
     apply_request_mutations(request, &unset, &set, &policy.append, &context)?;
     Ok(())
 }
@@ -177,6 +202,7 @@ struct RequestHeaderTemplateContext {
     path: String,
     query: String,
     request_id: Option<String>,
+    tls_identity: Option<RequestTlsClientIdentity>,
 }
 
 impl RequestHeaderTemplateContext {
@@ -185,6 +211,7 @@ impl RequestHeaderTemplateContext {
         client_ip: Option<IpAddr>,
         downstream_tls: bool,
         request_id: Option<&str>,
+        tls_identity: Option<&RequestTlsClientIdentity>,
     ) -> Self {
         let host = request
             .headers
@@ -210,6 +237,7 @@ impl RequestHeaderTemplateContext {
             path,
             query,
             request_id: request_id.map(str::to_owned),
+            tls_identity: tls_identity.cloned(),
         }
     }
 
@@ -222,6 +250,26 @@ impl RequestHeaderTemplateContext {
             "path" => Some(self.path.as_str()),
             "query" => Some(self.query.as_str()),
             "request_id" => self.request_id.as_deref(),
+            "tls.cipher" => self
+                .tls_identity
+                .as_ref()
+                .and_then(|identity| identity.cipher.as_deref()),
+            "tls.version" => self
+                .tls_identity
+                .as_ref()
+                .and_then(|identity| identity.version.as_deref()),
+            "tls.client_cert_organization" => self
+                .tls_identity
+                .as_ref()
+                .and_then(|identity| identity.organization.as_deref()),
+            "tls.client_cert_serial" => self
+                .tls_identity
+                .as_ref()
+                .and_then(|identity| identity.serial_number.as_deref()),
+            "tls.client_cert_sha256" => self
+                .tls_identity
+                .as_ref()
+                .and_then(|identity| identity.cert_sha256.as_deref()),
             variable => variable
                 .strip_prefix("http.")
                 .and_then(|name| self.headers.get(name))
@@ -326,6 +374,16 @@ fn render_header_template(value: &str, context: &RequestHeaderTemplateContext) -
 
 fn push_header_template_variable(rendered: &mut String, value: &str) {
     rendered.extend(value.chars().filter(|character| !character.is_control()));
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(bytes.len().saturating_mul(2));
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 fn apply_response_mutations(
@@ -745,10 +803,31 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
     #[cfg(not(feature = "privacy-mode"))]
-    use super::{RequestHeaderTemplateContext, render_header_template};
-    use super::{apply_response_policy, apply_upstream_request_policy};
+    use super::{RequestHeaderTemplateContext, RequestTlsClientIdentity, render_header_template};
+    use super::{
+        UpstreamRequestPolicyContext, apply_response_policy, apply_upstream_request_policy,
+    };
     #[cfg(not(feature = "privacy-mode"))]
     use proptest::prelude::*;
+
+    #[cfg(not(feature = "privacy-mode"))]
+    fn test_upstream_context<'a>(
+        client_addr: &'a SocketAddr,
+        trusted_proxy: bool,
+        trusted_proxy_matcher: Option<&'a dyn Fn(IpAddr) -> bool>,
+        downstream_tls: bool,
+        request_id: Option<&'a str>,
+        tls_identity: Option<&'a RequestTlsClientIdentity>,
+    ) -> UpstreamRequestPolicyContext<'a> {
+        UpstreamRequestPolicyContext {
+            client_addr: Some(client_addr),
+            trusted_proxy,
+            trusted_proxy_matcher,
+            downstream_tls,
+            request_id,
+            tls_identity,
+        }
+    }
 
     #[test]
     fn applies_default_response_headers() {
@@ -1052,11 +1131,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            None,
+            test_upstream_context(&client_addr, false, None, true, None, None),
         )
         .unwrap();
 
@@ -1099,11 +1174,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            None,
+            test_upstream_context(&client_addr, false, None, true, None, None),
         )
         .unwrap();
 
@@ -1141,11 +1212,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            None,
+            test_upstream_context(&client_addr, false, None, true, None, None),
         )
         .unwrap();
 
@@ -1186,6 +1253,15 @@ mod tests {
                 ("x-original-path".to_owned(), "{path}".to_owned()),
                 ("x-original-query".to_owned(), "{query}".to_owned()),
                 ("x-request-id".to_owned(), "{request_id}".to_owned()),
+                (
+                    "x-client-cert-sha256".to_owned(),
+                    "{tls.client_cert_sha256}".to_owned(),
+                ),
+                (
+                    "x-client-cert-serial".to_owned(),
+                    "{tls.client_cert_serial}".to_owned(),
+                ),
+                ("x-tls-version".to_owned(), "{tls.version}".to_owned()),
                 ("upgrade".to_owned(), "{http.upgrade}".to_owned()),
             ]),
             ..crate::config::RequestHeaderPolicyConfig::default()
@@ -1195,15 +1271,24 @@ mod tests {
         request.insert_header("host", "example.test").unwrap();
         request.insert_header("upgrade", "websocket").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
+        let tls_identity = RequestTlsClientIdentity {
+            version: Some("TLSv1.3".to_owned()),
+            serial_number: Some("01AB".to_owned()),
+            cert_sha256: Some("aabbcc".to_owned()),
+            ..RequestTlsClientIdentity::default()
+        };
 
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            Some("req-123"),
+            test_upstream_context(
+                &client_addr,
+                false,
+                None,
+                true,
+                Some("req-123"),
+                Some(&tls_identity),
+            ),
         )
         .unwrap();
 
@@ -1259,6 +1344,27 @@ mod tests {
         assert_eq!(
             request
                 .headers
+                .get("x-client-cert-sha256")
+                .and_then(|value| value.to_str().ok()),
+            Some("aabbcc")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-client-cert-serial")
+                .and_then(|value| value.to_str().ok()),
+            Some("01AB")
+        );
+        assert_eq!(
+            request
+                .headers
+                .get("x-tls-version")
+                .and_then(|value| value.to_str().ok()),
+            Some("TLSv1.3")
+        );
+        assert_eq!(
+            request
+                .headers
                 .get("upgrade")
                 .and_then(|value| value.to_str().ok()),
             Some("websocket")
@@ -1283,6 +1389,13 @@ mod tests {
             Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))),
             true,
             Some("req-123"),
+            Some(&RequestTlsClientIdentity {
+                cipher: Some("TLS_AES_128_GCM_SHA256".to_owned()),
+                version: Some("TLSv1.3".to_owned()),
+                organization: Some("Fluxheim Test".to_owned()),
+                serial_number: Some("01AB".to_owned()),
+                cert_sha256: Some("aabbcc".to_owned()),
+            }),
         )
     }
 
@@ -1297,7 +1410,7 @@ mod tests {
             suffix in safe_header_template_fragment(),
         ) {
             let template = format!(
-                "{prefix}{{host}}{middle}{{remote_addr}}{{scheme}}{{uri}}{{path}}{{query}}{{request_id}}{{http.upgrade}}{suffix}"
+                "{prefix}{{host}}{middle}{{remote_addr}}{{scheme}}{{uri}}{{path}}{{query}}{{request_id}}{{tls.client_cert_sha256}}{{tls.client_cert_serial}}{{tls.version}}{{http.upgrade}}{suffix}"
             );
             let rendered = render_header_template(&template, &safe_dynamic_header_context());
 
@@ -1307,6 +1420,9 @@ mod tests {
             prop_assert!(rendered.contains("203.0.113.10"));
             prop_assert!(rendered.contains("https"));
             prop_assert!(rendered.contains("req-123"));
+            prop_assert!(rendered.contains("aabbcc"));
+            prop_assert!(rendered.contains("01AB"));
+            prop_assert!(rendered.contains("TLSv1.3"));
             prop_assert!(rendered.contains("websocket"));
         }
 
@@ -1336,16 +1452,21 @@ mod tests {
             path: "/chat/\u{7f}bad".to_owned(),
             query: "room=main\tadmin=false".to_owned(),
             request_id: Some("req-123\nbad".to_owned()),
+            tls_identity: Some(RequestTlsClientIdentity {
+                serial_number: Some("01\nAB".to_owned()),
+                cert_sha256: Some("aa\tbb".to_owned()),
+                ..RequestTlsClientIdentity::default()
+            }),
         };
 
         let rendered = render_header_template(
-            "{host} {remote_addr} {scheme} {uri} {path} {query} {request_id}",
+            "{host} {remote_addr} {scheme} {uri} {path} {query} {request_id} {tls.client_cert_serial} {tls.client_cert_sha256}",
             &context,
         );
 
         assert_eq!(
             rendered,
-            "example.test 203.0.113.10x-injected: true https /chat/bad /chat/bad room=mainadmin=false req-123bad"
+            "example.test 203.0.113.10x-injected: true https /chat/bad /chat/bad room=mainadmin=false req-123bad 01AB aabb"
         );
         assert!(
             rendered
@@ -1383,11 +1504,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            None,
+            test_upstream_context(&client_addr, false, None, true, None, None),
         )
         .unwrap();
 
@@ -1425,11 +1542,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            None,
+            test_upstream_context(&client_addr, false, None, true, None, None),
         )
         .unwrap();
 
@@ -1473,11 +1586,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            true,
-            None,
-            false,
-            None,
+            test_upstream_context(&client_addr, true, None, false, None, None),
         )
         .unwrap();
 
@@ -1520,11 +1629,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            true,
-            Some(&matcher),
-            true,
-            None,
+            test_upstream_context(&client_addr, true, Some(&matcher), true, None, None),
         )
         .unwrap();
 
@@ -1575,11 +1680,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            false,
-            None,
+            test_upstream_context(&client_addr, false, None, false, None, None),
         )
         .unwrap();
 
@@ -1606,11 +1707,7 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            None,
+            test_upstream_context(&client_addr, false, None, true, None, None),
         )
         .unwrap();
 
@@ -1649,11 +1746,14 @@ mod tests {
         apply_upstream_request_policy(
             &mut request,
             &policy,
-            Some(&client_addr),
-            false,
-            None,
-            true,
-            None,
+            UpstreamRequestPolicyContext {
+                client_addr: Some(&client_addr),
+                trusted_proxy: false,
+                trusted_proxy_matcher: None,
+                downstream_tls: true,
+                request_id: None,
+                tls_identity: None,
+            },
         )
         .unwrap();
 

@@ -11969,7 +11969,18 @@ fn validate_dynamic_header_template(
 fn valid_dynamic_header_variable(variable: &str) -> bool {
     matches!(
         variable,
-        "host" | "remote_addr" | "scheme" | "uri" | "path" | "query" | "request_id"
+        "host"
+            | "remote_addr"
+            | "scheme"
+            | "uri"
+            | "path"
+            | "query"
+            | "request_id"
+            | "tls.cipher"
+            | "tls.version"
+            | "tls.client_cert_organization"
+            | "tls.client_cert_serial"
+            | "tls.client_cert_sha256"
     ) || variable
         .strip_prefix("http.")
         .is_some_and(valid_http_header_name)
@@ -20614,6 +20625,11 @@ mod tests {
                 "path",
                 "query",
                 "request_id",
+                "tls.cipher",
+                "tls.version",
+                "tls.client_cert_organization",
+                "tls.client_cert_serial",
+                "tls.client_cert_sha256",
                 "http.upgrade",
                 "http.x-forwarded-host",
             ]),

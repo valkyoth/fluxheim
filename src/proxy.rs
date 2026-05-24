@@ -6292,14 +6292,18 @@ impl ProxyHttp for FluxProxy {
         let request_id = ctx.request_id.as_deref();
         #[cfg(feature = "privacy-mode")]
         let request_id = None;
+        let tls_identity = downstream_tls_client_identity(session);
         crate::headers::apply_upstream_request_policy(
             upstream_request,
             request_headers,
-            client_addr,
-            trusted_proxy,
-            Some(&trusted_proxy_matcher),
-            downstream_tls,
-            request_id,
+            crate::headers::UpstreamRequestPolicyContext {
+                client_addr,
+                trusted_proxy,
+                trusted_proxy_matcher: Some(&trusted_proxy_matcher),
+                downstream_tls,
+                request_id,
+                tls_identity: tls_identity.as_ref(),
+            },
         )?;
         normalize_cookie_headers(upstream_request)?;
         append_fluxheim_via_to_request(upstream_request)?;
@@ -8801,6 +8805,15 @@ fn downstream_tls(session: &Session) -> bool {
     session
         .digest()
         .is_some_and(|digest| digest.ssl_digest.is_some())
+}
+
+fn downstream_tls_client_identity(
+    session: &Session,
+) -> Option<crate::headers::RequestTlsClientIdentity> {
+    session
+        .digest()
+        .and_then(|digest| digest.ssl_digest.as_deref())
+        .map(crate::headers::RequestTlsClientIdentity::from_ssl_digest)
 }
 
 async fn respond_host_routing_rejection(
