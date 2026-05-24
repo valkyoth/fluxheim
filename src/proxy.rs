@@ -3231,7 +3231,24 @@ enum RuntimeRouteAction {
 struct RuntimeProxy {
     enabled: bool,
     config: ProxyConfig,
+    #[cfg(feature = "load-balancer")]
+    retry_budget: Option<RuntimeRetryBudget>,
     error_pages: Vec<RuntimeErrorPage>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Debug, Clone)]
+struct RuntimeRetryBudget {
+    inner: Arc<Mutex<RuntimeRetryBudgetState>>,
+    max_per_window: u32,
+    window: Duration,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Debug)]
+struct RuntimeRetryBudgetState {
+    window_started_at: Instant,
+    used: u32,
 }
 
 #[cfg(feature = "php-fpm")]
@@ -3467,12 +3484,48 @@ impl RuntimeProxy {
         Ok(Self {
             enabled: config.has_configured_upstream(),
             config: config.clone(),
+            #[cfg(feature = "load-balancer")]
+            retry_budget: RuntimeRetryBudget::from_config(&config.load_balance.retry),
             error_pages,
         })
     }
 
     fn error_page(&self, status: u16) -> Option<&RuntimeErrorPage> {
         self.error_pages.iter().find(|page| page.status == status)
+    }
+}
+
+#[cfg(feature = "load-balancer")]
+impl RuntimeRetryBudget {
+    fn from_config(retry: &crate::config::LoadBalanceRetryConfig) -> Option<Self> {
+        if !retry.enabled || retry.budget_per_window == 0 {
+            return None;
+        }
+        Some(Self {
+            inner: Arc::new(Mutex::new(RuntimeRetryBudgetState {
+                window_started_at: Instant::now(),
+                used: 0,
+            })),
+            max_per_window: retry.budget_per_window,
+            window: Duration::from_secs(retry.budget_window_secs),
+        })
+    }
+
+    fn try_acquire(&self) -> bool {
+        let now = Instant::now();
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if now.saturating_duration_since(state.window_started_at) >= self.window {
+            state.window_started_at = now;
+            state.used = 0;
+        }
+        if state.used >= self.max_per_window {
+            return false;
+        }
+        state.used = state.used.saturating_add(1);
+        true
     }
 }
 
@@ -5654,6 +5707,10 @@ impl ProxyHttp for FluxProxy {
                 && retry.enabled
                 && ctx.upstream_load_balancer_retries < retry.max_retries
                 && load_balance_retry_method_allowed(retry, session.req_header().method.as_str())
+                && proxy
+                    .retry_budget
+                    .as_ref()
+                    .is_none_or(RuntimeRetryBudget::try_acquire)
             {
                 ctx.upstream_load_balancer_retries =
                     ctx.upstream_load_balancer_retries.saturating_add(1);
@@ -12647,6 +12704,8 @@ mod tests {
 
     #[cfg(feature = "compression-gzip")]
     use crate::config::CompressionConfig;
+    #[cfg(feature = "load-balancer")]
+    use crate::config::LoadBalanceRetryConfig;
     use crate::config::{
         ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
         RateLimitMode, RouteConfig, RouteRedirectConfig, ServerConfig, ServerLimitsConfig,
@@ -12659,6 +12718,8 @@ mod tests {
     use super::CacheRangeRequest;
     #[cfg(feature = "compression-gzip")]
     use super::ProxyRuntimeState;
+    #[cfg(feature = "load-balancer")]
+    use super::RuntimeRetryBudget;
     #[cfg(all(feature = "php-fpm", unix))]
     use super::managed_php_fpm_path_env_from;
     #[cfg(all(feature = "php-fpm", unix))]
@@ -17385,6 +17446,23 @@ mod tests {
         for key in &keys {
             assert!(block_on(storage.lookup(key, &span)).unwrap().is_none());
         }
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balance_retry_budget_caps_window_attempts() {
+        let budget = RuntimeRetryBudget::from_config(&LoadBalanceRetryConfig {
+            enabled: true,
+            max_retries: 3,
+            methods: vec!["GET".to_owned()],
+            budget_per_window: 2,
+            budget_window_secs: 60,
+        })
+        .unwrap();
+
+        assert!(budget.try_acquire());
+        assert!(budget.try_acquire());
+        assert!(!budget.try_acquire());
     }
 
     #[cfg(feature = "load-balancer")]

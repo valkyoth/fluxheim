@@ -4044,6 +4044,7 @@ fn default_lb_slow_start_duration_secs() -> u64 {
 
 const MAX_LB_RETRIES: u8 = 10;
 const MAX_LB_RETRY_METHODS: usize = 16;
+const MAX_LB_RETRY_BUDGET_PER_WINDOW: u32 = 1_000_000;
 const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -4055,6 +4056,10 @@ pub struct LoadBalanceRetryConfig {
     pub max_retries: u8,
     #[serde(default = "default_lb_retry_methods")]
     pub methods: Vec<String>,
+    #[serde(default)]
+    pub budget_per_window: u32,
+    #[serde(default = "default_lb_retry_budget_window_secs")]
+    pub budget_window_secs: u64,
 }
 
 impl Default for LoadBalanceRetryConfig {
@@ -4063,6 +4068,8 @@ impl Default for LoadBalanceRetryConfig {
             enabled: false,
             max_retries: default_lb_retry_max_retries(),
             methods: default_lb_retry_methods(),
+            budget_per_window: 0,
+            budget_window_secs: default_lb_retry_budget_window_secs(),
         }
     }
 }
@@ -4077,6 +4084,16 @@ impl LoadBalanceRetryConfig {
         if self.methods.len() > MAX_LB_RETRY_METHODS {
             return Err(ConfigError::InvalidLoadBalanceRetry {
                 field: "proxy.load_balance.retry.methods",
+            });
+        }
+        if self.budget_per_window > MAX_LB_RETRY_BUDGET_PER_WINDOW {
+            return Err(ConfigError::InvalidLoadBalanceRetry {
+                field: "proxy.load_balance.retry.budget_per_window",
+            });
+        }
+        if self.budget_window_secs == 0 || self.budget_window_secs > 3600 {
+            return Err(ConfigError::InvalidLoadBalanceRetry {
+                field: "proxy.load_balance.retry.budget_window_secs",
             });
         }
         let mut seen = HashSet::new();
@@ -4111,6 +4128,10 @@ fn default_lb_retry_max_retries() -> u8 {
 
 fn default_lb_retry_methods() -> Vec<String> {
     vec!["GET".to_owned(), "HEAD".to_owned(), "OPTIONS".to_owned()]
+}
+
+fn default_lb_retry_budget_window_secs() -> u64 {
+    1
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -13015,10 +13036,14 @@ mod tests {
             enabled = true
             max_retries = 2
             methods = ["GET", "HEAD"]
+            budget_per_window = 100
+            budget_window_secs = 10
             "#,
         )
         .unwrap();
         config.validate().unwrap();
+        assert_eq!(config.proxy.load_balance.retry.budget_per_window, 100);
+        assert_eq!(config.proxy.load_balance.retry.budget_window_secs, 10);
 
         let unsafe_method: Config = toml::from_str(
             r#"
@@ -13032,6 +13057,20 @@ mod tests {
             unsafe_method.validate(),
             Err(ConfigError::InvalidLoadBalanceRetry {
                 field: "proxy.load_balance.retry.methods"
+            })
+        );
+
+        let invalid_budget: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.retry]
+            budget_window_secs = 0
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            invalid_budget.validate(),
+            Err(ConfigError::InvalidLoadBalanceRetry {
+                field: "proxy.load_balance.retry.budget_window_secs"
             })
         );
     }

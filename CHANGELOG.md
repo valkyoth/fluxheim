@@ -33,6 +33,9 @@ behavior when the change improves security or project direction.
 - Added opt-in `proxy.load_balance.retry` redispatch for load-balanced
   connection failures before request forwarding, bounded by retry count and
   safe HTTP method policy.
+- Added optional load-balanced retry budgets with `budget_per_window` and
+  `budget_window_secs` so redispatch cannot amplify an upstream outage without
+  an operator-set cap.
 - Extended load-balanced upstream selection, passive health, and retry policy
   to route-level proxy pools, not only vhost-level proxy pools.
 - Added load-balanced upstream `backup_upstreams` and `drain_upstreams`
