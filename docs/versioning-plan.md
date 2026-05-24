@@ -1253,13 +1253,34 @@ Release shape:
   - stop line: ship advanced HTTP policy and backend operations only. Do not
     add TCP stream listeners, TLS passthrough SNI routing, UDP proxying,
     HTTP/3, gRPC transcoding, xDS/Kubernetes/Consul control planes, global
-    distributed rate-limit services, or arbitrary Wasm/Lua execution in
-    `1.4.2`;
-  - optional `geoip` Cargo feature using `maxminddb` for MaxMind GeoIP2/ASN
-    databases. Load database files with the same safe path rules used for other
-    operator-supplied files, reload on config reload, expose bounded
-    `{geo.country}` and `{geo.asn}` variables, and allow country/ASN decisions
-    in route/access policy;
+    distributed rate-limit services, arbitrary Wasm/Lua execution, built-in
+    GeoIP database downloading, remote GeoIP lookup fallbacks, or impossible
+    travel/anomaly engines in `1.4.2`;
+  - optional `geoip` Cargo feature as a bounded Geo-Context foundation, not a
+    broad programmable geo engine. Use `maxminddb` for local MaxMind GeoIP2/ASN
+    databases, load database files with the same safe path rules used for other
+    operator-supplied files, and reload by atomically swapping an `Arc` on
+    config reload;
+  - expose GeoIP as typed request context, not spoofable inbound headers.
+    Initial fields are country ISO code and ASN; city/latitude/longitude should
+    stay out of the first stable surface unless an operator explicitly enables
+    them because they are more privacy-sensitive;
+  - use the typed geo context in route/access policy, request-header templates,
+    structured access logs, and OTLP span attributes. Metric labels must be
+    bounded to low-cardinality values such as country and policy decision;
+    never emit city, IP, or raw organization strings as default metric labels;
+  - privacy-mode behavior: either reject GeoIP entirely or restrict it to
+    policy-only country/ASN evaluation with no logs, trace attributes, headers,
+    or persisted request context. Decide before implementation and test both
+    compile-time and config-time behavior;
+  - defer GeoIP auto-update sidecars, ETag/Last-Modified URL polling, L1 lookup
+    caches, remote sidecar lookup fallbacks, adaptive rate-limit weighting,
+    programmable rhai/Wasm geo logic, and impossible-travel detection to `1.5`
+    or `1.6` after the typed context and policy model are stable;
+  - implementation order: define the typed geo context and privacy behavior
+    before adding policy consumers; wire it into ACL/routing decisions before
+    any load-balancer weighting; keep enterprise load-balancer operations in
+    `1.5` unless they are required to make the `1.4.2` ACL surface correct;
   - advanced ACL composition with a small typed boolean expression AST:
     `and`, `or`, `not`, plus leaf conditions for source IP, client certificate
     fingerprint, method, path prefix, path regex, host, safe header values, and
@@ -2864,9 +2885,12 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.4.1`: discovery, mirroring, structured logs, richer rewrite policy,
   regex and method routing, WebSocket/upgrade verification, auth subrequests,
   local operational sockets, and typed operator hook points.
-- `v1.4.2`: optional GeoIP policy, advanced ACL composition, local
-  stick-table-style tracking, runtime backend management, map-style variables,
-  and bounded response body substitution.
+- `v1.4.2`: optional bounded Geo-Context foundation, advanced ACL composition,
+  local stick-table-style tracking, runtime backend management, map-style
+  variables, and bounded response body substitution. GeoIP scope stops at local
+  MMDB country/ASN context, privacy controls, route/access decisions, and
+  bounded observability; dynamic database downloaders, remote lookup sidecars,
+  programmable geo logic, and anomaly engines are later work.
 - `v1.4.3`: TCP stream proxy foundation with separate stream semantics,
   listener/upstream trust boundaries, metrics, and optional TLS passthrough SNI
   routing only after a bounded ClientHello parser is proven.

@@ -66,10 +66,17 @@ The highest-value missing NGINX migration items are now explicitly first in
 that queue: regex path routing with capture-aware rewrites, method-based
 routing, WebSocket/HTTP upgrade verification, and `auth_request`-style external
 authorization subrequests. Follow-up `1.4.2` work should cover optional GeoIP
-policy, advanced AND/OR/NOT ACL composition, local stick-table-style tracking,
-runtime backend drain/disable/enable operations, map-style variables, and
-bounded response body substitution. A separate `1.4.3` stream feature can add
-TCP proxying for NGINX stream / HAProxy TCP-mode parity; UDP proxying and
+as a bounded Geo-Context foundation before the later enterprise load-balancer
+track: local MaxMind GeoIP2/ASN databases, safe path loading, atomic context
+replacement on config reload, country/ASN route and ACL decisions, privacy
+controls, and low-cardinality observability. The larger geo-policy ideas -
+background MMDB downloading, remote lookup sidecars, adaptive rate-limit
+weighting, programmable Rhai/Wasm logic, and impossible-travel anomaly engines -
+are explicitly later work after the typed context is stable. The rest of
+`1.4.2` covers advanced AND/OR/NOT ACL composition, local stick-table-style
+tracking, runtime backend drain/disable/enable operations, map-style variables,
+and bounded response body substitution. A separate `1.4.3` stream feature can
+add TCP proxying for NGINX stream / HAProxy TCP-mode parity; UDP proxying and
 HTTP/2 server push are intentionally deferred/skipped until a concrete
 requirement makes them worth the extra attack surface.
 Each `1.4.x` release has a hard stop: `1.4.1` stops at HTTP migration blockers
