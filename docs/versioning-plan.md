@@ -1172,7 +1172,8 @@ Release shape:
   - traffic mirroring/shadowing with sampling, body controls, redaction,
     timeout budgets, and metrics;
   - richer typed proxy variables and structured JSON access logs. Structured
-    access logs already include resolved vhost and route identity;
+    access logs already include resolved vhost, route identity, and selected
+    upstream address;
   - route-scoped regex/template rewrite policy. `Location`, `Refresh`, and
     `Set-Cookie` response rewrites are already implemented through the
     inherited response-header policy path, and route `rewrite_prefix` handles

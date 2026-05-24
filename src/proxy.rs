@@ -378,6 +378,7 @@ impl FluxProxy {
                     .flatten(),
                 vhost,
                 route,
+                upstream: ctx.upstream.as_deref(),
                 path: state
                     .access_log
                     .include_path
@@ -5421,6 +5422,8 @@ pub struct RequestContext {
     started_at: Option<Instant>,
     #[cfg(not(feature = "privacy-mode"))]
     request_id: Option<String>,
+    #[cfg(not(feature = "privacy-mode"))]
+    upstream: Option<String>,
     #[cfg(feature = "otel-tracing")]
     trace_context: Option<crate::trace_context::TraceContext>,
     #[cfg(feature = "otel-otlp")]
@@ -6046,6 +6049,10 @@ impl ProxyHttp for FluxProxy {
                 effective_acl_client_ip(session, &state),
             )
         {
+            #[cfg(not(feature = "privacy-mode"))]
+            {
+                ctx.upstream = Some(selected.backend.addr.to_string());
+            }
             ctx.upstream_load_balancer_permit = selected.permit;
             ctx.upstream_load_balancer_reporter = selected.reporter;
             ctx.upstream_load_balancer_selected_at = Some(Instant::now());
@@ -6067,6 +6074,10 @@ impl ProxyHttp for FluxProxy {
                 "proxy upstream is not configured for selected vhost or route",
             )
         })?;
+        #[cfg(not(feature = "privacy-mode"))]
+        {
+            ctx.upstream = Some(upstream.to_owned());
+        }
         let mut peer = http_peer_for_runtime_proxy(upstream, proxy)?;
         apply_upstream_proxy_protocol(&mut peer, &proxy.config, session, &state);
 
@@ -12308,6 +12319,7 @@ struct AccessLogEvent<'a> {
     host: Option<&'a str>,
     vhost: &'a str,
     route: &'a str,
+    upstream: Option<&'a str>,
     path: Option<&'a str>,
     status: Option<u16>,
     status_class: Option<&'static str>,
@@ -12328,14 +12340,16 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
         .unwrap_or_else(|| "null".to_owned());
     let status_class = event.status_class.unwrap_or("unknown");
     let host = event.host.unwrap_or("");
+    let upstream = event.upstream.unwrap_or("");
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     let body = format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
         json_escape(event.vhost),
         json_escape(event.route),
+        json_escape(upstream),
         json_escape(path),
         status,
         status_class,
@@ -20433,6 +20447,7 @@ mod tests {
             host: Some("example.test"),
             vhost: "main\"site",
             route: "assets",
+            upstream: Some("127.0.0.1:3000"),
             path: Some("/asset path/one.js"),
             status: Some(200),
             status_class: Some(super::status_class(200)),
@@ -20449,6 +20464,7 @@ mod tests {
         assert!(log.contains("\"host\":\"example.test\""));
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
         assert!(log.contains("\"route\":\"assets\""));
+        assert!(log.contains("\"upstream\":\"127.0.0.1:3000\""));
         assert!(log.contains("\"path\":\"/asset path/one.js\""));
         assert!(log.contains("\"status_class\":\"2xx\""));
         assert!(log.contains("\"request_id\":\"req-123\""));
@@ -20464,6 +20480,7 @@ mod tests {
             host: Some("example.test"),
             vhost: "main",
             route: "private",
+            upstream: None,
             path: None,
             status: Some(204),
             status_class: Some(super::status_class(204)),
@@ -20488,6 +20505,7 @@ mod tests {
             host: None,
             vhost: "main",
             route: "root",
+            upstream: None,
             path: Some("/"),
             status: Some(204),
             status_class: Some(super::status_class(204)),
@@ -20512,6 +20530,7 @@ mod tests {
             host: Some("example.test"),
             vhost: "main",
             route: "root",
+            upstream: None,
             path: Some("/"),
             status: Some(200),
             status_class: Some(super::status_class(200)),
