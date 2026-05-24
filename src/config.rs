@@ -4412,6 +4412,7 @@ fn rate_limit_field(scope: &'static str, field: &'static str) -> &'static str {
 }
 
 const MAX_CONCURRENCY_LIMIT: usize = 1_000_000;
+const MAX_CONCURRENCY_QUEUE_TIMEOUT_MS: u64 = 60_000;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -4422,6 +4423,8 @@ pub struct ConcurrencyLimitConfig {
     pub max_in_flight: usize,
     #[serde(default = "default_concurrency_limit_status")]
     pub status: u16,
+    #[serde(default)]
+    pub queue_timeout_ms: u64,
 }
 
 impl Default for ConcurrencyLimitConfig {
@@ -4430,6 +4433,7 @@ impl Default for ConcurrencyLimitConfig {
             enabled: false,
             max_in_flight: 0,
             status: default_concurrency_limit_status(),
+            queue_timeout_ms: 0,
         }
     }
 }
@@ -4449,6 +4453,11 @@ impl ConcurrencyLimitConfig {
                 field: concurrency_limit_field(scope, "status"),
             });
         }
+        if self.queue_timeout_ms > MAX_CONCURRENCY_QUEUE_TIMEOUT_MS {
+            return Err(ConfigError::InvalidConcurrencyLimit {
+                field: concurrency_limit_field(scope, "queue_timeout_ms"),
+            });
+        }
 
         Ok(())
     }
@@ -4462,8 +4471,12 @@ fn concurrency_limit_field(scope: &'static str, field: &'static str) -> &'static
     match (scope, field) {
         ("vhosts.concurrency", "max_in_flight") => "vhosts.concurrency.max_in_flight",
         ("vhosts.concurrency", "status") => "vhosts.concurrency.status",
+        ("vhosts.concurrency", "queue_timeout_ms") => "vhosts.concurrency.queue_timeout_ms",
         ("vhosts.routes.concurrency", "max_in_flight") => "vhosts.routes.concurrency.max_in_flight",
         ("vhosts.routes.concurrency", "status") => "vhosts.routes.concurrency.status",
+        ("vhosts.routes.concurrency", "queue_timeout_ms") => {
+            "vhosts.routes.concurrency.queue_timeout_ms"
+        }
         _ => "concurrency",
     }
 }
@@ -19187,6 +19200,7 @@ mod tests {
             [vhosts.concurrency]
             enabled = true
             max_in_flight = 100
+            queue_timeout_ms = 100
 
             [[vhosts.routes]]
             name = "admin"
@@ -19204,6 +19218,7 @@ mod tests {
             [vhosts.routes.concurrency]
             enabled = true
             max_in_flight = 10
+            queue_timeout_ms = 50
 
             [vhosts.routes.proxy]
             upstream = "127.0.0.1:3000"
@@ -19223,7 +19238,9 @@ mod tests {
         assert_eq!(config.vhosts[0].rate_limit.max_delay_ms, 250);
         assert_eq!(config.vhosts[0].routes[0].rate_limit.burst, 4);
         assert_eq!(config.vhosts[0].concurrency.max_in_flight, 100);
+        assert_eq!(config.vhosts[0].concurrency.queue_timeout_ms, 100);
         assert_eq!(config.vhosts[0].routes[0].concurrency.max_in_flight, 10);
+        assert_eq!(config.vhosts[0].routes[0].concurrency.queue_timeout_ms, 50);
     }
 
     #[test]

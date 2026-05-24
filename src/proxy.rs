@@ -2603,17 +2603,17 @@ fn request_limited_by_rate_policy(
         .unwrap_or(RateLimitDecision::Allow)
 }
 
-fn acquire_request_concurrency_permits(
+async fn acquire_request_concurrency_permits(
     vhost: &RuntimeVhost,
     route_index: Option<usize>,
 ) -> std::result::Result<Vec<InFlightPermit>, u16> {
     let mut permits = Vec::with_capacity(2);
-    if let Some(permit) = vhost.concurrency.try_acquire()? {
+    if let Some(permit) = vhost.concurrency.acquire().await? {
         permits.push(permit);
     }
     if let Some(route_index) = route_index {
         let route = vhost.route(route_index);
-        if let Some(permit) = route.concurrency.try_acquire()? {
+        if let Some(permit) = route.concurrency.acquire().await? {
             permits.push(permit);
         }
     }
@@ -2812,6 +2812,7 @@ struct RuntimeConcurrencyLimit {
     enabled: bool,
     max_in_flight: usize,
     status: u16,
+    queue_timeout: Duration,
     counter: Arc<AtomicUsize>,
 }
 
@@ -2821,6 +2822,7 @@ impl Default for RuntimeConcurrencyLimit {
             enabled: false,
             max_in_flight: 0,
             status: 503,
+            queue_timeout: Duration::ZERO,
             counter: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -2832,7 +2834,27 @@ impl RuntimeConcurrencyLimit {
             enabled: config.enabled,
             max_in_flight: config.max_in_flight,
             status: config.status,
+            queue_timeout: Duration::from_millis(config.queue_timeout_ms),
             counter: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    async fn acquire(&self) -> std::result::Result<Option<InFlightPermit>, u16> {
+        if !self.enabled {
+            return Ok(None);
+        }
+
+        let deadline = Instant::now() + self.queue_timeout;
+        loop {
+            match self.try_acquire() {
+                Ok(permit) => return Ok(permit),
+                Err(status) if self.queue_timeout.is_zero() || Instant::now() >= deadline => {
+                    return Err(status);
+                }
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            }
         }
     }
 
@@ -5287,7 +5309,7 @@ impl ProxyHttp for FluxProxy {
                 return Ok(true);
             }
         }
-        match acquire_request_concurrency_permits(vhost, ctx.route_index) {
+        match acquire_request_concurrency_permits(vhost, ctx.route_index).await {
             Ok(permits) => ctx.in_flight_permits = permits,
             Err(status) => {
                 respond_text_error(session, status, Bytes::from_static(b"too many requests"))
@@ -13111,12 +13133,39 @@ mod tests {
             enabled: true,
             max_in_flight: 1,
             status: 503,
+            queue_timeout_ms: 0,
         });
 
         let first = policy.try_acquire().unwrap().expect("first permit");
         assert!(policy.try_acquire().is_err());
         drop(first);
         assert!(policy.try_acquire().unwrap().is_some());
+    }
+
+    #[test]
+    fn concurrency_limit_waits_for_bounded_queue() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let policy =
+                RuntimeConcurrencyLimit::from_config(&crate::config::ConcurrencyLimitConfig {
+                    enabled: true,
+                    max_in_flight: 1,
+                    status: 503,
+                    queue_timeout_ms: 250,
+                });
+
+            let first = policy.acquire().await.unwrap().expect("first permit");
+            let queued_policy = policy.clone();
+            let queued = tokio::spawn(async move { queued_policy.acquire().await });
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            drop(first);
+
+            assert!(queued.await.unwrap().unwrap().is_some());
+        });
     }
 
     #[cfg(feature = "php-fpm")]

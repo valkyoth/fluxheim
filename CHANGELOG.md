@@ -49,6 +49,9 @@ behavior when the change improves security or project direction.
 - Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and
   route token buckets can smooth short bursts without creating an unbounded
   request queue.
+- Added `queue_timeout_ms` to vhost and route concurrency limits so saturated
+  policies can wait briefly for an in-flight permit before returning their
+  configured rejection status.
 
 ### Planned
 
