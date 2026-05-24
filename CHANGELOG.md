@@ -70,6 +70,8 @@ behavior when the change improves security or project direction.
   `logging.access.include_client_ip`, `logging.access.include_cache_phase`,
   `logging.access.include_route`, and `logging.access.include_upstream`
   controls for redaction-sensitive deployments.
+- OTLP trace spans now report the resolved route name instead of a synthetic
+  route index label.
 - Added `compression.max_output_bytes` so encoded responses stay bounded even
   when a compressible input is within `max_input_bytes`.
 - Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and

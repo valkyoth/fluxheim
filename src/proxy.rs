@@ -440,9 +440,17 @@ impl FluxProxy {
             .and_then(|index| state.vhosts.get(index))
             .map(|vhost| vhost.name.as_str())
             .unwrap_or("unknown");
-        let route = ctx
-            .route_index
-            .map(|route_index| format!("route-{route_index}"));
+        let route = ctx.route_index.map(|route_index| {
+            state
+                .vhosts
+                .get(
+                    ctx.vhost_index
+                        .unwrap_or_else(|| state.vhost_index(request_host(session))),
+                )
+                .and_then(|vhost| vhost.routes.get(route_index))
+                .map(|route| route.name.clone())
+                .unwrap_or_else(|| format!("route-{route_index}"))
+        });
         let status = session
             .response_written()
             .map(|response| response.status.as_u16());

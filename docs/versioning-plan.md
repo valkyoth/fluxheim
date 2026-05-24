@@ -1173,7 +1173,8 @@ Release shape:
     timeout budgets, and metrics;
   - richer typed proxy variables and structured JSON access logs. Structured
     access logs already include trusted-proxy-aware client IP, effective cache
-    phase, resolved vhost, route identity, and selected upstream address;
+    phase, resolved vhost, route identity, and selected upstream address; OTLP
+    spans also use the resolved route identity;
   - route-scoped regex/template rewrite policy. `Location`, `Refresh`, and
     `Set-Cookie` response rewrites are already implemented through the
     inherited response-header policy path, and route `rewrite_prefix` handles
