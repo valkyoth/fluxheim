@@ -377,13 +377,15 @@ impl SelectedUpstream {
 }
 
 impl LoadBalancedUpstreamReporter {
-    pub fn record_status(&self, status: u16, latency: Option<Duration>) {
+    pub fn record_status(&self, status: u16, latency: Option<Duration>) -> bool {
+        let failed = self.passive_health.status_is_failure(status, latency);
         if let Some(restart_at) =
             self.passive_health
                 .record_status(self.backend_key, status, latency)
         {
             self.reset_slow_start(restart_at);
         }
+        failed
     }
 
     pub fn record_failure(&self) {
@@ -445,12 +447,7 @@ impl PassiveHealthState {
     }
 
     fn record_status(&self, key: u64, status: u16, latency: Option<Duration>) -> Option<Instant> {
-        if self.failure_status(status)
-            || latency.is_some_and(|latency| {
-                self.max_latency
-                    .is_some_and(|max_latency| latency >= max_latency)
-            })
-        {
+        if self.status_is_failure(status, latency) {
             self.record_failure(key)
         } else {
             self.record_success(key);
@@ -490,6 +487,14 @@ impl PassiveHealthState {
             return (500..=599).contains(&status);
         }
         self.failure_statuses.contains(&status)
+    }
+
+    fn status_is_failure(&self, status: u16, latency: Option<Duration>) -> bool {
+        self.failure_status(status)
+            || latency.is_some_and(|latency| {
+                self.max_latency
+                    .is_some_and(|max_latency| latency >= max_latency)
+            })
     }
 }
 

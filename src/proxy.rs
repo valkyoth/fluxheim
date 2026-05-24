@@ -6141,6 +6141,8 @@ impl ProxyHttp for FluxProxy {
                 effective_acl_client_ip(session, &state),
             )
         {
+            #[cfg(feature = "metrics")]
+            record_load_balancer_metric(vhost, ctx, "selected");
             #[cfg(not(feature = "privacy-mode"))]
             {
                 ctx.upstream = Some(selected.backend.addr.to_string());
@@ -6154,6 +6156,8 @@ impl ProxyHttp for FluxProxy {
         }
         #[cfg(feature = "load-balancer")]
         if selected_upstream_load_balancer(vhost, ctx).is_some() {
+            #[cfg(feature = "metrics")]
+            record_load_balancer_metric(vhost, ctx, "unavailable");
             return Error::e_explain(
                 ErrorType::ConnectError,
                 "no healthy load-balanced upstream is available",
@@ -6186,12 +6190,15 @@ impl ProxyHttp for FluxProxy {
         #[cfg(feature = "load-balancer")]
         {
             let mut error = error;
-            record_load_balanced_upstream_failure(ctx);
             let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
             let vhost_index = ctx
                 .vhost_index
                 .unwrap_or_else(|| state.vhost_index(request_host(session)));
             let vhost = state.vhost(vhost_index);
+            if record_load_balanced_upstream_failure(ctx) {
+                #[cfg(feature = "metrics")]
+                record_load_balancer_metric(vhost, ctx, "failure");
+            }
             let proxy = selected_runtime_proxy(vhost, ctx);
             let retry = &proxy.config.load_balance.retry;
             if selected_upstream_load_balancer(vhost, ctx).is_some()
@@ -6205,6 +6212,8 @@ impl ProxyHttp for FluxProxy {
             {
                 ctx.upstream_load_balancer_retries =
                     ctx.upstream_load_balancer_retries.saturating_add(1);
+                #[cfg(feature = "metrics")]
+                record_load_balancer_metric(vhost, ctx, "retry");
                 error.set_retry(true);
             }
             error
@@ -6603,7 +6612,12 @@ impl ProxyHttp for FluxProxy {
             );
         }
         #[cfg(feature = "load-balancer")]
-        record_load_balanced_upstream_status(ctx, response.status.as_u16());
+        if let Some(failed) = record_load_balanced_upstream_status(ctx, response.status.as_u16()) {
+            #[cfg(feature = "metrics")]
+            record_load_balancer_metric(vhost, ctx, if failed { "failure" } else { "success" });
+            #[cfg(not(feature = "metrics"))]
+            let _ = failed;
+        }
         append_fluxheim_via_to_response(response)
     }
 
@@ -12112,28 +12126,49 @@ fn append_fluxheim_via_to_response(response: &mut ResponseHeader) -> Result<()> 
 }
 
 #[cfg(feature = "load-balancer")]
-fn record_load_balanced_upstream_status(ctx: &mut RequestContext, status: u16) {
+fn record_load_balanced_upstream_status(ctx: &mut RequestContext, status: u16) -> Option<bool> {
     if ctx.upstream_load_balancer_outcome_recorded {
-        return;
+        return None;
     }
+    let latency = ctx
+        .upstream_load_balancer_selected_at
+        .map(|selected_at| selected_at.elapsed());
     if let Some(reporter) = &ctx.upstream_load_balancer_reporter {
-        let latency = ctx
-            .upstream_load_balancer_selected_at
-            .map(|selected_at| selected_at.elapsed());
-        reporter.record_status(status, latency);
+        let failed = reporter.record_status(status, latency);
         ctx.upstream_load_balancer_outcome_recorded = true;
+        return Some(failed);
     }
+    if ctx.upstream_load_balancer_selected_at.is_some() {
+        ctx.upstream_load_balancer_outcome_recorded = true;
+        return Some((500..=599).contains(&status));
+    }
+    None
 }
 
 #[cfg(feature = "load-balancer")]
-fn record_load_balanced_upstream_failure(ctx: &mut RequestContext) {
+fn record_load_balanced_upstream_failure(ctx: &mut RequestContext) -> bool {
     if ctx.upstream_load_balancer_outcome_recorded {
-        return;
+        return false;
     }
     if let Some(reporter) = &ctx.upstream_load_balancer_reporter {
         reporter.record_failure();
         ctx.upstream_load_balancer_outcome_recorded = true;
+        return true;
     }
+    if ctx.upstream_load_balancer_selected_at.is_some() {
+        ctx.upstream_load_balancer_outcome_recorded = true;
+        return true;
+    }
+    false
+}
+
+#[cfg(all(feature = "load-balancer", feature = "metrics"))]
+fn record_load_balancer_metric(vhost: &RuntimeVhost, ctx: &RequestContext, event: &str) {
+    let route = ctx
+        .route_index
+        .and_then(|route_index| vhost.routes.get(route_index))
+        .map(|route| route.name.as_str());
+    crate::metrics::record_load_balancer_event(vhost.name.as_str(), route, event);
 }
 
 #[cfg(feature = "load-balancer")]

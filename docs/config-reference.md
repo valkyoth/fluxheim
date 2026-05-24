@@ -683,6 +683,10 @@ membership changes. `least-connections` uses Fluxheim-held in-flight request
 permits and Pingora's current backend health state. `power-of-two` samples two
 healthy backends through Pingora's random weighted selector and chooses the
 lower in-flight count.
+With metrics enabled, load-balanced selections, unavailable pools, retries, and
+success/failure outcomes are counted by `fluxheim_load_balancer_events_total`
+with bounded configured vhost/route labels. The metric does not label raw
+upstream addresses.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send a `GET` request to `path`; by default only `200`

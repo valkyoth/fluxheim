@@ -6,6 +6,7 @@ use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeV
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static EDGE_POLICY_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static LOAD_BALANCER_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static RESPONSE_COMPRESSIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -61,6 +62,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     proxy_requests_total()?;
     host_routing_rejections_total()?;
     edge_policy_events_total()?;
+    load_balancer_events_total()?;
     response_compressions_total()?;
     admin_auth_events_total()?;
     acme_events_total()?;
@@ -215,6 +217,20 @@ pub fn record_edge_policy_event(vhost: &str, route: Option<&str>, policy: &str, 
             ])
             .inc(),
         Err(error) => log::debug!("metrics edge policy counter unavailable: {error}"),
+    }
+}
+
+pub fn record_load_balancer_event(vhost: &str, route: Option<&str>, event: &str) {
+    match load_balancer_events_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                cache_scope_label(route),
+                vhost,
+                route.unwrap_or(""),
+                load_balancer_event_label(event),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics load balancer counter unavailable: {error}"),
     }
 }
 
@@ -588,6 +604,32 @@ fn edge_policy_events_total() -> Result<&'static IntCounterVec, prometheus::Erro
     let _ = EDGE_POLICY_EVENTS_TOTAL.set(counter);
     EDGE_POLICY_EVENTS_TOTAL.get().ok_or_else(|| {
         prometheus::Error::Msg("fluxheim_edge_policy_events_total failed to initialize".to_owned())
+    })
+}
+
+fn load_balancer_events_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = LOAD_BALANCER_EVENTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_load_balancer_events_total",
+            "Total Fluxheim load-balancer events by configured vhost, optional route, and bounded event.",
+        ),
+        &["scope", "vhost", "route", "event"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = LOAD_BALANCER_EVENTS_TOTAL.set(counter);
+    LOAD_BALANCER_EVENTS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_load_balancer_events_total failed to initialize".to_owned(),
+        )
     })
 }
 
@@ -1380,6 +1422,17 @@ fn edge_policy_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+fn load_balancer_event_label(event: &str) -> &'static str {
+    match event {
+        "selected" => "selected",
+        "unavailable" => "unavailable",
+        "retry" => "retry",
+        "success" => "success",
+        "failure" => "failure",
+        _ => "other",
+    }
+}
+
 fn cache_event_label(event: &str) -> &'static str {
     match event {
         "hit" => "hit",
@@ -1556,9 +1609,10 @@ mod tests {
         record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
         record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
         record_cache_purger_run, record_config, record_edge_policy_event,
-        record_host_routing_rejection, record_metrics_otlp_export, record_php_fpm_pool_event,
-        record_php_fpm_pool_idle, record_php_fpm_retry, record_php_request, record_php_stderr,
-        record_proxy_outcome, record_response_compression, status_class,
+        record_host_routing_rejection, record_load_balancer_event, record_metrics_otlp_export,
+        record_php_fpm_pool_event, record_php_fpm_pool_idle, record_php_fpm_retry,
+        record_php_request, record_php_stderr, record_proxy_outcome, record_response_compression,
+        status_class,
     };
 
     #[test]
@@ -1644,6 +1698,38 @@ mod tests {
         assert!(output.contains(r#"outcome="other""#));
         assert!(!output.contains("attacker-policy"));
         assert!(!output.contains("attacker-outcome"));
+    }
+
+    #[test]
+    fn records_load_balancer_metrics_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_load_balancer_event("lb-test", Some("api"), "selected");
+        record_load_balancer_event("lb-test", Some("api"), "retry");
+        record_load_balancer_event("lb-test", None, "unavailable");
+        record_load_balancer_event("lb-test", Some("api"), "success");
+        record_load_balancer_event("lb-test", Some("api"), "failure");
+        record_load_balancer_event("lb-test", Some("api"), "attacker-event");
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_load_balancer_events_total"));
+        assert!(output.contains(r#"scope="route""#));
+        assert!(output.contains(r#"scope="vhost""#));
+        assert!(output.contains(r#"vhost="lb-test""#));
+        assert!(output.contains(r#"route="api""#));
+        assert!(output.contains(r#"event="selected""#));
+        assert!(output.contains(r#"event="unavailable""#));
+        assert!(output.contains(r#"event="retry""#));
+        assert!(output.contains(r#"event="success""#));
+        assert!(output.contains(r#"event="failure""#));
+        assert!(output.contains(r#"event="other""#));
+        assert!(!output.contains("attacker-event"));
     }
 
     #[test]

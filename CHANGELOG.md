@@ -49,6 +49,9 @@ behavior when the change improves security or project direction.
 - Added active HTTP load-balancer health checks with path, host,
   expected-status, connection reuse, and port override controls alongside the
   existing TCP/TLS health check mode.
+- Added `fluxheim_load_balancer_events_total` to count load-balanced
+  selections, unavailable pools, retries, and success/failure outcomes with
+  bounded vhost/route labels.
 - Added opt-in `compression-zstd` and `compression-brotli` codec features
   alongside gzip, with bounded levels and negotiation preference `br`, `zstd`,
   then `gzip`.
