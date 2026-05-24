@@ -36,11 +36,31 @@ small unreleased milestones.
   keepalive, Linux user timeout, receive-buffer size, DSCP, and TCP Fast Open
   controls.
 
+## Security Hardening
+
+- Hardened route `strip_prefix` / `rewrite_prefix` forwarding against
+  double-encoded traversal segments and decoded ASCII control bytes such as
+  `%00`.
+- Replaced concurrency-limit polling waiters with semaphore-backed permits and
+  bounded `max_queue` waiters so saturated routes cannot create an unbounded
+  wakeup loop.
+- Changed admin and route/vhost client-certificate fingerprint list checks to
+  compare across the full list without short-circuiting on the first matching
+  byte prefix.
+- Rejected TLS identity templates in request-header append policies. Use
+  `add`/`set` for TLS identity headers so Fluxheim strips any inbound spoofed
+  copy before forwarding the trusted value.
+- Documented the shared anonymous rate-limit bucket used when no effective
+  client IP is available, and added a startup security warning for
+  admin-client-certificate header gates on loopback listeners.
+
 ## Compatibility Notes
 
 - The new proxy controls are opt-in. Existing static, proxy, cache, PHP-FPM,
   ACME, and FIPS/ISO-capable configurations remain on their existing defaults
   unless the new config blocks are enabled.
+- `[vhosts.concurrency]` and `[vhosts.routes.concurrency]` now accept
+  `max_queue`; `0` derives a bounded queue size from `max_in_flight`.
 - Compression requires the `compression` feature plus at least one codec
   feature: `compression-gzip`, `compression-zstd`, or `compression-brotli`.
   `privacy-mode` rejects compression at compile time.

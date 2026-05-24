@@ -70,6 +70,8 @@ use pingora::{
     cache::CacheMeta, cache::CacheOptionOverrides, cache::CachePhase, cache::ForcedFreshness,
     cache::HitHandler, cache::NoCacheReason, cache::RespCacheable,
 };
+use subtle::ConstantTimeEq;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
@@ -2959,44 +2961,67 @@ struct RuntimeRoute {
 
 #[derive(Debug)]
 struct InFlightPermit {
-    counter: Arc<AtomicUsize>,
+    permit: Option<OwnedSemaphorePermit>,
 }
 
 impl Drop for InFlightPermit {
     fn drop(&mut self) {
-        self.counter.fetch_sub(1, Ordering::AcqRel);
+        let _ = self.permit.take();
+    }
+}
+
+#[derive(Debug)]
+struct QueuedConcurrencyWaiter {
+    queued: Arc<AtomicUsize>,
+}
+
+impl Drop for QueuedConcurrencyWaiter {
+    fn drop(&mut self) {
+        self.queued.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
 #[derive(Debug, Clone)]
 struct RuntimeConcurrencyLimit {
     enabled: bool,
-    max_in_flight: usize,
+    max_queue: usize,
     status: u16,
     queue_timeout: Duration,
-    counter: Arc<AtomicUsize>,
+    semaphore: Arc<Semaphore>,
+    queued: Arc<AtomicUsize>,
 }
 
 impl Default for RuntimeConcurrencyLimit {
     fn default() -> Self {
         Self {
             enabled: false,
-            max_in_flight: 0,
+            max_queue: 0,
             status: 503,
             queue_timeout: Duration::ZERO,
-            counter: Arc::new(AtomicUsize::new(0)),
+            semaphore: Arc::new(Semaphore::new(0)),
+            queued: Arc::new(AtomicUsize::new(0)),
         }
     }
 }
 
 impl RuntimeConcurrencyLimit {
     fn from_config(config: &crate::config::ConcurrencyLimitConfig) -> Self {
+        let max_queue = if config.max_queue == 0 {
+            config
+                .max_in_flight
+                .saturating_mul(4)
+                .max(config.max_in_flight)
+                .min(1_000_000)
+        } else {
+            config.max_queue
+        };
         Self {
             enabled: config.enabled,
-            max_in_flight: config.max_in_flight,
+            max_queue,
             status: config.status,
             queue_timeout: Duration::from_millis(config.queue_timeout_ms),
-            counter: Arc::new(AtomicUsize::new(0)),
+            semaphore: Arc::new(Semaphore::new(config.max_in_flight)),
+            queued: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -3005,44 +3030,54 @@ impl RuntimeConcurrencyLimit {
             return Ok(None);
         }
 
-        let deadline = Instant::now() + self.queue_timeout;
-        loop {
-            match self.try_acquire() {
-                Ok(permit) => return Ok(permit),
-                Err(status) if self.queue_timeout.is_zero() || Instant::now() >= deadline => {
-                    return Err(status);
-                }
-                Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
+        match Arc::clone(&self.semaphore).try_acquire_owned() {
+            Ok(permit) => {
+                return Ok(Some(InFlightPermit {
+                    permit: Some(permit),
+                }));
             }
+            Err(_) if self.queue_timeout.is_zero() => return Err(self.status),
+            Err(_) => {}
+        }
+
+        if !self.try_enter_queue() {
+            return Err(self.status);
+        }
+        let queued = QueuedConcurrencyWaiter {
+            queued: Arc::clone(&self.queued),
+        };
+
+        let result = tokio::time::timeout(
+            self.queue_timeout,
+            Arc::clone(&self.semaphore).acquire_owned(),
+        )
+        .await;
+        drop(queued);
+
+        match result {
+            Ok(Ok(permit)) => Ok(Some(InFlightPermit {
+                permit: Some(permit),
+            })),
+            Ok(Err(_)) | Err(_) => Err(self.status),
         }
     }
 
-    fn try_acquire(&self) -> std::result::Result<Option<InFlightPermit>, u16> {
-        if !self.enabled {
-            return Ok(None);
-        }
-
-        let mut current = self.counter.load(Ordering::Acquire);
+    fn try_enter_queue(&self) -> bool {
+        let mut current = self.queued.load(Ordering::Acquire);
         loop {
-            if current >= self.max_in_flight {
-                return Err(self.status);
+            if current >= self.max_queue {
+                return false;
             }
             let Some(next) = current.checked_add(1) else {
-                return Err(self.status);
+                return false;
             };
-            match self.counter.compare_exchange_weak(
+            match self.queued.compare_exchange_weak(
                 current,
                 next,
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => {
-                    return Ok(Some(InFlightPermit {
-                        counter: Arc::clone(&self.counter),
-                    }));
-                }
+                Ok(_) => return true,
                 Err(observed) => current = observed,
             }
         }
@@ -3234,18 +3269,11 @@ impl RuntimeAccessPolicy {
             return false;
         }
         if let Some(cert_sha256) = cert_sha256.as_deref() {
-            if self
-                .deny_client_cert_sha256
-                .iter()
-                .any(|denied| denied == cert_sha256)
-            {
+            if cert_fingerprint_list_contains(&self.deny_client_cert_sha256, cert_sha256) {
                 return false;
             }
             self.allow_client_cert_sha256.is_empty()
-                || self
-                    .allow_client_cert_sha256
-                    .iter()
-                    .any(|allowed| allowed == cert_sha256)
+                || cert_fingerprint_list_contains(&self.allow_client_cert_sha256, cert_sha256)
         } else {
             self.allow_client_cert_sha256.is_empty()
         }
@@ -3257,6 +3285,15 @@ fn normalized_cert_fingerprints(values: &[String]) -> Vec<String> {
         .iter()
         .map(|value| value.to_ascii_lowercase())
         .collect()
+}
+
+fn cert_fingerprint_list_contains(values: &[String], fingerprint: &str) -> bool {
+    let fingerprint = fingerprint.as_bytes();
+    let mut matched = 0u8;
+    for value in values {
+        matched |= bool::from(value.as_bytes().ct_eq(fingerprint)) as u8;
+    }
+    matched == 1
 }
 
 #[cfg(feature = "cache")]
@@ -12569,10 +12606,30 @@ fn safe_forward_path_segment(segment: &str) -> bool {
         return false;
     }
 
-    let Some(decoded) = percent_decode_path_segment(segment) else {
+    let Some(decoded_once) = percent_decode_path_segment(segment) else {
         return false;
     };
-    decoded != b".." && !decoded.iter().any(|byte| matches!(byte, b'/' | b'\\'))
+    if unsafe_decoded_forward_path_segment(&decoded_once) {
+        return false;
+    }
+    if let Ok(decoded_once_text) = std::str::from_utf8(&decoded_once)
+        && decoded_once_text.contains('%')
+    {
+        let Some(decoded_twice) = percent_decode_path_segment(decoded_once_text) else {
+            return false;
+        };
+        if unsafe_decoded_forward_path_segment(&decoded_twice) {
+            return false;
+        }
+    }
+    true
+}
+
+fn unsafe_decoded_forward_path_segment(segment: &[u8]) -> bool {
+    segment == b".."
+        || segment
+            .iter()
+            .any(|byte| byte.is_ascii_control() || matches!(byte, b'/' | b'\\'))
 }
 
 fn percent_decode_path_segment(segment: &str) -> Option<Vec<u8>> {
@@ -13351,7 +13408,7 @@ fn apply_upstream_proxy_protocol(
         UpstreamProxyProtocol::V1 => proxy_protocol_v1_header(source, destination),
         UpstreamProxyProtocol::V2 => proxy_protocol_v2_header(source, destination),
     };
-    peer.options.custom_l4 = Some(Arc::new(ProxyProtocolV1Connector {
+    peer.options.custom_l4 = Some(Arc::new(ProxyProtocolConnector {
         header,
         connect_timeout: proxy
             .connect_timeout_secs
@@ -13442,13 +13499,13 @@ fn proxy_protocol_v2_header(
 }
 
 #[derive(Debug)]
-struct ProxyProtocolV1Connector {
+struct ProxyProtocolConnector {
     header: Vec<u8>,
     connect_timeout: Option<Duration>,
 }
 
 #[async_trait]
-impl pingora::connectors::L4Connect for ProxyProtocolV1Connector {
+impl pingora::connectors::L4Connect for ProxyProtocolConnector {
     async fn connect(
         &self,
         addr: &pingora::protocols::l4::socket::SocketAddr,
@@ -14345,17 +14402,25 @@ mod tests {
 
     #[test]
     fn concurrency_limit_releases_permit_on_drop() {
-        let policy = RuntimeConcurrencyLimit::from_config(&crate::config::ConcurrencyLimitConfig {
-            enabled: true,
-            max_in_flight: 1,
-            status: 503,
-            queue_timeout_ms: 0,
-        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let policy =
+                RuntimeConcurrencyLimit::from_config(&crate::config::ConcurrencyLimitConfig {
+                    enabled: true,
+                    max_in_flight: 1,
+                    max_queue: 0,
+                    status: 503,
+                    queue_timeout_ms: 0,
+                });
 
-        let first = policy.try_acquire().unwrap().expect("first permit");
-        assert!(policy.try_acquire().is_err());
-        drop(first);
-        assert!(policy.try_acquire().unwrap().is_some());
+            let first = policy.acquire().await.unwrap().expect("first permit");
+            assert!(policy.acquire().await.is_err());
+            drop(first);
+            assert!(policy.acquire().await.unwrap().is_some());
+        });
     }
 
     #[test]
@@ -14369,6 +14434,7 @@ mod tests {
                 RuntimeConcurrencyLimit::from_config(&crate::config::ConcurrencyLimitConfig {
                     enabled: true,
                     max_in_flight: 1,
+                    max_queue: 1,
                     status: 503,
                     queue_timeout_ms: 250,
                 });
@@ -14381,6 +14447,33 @@ mod tests {
             drop(first);
 
             assert!(queued.await.unwrap().unwrap().is_some());
+        });
+    }
+
+    #[test]
+    fn concurrency_limit_rejects_when_queue_is_full() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let policy =
+                RuntimeConcurrencyLimit::from_config(&crate::config::ConcurrencyLimitConfig {
+                    enabled: true,
+                    max_in_flight: 1,
+                    max_queue: 1,
+                    status: 503,
+                    queue_timeout_ms: 250,
+                });
+
+            let _first = policy.acquire().await.unwrap().expect("first permit");
+            let queued_policy = policy.clone();
+            let queued = tokio::spawn(async move { queued_policy.acquire().await });
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            assert_eq!(policy.acquire().await.unwrap_err(), 503);
+            queued.abort();
+            let _ = queued.await;
         });
     }
 
@@ -16453,12 +16546,23 @@ mod tests {
             pingora::http::RequestHeader::build("GET", b"/api/%2e%2e/admin", None).unwrap();
         assert_eq!(route_rewritten_path_and_query(&encoded, &route), None);
 
+        let double_encoded =
+            pingora::http::RequestHeader::build("GET", b"/api/%252e%252e/admin", None).unwrap();
+        assert_eq!(
+            route_rewritten_path_and_query(&double_encoded, &route),
+            None
+        );
+
         let encoded_separator =
             pingora::http::RequestHeader::build("GET", b"/api/safe%2f..%2fadmin", None).unwrap();
         assert_eq!(
             route_rewritten_path_and_query(&encoded_separator, &route),
             None
         );
+
+        let encoded_null =
+            pingora::http::RequestHeader::build("GET", b"/api/safe%00admin", None).unwrap();
+        assert_eq!(route_rewritten_path_and_query(&encoded_null, &route), None);
     }
 
     #[test]

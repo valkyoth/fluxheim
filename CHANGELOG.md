@@ -145,10 +145,25 @@ behavior when the change improves security or project direction.
   `proxy.upstream_idle_timeout_secs`.
 - Added upstream TCP socket tuning for proxy origins, including TCP keepalive,
   Linux user timeout, receive-buffer size, DSCP, and TCP Fast Open controls.
+- Added bounded `max_queue` waiters for vhost and route concurrency limits,
+  replacing the previous short sleep/retry loop with semaphore-backed wakeups.
 - Replaced Fluxheim's direct `rustls-pemfile` usage with
   `rustls-pki-types::pem::PemObject`; the remaining `RUSTSEC-2025-0134`
   warning is transitive through Pingora's rustls stack and documented in
   `SECURITY.md`.
+
+### Security
+
+- Hardened route path rewriting against double-encoded traversal and decoded
+  control-byte segments before forwarding to upstreams.
+- Rejected request-header append policies that use TLS identity templates so
+  spoofed inbound identity headers cannot be forwarded before Fluxheim's
+  verified TLS-derived value.
+- Switched admin and route/vhost client-certificate fingerprint list checks to
+  full-list constant-time-oriented comparisons.
+- Documented the anonymous shared rate-limit bucket used when no effective
+  client IP is available, and warn when admin client-certificate header gates
+  are configured on loopback listeners without an enforced terminator boundary.
 
 ### Planned
 

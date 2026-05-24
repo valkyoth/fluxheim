@@ -1993,15 +1993,12 @@ impl AdminClientCertificatePolicy {
             }
         };
 
-        if self.deny_sha256.iter().any(|denied| denied == &fingerprint) {
+        if admin_fingerprint_list_contains(&self.deny_sha256, &fingerprint) {
             return AdminClientCertificateDecision::Denied;
         }
 
         if !self.allow_sha256.is_empty()
-            && !self
-                .allow_sha256
-                .iter()
-                .any(|allowed| allowed == &fingerprint)
+            && !admin_fingerprint_list_contains(&self.allow_sha256, &fingerprint)
         {
             return AdminClientCertificateDecision::Denied;
         }
@@ -2044,6 +2041,15 @@ fn normalized_sha256_fingerprints(values: &[String]) -> Vec<String> {
         .iter()
         .map(|value| value.to_ascii_lowercase())
         .collect()
+}
+
+fn admin_fingerprint_list_contains(values: &[String], fingerprint: &str) -> bool {
+    let fingerprint = fingerprint.as_bytes();
+    let mut matched = 0u8;
+    for value in values {
+        matched |= bool::from(value.as_bytes().ct_eq(fingerprint)) as u8;
+    }
+    matched == 1
 }
 
 fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {

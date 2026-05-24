@@ -212,6 +212,9 @@ restricts admin access to the listed fingerprints when it is non-empty. The
 trusted terminator must strip any incoming copy of this header before adding its
 own value; do not rely on this option for directly exposed cleartext admin
 listeners.
+When this option is enabled on a loopback admin listener, Fluxheim emits a
+security warning because local processes can inject the configured header unless
+a trusted local terminator strips and rewrites it.
 
 Admin endpoint paths are capped at 2048 bytes and query strings are capped at
 16 KiB before endpoint-specific parsing. Prefer headers for long cache purge
@@ -491,6 +494,11 @@ Request header values can use a small safe dynamic template set:
 
 Unknown variables fail config validation. Rendered values are still passed
 through HTTP header validation before Fluxheim sends them upstream.
+Do not put TLS identity templates in `[headers.request.append]` or
+`[vhosts.headers.request.append]`; Fluxheim rejects that configuration because
+an attacker-supplied inbound header would otherwise remain before the
+TLS-derived value. Use `add`/`set` for TLS identity headers so Fluxheim removes
+any inbound copy before forwarding the trusted value.
 
 Common proxy migration headers:
 
@@ -798,9 +806,11 @@ route for that root.
 
 `[compression]` is a global opt-in response compression policy. It is available
 only in binaries built with one or more codec features: `compression-gzip`,
-`compression-zstd`, or `compression-brotli`; default release binaries do not
-include compression code. `privacy-mode` builds reject compression at compile
-time.
+`compression-zstd`, or `compression-brotli`. The 1.4 production profile aliases
+used for official full/cache/proxy/PHP artifacts compile all three codecs so
+operators can enable compression by vhost or route without rebuilding; default
+developer builds still omit compression code. `privacy-mode` builds reject
+compression at compile time.
 
 ```toml
 [compression]
@@ -1819,6 +1829,7 @@ status = 429
 [vhosts.concurrency]
 enabled = true
 max_in_flight = 256
+max_queue = 1024
 queue_timeout_ms = 0
 status = 503
 
@@ -1866,7 +1877,10 @@ empty. `mode = "delay"` reserves future tokens and sleeps the request up to
 rejects instead of queueing indefinitely. If `burst` is omitted or zero,
 Fluxheim uses `requests_per_second` as the burst. State is bounded by
 `table_max_entries` and stale entries are pruned after `entry_ttl_secs`. Vhost
-limits are checked before route limits.
+limits are checked before route limits. If Fluxheim cannot determine an
+effective client IP, the request uses one shared anonymous bucket for that
+vhost or route; do not rely on anonymous-IP rate limiting as the only
+protection for sensitive internal paths.
 With metrics enabled, delayed and rejected rate-limit decisions are counted by
 `fluxheim_edge_policy_events_total` with bounded labels.
 
@@ -1875,9 +1889,9 @@ requests. They are local process limits, not distributed cluster limits.
 `max_in_flight` sets the active request budget and `status` controls the
 rejection status when the budget is exhausted. `queue_timeout_ms = 0` rejects
 immediately. A positive `queue_timeout_ms` lets Fluxheim wait briefly for a
-permit before rejecting, which is useful for short origin spikes but remains a
-bounded local queue. Vhost permits are acquired before route permits and are
-released automatically when the request finishes.
+permit before rejecting. `max_queue` caps waiting requests; `0` derives a
+bounded default from `max_in_flight`. Vhost permits are acquired before route
+permits and are released automatically when the request finishes.
 With metrics enabled, concurrency-limit rejections are counted by
 `fluxheim_edge_policy_events_total` with bounded labels.
 

@@ -1003,6 +1003,16 @@ impl AdminConfig {
                 address: self.listen.clone(),
             });
         }
+        if listen.ip().is_loopback()
+            && (self.client_certificate.required
+                || !self.client_certificate.allow_sha256.is_empty()
+                || !self.client_certificate.deny_sha256.is_empty())
+        {
+            log::warn!(
+                target: "fluxheim::security",
+                "admin.client_certificate is configured on a loopback admin listener; this only hardens a trusted TLS/mTLS terminator that strips and injects the configured fingerprint header"
+            );
+        }
 
         match (&self.token_env, &self.token_file) {
             (None, None) => Err(ConfigError::MissingAdminAuth),
@@ -1855,7 +1865,8 @@ impl RequestHeaderPolicyOverlayConfig {
         )?;
         let unset = combined_header_unset(&self.unset, &self.remove, &self.operations.remove);
         let set = combined_header_set(&self.set, &self.add, &self.operations.add);
-        validate_header_mutations("vhosts.headers.request", &unset, &set, &self.append)
+        validate_header_mutations("vhosts.headers.request", &unset, &set, &self.append)?;
+        validate_no_tls_header_append("vhosts.headers.request", &self.append)
     }
 
     fn effective_unset(&self) -> Vec<String> {
@@ -1932,7 +1943,7 @@ impl RequestHeaderPolicyConfig {
         let unset = self.effective_unset();
         let set = self.effective_set();
         validate_header_mutations("headers.request", &unset, &set, &self.append)?;
-        Ok(())
+        validate_no_tls_header_append("headers.request", &self.append)
     }
 
     pub fn effective_unset(&self) -> Vec<String> {
@@ -5135,6 +5146,8 @@ pub struct ConcurrencyLimitConfig {
     pub enabled: bool,
     #[serde(default)]
     pub max_in_flight: usize,
+    #[serde(default)]
+    pub max_queue: usize,
     #[serde(default = "default_concurrency_limit_status")]
     pub status: u16,
     #[serde(default)]
@@ -5146,6 +5159,7 @@ impl Default for ConcurrencyLimitConfig {
         Self {
             enabled: false,
             max_in_flight: 0,
+            max_queue: 0,
             status: default_concurrency_limit_status(),
             queue_timeout_ms: 0,
         }
@@ -5160,6 +5174,11 @@ impl ConcurrencyLimitConfig {
         if self.max_in_flight == 0 || self.max_in_flight > MAX_CONCURRENCY_LIMIT {
             return Err(ConfigError::InvalidConcurrencyLimit {
                 field: concurrency_limit_field(scope, "max_in_flight"),
+            });
+        }
+        if self.max_queue > MAX_CONCURRENCY_LIMIT {
+            return Err(ConfigError::InvalidConcurrencyLimit {
+                field: concurrency_limit_field(scope, "max_queue"),
             });
         }
         if !(400..=599).contains(&self.status) {
@@ -5184,9 +5203,11 @@ fn default_concurrency_limit_status() -> u16 {
 fn concurrency_limit_field(scope: &'static str, field: &'static str) -> &'static str {
     match (scope, field) {
         ("vhosts.concurrency", "max_in_flight") => "vhosts.concurrency.max_in_flight",
+        ("vhosts.concurrency", "max_queue") => "vhosts.concurrency.max_queue",
         ("vhosts.concurrency", "status") => "vhosts.concurrency.status",
         ("vhosts.concurrency", "queue_timeout_ms") => "vhosts.concurrency.queue_timeout_ms",
         ("vhosts.routes.concurrency", "max_in_flight") => "vhosts.routes.concurrency.max_in_flight",
+        ("vhosts.routes.concurrency", "max_queue") => "vhosts.routes.concurrency.max_queue",
         ("vhosts.routes.concurrency", "status") => "vhosts.routes.concurrency.status",
         ("vhosts.routes.concurrency", "queue_timeout_ms") => {
             "vhosts.routes.concurrency.queue_timeout_ms"
@@ -9014,6 +9035,10 @@ pub enum ConfigError {
         name: String,
         variable: String,
     },
+    UnsafeTlsHeaderAppend {
+        field: &'static str,
+        name: String,
+    },
     ConflictingHeaderAdd {
         field: &'static str,
         name: String,
@@ -9614,6 +9639,10 @@ impl Display for ConfigError {
             } => write!(
                 formatter,
                 "{field}.{name} contains unsupported dynamic header variable {{{variable}}}"
+            ),
+            Self::UnsafeTlsHeaderAppend { field, name } => write!(
+                formatter,
+                "{field}.append.{name} cannot use tls.* template variables; use set/add so inbound spoofed headers are removed before Fluxheim forwards TLS identity"
             ),
             Self::ConflictingHeaderAdd { field, name } => write!(
                 formatter,
@@ -11827,6 +11856,36 @@ fn validate_header_mutations(
     Ok(())
 }
 
+fn validate_no_tls_header_append(
+    field: &'static str,
+    append: &BTreeMap<String, HeaderValues>,
+) -> Result<(), ConfigError> {
+    for (name, values) in append {
+        if values.iter().any(header_value_uses_tls_template) {
+            return Err(ConfigError::UnsafeTlsHeaderAppend {
+                field,
+                name: name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn header_value_uses_tls_template(value: &str) -> bool {
+    let mut rest = value;
+    while let Some(open) = rest.find('{') {
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('}') else {
+            return false;
+        };
+        if after_open[..close].starts_with("tls.") {
+            return true;
+        }
+        rest = &after_open[close + 1..];
+    }
+    false
+}
+
 fn validate_response_header_rewrite_rules(
     field: &'static str,
     header: &'static str,
@@ -13468,6 +13527,25 @@ mod tests {
                 field: "headers.request",
                 name: "x-bad".to_owned(),
                 variable: "client_ip".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_tls_identity_request_header_append() {
+        let config: Config = toml::from_str(
+            r#"
+            [headers.request.append]
+            x-client-cert-sha256 = "{tls.client_cert_sha256}"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::UnsafeTlsHeaderAppend {
+                field: "headers.request",
+                name: "x-client-cert-sha256".to_owned(),
             })
         );
     }
@@ -20913,6 +20991,7 @@ mod tests {
             [vhosts.concurrency]
             enabled = true
             max_in_flight = 100
+            max_queue = 300
             queue_timeout_ms = 100
 
             [[vhosts.routes]]
@@ -20931,6 +21010,7 @@ mod tests {
             [vhosts.routes.concurrency]
             enabled = true
             max_in_flight = 10
+            max_queue = 20
             queue_timeout_ms = 50
 
             [vhosts.routes.proxy]
@@ -20956,8 +21036,10 @@ mod tests {
         assert_eq!(config.vhosts[0].rate_limit.max_delay_ms, 250);
         assert_eq!(config.vhosts[0].routes[0].rate_limit.burst, 4);
         assert_eq!(config.vhosts[0].concurrency.max_in_flight, 100);
+        assert_eq!(config.vhosts[0].concurrency.max_queue, 300);
         assert_eq!(config.vhosts[0].concurrency.queue_timeout_ms, 100);
         assert_eq!(config.vhosts[0].routes[0].concurrency.max_in_flight, 10);
+        assert_eq!(config.vhosts[0].routes[0].concurrency.max_queue, 20);
         assert_eq!(config.vhosts[0].routes[0].concurrency.queue_timeout_ms, 50);
     }
 
@@ -21054,6 +21136,26 @@ mod tests {
             error.contains("vhosts.concurrency.max_in_flight"),
             "{error}"
         );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [vhosts.concurrency]
+            enabled = true
+            max_in_flight = 1
+            max_queue = 1000001
+
+            [vhosts.proxy]
+            upstream = "127.0.0.1:3000"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("vhosts.concurrency.max_queue"), "{error}");
     }
 
     #[test]
