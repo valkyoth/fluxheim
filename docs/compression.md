@@ -1,24 +1,26 @@
 # Compression
 
-Status: future optional module.
+Status: initial optional `1.4` module.
 
-Planned Cargo features:
+Cargo features:
 
-- `compression`: shared config, negotiation, eligibility checks, and response
-  body filter integration.
+- `compression`: shared config and response filter integration.
+- `compression-gzip`: gzip response encoding through `flate2`.
+
+Planned later features:
+
 - `compression-zstd`: Zstandard response encoding.
 - `compression-brotli`: Brotli response encoding.
-- `compression-gzip`: gzip compatibility fallback.
 
-Compression should be a CPU-efficiency feature, not just a smaller-response
-feature. The default build should stay free of compression code until the body
-filter, cache-variant, and resource-limit behavior is proven.
+Compression remains opt-in. Default builds do not include compression code, and
+`privacy-mode` builds reject compression at compile time because response-body
+transforms can create side-channel and retention risks.
 
 ## Goals
 
-- Prefer modern encodings first: Zstandard for dynamic or streaming responses
-  and Brotli for static web assets where it wins.
-- Keep gzip as a compatibility fallback for older clients.
+- Keep gzip as a conservative compatibility baseline first.
+- Add Zstandard and Brotli later once resource and cache-variant behavior is
+  proven.
 - Avoid compressing already-compressed or low-value content.
 - Keep request workers responsive by moving expensive compression work out of
   the main request path.
@@ -29,14 +31,11 @@ filter, cache-variant, and resource-limit behavior is proven.
 
 ## Negotiation
 
-Fluxheim should negotiate response encoding from `Accept-Encoding` and route
-policy:
-
-1. choose `zstd` when the client supports it and the policy allows it;
-2. choose `br` for eligible static assets when the client supports it;
-3. choose `gzip` only as a fallback;
-4. serve identity when content is already compressed, too small, too large,
-   streaming in an unsupported way, or policy disables compression.
+Fluxheim currently negotiates gzip from `Accept-Encoding` when
+`compression.enabled = true` and the binary is built with `compression-gzip`.
+`gzip;q=0` is respected. Identity is served when gzip is unsupported by the
+client, the response is already encoded, the response is too small or too
+large, the content length is unknown, or policy disables compression.
 
 Every compressed response must set or update:
 
@@ -70,21 +69,22 @@ Initial positive MIME types should be conservative:
 
 ## Execution Model
 
-Compression can be CPU-heavy. Fluxheim should use a bounded worker pool or
-blocking task pool for non-trivial compression so Pingora request workers do
-not stall behind large JSON or static asset encoding jobs.
+The first gzip implementation is intentionally bounded:
 
-The module must enforce:
+- only responses with a known `Content-Length` are compressed;
+- input must fit between `compression.min_bytes` and
+  `compression.max_input_bytes`;
+- `compression.max_input_bytes` is capped at 64 MiB by config validation;
+- gzip levels are restricted to `0..=9`;
+- Fluxheim removes `Content-Length` after enabling gzip because the encoded
+  length is streamed out through the body filter.
 
-- global and per-vhost compression concurrency;
-- maximum input bytes;
-- maximum buffered bytes before switching to streaming or identity;
-- per-encoding level bounds;
-- timeout or cancellation behavior when clients disconnect.
+A later implementation may add bounded compression worker pools, per-vhost
+concurrency, zstd, brotli, and precompressed static asset variants.
 
 ## Cache Integration
 
-Compression variants must be cache-isolated by:
+Future shared-cache compression variants must be cache-isolated by:
 
 - vhost;
 - route;
@@ -93,9 +93,9 @@ Compression variants must be cache-isolated by:
 - selected encoding;
 - compression policy version.
 
-`Vary: Accept-Encoding` must be present for all negotiated variants. Shared
-cache admission must still reject unsafe personalized responses such as
-responses with `Set-Cookie`.
+`Vary: Accept-Encoding` is added to every compressed response. Shared cache
+admission must still reject unsafe personalized responses such as responses
+with `Set-Cookie`.
 
 Precompressed static assets may be supported later through files such as
 `index.html.br`, `app.js.zst`, or `style.css.gz`, but config validation and
@@ -121,40 +121,26 @@ input share the same compressed response. Safe defaults:
 - reject the module with `privacy-mode` until a no-retention, no-side-channel
   design is written and tested.
 
-## Configuration Sketch
+## Configuration
 
 ```toml
 [compression]
 enabled = true
-encodings = ["zstd", "br", "gzip"]
 min_bytes = "1KiB"
-max_input_bytes = "16MiB"
-concurrency = 8
-
-[compression.zstd]
-level = 3
-
-[compression.brotli]
-level = 5
-static_only = true
-
-[compression.gzip]
-level = 4
-
-[[vhosts.routes]]
-name = "assets"
-match = { prefix = "/assets/" }
-action = "web"
-compression = { enabled = true, encodings = ["br", "gzip"] }
+max_input_bytes = "1MiB"
+gzip = true
+gzip_level = 4
 ```
+
+Compression is currently global. Per-vhost and per-route compression policy is
+tracked for later `1.4.x` work.
 
 ## Test Plan
 
-- Negotiates `zstd`, `br`, `gzip`, and identity correctly.
+- Negotiates `gzip` and identity correctly.
 - Adds `Vary: Accept-Encoding`.
 - Does not compress excluded MIME types or `no-transform` responses.
-- Keeps cache variants isolated by encoding.
-- Rejects unsafe cache admission for personalized compressed responses.
-- Enforces input size, output size, level, and concurrency limits.
-- Cancels compression work when the downstream client disconnects.
+- Does not compress cookie, authorization, `Set-Cookie`, range, or already
+  encoded responses.
+- Enforces input size and level limits.
 - Proves compression code is absent from default and `privacy-mode` builds.

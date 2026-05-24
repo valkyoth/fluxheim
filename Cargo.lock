@@ -1032,6 +1032,7 @@ dependencies = [
  "clap",
  "env_logger",
  "fastcgi-client",
+ "flate2",
  "fluxheim-openssl-fips-support",
  "getrandom 0.4.2",
  "http",

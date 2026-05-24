@@ -539,6 +539,33 @@ failures. The `path` is an internal request path resolved below the entry's
 `web.root`; it is not exposed as a public route unless you also configure a
 route for that root.
 
+## Compression
+
+`[compression]` is a global opt-in response compression policy. It is available
+only in binaries built with `compression-gzip`; default release binaries do not
+include compression code. `privacy-mode` builds reject compression at compile
+time.
+
+```toml
+[compression]
+enabled = true
+gzip = true
+min_bytes = "1KiB"
+max_input_bytes = "1MiB"
+gzip_level = 4
+```
+
+The first implementation compresses only eligible `GET` responses with known
+`Content-Length`, status `200`, client `Accept-Encoding: gzip`, no existing
+`Content-Encoding`, no `Set-Cookie`, no request `Cookie` or `Authorization`,
+no `Content-Range`, no `Cache-Control: no-transform`, and a conservative text,
+JavaScript, JSON, XML, or SVG media type. Fluxheim removes `Content-Length` and
+`ETag` from compressed responses and adds `Vary: Accept-Encoding`.
+
+`min_bytes` and `max_input_bytes` bound the original response size. The
+configured maximum cannot exceed 64 MiB. `gzip_level` must be between `0` and
+`9`.
+
 ## Web
 
 ```toml

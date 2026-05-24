@@ -1,6 +1,8 @@
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
+#[cfg(feature = "compression-gzip")]
+use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
@@ -15,6 +17,8 @@ use std::time::{Duration, Instant};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use bytes::Bytes;
+#[cfg(feature = "compression-gzip")]
+use flate2::{Compression, write::GzEncoder};
 #[cfg(feature = "cache")]
 use pingora::ErrorSource;
 #[cfg(feature = "cache")]
@@ -25,7 +29,7 @@ use pingora::cache::key::{CacheHashKey, HashBinary};
 use pingora::cache::lock::CacheKeyLockImpl;
 #[cfg(feature = "cache")]
 use pingora::cache::predictor::{CacheablePredictor, Predictor};
-#[cfg(any(feature = "cache", feature = "php-fpm"))]
+#[cfg(any(feature = "cache", feature = "php-fpm", feature = "compression-gzip"))]
 use pingora::http::StatusCode;
 use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::prelude::{HttpPeer, Result};
@@ -136,6 +140,8 @@ struct ProxyRuntimeState {
     limits: ServerLimitsConfig,
     https_redirect: HttpsRedirectConfig,
     host_routing: HostRoutingConfig,
+    #[cfg(feature = "compression")]
+    compression: crate::config::CompressionConfig,
     #[cfg(feature = "otel-tracing")]
     tracing: crate::config::TracingConfig,
     #[cfg(feature = "otel-otlp")]
@@ -2232,6 +2238,8 @@ impl ProxyRuntimeState {
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
+            #[cfg(feature = "compression")]
+            compression: config.compression.clone(),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2300,6 +2308,8 @@ impl ProxyRuntimeState {
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
+            #[cfg(feature = "compression")]
+            compression: config.compression.clone(),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -4839,6 +4849,40 @@ pub struct RequestContext {
     revalidation_304_headers: Option<Revalidation304Headers>,
     #[cfg(all(feature = "php-fpm", feature = "otel-otlp"))]
     php_outcome: Option<&'static str>,
+    #[cfg(feature = "compression-gzip")]
+    gzip: Option<GzipResponseEncoder>,
+}
+
+#[cfg(feature = "compression-gzip")]
+#[derive(Debug)]
+struct GzipResponseEncoder {
+    encoder: GzEncoder<Vec<u8>>,
+    emitted: usize,
+}
+
+#[cfg(feature = "compression-gzip")]
+impl GzipResponseEncoder {
+    fn new(level: u32) -> Self {
+        Self {
+            encoder: GzEncoder::new(Vec::new(), Compression::new(level)),
+            emitted: 0,
+        }
+    }
+
+    fn encode_chunk(&mut self, input: Option<&Bytes>, end_of_stream: bool) -> io::Result<Bytes> {
+        if let Some(input) = input {
+            self.encoder.write_all(input)?;
+        }
+        if end_of_stream {
+            self.encoder.try_finish()?;
+        } else {
+            self.encoder.flush()?;
+        }
+        let output = self.encoder.get_ref();
+        let bytes = Bytes::copy_from_slice(&output[self.emitted..]);
+        self.emitted = output.len();
+        Ok(bytes)
+    }
 }
 
 #[cfg(feature = "cache")]
@@ -5631,6 +5675,8 @@ impl ProxyHttp for FluxProxy {
         )?;
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)?;
+        #[cfg(feature = "compression-gzip")]
+        prepare_gzip_response_compression(session.req_header(), response, &state.compression, ctx)?;
         append_fluxheim_via_to_response(response)
     }
 
@@ -5644,6 +5690,14 @@ impl ProxyHttp for FluxProxy {
     where
         Self::CTX: Send + Sync,
     {
+        #[cfg(feature = "compression-gzip")]
+        if let Some(gzip) = &mut ctx.gzip {
+            let encoded = gzip
+                .encode_chunk(body.as_ref(), _end_of_stream)
+                .map_err(|error| Error::because(ErrorType::InternalError, "gzip failed", error))?;
+            *body = (!encoded.is_empty()).then_some(encoded);
+        }
+
         count_response_body_chunk(&mut ctx.response_body_bytes_seen, body.as_ref());
         Ok(None)
     }
@@ -7014,6 +7068,163 @@ fn response_has_non_identity_encoding(response: &ResponseHeader) -> bool {
         .iter()
         .filter_map(|value| value.to_str().ok())
         .any(|value| !value.trim().eq_ignore_ascii_case("identity"))
+}
+
+#[cfg(feature = "compression-gzip")]
+fn prepare_gzip_response_compression(
+    request: &RequestHeader,
+    response: &mut ResponseHeader,
+    config: &crate::config::CompressionConfig,
+    ctx: &mut RequestContext,
+) -> Result<()> {
+    if !gzip_response_eligible(request, response, config) {
+        return Ok(());
+    }
+
+    response.insert_header("content-encoding", "gzip")?;
+    response.remove_header("content-length");
+    response.remove_header("etag");
+    append_vary_accept_encoding(response)?;
+    ctx.gzip = Some(GzipResponseEncoder::new(config.gzip_level));
+    Ok(())
+}
+
+#[cfg(feature = "compression-gzip")]
+fn gzip_response_eligible(
+    request: &RequestHeader,
+    response: &ResponseHeader,
+    config: &crate::config::CompressionConfig,
+) -> bool {
+    config.enabled
+        && config.gzip
+        && request.method.as_str() == "GET"
+        && response.status == StatusCode::OK
+        && request_accepts_gzip(request)
+        && !response_has_content_encoding(response)
+        && !response.headers.contains_key("content-range")
+        && !response.headers.contains_key("set-cookie")
+        && !request.headers.contains_key("authorization")
+        && !request.headers.contains_key("cookie")
+        && !response_cache_control_blocks_compression(response)
+        && response_content_type_is_compressible(response)
+        && response_content_length_in_compression_bounds(response, config)
+}
+
+#[cfg(feature = "compression-gzip")]
+fn request_accepts_gzip(request: &RequestHeader) -> bool {
+    request
+        .headers
+        .get_all("accept-encoding")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(encoding_token_allows_gzip)
+}
+
+#[cfg(feature = "compression-gzip")]
+fn encoding_token_allows_gzip(token: &str) -> bool {
+    let mut parts = token.split(';');
+    let coding = parts.next().unwrap_or_default().trim();
+    if !coding.eq_ignore_ascii_case("gzip") && coding != "*" {
+        return false;
+    }
+
+    !parts
+        .map(str::trim)
+        .filter_map(|parameter| parameter.split_once('='))
+        .any(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("q")
+                && value
+                    .trim()
+                    .parse::<f32>()
+                    .is_ok_and(|quality| quality <= 0.0)
+        })
+}
+
+#[cfg(feature = "compression-gzip")]
+fn response_has_content_encoding(response: &ResponseHeader) -> bool {
+    response
+        .headers
+        .get_all("content-encoding")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| !value.trim().eq_ignore_ascii_case("identity"))
+}
+
+#[cfg(feature = "compression-gzip")]
+fn response_cache_control_blocks_compression(response: &ResponseHeader) -> bool {
+    response
+        .headers
+        .get_all("cache-control")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .any(|directive| {
+            directive.eq_ignore_ascii_case("no-transform")
+                || directive.eq_ignore_ascii_case("private")
+                || directive.eq_ignore_ascii_case("no-store")
+        })
+}
+
+#[cfg(feature = "compression-gzip")]
+fn response_content_type_is_compressible(response: &ResponseHeader) -> bool {
+    let Some(content_type) = response
+        .headers
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            value
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+        })
+    else {
+        return false;
+    };
+
+    content_type.as_str().starts_with("text/")
+        || matches!(
+            content_type.as_str(),
+            "application/javascript"
+                | "application/json"
+                | "application/xml"
+                | "image/svg+xml"
+                | "text/javascript"
+        )
+}
+
+#[cfg(feature = "compression-gzip")]
+fn response_content_length_in_compression_bounds(
+    response: &ResponseHeader,
+    config: &crate::config::CompressionConfig,
+) -> bool {
+    let Some(length) = response
+        .headers
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+    else {
+        return false;
+    };
+    length >= config.min_bytes.as_u64() && length <= config.max_input_bytes.as_u64()
+}
+
+#[cfg(feature = "compression-gzip")]
+fn append_vary_accept_encoding(response: &mut ResponseHeader) -> Result<()> {
+    let has_accept_encoding = response
+        .headers
+        .get_all("vary")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|field| field.trim().eq_ignore_ascii_case("accept-encoding"));
+    if !has_accept_encoding {
+        response.append_header("vary", "accept-encoding")?;
+    }
+    Ok(())
 }
 
 #[cfg(feature = "cache")]
@@ -11854,6 +12065,8 @@ mod tests {
     use std::fs;
     #[cfg(feature = "php-fpm")]
     use std::io;
+    #[cfg(feature = "compression-gzip")]
+    use std::io::Read as _;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     #[cfg(feature = "php-fpm")]
     use std::sync::Arc;
@@ -11862,9 +12075,11 @@ mod tests {
     use std::time::Duration;
 
     use bytes::Bytes;
-    #[cfg(feature = "php-fpm")]
+    #[cfg(any(feature = "php-fpm", feature = "compression-gzip"))]
     use pingora::http::{ResponseHeader, StatusCode};
 
+    #[cfg(feature = "compression-gzip")]
+    use crate::config::CompressionConfig;
     use crate::config::{
         ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
         RouteConfig, RouteRedirectConfig, ServerConfig, ServerLimitsConfig, VhostConfig, WebConfig,
@@ -11902,6 +12117,11 @@ mod tests {
         effective_client_ip_from_forwarded_for, http_peer_for_proxy, https_redirect_location,
         normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
+    };
+    #[cfg(feature = "compression-gzip")]
+    use super::{
+        GzipResponseEncoder, RequestContext, gzip_response_eligible,
+        prepare_gzip_response_compression, request_accepts_gzip,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -11961,6 +12181,132 @@ mod tests {
                 "wordpress_logged_in=abc; wordpress_sec=def; wordpress_test_cookie=WP%20Cookie%20check"
             ]
         );
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    fn compression_request() -> pingora::http::RequestHeader {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        request
+            .insert_header("accept-encoding", "br, gzip")
+            .unwrap();
+        request
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    fn compression_response() -> ResponseHeader {
+        let mut response = ResponseHeader::build(StatusCode::OK, Some(3)).unwrap();
+        response
+            .insert_header("content-type", "application/javascript; charset=utf-8")
+            .unwrap();
+        response.insert_header("content-length", "2048").unwrap();
+        response.insert_header("etag", "\"abc\"").unwrap();
+        response
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    fn compression_config() -> CompressionConfig {
+        CompressionConfig {
+            enabled: true,
+            min_bytes: ByteSize::from_bytes(1024),
+            max_input_bytes: ByteSize::from_bytes(4096),
+            gzip_level: 4,
+            ..CompressionConfig::default()
+        }
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn gzip_response_compression_sets_safe_headers() {
+        let request = compression_request();
+        let mut response = compression_response();
+        response.insert_header("vary", "accept-language").unwrap();
+        let mut ctx = RequestContext::default();
+
+        prepare_gzip_response_compression(&request, &mut response, &compression_config(), &mut ctx)
+            .unwrap();
+
+        assert_eq!(response.headers.get("content-encoding").unwrap(), "gzip");
+        assert!(!response.headers.contains_key("content-length"));
+        assert!(!response.headers.contains_key("etag"));
+        let vary = response
+            .headers
+            .get_all("vary")
+            .iter()
+            .map(|value| value.to_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert!(vary.contains(&"accept-language".to_owned()));
+        assert!(vary.contains(&"accept-encoding".to_owned()));
+        assert!(ctx.gzip.is_some());
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn gzip_response_compression_rejects_private_or_unknown_length_responses() {
+        let request = compression_request();
+        let config = compression_config();
+
+        let mut private_response = compression_response();
+        private_response
+            .insert_header("cache-control", "private")
+            .unwrap();
+        assert!(!gzip_response_eligible(
+            &request,
+            &private_response,
+            &config
+        ));
+
+        let mut no_transform = compression_response();
+        no_transform
+            .insert_header("cache-control", "public, no-transform")
+            .unwrap();
+        assert!(!gzip_response_eligible(&request, &no_transform, &config));
+
+        let mut unknown_length = compression_response();
+        unknown_length.remove_header("content-length");
+        assert!(!gzip_response_eligible(&request, &unknown_length, &config));
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn gzip_accept_encoding_honors_q_zero() {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        request
+            .insert_header("accept-encoding", "br, gzip;q=0")
+            .unwrap();
+        assert!(!request_accepts_gzip(&request));
+
+        let mut wildcard =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        wildcard
+            .insert_header("accept-encoding", "*;q=0.5")
+            .unwrap();
+        assert!(request_accepts_gzip(&wildcard));
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn gzip_encoder_emits_decodable_stream() {
+        let mut encoder = GzipResponseEncoder::new(4);
+        let mut compressed = Vec::new();
+        compressed.extend_from_slice(
+            &encoder
+                .encode_chunk(Some(&Bytes::from_static(b"hello ")), false)
+                .unwrap(),
+        );
+        compressed.extend_from_slice(
+            &encoder
+                .encode_chunk(Some(&Bytes::from_static(b"fluxheim")), true)
+                .unwrap(),
+        );
+
+        assert_eq!(&compressed[..2], &[0x1f, 0x8b]);
+        let mut decoded = String::new();
+        flate2::read::GzDecoder::new(&compressed[..])
+            .read_to_string(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, "hello fluxheim");
     }
 
     #[test]

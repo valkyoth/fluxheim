@@ -83,6 +83,8 @@ pub struct Config {
     #[serde(default)]
     pub proxy: ProxyConfig,
     #[serde(default)]
+    pub compression: CompressionConfig,
+    #[serde(default)]
     pub cache: CacheConfig,
     #[serde(default)]
     pub cache_purger: CachePurgerConfig,
@@ -220,6 +222,9 @@ impl Config {
         if let Some(proxy) = fragment.proxy {
             self.proxy = proxy;
         }
+        if let Some(compression) = fragment.compression {
+            self.compression = compression;
+        }
         if let Some(cache) = fragment.cache {
             self.cache = cache;
         }
@@ -251,6 +256,7 @@ impl Config {
         self.validate_acme_challenge_runtime()?;
         self.validate_tls_listeners()?;
         self.proxy.validate()?;
+        self.compression.validate()?;
         self.cache.validate("cache")?;
         self.cache_purger.validate()?;
         self.web.validate()?;
@@ -514,6 +520,8 @@ struct ConfigFragment {
     tls: Option<TlsConfigFragment>,
     #[serde(default)]
     proxy: Option<ProxyConfig>,
+    #[serde(default)]
+    compression: Option<CompressionConfig>,
     #[serde(default)]
     cache: Option<CacheConfig>,
     #[serde(default)]
@@ -3491,6 +3499,85 @@ impl ProxyErrorPageConfig {
         }
         Ok(())
     }
+}
+
+const DEFAULT_COMPRESSION_MIN_BYTES: u64 = 1024;
+const DEFAULT_COMPRESSION_MAX_INPUT_BYTES: u64 = 1024 * 1024;
+const DEFAULT_COMPRESSION_GZIP_LEVEL: u32 = 4;
+const MAX_COMPRESSION_INPUT_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompressionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_compression_gzip_enabled")]
+    pub gzip: bool,
+    #[serde(default = "default_compression_min_bytes")]
+    pub min_bytes: ByteSize,
+    #[serde(default = "default_compression_max_input_bytes")]
+    pub max_input_bytes: ByteSize,
+    #[serde(default = "default_compression_gzip_level")]
+    pub gzip_level: u32,
+}
+
+impl Default for CompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gzip: true,
+            min_bytes: default_compression_min_bytes(),
+            max_input_bytes: default_compression_max_input_bytes(),
+            gzip_level: default_compression_gzip_level(),
+        }
+    }
+}
+
+impl CompressionConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if !self.gzip {
+            return Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.gzip",
+            });
+        }
+        if self.min_bytes.as_u64() == 0 || self.min_bytes.as_u64() > self.max_input_bytes.as_u64() {
+            return Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.min_bytes",
+            });
+        }
+        if self.max_input_bytes.as_u64() == 0
+            || self.max_input_bytes.as_u64() > MAX_COMPRESSION_INPUT_BYTES
+        {
+            return Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.max_input_bytes",
+            });
+        }
+        if self.gzip_level > 9 {
+            return Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.gzip_level",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_compression_min_bytes() -> ByteSize {
+    ByteSize::from_bytes(DEFAULT_COMPRESSION_MIN_BYTES)
+}
+
+fn default_compression_gzip_enabled() -> bool {
+    true
+}
+
+fn default_compression_max_input_bytes() -> ByteSize {
+    ByteSize::from_bytes(DEFAULT_COMPRESSION_MAX_INPUT_BYTES)
+}
+
+fn default_compression_gzip_level() -> u32 {
+    DEFAULT_COMPRESSION_GZIP_LEVEL
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -7828,6 +7915,9 @@ pub enum ConfigError {
     InvalidProxyTimeout {
         field: &'static str,
     },
+    InvalidCompressionPolicy {
+        field: &'static str,
+    },
     TooManyProxyErrorPages {
         max: usize,
     },
@@ -8426,6 +8516,9 @@ impl Display for ConfigError {
             Self::EmptyUpstreamSni => write!(formatter, "upstream_sni cannot be empty"),
             Self::InvalidProxyTimeout { field } => {
                 write!(formatter, "{field} must be greater than zero")
+            }
+            Self::InvalidCompressionPolicy { field } => {
+                write!(formatter, "{field} contains an invalid compression value")
             }
             Self::TooManyProxyErrorPages { max } => write!(
                 formatter,
@@ -10722,11 +10815,11 @@ mod tests {
         AdminConfig, AdminHealthConfig, AdminHealthResponseMode, AdminRemoteTransportMode,
         AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
         CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig,
-        CacheStaleErrorKind, Config, ConfigError, ConfigLoadError, HeaderPolicyConfig,
-        LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig, ServerLimitsConfig,
-        StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsCurvePreference,
-        TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig, VhostHeaderPolicyConfig,
-        VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+        CacheStaleErrorKind, CompressionConfig, Config, ConfigError, ConfigLoadError,
+        HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig,
+        ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
+        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig,
+        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
         valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     #[cfg(feature = "cache")]
@@ -10813,6 +10906,8 @@ mod tests {
         assert_eq!(Config::default().server.process.threads, 1);
         assert_eq!(Config::default().server.process.listener_tasks_per_fd, 1);
         assert_eq!(Config::default().server.process.max_retries, 16);
+        assert!(!Config::default().compression.enabled);
+        assert!(Config::default().compression.gzip);
         let default_issuers = Config::default().tls.acme.issuers;
         let issuer_names: Vec<&str> = default_issuers
             .iter()
@@ -10836,6 +10931,55 @@ mod tests {
         assert!(Config::default().logging.access.enabled);
         #[cfg(feature = "privacy-mode")]
         assert!(!Config::default().logging.access.enabled);
+    }
+
+    #[test]
+    fn compression_config_validates_bounds() {
+        let config: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = true
+            gzip = true
+            min_bytes = "2KiB"
+            max_input_bytes = "4KiB"
+            gzip_level = 6
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.compression.min_bytes.as_u64(), 2048);
+        config.validate().unwrap();
+
+        let invalid_level: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = true
+            gzip_level = 10
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid_level.validate(),
+            Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.gzip_level"
+            })
+        ));
+
+        let invalid_bounds: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = true
+            min_bytes = "8KiB"
+            max_input_bytes = "4KiB"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid_bounds.validate(),
+            Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.min_bytes"
+            })
+        ));
     }
 
     #[test]
@@ -16946,6 +17090,7 @@ mod tests {
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
+            compression: CompressionConfig::default(),
             cache: CacheConfig::default(),
             cache_purger: CachePurgerConfig::default(),
             web: WebConfig::default(),
@@ -17910,6 +18055,7 @@ mod tests {
                 upstream_sni: None,
                 ..ProxyConfig::default()
             },
+            compression: CompressionConfig::default(),
             cache: CacheConfig::default(),
             cache_purger: CachePurgerConfig::default(),
             web: WebConfig::default(),
@@ -18003,6 +18149,7 @@ mod tests {
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
+            compression: CompressionConfig::default(),
             cache: CacheConfig::default(),
             cache_purger: CachePurgerConfig::default(),
             web: WebConfig {
@@ -18031,6 +18178,7 @@ mod tests {
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
+            compression: CompressionConfig::default(),
             cache: CacheConfig::default(),
             cache_purger: CachePurgerConfig::default(),
             web: WebConfig {
@@ -18099,6 +18247,7 @@ mod tests {
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
+            compression: CompressionConfig::default(),
             cache: CacheConfig::default(),
             cache_purger: CachePurgerConfig::default(),
             web: WebConfig {
@@ -18889,6 +19038,7 @@ mod tests {
             headers: HeaderPolicyConfig::default(),
             tls: super::TlsConfig::default(),
             proxy: ProxyConfig::default(),
+            compression: CompressionConfig::default(),
             cache: CacheConfig::default(),
             cache_purger: CachePurgerConfig::default(),
             web: WebConfig::default(),

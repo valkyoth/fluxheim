@@ -39,6 +39,8 @@ before Cargo starts compiling Pingora.
 | `otel-otlp` | No | Optional OTLP/HTTP JSON trace export to a local collector or Jaeger endpoint. |
 | `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 and rustls TLS-ALPN-01 challenge serving, and the renewal executor contract. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service. |
+| `compression` | No | Shared response compression config and body-filter integration. |
+| `compression-gzip` | No | gzip response compression for eligible known-length responses. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 
@@ -247,7 +249,6 @@ These are documented architecture tracks, not enabled Cargo features yet:
 
 | Future feature family | Document |
 | --- | --- |
-| Compression | [Compression](compression.md) |
 | Image filter | [Image Filter](image-filter.md) |
 | Programmable media edge | [Programmable Media Edge](programmable-media-edge.md) |
 | OpenTelemetry OTLP export | [OpenTelemetry Tracing](opentelemetry-tracing.md) |

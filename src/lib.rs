@@ -77,6 +77,11 @@ compile_error!(
     "privacy-mode cannot be combined with the cache feature; build with --no-default-features --features profile-privacy or select proxy,web,tls-*,privacy-mode explicitly"
 );
 
+#[cfg(all(feature = "privacy-mode", feature = "compression"))]
+compile_error!(
+    "privacy-mode cannot be combined with compression; zero-retention builds must not transform response bodies"
+);
+
 #[cfg(all(feature = "privacy-mode", feature = "metrics"))]
 compile_error!(
     "privacy-mode cannot be combined with metrics; zero-retention builds must not compile request metrics"

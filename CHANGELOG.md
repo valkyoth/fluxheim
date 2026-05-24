@@ -19,13 +19,14 @@ behavior when the change improves security or project direction.
   trusted-proxy-aware client IP.
 - Added opt-in local in-flight request limits through `[vhosts.concurrency]`
   and `[vhosts.routes.concurrency]`.
+- Added opt-in gzip response compression behind the `compression-gzip` feature,
+  with conservative MIME, size, cookie/auth, range, `no-transform`, and
+  `Vary: Accept-Encoding` handling.
 
 ### Planned
 
-- Start the production proxy parity line with edge policy and compression:
-  local rate limiting, connection limits, IP ACLs, opt-in response compression,
-  and the groundwork for the later `1.4.x` upstream resilience, TLS/protocol,
-  discovery, mirroring, and operator-hook work.
+- Continue the production proxy parity line with upstream resilience,
+  TLS/protocol, discovery, mirroring, and operator-hook work.
 
 ## 1.3.7 - Production PHP-FPM Completion
 
