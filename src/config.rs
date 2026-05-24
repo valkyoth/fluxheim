@@ -3485,6 +3485,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_weights: Vec<usize>,
     #[serde(default)]
+    pub upstream_aliases: Vec<String>,
+    #[serde(default)]
     pub backup_upstreams: Vec<String>,
     #[serde(default)]
     pub drain_upstreams: Vec<String>,
@@ -3579,6 +3581,7 @@ impl Default for ProxyConfig {
             upstream: Some(default_upstream()),
             upstreams: Vec::new(),
             upstream_weights: Vec::new(),
+            upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
             drain_upstreams: Vec::new(),
             upstream_tls: false,
@@ -3697,6 +3700,29 @@ impl ProxyConfig {
                 return Err(ConfigError::InvalidProxyUpstreamWeights {
                     reason: "total upstream weight is too large",
                 });
+            }
+        }
+        if !self.upstream_aliases.is_empty() {
+            if self.upstream.is_some() || self.upstream_aliases.len() != self.upstreams.len() {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_aliases",
+                    reason: "upstream_aliases must match proxy.upstreams and cannot be used with proxy.upstream",
+                });
+            }
+            let mut seen_aliases = std::collections::HashSet::new();
+            for alias in &self.upstream_aliases {
+                if !valid_upstream_alias(alias) {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_aliases",
+                        reason: "aliases must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
+                    });
+                }
+                if !seen_aliases.insert(alias.to_ascii_lowercase()) {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_aliases",
+                        reason: "aliases must be unique case-insensitively",
+                    });
+                }
             }
         }
         if self.error_pages.len() > MAX_PROXY_ERROR_PAGES {
@@ -12040,6 +12066,14 @@ fn upstream_host(authority: &str) -> Option<String> {
     split_host_port(authority).map(|(host, _port)| host.to_owned())
 }
 
+fn valid_upstream_alias(alias: &str) -> bool {
+    !alias.is_empty()
+        && alias.len() <= 64
+        && alias
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
 fn split_host_port(authority: &str) -> Option<(&str, u16)> {
     let (host, port) = authority.rsplit_once(':')?;
     if host.trim().is_empty() || port.trim().is_empty() {
@@ -12485,6 +12519,7 @@ mod tests {
             [proxy]
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
             upstream_weights = [1, 3]
+            upstream_aliases = ["app-a", "app-b"]
             backup_upstreams = ["127.0.0.1:3002"]
             connect_timeout_secs = 5
             upstream_total_connection_timeout_secs = 10
@@ -12546,6 +12581,7 @@ mod tests {
             ["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()]
         );
         assert_eq!(config.proxy.upstream_weights, [1, 3]);
+        assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b"]);
         assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
         assert_eq!(config.proxy.connect_timeout_secs, Some(5));
         assert_eq!(
@@ -12682,6 +12718,57 @@ mod tests {
         assert!(matches!(
             zero.validate(),
             Err(ConfigError::InvalidProxyUpstreamWeights { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_upstream_aliases() {
+        let mismatch: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_aliases = ["origin-a"]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            mismatch.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_aliases",
+                ..
+            })
+        ));
+
+        let unsafe_alias: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_aliases = ["origin/a", "origin-b"]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            unsafe_alias.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_aliases",
+                ..
+            })
+        ));
+
+        let duplicate: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_aliases = ["origin-a", "ORIGIN-A"]
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            duplicate.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_aliases",
+                ..
+            })
         ));
     }
 

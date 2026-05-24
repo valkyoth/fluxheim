@@ -110,7 +110,7 @@ Current cache baseline:
 - `fluxheim_cache_purger_entries_total{result}`
 - `fluxheim_cache_purger_duration_seconds{outcome}`
 - `fluxheim_edge_policy_events_total{scope,vhost,route,policy,outcome}`
-- `fluxheim_load_balancer_events_total{scope,vhost,route,event}`
+- `fluxheim_load_balancer_events_total{scope,vhost,route,upstream,event}`
 - `fluxheim_response_compressions_total{scope,vhost,route,encoding}`
 
 The configuration gauges are aggregate, label-free, and populated from
@@ -193,7 +193,8 @@ Load balancer:
 
 - `fluxheim_load_balancer_events_total` counts selected upstreams, retries,
   all-nodes-down/unavailable pools, and success/failure outcomes with bounded
-  configured vhost/route labels.
+  configured vhost/route labels. The `upstream` label is empty unless the
+  operator configures a safe low-cardinality `proxy.upstream_aliases` entry.
 - upstream health state transition metrics remain planned; they should not
   label raw upstream addresses unless an explicit low-cardinality alias is
   configured.

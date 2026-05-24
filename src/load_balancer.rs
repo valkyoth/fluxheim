@@ -33,6 +33,7 @@ pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 pub struct UpstreamLoadBalancer {
     inner: UpstreamLoadBalancerInner,
     key_source: LoadBalanceKeySource,
+    backend_aliases: Arc<std::collections::HashMap<u64, Arc<str>>>,
     passive_health: Option<Arc<PassiveHealthState>>,
     slow_start: Option<Arc<SlowStartState>>,
     backend_policy: BackendSelectionPolicy,
@@ -41,6 +42,7 @@ pub struct UpstreamLoadBalancer {
 
 pub struct SelectedUpstream {
     pub backend: Backend,
+    pub alias: Option<Arc<str>>,
     pub permit: Option<LoadBalancedConnectionPermit>,
     pub reporter: Option<LoadBalancedUpstreamReporter>,
 }
@@ -200,6 +202,10 @@ impl UpstreamLoadBalancer {
             self.slow_start.as_deref(),
             &self.backend_policy,
         )?;
+        selected.alias = self
+            .backend_aliases
+            .get(&backend_policy_key(&selected.backend))
+            .cloned();
         selected.reporter =
             self.passive_health
                 .as_ref()
@@ -215,6 +221,7 @@ impl UpstreamLoadBalancer {
         Self {
             inner,
             key_source: LoadBalanceKeySource::from_config(config),
+            backend_aliases: Arc::new(backend_aliases(config)),
             passive_health: config.load_balance.passive_health.enabled.then(|| {
                 Arc::new(PassiveHealthState::from_config(
                     &config.load_balance.passive_health,
@@ -370,6 +377,7 @@ impl SelectedUpstream {
     fn new(backend: Backend) -> Self {
         Self {
             backend,
+            alias: None,
             permit: None,
             reporter: None,
         }
@@ -613,6 +621,21 @@ fn backend_policy_key(backend: &Backend) -> u64 {
     hasher.finish()
 }
 
+fn backend_aliases(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<str>> {
+    config
+        .upstreams
+        .iter()
+        .zip(&config.upstream_aliases)
+        .filter_map(|(upstream, alias)| {
+            let backend = Backend::new(upstream).ok()?;
+            Some((
+                backend_policy_key(&backend),
+                Arc::<str>::from(alias.as_str()),
+            ))
+        })
+        .collect()
+}
+
 fn select_pingora<S>(
     inner: &LoadBalancer<S>,
     key: &[u8],
@@ -764,6 +787,7 @@ fn select_least_connections_with_backup_policy(
     let permit = counters.permit(&backend)?;
     Some(SelectedUpstream {
         permit: Some(permit),
+        alias: None,
         backend,
         reporter: None,
     })
@@ -807,6 +831,7 @@ fn select_power_of_two(
     let permit = counters.permit(&selected)?;
     Some(SelectedUpstream {
         permit: Some(permit),
+        alias: None,
         backend: selected,
         reporter: None,
     })
@@ -1082,6 +1107,7 @@ mod tests {
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
             upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
             upstream_weights: vec![1, 4],
+            upstream_aliases: vec!["origin-a".to_owned(), "origin-b".to_owned()],
             load_balance: LoadBalanceConfig {
                 max_iterations: 8,
                 ..LoadBalanceConfig::default()
@@ -1093,7 +1119,14 @@ mod tests {
 
         assert_eq!(balancer.backend_count(), 2);
         assert_eq!(balancer.backend_weights(), [1, 4]);
-        assert!(balancer.select(&request(), None).is_some());
+        let selected = balancer.select(&request(), None).unwrap();
+        assert!(
+            matches!(
+                selected.alias.as_deref(),
+                Some("origin-a") | Some("origin-b")
+            ),
+            "selected alias should come from configured upstream_aliases"
+        );
     }
 
     #[test]

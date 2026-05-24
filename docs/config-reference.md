@@ -540,6 +540,7 @@ rules and can append additional rules.
 [proxy]
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_weights = [1, 2]
+upstream_aliases = ["app-a", "app-b"]
 backup_upstreams = ["127.0.0.1:3001"]
 drain_upstreams = []
 upstream_tls = false
@@ -666,6 +667,12 @@ where the platform and kernel allow it.
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
 fit in Pingora's weighted selector.
+`upstream_aliases` is optional and, when set, must contain one safe
+low-cardinality alias for each `upstreams` entry. Aliases may contain ASCII
+letters, digits, dots, dashes, and underscores, are capped at 64 bytes, and
+must be unique case-insensitively. Fluxheim uses them only for operator-facing
+metrics and status surfaces; they are not sent upstream and do not affect
+selection.
 `backup_upstreams` and `drain_upstreams` are optional subsets of `upstreams`.
 Backups stay out of normal rotation and are selected only when no non-backup
 backend is currently selectable. Drained upstreams remain configured for
@@ -686,7 +693,8 @@ lower in-flight count.
 With metrics enabled, load-balanced selections, unavailable pools, retries, and
 success/failure outcomes are counted by `fluxheim_load_balancer_events_total`
 with bounded configured vhost/route labels. The metric does not label raw
-upstream addresses.
+upstream addresses; it uses `upstream_aliases` when present and otherwise leaves
+the upstream label empty.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send a `GET` request to `path`; by default only `200`

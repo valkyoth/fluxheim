@@ -220,13 +220,19 @@ pub fn record_edge_policy_event(vhost: &str, route: Option<&str>, policy: &str, 
     }
 }
 
-pub fn record_load_balancer_event(vhost: &str, route: Option<&str>, event: &str) {
+pub fn record_load_balancer_event(
+    vhost: &str,
+    route: Option<&str>,
+    upstream: Option<&str>,
+    event: &str,
+) {
     match load_balancer_events_total() {
         Ok(counter) => counter
             .with_label_values(&[
                 cache_scope_label(route),
                 vhost,
                 route.unwrap_or(""),
+                load_balancer_upstream_label(upstream),
                 load_balancer_event_label(event),
             ])
             .inc(),
@@ -615,9 +621,9 @@ fn load_balancer_events_total() -> Result<&'static IntCounterVec, prometheus::Er
     let counter = IntCounterVec::new(
         Opts::new(
             "fluxheim_load_balancer_events_total",
-            "Total Fluxheim load-balancer events by configured vhost, optional route, and bounded event.",
+            "Total Fluxheim load-balancer events by configured vhost, optional route, optional upstream alias, and bounded event.",
         ),
-        &["scope", "vhost", "route", "event"],
+        &["scope", "vhost", "route", "upstream", "event"],
     )?;
     match prometheus::default_registry().register(Box::new(counter.clone())) {
         Ok(()) => {}
@@ -1433,6 +1439,21 @@ fn load_balancer_event_label(event: &str) -> &'static str {
     }
 }
 
+fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {
+    let Some(upstream) = upstream else {
+        return "";
+    };
+    if upstream.is_empty()
+        || upstream.len() > 64
+        || upstream
+            .bytes()
+            .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')))
+    {
+        return "other";
+    }
+    upstream
+}
+
 fn cache_event_label(event: &str) -> &'static str {
     match event {
         "hit" => "hit",
@@ -1705,12 +1726,13 @@ mod tests {
         let _guard = metrics_test_lock();
         init().unwrap();
 
-        record_load_balancer_event("lb-test", Some("api"), "selected");
-        record_load_balancer_event("lb-test", Some("api"), "retry");
-        record_load_balancer_event("lb-test", None, "unavailable");
-        record_load_balancer_event("lb-test", Some("api"), "success");
-        record_load_balancer_event("lb-test", Some("api"), "failure");
-        record_load_balancer_event("lb-test", Some("api"), "attacker-event");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "selected");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "retry");
+        record_load_balancer_event("lb-test", None, None, "unavailable");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "success");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "failure");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "attacker-event");
+        record_load_balancer_event("lb-test", Some("api"), Some("http://raw:3000"), "selected");
 
         let metric_families = prometheus::gather();
         let mut output = Vec::new();
@@ -1723,6 +1745,8 @@ mod tests {
         assert!(output.contains(r#"scope="vhost""#));
         assert!(output.contains(r#"vhost="lb-test""#));
         assert!(output.contains(r#"route="api""#));
+        assert!(output.contains(r#"upstream="origin-a""#));
+        assert!(output.contains(r#"upstream="other""#));
         assert!(output.contains(r#"event="selected""#));
         assert!(output.contains(r#"event="unavailable""#));
         assert!(output.contains(r#"event="retry""#));
@@ -1730,6 +1754,7 @@ mod tests {
         assert!(output.contains(r#"event="failure""#));
         assert!(output.contains(r#"event="other""#));
         assert!(!output.contains("attacker-event"));
+        assert!(!output.contains("http://raw:3000"));
     }
 
     #[test]

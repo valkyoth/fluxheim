@@ -5469,6 +5469,8 @@ pub struct RequestContext {
     upstream_load_balancer_selected_at: Option<Instant>,
     #[cfg(feature = "load-balancer")]
     upstream_load_balancer_retries: u8,
+    #[cfg(feature = "load-balancer")]
+    upstream_load_balancer_alias: Option<std::sync::Arc<str>>,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
     health_signal_recorded: bool,
@@ -6132,6 +6134,7 @@ impl ProxyHttp for FluxProxy {
             ctx.upstream_load_balancer_reporter = None;
             ctx.upstream_load_balancer_outcome_recorded = false;
             ctx.upstream_load_balancer_selected_at = None;
+            ctx.upstream_load_balancer_alias = None;
         }
 
         #[cfg(feature = "load-balancer")]
@@ -6141,6 +6144,7 @@ impl ProxyHttp for FluxProxy {
                 effective_acl_client_ip(session, &state),
             )
         {
+            ctx.upstream_load_balancer_alias = selected.alias.clone();
             #[cfg(feature = "metrics")]
             record_load_balancer_metric(vhost, ctx, "selected");
             #[cfg(not(feature = "privacy-mode"))]
@@ -12168,7 +12172,12 @@ fn record_load_balancer_metric(vhost: &RuntimeVhost, ctx: &RequestContext, event
         .route_index
         .and_then(|route_index| vhost.routes.get(route_index))
         .map(|route| route.name.as_str());
-    crate::metrics::record_load_balancer_event(vhost.name.as_str(), route, event);
+    crate::metrics::record_load_balancer_event(
+        vhost.name.as_str(),
+        route,
+        ctx.upstream_load_balancer_alias.as_deref(),
+        event,
+    );
 }
 
 #[cfg(feature = "load-balancer")]
