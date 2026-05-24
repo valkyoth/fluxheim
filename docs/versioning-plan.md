@@ -1118,7 +1118,8 @@ Reference parity map:
 
 Release shape:
 
-- `1.4.0` - edge policy and compression:
+- `1.4.0` - production proxy parity baseline:
+  - edge policy and compression:
   - local request-rate token bucket with burst, nodelay/delay modes, and
     configurable rejection status;
   - per-route, per-vhost, and per-listener connection limits and bounded queues;
@@ -1133,7 +1134,7 @@ Release shape:
     `rewrite_prefix` is implemented for bounded public-prefix to upstream-prefix
     URI mapping after `strip_prefix`; regex/template URI rewrites remain later
     1.4 work.
-- `1.4.1` - upstream selection and resilience:
+  - upstream selection and resilience:
   - named upstream pools and per-route pool selection;
   - weighted round-robin, least-connections, power-of-two choices, source hash,
     URI hash, header hash, and cookie stickiness;
@@ -1147,7 +1148,7 @@ Release shape:
     `proxy.upstream_aliases` now provides optional safe low-cardinality backend
     labels for operator-facing metrics; richer per-backend health transition
     metrics remain later work.
-- `1.4.2` - TLS, identity, and protocol parity:
+  - TLS, identity, and protocol parity:
   - listener-level mTLS/client certificate auth with `off`, `optional`, and
     `required` modes plus safe CA file handling for rustls and
     OpenSSL/BoringSSL is implemented. Verified downstream TLS/client
@@ -1180,7 +1181,7 @@ Release shape:
     requests before forwarding. Remaining work is explicit end-to-end h2
     trailer/status fixture coverage. gRPC-Web/JSON transcoding remains out of
     scope unless a mature crate or small adapter is justified.
-- `1.4.3` - discovery, mirroring, and operator hooks:
+- `1.4.1` - discovery, mirroring, and operator hooks:
   - DNS-refreshing upstreams for container/service-name targets;
   - file-watched upstream lists for service discovery without full config reload;
   - traffic mirroring/shadowing with sampling, body controls, redaction,
@@ -2738,9 +2739,12 @@ the exception while the cache server is being completed as a focused sequence:
   workflow.
 - `v1.3.7`: managed php-fpm process supervision under the existing `php-fpm`
   feature.
-- `v1.4.0` through `v1.4.3`: production proxy parity in a few larger releases:
-  edge policy/compression, upstream resilience, TLS/protocol parity, then
-  discovery/mirroring/operator hooks.
+- `v1.4.0`: production proxy parity baseline: edge policy/compression,
+  upstream resilience, TLS/protocol parity, mTLS/client certificate policy,
+  PROXY protocol, upstream TLS controls, HTTP/2 origin controls, and gRPC
+  pass-through policy.
+- `v1.4.1`: discovery, mirroring, structured logs, richer rewrite policy,
+  local operational sockets, and typed operator hook points.
 - `v1.5.1`: fixes for enterprise load-balancer operations.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 

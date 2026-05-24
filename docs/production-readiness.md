@@ -218,6 +218,17 @@ FastCGI request path. The recommended Wolfi PHP image includes `php-8.5-fpm`
 for this managed mode; other image variants keep the external php-fpm
 deployment shape unless customized.
 
+The `1.4.0` support promise is the first production proxy parity baseline.
+It adds opt-in edge ACLs, request rate limits, concurrency limits,
+gzip/zstd/brotli compression, response and URI rewrite helpers, advanced
+load-balancer selection, passive health/outlier ejection, retry budgets, active
+HTTP health checks, bounded proxy metrics, upstream connection and socket
+tuning, listener/client-certificate policy, PROXY protocol v1/v2 receive/send,
+upstream TLS trust and mTLS controls, HTTP/2 origin controls, and gRPC
+pass-through policy. Dynamic discovery, traffic mirroring, richer rewrite
+templates, local operational sockets, and typed hook points remain `1.4.1`
+work.
+
 ## Operator Checks
 
 Before using a Fluxheim build for a real site, run the stable gate from the repo

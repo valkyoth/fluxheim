@@ -112,15 +112,15 @@ feature aliases for common deployment shapes.
 | `profile-static-site` | `proxy`, `web`, `tls-rustls`, `security` | Static sites without Fluxheim cache. |
 | `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
 | `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
-| `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
+| `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing and all 1.4 compression codecs compiled in. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
-| `profile-full` | `profile-load-balancer` | All stable production modules. |
+| `profile-full` | `profile-load-balancer` | All stable production modules, including the 1.4 compression codecs. |
 | `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
-| `profile-web-server` | `proxy`, `web`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
-| `profile-cache-edge` | `proxy`, `cache`, `tls-rustls`, `security` | Cache edge without local static web serving. |
-| `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
-| `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
+| `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
+| `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
+| `profile-proxy-edge` | `proxy`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Focused reverse proxy edge. |
+| `profile-load-balancer-edge` | `proxy`, `load-balancer`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
 | `profile-fips-openssl` | `proxy`, `security`, `tls-openssl-fips` | FIPS-capable OpenSSL proxy build that links to the operator-selected OpenSSL provider. |
 | `profile-iso19790-openssl` | `profile-fips-openssl`, `tls-openssl-iso19790` | ISO/IEC 19790 terminology alias for the same OpenSSL validated-provider proof path. |
 | `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | FIPS-capable rustls/AWS-LC candidate build. |

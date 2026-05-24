@@ -80,7 +80,8 @@ Local development and CI should keep build environments low-trust by default:
 
 ## Human Review Roadmap
 
-Fluxheim should add `cargo-vet` once the 1.3.x security work stabilizes.
+Fluxheim should add `cargo-vet` after the 1.4.0 proxy-parity release
+stabilizes.
 
 Planned adoption path:
 

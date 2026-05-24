@@ -152,8 +152,10 @@ behavior when the change improves security or project direction.
 
 ### Planned
 
-- Continue the production proxy parity line with TLS/protocol, discovery,
-  mirroring, and operator-hook work.
+- Move the remaining proxy-operations work into `1.4.1`: dynamic upstream
+  discovery, file-watched upstream lists, traffic mirroring, richer structured
+  logs, regex/template rewrite policy, local operational sockets, and typed
+  hook points.
 
 ## 1.3.7 - Production PHP-FPM Completion
 

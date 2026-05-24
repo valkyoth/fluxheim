@@ -53,19 +53,17 @@ Pure-Rust PHP/phprs support is no longer planned for the 1.3 line; managed
 php-fpm now covers the zero-admin PHP deployment goal without adopting an
 immature interpreter. Turbine-style PHP app servers stay reverse-proxy upstreams
 unless a future embeddable library API proves safer than that boundary.
-`1.4` is planned as the production proxy parity release. Its target is the set
-of operational features operators expect when migrating from NGINX, HAProxy,
+`1.4.0` is the production proxy parity release. Its target is the first set of
+operational features operators expect when migrating from NGINX, HAProxy,
 Envoy, or Caddy: rate limits, connection limits, IP ACLs, response compression,
 advanced upstream selection, passive health/outlier detection, mTLS/client
-certificate authentication, PROXY protocol, gRPC-safe HTTP/2 proxying, request
-mirroring, DNS/service discovery, proxy buffering/streaming controls, structured
-logging, host/header/cookie/redirect rewrite policy, upstream TLS controls, and
-local Unix-socket operational visibility. The `1.4.x` line should use a few
-larger releases instead of many small ones: `1.4.0` edge policy and
-compression, `1.4.1` upstream selection and resilience, `1.4.2` TLS/protocol
-parity, and `1.4.3` discovery, mirroring, and extension hooks. Palo
-Alto-style security asks are tracked as policy integrations around this proxy
-surface: reputation/Geo decisions, TLS fingerprint signals, and future
+certificate authentication, PROXY protocol, gRPC-safe HTTP/2 proxying,
+structured access logging, host/header/cookie/redirect rewrite policy, upstream
+TLS controls, active HTTP health checks, retry budgets, and connection/socket
+tuning. The next `1.4.1` proxy-operations release owns the remaining discovery,
+mirroring, richer rewrite, local operational socket, and typed hook-point work.
+Palo Alto-style security asks are tracked as policy integrations around this
+proxy surface: reputation/Geo decisions, TLS fingerprint signals, and future
 WAF/App-ID-like classification hooks without turning Fluxheim into a full
 firewall.
 `1.5` is planned as enterprise load-balancer stabilization after the `1.4`

@@ -93,6 +93,9 @@ profile-load-balancer = [
     "proxy",
     "web",
     "cache",
+    "compression-gzip",
+    "compression-zstd",
+    "compression-brotli",
     "load-balancer",
     "tls-rustls",
     "security",
@@ -111,10 +114,41 @@ profile-development = [
     "otel-tracing",
     "otel-otlp",
 ]
-profile-web-server = ["proxy", "web", "tls-rustls", "security"]
-profile-cache-edge = ["proxy", "cache", "tls-rustls", "security"]
-profile-proxy-edge = ["proxy", "tls-rustls", "security"]
-profile-load-balancer-edge = ["proxy", "load-balancer", "tls-rustls", "security"]
+profile-web-server = [
+    "proxy",
+    "web",
+    "compression-gzip",
+    "compression-zstd",
+    "compression-brotli",
+    "tls-rustls",
+    "security",
+]
+profile-cache-edge = [
+    "proxy",
+    "cache",
+    "compression-gzip",
+    "compression-zstd",
+    "compression-brotli",
+    "tls-rustls",
+    "security",
+]
+profile-proxy-edge = [
+    "proxy",
+    "compression-gzip",
+    "compression-zstd",
+    "compression-brotli",
+    "tls-rustls",
+    "security",
+]
+profile-load-balancer-edge = [
+    "proxy",
+    "load-balancer",
+    "compression-gzip",
+    "compression-zstd",
+    "compression-brotli",
+    "tls-rustls",
+    "security",
+]
 profile-fips-openssl = ["proxy", "security", "tls-openssl-fips"]
 profile-iso19790-openssl = ["profile-fips-openssl", "tls-openssl-iso19790"]
 profile-fips-rustls = ["proxy", "security", "tls-rustls-fips"]

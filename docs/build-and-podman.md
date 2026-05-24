@@ -126,7 +126,7 @@ See [Feature Matrix](features.md) for the complete feature/profile list.
 
 Fluxheim's production RPM intentionally compiles
 `profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp` for the
-`1.3.x` line. That keeps the normal packaged binary broad while the container
+`1.4.x` line. That keeps the normal packaged binary broad while the container
 and tarball release assets also provide focused cache/proxy builds. Custom
 source builds can still omit `acme-client`, load-balancer, cache, web, or
 observability features when they are not needed.
@@ -249,7 +249,8 @@ profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
 ```
 
 That default image includes proxying, static serving, cache, load balancing,
-rustls TLS, managed ACME, Prometheus metrics, and OpenTelemetry export support.
+gzip/Zstandard/Brotli compression codecs, rustls TLS, managed ACME, Prometheus
+metrics, and OpenTelemetry export support.
 Published releases also build smaller focused profiles:
 
 - `cache`: `profile-cache-edge,acme-client`
@@ -463,15 +464,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.3.7-wolfi`, `v1.3.7-alpine`, `v1.3.7-suse-micro`, `v1.3.7-debian`
+- `v1.4.0-wolfi`, `v1.4.0-alpine`, `v1.4.0-suse-micro`, `v1.4.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.3.7`
-- `v1.3.7-base`
+- `v1.4.0`
+- `v1.4.0-base`
 - `latest`
 - `latest-base`
 
@@ -480,17 +481,17 @@ automation. They point at the full/default image profile.
 
 The cache and proxy image profiles publish tags with a profile segment:
 
-- `v1.3.7-cache-wolfi`, `v1.3.7-cache-alpine`,
-  `v1.3.7-cache-suse-micro`, `v1.3.7-cache-debian`
-- `v1.3.7-proxy-wolfi`, `v1.3.7-proxy-alpine`,
-  `v1.3.7-proxy-suse-micro`, `v1.3.7-proxy-debian`
-- `v1.3.7-php-wolfi`, `v1.3.7-php-alpine`,
-  `v1.3.7-php-suse-micro`, `v1.3.7-php-debian`
+- `v1.4.0-cache-wolfi`, `v1.4.0-cache-alpine`,
+  `v1.4.0-cache-suse-micro`, `v1.4.0-cache-debian`
+- `v1.4.0-proxy-wolfi`, `v1.4.0-proxy-alpine`,
+  `v1.4.0-proxy-suse-micro`, `v1.4.0-proxy-debian`
+- `v1.4.0-php-wolfi`, `v1.4.0-php-alpine`,
+  `v1.4.0-php-suse-micro`, `v1.4.0-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
   `sha-<short-sha>-php-wolfi`, etc.
 - `latest-cache-wolfi`, `latest-proxy-wolfi`, `latest-php-wolfi`, etc. when
   run from the default branch
-- Wolfi short aliases: `v1.3.7-cache`, `v1.3.7-proxy`, `v1.3.7-php`,
+- Wolfi short aliases: `v1.4.0-cache`, `v1.4.0-proxy`, `v1.4.0-php`,
   `latest-cache`, `latest-proxy`, and `latest-php`
 
 The load-balancer image profile is prepared for the `1.5` line. It is skipped
@@ -905,8 +906,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.3.7 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.3.7 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.4.0 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.4.0 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date

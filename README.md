@@ -22,16 +22,18 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.3.7`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+[Pingora](https://github.com/cloudflare/pingora). The current release target is
+`1.4.0`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
-application serving for WordPress-style deployments, PHP-FPM hardening and
-application recipes, managed php-fpm process supervision, the `fluxheim-acme`
-companion, release-page config tester diagnostics, an OpenSSL FIPS-capable TLS
-build path, and a rustls/AWS-LC FIPS-capable candidate path with fail-closed
-internal-crypto gates and compliance evidence templates.
+application serving for WordPress-style deployments, managed php-fpm process
+supervision, the `fluxheim-acme` companion, release-page config tester
+diagnostics, OpenSSL and rustls/AWS-LC FIPS/ISO-capable build paths, and the
+first production proxy-parity set: edge ACLs, rate/concurrency limits,
+compression, advanced upstream selection, passive health, retry budgets,
+PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
+origin controls, and gRPC pass-through policy.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -192,7 +194,7 @@ For managed certificate issuance, see
 [`examples/acme-http-01.toml`](examples/acme-http-01.toml). For an issuer that
 requires External Account Binding, see
 [`examples/acme-actalis.toml`](examples/acme-actalis.toml).
-Packaged `1.3.x` builds include `acme-init` for guided issuer bootstrap:
+Packaged builds include `acme-init` for guided issuer bootstrap:
 
 ```bash
 sudo fluxheim acme-init actalis
@@ -210,19 +212,19 @@ Recommended profile features:
 | `profile-static-site` | `proxy`, `web`, `tls-rustls`, `security` | Static sites without Fluxheim cache. |
 | `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
 | `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
-| `profile-load-balancer` | `proxy`, `web`, `cache`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing. |
+| `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing and all 1.4 compression codecs compiled in. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
-| `profile-full` | `profile-load-balancer` | All stable production modules. |
+| `profile-full` | `profile-load-balancer` | All stable production modules, including the 1.4 compression codecs. |
 | `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
-| `profile-web-server` | `proxy`, `web`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
-| `profile-cache-edge` | `proxy`, `cache`, `tls-rustls`, `security` | Cache edge without local static web serving. |
-| `profile-proxy-edge` | `proxy`, `tls-rustls`, `security` | Focused reverse proxy edge. |
-| `profile-load-balancer-edge` | `proxy`, `load-balancer`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
+| `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
+| `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |
+| `profile-proxy-edge` | `proxy`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Focused reverse proxy edge. |
+| `profile-load-balancer-edge` | `proxy`, `load-balancer`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Load-balancer edge without cache or static web serving. |
 | `profile-fips-rustls` | `proxy`, `security`, `tls-rustls-fips` | rustls/AWS-LC FIPS-capable candidate build. |
 | `profile-iso19790-rustls` | `profile-fips-rustls` | ISO/IEC 19790 terminology alias for the same rustls/AWS-LC candidate path. |
 
-Fluxheim 1.3 starts the focused image split. The `profile-cache-edge` and
+Fluxheim 1.3 started the focused image split. The `profile-cache-edge` and
 `profile-proxy-edge` aliases are TLS-capable without compiling local static web
 serving. Official RPMs, container images, and release tarballs add
 `acme-client` to the full, cache, and proxy profiles by default because
@@ -263,8 +265,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.3.7-wolfi`, `v1.3.7-cache-wolfi`, `v1.3.7-proxy-wolfi`, and
-`v1.3.7-php-wolfi`.
+`v1.4.0-wolfi`, `v1.4.0-cache-wolfi`, `v1.4.0-proxy-wolfi`, and
+`v1.4.0-php-wolfi`.
 
 Manual feature selection also works:
 
@@ -278,12 +280,12 @@ and explicit `.php` scripts to php-fpm. See
 [`docs/php-runtime-support.md`](docs/php-runtime-support.md),
 [`docs/php-fpm-app-recipes.md`](docs/php-fpm-app-recipes.md), and
 [`examples/php-fpm.toml`](examples/php-fpm.toml).
-Fluxheim `1.3.7` is the production PHP-FPM completion release with managed
-php-fpm supervision as an opt-in runtime mode. The Wolfi `v1.3.7-php` image is
+Fluxheim `1.3.7` completed the production PHP-FPM line with managed php-fpm
+supervision as an opt-in runtime mode. The current Wolfi `v1.4.0-php` image is
 self-contained for managed PHP-FPM and includes the Wolfi `php-8.5-fpm`
 runtime; non-Wolfi PHP image variants keep the external php-fpm container
-config unless customized. Pure-Rust PHP/phprs support is not planned for the
-1.3 line; managed php-fpm is the supported zero-admin PHP path.
+config unless customized. Pure-Rust PHP/phprs support is not planned; managed
+php-fpm is the supported zero-admin PHP path.
 
 TLS backends are mutually exclusive. Select exactly one backend when TLS is
 needed:
@@ -324,11 +326,10 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Stable: 1.3 Split Profiles
+## Current Release: 1.4 Proxy Parity
 
-Fluxheim does not treat every planned idea as stable. The current stable line is
-`1.3.x`, and active development has moved to the `1.4.x` production proxy
-parity line.
+Fluxheim does not treat every planned idea as stable. The current release line
+is `1.4.x`, starting with the `1.4.0` production proxy parity release.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -348,9 +349,16 @@ parity line.
   Fluxheim-managed php-fpm supervision, OpenSSL and rustls/AWS-LC FIPS/ISO
   build paths, internal-crypto compliance guards, and the repeatable compliance
   evidence package template.
-- `1.4.x` is now the active development line for production proxy parity:
-  edge policy and compression first, followed by upstream resilience, TLS and
-  protocol parity, dynamic discovery, traffic mirroring, and operator hooks.
+- `1.4.0` is the production proxy parity baseline: edge ACLs, rate and
+  concurrency limits, gzip/zstd/brotli compression, response and URI rewrites,
+  advanced load balancing, passive health, retry budgets, active HTTP health
+  checks, bounded metrics, upstream connection/socket tuning, mTLS/client cert
+  policy, PROXY protocol v1/v2, upstream TLS controls, HTTP/2 origin controls,
+  and gRPC pass-through policy.
+- `1.4.1` is planned for the remaining proxy-operations work: dynamic upstream
+  discovery, file-watched upstream lists, traffic mirroring, richer structured
+  logs, regex/template rewrite policy, local operational sockets, and typed
+  hook points.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

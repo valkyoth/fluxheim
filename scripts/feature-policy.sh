@@ -6,7 +6,7 @@
 
 TLS_BACKENDS="tls-rustls tls-rustls-fips tls-openssl tls-boringssl tls-s2n"
 PHP_RUNTIMES="php-fpm"
-PRIVACY_INCOMPATIBLE_FEATURES="cache metrics metrics-otlp otel-tracing otel-otlp"
+PRIVACY_INCOMPATIBLE_FEATURES="cache metrics metrics-otlp otel-tracing otel-otlp compression compression-gzip compression-zstd compression-brotli"
 
 expand_fluxheim_feature() {
     case "$1" in
@@ -23,25 +23,25 @@ expand_fluxheim_feature() {
             echo "proxy,web,cache,tls-rustls,security"
             ;;
         profile-load-balancer)
-            echo "proxy,web,cache,load-balancer,tls-rustls,security"
+            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,tls-rustls,security"
             ;;
         profile-full)
-            echo "proxy,web,cache,load-balancer,tls-rustls,security"
+            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,tls-rustls,security"
             ;;
         profile-development)
-            echo "proxy,web,cache,load-balancer,tls-rustls,security,php-fpm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"
+            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,tls-rustls,security,php-fpm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"
             ;;
         profile-web-server)
-            echo "proxy,web,tls-rustls,security"
+            echo "proxy,web,compression-gzip,compression-zstd,compression-brotli,tls-rustls,security"
             ;;
         profile-cache-edge)
-            echo "proxy,cache,tls-rustls,security"
+            echo "proxy,cache,compression-gzip,compression-zstd,compression-brotli,tls-rustls,security"
             ;;
         profile-proxy-edge)
-            echo "proxy,tls-rustls,security"
+            echo "proxy,compression-gzip,compression-zstd,compression-brotli,tls-rustls,security"
             ;;
         profile-load-balancer-edge)
-            echo "proxy,load-balancer,tls-rustls,security"
+            echo "proxy,load-balancer,compression-gzip,compression-zstd,compression-brotli,tls-rustls,security"
             ;;
         profile-fips-openssl)
             echo "proxy,security,tls-openssl-fips"

@@ -13,6 +13,11 @@ Compression remains opt-in. Default builds do not include compression code, and
 `privacy-mode` builds reject compression at compile time because response-body
 transforms can create side-channel and retention risks.
 
+The `1.4.0` production profile aliases used by official full, cache-edge,
+proxy-edge, load-balancer-edge, and PHP/web artifacts compile all three codecs
+so operators can enable compression by vhost or route without rebuilding. A
+compiled codec is inert until `compression.enabled = true` is set in config.
+
 ## Goals
 
 - Keep gzip as a conservative compatibility baseline.

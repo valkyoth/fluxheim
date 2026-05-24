@@ -12,8 +12,8 @@ published Security Policy.
 
 ## Status
 
-Current stable line: `1.3.7`. The FIPS/ISO internal-crypto closure was
-completed in `1.3.6`; `1.3.7` does not broaden the compliance claim.
+Current release line: `1.4.0`. The FIPS/ISO internal-crypto closure was
+completed in `1.3.6`; `1.4.0` does not broaden the compliance claim.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
 ISO/IEC 19790 terminology aliases for compliance evidence plumbing. The
