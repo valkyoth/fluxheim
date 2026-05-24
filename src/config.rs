@@ -5060,6 +5060,8 @@ pub struct RouteConfig {
     #[serde(default)]
     pub strip_prefix: Option<String>,
     #[serde(default)]
+    pub rewrite_prefix: Option<String>,
+    #[serde(default)]
     pub max_request_body_bytes: Option<ByteSize>,
     #[serde(default)]
     pub access: AccessPolicyConfig,
@@ -5153,6 +5155,20 @@ impl RouteConfig {
             };
             if !prefix.starts_with(path) && !path.starts_with(prefix) {
                 return Err(ConfigError::InvalidRouteStripPrefix {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                });
+            }
+        }
+        if let Some(path) = &self.rewrite_prefix {
+            validate_route_rewrite_prefix_path(path).map_err(|_| {
+                ConfigError::InvalidRouteRewritePrefix {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                }
+            })?;
+            if self.strip_prefix.is_none() {
+                return Err(ConfigError::InvalidRouteRewritePrefix {
                     vhost: vhost.to_owned(),
                     route: self.name.clone(),
                 });
@@ -5361,6 +5377,7 @@ impl VhostRedirectConfig {
             fallback: true,
             https_redirect_exempt: false,
             strip_prefix: None,
+            rewrite_prefix: None,
             max_request_body_bytes: None,
             access: AccessPolicyConfig::default(),
             rate_limit: RateLimitConfig::default(),
@@ -5590,6 +5607,7 @@ impl VhostAcmeChallengeConfig {
             fallback: false,
             https_redirect_exempt: true,
             strip_prefix: None,
+            rewrite_prefix: None,
             max_request_body_bytes: None,
             access: AccessPolicyConfig::default(),
             rate_limit: RateLimitConfig::default(),
@@ -9172,6 +9190,10 @@ pub enum ConfigError {
         vhost: String,
         route: String,
     },
+    InvalidRouteRewritePrefix {
+        vhost: String,
+        route: String,
+    },
     InvalidRouteAction {
         vhost: String,
         route: String,
@@ -9875,6 +9897,10 @@ impl Display for ConfigError {
             Self::InvalidRouteStripPrefix { vhost, route } => write!(
                 formatter,
                 "vhost {vhost:?} route {route:?} strip_prefix must be an absolute path prefix attached to path_prefix"
+            ),
+            Self::InvalidRouteRewritePrefix { vhost, route } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} rewrite_prefix must be an absolute path prefix attached to strip_prefix"
             ),
             Self::InvalidRouteAction { vhost, route } => write!(
                 formatter,
@@ -10745,6 +10771,17 @@ fn validate_route_path(
         || value.chars().any(char::is_control)
         || value.split('/').any(|segment| segment == "..")
     {
+        return Err(ConfigError::InvalidRouteMatcher {
+            vhost: String::new(),
+            route: String::new(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_route_rewrite_prefix_path(value: &str) -> Result<(), ConfigError> {
+    validate_route_path("vhosts.routes.rewrite_prefix", value, true)?;
+    if value.contains('%') || value.chars().any(char::is_whitespace) {
         return Err(ConfigError::InvalidRouteMatcher {
             vhost: String::new(),
             route: String::new(),
@@ -20681,6 +20718,7 @@ mod tests {
             path_prefix = "/chat/"
             https_redirect_exempt = true
             strip_prefix = "/chat/"
+            rewrite_prefix = "/backend/chat/"
 
             [vhosts.routes.proxy]
             upstreams = ["127.0.0.1:6012"]
@@ -20720,6 +20758,10 @@ mod tests {
         );
         assert_eq!(config.vhosts[0].routes[0].name, "chat");
         assert!(config.vhosts[0].routes[0].https_redirect_exempt);
+        assert_eq!(
+            config.vhosts[0].routes[0].rewrite_prefix.as_deref(),
+            Some("/backend/chat/")
+        );
         assert_eq!(
             config.vhosts[0].routes[0]
                 .proxy
@@ -21135,6 +21177,57 @@ mod tests {
         assert_eq!(
             config.validate(),
             Err(ConfigError::InvalidRouteAction {
+                vhost: "gateway".to_owned(),
+                route: "bad".to_owned(),
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_prefix = "/one/"
+            rewrite_prefix = "/upstream/"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidRouteRewritePrefix {
+                vhost: "gateway".to_owned(),
+                route: "bad".to_owned(),
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_prefix = "/one/"
+            strip_prefix = "/one/"
+            rewrite_prefix = "/upstream/%2e%2e/"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidRouteRewritePrefix {
                 vhost: "gateway".to_owned(),
                 route: "bad".to_owned(),
             })

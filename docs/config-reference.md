@@ -1807,6 +1807,7 @@ action: `redirect`, `proxy`, `web`, or `php`.
 name = "chat"
 path_prefix = "/chat/"
 strip_prefix = "/chat/"
+rewrite_prefix = "/backend/chat/"
 max_request_body_bytes = "64MiB"
 
 [vhosts.routes.proxy]
@@ -1993,7 +1994,10 @@ status = 308
 ```
 
 `strip_prefix` is useful when a backend or alias root should receive `/room`
-instead of `/chat/room`. Redirect targets must be absolute `http://` or
+instead of `/chat/room`. Add `rewrite_prefix` when the stripped suffix should
+be attached to an upstream path prefix, for example `/chat/room?id=7` to
+`/backend/chat/room?id=7`; it must be paired with `strip_prefix` and must be an
+absolute safe path. Redirect targets must be absolute `http://` or
 `https://` templates and may use `{uri}`, `{path}`, and `{query}`. Use
 `max_request_body_bytes` on a route to narrow or expand the vhost or global
 body limit for uploads handled by that route. Proxy actions accept

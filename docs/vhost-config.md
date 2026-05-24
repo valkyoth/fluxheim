@@ -163,6 +163,7 @@ max_request_body_bytes = "64MiB"
 name = "chat"
 path_prefix = "/chat/"
 strip_prefix = "/chat/"
+rewrite_prefix = "/backend/chat/"
 max_request_body_bytes = "64MiB"
 
 [vhosts.routes.proxy]
@@ -203,6 +204,10 @@ status = 308
 
 `strip_prefix` rewrites the path for the selected route only. For example,
 `/chat/room?id=7` becomes `/room?id=7` before it is sent to the route backend.
+When `rewrite_prefix` is also set, the stripped suffix is attached to that
+upstream prefix instead, so `/chat/room?id=7` becomes
+`/backend/chat/room?id=7`. `rewrite_prefix` must be paired with
+`strip_prefix` and must be an absolute safe path.
 `max_request_body_bytes` can be set on a vhost for a host-wide upload limit, or
 on a route to override both the vhost and global request body limit for the
 selected route. Route proxy actions can also set `connect_timeout_secs`,

@@ -63,6 +63,8 @@ behavior when the change improves security or project direction.
 - Added response `Set-Cookie` `Domain=` and `Path=` rewrite rules under
   `headers.response.rewrite.cookie_domain` and
   `headers.response.rewrite.cookie_path`.
+- Added route `rewrite_prefix` so a stripped public path prefix can be mapped
+  onto a safe upstream path prefix before proxy forwarding.
 - Added `compression.max_output_bytes` so encoded responses stay bounded even
   when a compressible input is within `max_input_bytes`.
 - Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and
