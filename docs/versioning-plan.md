@@ -1113,7 +1113,7 @@ Reference parity map:
 | HTTP/3/QUIC | NGINX/Caddy/Envoy support | Track behind a protocol milestone; do not block 1.4 unless Pingora server support is stable enough |
 | Traffic mirroring | NGINX `mirror`, Envoy shadowing | Bounded shadow requests with body on/off, sampling, timeout, redaction, and no effect on primary response |
 | Dynamic discovery | Envoy xDS, Caddy dynamic upstreams, DNS/service integrations | DNS refresh and file-watched upstream lists first; xDS/Kubernetes/Consul later |
-| Response rewrites | NGINX `proxy_redirect`, Apache `ProxyPassReverse` | Bounded `Location` and `Refresh` prefix rewrites first; URI and cookie rewrites later |
+| Response rewrites | NGINX `proxy_redirect`, Apache `ProxyPassReverse`, NGINX `proxy_cookie_domain`/`proxy_cookie_path` | Bounded `Location`, `Refresh`, and `Set-Cookie` domain/path rewrites first; URI rewrites later |
 | Extension hooks | NGINX/HAProxy Lua, Envoy Wasm | Typed policy inputs and hook points in 1.4; actual shared Wasm runtime remains 1.6 |
 
 Release shape:
@@ -1128,8 +1128,9 @@ Release shape:
     privacy-mode rejection, and cache-safe `Vary` behavior.
   - response `Location` and `Refresh` prefix rewrite rules are implemented
     under `headers.response.rewrite` for common `proxy_redirect` /
-    `ProxyPassReverse` migrations. URI and cookie rewrites remain later 1.4
-    work.
+    `ProxyPassReverse` migrations. `Set-Cookie` `Domain=` and `Path=` rewrites
+    are implemented under the same response rewrite policy. URI rewrites remain
+    later 1.4 work.
 - `1.4.1` - upstream selection and resilience:
   - named upstream pools and per-route pool selection;
   - weighted round-robin, least-connections, power-of-two choices, source hash,
@@ -1169,8 +1170,8 @@ Release shape:
   - traffic mirroring/shadowing with sampling, body controls, redaction,
     timeout budgets, and metrics;
   - richer typed proxy variables and structured JSON access logs;
-  - route-scoped header, URI, and cookie rewrite policy. `Location` and
-    `Refresh` response prefix rewrites are already implemented through the
+  - route-scoped header and URI rewrite policy. `Location`, `Refresh`, and
+    `Set-Cookie` response rewrites are already implemented through the
     inherited response-header policy path;
   - local Unix operational socket for read-only pool, queue, rate-limit,
     circuit, and mirror status;

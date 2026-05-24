@@ -360,7 +360,8 @@ fn apply_response_rewrites(
         &rewrite.location,
         rewrite_header_prefix,
     )?;
-    rewrite_header_values(response, "refresh", &rewrite.refresh, rewrite_refresh_url)
+    rewrite_header_values(response, "refresh", &rewrite.refresh, rewrite_refresh_url)?;
+    rewrite_set_cookie_values(response, rewrite)
 }
 
 fn rewrite_header_values(
@@ -471,6 +472,145 @@ fn find_refresh_url_start(value: &str) -> Option<usize> {
             }
         }
         index += 1;
+    }
+    None
+}
+
+fn rewrite_set_cookie_values(
+    response: &mut pingora::http::ResponseHeader,
+    rewrite: &crate::config::ResponseHeaderRewriteConfig,
+) -> pingora::Result<()> {
+    if rewrite.cookie_domain.is_empty() && rewrite.cookie_path.is_empty() {
+        return Ok(());
+    }
+
+    let values = response
+        .headers
+        .get_all("set-cookie")
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Ok(());
+    }
+
+    let mut rewritten = Vec::with_capacity(values.len());
+    let mut changed = false;
+    for value in values {
+        if let Ok(text) = value.to_str()
+            && let Some(next) = rewrite_set_cookie_value(text, rewrite)
+        {
+            rewritten.push(RewrittenResponseHeaderValue::Text(next));
+            changed = true;
+            continue;
+        }
+        rewritten.push(RewrittenResponseHeaderValue::Original(value));
+    }
+
+    if changed {
+        response.remove_header("set-cookie");
+        for value in rewritten {
+            match value {
+                RewrittenResponseHeaderValue::Original(value) => {
+                    response.append_header("set-cookie", value)?;
+                }
+                RewrittenResponseHeaderValue::Text(value) => {
+                    response.append_header("set-cookie", value.as_str())?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn rewrite_set_cookie_value(
+    value: &str,
+    rewrite: &crate::config::ResponseHeaderRewriteConfig,
+) -> Option<String> {
+    let mut changed = false;
+    let mut rewritten = String::with_capacity(value.len());
+    for (index, segment) in value.split(';').enumerate() {
+        if index > 0 {
+            rewritten.push(';');
+        }
+        if let Some(next) =
+            rewrite_cookie_attribute(segment, "domain", &rewrite.cookie_domain, rewrite_domain)
+        {
+            rewritten.push_str(&next);
+            changed = true;
+        } else if let Some(next) =
+            rewrite_cookie_attribute(segment, "path", &rewrite.cookie_path, rewrite_header_prefix)
+        {
+            rewritten.push_str(&next);
+            changed = true;
+        } else {
+            rewritten.push_str(segment);
+        }
+    }
+
+    changed.then_some(rewritten)
+}
+
+fn rewrite_cookie_attribute(
+    segment: &str,
+    attribute: &str,
+    rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
+    rewrite_value: fn(&str, &[crate::config::ResponseHeaderRewriteRuleConfig]) -> Option<String>,
+) -> Option<String> {
+    if rules.is_empty() {
+        return None;
+    }
+    let value_start = cookie_attribute_value_start(segment, attribute)?;
+    let rewritten_value = rewrite_value(&segment[value_start..], rules)?;
+    let mut rewritten = String::with_capacity(value_start + rewritten_value.len());
+    rewritten.push_str(&segment[..value_start]);
+    rewritten.push_str(&rewritten_value);
+    Some(rewritten)
+}
+
+fn cookie_attribute_value_start(segment: &str, attribute: &str) -> Option<usize> {
+    let bytes = segment.as_bytes();
+    let mut cursor = 0;
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        cursor += 1;
+    }
+    if cursor + attribute.len() > bytes.len()
+        || !bytes[cursor..cursor + attribute.len()].eq_ignore_ascii_case(attribute.as_bytes())
+    {
+        return None;
+    }
+    cursor += attribute.len();
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'=') {
+        return None;
+    }
+    cursor += 1;
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        cursor += 1;
+    }
+    Some(cursor)
+}
+
+fn rewrite_domain(
+    value: &str,
+    rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
+) -> Option<String> {
+    for rule in rules {
+        if value.eq_ignore_ascii_case(&rule.from) {
+            return Some(rule.to.clone());
+        }
     }
     None
 }
@@ -795,6 +935,7 @@ mod tests {
                     from: "http://backend.internal/".to_owned(),
                     to: "https://example.test/".to_owned(),
                 }],
+                ..crate::config::ResponseHeaderRewriteConfig::default()
             },
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
@@ -833,6 +974,7 @@ mod tests {
                     to: "https://example.test/".to_owned(),
                 }],
                 refresh: Vec::new(),
+                ..crate::config::ResponseHeaderRewriteConfig::default()
             },
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
@@ -849,6 +991,49 @@ mod tests {
                 .get("location")
                 .and_then(|value| value.to_str().ok()),
             Some("https://other.example/login")
+        );
+    }
+
+    #[test]
+    fn rewrites_set_cookie_domain_and_path_attributes() {
+        let policy = crate::config::ResponseHeaderPolicyConfig {
+            rewrite: crate::config::ResponseHeaderRewriteConfig {
+                cookie_domain: vec![crate::config::ResponseHeaderRewriteRuleConfig {
+                    from: "backend.internal".to_owned(),
+                    to: "example.test".to_owned(),
+                }],
+                cookie_path: vec![crate::config::ResponseHeaderRewriteRuleConfig {
+                    from: "/app/".to_owned(),
+                    to: "/".to_owned(),
+                }],
+                ..crate::config::ResponseHeaderRewriteConfig::default()
+            },
+            ..crate::config::ResponseHeaderPolicyConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        response
+            .append_header(
+                "set-cookie",
+                "session=abc; Domain=BACKEND.internal; Path=/app/admin; HttpOnly",
+            )
+            .unwrap();
+        response
+            .append_header("set-cookie", "theme=dark; Path=/public; Secure")
+            .unwrap();
+
+        apply_response_policy(&mut response, &policy).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get_all("set-cookie")
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .collect::<Vec<_>>(),
+            [
+                "session=abc; Domain=example.test; Path=/admin; HttpOnly",
+                "theme=dark; Path=/public; Secure"
+            ]
         );
     }
 

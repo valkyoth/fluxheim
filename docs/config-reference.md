@@ -410,6 +410,14 @@ to = "https://www.example.com/"
 [[headers.response.rewrite.refresh]]
 from = "http://backend.internal/"
 to = "https://www.example.com/"
+
+[[headers.response.rewrite.cookie_domain]]
+from = "backend.internal"
+to = "www.example.com"
+
+[[headers.response.rewrite.cookie_path]]
+from = "/app/"
+to = "/"
 ```
 
 `x_forwarded_for` values: `off`, `replace`, `append`. `x_real_ip = true`
@@ -494,8 +502,14 @@ upstream redirect headers, similar to NGINX `proxy_redirect` or Apache
 `Refresh` rewrites apply only to the URL after `url=` and preserve the refresh
 delay. `from` and `to` values must be absolute `http://` / `https://` prefixes
 or absolute paths, must not contain control characters, and each header supports
-up to 32 rules. Vhost and route response-header policies inherit global rules
-and can append additional rules.
+up to 32 rules.
+
+`[[headers.response.rewrite.cookie_domain]]` and
+`[[headers.response.rewrite.cookie_path]]` rewrite `Set-Cookie` `Domain=` and
+`Path=` attributes. Domain rewrites are exact case-insensitive matches against
+safe ASCII domain labels. Path rewrites are prefix replacements and must use
+absolute paths. Vhost and route response-header policies inherit global rewrite
+rules and can append additional rules.
 
 ## Proxy
 

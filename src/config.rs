@@ -2068,17 +2068,26 @@ pub struct ResponseHeaderRewriteConfig {
     pub location: Vec<ResponseHeaderRewriteRuleConfig>,
     #[serde(default)]
     pub refresh: Vec<ResponseHeaderRewriteRuleConfig>,
+    #[serde(default)]
+    pub cookie_domain: Vec<ResponseHeaderRewriteRuleConfig>,
+    #[serde(default)]
+    pub cookie_path: Vec<ResponseHeaderRewriteRuleConfig>,
 }
 
 impl ResponseHeaderRewriteConfig {
     fn validate(&self, field: &'static str) -> Result<(), ConfigError> {
         validate_response_header_rewrite_rules(field, "location", &self.location)?;
-        validate_response_header_rewrite_rules(field, "refresh", &self.refresh)
+        validate_response_header_rewrite_rules(field, "refresh", &self.refresh)?;
+        validate_cookie_domain_rewrite_rules(field, &self.cookie_domain)?;
+        validate_cookie_path_rewrite_rules(field, &self.cookie_path)
     }
 
     fn merge(&mut self, overlay: &Self) {
         self.location.extend(overlay.location.iter().cloned());
         self.refresh.extend(overlay.refresh.iter().cloned());
+        self.cookie_domain
+            .extend(overlay.cookie_domain.iter().cloned());
+        self.cookie_path.extend(overlay.cookie_path.iter().cloned());
     }
 }
 
@@ -11624,6 +11633,105 @@ fn validate_response_header_rewrite_endpoint(
     Ok(())
 }
 
+fn validate_cookie_domain_rewrite_rules(
+    field: &'static str,
+    rules: &[ResponseHeaderRewriteRuleConfig],
+) -> Result<(), ConfigError> {
+    validate_header_mutation_len(
+        field,
+        "cookie_domain",
+        rules.len(),
+        MAX_RESPONSE_HEADER_REWRITE_RULES,
+    )?;
+
+    let mut seen = std::collections::BTreeSet::new();
+    for rule in rules {
+        validate_cookie_domain_rewrite_endpoint(field, "from", &rule.from)?;
+        validate_cookie_domain_rewrite_endpoint(field, "to", &rule.to)?;
+        if !seen.insert(rule.from.to_ascii_lowercase()) {
+            return Err(ConfigError::ConflictingHeaderAdd {
+                field,
+                name: "cookie_domain.from".to_owned(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_cookie_domain_rewrite_endpoint(
+    field: &'static str,
+    side: &'static str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || trimmed != value
+        || value.len() > 255
+        || value.starts_with('-')
+        || value.ends_with('-')
+        || value.contains("..")
+        || value
+            .bytes()
+            .any(|byte| !(byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.')))
+    {
+        return Err(ConfigError::InvalidHeaderValue {
+            field,
+            name: format!("cookie_domain.{side}"),
+        });
+    }
+
+    Ok(())
+}
+
+fn validate_cookie_path_rewrite_rules(
+    field: &'static str,
+    rules: &[ResponseHeaderRewriteRuleConfig],
+) -> Result<(), ConfigError> {
+    validate_header_mutation_len(
+        field,
+        "cookie_path",
+        rules.len(),
+        MAX_RESPONSE_HEADER_REWRITE_RULES,
+    )?;
+
+    let mut seen = std::collections::BTreeSet::new();
+    for rule in rules {
+        validate_cookie_path_rewrite_endpoint(field, "from", &rule.from)?;
+        validate_cookie_path_rewrite_endpoint(field, "to", &rule.to)?;
+        if !seen.insert(rule.from.as_str()) {
+            return Err(ConfigError::ConflictingHeaderAdd {
+                field,
+                name: "cookie_path.from".to_owned(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_cookie_path_rewrite_endpoint(
+    field: &'static str,
+    side: &'static str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    if value.is_empty()
+        || value.len() > 2048
+        || !value.starts_with('/')
+        || value.starts_with("//")
+        || value
+            .bytes()
+            .any(|byte| matches!(byte, 0x00..=0x20 | 0x7f | b';'))
+    {
+        return Err(ConfigError::InvalidHeaderValue {
+            field,
+            name: format!("cookie_path.{side}"),
+        });
+    }
+
+    Ok(())
+}
+
 fn validate_header_mutation_len(
     field: &'static str,
     operation: &'static str,
@@ -13295,6 +13403,14 @@ mod tests {
             [[headers.response.rewrite.refresh]]
             from = "/legacy/"
             to = "/"
+
+            [[headers.response.rewrite.cookie_domain]]
+            from = "backend.internal"
+            to = "example.test"
+
+            [[headers.response.rewrite.cookie_path]]
+            from = "/app/"
+            to = "/"
             "#,
         )
         .unwrap();
@@ -13340,6 +13456,20 @@ mod tests {
                 to: "/".to_owned()
             }]
         );
+        assert_eq!(
+            policy.rewrite.cookie_domain,
+            [super::ResponseHeaderRewriteRuleConfig {
+                from: "backend.internal".to_owned(),
+                to: "example.test".to_owned()
+            }]
+        );
+        assert_eq!(
+            policy.rewrite.cookie_path,
+            [super::ResponseHeaderRewriteRuleConfig {
+                from: "/app/".to_owned(),
+                to: "/".to_owned()
+            }]
+        );
         config.validate().unwrap();
     }
 
@@ -13380,6 +13510,40 @@ mod tests {
             Err(ConfigError::ConflictingHeaderAdd {
                 field: "headers.response.rewrite",
                 name: "refresh.from".to_owned()
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[headers.response.rewrite.cookie_domain]]
+            from = "bad domain"
+            to = "example.test"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderValue {
+                field: "headers.response.rewrite",
+                name: "cookie_domain.from".to_owned()
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[headers.response.rewrite.cookie_path]]
+            from = "//backend"
+            to = "/"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderValue {
+                field: "headers.response.rewrite",
+                name: "cookie_path.from".to_owned()
             })
         );
     }
