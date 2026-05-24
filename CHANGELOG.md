@@ -94,6 +94,9 @@ behavior when the change improves security or project direction.
 - Added listener-side binary PROXY protocol v2 receive support through
   `server.proxy_protocol = "v2"`, with the same trusted-direct-peer gate as v1
   plus bounded TCP4/TCP6 parsing and LOCAL/UNSPEC handling.
+- Added upstream HTTP version selection through `proxy.upstream_http_version`
+  with `http1`, `http2`, and `http1-and-http2`, plus bounded HTTP/2 stream and
+  ping controls for gRPC-capable origins.
 
 ### Planned
 

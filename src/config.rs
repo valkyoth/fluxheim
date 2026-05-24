@@ -3449,6 +3449,12 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_proxy_protocol: UpstreamProxyProtocol,
     #[serde(default)]
+    pub upstream_http_version: UpstreamHttpVersion,
+    #[serde(default)]
+    pub upstream_h2_max_streams: Option<usize>,
+    #[serde(default)]
+    pub upstream_h2_ping_interval_secs: Option<u64>,
+    #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default)]
     pub read_timeout_secs: Option<u64>,
@@ -3473,10 +3479,20 @@ pub enum UpstreamProxyProtocol {
     V2,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpstreamHttpVersion {
+    #[default]
+    Http1,
+    Http2,
+    Http1AndHttp2,
+}
+
 const MAX_PROXY_UPSTREAMS: usize = 64;
 const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_ERROR_PAGES: usize = 64;
+const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 
 impl Default for ProxyConfig {
     fn default() -> Self {
@@ -3495,6 +3511,9 @@ impl Default for ProxyConfig {
             upstream_client_cert_path: None,
             upstream_client_key_path: None,
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
+            upstream_http_version: UpstreamHttpVersion::Http1,
+            upstream_h2_max_streams: None,
+            upstream_h2_ping_interval_secs: None,
             connect_timeout_secs: None,
             read_timeout_secs: None,
             send_timeout_secs: None,
@@ -3677,6 +3696,39 @@ impl ProxyConfig {
                 reason: "upstream_proxy_protocol requires a configured proxy upstream",
             });
         }
+        if self.upstream_http_version != UpstreamHttpVersion::Http1
+            && !self.has_configured_upstream()
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_http_version",
+                reason: "requires a configured proxy upstream",
+            });
+        }
+        if self.upstream_h2_max_streams.is_some()
+            && self.upstream_http_version == UpstreamHttpVersion::Http1
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_h2_max_streams",
+                reason: "requires upstream_http_version to allow http2",
+            });
+        }
+        if self.upstream_h2_ping_interval_secs.is_some()
+            && self.upstream_http_version == UpstreamHttpVersion::Http1
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_h2_ping_interval_secs",
+                reason: "requires upstream_http_version to allow http2",
+            });
+        }
+        if self
+            .upstream_h2_max_streams
+            .is_some_and(|streams| streams == 0 || streams > MAX_PROXY_UPSTREAM_H2_STREAMS)
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_h2_max_streams",
+                reason: "must be between 1 and 1024",
+            });
+        }
         #[cfg(all(
             feature = "tls-s2n",
             not(any(
@@ -3709,6 +3761,10 @@ impl ProxyConfig {
         validate_optional_timeout_secs("proxy.connect_timeout_secs", self.connect_timeout_secs)?;
         validate_optional_timeout_secs("proxy.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("proxy.send_timeout_secs", self.send_timeout_secs)?;
+        validate_optional_timeout_secs(
+            "proxy.upstream_h2_ping_interval_secs",
+            self.upstream_h2_ping_interval_secs,
+        )?;
         validate_optional_timeout_secs(
             "proxy.downstream_write_timeout_secs",
             self.downstream_write_timeout_secs,
@@ -11677,9 +11733,9 @@ mod tests {
         MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig,
         StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode,
         TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig,
-        UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
-        normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
-        validate_dynamic_header_template,
+        UpstreamHttpVersion, UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig,
+        VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+        valid_dynamic_header_variable, validate_dynamic_header_template,
     };
     #[cfg(feature = "cache")]
     use super::{CachePeerConfig, CachePeerFillConfig};
@@ -12101,6 +12157,9 @@ mod tests {
             upstream_client_cert_path = "tests/fixtures/tls/localhost-cert.pem"
             upstream_client_key_path = "tests/fixtures/tls/localhost-key.pem"
             upstream_proxy_protocol = "v2"
+            upstream_http_version = "http1-and-http2"
+            upstream_h2_max_streams = 64
+            upstream_h2_ping_interval_secs = 30
 
             [proxy.load_balance]
             max_iterations = 16
@@ -12168,6 +12227,12 @@ mod tests {
             config.proxy.upstream_proxy_protocol,
             UpstreamProxyProtocol::V2
         );
+        assert_eq!(
+            config.proxy.upstream_http_version,
+            UpstreamHttpVersion::Http1AndHttp2
+        );
+        assert_eq!(config.proxy.upstream_h2_max_streams, Some(64));
+        assert_eq!(config.proxy.upstream_h2_ping_interval_secs, Some(30));
         assert_eq!(config.proxy.error_pages.len(), 1);
         assert_eq!(config.proxy.error_pages[0].status, 502);
         assert_eq!(config.proxy.error_pages[0].path, "/502.html");
@@ -12326,6 +12391,47 @@ mod tests {
         assert!(matches!(
             no_primary.validate(),
             Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let h2_options_without_h2: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_h2_max_streams = 64
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            h2_options_without_h2.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let too_many_h2_streams: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_http_version = "http2"
+            upstream_h2_max_streams = 1025
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            too_many_h2_streams.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+        ));
+
+        let zero_h2_ping_interval: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_http_version = "http2"
+            upstream_h2_ping_interval_secs = 0
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            zero_h2_ping_interval.validate(),
+            Err(ConfigError::InvalidProxyTimeout { .. })
         ));
     }
 

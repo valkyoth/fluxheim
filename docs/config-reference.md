@@ -499,6 +499,9 @@ upstream_ca_path = "/etc/fluxheim/upstreams/origin-ca.pem"
 upstream_client_cert_path = "/etc/fluxheim/upstreams/client-chain.pem"
 upstream_client_key_path = "/etc/fluxheim/upstreams/client-key.pem"
 upstream_proxy_protocol = "off"
+upstream_http_version = "http1"
+# upstream_h2_max_streams = 64
+# upstream_h2_ping_interval_secs = 30
 connect_timeout_secs = 5
 read_timeout_secs = 60
 send_timeout_secs = 30
@@ -577,6 +580,14 @@ address is trusted-proxy-aware: if the direct peer is trusted and
 port `0`; otherwise the direct downstream socket address is used. If Fluxheim
 cannot produce a same-family TCP4/TCP6 source and destination pair, it sends
 `PROXY UNKNOWN` for v1 or an empty v2 PROXY/UNSPEC frame for v2.
+`upstream_http_version` defaults to `http1`. Set it to `http2` for origins
+that require HTTP/2, including gRPC-style upstreams, or to `http1-and-http2`
+to allow HTTP/2 with HTTP/1.1 fallback where the selected TLS/backend connector
+can negotiate it. For plaintext origins, `http2` means h2c; use it only when
+the origin is known to accept cleartext HTTP/2. `upstream_h2_max_streams`
+limits concurrent streams per upstream HTTP/2 connection and must be between
+1 and 1024. `upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive
+pings. Both h2 settings require `upstream_http_version` to allow HTTP/2.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must

@@ -74,7 +74,8 @@ use pingora::{
 use crate::config::AccessLoggingConfig;
 use crate::config::{
     Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig, RateLimitMode,
-    RouteRedirectConfig, ServerLimitsConfig, UpstreamProxyProtocol, normalize_host,
+    RouteRedirectConfig, ServerLimitsConfig, UpstreamHttpVersion, UpstreamProxyProtocol,
+    normalize_host,
 };
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
@@ -13150,6 +13151,7 @@ where
         peer.client_cert_key = upstream_tls.client_cert_key.clone();
     }
     apply_proxy_timeouts(&mut peer, proxy);
+    apply_proxy_upstream_http_policy(&mut peer, proxy);
     apply_proxy_upstream_tls_policy(&mut peer, proxy);
     Ok(peer)
 }
@@ -13166,6 +13168,20 @@ fn apply_proxy_upstream_tls_policy(peer: &mut HttpPeer, proxy: &ProxyConfig) {
     peer.options.verify_cert = proxy.upstream_verify_cert;
     peer.options.verify_hostname = proxy.upstream_verify_hostname;
     peer.options.alternative_cn = proxy.upstream_alternative_cn.clone();
+}
+
+fn apply_proxy_upstream_http_policy(peer: &mut HttpPeer, proxy: &ProxyConfig) {
+    match proxy.upstream_http_version {
+        UpstreamHttpVersion::Http1 => peer.options.set_http_version(1, 1),
+        UpstreamHttpVersion::Http2 => peer.options.set_http_version(2, 2),
+        UpstreamHttpVersion::Http1AndHttp2 => peer.options.set_http_version(2, 1),
+    }
+    if let Some(max_streams) = proxy.upstream_h2_max_streams {
+        peer.options.max_h2_streams = max_streams;
+    }
+    peer.options.h2_ping_interval = proxy
+        .upstream_h2_ping_interval_secs
+        .map(Duration::from_secs);
 }
 
 fn request_host_header(request: &RequestHeader) -> Option<&str> {
@@ -13308,7 +13324,7 @@ mod tests {
     use crate::config::{
         ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
         RateLimitMode, RouteConfig, RouteRedirectConfig, ServerConfig, ServerLimitsConfig,
-        VhostConfig, WebConfig,
+        UpstreamHttpVersion, VhostConfig, WebConfig,
     };
     #[cfg(any(feature = "cache", feature = "web"))]
     use crate::test_support::unique_temp_path;
@@ -15928,6 +15944,38 @@ mod tests {
         );
         assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(600)));
         assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn proxy_upstream_http_policy_maps_to_pingora_peer_options() {
+        let proxy = ProxyConfig {
+            upstream: Some("127.0.0.1:6010".to_owned()),
+            upstream_http_version: UpstreamHttpVersion::Http2,
+            upstream_h2_max_streams: Some(64),
+            upstream_h2_ping_interval_secs: Some(30),
+            ..ProxyConfig::default()
+        };
+
+        let peer = http_peer_for_proxy(proxy.primary_upstream(), &proxy).unwrap();
+
+        assert_eq!(peer.options.alpn.get_min_http_version(), 2);
+        assert_eq!(peer.options.alpn.get_max_http_version(), 2);
+        assert_eq!(peer.options.max_h2_streams, 64);
+        assert_eq!(peer.options.h2_ping_interval, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn proxy_upstream_http_policy_can_offer_h2_with_h1_fallback() {
+        let proxy = ProxyConfig {
+            upstream: Some("127.0.0.1:6010".to_owned()),
+            upstream_http_version: UpstreamHttpVersion::Http1AndHttp2,
+            ..ProxyConfig::default()
+        };
+
+        let peer = http_peer_for_proxy(proxy.primary_upstream(), &proxy).unwrap();
+
+        assert_eq!(peer.options.alpn.get_min_http_version(), 1);
+        assert_eq!(peer.options.alpn.get_max_http_version(), 2);
     }
 
     #[test]

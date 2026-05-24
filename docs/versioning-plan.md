@@ -1152,8 +1152,12 @@ Release shape:
     `proxy.upstream_proxy_protocol`. v2 support is conservative TCP4/TCP6 plus
     LOCAL/UNSPEC only; TLV interpretation remains future work;
   - gRPC-safe HTTP/2 proxying for trailers, status, timeouts, body limits, and
-    streaming behavior. gRPC-Web/JSON transcoding remains out of scope unless a
-    mature crate or small adapter is justified.
+    streaming behavior. Upstream HTTP version selection is implemented through
+    `proxy.upstream_http_version` with `http1`, `http2`, and
+    `http1-and-http2`, plus bounded h2 stream and ping controls. Remaining work
+    is explicit gRPC fixture coverage for trailers/status behavior and any
+    route-level gRPC policy operators need. gRPC-Web/JSON transcoding remains
+    out of scope unless a mature crate or small adapter is justified.
 - `1.4.3` - discovery, mirroring, and operator hooks:
   - DNS-refreshing upstreams for container/service-name targets;
   - file-watched upstream lists for service discovery without full config reload;
