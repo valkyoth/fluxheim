@@ -38,6 +38,9 @@ behavior when the change improves security or project direction.
 - Added load-balanced upstream `backup_upstreams` and `drain_upstreams`
   policies so operators can keep standby origins out of normal rotation and
   stop new traffic to draining origins without removing them from the pool.
+- Added opt-in `proxy.load_balance.slow_start` so newly seen or passively
+  recovered load-balanced backends can warm up gradually instead of immediately
+  receiving their full selection share.
 - Added opt-in `compression-zstd` and `compression-brotli` codec features
   alongside gzip, with bounded levels and negotiation preference `br`, `zstd`,
   then `gzip`.

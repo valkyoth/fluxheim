@@ -500,6 +500,10 @@ consecutive_success = 1
 consecutive_failure = 1
 parallel = false
 
+[proxy.load_balance.slow_start]
+enabled = false
+duration_secs = 30
+
 [[proxy.error_pages]]
 status = 502
 path = "/502.html"
@@ -542,6 +546,11 @@ narrow the failure set to specific 5xx status codes. Active TCP health checks
 and passive ejection are combined; if no backend is currently selectable,
 Fluxheim returns a proxy error instead of falling back to a configured primary
 upstream.
+`proxy.load_balance.slow_start.enabled = true` warms newly seen and passively
+recovered load-balanced backends over `duration_secs` before they receive their
+full normal selection share. If all otherwise healthy candidates are still
+warming, Fluxheim allows a selection instead of failing the entire pool, so
+slow-start is a traffic-shaping guard rather than an availability blocker.
 `proxy.load_balance.retry.enabled = true` enables bounded redispatch for
 connection failures that happen before the request is sent upstream. It is
 limited by `max_retries`, by Pingora's process-wide retry cap, and by

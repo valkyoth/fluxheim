@@ -3752,6 +3752,8 @@ pub struct LoadBalanceConfig {
     #[serde(default)]
     pub passive_health: LoadBalancePassiveHealthConfig,
     #[serde(default)]
+    pub slow_start: LoadBalanceSlowStartConfig,
+    #[serde(default)]
     pub retry: LoadBalanceRetryConfig,
 }
 
@@ -3764,6 +3766,7 @@ impl Default for LoadBalanceConfig {
             max_iterations: default_lb_max_iterations(),
             health_check: LoadBalanceHealthCheckConfig::default(),
             passive_health: LoadBalancePassiveHealthConfig::default(),
+            slow_start: LoadBalanceSlowStartConfig::default(),
             retry: LoadBalanceRetryConfig::default(),
         }
     }
@@ -3810,6 +3813,7 @@ impl LoadBalanceConfig {
 
         self.health_check.validate()?;
         self.passive_health.validate()?;
+        self.slow_start.validate()?;
         self.retry.validate()?;
         Ok(())
     }
@@ -3946,6 +3950,39 @@ fn default_lb_passive_consecutive_failure() -> usize {
 }
 
 fn default_lb_passive_ejection_secs() -> u64 {
+    30
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceSlowStartConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_lb_slow_start_duration_secs")]
+    pub duration_secs: u64,
+}
+
+impl Default for LoadBalanceSlowStartConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            duration_secs: default_lb_slow_start_duration_secs(),
+        }
+    }
+}
+
+impl LoadBalanceSlowStartConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.duration_secs == 0 || self.duration_secs > 3600 {
+            return Err(ConfigError::InvalidLoadBalanceSlowStart {
+                field: "proxy.load_balance.slow_start.duration_secs",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_lb_slow_start_duration_secs() -> u64 {
     30
 }
 
@@ -8381,6 +8418,9 @@ pub enum ConfigError {
     InvalidLoadBalancePassiveHealth {
         field: &'static str,
     },
+    InvalidLoadBalanceSlowStart {
+        field: &'static str,
+    },
     InvalidLoadBalanceRetry {
         field: &'static str,
     },
@@ -9013,6 +9053,9 @@ impl Display for ConfigError {
                     formatter,
                     "{field} contains an invalid passive health value"
                 )
+            }
+            Self::InvalidLoadBalanceSlowStart { field } => {
+                write!(formatter, "{field} contains an invalid slow-start value")
             }
             Self::InvalidLoadBalanceRetry { field } => {
                 write!(formatter, "{field} contains an invalid retry value")
@@ -11712,6 +11755,10 @@ mod tests {
             consecutive_failure = 3
             parallel = true
 
+            [proxy.load_balance.slow_start]
+            enabled = true
+            duration_secs = 45
+
             [[proxy.error_pages]]
             status = 502
             path = "/502.html"
@@ -11746,6 +11793,8 @@ mod tests {
             3
         );
         assert!(config.proxy.load_balance.health_check.parallel);
+        assert!(config.proxy.load_balance.slow_start.enabled);
+        assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
         config.validate().unwrap();
     }
 
@@ -12819,6 +12868,25 @@ mod tests {
             invalid_status.validate(),
             Err(ConfigError::InvalidLoadBalancePassiveHealth {
                 field: "proxy.load_balance.passive_health.failure_statuses"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_load_balance_slow_start() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.slow_start]
+            enabled = true
+            duration_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidLoadBalanceSlowStart {
+                field: "proxy.load_balance.slow_start.duration_secs"
             })
         );
     }

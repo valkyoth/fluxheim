@@ -21,7 +21,9 @@ use pingora::lb::selection::{
 use pingora::services::ServiceWithDependents;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 
-use crate::config::{LoadBalancePassiveHealthConfig, LoadBalanceSelection, ProxyConfig};
+use crate::config::{
+    LoadBalancePassiveHealthConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+};
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 
@@ -30,6 +32,7 @@ pub struct UpstreamLoadBalancer {
     inner: UpstreamLoadBalancerInner,
     key_source: LoadBalanceKeySource,
     passive_health: Option<Arc<PassiveHealthState>>,
+    slow_start: Option<Arc<SlowStartState>>,
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
 }
@@ -49,6 +52,7 @@ pub struct LoadBalancedConnectionPermit {
 pub struct LoadBalancedUpstreamReporter {
     backend_key: u64,
     passive_health: Arc<PassiveHealthState>,
+    slow_start: Option<Arc<SlowStartState>>,
 }
 
 impl Debug for LoadBalancedUpstreamReporter {
@@ -191,6 +195,7 @@ impl UpstreamLoadBalancer {
             key.as_deref(),
             self.max_iterations,
             self.passive_health.as_deref(),
+            self.slow_start.as_deref(),
             &self.backend_policy,
         )?;
         selected.reporter =
@@ -199,6 +204,7 @@ impl UpstreamLoadBalancer {
                 .map(|passive_health| LoadBalancedUpstreamReporter {
                     backend_key: backend_connection_key(&selected.backend),
                     passive_health: passive_health.clone(),
+                    slow_start: self.slow_start.clone(),
                 });
         Some(selected)
     }
@@ -212,6 +218,11 @@ impl UpstreamLoadBalancer {
                     &config.load_balance.passive_health,
                 ))
             }),
+            slow_start: config
+                .load_balance
+                .slow_start
+                .enabled
+                .then(|| Arc::new(SlowStartState::from_config(&config.load_balance.slow_start))),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
         }
@@ -259,21 +270,32 @@ impl UpstreamLoadBalancerInner {
         key: Option<&[u8]>,
         max_iterations: usize,
         passive_health: Option<&PassiveHealthState>,
+        slow_start: Option<&SlowStartState>,
         backend_policy: &BackendSelectionPolicy,
     ) -> Option<SelectedUpstream> {
         match self {
-            Self::RoundRobin(inner) => {
-                select_pingora(inner, b"", max_iterations, passive_health, backend_policy)
-                    .map(SelectedUpstream::new)
-            }
-            Self::LeastConnections { inner, counters } => {
-                select_least_connections(inner, counters, passive_health, backend_policy)
-            }
+            Self::RoundRobin(inner) => select_pingora(
+                inner,
+                b"",
+                max_iterations,
+                passive_health,
+                slow_start,
+                backend_policy,
+            )
+            .map(SelectedUpstream::new),
+            Self::LeastConnections { inner, counters } => select_least_connections(
+                inner,
+                counters,
+                passive_health,
+                slow_start,
+                backend_policy,
+            ),
             Self::PowerOfTwo { inner, counters } => select_power_of_two(
                 inner,
                 counters,
                 max_iterations,
                 passive_health,
+                slow_start,
                 backend_policy,
             ),
             Self::FnvHash(inner) => select_pingora(
@@ -281,6 +303,7 @@ impl UpstreamLoadBalancerInner {
                 key.unwrap_or_default(),
                 max_iterations,
                 passive_health,
+                slow_start,
                 backend_policy,
             )
             .map(SelectedUpstream::new),
@@ -289,6 +312,7 @@ impl UpstreamLoadBalancerInner {
                 key.unwrap_or_default(),
                 max_iterations,
                 passive_health,
+                slow_start,
                 backend_policy,
             )
             .map(SelectedUpstream::new),
@@ -352,11 +376,21 @@ impl SelectedUpstream {
 
 impl LoadBalancedUpstreamReporter {
     pub fn record_status(&self, status: u16) {
-        self.passive_health.record_status(self.backend_key, status);
+        if let Some(restart_at) = self.passive_health.record_status(self.backend_key, status) {
+            self.reset_slow_start(restart_at);
+        }
     }
 
     pub fn record_failure(&self) {
-        self.passive_health.record_failure(self.backend_key);
+        if let Some(restart_at) = self.passive_health.record_failure(self.backend_key) {
+            self.reset_slow_start(restart_at);
+        }
+    }
+
+    fn reset_slow_start(&self, restart_at: Instant) {
+        if let Some(slow_start) = &self.slow_start {
+            slow_start.reset_at(self.backend_key, restart_at);
+        }
     }
 }
 
@@ -402,15 +436,16 @@ impl PassiveHealthState {
         false
     }
 
-    fn record_status(&self, key: u64, status: u16) {
+    fn record_status(&self, key: u64, status: u16) -> Option<Instant> {
         if self.failure_status(status) {
-            self.record_failure(key);
+            self.record_failure(key)
         } else {
             self.record_success(key);
+            None
         }
     }
 
-    fn record_failure(&self, key: u64) {
+    fn record_failure(&self, key: u64) -> Option<Instant> {
         let mut backends = self
             .backends
             .lock()
@@ -419,8 +454,11 @@ impl PassiveHealthState {
         state.consecutive_failures = state.consecutive_failures.saturating_add(1);
         if state.consecutive_failures >= self.consecutive_failure {
             state.consecutive_failures = 0;
-            state.ejected_until = Some(Instant::now() + self.ejection);
+            let ejected_until = Instant::now() + self.ejection;
+            state.ejected_until = Some(ejected_until);
+            return Some(ejected_until);
         }
+        None
     }
 
     fn record_success(&self, key: u64) {
@@ -439,6 +477,46 @@ impl PassiveHealthState {
             return (500..=599).contains(&status);
         }
         self.failure_statuses.contains(&status)
+    }
+}
+
+#[derive(Debug)]
+struct SlowStartState {
+    duration: Duration,
+    backends: Mutex<std::collections::HashMap<u64, Instant>>,
+}
+
+impl SlowStartState {
+    fn from_config(config: &LoadBalanceSlowStartConfig) -> Self {
+        Self {
+            duration: Duration::from_secs(config.duration_secs),
+            backends: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn permits(&self, backend: &Backend) -> bool {
+        let now = Instant::now();
+        let key = backend_connection_key(backend);
+        let mut backends = self
+            .backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let started_at = *backends.entry(key).or_insert(now);
+        let elapsed = now.saturating_duration_since(started_at);
+        if elapsed >= self.duration {
+            return true;
+        }
+
+        let progress_per_mille =
+            ((elapsed.as_millis() * 1000) / self.duration.as_millis()).clamp(1, 1000) as u64;
+        (key % 1000) < progress_per_mille
+    }
+
+    fn reset_at(&self, key: u64, restart_at: Instant) {
+        self.backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key, restart_at);
     }
 }
 
@@ -522,6 +600,7 @@ fn select_pingora<S>(
     key: &[u8],
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<Backend>
 where
@@ -533,8 +612,12 @@ where
         key,
         max_iterations,
         passive_health,
+        slow_start,
         backend_policy,
-        false,
+        SelectionPass {
+            allow_backup: false,
+            ignore_slow_start: false,
+        },
     )
     .or_else(|| {
         select_pingora_with_backup_policy(
@@ -542,10 +625,34 @@ where
             key,
             max_iterations,
             passive_health,
+            slow_start,
             backend_policy,
-            true,
+            SelectionPass {
+                allow_backup: true,
+                ignore_slow_start: false,
+            },
         )
     })
+    .or_else(|| {
+        select_pingora_with_backup_policy(
+            inner,
+            key,
+            max_iterations,
+            passive_health,
+            slow_start,
+            backend_policy,
+            SelectionPass {
+                allow_backup: false,
+                ignore_slow_start: true,
+            },
+        )
+    })
+}
+
+#[derive(Clone, Copy)]
+struct SelectionPass {
+    allow_backup: bool,
+    ignore_slow_start: bool,
 }
 
 fn select_pingora_with_backup_policy<S>(
@@ -553,8 +660,9 @@ fn select_pingora_with_backup_policy<S>(
     key: &[u8],
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
-    allow_backup: bool,
+    pass: SelectionPass,
 ) -> Option<Backend>
 where
     S: BackendSelection + 'static,
@@ -562,8 +670,9 @@ where
 {
     inner.select_with(key, max_iterations, |backend, ready| {
         ready
-            && backend_policy.permits(backend, allow_backup)
+            && backend_policy.permits(backend, pass.allow_backup)
             && passive_health.is_none_or(|health| !health.is_ejected(backend))
+            && (pass.ignore_slow_start || slow_start.is_none_or(|state| state.permits(backend)))
     })
 }
 
@@ -571,13 +680,16 @@ fn select_least_connections(
     inner: &LoadBalancer<RoundRobin>,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
     select_least_connections_with_backup_policy(
         inner,
         counters,
         passive_health,
+        slow_start,
         backend_policy,
+        false,
         false,
     )
     .or_else(|| {
@@ -585,7 +697,20 @@ fn select_least_connections(
             inner,
             counters,
             passive_health,
+            slow_start,
             backend_policy,
+            true,
+            false,
+        )
+    })
+    .or_else(|| {
+        select_least_connections_with_backup_policy(
+            inner,
+            counters,
+            passive_health,
+            slow_start,
+            backend_policy,
+            false,
             true,
         )
     })
@@ -595,14 +720,17 @@ fn select_least_connections_with_backup_policy(
     inner: &LoadBalancer<RoundRobin>,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
     allow_backup: bool,
+    ignore_slow_start: bool,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
     for backend in inner.backends().get_backend().iter() {
         if !inner.backends().ready(backend)
             || !backend_policy.permits(backend, allow_backup)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
+            || (!ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
         {
             continue;
         }
@@ -628,12 +756,29 @@ fn select_power_of_two(
     counters: &BackendConnectionCounters,
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
-    let first = select_pingora(inner, b"", max_iterations, passive_health, backend_policy)?;
+    let first = select_pingora(
+        inner,
+        b"",
+        max_iterations,
+        passive_health,
+        slow_start,
+        backend_policy,
+    )?;
     let first_key = backend_connection_key(&first);
     let second = (0..max_iterations)
-        .filter_map(|_| select_pingora(inner, b"", max_iterations, passive_health, backend_policy))
+        .filter_map(|_| {
+            select_pingora(
+                inner,
+                b"",
+                max_iterations,
+                passive_health,
+                slow_start,
+                backend_policy,
+            )
+        })
         .find(|backend| backend_connection_key(backend) != first_key)
         .unwrap_or_else(|| first.clone());
     let selected = if counters.count(&second) < counters.count(&first) {
@@ -800,16 +945,21 @@ where
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
-    use std::time::Duration;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     use pingora::http::RequestHeader;
+    use pingora::lb::Backend;
 
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalancePassiveHealthConfig,
-        LoadBalanceSelection, ProxyConfig,
+        LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
 
-    use super::UpstreamLoadBalancer;
+    use super::{
+        LoadBalancedUpstreamReporter, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
+        backend_connection_key,
+    };
 
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
@@ -968,6 +1118,81 @@ mod tests {
 
         let selected = balancer.select(&request(), None).unwrap();
         assert!(selected.permit.is_some());
+    }
+
+    #[test]
+    fn slow_start_gates_new_backends_until_warmed() {
+        let state = SlowStartState::from_config(&LoadBalanceSlowStartConfig {
+            enabled: true,
+            duration_secs: 60,
+        });
+        let backend = (3000..4000)
+            .filter_map(|port| Backend::new(&format!("127.0.0.1:{port}")).ok())
+            .find(|backend| backend_connection_key(backend) % 1000 > 900)
+            .expect("test backend with high slow-start gate");
+
+        assert!(!state.permits(&backend));
+        state.backends.lock().unwrap().insert(
+            backend_connection_key(&backend),
+            Instant::now() - Duration::from_secs(61),
+        );
+        assert!(state.permits(&backend));
+    }
+
+    #[test]
+    fn slow_start_does_not_outage_all_warming_backends() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                slow_start: LoadBalanceSlowStartConfig {
+                    enabled: true,
+                    duration_secs: 60,
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert!(balancer.select(&request(), None).is_some());
+    }
+
+    #[test]
+    fn passive_recovery_restarts_slow_start_window() {
+        let slow_start = Arc::new(SlowStartState::from_config(&LoadBalanceSlowStartConfig {
+            enabled: true,
+            duration_secs: 60,
+        }));
+        let backend = (3000..4000)
+            .filter_map(|port| Backend::new(&format!("127.0.0.1:{port}")).ok())
+            .find(|backend| backend_connection_key(backend) % 1000 > 900)
+            .expect("test backend with high slow-start gate");
+        let key = backend_connection_key(&backend);
+        slow_start
+            .backends
+            .lock()
+            .unwrap()
+            .insert(key, Instant::now() - Duration::from_secs(61));
+        assert!(slow_start.permits(&backend));
+
+        let reporter = LoadBalancedUpstreamReporter {
+            backend_key: key,
+            passive_health: Arc::new(PassiveHealthState::from_config(
+                &LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 1,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+            )),
+            slow_start: Some(slow_start.clone()),
+        };
+        reporter.record_failure();
+
+        assert!(!slow_start.permits(&backend));
     }
 
     #[test]
