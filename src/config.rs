@@ -3688,6 +3688,7 @@ pub enum LoadBalanceSelection {
     #[default]
     RoundRobin,
     LeastConnections,
+    PowerOfTwo,
     SourceHash,
     UriHash,
     HeaderHash,
@@ -12243,6 +12244,15 @@ mod tests {
             missing_cookie.validate(),
             Err(ConfigError::InvalidLoadBalanceSelection { .. })
         ));
+
+        let power_of_two: Config = toml::from_str(
+            r#"
+            [proxy.load_balance]
+            selection = "power-of-two"
+            "#,
+        )
+        .unwrap();
+        power_of_two.validate().unwrap();
     }
 
     #[test]

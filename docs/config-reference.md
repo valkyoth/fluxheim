@@ -516,16 +516,17 @@ for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
 fit in Pingora's weighted selector.
 `proxy.load_balance.selection` defaults to `round-robin`. It also accepts
-`least-connections`, `source-hash`, `uri-hash`, `header-hash`, `cookie-hash`,
-`consistent-source-hash`, `consistent-uri-hash`, `consistent-header-hash`, and
-`consistent-cookie-hash`. Header-hash modes require
+`least-connections`, `power-of-two`, `source-hash`, `uri-hash`, `header-hash`,
+`cookie-hash`, `consistent-source-hash`, `consistent-uri-hash`,
+`consistent-header-hash`, and `consistent-cookie-hash`. Header-hash modes require
 `proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
 name. Cookie-hash modes require `proxy.load_balance.hash_cookie = "session"` or
 another valid cookie name. Hash modes use weighted FNV selection; consistent
 modes use Pingora's weighted Ketama ring for lower remapping when upstream
 membership changes. `least-connections` uses Fluxheim-held in-flight request
-permits and Pingora's current backend health state. Power-of-two choices remain
-planned.
+permits and Pingora's current backend health state. `power-of-two` samples two
+healthy backends through Pingora's random weighted selector and chooses the
+lower in-flight count.
 
 `upstreams` is the preferred proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

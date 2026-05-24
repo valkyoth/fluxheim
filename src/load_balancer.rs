@@ -15,7 +15,9 @@ use pingora::lb::Backends;
 use pingora::lb::discovery::Static;
 use pingora::lb::health_check::TcpHealthCheck;
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, FNVHash, RoundRobin};
+use pingora::lb::selection::{
+    BackendIter, BackendSelection, Consistent, FNVHash, Random, RoundRobin,
+};
 use pingora::services::ServiceWithDependents;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 
@@ -79,6 +81,18 @@ impl UpstreamLoadBalancer {
                     config,
                 )))
             }
+            LoadBalanceSelection::PowerOfTwo => {
+                let Some(inner) = configured_load_balancer::<Random>(config)? else {
+                    return Ok(None);
+                };
+                Ok(Some(Self::from_inner(
+                    UpstreamLoadBalancerInner::PowerOfTwo {
+                        inner: Arc::new(inner),
+                        counters: Arc::new(BackendConnectionCounters::default()),
+                    },
+                    config,
+                )))
+            }
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
@@ -119,6 +133,14 @@ impl UpstreamLoadBalancer {
             LoadBalanceSelection::LeastConnections => {
                 background_service_for::<RoundRobin>(name, config, |inner| {
                     UpstreamLoadBalancerInner::LeastConnections {
+                        inner,
+                        counters: Arc::new(BackendConnectionCounters::default()),
+                    }
+                })
+            }
+            LoadBalanceSelection::PowerOfTwo => {
+                background_service_for::<Random>(name, config, |inner| {
+                    UpstreamLoadBalancerInner::PowerOfTwo {
                         inner,
                         counters: Arc::new(BackendConnectionCounters::default()),
                     }
@@ -186,6 +208,10 @@ enum UpstreamLoadBalancerInner {
         inner: Arc<LoadBalancer<RoundRobin>>,
         counters: Arc<BackendConnectionCounters>,
     },
+    PowerOfTwo {
+        inner: Arc<LoadBalancer<Random>>,
+        counters: Arc<BackendConnectionCounters>,
+    },
     FnvHash(Arc<LoadBalancer<FNVHash>>),
     ConsistentHash(Arc<LoadBalancer<Consistent>>),
 }
@@ -195,6 +221,9 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => inner.select(b"", max_iterations).map(SelectedUpstream::new),
             Self::LeastConnections { inner, counters } => select_least_connections(inner, counters),
+            Self::PowerOfTwo { inner, counters } => {
+                select_power_of_two(inner, counters, max_iterations)
+            }
             Self::FnvHash(inner) => inner
                 .select(key.unwrap_or_default(), max_iterations)
                 .map(SelectedUpstream::new),
@@ -209,6 +238,7 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => inner.backends().get_backend().len(),
             Self::LeastConnections { inner, .. } => inner.backends().get_backend().len(),
+            Self::PowerOfTwo { inner, .. } => inner.backends().get_backend().len(),
             Self::FnvHash(inner) => inner.backends().get_backend().len(),
             Self::ConsistentHash(inner) => inner.backends().get_backend().len(),
         }
@@ -219,6 +249,7 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => backend_weights(inner),
             Self::LeastConnections { inner, .. } => backend_weights(inner),
+            Self::PowerOfTwo { inner, .. } => backend_weights(inner),
             Self::FnvHash(inner) => backend_weights(inner),
             Self::ConsistentHash(inner) => backend_weights(inner),
         }
@@ -229,6 +260,7 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => inner.health_check_frequency,
             Self::LeastConnections { inner, .. } => inner.health_check_frequency,
+            Self::PowerOfTwo { inner, .. } => inner.health_check_frequency,
             Self::FnvHash(inner) => inner.health_check_frequency,
             Self::ConsistentHash(inner) => inner.health_check_frequency,
         }
@@ -239,6 +271,7 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => inner.parallel_health_check,
             Self::LeastConnections { inner, .. } => inner.parallel_health_check,
+            Self::PowerOfTwo { inner, .. } => inner.parallel_health_check,
             Self::FnvHash(inner) => inner.parallel_health_check,
             Self::ConsistentHash(inner) => inner.parallel_health_check,
         }
@@ -320,6 +353,29 @@ fn select_least_connections(
     })
 }
 
+fn select_power_of_two(
+    inner: &LoadBalancer<Random>,
+    counters: &BackendConnectionCounters,
+    max_iterations: usize,
+) -> Option<SelectedUpstream> {
+    let first = inner.select(b"", max_iterations)?;
+    let first_key = backend_connection_key(&first);
+    let second = (0..max_iterations)
+        .filter_map(|_| inner.select(b"", max_iterations))
+        .find(|backend| backend_connection_key(backend) != first_key)
+        .unwrap_or_else(|| first.clone());
+    let selected = if counters.count(&second) < counters.count(&first) {
+        second
+    } else {
+        first
+    };
+    let permit = counters.permit(&selected)?;
+    Some(SelectedUpstream {
+        permit: Some(permit),
+        backend: selected,
+    })
+}
+
 #[derive(Clone, Debug)]
 enum LoadBalanceKeySource {
     None,
@@ -334,6 +390,7 @@ impl LoadBalanceKeySource {
         match config.load_balance.selection {
             LoadBalanceSelection::RoundRobin => Self::None,
             LoadBalanceSelection::LeastConnections => Self::None,
+            LoadBalanceSelection::PowerOfTwo => Self::None,
             LoadBalanceSelection::SourceHash | LoadBalanceSelection::ConsistentSourceHash => {
                 Self::SourceIp
             }
@@ -618,6 +675,25 @@ mod tests {
         drop(first);
         let third = balancer.select(&request(), None).unwrap();
         assert_eq!(third.backend.addr, first_addr);
+    }
+
+    #[test]
+    fn builds_power_of_two_selection_from_proxy_upstreams() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::PowerOfTwo,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let selected = balancer.select(&request(), None).unwrap();
+        assert!(selected.permit.is_some());
     }
 
     #[test]
