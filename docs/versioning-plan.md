@@ -1202,6 +1202,11 @@ Release shape:
     trailer/status fixture coverage. gRPC-Web/JSON transcoding remains out of
     scope unless a mature crate or small adapter is justified.
 - `1.4.1` - HTTP migration blockers and proxy operations:
+  - stop line: ship only HTTP reverse-proxy migration blockers and read-only
+    operational visibility. Do not add GeoIP policy, advanced ACL expression
+    evaluation, stick-table tracking, runtime backend mutation, response body
+    substitution, TCP stream proxying, UDP proxying, HTTP/3, gRPC
+    transcoding, or arbitrary Wasm/Lua execution in `1.4.1`;
   - regex path routing using Rust's `regex` crate. Matching order should be
     exact routes first, then prefix routes, then configured regex routes in
     documented order. Regex size limits and config-time compilation failures
@@ -1245,6 +1250,11 @@ Release shape:
   - typed hook points for future Wasm/Lua-like policy without executing plugins
     in 1.4.
 - `1.4.2` - advanced policy and HAProxy-style operations:
+  - stop line: ship advanced HTTP policy and backend operations only. Do not
+    add TCP stream listeners, TLS passthrough SNI routing, UDP proxying,
+    HTTP/3, gRPC transcoding, xDS/Kubernetes/Consul control planes, global
+    distributed rate-limit services, or arbitrary Wasm/Lua execution in
+    `1.4.2`;
   - optional `geoip` Cargo feature using `maxminddb` for MaxMind GeoIP2/ASN
     databases. Load database files with the same safe path rules used for other
     operator-supplied files, reload on config reload, expose bounded
@@ -1273,6 +1283,10 @@ Release shape:
     interaction order with compression, and identity pass-through for bodies
     above the configured limit.
 - `1.4.3` - TCP stream proxy foundation:
+  - stop line: ship L4 TCP stream proxy basics only. Do not add UDP proxying,
+    DNS-specific UDP load balancing, generic L7 policy on stream routes,
+    HTTP cache/compression/auth/PHP behavior on stream routes, xDS/Kubernetes
+    service discovery, or Wasm/Lua stream filters in `1.4.3`;
   - compile-time feature separate from HTTP proxy if needed;
   - port/listener-based stream routing to one or more upstreams, reusing the
     load-balancer selection and health primitives where they are transport
@@ -1289,6 +1303,19 @@ Release shape:
     must forward the original bytes unmodified after peeking;
   - no HTTP headers, cache, auth subrequest, compression, or PHP behavior on
     stream routes.
+
+Version discipline for the rest of `1.4.x`:
+
+- A version is releasable when every item above its stop line is either
+  implemented, explicitly documented as deferred, or removed from that version
+  before the release candidate. Do not keep adding adjacent parity requests to
+  the active version after that point.
+- Security fixes, correctness fixes, test coverage, docs, and release evidence
+  may still land inside the active version. New feature families must move to
+  the next planned version unless they are required to make an already-in-scope
+  item safe.
+- If a pentest uncovers a design gap in a not-yet-started feature family, record
+  it under the future version instead of expanding the current release.
 
 Stable scope:
 

@@ -72,6 +72,11 @@ bounded response body substitution. A separate `1.4.3` stream feature can add
 TCP proxying for NGINX stream / HAProxy TCP-mode parity; UDP proxying and
 HTTP/2 server push are intentionally deferred/skipped until a concrete
 requirement makes them worth the extra attack surface.
+Each `1.4.x` release has a hard stop: `1.4.1` stops at HTTP migration blockers
+and read-only operational visibility, `1.4.2` stops at advanced HTTP policy and
+backend operations, and `1.4.3` stops at L4 TCP stream basics. New feature
+families should move to the next planned version unless they are required to
+make an already-in-scope item safe.
 Palo Alto-style security asks are tracked as policy integrations around this
 proxy surface: reputation/Geo decisions, TLS fingerprint signals, and future
 WAF/App-ID-like classification hooks without turning Fluxheim into a full
