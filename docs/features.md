@@ -40,7 +40,9 @@ before Cargo starts compiling Pingora.
 | `acme` | No | ACME config, renewal planning, managed certificate/account paths, local HTTP-01 and rustls TLS-ALPN-01 challenge serving, and the renewal executor contract. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service. |
 | `compression` | No | Shared response compression config and body-filter integration. |
+| `compression-brotli` | No | Brotli response compression for eligible known-length responses. |
 | `compression-gzip` | No | gzip response compression for eligible known-length responses. |
+| `compression-zstd` | No | Zstandard response compression for eligible known-length responses. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 

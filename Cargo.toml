@@ -35,7 +35,9 @@ proxy = [
     "dep:zeroize",
 ]
 compression = ["proxy"]
+compression-brotli = ["compression", "dep:brotli"]
 compression-gzip = ["compression", "dep:flate2"]
+compression-zstd = ["compression", "dep:zstd"]
 load-balancer = ["proxy", "pingora/lb"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "pingora?/cache"]
 web = [
@@ -123,6 +125,7 @@ arc-swap = "1.9.1"
 async-trait = { version = "0.1.89", optional = true }
 aws-lc-rs = { version = "1.17.0", default-features = false, features = ["fips"], optional = true }
 base64-ng = { version = "1.0.0", optional = true }
+brotli = { version = "8.0.2", default-features = false, features = ["std"], optional = true }
 bytes = { version = "1.11.1", optional = true }
 chrono = { version = "0.4.44", default-features = false, features = ["clock"], optional = true }
 clap = { version = "4.6.1", features = ["derive", "env"] }
@@ -156,6 +159,7 @@ toml = "1.1.2"
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
 x509-parser = { version = "0.18.1", default-features = false, optional = true }
 zeroize = { version = "1.8.2", features = ["derive"], optional = true }
+zstd = { version = "0.13.3", default-features = false, optional = true }
 
 [dev-dependencies]
 proptest = "1.6.0"

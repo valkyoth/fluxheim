@@ -5,12 +5,9 @@ Status: initial optional `1.4` module.
 Cargo features:
 
 - `compression`: shared config and response filter integration.
+- `compression-brotli`: Brotli response encoding through `brotli`.
 - `compression-gzip`: gzip response encoding through `flate2`.
-
-Planned later features:
-
 - `compression-zstd`: Zstandard response encoding.
-- `compression-brotli`: Brotli response encoding.
 
 Compression remains opt-in. Default builds do not include compression code, and
 `privacy-mode` builds reject compression at compile time because response-body
@@ -18,9 +15,9 @@ transforms can create side-channel and retention risks.
 
 ## Goals
 
-- Keep gzip as a conservative compatibility baseline first.
-- Add Zstandard and Brotli later once resource and cache-variant behavior is
-  proven.
+- Keep gzip as a conservative compatibility baseline.
+- Keep Zstandard and Brotli behind explicit Cargo features because they add
+  extra codec dependencies and operational behavior.
 - Avoid compressing already-compressed or low-value content.
 - Keep request workers responsive by moving expensive compression work out of
   the main request path.
@@ -31,11 +28,16 @@ transforms can create side-channel and retention risks.
 
 ## Negotiation
 
-Fluxheim currently negotiates gzip from `Accept-Encoding` when
-`compression.enabled = true` and the binary is built with `compression-gzip`.
-`gzip;q=0` is respected. Identity is served when gzip is unsupported by the
-client, the response is already encoded, the response is too small or too
-large, the content length is unknown, or policy disables compression.
+Fluxheim negotiates response compression from `Accept-Encoding` when
+`compression.enabled = true` and the binary is built with at least one codec
+feature. Gzip is available through `compression-gzip`, Zstandard through
+`compression-zstd`, and Brotli through `compression-brotli`. `q=0` is respected
+for each coding. When multiple accepted codings are enabled, Fluxheim prefers
+`br`, then `zstd`, then `gzip`.
+
+Identity is served when no enabled coding is accepted by the client, the
+response is already encoded, the response is too small or too large, the
+content length is unknown, or policy disables compression.
 
 Every compressed response must set or update:
 
@@ -69,18 +71,20 @@ Initial positive MIME types should be conservative:
 
 ## Execution Model
 
-The first gzip implementation is intentionally bounded:
+The first codec implementation is intentionally bounded:
 
 - only responses with a known `Content-Length` are compressed;
 - input must fit between `compression.min_bytes` and
   `compression.max_input_bytes`;
 - `compression.max_input_bytes` is capped at 64 MiB by config validation;
 - gzip levels are restricted to `0..=9`;
-- Fluxheim removes `Content-Length` after enabling gzip because the encoded
+- zstd levels are restricted to `1..=19`;
+- Brotli quality is restricted to `0..=11`;
+- Fluxheim removes `Content-Length` after enabling compression because the encoded
   length is streamed out through the body filter.
 
 A later implementation may add bounded compression worker pools, per-vhost
-concurrency, zstd, brotli, and precompressed static asset variants.
+concurrency, and precompressed static asset variants.
 
 ## Cache Integration
 
@@ -130,6 +134,10 @@ min_bytes = "1KiB"
 max_input_bytes = "1MiB"
 gzip = true
 gzip_level = 4
+zstd = false
+zstd_level = 3
+brotli = false
+brotli_quality = 4
 ```
 
 Compression is currently global. Per-vhost and per-route compression policy is
@@ -137,7 +145,7 @@ tracked for later `1.4.x` work.
 
 ## Test Plan
 
-- Negotiates `gzip` and identity correctly.
+- Negotiates `br`, `zstd`, `gzip`, and identity correctly for compiled codecs.
 - Adds `Vary: Accept-Encoding`.
 - Does not compress excluded MIME types or `no-transform` responses.
 - Does not compress cookie, authorization, `Set-Cookie`, range, or already

@@ -1,7 +1,11 @@
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::io;
-#[cfg(feature = "compression-gzip")]
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
 use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 #[cfg(feature = "php-fpm")]
@@ -16,6 +20,8 @@ use std::time::{Duration, Instant};
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
+#[cfg(feature = "compression-brotli")]
+use brotli::CompressorWriter;
 use bytes::Bytes;
 #[cfg(feature = "compression-gzip")]
 use flate2::{Compression, write::GzEncoder};
@@ -29,7 +35,13 @@ use pingora::cache::key::{CacheHashKey, HashBinary};
 use pingora::cache::lock::CacheKeyLockImpl;
 #[cfg(feature = "cache")]
 use pingora::cache::predictor::{CacheablePredictor, Predictor};
-#[cfg(any(feature = "cache", feature = "php-fpm", feature = "compression-gzip"))]
+#[cfg(any(
+    feature = "cache",
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd",
+    feature = "php-fpm"
+))]
 use pingora::http::StatusCode;
 use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::prelude::{HttpPeer, Result};
@@ -4910,40 +4922,159 @@ pub struct RequestContext {
     revalidation_304_headers: Option<Revalidation304Headers>,
     #[cfg(all(feature = "php-fpm", feature = "otel-otlp"))]
     php_outcome: Option<&'static str>,
-    #[cfg(feature = "compression-gzip")]
-    gzip: Option<GzipResponseEncoder>,
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    compression: Option<ResponseCompressionEncoder>,
 }
 
-#[cfg(feature = "compression-gzip")]
-#[derive(Debug)]
-struct GzipResponseEncoder {
-    encoder: GzEncoder<Vec<u8>>,
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+struct ResponseCompressionEncoder {
+    inner: ResponseCompressionEncoderInner,
     emitted: usize,
 }
 
-#[cfg(feature = "compression-gzip")]
-impl GzipResponseEncoder {
-    fn new(level: u32) -> Self {
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+enum ResponseCompressionEncoderInner {
+    #[cfg(feature = "compression-brotli")]
+    Brotli(Box<Option<CompressorWriter<Vec<u8>>>>),
+    #[cfg(feature = "compression-gzip")]
+    Gzip(GzEncoder<Vec<u8>>),
+    #[cfg(feature = "compression-zstd")]
+    Zstd(Option<zstd::stream::write::Encoder<'static, Vec<u8>>>),
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+impl std::fmt::Debug for ResponseCompressionEncoder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ResponseCompressionEncoder")
+            .field("emitted", &self.emitted)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+impl ResponseCompressionEncoder {
+    #[cfg(feature = "compression-brotli")]
+    fn brotli(quality: u32) -> Self {
         Self {
-            encoder: GzEncoder::new(Vec::new(), Compression::new(level)),
+            inner: ResponseCompressionEncoderInner::Brotli(Box::new(Some(CompressorWriter::new(
+                Vec::new(),
+                4096,
+                quality,
+                22,
+            )))),
             emitted: 0,
         }
     }
 
-    fn encode_chunk(&mut self, input: Option<&Bytes>, end_of_stream: bool) -> io::Result<Bytes> {
-        if let Some(input) = input {
-            self.encoder.write_all(input)?;
+    #[cfg(feature = "compression-gzip")]
+    fn gzip(level: u32) -> Self {
+        Self {
+            inner: ResponseCompressionEncoderInner::Gzip(GzEncoder::new(
+                Vec::new(),
+                Compression::new(level),
+            )),
+            emitted: 0,
         }
-        if end_of_stream {
-            self.encoder.try_finish()?;
-        } else {
-            self.encoder.flush()?;
-        }
-        let output = self.encoder.get_ref();
-        let bytes = Bytes::copy_from_slice(&output[self.emitted..]);
-        self.emitted = output.len();
-        Ok(bytes)
     }
+
+    #[cfg(feature = "compression-zstd")]
+    fn zstd(level: i32) -> io::Result<Self> {
+        Ok(Self {
+            inner: ResponseCompressionEncoderInner::Zstd(Some(zstd::stream::write::Encoder::new(
+                Vec::new(),
+                level,
+            )?)),
+            emitted: 0,
+        })
+    }
+
+    fn encode_chunk(&mut self, input: Option<&Bytes>, end_of_stream: bool) -> io::Result<Bytes> {
+        match &mut self.inner {
+            #[cfg(feature = "compression-brotli")]
+            ResponseCompressionEncoderInner::Brotli(encoder_slot) => {
+                let Some(mut encoder) = encoder_slot.as_mut().take() else {
+                    return Ok(Bytes::new());
+                };
+                if let Some(input) = input {
+                    encoder.write_all(input)?;
+                }
+                let output = if end_of_stream {
+                    encoder.into_inner()
+                } else {
+                    encoder.flush()?;
+                    let bytes = copy_new_compression_bytes(encoder.get_ref(), &mut self.emitted);
+                    *encoder_slot.as_mut() = Some(encoder);
+                    return Ok(bytes);
+                };
+                Ok(copy_new_compression_bytes(&output, &mut self.emitted))
+            }
+            #[cfg(feature = "compression-gzip")]
+            ResponseCompressionEncoderInner::Gzip(encoder) => {
+                if let Some(input) = input {
+                    encoder.write_all(input)?;
+                }
+                if end_of_stream {
+                    encoder.try_finish()?;
+                } else {
+                    encoder.flush()?;
+                }
+                Ok(copy_new_compression_bytes(
+                    encoder.get_ref(),
+                    &mut self.emitted,
+                ))
+            }
+            #[cfg(feature = "compression-zstd")]
+            ResponseCompressionEncoderInner::Zstd(encoder_slot) => {
+                let Some(mut encoder) = encoder_slot.take() else {
+                    return Ok(Bytes::new());
+                };
+                if let Some(input) = input {
+                    encoder.write_all(input)?;
+                }
+                let output = if end_of_stream {
+                    encoder.finish()?
+                } else {
+                    encoder.flush()?;
+                    let bytes = copy_new_compression_bytes(encoder.get_ref(), &mut self.emitted);
+                    *encoder_slot = Some(encoder);
+                    return Ok(bytes);
+                };
+                Ok(copy_new_compression_bytes(&output, &mut self.emitted))
+            }
+        }
+    }
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn copy_new_compression_bytes(output: &[u8], emitted: &mut usize) -> Bytes {
+    let bytes = Bytes::copy_from_slice(&output[*emitted..]);
+    *emitted = output.len();
+    bytes
 }
 
 #[cfg(feature = "cache")]
@@ -5790,8 +5921,12 @@ impl ProxyHttp for FluxProxy {
         )?;
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)?;
-        #[cfg(feature = "compression-gzip")]
-        prepare_gzip_response_compression(session.req_header(), response, &state.compression, ctx)?;
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        prepare_response_compression(session.req_header(), response, &state.compression, ctx)?;
         #[cfg(feature = "load-balancer")]
         record_load_balanced_upstream_status(ctx, response.status.as_u16());
         append_fluxheim_via_to_response(response)
@@ -5807,11 +5942,21 @@ impl ProxyHttp for FluxProxy {
     where
         Self::CTX: Send + Sync,
     {
-        #[cfg(feature = "compression-gzip")]
-        if let Some(gzip) = &mut ctx.gzip {
-            let encoded = gzip
+        #[cfg(any(
+            feature = "compression-brotli",
+            feature = "compression-gzip",
+            feature = "compression-zstd"
+        ))]
+        if let Some(compression) = &mut ctx.compression {
+            let encoded = compression
                 .encode_chunk(body.as_ref(), _end_of_stream)
-                .map_err(|error| Error::because(ErrorType::InternalError, "gzip failed", error))?;
+                .map_err(|error| {
+                    Error::because(
+                        ErrorType::InternalError,
+                        "response compression failed",
+                        error,
+                    )
+                })?;
             *body = (!encoded.is_empty()).then_some(encoded);
         }
 
@@ -7189,36 +7334,95 @@ fn response_has_non_identity_encoding(response: &ResponseHeader) -> bool {
         .any(|value| !value.trim().eq_ignore_ascii_case("identity"))
 }
 
-#[cfg(feature = "compression-gzip")]
-fn prepare_gzip_response_compression(
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn prepare_response_compression(
     request: &RequestHeader,
     response: &mut ResponseHeader,
     config: &crate::config::CompressionConfig,
     ctx: &mut RequestContext,
 ) -> Result<()> {
-    if !gzip_response_eligible(request, response, config) {
+    let Some(encoding) = selected_response_compression(request, response, config) else {
         return Ok(());
-    }
+    };
 
-    response.insert_header("content-encoding", "gzip")?;
+    response.insert_header("content-encoding", encoding.content_encoding())?;
     response.remove_header("content-length");
     response.remove_header("etag");
     append_vary_accept_encoding(response)?;
-    ctx.gzip = Some(GzipResponseEncoder::new(config.gzip_level));
+    ctx.compression = Some(encoding.encoder(config).map_err(|error| {
+        Error::because(
+            ErrorType::InternalError,
+            "response compression initialization failed",
+            error,
+        )
+    })?);
     Ok(())
 }
 
-#[cfg(feature = "compression-gzip")]
-fn gzip_response_eligible(
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ResponseCompressionEncoding {
+    #[cfg(feature = "compression-brotli")]
+    Brotli,
+    #[cfg(feature = "compression-gzip")]
+    Gzip,
+    #[cfg(feature = "compression-zstd")]
+    Zstd,
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+impl ResponseCompressionEncoding {
+    fn content_encoding(self) -> &'static str {
+        match self {
+            #[cfg(feature = "compression-brotli")]
+            Self::Brotli => "br",
+            #[cfg(feature = "compression-gzip")]
+            Self::Gzip => "gzip",
+            #[cfg(feature = "compression-zstd")]
+            Self::Zstd => "zstd",
+        }
+    }
+
+    fn encoder(
+        self,
+        config: &crate::config::CompressionConfig,
+    ) -> io::Result<ResponseCompressionEncoder> {
+        match self {
+            #[cfg(feature = "compression-brotli")]
+            Self::Brotli => Ok(ResponseCompressionEncoder::brotli(config.brotli_quality)),
+            #[cfg(feature = "compression-gzip")]
+            Self::Gzip => Ok(ResponseCompressionEncoder::gzip(config.gzip_level)),
+            #[cfg(feature = "compression-zstd")]
+            Self::Zstd => ResponseCompressionEncoder::zstd(config.zstd_level),
+        }
+    }
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn selected_response_compression(
     request: &RequestHeader,
     response: &ResponseHeader,
     config: &crate::config::CompressionConfig,
-) -> bool {
-    config.enabled
-        && config.gzip
+) -> Option<ResponseCompressionEncoding> {
+    if !(config.enabled
         && request.method.as_str() == "GET"
         && response.status == StatusCode::OK
-        && request_accepts_gzip(request)
         && !response_has_content_encoding(response)
         && !response.headers.contains_key("content-range")
         && !response.headers.contains_key("set-cookie")
@@ -7226,25 +7430,66 @@ fn gzip_response_eligible(
         && !request.headers.contains_key("cookie")
         && !response_cache_control_blocks_compression(response)
         && response_content_type_is_compressible(response)
-        && response_content_length_in_compression_bounds(response, config)
+        && response_content_length_in_compression_bounds(response, config))
+    {
+        return None;
+    }
+
+    #[cfg(feature = "compression-brotli")]
+    if config.brotli && request_accepts_encoding(request, "br") {
+        return Some(ResponseCompressionEncoding::Brotli);
+    }
+    #[cfg(feature = "compression-zstd")]
+    if config.zstd && request_accepts_encoding(request, "zstd") {
+        return Some(ResponseCompressionEncoding::Zstd);
+    }
+    #[cfg(feature = "compression-gzip")]
+    if config.gzip && request_accepts_encoding(request, "gzip") {
+        return Some(ResponseCompressionEncoding::Gzip);
+    }
+
+    None
 }
 
-#[cfg(feature = "compression-gzip")]
+#[cfg(all(test, feature = "compression-gzip"))]
+fn gzip_response_eligible(
+    request: &RequestHeader,
+    response: &ResponseHeader,
+    config: &crate::config::CompressionConfig,
+) -> bool {
+    selected_response_compression(request, response, config)
+        == Some(ResponseCompressionEncoding::Gzip)
+}
+
+#[cfg(all(test, feature = "compression-gzip"))]
 fn request_accepts_gzip(request: &RequestHeader) -> bool {
+    request_accepts_encoding(request, "gzip")
+}
+
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn request_accepts_encoding(request: &RequestHeader, expected: &str) -> bool {
     request
         .headers
         .get_all("accept-encoding")
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|value| value.split(','))
-        .any(encoding_token_allows_gzip)
+        .any(|token| encoding_token_allows(token, expected))
 }
 
-#[cfg(feature = "compression-gzip")]
-fn encoding_token_allows_gzip(token: &str) -> bool {
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+fn encoding_token_allows(token: &str, expected: &str) -> bool {
     let mut parts = token.split(';');
     let coding = parts.next().unwrap_or_default().trim();
-    if !coding.eq_ignore_ascii_case("gzip") && coding != "*" {
+    if !coding.eq_ignore_ascii_case(expected) && coding != "*" {
         return false;
     }
 
@@ -7260,7 +7505,11 @@ fn encoding_token_allows_gzip(token: &str) -> bool {
         })
 }
 
-#[cfg(feature = "compression-gzip")]
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
 fn response_has_content_encoding(response: &ResponseHeader) -> bool {
     response
         .headers
@@ -7270,7 +7519,11 @@ fn response_has_content_encoding(response: &ResponseHeader) -> bool {
         .any(|value| !value.trim().eq_ignore_ascii_case("identity"))
 }
 
-#[cfg(feature = "compression-gzip")]
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
 fn response_cache_control_blocks_compression(response: &ResponseHeader) -> bool {
     response
         .headers
@@ -7286,7 +7539,11 @@ fn response_cache_control_blocks_compression(response: &ResponseHeader) -> bool 
         })
 }
 
-#[cfg(feature = "compression-gzip")]
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
 fn response_content_type_is_compressible(response: &ResponseHeader) -> bool {
     let Some(content_type) = response
         .headers
@@ -7315,7 +7572,11 @@ fn response_content_type_is_compressible(response: &ResponseHeader) -> bool {
         )
 }
 
-#[cfg(feature = "compression-gzip")]
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
 fn response_content_length_in_compression_bounds(
     response: &ResponseHeader,
     config: &crate::config::CompressionConfig,
@@ -7331,7 +7592,11 @@ fn response_content_length_in_compression_bounds(
     length >= config.min_bytes.as_u64() && length <= config.max_input_bytes.as_u64()
 }
 
-#[cfg(feature = "compression-gzip")]
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
 fn append_vary_accept_encoding(response: &mut ResponseHeader) -> Result<()> {
     let has_accept_encoding = response
         .headers
@@ -12284,11 +12549,6 @@ mod tests {
         normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
-    #[cfg(feature = "compression-gzip")]
-    use super::{
-        GzipResponseEncoder, RequestContext, gzip_response_eligible,
-        prepare_gzip_response_compression, request_accepts_gzip,
-    };
     #[cfg(feature = "php-fpm")]
     use super::{
         MAX_PHP_PARAM_VALUE_BYTES, PhpFpmTimeoutKind, PhpRequestBody, PhpResolveOutcome,
@@ -12312,6 +12572,17 @@ mod tests {
         PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
         peer_fill_request_from_header, peer_fill_url,
         prune_inactive_peer_fill_concurrency_counters,
+    };
+    #[cfg(any(
+        feature = "compression-brotli",
+        feature = "compression-gzip",
+        feature = "compression-zstd"
+    ))]
+    use super::{RequestContext, prepare_response_compression, selected_response_compression};
+    #[cfg(feature = "compression-gzip")]
+    use super::{
+        ResponseCompressionEncoder, ResponseCompressionEncoding, gzip_response_eligible,
+        request_accepts_gzip,
     };
     #[cfg(feature = "cache")]
     use super::{
@@ -12389,7 +12660,7 @@ mod tests {
         response.insert_header("vary", "accept-language").unwrap();
         let mut ctx = RequestContext::default();
 
-        prepare_gzip_response_compression(&request, &mut response, &compression_config(), &mut ctx)
+        prepare_response_compression(&request, &mut response, &compression_config(), &mut ctx)
             .unwrap();
 
         assert_eq!(response.headers.get("content-encoding").unwrap(), "gzip");
@@ -12403,7 +12674,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(vary.contains(&"accept-language".to_owned()));
         assert!(vary.contains(&"accept-encoding".to_owned()));
-        assert!(ctx.gzip.is_some());
+        assert!(ctx.compression.is_some());
     }
 
     #[cfg(feature = "compression-gzip")]
@@ -12454,7 +12725,7 @@ mod tests {
     #[cfg(feature = "compression-gzip")]
     #[test]
     fn gzip_encoder_emits_decodable_stream() {
-        let mut encoder = GzipResponseEncoder::new(4);
+        let mut encoder = ResponseCompressionEncoder::gzip(4);
         let mut compressed = Vec::new();
         compressed.extend_from_slice(
             &encoder
@@ -12473,6 +12744,85 @@ mod tests {
             .read_to_string(&mut decoded)
             .unwrap();
         assert_eq!(decoded, "hello fluxheim");
+    }
+
+    #[cfg(feature = "compression-brotli")]
+    #[test]
+    fn brotli_encoder_emits_decodable_stream() {
+        let mut encoder = ResponseCompressionEncoder::brotli(4);
+        let mut compressed = Vec::new();
+        compressed.extend_from_slice(
+            &encoder
+                .encode_chunk(Some(&Bytes::from_static(b"hello ")), false)
+                .unwrap(),
+        );
+        compressed.extend_from_slice(
+            &encoder
+                .encode_chunk(Some(&Bytes::from_static(b"fluxheim")), true)
+                .unwrap(),
+        );
+
+        let mut decoded = String::new();
+        brotli::Decompressor::new(&compressed[..], 4096)
+            .read_to_string(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, "hello fluxheim");
+    }
+
+    #[cfg(feature = "compression-zstd")]
+    #[test]
+    fn zstd_encoder_emits_decodable_stream() {
+        let mut encoder = ResponseCompressionEncoder::zstd(3).unwrap();
+        let mut compressed = Vec::new();
+        compressed.extend_from_slice(
+            &encoder
+                .encode_chunk(Some(&Bytes::from_static(b"hello ")), false)
+                .unwrap(),
+        );
+        compressed.extend_from_slice(
+            &encoder
+                .encode_chunk(Some(&Bytes::from_static(b"fluxheim")), true)
+                .unwrap(),
+        );
+
+        let decoded = zstd::stream::decode_all(&compressed[..]).unwrap();
+        assert_eq!(decoded, b"hello fluxheim");
+    }
+
+    #[cfg(all(feature = "compression-brotli", feature = "compression-gzip"))]
+    #[test]
+    fn brotli_is_preferred_when_enabled_and_accepted() {
+        let request = compression_request();
+        let response = compression_response();
+        let config = CompressionConfig {
+            brotli: true,
+            ..compression_config()
+        };
+
+        assert_eq!(
+            selected_response_compression(&request, &response, &config),
+            Some(ResponseCompressionEncoding::Brotli)
+        );
+    }
+
+    #[cfg(all(feature = "compression-gzip", feature = "compression-zstd"))]
+    #[test]
+    fn zstd_is_preferred_over_gzip_when_enabled_and_accepted() {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        request
+            .insert_header("accept-encoding", "zstd, gzip")
+            .unwrap();
+        let response = compression_response();
+        let config = CompressionConfig {
+            zstd: true,
+            ..compression_config()
+        };
+
+        assert_eq!(
+            selected_response_compression(&request, &response, &config),
+            Some(ResponseCompressionEncoding::Zstd)
+        );
     }
 
     #[test]

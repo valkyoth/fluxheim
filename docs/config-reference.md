@@ -583,7 +583,8 @@ route for that root.
 ## Compression
 
 `[compression]` is a global opt-in response compression policy. It is available
-only in binaries built with `compression-gzip`; default release binaries do not
+only in binaries built with one or more codec features: `compression-gzip`,
+`compression-zstd`, or `compression-brotli`; default release binaries do not
 include compression code. `privacy-mode` builds reject compression at compile
 time.
 
@@ -591,21 +592,28 @@ time.
 [compression]
 enabled = true
 gzip = true
+zstd = false
+brotli = false
 min_bytes = "1KiB"
 max_input_bytes = "1MiB"
 gzip_level = 4
+zstd_level = 3
+brotli_quality = 4
 ```
 
-The first implementation compresses only eligible `GET` responses with known
-`Content-Length`, status `200`, client `Accept-Encoding: gzip`, no existing
-`Content-Encoding`, no `Set-Cookie`, no request `Cookie` or `Authorization`,
-no `Content-Range`, no `Cache-Control: no-transform`, and a conservative text,
-JavaScript, JSON, XML, or SVG media type. Fluxheim removes `Content-Length` and
-`ETag` from compressed responses and adds `Vary: Accept-Encoding`.
+The compression path compresses only eligible `GET` responses with known
+`Content-Length`, status `200`, a matching client `Accept-Encoding`, no
+existing `Content-Encoding`, no `Set-Cookie`, no request `Cookie` or
+`Authorization`, no `Content-Range`, no `Cache-Control: no-transform`, and a
+conservative text, JavaScript, JSON, XML, or SVG media type. Fluxheim prefers
+`br`, then `zstd`, then `gzip` when those codecs are enabled and accepted by
+the client. Fluxheim removes `Content-Length` and `ETag` from compressed
+responses and adds `Vary: Accept-Encoding`.
 
 `min_bytes` and `max_input_bytes` bound the original response size. The
 configured maximum cannot exceed 64 MiB. `gzip_level` must be between `0` and
-`9`.
+`9`, `zstd_level` between `1` and `19`, and `brotli_quality` between `0` and
+`11`.
 
 ## Web
 
