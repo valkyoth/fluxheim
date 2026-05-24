@@ -1675,6 +1675,10 @@ pub struct AccessLoggingConfig {
     #[serde(default = "default_true")]
     pub include_path: bool,
     #[serde(default = "default_true")]
+    pub include_route: bool,
+    #[serde(default = "default_true")]
+    pub include_upstream: bool,
+    #[serde(default = "default_true")]
     pub request_id: bool,
     #[serde(default = "default_request_id_header")]
     pub request_id_header: String,
@@ -1686,6 +1690,8 @@ impl Default for AccessLoggingConfig {
             enabled: default_access_logging_enabled(),
             include_host: true,
             include_path: true,
+            include_route: true,
+            include_upstream: true,
             request_id: true,
             request_id_header: default_request_id_header(),
         }
@@ -19678,6 +19684,8 @@ mod tests {
             enabled = false
             include_host = false
             include_path = false
+            include_route = false
+            include_upstream = false
             request_id = false
             request_id_header = "x-correlation-id"
             "#,
@@ -19691,6 +19699,8 @@ mod tests {
         assert!(!config.logging.access.enabled);
         assert!(!config.logging.access.include_host);
         assert!(!config.logging.access.include_path);
+        assert!(!config.logging.access.include_route);
+        assert!(!config.logging.access.include_upstream);
         assert!(!config.logging.access.request_id);
         assert_eq!(config.logging.access.request_id_header, "x-correlation-id");
     }

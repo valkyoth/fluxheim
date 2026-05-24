@@ -377,8 +377,16 @@ impl FluxProxy {
                     .then(|| request_host(session))
                     .flatten(),
                 vhost,
-                route,
-                upstream: ctx.upstream.as_deref(),
+                route: if state.access_log.include_route {
+                    route
+                } else {
+                    ""
+                },
+                upstream: state
+                    .access_log
+                    .include_upstream
+                    .then_some(ctx.upstream.as_deref())
+                    .flatten(),
                 path: state
                     .access_log
                     .include_path

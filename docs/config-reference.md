@@ -364,6 +364,10 @@ route name and selected upstream address when a request reaches a proxy action;
 fallback, local static, or unrouted requests emit empty `route` or `upstream`
 fields as applicable.
 
+`logging.access.include_route = false` emits an empty `route` field.
+`logging.access.include_upstream = false` emits an empty `upstream` field, which
+is useful when internal backend addresses should not appear in logs.
+
 ## Headers
 
 Header policies can be global or per-vhost. Vhost policies overlay the global
