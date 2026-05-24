@@ -2886,6 +2886,7 @@ impl std::fmt::Debug for RuntimeVhost {
 
 #[derive(Debug, Clone)]
 struct RuntimeRoute {
+    #[cfg_attr(feature = "privacy-mode", allow(dead_code))]
     name: String,
     matcher: RuntimeRouteMatcher,
     https_redirect_exempt: bool,
