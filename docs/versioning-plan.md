@@ -1141,7 +1141,10 @@ Release shape:
     admin hardening;
   - upstream TLS controls: SNI override, trust roots, upstream mTLS client cert,
     protocol/cipher policy where supported, and auditable insecure-skip-verify
-    behavior;
+    behavior. SNI override already existed; certificate verification, hostname
+    verification, and alternative-CN controls are implemented. Remaining work is
+    custom upstream trust roots, upstream mTLS client certs, and per-upstream
+    protocol/cipher policy;
   - PROXY protocol v1/v2 accept/send with explicit trust boundaries;
   - gRPC-safe HTTP/2 proxying for trailers, status, timeouts, body limits, and
     streaming behavior. gRPC-Web/JSON transcoding remains out of scope unless a

@@ -70,6 +70,10 @@ behavior when the change improves security or project direction.
   CA bundle path. The first implementation wires rustls and OpenSSL/BoringSSL
   listeners and fails closed for s2n until its CA loader can be exposed without
   panic-prone helpers.
+- Added upstream TLS verification controls for proxy origins:
+  `upstream_verify_cert`, `upstream_verify_hostname`, and
+  `upstream_alternative_cn`, while keeping certificate and hostname validation
+  enabled by default.
 
 ### Planned
 

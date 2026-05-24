@@ -3412,6 +3412,12 @@ pub struct ProxyConfig {
     pub upstream_tls: bool,
     #[serde(default)]
     pub upstream_sni: Option<String>,
+    #[serde(default = "default_true")]
+    pub upstream_verify_cert: bool,
+    #[serde(default = "default_true")]
+    pub upstream_verify_hostname: bool,
+    #[serde(default)]
+    pub upstream_alternative_cn: Option<String>,
     #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default)]
@@ -3443,6 +3449,9 @@ impl Default for ProxyConfig {
             drain_upstreams: Vec::new(),
             upstream_tls: false,
             upstream_sni: None,
+            upstream_verify_cert: true,
+            upstream_verify_hostname: true,
+            upstream_alternative_cn: None,
             connect_timeout_secs: None,
             read_timeout_secs: None,
             send_timeout_secs: None,
@@ -3558,6 +3567,23 @@ impl ProxyConfig {
             && sni.trim().is_empty()
         {
             return Err(ConfigError::EmptyUpstreamSni);
+        }
+        if !self.upstream_verify_cert && self.upstream_verify_hostname {
+            return Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream_verify_hostname must be false when upstream_verify_cert = false",
+            });
+        }
+        if let Some(alternative_cn) = &self.upstream_alternative_cn {
+            if alternative_cn.contains('*') {
+                return Err(ConfigError::InvalidProxyTlsPolicy {
+                    reason: "upstream_alternative_cn must not contain wildcards",
+                });
+            }
+            if normalize_host(alternative_cn).is_none() {
+                return Err(ConfigError::InvalidProxyTlsPolicy {
+                    reason: "upstream_alternative_cn must be a valid hostname",
+                });
+            }
         }
 
         validate_optional_timeout_secs("proxy.connect_timeout_secs", self.connect_timeout_secs)?;
@@ -8559,6 +8585,9 @@ pub enum ConfigError {
         upstream: String,
     },
     EmptyUpstreamSni,
+    InvalidProxyTlsPolicy {
+        reason: &'static str,
+    },
     InvalidProxyTimeout {
         field: &'static str,
     },
@@ -9179,6 +9208,9 @@ impl Display for ConfigError {
                 "proxy.upstreams contains duplicate upstream {upstream:?}"
             ),
             Self::EmptyUpstreamSni => write!(formatter, "upstream_sni cannot be empty"),
+            Self::InvalidProxyTlsPolicy { reason } => {
+                write!(formatter, "proxy upstream TLS policy is invalid: {reason}")
+            }
             Self::InvalidProxyTimeout { field } => {
                 write!(formatter, "{field} must be greater than zero")
             }
@@ -11933,6 +11965,11 @@ mod tests {
             connect_timeout_secs = 5
             read_timeout_secs = 60
             send_timeout_secs = 30
+            upstream_tls = true
+            upstream_sni = "origin.example.test"
+            upstream_verify_cert = true
+            upstream_verify_hostname = true
+            upstream_alternative_cn = "fallback-origin.example.test"
 
             [proxy.load_balance]
             max_iterations = 16
@@ -11973,6 +12010,17 @@ mod tests {
         assert_eq!(config.proxy.connect_timeout_secs, Some(5));
         assert_eq!(config.proxy.read_timeout_secs, Some(60));
         assert_eq!(config.proxy.send_timeout_secs, Some(30));
+        assert!(config.proxy.upstream_tls);
+        assert_eq!(
+            config.proxy.upstream_sni.as_deref(),
+            Some("origin.example.test")
+        );
+        assert!(config.proxy.upstream_verify_cert);
+        assert!(config.proxy.upstream_verify_hostname);
+        assert_eq!(
+            config.proxy.upstream_alternative_cn.as_deref(),
+            Some("fallback-origin.example.test")
+        );
         assert_eq!(config.proxy.error_pages.len(), 1);
         assert_eq!(config.proxy.error_pages[0].status, 502);
         assert_eq!(config.proxy.error_pages[0].path, "/502.html");
@@ -12136,6 +12184,45 @@ mod tests {
             config.validate(),
             Err(ConfigError::DuplicateProxyUpstream {
                 upstream: "ORIGIN.example.test:8080".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_inconsistent_proxy_upstream_tls_verification_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream_tls = true
+            upstream_verify_cert = false
+            upstream_verify_hostname = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream_verify_hostname must be false when upstream_verify_cert = false"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_upstream_alternative_cn() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream_tls = true
+            upstream_alternative_cn = "*.example.test"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream_alternative_cn must not contain wildcards"
             })
         );
     }

@@ -12565,6 +12565,7 @@ where
     })?;
     let mut peer = HttpPeer::new(address, proxy.upstream_tls, proxy.upstream_sni());
     apply_proxy_timeouts(&mut peer, proxy);
+    apply_proxy_upstream_tls_policy(&mut peer, proxy);
     Ok(peer)
 }
 
@@ -12574,6 +12575,12 @@ fn apply_proxy_timeouts(peer: &mut HttpPeer, proxy: &ProxyConfig) {
         .map(std::time::Duration::from_secs);
     peer.options.read_timeout = proxy.read_timeout_secs.map(std::time::Duration::from_secs);
     peer.options.write_timeout = proxy.send_timeout_secs.map(std::time::Duration::from_secs);
+}
+
+fn apply_proxy_upstream_tls_policy(peer: &mut HttpPeer, proxy: &ProxyConfig) {
+    peer.options.verify_cert = proxy.upstream_verify_cert;
+    peer.options.verify_hostname = proxy.upstream_verify_hostname;
+    peer.options.alternative_cn = proxy.upstream_alternative_cn.clone();
 }
 
 fn request_host_header(request: &RequestHeader) -> Option<&str> {
@@ -15335,6 +15342,30 @@ mod tests {
         );
         assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(600)));
         assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn proxy_upstream_tls_policy_maps_to_pingora_peer_options() {
+        let proxy = ProxyConfig {
+            upstream: Some("127.0.0.1:6010".to_owned()),
+            upstream_tls: true,
+            upstream_sni: Some("origin.example.test".to_owned()),
+            upstream_verify_cert: true,
+            upstream_verify_hostname: false,
+            upstream_alternative_cn: Some("fallback-origin.example.test".to_owned()),
+            ..ProxyConfig::default()
+        };
+
+        let peer = http_peer_for_proxy(proxy.primary_upstream(), &proxy).unwrap();
+
+        assert!(peer.is_tls());
+        assert_eq!(peer.sni, "origin.example.test");
+        assert!(peer.options.verify_cert);
+        assert!(!peer.options.verify_hostname);
+        assert_eq!(
+            peer.options.alternative_cn.as_deref(),
+            Some("fallback-origin.example.test")
+        );
     }
 
     #[test]

@@ -483,6 +483,9 @@ backup_upstreams = ["127.0.0.1:3001"]
 drain_upstreams = []
 upstream_tls = false
 upstream_sni = "origin.example.test"
+upstream_verify_cert = true
+upstream_verify_hostname = true
+upstream_alternative_cn = "fallback-origin.example.test"
 connect_timeout_secs = 5
 read_timeout_secs = 60
 send_timeout_secs = 30
@@ -536,6 +539,16 @@ Every `upstreams` entry must be an authority such as
 `127.0.0.1:3000` or `origin.example.test:443`.
 Proxy upstream lists are capped at 64 entries and reject duplicates
 case-insensitively. Proxy error-page lists are also capped at 64 entries.
+When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
+overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
+upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
+`true`. Disabling certificate verification is an explicit insecure policy and
+also requires `upstream_verify_hostname = false` so the config cannot imply
+hostname validation while certificate validation is off. `upstream_alternative_cn`
+adds one additional hostname that may match the upstream certificate when the
+configured SNI does not. Wildcards are rejected for this field. Custom upstream
+trust roots and upstream mTLS client certificates are tracked as later 1.4 TLS
+work.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
