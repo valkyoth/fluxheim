@@ -376,6 +376,12 @@ impl FluxProxy {
                     .include_host
                     .then(|| request_host(session))
                     .flatten(),
+                client_ip: if state.access_log.include_client_ip {
+                    effective_acl_client_ip(session, &state)
+                        .map(|client_ip| client_ip.to_string())
+                } else {
+                    None
+                },
                 vhost,
                 route: if state.access_log.include_route {
                     route
@@ -12325,6 +12331,7 @@ fn hex_value(byte: u8) -> Option<u8> {
 struct AccessLogEvent<'a> {
     method: &'a str,
     host: Option<&'a str>,
+    client_ip: Option<String>,
     vhost: &'a str,
     route: &'a str,
     upstream: Option<&'a str>,
@@ -12348,13 +12355,15 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
         .unwrap_or_else(|| "null".to_owned());
     let status_class = event.status_class.unwrap_or("unknown");
     let host = event.host.unwrap_or("");
+    let client_ip = event.client_ip.as_deref().unwrap_or("");
     let upstream = event.upstream.unwrap_or("");
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     let body = format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
+        json_escape(client_ip),
         json_escape(event.vhost),
         json_escape(event.route),
         json_escape(upstream),
@@ -20453,6 +20462,7 @@ mod tests {
         let log = super::access_log_json(super::AccessLogEvent {
             method: "GET",
             host: Some("example.test"),
+            client_ip: Some("203.0.113.10".to_owned()),
             vhost: "main\"site",
             route: "assets",
             upstream: Some("127.0.0.1:3000"),
@@ -20470,6 +20480,7 @@ mod tests {
 
         assert!(log.contains("\"event\":\"access\""));
         assert!(log.contains("\"host\":\"example.test\""));
+        assert!(log.contains("\"client_ip\":\"203.0.113.10\""));
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
         assert!(log.contains("\"route\":\"assets\""));
         assert!(log.contains("\"upstream\":\"127.0.0.1:3000\""));
@@ -20486,6 +20497,7 @@ mod tests {
         let log = super::access_log_json(super::AccessLogEvent {
             method: "GET",
             host: Some("example.test"),
+            client_ip: None,
             vhost: "main",
             route: "private",
             upstream: None,
@@ -20511,6 +20523,7 @@ mod tests {
         let log = super::access_log_json(super::AccessLogEvent {
             method: "GET",
             host: None,
+            client_ip: None,
             vhost: "main",
             route: "root",
             upstream: None,
@@ -20536,6 +20549,7 @@ mod tests {
         let log = super::access_log_json(super::AccessLogEvent {
             method: "GET",
             host: Some("example.test"),
+            client_ip: None,
             vhost: "main",
             route: "root",
             upstream: None,

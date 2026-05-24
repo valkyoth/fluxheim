@@ -359,10 +359,15 @@ tenant IDs, filenames, or other sensitive identifiers.
 
 `logging.access.include_host = false` keeps access logging enabled while
 emitting an empty raw `host` field. The configured `vhost` name is still logged
-after Fluxheim resolves the request. Access log events also include the resolved
-route name and selected upstream address when a request reaches a proxy action;
-fallback, local static, or unrouted requests emit empty `route` or `upstream`
-fields as applicable.
+after Fluxheim resolves the request.
+
+`logging.access.include_client_ip = false` emits an empty `client_ip` field.
+When enabled, the logged address is the same trusted-proxy-aware client IP used
+by access policy and rate limiting.
+
+Access log events also include the resolved route name and selected upstream
+address when a request reaches a proxy action; fallback, local static, or
+unrouted requests emit empty `route` or `upstream` fields as applicable.
 
 `logging.access.include_route = false` emits an empty `route` field.
 `logging.access.include_upstream = false` emits an empty `upstream` field, which

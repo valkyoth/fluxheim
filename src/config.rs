@@ -1673,6 +1673,8 @@ pub struct AccessLoggingConfig {
     #[serde(default = "default_true")]
     pub include_host: bool,
     #[serde(default = "default_true")]
+    pub include_client_ip: bool,
+    #[serde(default = "default_true")]
     pub include_path: bool,
     #[serde(default = "default_true")]
     pub include_route: bool,
@@ -1689,6 +1691,7 @@ impl Default for AccessLoggingConfig {
         Self {
             enabled: default_access_logging_enabled(),
             include_host: true,
+            include_client_ip: true,
             include_path: true,
             include_route: true,
             include_upstream: true,
@@ -19683,6 +19686,7 @@ mod tests {
             [logging.access]
             enabled = false
             include_host = false
+            include_client_ip = false
             include_path = false
             include_route = false
             include_upstream = false
@@ -19698,6 +19702,7 @@ mod tests {
         assert_eq!(config.logging.target, super::LoggingTarget::Stdout);
         assert!(!config.logging.access.enabled);
         assert!(!config.logging.access.include_host);
+        assert!(!config.logging.access.include_client_ip);
         assert!(!config.logging.access.include_path);
         assert!(!config.logging.access.include_route);
         assert!(!config.logging.access.include_upstream);
