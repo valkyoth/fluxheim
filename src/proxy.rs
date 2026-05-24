@@ -5212,6 +5212,7 @@ impl RuntimeRoute {
             access: RuntimeAccessPolicy::default(),
             rate_limit: RuntimeRateLimit::default(),
             concurrency: RuntimeConcurrencyLimit::default(),
+            grpc: crate::config::GrpcRouteConfig::default(),
             action: RuntimeRouteAction::AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore::new(
                 storage, vhost_name,
             )),
@@ -13261,7 +13262,6 @@ fn cache_request_from_header(request: &RequestHeader) -> crate::cache::CacheRequ
     }
 }
 
-#[cfg(any(feature = "web", feature = "cache"))]
 fn request_header_values<'a>(
     request: &'a RequestHeader,
     name: &'a str,
