@@ -5195,6 +5195,24 @@ fn concurrency_limit_field(scope: &'static str, field: &'static str) -> &'static
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GrpcRouteConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub require_content_type: bool,
+}
+
+impl Default for GrpcRouteConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            require_content_type: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouteConfig {
@@ -5219,6 +5237,8 @@ pub struct RouteConfig {
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub concurrency: ConcurrencyLimitConfig,
+    #[serde(default)]
+    pub grpc: GrpcRouteConfig,
     #[serde(default)]
     pub redirect: Option<RouteRedirectConfig>,
     #[serde(default)]
@@ -5358,6 +5378,13 @@ impl RouteConfig {
                 section: "concurrency",
                 source: Box::new(source),
             })?;
+        if self.grpc.enabled && !self.grpc.require_content_type {
+            return Err(ConfigError::InvalidRouteGrpcPolicy {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                reason: "require_content_type must remain true for gRPC routes",
+            });
+        }
 
         let action_count = usize::from(self.redirect.is_some())
             + usize::from(self.proxy.is_some())
@@ -5382,6 +5409,20 @@ impl RouteConfig {
                     section: "proxy",
                     source: Box::new(source),
                 })?;
+            if self.grpc.enabled && proxy.upstream_http_version == UpstreamHttpVersion::Http1 {
+                return Err(ConfigError::InvalidRouteGrpcPolicy {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                    reason: "gRPC routes require proxy.upstream_http_version = \"http2\" or \"http1-and-http2\"",
+                });
+            }
+        }
+        if self.grpc.enabled && self.proxy.is_none() {
+            return Err(ConfigError::InvalidRouteGrpcPolicy {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                reason: "gRPC routes must use a proxy action",
+            });
         }
         if let Some(web) = &self.web {
             web.validate().map_err(|source| ConfigError::RouteSection {
@@ -5421,6 +5462,13 @@ impl RouteConfig {
                     section: "cache",
                     source: Box::new(source),
                 })?;
+            if self.grpc.enabled && cache.enabled {
+                return Err(ConfigError::InvalidRouteGrpcPolicy {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                    reason: "gRPC routes cannot enable response caching because trailers and streaming status must pass through",
+                });
+            }
         }
         if let Some(compression) = &self.compression {
             compression
@@ -5532,6 +5580,7 @@ impl VhostRedirectConfig {
             access: AccessPolicyConfig::default(),
             rate_limit: RateLimitConfig::default(),
             concurrency: ConcurrencyLimitConfig::default(),
+            grpc: GrpcRouteConfig::default(),
             redirect: Some(RouteRedirectConfig {
                 to,
                 status: self.status,
@@ -5762,6 +5811,7 @@ impl VhostAcmeChallengeConfig {
             access: AccessPolicyConfig::default(),
             rate_limit: RateLimitConfig::default(),
             concurrency: ConcurrencyLimitConfig::default(),
+            grpc: GrpcRouteConfig::default(),
             redirect: None,
             proxy: Some(ProxyConfig {
                 upstream: self.upstream.clone(),
@@ -9348,6 +9398,11 @@ pub enum ConfigError {
         vhost: String,
         route: String,
     },
+    InvalidRouteGrpcPolicy {
+        vhost: String,
+        route: String,
+        reason: &'static str,
+    },
     InvalidRouteLimit {
         vhost: String,
         route: String,
@@ -10055,6 +10110,14 @@ impl Display for ConfigError {
             Self::InvalidRouteAction { vhost, route } => write!(
                 formatter,
                 "vhost {vhost:?} route {route:?} must define exactly one action: redirect, proxy, or web"
+            ),
+            Self::InvalidRouteGrpcPolicy {
+                vhost,
+                route,
+                reason,
+            } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} grpc policy is invalid: {reason}"
             ),
             Self::InvalidRouteLimit {
                 vhost,
@@ -21013,8 +21076,12 @@ mod tests {
             strip_prefix = "/chat/"
             rewrite_prefix = "/backend/chat/"
 
+            [vhosts.routes.grpc]
+            enabled = true
+
             [vhosts.routes.proxy]
             upstreams = ["127.0.0.1:6012"]
+            upstream_http_version = "http2"
             connect_timeout_secs = 5
             read_timeout_secs = 600
             send_timeout_secs = 600
@@ -21050,6 +21117,7 @@ mod tests {
             ["127.0.0.1:8080"]
         );
         assert_eq!(config.vhosts[0].routes[0].name, "chat");
+        assert!(config.vhosts[0].routes[0].grpc.enabled);
         assert!(config.vhosts[0].routes[0].https_redirect_exempt);
         assert_eq!(
             config.vhosts[0].routes[0].rewrite_prefix.as_deref(),
@@ -21072,8 +21140,44 @@ mod tests {
             Some(600)
         );
         assert_eq!(
+            config.vhosts[0].routes[0]
+                .proxy
+                .as_ref()
+                .unwrap()
+                .upstream_http_version,
+            UpstreamHttpVersion::Http2
+        );
+        assert_eq!(
             config.vhosts[0].routes[2].redirect.as_ref().unwrap().status,
             308
+        );
+    }
+
+    #[test]
+    fn rejects_grpc_route_without_http2_upstream() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "grpc"
+            path_prefix = "/grpc/"
+
+            [vhosts.routes.grpc]
+            enabled = true
+
+            [vhosts.routes.proxy]
+            upstream = "127.0.0.1:6012"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("grpc policy is invalid") && error.contains("upstream_http_version"),
+            "{error}"
         );
     }
 

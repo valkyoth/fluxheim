@@ -1174,10 +1174,12 @@ Release shape:
   - gRPC-safe HTTP/2 proxying for trailers, status, timeouts, body limits, and
     streaming behavior. Upstream HTTP version selection is implemented through
     `proxy.upstream_http_version` with `http1`, `http2`, and
-    `http1-and-http2`, plus bounded h2 stream and ping controls. Remaining work
-    is explicit gRPC fixture coverage for trailers/status behavior and any
-    route-level gRPC policy operators need. gRPC-Web/JSON transcoding remains
-    out of scope unless a mature crate or small adapter is justified.
+    `http1-and-http2`, plus bounded h2 stream and ping controls. Route-scoped
+    `[vhosts.routes.grpc]` policy now validates gRPC pass-through routes by
+    requiring an HTTP/2-capable proxy action and rejecting obvious non-gRPC
+    requests before forwarding. Remaining work is explicit end-to-end h2
+    trailer/status fixture coverage. gRPC-Web/JSON transcoding remains out of
+    scope unless a mature crate or small adapter is justified.
 - `1.4.3` - discovery, mirroring, and operator hooks:
   - DNS-refreshing upstreams for container/service-name targets;
   - file-watched upstream lists for service discovery without full config reload;

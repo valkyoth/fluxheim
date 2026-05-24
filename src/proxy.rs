@@ -2945,6 +2945,7 @@ struct RuntimeRoute {
     access: RuntimeAccessPolicy,
     rate_limit: RuntimeRateLimit,
     concurrency: RuntimeConcurrencyLimit,
+    grpc: crate::config::GrpcRouteConfig,
     action: RuntimeRouteAction,
     #[cfg(feature = "load-balancer")]
     load_balancer: Option<UpstreamLoadBalancer>,
@@ -5178,6 +5179,7 @@ impl RuntimeRoute {
             access: RuntimeAccessPolicy::from_config(&route.access)?,
             rate_limit: RuntimeRateLimit::from_config(&route.rate_limit),
             concurrency: RuntimeConcurrencyLimit::from_config(&route.concurrency),
+            grpc: route.grpc,
             action,
             #[cfg(feature = "load-balancer")]
             load_balancer,
@@ -6001,6 +6003,29 @@ impl ProxyHttp for FluxProxy {
                             Bytes::from_static(b"proxy upstream not configured"),
                         )
                         .await?;
+                        return Ok(true);
+                    }
+                    if let Some(status) =
+                        grpc_route_rejection_status(&route.grpc, session.req_header())
+                    {
+                        match status {
+                            GrpcRouteRejectionStatus::MethodNotAllowed => {
+                                respond_method_not_allowed(
+                                    session,
+                                    &route.response_headers,
+                                    "POST",
+                                )
+                                .await?;
+                            }
+                            GrpcRouteRejectionStatus::UnsupportedMediaType => {
+                                respond_text_error(
+                                    session,
+                                    415,
+                                    Bytes::from_static(b"unsupported media type"),
+                                )
+                                .await?;
+                            }
+                        }
                         return Ok(true);
                     }
                     #[cfg(feature = "cache")]
@@ -12178,7 +12203,6 @@ async fn respond_acme_http_01_challenge(
     Ok(())
 }
 
-#[cfg(feature = "acme")]
 async fn respond_method_not_allowed(
     session: &mut Session,
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
@@ -13580,6 +13604,40 @@ fn request_host_header(request: &RequestHeader) -> Option<&str> {
         .or_else(|| request.uri.authority().map(|authority| authority.as_str()))
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum GrpcRouteRejectionStatus {
+    MethodNotAllowed,
+    UnsupportedMediaType,
+}
+
+fn grpc_route_rejection_status(
+    grpc: &crate::config::GrpcRouteConfig,
+    request: &RequestHeader,
+) -> Option<GrpcRouteRejectionStatus> {
+    if !grpc.enabled {
+        return None;
+    }
+    if request.method.as_str() != "POST" {
+        return Some(GrpcRouteRejectionStatus::MethodNotAllowed);
+    }
+    if grpc.require_content_type
+        && !request_header_values(request, "content-type").any(grpc_content_type)
+    {
+        return Some(GrpcRouteRejectionStatus::UnsupportedMediaType);
+    }
+
+    None
+}
+
+fn grpc_content_type(value: &str) -> bool {
+    let media_type = value
+        .split_once(';')
+        .map(|(media_type, _)| media_type)
+        .unwrap_or(value)
+        .trim();
+    media_type == "application/grpc" || media_type.starts_with("application/grpc+")
+}
+
 fn request_limit_status(
     limits: &ServerLimitsConfig,
     request_body_limit_bytes: Option<u64>,
@@ -13710,9 +13768,9 @@ mod tests {
     #[cfg(feature = "load-balancer")]
     use crate::config::LoadBalanceRetryConfig;
     use crate::config::{
-        ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
-        RateLimitMode, RouteConfig, RouteRedirectConfig, ServerConfig, ServerLimitsConfig,
-        UpstreamHttpVersion, VhostConfig, WebConfig,
+        ByteSize, CacheConfig, Config, GrpcRouteConfig, HostRoutingConfig, HttpsRedirectConfig,
+        ProxyConfig, RateLimitMode, RouteConfig, RouteRedirectConfig, ServerConfig,
+        ServerLimitsConfig, UpstreamHttpVersion, VhostConfig, WebConfig,
     };
     #[cfg(any(feature = "cache", feature = "web"))]
     use crate::test_support::unique_temp_path;
@@ -13748,11 +13806,11 @@ mod tests {
         FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
         RuntimeConcurrencyLimit, RuntimeProxy, RuntimeRateLimit, append_fluxheim_via_to_request,
         append_fluxheim_via_to_response, approximate_request_header_bytes,
-        count_response_body_chunk, effective_client_ip_from_forwarded_for, http_peer_for_proxy,
-        http_peer_for_runtime_proxy, https_redirect_location, normalize_cookie_headers,
-        proxy_protocol_v1_header, proxy_protocol_v2_header, redirect_authority,
-        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
-        route_rewritten_path_and_query,
+        count_response_body_chunk, effective_client_ip_from_forwarded_for, grpc_content_type,
+        grpc_route_rejection_status, http_peer_for_proxy, http_peer_for_runtime_proxy,
+        https_redirect_location, normalize_cookie_headers, proxy_protocol_v1_header,
+        proxy_protocol_v2_header, redirect_authority, request_body_chunk_limit_status,
+        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -16176,6 +16234,7 @@ mod tests {
                         access: Default::default(),
                         rate_limit: Default::default(),
                         concurrency: Default::default(),
+                        grpc: Default::default(),
                         proxy: None,
                         web: None,
                         php: None,
@@ -16200,6 +16259,7 @@ mod tests {
                         access: Default::default(),
                         rate_limit: Default::default(),
                         concurrency: Default::default(),
+                        grpc: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -16224,6 +16284,7 @@ mod tests {
                         access: Default::default(),
                         rate_limit: Default::default(),
                         concurrency: Default::default(),
+                        grpc: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -16248,6 +16309,7 @@ mod tests {
                         access: Default::default(),
                         rate_limit: Default::default(),
                         concurrency: Default::default(),
+                        grpc: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -16304,6 +16366,7 @@ mod tests {
             access: Default::default(),
             rate_limit: Default::default(),
             concurrency: Default::default(),
+            grpc: Default::default(),
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
@@ -16337,6 +16400,7 @@ mod tests {
             access: Default::default(),
             rate_limit: Default::default(),
             concurrency: Default::default(),
+            grpc: Default::default(),
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
@@ -16368,6 +16432,7 @@ mod tests {
             access: Default::default(),
             rate_limit: Default::default(),
             concurrency: Default::default(),
+            grpc: Default::default(),
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
@@ -16469,6 +16534,43 @@ mod tests {
 
         assert_eq!(peer.options.alpn.get_min_http_version(), 1);
         assert_eq!(peer.options.alpn.get_max_http_version(), 2);
+    }
+
+    #[test]
+    fn grpc_route_policy_accepts_grpc_content_types() {
+        assert!(grpc_content_type("application/grpc"));
+        assert!(grpc_content_type("application/grpc+proto"));
+        assert!(grpc_content_type("application/grpc+json; charset=utf-8"));
+        assert!(!grpc_content_type("application/json"));
+        assert!(!grpc_content_type("text/plain"));
+    }
+
+    #[test]
+    fn grpc_route_policy_rejects_non_post_or_missing_content_type() {
+        let grpc = GrpcRouteConfig {
+            enabled: true,
+            require_content_type: true,
+        };
+        let get_request =
+            pingora::http::RequestHeader::build("GET", b"/service.Method", None).unwrap();
+        assert_eq!(
+            grpc_route_rejection_status(&grpc, &get_request),
+            Some(super::GrpcRouteRejectionStatus::MethodNotAllowed)
+        );
+
+        let post_request =
+            pingora::http::RequestHeader::build("POST", b"/service.Method", None).unwrap();
+        assert_eq!(
+            grpc_route_rejection_status(&grpc, &post_request),
+            Some(super::GrpcRouteRejectionStatus::UnsupportedMediaType)
+        );
+
+        let mut grpc_request =
+            pingora::http::RequestHeader::build("POST", b"/service.Method", None).unwrap();
+        grpc_request
+            .insert_header("content-type", "application/grpc+proto")
+            .unwrap();
+        assert_eq!(grpc_route_rejection_status(&grpc, &grpc_request), None);
     }
 
     #[test]
@@ -17005,6 +17107,7 @@ mod tests {
                     access: Default::default(),
                     rate_limit: Default::default(),
                     concurrency: Default::default(),
+                    grpc: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -17099,6 +17202,7 @@ mod tests {
                     access: Default::default(),
                     rate_limit: Default::default(),
                     concurrency: Default::default(),
+                    grpc: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -17608,6 +17712,7 @@ mod tests {
                     access: Default::default(),
                     rate_limit: Default::default(),
                     concurrency: Default::default(),
+                    grpc: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -18281,6 +18386,7 @@ mod tests {
                     access: Default::default(),
                     rate_limit: Default::default(),
                     concurrency: Default::default(),
+                    grpc: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -18394,6 +18500,7 @@ mod tests {
                     access: Default::default(),
                     rate_limit: Default::default(),
                     concurrency: Default::default(),
+                    grpc: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -18760,6 +18867,7 @@ mod tests {
                         access: Default::default(),
                         rate_limit: Default::default(),
                         concurrency: Default::default(),
+                        grpc: Default::default(),
                         redirect: None,
                         proxy: Some(ProxyConfig {
                             upstreams: vec![
@@ -18844,6 +18952,7 @@ mod tests {
                     access: Default::default(),
                     rate_limit: Default::default(),
                     concurrency: Default::default(),
+                    grpc: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3010".to_owned()),

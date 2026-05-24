@@ -681,6 +681,10 @@ the origin is known to accept cleartext HTTP/2. `upstream_h2_max_streams`
 limits concurrent streams per upstream HTTP/2 connection and must be between
 1 and 1024. `upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive
 pings. Both h2 settings require `upstream_http_version` to allow HTTP/2.
+For explicit gRPC routes, set route-scoped `[vhosts.routes.grpc] enabled =
+true`; Fluxheim then requires the route proxy to allow upstream HTTP/2, rejects
+non-`POST` requests, accepts only `application/grpc` or `application/grpc+*`
+content types, and leaves gRPC-Web/JSON transcoding out of scope.
 `connect_timeout_secs` bounds the low-level socket connect phase.
 `upstream_total_connection_timeout_secs` wraps full upstream establishment,
 including protocol/TLS setup where the selected connector exposes it.
@@ -1895,6 +1899,10 @@ connect_timeout_secs = 5
 read_timeout_secs = 600
 send_timeout_secs = 600
 
+[vhosts.routes.grpc]
+enabled = false
+require_content_type = true
+
 [vhosts.routes.cache]
 enabled = true
 status_header = "X-Cache-Status"
@@ -2083,6 +2091,14 @@ body limit for uploads handled by that route. Proxy actions accept
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs`; route
 proxy timeout values override the vhost/global proxy timeout values because the
 route owns its own proxy action.
+
+`[vhosts.routes.grpc]` is disabled by default and is valid only on proxy
+routes. When enabled, the route proxy must set `upstream_http_version = "http2"`
+or `"http1-and-http2"`, cache must remain disabled for that route, and
+`require_content_type` must stay `true`. This is a pass-through compatibility
+policy: Fluxheim preserves HTTP/2 proxying behavior and rejects obvious
+non-gRPC requests before forwarding, but it does not transcode gRPC-Web or JSON
+to gRPC.
 
 For PHP actions, `max_request_body_bytes` bounds the request sent to php-fpm
 and `max_response_bytes` bounds the FastCGI STDOUT/STDERR bytes accepted from

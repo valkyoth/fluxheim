@@ -137,6 +137,9 @@ behavior when the change improves security or project direction.
 - Added upstream HTTP version selection through `proxy.upstream_http_version`
   with `http1`, `http2`, and `http1-and-http2`, plus bounded HTTP/2 stream and
   ping controls for gRPC-capable origins.
+- Added route-scoped `[vhosts.routes.grpc]` pass-through policy that requires
+  HTTP/2-capable proxy origins and rejects obvious non-gRPC requests before
+  forwarding.
 - Added upstream connection establishment and keepalive-pool tuning through
   `proxy.upstream_total_connection_timeout_secs` and
   `proxy.upstream_idle_timeout_secs`.
