@@ -13,16 +13,18 @@ use pingora::http::RequestHeader;
 use pingora::lb::Backend;
 use pingora::lb::Backends;
 use pingora::lb::discovery::Static;
-use pingora::lb::health_check::TcpHealthCheck;
+use pingora::lb::health_check::{HttpHealthCheck, TcpHealthCheck};
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{
     BackendIter, BackendSelection, Consistent, FNVHash, Random, RoundRobin,
 };
 use pingora::services::ServiceWithDependents;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
+use pingora::{Error, ErrorType};
 
 use crate::config::{
-    LoadBalancePassiveHealthConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+    LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalanceSelection,
+    LoadBalanceSlowStartConfig, ProxyConfig,
 };
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
@@ -881,13 +883,7 @@ where
         .ok_or_else(|| io::Error::other("static load balancer update blocked unexpectedly"))?
         .map_err(|error| io::Error::other(error.to_string()))?;
     if config.load_balance.health_check.enabled {
-        let mut health_check = if config.upstream_tls {
-            TcpHealthCheck::new_tls(&config.upstream_sni())
-        } else {
-            TcpHealthCheck::new()
-        };
-        health_check.consecutive_success = config.load_balance.health_check.consecutive_success;
-        health_check.consecutive_failure = config.load_balance.health_check.consecutive_failure;
+        let health_check = configured_health_check(config)?;
         load_balancer.set_health_check(health_check);
         load_balancer.health_check_frequency = Some(Duration::from_secs(
             config.load_balance.health_check.interval_secs,
@@ -896,6 +892,81 @@ where
     }
 
     Ok(Some(load_balancer))
+}
+
+fn configured_health_check(
+    config: &ProxyConfig,
+) -> io::Result<Box<dyn pingora::lb::health_check::HealthCheck + Send + Sync + 'static>> {
+    match config.load_balance.health_check.protocol {
+        LoadBalanceHealthCheckProtocol::Tcp => {
+            let mut health_check = if config.upstream_tls {
+                TcpHealthCheck::new_tls(&config.upstream_sni())
+            } else {
+                TcpHealthCheck::new()
+            };
+            health_check.consecutive_success = config.load_balance.health_check.consecutive_success;
+            health_check.consecutive_failure = config.load_balance.health_check.consecutive_failure;
+            Ok(health_check)
+        }
+        LoadBalanceHealthCheckProtocol::Http => configured_http_health_check(config).map(|check| {
+            check as Box<dyn pingora::lb::health_check::HealthCheck + Send + Sync + 'static>
+        }),
+    }
+}
+
+fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<HttpHealthCheck>> {
+    let host = config
+        .load_balance
+        .health_check
+        .host
+        .clone()
+        .unwrap_or_else(|| config.upstream_sni());
+    let mut request = RequestHeader::build(
+        "GET",
+        config.load_balance.health_check.path.as_bytes(),
+        None,
+    )
+    .map_err(|error| io::Error::other(error.to_string()))?;
+    request
+        .append_header("Host", &host)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+
+    let mut health_check = HttpHealthCheck::new(&host, config.upstream_tls);
+    health_check.req = request;
+    health_check.consecutive_success = config.load_balance.health_check.consecutive_success;
+    health_check.consecutive_failure = config.load_balance.health_check.consecutive_failure;
+    health_check.reuse_connection = config.load_balance.health_check.reuse_connection;
+    health_check.port_override = config.load_balance.health_check.port_override;
+    if let Some(timeout) = config.connect_timeout_secs {
+        health_check.peer_template.options.connection_timeout = Some(Duration::from_secs(timeout));
+    }
+    if let Some(timeout) = config.read_timeout_secs {
+        health_check.peer_template.options.read_timeout = Some(Duration::from_secs(timeout));
+    }
+    if !config
+        .load_balance
+        .health_check
+        .expected_statuses
+        .is_empty()
+    {
+        let expected: Arc<[u16]> = config
+            .load_balance
+            .health_check
+            .expected_statuses
+            .clone()
+            .into();
+        health_check.validator = Some(Box::new(move |response| {
+            if expected.contains(&response.status.as_u16()) {
+                Ok(())
+            } else {
+                Error::e_explain(
+                    ErrorType::HTTPStatus(response.status.as_u16()),
+                    "unexpected HTTP health check status",
+                )
+            }
+        }));
+    }
+    Ok(Box::new(health_check))
 }
 
 fn background_service_for<S>(
@@ -952,13 +1023,14 @@ mod tests {
     use pingora::lb::Backend;
 
     use crate::config::{
-        LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalancePassiveHealthConfig,
-        LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+        LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckProtocol,
+        LoadBalancePassiveHealthConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig,
+        ProxyConfig,
     };
 
     use super::{
         LoadBalancedUpstreamReporter, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
-        backend_connection_key,
+        backend_connection_key, configured_http_health_check,
     };
 
     fn install_test_crypto_provider() {
@@ -1283,6 +1355,7 @@ mod tests {
                     consecutive_success: 2,
                     consecutive_failure: 4,
                     parallel: true,
+                    ..LoadBalanceHealthCheckConfig::default()
                 },
                 ..LoadBalanceConfig::default()
             },
@@ -1296,6 +1369,46 @@ mod tests {
             Some(Duration::from_secs(3))
         );
         assert!(balancer.parallel_health_check());
+    }
+
+    #[test]
+    fn configures_pingora_http_health_check() {
+        let health_check = configured_http_health_check(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            connect_timeout_secs: Some(2),
+            read_timeout_secs: Some(4),
+            load_balance: LoadBalanceConfig {
+                health_check: LoadBalanceHealthCheckConfig {
+                    enabled: true,
+                    protocol: LoadBalanceHealthCheckProtocol::Http,
+                    consecutive_success: 2,
+                    consecutive_failure: 3,
+                    path: "/healthz".to_owned(),
+                    host: Some("origin.example.test".to_owned()),
+                    expected_statuses: vec![200, 204],
+                    reuse_connection: true,
+                    port_override: Some(8081),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap();
+
+        assert_eq!(health_check.consecutive_success, 2);
+        assert_eq!(health_check.consecutive_failure, 3);
+        assert!(health_check.reuse_connection);
+        assert_eq!(health_check.port_override, Some(8081));
+        assert_eq!(
+            health_check.peer_template.options.connection_timeout,
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            health_check.peer_template.options.read_timeout,
+            Some(Duration::from_secs(4))
+        );
+        assert!(health_check.validator.is_some());
     }
 
     #[test]

@@ -495,10 +495,15 @@ max_iterations = 256
 
 [proxy.load_balance.health_check]
 enabled = true
+protocol = "tcp"
 interval_secs = 1
 consecutive_success = 1
 consecutive_failure = 1
 parallel = false
+path = "/"
+host = "origin.example.test"
+expected_statuses = []
+reuse_connection = false
 
 [proxy.load_balance.slow_start]
 enabled = false
@@ -538,12 +543,20 @@ membership changes. `least-connections` uses Fluxheim-held in-flight request
 permits and Pingora's current backend health state. `power-of-two` samples two
 healthy backends through Pingora's random weighted selector and chooses the
 lower in-flight count.
+`proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
+TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
+`protocol = "http"` to send a `GET` request to `path`; by default only `200`
+passes, or `expected_statuses = [200, 204]` can define an explicit allow-list.
+`host` overrides the health-check `Host` header and TLS SNI fallback,
+`reuse_connection = true` allows Pingora to reuse check connections, and
+`port_override` sends checks to a different port on the same backend address.
+Omit `port_override` to check the backend's normal port.
 `proxy.load_balance.passive_health.enabled = true` adds opt-in passive outlier
 detection. Fluxheim records selected upstream outcomes, treats 5xx responses as
 failures by default, and temporarily ejects a backend after
 `consecutive_failure` failures for `ejection_secs`. `failure_statuses` may
-narrow the failure set to specific 5xx status codes. Active TCP health checks
-and passive ejection are combined; if no backend is currently selectable,
+narrow the failure set to specific 5xx status codes. Active health checks and
+passive ejection are combined; if no backend is currently selectable,
 Fluxheim returns a proxy error instead of falling back to a configured primary
 upstream.
 `proxy.load_balance.slow_start.enabled = true` warms newly seen and passively

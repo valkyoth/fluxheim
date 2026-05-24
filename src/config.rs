@@ -3836,6 +3836,14 @@ pub enum LoadBalanceSelection {
     ConsistentCookieHash,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LoadBalanceHealthCheckProtocol {
+    #[default]
+    Tcp,
+    Http,
+}
+
 impl LoadBalanceSelection {
     fn requires_hash_header(self) -> bool {
         matches!(self, Self::HeaderHash | Self::ConsistentHeaderHash)
@@ -3851,6 +3859,8 @@ impl LoadBalanceSelection {
 pub struct LoadBalanceHealthCheckConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default)]
+    pub protocol: LoadBalanceHealthCheckProtocol,
     #[serde(default = "default_lb_health_check_interval_secs")]
     pub interval_secs: u64,
     #[serde(default = "default_lb_health_check_threshold")]
@@ -3859,16 +3869,32 @@ pub struct LoadBalanceHealthCheckConfig {
     pub consecutive_failure: usize,
     #[serde(default)]
     pub parallel: bool,
+    #[serde(default = "default_lb_health_check_path")]
+    pub path: String,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub expected_statuses: Vec<u16>,
+    #[serde(default)]
+    pub reuse_connection: bool,
+    #[serde(default)]
+    pub port_override: Option<u16>,
 }
 
 impl Default for LoadBalanceHealthCheckConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            protocol: LoadBalanceHealthCheckProtocol::default(),
             interval_secs: default_lb_health_check_interval_secs(),
             consecutive_success: default_lb_health_check_threshold(),
             consecutive_failure: default_lb_health_check_threshold(),
             parallel: false,
+            path: default_lb_health_check_path(),
+            host: None,
+            expected_statuses: Vec::new(),
+            reuse_connection: false,
+            port_override: None,
         }
     }
 }
@@ -3888,6 +3914,36 @@ impl LoadBalanceHealthCheckConfig {
         if self.consecutive_failure == 0 {
             return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.consecutive_failure",
+            });
+        }
+        if !valid_health_check_path(&self.path) {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.path",
+            });
+        }
+        if let Some(host) = &self.host
+            && !valid_health_check_host(host)
+        {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.host",
+            });
+        }
+        if self.expected_statuses.len() > 32 {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.expected_statuses",
+            });
+        }
+        let mut seen_statuses = std::collections::HashSet::new();
+        for status in &self.expected_statuses {
+            if !(100..=599).contains(status) || !seen_statuses.insert(*status) {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.expected_statuses",
+                });
+            }
+        }
+        if self.port_override.is_some_and(|port| port == 0) {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.port_override",
             });
         }
 
@@ -9790,6 +9846,22 @@ fn default_lb_health_check_threshold() -> usize {
     1
 }
 
+fn default_lb_health_check_path() -> String {
+    "/".to_owned()
+}
+
+fn valid_health_check_path(path: &str) -> bool {
+    path.len() <= 2048
+        && path.starts_with('/')
+        && path
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() && byte != b'#')
+}
+
+fn valid_health_check_host(host: &str) -> bool {
+    host.len() <= 255 && normalize_host(host).is_some()
+}
+
 fn default_cache_include_query() -> bool {
     true
 }
@@ -11327,11 +11399,12 @@ mod tests {
         AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
         CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig,
         CacheStaleErrorKind, CompressionConfig, Config, ConfigError, ConfigLoadError,
-        HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig,
-        ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
-        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig,
-        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
-        valid_dynamic_header_variable, validate_dynamic_header_template,
+        HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoggingConfig, MetricsConfig,
+        ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig, StaticCertificateConfig,
+        TlsAlpnPolicy, TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion,
+        TracingConfig, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
+        normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+        validate_dynamic_header_template,
     };
     #[cfg(feature = "cache")]
     use super::{CachePeerConfig, CachePeerFillConfig};
@@ -11750,10 +11823,16 @@ mod tests {
 
             [proxy.load_balance.health_check]
             enabled = true
+            protocol = "http"
             interval_secs = 2
             consecutive_success = 2
             consecutive_failure = 3
             parallel = true
+            path = "/healthz"
+            host = "app.internal"
+            expected_statuses = [200, 204]
+            reuse_connection = true
+            port_override = 8081
 
             [proxy.load_balance.slow_start]
             enabled = true
@@ -11783,6 +11862,10 @@ mod tests {
         assert_eq!(config.proxy.error_pages[0].path, "/502.html");
         assert_eq!(config.proxy.load_balance.max_iterations, 16);
         assert!(config.proxy.load_balance.health_check.enabled);
+        assert_eq!(
+            config.proxy.load_balance.health_check.protocol,
+            LoadBalanceHealthCheckProtocol::Http
+        );
         assert_eq!(config.proxy.load_balance.health_check.interval_secs, 2);
         assert_eq!(
             config.proxy.load_balance.health_check.consecutive_success,
@@ -11793,6 +11876,20 @@ mod tests {
             3
         );
         assert!(config.proxy.load_balance.health_check.parallel);
+        assert_eq!(config.proxy.load_balance.health_check.path, "/healthz");
+        assert_eq!(
+            config.proxy.load_balance.health_check.host.as_deref(),
+            Some("app.internal")
+        );
+        assert_eq!(
+            config.proxy.load_balance.health_check.expected_statuses,
+            vec![200, 204]
+        );
+        assert!(config.proxy.load_balance.health_check.reuse_connection);
+        assert_eq!(
+            config.proxy.load_balance.health_check.port_override,
+            Some(8081)
+        );
         assert!(config.proxy.load_balance.slow_start.enabled);
         assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
         config.validate().unwrap();
@@ -12838,6 +12935,25 @@ mod tests {
             config.validate(),
             Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.interval_secs"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_http_load_balance_health_check() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+            path = "relative"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.path"
             })
         );
     }

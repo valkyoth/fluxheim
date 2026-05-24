@@ -41,6 +41,9 @@ behavior when the change improves security or project direction.
 - Added opt-in `proxy.load_balance.slow_start` so newly seen or passively
   recovered load-balanced backends can warm up gradually instead of immediately
   receiving their full selection share.
+- Added active HTTP load-balancer health checks with path, host,
+  expected-status, connection reuse, and port override controls alongside the
+  existing TCP/TLS health check mode.
 - Added opt-in `compression-zstd` and `compression-brotli` codec features
   alongside gzip, with bounded levels and negotiation preference `br`, `zstd`,
   then `gzip`.
