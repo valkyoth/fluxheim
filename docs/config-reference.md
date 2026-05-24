@@ -527,6 +527,14 @@ membership changes. `least-connections` uses Fluxheim-held in-flight request
 permits and Pingora's current backend health state. `power-of-two` samples two
 healthy backends through Pingora's random weighted selector and chooses the
 lower in-flight count.
+`proxy.load_balance.passive_health.enabled = true` adds opt-in passive outlier
+detection. Fluxheim records selected upstream outcomes, treats 5xx responses as
+failures by default, and temporarily ejects a backend after
+`consecutive_failure` failures for `ejection_secs`. `failure_statuses` may
+narrow the failure set to specific 5xx status codes. Active TCP health checks
+and passive ejection are combined; if no backend is currently selectable,
+Fluxheim returns a proxy error instead of falling back to a configured primary
+upstream.
 
 `upstreams` is the preferred proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

@@ -27,10 +27,13 @@ behavior when the change improves security or project direction.
 - Added `proxy.load_balance.selection` for least-connections, power-of-two,
   weighted source, URI, header, cookie, and consistent-hash upstream selection in
   `load-balancer` builds.
+- Added opt-in `proxy.load_balance.passive_health` outlier detection for
+  load-balanced upstreams, with bounded consecutive-failure ejection for proxy
+  failures and selected 5xx response statuses.
 
 ### Planned
 
-- Continue the production proxy parity line with upstream resilience,
+- Continue the production proxy parity line with retry/redispatch controls,
   TLS/protocol, discovery, mirroring, and operator-hook work.
 
 ## 1.3.7 - Production PHP-FPM Completion

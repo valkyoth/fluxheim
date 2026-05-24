@@ -3624,6 +3624,8 @@ pub struct LoadBalanceConfig {
     pub max_iterations: usize,
     #[serde(default)]
     pub health_check: LoadBalanceHealthCheckConfig,
+    #[serde(default)]
+    pub passive_health: LoadBalancePassiveHealthConfig,
 }
 
 impl Default for LoadBalanceConfig {
@@ -3634,6 +3636,7 @@ impl Default for LoadBalanceConfig {
             hash_cookie: None,
             max_iterations: default_lb_max_iterations(),
             health_check: LoadBalanceHealthCheckConfig::default(),
+            passive_health: LoadBalancePassiveHealthConfig::default(),
         }
     }
 }
@@ -3678,6 +3681,7 @@ impl LoadBalanceConfig {
         }
 
         self.health_check.validate()?;
+        self.passive_health.validate()?;
         Ok(())
     }
 }
@@ -3756,6 +3760,64 @@ impl LoadBalanceHealthCheckConfig {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalancePassiveHealthConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_lb_passive_consecutive_failure")]
+    pub consecutive_failure: usize,
+    #[serde(default = "default_lb_passive_ejection_secs")]
+    pub ejection_secs: u64,
+    #[serde(default)]
+    pub failure_statuses: Vec<u16>,
+}
+
+impl Default for LoadBalancePassiveHealthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            consecutive_failure: default_lb_passive_consecutive_failure(),
+            ejection_secs: default_lb_passive_ejection_secs(),
+            failure_statuses: Vec::new(),
+        }
+    }
+}
+
+impl LoadBalancePassiveHealthConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.consecutive_failure == 0 || self.consecutive_failure > 1000 {
+            return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.consecutive_failure",
+            });
+        }
+        if self.ejection_secs == 0 || self.ejection_secs > 3600 {
+            return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.ejection_secs",
+            });
+        }
+        if self.failure_statuses.len() > 64
+            || self
+                .failure_statuses
+                .iter()
+                .any(|status| !(500..=599).contains(status))
+        {
+            return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.failure_statuses",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_lb_passive_consecutive_failure() -> usize {
+    3
+}
+
+fn default_lb_passive_ejection_secs() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -8043,6 +8105,9 @@ pub enum ConfigError {
     InvalidLoadBalanceHealthCheck {
         field: &'static str,
     },
+    InvalidLoadBalancePassiveHealth {
+        field: &'static str,
+    },
     EmptyCacheImageExtensions {
         scope: &'static str,
     },
@@ -8663,6 +8728,12 @@ impl Display for ConfigError {
             }
             Self::InvalidLoadBalanceHealthCheck { field } => {
                 write!(formatter, "{field} must be greater than zero")
+            }
+            Self::InvalidLoadBalancePassiveHealth { field } => {
+                write!(
+                    formatter,
+                    "{field} contains an invalid passive health value"
+                )
             }
             Self::EmptyCacheImageExtensions { scope } => {
                 write!(formatter, "{scope}.image_extensions cannot be empty")
@@ -12269,6 +12340,36 @@ mod tests {
             config.validate(),
             Err(ConfigError::InvalidLoadBalanceHealthCheck {
                 field: "proxy.load_balance.health_check.interval_secs"
+            })
+        );
+    }
+
+    #[test]
+    fn validates_load_balance_passive_health() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.passive_health]
+            enabled = true
+            consecutive_failure = 2
+            ejection_secs = 10
+            failure_statuses = [500, 502, 503]
+            "#,
+        )
+        .unwrap();
+        config.validate().unwrap();
+
+        let invalid_status: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.passive_health]
+            enabled = true
+            failure_statuses = [404]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            invalid_status.validate(),
+            Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.failure_statuses"
             })
         );
     }

@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::FutureExt;
 use pingora::http::RequestHeader;
@@ -21,7 +21,7 @@ use pingora::lb::selection::{
 use pingora::services::ServiceWithDependents;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 
-use crate::config::{LoadBalanceSelection, ProxyConfig};
+use crate::config::{LoadBalancePassiveHealthConfig, LoadBalanceSelection, ProxyConfig};
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 
@@ -29,17 +29,34 @@ pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 pub struct UpstreamLoadBalancer {
     inner: UpstreamLoadBalancerInner,
     key_source: LoadBalanceKeySource,
+    passive_health: Option<Arc<PassiveHealthState>>,
     max_iterations: usize,
 }
 
 pub struct SelectedUpstream {
     pub backend: Backend,
     pub permit: Option<LoadBalancedConnectionPermit>,
+    pub reporter: Option<LoadBalancedUpstreamReporter>,
 }
 
 #[derive(Debug)]
 pub struct LoadBalancedConnectionPermit {
     counter: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+pub struct LoadBalancedUpstreamReporter {
+    backend_key: u64,
+    passive_health: Arc<PassiveHealthState>,
+}
+
+impl Debug for LoadBalancedUpstreamReporter {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LoadBalancedUpstreamReporter")
+            .field("backend_key", &self.backend_key)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Drop for LoadBalancedConnectionPermit {
@@ -169,13 +186,30 @@ impl UpstreamLoadBalancer {
         client_ip: Option<IpAddr>,
     ) -> Option<SelectedUpstream> {
         let key = self.key_source.request_key(request, client_ip);
-        self.inner.select(key.as_deref(), self.max_iterations)
+        let mut selected = self.inner.select(
+            key.as_deref(),
+            self.max_iterations,
+            self.passive_health.as_deref(),
+        )?;
+        selected.reporter =
+            self.passive_health
+                .as_ref()
+                .map(|passive_health| LoadBalancedUpstreamReporter {
+                    backend_key: backend_connection_key(&selected.backend),
+                    passive_health: passive_health.clone(),
+                });
+        Some(selected)
     }
 
     fn from_inner(inner: UpstreamLoadBalancerInner, config: &ProxyConfig) -> Self {
         Self {
             inner,
             key_source: LoadBalanceKeySource::from_config(config),
+            passive_health: config.load_balance.passive_health.enabled.then(|| {
+                Arc::new(PassiveHealthState::from_config(
+                    &config.load_balance.passive_health,
+                ))
+            }),
             max_iterations: config.load_balance.max_iterations,
         }
     }
@@ -217,19 +251,35 @@ enum UpstreamLoadBalancerInner {
 }
 
 impl UpstreamLoadBalancerInner {
-    fn select(&self, key: Option<&[u8]>, max_iterations: usize) -> Option<SelectedUpstream> {
+    fn select(
+        &self,
+        key: Option<&[u8]>,
+        max_iterations: usize,
+        passive_health: Option<&PassiveHealthState>,
+    ) -> Option<SelectedUpstream> {
         match self {
-            Self::RoundRobin(inner) => inner.select(b"", max_iterations).map(SelectedUpstream::new),
-            Self::LeastConnections { inner, counters } => select_least_connections(inner, counters),
-            Self::PowerOfTwo { inner, counters } => {
-                select_power_of_two(inner, counters, max_iterations)
+            Self::RoundRobin(inner) => select_pingora(inner, b"", max_iterations, passive_health)
+                .map(SelectedUpstream::new),
+            Self::LeastConnections { inner, counters } => {
+                select_least_connections(inner, counters, passive_health)
             }
-            Self::FnvHash(inner) => inner
-                .select(key.unwrap_or_default(), max_iterations)
-                .map(SelectedUpstream::new),
-            Self::ConsistentHash(inner) => inner
-                .select(key.unwrap_or_default(), max_iterations)
-                .map(SelectedUpstream::new),
+            Self::PowerOfTwo { inner, counters } => {
+                select_power_of_two(inner, counters, max_iterations, passive_health)
+            }
+            Self::FnvHash(inner) => select_pingora(
+                inner,
+                key.unwrap_or_default(),
+                max_iterations,
+                passive_health,
+            )
+            .map(SelectedUpstream::new),
+            Self::ConsistentHash(inner) => select_pingora(
+                inner,
+                key.unwrap_or_default(),
+                max_iterations,
+                passive_health,
+            )
+            .map(SelectedUpstream::new),
         }
     }
 
@@ -283,7 +333,100 @@ impl SelectedUpstream {
         Self {
             backend,
             permit: None,
+            reporter: None,
         }
+    }
+}
+
+impl LoadBalancedUpstreamReporter {
+    pub fn record_status(&self, status: u16) {
+        self.passive_health.record_status(self.backend_key, status);
+    }
+
+    pub fn record_failure(&self) {
+        self.passive_health.record_failure(self.backend_key);
+    }
+}
+
+struct PassiveHealthState {
+    consecutive_failure: usize,
+    ejection: Duration,
+    failure_statuses: Arc<[u16]>,
+    backends: Arc<Mutex<std::collections::HashMap<u64, PassiveBackendHealth>>>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PassiveBackendHealth {
+    consecutive_failures: usize,
+    ejected_until: Option<Instant>,
+}
+
+impl PassiveHealthState {
+    fn from_config(config: &LoadBalancePassiveHealthConfig) -> Self {
+        Self {
+            consecutive_failure: config.consecutive_failure,
+            ejection: Duration::from_secs(config.ejection_secs),
+            failure_statuses: config.failure_statuses.clone().into(),
+            backends: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+
+    fn is_ejected(&self, backend: &Backend) -> bool {
+        let key = backend_connection_key(backend);
+        let mut backends = self
+            .backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(state) = backends.get_mut(&key) else {
+            return false;
+        };
+        if state
+            .ejected_until
+            .is_some_and(|until| Instant::now() < until)
+        {
+            return true;
+        }
+        state.ejected_until = None;
+        false
+    }
+
+    fn record_status(&self, key: u64, status: u16) {
+        if self.failure_status(status) {
+            self.record_failure(key);
+        } else {
+            self.record_success(key);
+        }
+    }
+
+    fn record_failure(&self, key: u64) {
+        let mut backends = self
+            .backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = backends.entry(key).or_default();
+        state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+        if state.consecutive_failures >= self.consecutive_failure {
+            state.consecutive_failures = 0;
+            state.ejected_until = Some(Instant::now() + self.ejection);
+        }
+    }
+
+    fn record_success(&self, key: u64) {
+        let mut backends = self
+            .backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(state) = backends.get_mut(&key) {
+            state.consecutive_failures = 0;
+            state.ejected_until = None;
+        }
+    }
+
+    fn failure_status(&self, status: u16) -> bool {
+        if self.failure_statuses.is_empty() {
+            return (500..=599).contains(&status);
+        }
+        self.failure_statuses.contains(&status)
     }
 }
 
@@ -328,13 +471,35 @@ fn backend_connection_key(backend: &Backend) -> u64 {
     hasher.finish()
 }
 
+fn select_pingora<S>(
+    inner: &LoadBalancer<S>,
+    key: &[u8],
+    max_iterations: usize,
+    passive_health: Option<&PassiveHealthState>,
+) -> Option<Backend>
+where
+    S: BackendSelection + 'static,
+    S::Iter: BackendIter,
+{
+    for _ in 0..max_iterations {
+        let backend = inner.select(key, max_iterations)?;
+        if passive_health.is_none_or(|health| !health.is_ejected(&backend)) {
+            return Some(backend);
+        }
+    }
+    None
+}
+
 fn select_least_connections(
     inner: &LoadBalancer<RoundRobin>,
     counters: &BackendConnectionCounters,
+    passive_health: Option<&PassiveHealthState>,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
     for backend in inner.backends().get_backend().iter() {
-        if !inner.backends().ready(backend) {
+        if !inner.backends().ready(backend)
+            || passive_health.is_some_and(|health| health.is_ejected(backend))
+        {
             continue;
         }
         let connections = counters.count(backend);
@@ -350,6 +515,7 @@ fn select_least_connections(
     Some(SelectedUpstream {
         permit: Some(permit),
         backend,
+        reporter: None,
     })
 }
 
@@ -357,11 +523,12 @@ fn select_power_of_two(
     inner: &LoadBalancer<Random>,
     counters: &BackendConnectionCounters,
     max_iterations: usize,
+    passive_health: Option<&PassiveHealthState>,
 ) -> Option<SelectedUpstream> {
-    let first = inner.select(b"", max_iterations)?;
+    let first = select_pingora(inner, b"", max_iterations, passive_health)?;
     let first_key = backend_connection_key(&first);
     let second = (0..max_iterations)
-        .filter_map(|_| inner.select(b"", max_iterations))
+        .filter_map(|_| select_pingora(inner, b"", max_iterations, passive_health))
         .find(|backend| backend_connection_key(backend) != first_key)
         .unwrap_or_else(|| first.clone());
     let selected = if counters.count(&second) < counters.count(&first) {
@@ -373,6 +540,7 @@ fn select_power_of_two(
     Some(SelectedUpstream {
         permit: Some(permit),
         backend: selected,
+        reporter: None,
     })
 }
 
@@ -532,7 +700,8 @@ mod tests {
     use pingora::http::RequestHeader;
 
     use crate::config::{
-        LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceSelection, ProxyConfig,
+        LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalancePassiveHealthConfig,
+        LoadBalanceSelection, ProxyConfig,
     };
 
     use super::UpstreamLoadBalancer;
@@ -694,6 +863,33 @@ mod tests {
 
         let selected = balancer.select(&request(), None).unwrap();
         assert!(selected.permit.is_some());
+    }
+
+    #[test]
+    fn passive_health_ejects_failed_backend() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    failure_statuses: Vec::new(),
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let failed = balancer.select(&request(), None).unwrap();
+        let failed_addr = failed.backend.addr.clone();
+        failed.reporter.unwrap().record_status(503);
+        let next = balancer.select(&request(), None).unwrap();
+        assert_ne!(failed_addr, next.backend.addr);
     }
 
     #[test]

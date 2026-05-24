@@ -4830,6 +4830,10 @@ pub struct RequestContext {
     in_flight_permits: Vec<InFlightPermit>,
     #[cfg(feature = "load-balancer")]
     upstream_load_balancer_permit: Option<crate::load_balancer::LoadBalancedConnectionPermit>,
+    #[cfg(feature = "load-balancer")]
+    upstream_load_balancer_reporter: Option<crate::load_balancer::LoadBalancedUpstreamReporter>,
+    #[cfg(feature = "load-balancer")]
+    upstream_load_balancer_outcome_recorded: bool,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
     health_signal_recorded: bool,
@@ -5309,8 +5313,16 @@ impl ProxyHttp for FluxProxy {
             )
         {
             ctx.upstream_load_balancer_permit = selected.permit;
+            ctx.upstream_load_balancer_reporter = selected.reporter;
             let peer = http_peer_for_proxy(selected.backend, &proxy.config)?;
             return Ok(Box::new(peer));
+        }
+        #[cfg(feature = "load-balancer")]
+        if vhost.load_balancer.is_some() {
+            return Error::e_explain(
+                ErrorType::ConnectError,
+                "no healthy load-balanced upstream is available",
+            );
         }
 
         let upstream = proxy.config.configured_primary_upstream().ok_or_else(|| {
@@ -5683,6 +5695,8 @@ impl ProxyHttp for FluxProxy {
         crate::headers::apply_response_policy(response, response_headers)?;
         #[cfg(feature = "compression-gzip")]
         prepare_gzip_response_compression(session.req_header(), response, &state.compression, ctx)?;
+        #[cfg(feature = "load-balancer")]
+        record_load_balanced_upstream_status(ctx, response.status.as_u16());
         append_fluxheim_via_to_response(response)
     }
 
@@ -5717,6 +5731,8 @@ impl ProxyHttp for FluxProxy {
     where
         Self::CTX: Send + Sync,
     {
+        #[cfg(feature = "load-balancer")]
+        record_load_balanced_upstream_failure(ctx);
         let code = proxy_error_status(error);
         if code > 0 {
             let state = ctx.state.clone().unwrap_or_else(|| self.state.load_full());
@@ -11014,6 +11030,28 @@ fn append_fluxheim_via_to_response(response: &mut ResponseHeader) -> Result<()> 
         .join(", ");
     response.remove_header("via");
     response.insert_header("via", append_fluxheim_via_value(&existing))
+}
+
+#[cfg(feature = "load-balancer")]
+fn record_load_balanced_upstream_status(ctx: &mut RequestContext, status: u16) {
+    if ctx.upstream_load_balancer_outcome_recorded {
+        return;
+    }
+    if let Some(reporter) = &ctx.upstream_load_balancer_reporter {
+        reporter.record_status(status);
+        ctx.upstream_load_balancer_outcome_recorded = true;
+    }
+}
+
+#[cfg(feature = "load-balancer")]
+fn record_load_balanced_upstream_failure(ctx: &mut RequestContext) {
+    if ctx.upstream_load_balancer_outcome_recorded {
+        return;
+    }
+    if let Some(reporter) = &ctx.upstream_load_balancer_reporter {
+        reporter.record_failure();
+        ctx.upstream_load_balancer_outcome_recorded = true;
+    }
 }
 
 fn proxy_error_status(error: &Error) -> u16 {
