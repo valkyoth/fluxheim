@@ -1208,10 +1208,13 @@ Stable scope:
   - disabled in privacy mode unless the policy proves no extra retention.
 - Upstream keepalive and connection-pool tuning beyond the existing global
   pool size:
-  - per-route pool limits;
-  - idle timeout;
-  - maximum reuse count or lifetime;
-  - clear behavior when upstream closes an idle pooled connection.
+  - upstream idle timeout is implemented through
+    `proxy.upstream_idle_timeout_secs`;
+  - total connection establishment timeout is implemented through
+    `proxy.upstream_total_connection_timeout_secs`;
+  - remaining work: per-route pool limits, maximum reuse count or lifetime, and
+    clear behavior documentation when an upstream closes an idle pooled
+    connection.
 - NGINX-style proxy buffering controls:
   - request buffering on/off;
   - response buffering on/off;

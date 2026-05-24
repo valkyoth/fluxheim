@@ -503,6 +503,8 @@ upstream_http_version = "http1"
 # upstream_h2_max_streams = 64
 # upstream_h2_ping_interval_secs = 30
 connect_timeout_secs = 5
+upstream_total_connection_timeout_secs = 10
+upstream_idle_timeout_secs = 120
 read_timeout_secs = 60
 send_timeout_secs = 30
 downstream_write_timeout_secs = 30
@@ -588,6 +590,11 @@ the origin is known to accept cleartext HTTP/2. `upstream_h2_max_streams`
 limits concurrent streams per upstream HTTP/2 connection and must be between
 1 and 1024. `upstream_h2_ping_interval_secs` enables upstream HTTP/2 keepalive
 pings. Both h2 settings require `upstream_http_version` to allow HTTP/2.
+`connect_timeout_secs` bounds the low-level socket connect phase.
+`upstream_total_connection_timeout_secs` wraps full upstream establishment,
+including protocol/TLS setup where the selected connector exposes it.
+`upstream_idle_timeout_secs` controls how long reusable idle upstream
+connections remain in Pingora's keepalive pool before they are closed.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must

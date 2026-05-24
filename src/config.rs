@@ -3457,6 +3457,10 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default)]
+    pub upstream_total_connection_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub upstream_idle_timeout_secs: Option<u64>,
+    #[serde(default)]
     pub read_timeout_secs: Option<u64>,
     #[serde(default)]
     pub send_timeout_secs: Option<u64>,
@@ -3515,6 +3519,8 @@ impl Default for ProxyConfig {
             upstream_h2_max_streams: None,
             upstream_h2_ping_interval_secs: None,
             connect_timeout_secs: None,
+            upstream_total_connection_timeout_secs: None,
+            upstream_idle_timeout_secs: None,
             read_timeout_secs: None,
             send_timeout_secs: None,
             downstream_write_timeout_secs: None,
@@ -3759,6 +3765,14 @@ impl ProxyConfig {
         }
 
         validate_optional_timeout_secs("proxy.connect_timeout_secs", self.connect_timeout_secs)?;
+        validate_optional_timeout_secs(
+            "proxy.upstream_total_connection_timeout_secs",
+            self.upstream_total_connection_timeout_secs,
+        )?;
+        validate_optional_timeout_secs(
+            "proxy.upstream_idle_timeout_secs",
+            self.upstream_idle_timeout_secs,
+        )?;
         validate_optional_timeout_secs("proxy.read_timeout_secs", self.read_timeout_secs)?;
         validate_optional_timeout_secs("proxy.send_timeout_secs", self.send_timeout_secs)?;
         validate_optional_timeout_secs(
@@ -12146,6 +12160,8 @@ mod tests {
             upstream_weights = [1, 3]
             backup_upstreams = ["127.0.0.1:3002"]
             connect_timeout_secs = 5
+            upstream_total_connection_timeout_secs = 10
+            upstream_idle_timeout_secs = 120
             read_timeout_secs = 60
             send_timeout_secs = 30
             upstream_tls = true
@@ -12198,6 +12214,11 @@ mod tests {
         assert_eq!(config.proxy.upstream_weights, [1, 3]);
         assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
         assert_eq!(config.proxy.connect_timeout_secs, Some(5));
+        assert_eq!(
+            config.proxy.upstream_total_connection_timeout_secs,
+            Some(10)
+        );
+        assert_eq!(config.proxy.upstream_idle_timeout_secs, Some(120));
         assert_eq!(config.proxy.read_timeout_secs, Some(60));
         assert_eq!(config.proxy.send_timeout_secs, Some(30));
         assert!(config.proxy.upstream_tls);
@@ -12431,6 +12452,32 @@ mod tests {
         .unwrap();
         assert!(matches!(
             zero_h2_ping_interval.validate(),
+            Err(ConfigError::InvalidProxyTimeout { .. })
+        ));
+
+        let zero_upstream_total_connection_timeout: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_total_connection_timeout_secs = 0
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            zero_upstream_total_connection_timeout.validate(),
+            Err(ConfigError::InvalidProxyTimeout { .. })
+        ));
+
+        let zero_upstream_idle_timeout: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            upstream_idle_timeout_secs = 0
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            zero_upstream_idle_timeout.validate(),
             Err(ConfigError::InvalidProxyTimeout { .. })
         ));
     }

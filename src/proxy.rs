@@ -13160,6 +13160,12 @@ fn apply_proxy_timeouts(peer: &mut HttpPeer, proxy: &ProxyConfig) {
     peer.options.connection_timeout = proxy
         .connect_timeout_secs
         .map(std::time::Duration::from_secs);
+    peer.options.total_connection_timeout = proxy
+        .upstream_total_connection_timeout_secs
+        .map(std::time::Duration::from_secs);
+    peer.options.idle_timeout = proxy
+        .upstream_idle_timeout_secs
+        .map(std::time::Duration::from_secs);
     peer.options.read_timeout = proxy.read_timeout_secs.map(std::time::Duration::from_secs);
     peer.options.write_timeout = proxy.send_timeout_secs.map(std::time::Duration::from_secs);
 }
@@ -15931,6 +15937,8 @@ mod tests {
         let proxy = ProxyConfig {
             upstream: Some("127.0.0.1:6010".to_owned()),
             connect_timeout_secs: Some(5),
+            upstream_total_connection_timeout_secs: Some(10),
+            upstream_idle_timeout_secs: Some(120),
             read_timeout_secs: Some(600),
             send_timeout_secs: Some(30),
             ..ProxyConfig::default()
@@ -15942,6 +15950,11 @@ mod tests {
             peer.options.connection_timeout,
             Some(Duration::from_secs(5))
         );
+        assert_eq!(
+            peer.options.total_connection_timeout,
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(peer.options.idle_timeout, Some(Duration::from_secs(120)));
         assert_eq!(peer.options.read_timeout, Some(Duration::from_secs(600)));
         assert_eq!(peer.options.write_timeout, Some(Duration::from_secs(30)));
     }
