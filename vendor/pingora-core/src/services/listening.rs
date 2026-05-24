@@ -117,6 +117,11 @@ impl<A> Service<A> {
         self.listeners.set_proxy_protocol_v1(config);
     }
 
+    /// Enable trusted PROXY protocol v2 receive on all listener endpoints.
+    pub fn set_proxy_protocol_v2(&mut self, config: ProxyProtocolConfig) {
+        self.listeners.set_proxy_protocol_v2(config);
+    }
+
     /// Get the [`Listeners`], mostly to add more endpoints.
     pub fn endpoints(&mut self) -> &mut Listeners {
         &mut self.listeners

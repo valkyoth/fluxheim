@@ -216,7 +216,19 @@ where
         "downstream PROXY protocol v1 receive enabled for {} trusted source(s)",
         trusted_sources.len()
     );
-    service.set_proxy_protocol_v1(pingora::listeners::ProxyProtocolConfig::v1(trusted_sources));
+    match config.server.proxy_protocol {
+        DownstreamProxyProtocol::Off => {}
+        DownstreamProxyProtocol::V1 => {
+            service.set_proxy_protocol_v1(pingora::listeners::ProxyProtocolConfig::v1(
+                trusted_sources,
+            ));
+        }
+        DownstreamProxyProtocol::V2 => {
+            service.set_proxy_protocol_v2(pingora::listeners::ProxyProtocolConfig::v2(
+                trusted_sources,
+            ));
+        }
+    }
     Ok(())
 }
 

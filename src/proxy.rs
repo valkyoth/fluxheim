@@ -12958,16 +12958,16 @@ fn apply_upstream_proxy_protocol(
     session: &Session,
     state: &ProxyRuntimeState,
 ) {
-    if proxy.upstream_proxy_protocol != UpstreamProxyProtocol::V1 {
-        return;
-    }
-    let header = proxy_protocol_v1_header(
-        effective_proxy_protocol_source_addr(session, state),
-        session
-            .server_addr()
-            .and_then(|address| address.as_inet())
-            .copied(),
-    );
+    let source = effective_proxy_protocol_source_addr(session, state);
+    let destination = session
+        .server_addr()
+        .and_then(|address| address.as_inet())
+        .copied();
+    let header = match proxy.upstream_proxy_protocol {
+        UpstreamProxyProtocol::Off => return,
+        UpstreamProxyProtocol::V1 => proxy_protocol_v1_header(source, destination),
+        UpstreamProxyProtocol::V2 => proxy_protocol_v2_header(source, destination),
+    };
     peer.options.custom_l4 = Some(Arc::new(ProxyProtocolV1Connector {
         header,
         connect_timeout: proxy
@@ -13020,6 +13020,42 @@ fn proxy_protocol_v1_header(
         .into_bytes(),
         _ => b"PROXY UNKNOWN\r\n".to_vec(),
     }
+}
+
+const PROXY_PROTOCOL_V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\0\r\nQUIT\n";
+
+fn proxy_protocol_v2_header(
+    source: Option<std::net::SocketAddr>,
+    destination: Option<std::net::SocketAddr>,
+) -> Vec<u8> {
+    let mut header = Vec::from(&PROXY_PROTOCOL_V2_SIGNATURE[..]);
+    let Some(source) = source else {
+        header.extend_from_slice(&[0x21, 0x00, 0x00, 0x00]);
+        return header;
+    };
+    let Some(destination) = destination else {
+        header.extend_from_slice(&[0x21, 0x00, 0x00, 0x00]);
+        return header;
+    };
+
+    match (source.ip(), destination.ip()) {
+        (IpAddr::V4(source_ip), IpAddr::V4(destination_ip)) => {
+            header.extend_from_slice(&[0x21, 0x11, 0x00, 0x0c]);
+            header.extend_from_slice(&source_ip.octets());
+            header.extend_from_slice(&destination_ip.octets());
+            header.extend_from_slice(&source.port().to_be_bytes());
+            header.extend_from_slice(&destination.port().to_be_bytes());
+        }
+        (IpAddr::V6(source_ip), IpAddr::V6(destination_ip)) => {
+            header.extend_from_slice(&[0x21, 0x21, 0x00, 0x24]);
+            header.extend_from_slice(&source_ip.octets());
+            header.extend_from_slice(&destination_ip.octets());
+            header.extend_from_slice(&source.port().to_be_bytes());
+            header.extend_from_slice(&destination.port().to_be_bytes());
+        }
+        _ => header.extend_from_slice(&[0x21, 0x00, 0x00, 0x00]),
+    }
+    header
 }
 
 #[derive(Debug)]
@@ -13310,8 +13346,9 @@ mod tests {
         append_fluxheim_via_to_response, approximate_request_header_bytes,
         count_response_body_chunk, effective_client_ip_from_forwarded_for, http_peer_for_proxy,
         http_peer_for_runtime_proxy, https_redirect_location, normalize_cookie_headers,
-        proxy_protocol_v1_header, redirect_authority, request_body_chunk_limit_status,
-        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
+        proxy_protocol_v1_header, proxy_protocol_v2_header, redirect_authority,
+        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
+        route_rewritten_path_and_query,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -15968,6 +16005,38 @@ mod tests {
         assert_eq!(
             proxy_protocol_v1_header(None, Some(destination)),
             b"PROXY UNKNOWN\r\n"
+        );
+    }
+
+    #[test]
+    fn proxy_protocol_v2_header_encodes_matching_ip_families() {
+        let source = "203.0.113.10:42300".parse().unwrap();
+        let destination = "192.0.2.20:443".parse().unwrap();
+        let header = proxy_protocol_v2_header(Some(source), Some(destination));
+        assert_eq!(&header[..12], b"\r\n\r\n\0\r\nQUIT\n");
+        assert_eq!(&header[12..16], &[0x21, 0x11, 0x00, 0x0c]);
+        assert_eq!(&header[16..24], &[203, 0, 113, 10, 192, 0, 2, 20]);
+        assert_eq!(&header[24..26], &42300u16.to_be_bytes());
+        assert_eq!(&header[26..28], &443u16.to_be_bytes());
+
+        let source = "[2001:db8::10]:42300".parse().unwrap();
+        let destination = "[2001:db8::20]:8443".parse().unwrap();
+        let header = proxy_protocol_v2_header(Some(source), Some(destination));
+        assert_eq!(&header[12..16], &[0x21, 0x21, 0x00, 0x24]);
+        assert_eq!(header.len(), 52);
+    }
+
+    #[test]
+    fn proxy_protocol_v2_header_falls_back_to_unspec_for_ambiguous_inputs() {
+        let source = "203.0.113.10:42300".parse().unwrap();
+        let destination = "[2001:db8::20]:8443".parse().unwrap();
+        assert_eq!(
+            &proxy_protocol_v2_header(Some(source), Some(destination))[12..16],
+            &[0x21, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(
+            &proxy_protocol_v2_header(None, Some(destination))[12..16],
+            &[0x21, 0x00, 0x00, 0x00]
         );
     }
 

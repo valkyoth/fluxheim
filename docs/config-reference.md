@@ -115,13 +115,14 @@ Notes:
   Fluxheim walks `X-Forwarded-For` from right to left and restores the last
   non-trusted hop for generated client-IP headers, equivalent to nginx
   `real_ip_recursive on`. The list is capped at 512 entries.
-- `proxy_protocol` defaults to `off`. Set it to `v1` only on listeners reached
+- `proxy_protocol` defaults to `off`. Set it to `v1` or `v2` only on listeners reached
   exclusively through trusted load balancers or edge proxies that send HAProxy
-  PROXY protocol v1 before TLS/HTTP bytes. Fluxheim requires
+  PROXY protocol before TLS/HTTP bytes. Fluxheim requires
   `server.trusted_proxies` when this is enabled, rejects direct peers outside
   that trust list before parsing the header, and restores the PROXY source
-  address before TLS and HTTP handling. Binary PROXY protocol v2 is still
-  planned.
+  address before TLS and HTTP handling. The v2 parser supports TCP4/TCP6 and
+  LOCAL/UNSPEC frames, skips bounded TLV payloads, and rejects unsupported
+  address families or oversized v2 payloads.
 - `[server.process]` maps safe process settings into Pingora's `ServerConf`.
   Changes to these values require a process upgrade, not a live snapshot
   reload. Keep `threads` conservative in containers because Pingora allocates
@@ -568,14 +569,14 @@ reject symlinked existing path components, and reject group/world-writable
 existing parents. Rustls, OpenSSL, and BoringSSL builds support custom upstream
 trust roots and upstream client certificates. s2n builds currently reject these
 fields until Fluxheim has panic-free PEM loading for that backend.
-`upstream_proxy_protocol` defaults to `off`. Set it to `v1` to send a HAProxy
-PROXY protocol v1 line to the origin immediately after the upstream TCP/Unix
+`upstream_proxy_protocol` defaults to `off`. Set it to `v1` or `v2` to send a
+HAProxy PROXY protocol header to the origin immediately after the upstream TCP/Unix
 connection is established and before any upstream TLS handshake. The source
 address is trusted-proxy-aware: if the direct peer is trusted and
 `X-Forwarded-For` restores a client IP, that restored IP is used with source
 port `0`; otherwise the direct downstream socket address is used. If Fluxheim
 cannot produce a same-family TCP4/TCP6 source and destination pair, it sends
-`PROXY UNKNOWN`.
+`PROXY UNKNOWN` for v1 or an empty v2 PROXY/UNSPEC frame for v2.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must

@@ -1147,9 +1147,10 @@ Release shape:
     BoringSSL. Remaining work is s2n parity and per-upstream protocol/cipher
     policy;
   - PROXY protocol v1/v2 accept/send with explicit trust boundaries. Listener
-    v1 receive is implemented through `server.proxy_protocol` with mandatory
-    trusted-peer gating, and upstream v1 send is implemented through
-    `proxy.upstream_proxy_protocol`; binary v2 remains;
+    v1/v2 receive is implemented through `server.proxy_protocol` with mandatory
+    trusted-peer gating, and upstream v1/v2 send is implemented through
+    `proxy.upstream_proxy_protocol`. v2 support is conservative TCP4/TCP6 plus
+    LOCAL/UNSPEC only; TLV interpretation remains future work;
   - gRPC-safe HTTP/2 proxying for trailers, status, timeouts, body limits, and
     streaming behavior. gRPC-Web/JSON transcoding remains out of scope unless a
     mature crate or small adapter is justified.
@@ -1255,11 +1256,10 @@ Stable scope:
   design, but `1.4` should make it proxy-route complete: timeout, header
   forwarding, allowed response headers, deny status, and metrics.
 - PROXY protocol support:
-  - accept Proxy Protocol v1/v2 on configured listeners. Listener v1 receive is
-    implemented through `server.proxy_protocol`; v2 receive remains future work;
-  - send Proxy Protocol to upstreams on configured routes. Upstream v1 send is
-    implemented through `proxy.upstream_proxy_protocol`; v2 send remains future
-    work;
+  - accept Proxy Protocol v1/v2 on configured listeners. Listener v1/v2 receive
+    is implemented through `server.proxy_protocol` with trusted peer gating;
+  - send Proxy Protocol to upstreams on configured routes. Upstream v1/v2 send
+    is implemented through `proxy.upstream_proxy_protocol`;
   - validate trust boundaries before restoring client identity.
 - Dynamic service discovery:
   - DNS refresh for upstream hostnames with TTL/refresh controls;

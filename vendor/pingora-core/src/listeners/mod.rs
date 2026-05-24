@@ -84,7 +84,7 @@ use pingora_error::{Error, ErrorType, Result};
 use std::{
     any::Any,
     fs::Permissions,
-    net::{IpAddr, SocketAddr as StdSocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr as StdSocketAddr},
     sync::Arc,
 };
 use tokio::io::AsyncReadExt;
@@ -96,15 +96,27 @@ pub use crate::protocols::tls::ALPN;
 pub use l4::{ServerAddress, TcpSocketOptions};
 
 const PROXY_PROTOCOL_V1_MAX_LINE: usize = 108;
+const PROXY_PROTOCOL_V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\0\r\nQUIT\n";
+const PROXY_PROTOCOL_V2_HEADER_LEN: usize = 16;
+const PROXY_PROTOCOL_V2_MAX_PAYLOAD: usize = 4096;
 
 #[derive(Clone, Debug)]
 pub struct ProxyProtocolConfig {
+    version: ProxyProtocolVersion,
     trusted_sources: Arc<[ProxyProtocolTrustedSource]>,
 }
 
 impl ProxyProtocolConfig {
     pub fn v1(trusted_sources: Vec<ProxyProtocolTrustedSource>) -> Self {
         Self {
+            version: ProxyProtocolVersion::V1,
+            trusted_sources: trusted_sources.into(),
+        }
+    }
+
+    pub fn v2(trusted_sources: Vec<ProxyProtocolTrustedSource>) -> Self {
+        Self {
+            version: ProxyProtocolVersion::V2,
             trusted_sources: trusted_sources.into(),
         }
     }
@@ -114,6 +126,12 @@ impl ProxyProtocolConfig {
             .iter()
             .any(|source| source.contains(address.ip()))
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProxyProtocolVersion {
+    V1,
+    V2,
 }
 
 #[derive(Clone, Debug)]
@@ -253,7 +271,7 @@ impl UninitializedStream {
     pub async fn handshake(mut self) -> Result<Stream> {
         self.l4.set_buffer();
         if let Some(proxy_protocol) = &self.proxy_protocol {
-            apply_proxy_protocol_v1(&mut self.l4, proxy_protocol).await?;
+            apply_proxy_protocol(&mut self.l4, proxy_protocol).await?;
         }
         if let Some(tls) = self.tls {
             let tls_stream = tls.tls_handshake(self.l4).await?;
@@ -271,10 +289,7 @@ impl UninitializedStream {
     }
 }
 
-async fn apply_proxy_protocol_v1(
-    stream: &mut L4Stream,
-    config: &ProxyProtocolConfig,
-) -> Result<()> {
+async fn apply_proxy_protocol(stream: &mut L4Stream, config: &ProxyProtocolConfig) -> Result<()> {
     let Some(digest) = stream.get_socket_digest() else {
         return Error::e_explain(
             ErrorType::Custom("ProxyProtocolError"),
@@ -295,7 +310,10 @@ async fn apply_proxy_protocol_v1(
         );
     }
 
-    let parsed = read_proxy_protocol_v1_header(stream).await?;
+    let parsed = match config.version {
+        ProxyProtocolVersion::V1 => read_proxy_protocol_v1_header(stream).await?,
+        ProxyProtocolVersion::V2 => read_proxy_protocol_v2_header(stream).await?,
+    };
     if let Some(peer_addr) = parsed {
         stream.set_socket_digest(digest.clone_with_peer_addr(Some(SocketAddr::Inet(peer_addr))));
     }
@@ -328,6 +346,117 @@ async fn read_proxy_protocol_v1_header(stream: &mut L4Stream) -> Result<Option<S
         }
     }
     parse_proxy_protocol_v1_header(&line)
+}
+
+async fn read_proxy_protocol_v2_header(stream: &mut L4Stream) -> Result<Option<StdSocketAddr>> {
+    let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+    stream.read_exact(&mut header).await.map_err(|error| {
+        Error::because(
+            ErrorType::ReadError,
+            "while reading PROXY protocol v2 header",
+            error,
+        )
+    })?;
+    let payload_len = u16::from_be_bytes([header[14], header[15]]) as usize;
+    if payload_len > PROXY_PROTOCOL_V2_MAX_PAYLOAD {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "PROXY protocol v2 payload exceeds configured parser limit",
+        );
+    }
+    let mut payload = vec![0u8; payload_len];
+    if payload_len > 0 {
+        stream.read_exact(&mut payload).await.map_err(|error| {
+            Error::because(
+                ErrorType::ReadError,
+                "while reading PROXY protocol v2 payload",
+                error,
+            )
+        })?;
+    }
+    parse_proxy_protocol_v2_header(&header, &payload)
+}
+
+fn parse_proxy_protocol_v2_header(
+    header: &[u8; PROXY_PROTOCOL_V2_HEADER_LEN],
+    payload: &[u8],
+) -> Result<Option<StdSocketAddr>> {
+    if &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()] != PROXY_PROTOCOL_V2_SIGNATURE {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "invalid PROXY protocol v2 signature",
+        );
+    }
+    let version = header[12] & 0xf0;
+    let command = header[12] & 0x0f;
+    if version != 0x20 {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "invalid PROXY protocol v2 version",
+        );
+    }
+    if command == 0x00 {
+        return Ok(None);
+    }
+    if command != 0x01 {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "invalid PROXY protocol v2 command",
+        );
+    }
+
+    match header[13] {
+        0x00 => Ok(None),
+        0x11 => {
+            if payload.len() < 12 {
+                return Error::e_explain(
+                    ErrorType::Custom("ProxyProtocolError"),
+                    "truncated PROXY protocol v2 TCP4 address",
+                );
+            }
+            let source = Ipv4Addr::new(payload[0], payload[1], payload[2], payload[3]);
+            let source_port = u16::from_be_bytes([payload[8], payload[9]]);
+            Ok(Some(StdSocketAddr::new(
+                IpAddr::V4(source),
+                source_port,
+            )))
+        }
+        0x21 => {
+            if payload.len() < 36 {
+                return Error::e_explain(
+                    ErrorType::Custom("ProxyProtocolError"),
+                    "truncated PROXY protocol v2 TCP6 address",
+                );
+            }
+            let source = Ipv6Addr::from([
+                payload[0],
+                payload[1],
+                payload[2],
+                payload[3],
+                payload[4],
+                payload[5],
+                payload[6],
+                payload[7],
+                payload[8],
+                payload[9],
+                payload[10],
+                payload[11],
+                payload[12],
+                payload[13],
+                payload[14],
+                payload[15],
+            ]);
+            let source_port = u16::from_be_bytes([payload[32], payload[33]]);
+            Ok(Some(StdSocketAddr::new(
+                IpAddr::V6(source),
+                source_port,
+            )))
+        }
+        _ => Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "unsupported PROXY protocol v2 address family or transport",
+        ),
+    }
 }
 
 fn parse_proxy_protocol_v1_header(line: &[u8]) -> Result<Option<StdSocketAddr>> {
@@ -546,6 +675,15 @@ impl Listeners {
         }
     }
 
+    /// Enable trusted PROXY protocol v2 receive on all listener endpoints.
+    pub fn set_proxy_protocol_v2(&mut self, config: ProxyProtocolConfig) {
+        let config = Arc::new(config);
+        self.proxy_protocol = Some(config.clone());
+        for stack in &mut self.stacks {
+            stack.proxy_protocol = Some(config.clone());
+        }
+    }
+
     pub(crate) async fn build(
         &mut self,
         #[cfg(unix)] upgrade_listeners: Option<ListenFds>,
@@ -601,6 +739,36 @@ mod test {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn proxy_protocol_v2_parser_accepts_tcp4_and_unspec() {
+        let mut header = Vec::from(&PROXY_PROTOCOL_V2_SIGNATURE[..]);
+        header.extend_from_slice(&[0x21, 0x11, 0x00, 0x0c]);
+        header.extend_from_slice(&[203, 0, 113, 10, 192, 0, 2, 20]);
+        header.extend_from_slice(&42300u16.to_be_bytes());
+        header.extend_from_slice(&443u16.to_be_bytes());
+        let parsed = parse_proxy_protocol_v2_header(
+            header[..PROXY_PROTOCOL_V2_HEADER_LEN].try_into().unwrap(),
+            &header[PROXY_PROTOCOL_V2_HEADER_LEN..],
+        )
+        .unwrap();
+        assert_eq!(parsed, Some("203.0.113.10:42300".parse().unwrap()));
+
+        let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+        header[..PROXY_PROTOCOL_V2_SIGNATURE.len()].copy_from_slice(PROXY_PROTOCOL_V2_SIGNATURE);
+        header[12] = 0x21;
+        assert_eq!(parse_proxy_protocol_v2_header(&header, &[]).unwrap(), None);
+    }
+
+    #[test]
+    fn proxy_protocol_v2_parser_rejects_truncated_tcp6() {
+        let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+        header[..PROXY_PROTOCOL_V2_SIGNATURE.len()].copy_from_slice(PROXY_PROTOCOL_V2_SIGNATURE);
+        header[12] = 0x21;
+        header[13] = 0x21;
+        header[15] = 0x01;
+        assert!(parse_proxy_protocol_v2_header(&header, &[0]).is_err());
     }
 
     #[test]

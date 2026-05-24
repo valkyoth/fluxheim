@@ -83,10 +83,17 @@ behavior when the change improves security or project direction.
   `proxy.upstream_proxy_protocol = "v1"`, using the trusted-proxy-aware client
   identity when available and falling back to `PROXY UNKNOWN` when a safe
   TCP4/TCP6 line cannot be formed.
+- Added binary PROXY protocol v2 upstream send support through
+  `proxy.upstream_proxy_protocol = "v2"`, emitting TCP4/TCP6 frames when Fluxheim
+  has same-family source and destination addresses and an empty PROXY/UNSPEC
+  frame otherwise.
 - Added opt-in listener-side HAProxy PROXY protocol v1 receive support through
   `server.proxy_protocol = "v1"`. It requires `server.trusted_proxies`, rejects
   untrusted direct peers before parsing the header, and restores the PROXY
   source address before downstream TLS and HTTP handling.
+- Added listener-side binary PROXY protocol v2 receive support through
+  `server.proxy_protocol = "v2"`, with the same trusted-direct-peer gate as v1
+  plus bounded TCP4/TCP6 parsing and LOCAL/UNSPEC handling.
 
 ### Planned
 

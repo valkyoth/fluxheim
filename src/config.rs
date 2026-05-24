@@ -727,6 +727,7 @@ pub enum DownstreamProxyProtocol {
     #[default]
     Off,
     V1,
+    V2,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -3469,6 +3470,7 @@ pub enum UpstreamProxyProtocol {
     #[default]
     Off,
     V1,
+    V2,
 }
 
 const MAX_PROXY_UPSTREAMS: usize = 64;
@@ -12098,7 +12100,7 @@ mod tests {
             upstream_ca_path = "tests/fixtures/tls/localhost-cert.pem"
             upstream_client_cert_path = "tests/fixtures/tls/localhost-cert.pem"
             upstream_client_key_path = "tests/fixtures/tls/localhost-key.pem"
-            upstream_proxy_protocol = "v1"
+            upstream_proxy_protocol = "v2"
 
             [proxy.load_balance]
             max_iterations = 16
@@ -12164,7 +12166,7 @@ mod tests {
         );
         assert_eq!(
             config.proxy.upstream_proxy_protocol,
-            UpstreamProxyProtocol::V1
+            UpstreamProxyProtocol::V2
         );
         assert_eq!(config.proxy.error_pages.len(), 1);
         assert_eq!(config.proxy.error_pages[0].status, 502);
@@ -13458,7 +13460,7 @@ mod tests {
             r#"
             [server]
             trusted_proxies = ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
-            proxy_protocol = "v1"
+            proxy_protocol = "v2"
 
             [server.limits]
             max_request_header_bytes = "32KiB"
@@ -13486,7 +13488,7 @@ mod tests {
             config.server.trusted_proxies,
             ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
         );
-        assert_eq!(config.server.proxy_protocol, DownstreamProxyProtocol::V1);
+        assert_eq!(config.server.proxy_protocol, DownstreamProxyProtocol::V2);
         config.validate().unwrap();
     }
 
