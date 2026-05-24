@@ -596,6 +596,7 @@ zstd = false
 brotli = false
 min_bytes = "1KiB"
 max_input_bytes = "1MiB"
+max_output_bytes = "2MiB"
 gzip_level = 4
 zstd_level = 3
 brotli_quality = 4
@@ -619,6 +620,7 @@ zstd = true
 brotli = false
 min_bytes = "1KiB"
 max_input_bytes = "2MiB"
+max_output_bytes = "4MiB"
 
 [[vhosts.routes]]
 name = "uploads"
@@ -633,6 +635,7 @@ gzip = true
 zstd = true
 min_bytes = "1KiB"
 max_input_bytes = "2MiB"
+max_output_bytes = "4MiB"
 ```
 
 The compression path compresses only eligible `GET` responses with known
@@ -644,10 +647,11 @@ conservative text, JavaScript, JSON, XML, or SVG media type. Fluxheim prefers
 the client. Fluxheim removes `Content-Length` and `ETag` from compressed
 responses and adds `Vary: Accept-Encoding`.
 
-`min_bytes` and `max_input_bytes` bound the original response size. The
-configured maximum cannot exceed 64 MiB. `gzip_level` must be between `0` and
-`9`, `zstd_level` between `1` and `19`, and `brotli_quality` between `0` and
-`11`.
+`min_bytes` and `max_input_bytes` bound the original response size.
+`max_output_bytes` bounds the encoded response size. The configured input
+maximum cannot exceed 64 MiB and the output maximum cannot exceed 128 MiB.
+`gzip_level` must be between `0` and `9`, `zstd_level` between `1` and `19`,
+and `brotli_quality` between `0` and `11`.
 
 ## Web
 

@@ -3611,10 +3611,12 @@ impl ProxyErrorPageConfig {
 
 const DEFAULT_COMPRESSION_MIN_BYTES: u64 = 1024;
 const DEFAULT_COMPRESSION_MAX_INPUT_BYTES: u64 = 1024 * 1024;
+const DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_COMPRESSION_GZIP_LEVEL: u32 = 4;
 const DEFAULT_COMPRESSION_ZSTD_LEVEL: i32 = 3;
 const DEFAULT_COMPRESSION_BROTLI_QUALITY: u32 = 4;
 const MAX_COMPRESSION_INPUT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_COMPRESSION_OUTPUT_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -3631,6 +3633,8 @@ pub struct CompressionConfig {
     pub min_bytes: ByteSize,
     #[serde(default = "default_compression_max_input_bytes")]
     pub max_input_bytes: ByteSize,
+    #[serde(default = "default_compression_max_output_bytes")]
+    pub max_output_bytes: ByteSize,
     #[serde(default = "default_compression_gzip_level")]
     pub gzip_level: u32,
     #[serde(default = "default_compression_zstd_level")]
@@ -3648,6 +3652,7 @@ impl Default for CompressionConfig {
             brotli: false,
             min_bytes: default_compression_min_bytes(),
             max_input_bytes: default_compression_max_input_bytes(),
+            max_output_bytes: default_compression_max_output_bytes(),
             gzip_level: default_compression_gzip_level(),
             zstd_level: default_compression_zstd_level(),
             brotli_quality: default_compression_brotli_quality(),
@@ -3675,6 +3680,13 @@ impl CompressionConfig {
         {
             return Err(ConfigError::InvalidCompressionPolicy {
                 field: "compression.max_input_bytes",
+            });
+        }
+        if self.max_output_bytes.as_u64() < self.min_bytes.as_u64()
+            || self.max_output_bytes.as_u64() > MAX_COMPRESSION_OUTPUT_BYTES
+        {
+            return Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.max_output_bytes",
             });
         }
         if self.gzip_level > 9 {
@@ -3706,6 +3718,10 @@ fn default_compression_gzip_enabled() -> bool {
 
 fn default_compression_max_input_bytes() -> ByteSize {
     ByteSize::from_bytes(DEFAULT_COMPRESSION_MAX_INPUT_BYTES)
+}
+
+fn default_compression_max_output_bytes() -> ByteSize {
+    ByteSize::from_bytes(DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES)
 }
 
 fn default_compression_gzip_level() -> u32 {
@@ -11362,6 +11378,10 @@ mod tests {
         assert!(Config::default().compression.gzip);
         assert!(!Config::default().compression.zstd);
         assert!(!Config::default().compression.brotli);
+        assert_eq!(
+            Config::default().compression.max_output_bytes.as_u64(),
+            super::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES
+        );
         let default_issuers = Config::default().tls.acme.issuers;
         let issuer_names: Vec<&str> = default_issuers
             .iter()
@@ -11398,6 +11418,7 @@ mod tests {
             brotli = true
             min_bytes = "2KiB"
             max_input_bytes = "4KiB"
+            max_output_bytes = "8KiB"
             gzip_level = 6
             zstd_level = 5
             brotli_quality = 5
@@ -11406,6 +11427,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.compression.min_bytes.as_u64(), 2048);
+        assert_eq!(config.compression.max_output_bytes.as_u64(), 8192);
         assert!(config.compression.zstd);
         assert!(config.compression.brotli);
         assert_eq!(config.compression.zstd_level, 5);
@@ -11470,6 +11492,23 @@ mod tests {
             invalid_bounds.validate(),
             Err(ConfigError::InvalidCompressionPolicy {
                 field: "compression.min_bytes"
+            })
+        ));
+
+        let invalid_output_bounds: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = true
+            min_bytes = "8KiB"
+            max_input_bytes = "16KiB"
+            max_output_bytes = "4KiB"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid_output_bounds.validate(),
+            Err(ConfigError::InvalidCompressionPolicy {
+                field: "compression.max_output_bytes"
             })
         ));
 

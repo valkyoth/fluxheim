@@ -76,7 +76,9 @@ The first codec implementation is intentionally bounded:
 - only responses with a known `Content-Length` are compressed;
 - input must fit between `compression.min_bytes` and
   `compression.max_input_bytes`;
+- encoded output must stay within `compression.max_output_bytes`;
 - `compression.max_input_bytes` is capped at 64 MiB by config validation;
+- `compression.max_output_bytes` is capped at 128 MiB by config validation;
 - gzip levels are restricted to `0..=9`;
 - zstd levels are restricted to `1..=19`;
 - Brotli quality is restricted to `0..=11`;
@@ -132,6 +134,7 @@ input share the same compressed response. Safe defaults:
 enabled = true
 min_bytes = "1KiB"
 max_input_bytes = "1MiB"
+max_output_bytes = "2MiB"
 gzip = true
 gzip_level = 4
 zstd = false
@@ -161,6 +164,7 @@ zstd = true
 brotli = true
 min_bytes = "1KiB"
 max_input_bytes = "2MiB"
+max_output_bytes = "4MiB"
 ```
 
 Path-scoped compression can be modeled as a route override:
@@ -189,6 +193,7 @@ gzip = true
 zstd = true
 min_bytes = "1KiB"
 max_input_bytes = "2MiB"
+max_output_bytes = "4MiB"
 ```
 
 Eligibility checks still apply inside that path: already-compressed media types
