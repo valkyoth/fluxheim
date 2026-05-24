@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 #[cfg(feature = "php-fpm")]
 use std::sync::atomic::AtomicBool;
-#[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -2540,6 +2539,23 @@ fn request_limited_by_rate_policy(
     route_index.and_then(|route_index| vhost.route(route_index).rate_limit.check(client_ip))
 }
 
+fn acquire_request_concurrency_permits(
+    vhost: &RuntimeVhost,
+    route_index: Option<usize>,
+) -> std::result::Result<Vec<InFlightPermit>, u16> {
+    let mut permits = Vec::with_capacity(2);
+    if let Some(permit) = vhost.concurrency.try_acquire()? {
+        permits.push(permit);
+    }
+    if let Some(route_index) = route_index {
+        let route = vhost.route(route_index);
+        if let Some(permit) = route.concurrency.try_acquire()? {
+            permits.push(permit);
+        }
+    }
+    Ok(permits)
+}
+
 fn effective_acl_client_ip(session: &Session, state: &ProxyRuntimeState) -> Option<IpAddr> {
     let direct_ip = session.client_addr().and_then(|addr| addr.as_inet())?.ip();
     let trusted_direct_peer = state.trusted_proxy(direct_ip);
@@ -2616,6 +2632,7 @@ struct RuntimeVhost {
     max_request_body_bytes: Option<crate::config::ByteSize>,
     access: RuntimeAccessPolicy,
     rate_limit: RuntimeRateLimit,
+    concurrency: RuntimeConcurrencyLimit,
     proxy: RuntimeProxy,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
@@ -2653,6 +2670,7 @@ impl std::fmt::Debug for RuntimeVhost {
             .field("max_request_body_bytes", &self.max_request_body_bytes)
             .field("access", &self.access)
             .field("rate_limit", &self.rate_limit)
+            .field("concurrency", &self.concurrency)
             .field("proxy", &self.proxy)
             .field("request_headers", &self.request_headers)
             .field("response_headers", &self.response_headers);
@@ -2698,11 +2716,82 @@ struct RuntimeRoute {
     max_request_body_bytes: Option<crate::config::ByteSize>,
     access: RuntimeAccessPolicy,
     rate_limit: RuntimeRateLimit,
+    concurrency: RuntimeConcurrencyLimit,
     action: RuntimeRouteAction,
     #[cfg(feature = "cache")]
     cache: Option<RuntimeRouteCache>,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
+}
+
+#[derive(Debug)]
+struct InFlightPermit {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for InFlightPermit {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeConcurrencyLimit {
+    enabled: bool,
+    max_in_flight: usize,
+    status: u16,
+    counter: Arc<AtomicUsize>,
+}
+
+impl Default for RuntimeConcurrencyLimit {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_in_flight: 0,
+            status: 503,
+            counter: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
+impl RuntimeConcurrencyLimit {
+    fn from_config(config: &crate::config::ConcurrencyLimitConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            max_in_flight: config.max_in_flight,
+            status: config.status,
+            counter: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    fn try_acquire(&self) -> std::result::Result<Option<InFlightPermit>, u16> {
+        if !self.enabled {
+            return Ok(None);
+        }
+
+        let mut current = self.counter.load(Ordering::Acquire);
+        loop {
+            if current >= self.max_in_flight {
+                return Err(self.status);
+            }
+            let Some(next) = current.checked_add(1) else {
+                return Err(self.status);
+            };
+            match self.counter.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Ok(Some(InFlightPermit {
+                        counter: Arc::clone(&self.counter),
+                    }));
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -4413,6 +4502,7 @@ impl RuntimeRoute {
             max_request_body_bytes: route.max_request_body_bytes,
             access: RuntimeAccessPolicy::from_config(&route.access)?,
             rate_limit: RuntimeRateLimit::from_config(&route.rate_limit),
+            concurrency: RuntimeConcurrencyLimit::from_config(&route.concurrency),
             action,
             #[cfg(feature = "cache")]
             cache: route
@@ -4438,6 +4528,7 @@ impl RuntimeRoute {
             max_request_body_bytes: None,
             access: RuntimeAccessPolicy::default(),
             rate_limit: RuntimeRateLimit::default(),
+            concurrency: RuntimeConcurrencyLimit::default(),
             action: RuntimeRouteAction::AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore::new(
                 storage, vhost_name,
             )),
@@ -4560,6 +4651,7 @@ impl RuntimeVhost {
             max_request_body_bytes: None,
             access: RuntimeAccessPolicy::default(),
             rate_limit: RuntimeRateLimit::default(),
+            concurrency: RuntimeConcurrencyLimit::default(),
             #[cfg(feature = "load-balancer")]
             load_balancer,
             proxy: RuntimeProxy::from_config(&proxy, "default proxy")?,
@@ -4678,6 +4770,7 @@ impl RuntimeVhost {
             max_request_body_bytes: vhost.max_request_body_bytes,
             access: RuntimeAccessPolicy::from_config(&vhost.access)?,
             rate_limit: RuntimeRateLimit::from_config(&vhost.rate_limit),
+            concurrency: RuntimeConcurrencyLimit::from_config(&vhost.concurrency),
             #[cfg(feature = "load-balancer")]
             load_balancer,
             proxy: RuntimeProxy::from_config(&vhost.proxy, &proxy_scope)?,
@@ -4724,6 +4817,7 @@ pub struct RequestContext {
     vhost_index: Option<usize>,
     route_index: Option<usize>,
     request_body_limit_bytes: Option<u64>,
+    in_flight_permits: Vec<InFlightPermit>,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
     health_signal_recorded: bool,
@@ -4898,6 +4992,14 @@ impl ProxyHttp for FluxProxy {
         {
             respond_text_error(session, status, Bytes::from_static(b"rate limited")).await?;
             return Ok(true);
+        }
+        match acquire_request_concurrency_permits(vhost, ctx.route_index) {
+            Ok(permits) => ctx.in_flight_permits = permits,
+            Err(status) => {
+                respond_text_error(session, status, Bytes::from_static(b"too many requests"))
+                    .await?;
+                return Ok(true);
+            }
         }
         ctx.request_body_limit_bytes = ctx
             .route_index
@@ -11794,8 +11896,8 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, HostRoutingRejectReason, RuntimeAccessPolicy, RuntimeRateLimit,
-        append_fluxheim_via_to_request, append_fluxheim_via_to_response,
+        FluxProxy, HostRoutingRejectReason, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
+        RuntimeRateLimit, append_fluxheim_via_to_request, append_fluxheim_via_to_response,
         approximate_request_header_bytes, count_response_body_chunk,
         effective_client_ip_from_forwarded_for, http_peer_for_proxy, https_redirect_location,
         normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
@@ -11948,6 +12050,20 @@ mod tests {
             policy.check(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 11)))),
             None
         );
+    }
+
+    #[test]
+    fn concurrency_limit_releases_permit_on_drop() {
+        let policy = RuntimeConcurrencyLimit::from_config(&crate::config::ConcurrencyLimitConfig {
+            enabled: true,
+            max_in_flight: 1,
+            status: 503,
+        });
+
+        let first = policy.try_acquire().unwrap().expect("first permit");
+        assert!(policy.try_acquire().is_err());
+        drop(first);
+        assert!(policy.try_acquire().unwrap().is_some());
     }
 
     #[cfg(feature = "php-fpm")]
@@ -13272,6 +13388,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13291,6 +13408,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13322,6 +13440,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13354,6 +13473,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13395,6 +13515,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13417,6 +13538,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13454,6 +13576,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13470,6 +13593,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13509,6 +13633,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig {
@@ -13570,6 +13695,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig {
@@ -13594,6 +13720,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig {
                         enabled: true,
@@ -13647,6 +13774,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13663,6 +13791,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13747,6 +13876,7 @@ mod tests {
                 max_request_body_bytes: Some(ByteSize::from_bytes(64 * 1024 * 1024)),
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13770,6 +13900,7 @@ mod tests {
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
+                        concurrency: Default::default(),
                         proxy: None,
                         web: None,
                         php: None,
@@ -13791,6 +13922,7 @@ mod tests {
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
+                        concurrency: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -13812,6 +13944,7 @@ mod tests {
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
+                        concurrency: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -13833,6 +13966,7 @@ mod tests {
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
+                        concurrency: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -13885,6 +14019,7 @@ mod tests {
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
+            concurrency: Default::default(),
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
@@ -13909,6 +14044,7 @@ mod tests {
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
+            concurrency: Default::default(),
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
@@ -14028,6 +14164,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14141,6 +14278,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -14164,6 +14302,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -14219,6 +14358,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14279,6 +14419,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14345,6 +14486,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14363,6 +14505,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -14434,6 +14577,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14452,6 +14596,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -14518,6 +14663,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14575,6 +14721,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14645,6 +14792,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14727,6 +14875,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14839,6 +14988,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14928,6 +15078,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14946,6 +15097,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -15023,6 +15175,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15087,6 +15240,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15143,6 +15297,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15186,6 +15341,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15232,6 +15388,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15292,6 +15449,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15338,6 +15496,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15394,6 +15553,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15473,6 +15633,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15578,6 +15739,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15596,6 +15758,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -15676,6 +15839,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15704,6 +15868,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -15849,6 +16014,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15938,6 +16104,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -16023,6 +16190,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -16042,6 +16210,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),

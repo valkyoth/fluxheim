@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
 - Added opt-in local token-bucket request limiting through
   `[vhosts.rate_limit]` and `[vhosts.routes.rate_limit]`, keyed by the
   trusted-proxy-aware client IP.
+- Added opt-in local in-flight request limits through `[vhosts.concurrency]`
+  and `[vhosts.routes.concurrency]`.
 
 ### Planned
 

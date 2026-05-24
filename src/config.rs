@@ -3584,6 +3584,8 @@ pub struct VhostConfig {
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
+    pub concurrency: ConcurrencyLimitConfig,
+    #[serde(default)]
     pub tls: VhostTlsConfig,
     #[serde(default)]
     pub acme_challenge: VhostAcmeChallengeConfig,
@@ -3670,6 +3672,13 @@ impl VhostConfig {
             .map_err(|source| ConfigError::VhostSection {
                 vhost: self.name.clone(),
                 section: "rate_limit",
+                source: Box::new(source),
+            })?;
+        self.concurrency
+            .validate("vhosts.concurrency")
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "concurrency",
                 source: Box::new(source),
             })?;
         self.cache
@@ -3927,6 +3936,63 @@ fn rate_limit_field(scope: &'static str, field: &'static str) -> &'static str {
     }
 }
 
+const MAX_CONCURRENCY_LIMIT: usize = 1_000_000;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConcurrencyLimitConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub max_in_flight: usize,
+    #[serde(default = "default_concurrency_limit_status")]
+    pub status: u16,
+}
+
+impl Default for ConcurrencyLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_in_flight: 0,
+            status: default_concurrency_limit_status(),
+        }
+    }
+}
+
+impl ConcurrencyLimitConfig {
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.max_in_flight == 0 || self.max_in_flight > MAX_CONCURRENCY_LIMIT {
+            return Err(ConfigError::InvalidConcurrencyLimit {
+                field: concurrency_limit_field(scope, "max_in_flight"),
+            });
+        }
+        if !(400..=599).contains(&self.status) {
+            return Err(ConfigError::InvalidConcurrencyLimit {
+                field: concurrency_limit_field(scope, "status"),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+fn default_concurrency_limit_status() -> u16 {
+    503
+}
+
+fn concurrency_limit_field(scope: &'static str, field: &'static str) -> &'static str {
+    match (scope, field) {
+        ("vhosts.concurrency", "max_in_flight") => "vhosts.concurrency.max_in_flight",
+        ("vhosts.concurrency", "status") => "vhosts.concurrency.status",
+        ("vhosts.routes.concurrency", "max_in_flight") => "vhosts.routes.concurrency.max_in_flight",
+        ("vhosts.routes.concurrency", "status") => "vhosts.routes.concurrency.status",
+        _ => "concurrency",
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouteConfig {
@@ -3947,6 +4013,8 @@ pub struct RouteConfig {
     pub access: AccessPolicyConfig,
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
+    #[serde(default)]
+    pub concurrency: ConcurrencyLimitConfig,
     #[serde(default)]
     pub redirect: Option<RouteRedirectConfig>,
     #[serde(default)]
@@ -4060,6 +4128,14 @@ impl RouteConfig {
                 vhost: vhost.to_owned(),
                 route: self.name.clone(),
                 section: "rate_limit",
+                source: Box::new(source),
+            })?;
+        self.concurrency
+            .validate("vhosts.routes.concurrency")
+            .map_err(|source| ConfigError::RouteSection {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                section: "concurrency",
                 source: Box::new(source),
             })?;
 
@@ -4224,6 +4300,7 @@ impl VhostRedirectConfig {
             max_request_body_bytes: None,
             access: AccessPolicyConfig::default(),
             rate_limit: RateLimitConfig::default(),
+            concurrency: ConcurrencyLimitConfig::default(),
             redirect: Some(RouteRedirectConfig {
                 to,
                 status: self.status,
@@ -4451,6 +4528,7 @@ impl VhostAcmeChallengeConfig {
             max_request_body_bytes: None,
             access: AccessPolicyConfig::default(),
             rate_limit: RateLimitConfig::default(),
+            concurrency: ConcurrencyLimitConfig::default(),
             redirect: None,
             proxy: Some(ProxyConfig {
                 upstream: self.upstream.clone(),
@@ -7977,6 +8055,9 @@ pub enum ConfigError {
     InvalidRateLimit {
         field: &'static str,
     },
+    InvalidConcurrencyLimit {
+        field: &'static str,
+    },
     MissingVhostRedirectTarget {
         vhost: String,
     },
@@ -8633,6 +8714,12 @@ impl Display for ConfigError {
             }
             Self::InvalidRateLimit { field } => {
                 write!(formatter, "{field} contains an invalid rate limit value")
+            }
+            Self::InvalidConcurrencyLimit { field } => {
+                write!(
+                    formatter,
+                    "{field} contains an invalid concurrency limit value"
+                )
             }
             Self::MissingVhostRedirectTarget { vhost } => write!(
                 formatter,
@@ -17735,6 +17822,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 tls: VhostTlsConfig {
                     enabled: true,
                     certificate: Some(certificate),
@@ -17781,6 +17869,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 tls: VhostTlsConfig {
                     enabled: true,
                     acme: super::VhostAcmeConfig {
@@ -18200,6 +18289,10 @@ mod tests {
             requests_per_second = 10
             burst = 20
 
+            [vhosts.concurrency]
+            enabled = true
+            max_in_flight = 100
+
             [[vhosts.routes]]
             name = "admin"
             path_prefix = "/admin/"
@@ -18212,6 +18305,10 @@ mod tests {
             requests_per_second = 2
             burst = 4
             status = 429
+
+            [vhosts.routes.concurrency]
+            enabled = true
+            max_in_flight = 10
 
             [vhosts.routes.proxy]
             upstream = "127.0.0.1:3000"
@@ -18228,6 +18325,8 @@ mod tests {
         assert_eq!(config.vhosts[0].routes[0].access.allow, ["10.1.2.3"]);
         assert_eq!(config.vhosts[0].rate_limit.requests_per_second, 10);
         assert_eq!(config.vhosts[0].routes[0].rate_limit.burst, 4);
+        assert_eq!(config.vhosts[0].concurrency.max_in_flight, 100);
+        assert_eq!(config.vhosts[0].routes[0].concurrency.max_in_flight, 10);
     }
 
     #[test]
@@ -18272,6 +18371,31 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
         assert!(
             error.contains("vhosts.rate_limit.requests_per_second"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_vhost_concurrency_limit() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [vhosts.concurrency]
+            enabled = true
+            max_in_flight = 0
+
+            [vhosts.proxy]
+            upstream = "127.0.0.1:3000"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("vhosts.concurrency.max_in_flight"),
             "{error}"
         );
     }
@@ -18775,6 +18899,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
@@ -18791,6 +18916,7 @@ mod tests {
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
+                    concurrency: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
@@ -18829,6 +18955,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),
@@ -18862,6 +18989,7 @@ mod tests {
                 max_request_body_bytes: None,
                 access: Default::default(),
                 rate_limit: Default::default(),
+                concurrency: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),

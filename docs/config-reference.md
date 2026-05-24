@@ -1457,6 +1457,11 @@ requests_per_second = 50
 burst = 100
 status = 429
 
+[vhosts.concurrency]
+enabled = true
+max_in_flight = 256
+status = 503
+
 # Second vhost. The tables below belong to api.example.test.
 [[vhosts]]
 name = "api.example.test"
@@ -1491,6 +1496,12 @@ sets the bucket capacity, and `status` controls the rejection status. If `burst`
 is omitted or zero, Fluxheim uses `requests_per_second` as the burst. State is
 bounded by `table_max_entries` and stale entries are pruned after
 `entry_ttl_secs`. Vhost limits are checked before route limits.
+
+`[vhosts.concurrency]` and `[vhosts.routes.concurrency]` cap active in-flight
+requests. They are local process limits, not distributed cluster limits.
+`max_in_flight` sets the active request budget and `status` controls the
+rejection status when the budget is exhausted. Vhost permits are acquired before
+route permits and are released automatically when the request finishes.
 
 Vhosts can also contain ordered route tables. Exact matches win first, then the
 longest prefix match, then one optional fallback route. A route must define one

@@ -2970,6 +2970,7 @@ mod tests {
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
+            concurrency: Default::default(),
             acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
             redirect: crate::config::VhostRedirectConfig::default(),
             tls: VhostTlsConfig {
@@ -3722,6 +3723,7 @@ mod tests {
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
+            concurrency: Default::default(),
             acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
             redirect: crate::config::VhostRedirectConfig::default(),
             tls: VhostTlsConfig {
