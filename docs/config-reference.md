@@ -359,7 +359,9 @@ tenant IDs, filenames, or other sensitive identifiers.
 
 `logging.access.include_host = false` keeps access logging enabled while
 emitting an empty raw `host` field. The configured `vhost` name is still logged
-after Fluxheim resolves the request.
+after Fluxheim resolves the request. Access log events also include the resolved
+route name when a request matches an explicit route; fallback or unrouted
+requests emit an empty `route` field.
 
 ## Headers
 

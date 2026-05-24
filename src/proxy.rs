@@ -349,6 +349,15 @@ impl FluxProxy {
             .and_then(|index| state.vhosts.get(index))
             .map(|vhost| vhost.name.as_str())
             .unwrap_or("unknown");
+        let route = ctx
+            .vhost_index
+            .and_then(|vhost_index| state.vhosts.get(vhost_index))
+            .and_then(|vhost| {
+                ctx.route_index
+                    .and_then(|route_index| vhost.routes.get(route_index))
+            })
+            .map(|route| route.name.as_str())
+            .unwrap_or("");
         let status = session
             .response_written()
             .map(|response| response.status.as_u16());
@@ -368,6 +377,7 @@ impl FluxProxy {
                     .then(|| request_host(session))
                     .flatten(),
                 vhost,
+                route,
                 path: state
                     .access_log
                     .include_path
@@ -2847,6 +2857,7 @@ impl std::fmt::Debug for RuntimeVhost {
 
 #[derive(Debug, Clone)]
 struct RuntimeRoute {
+    name: String,
     matcher: RuntimeRouteMatcher,
     https_redirect_exempt: bool,
     strip_prefix: Option<String>,
@@ -5034,6 +5045,7 @@ impl RuntimeRoute {
         };
 
         Ok(Self {
+            name: route.name.clone(),
             matcher,
             https_redirect_exempt: route.https_redirect_exempt,
             strip_prefix: route.strip_prefix.clone(),
@@ -5065,6 +5077,7 @@ impl RuntimeRoute {
         base_headers: &crate::config::HeaderPolicyConfig,
     ) -> Self {
         Self {
+            name: "acme-http-01".to_owned(),
             matcher: RuntimeRouteMatcher::Prefix("/.well-known/acme-challenge/".to_owned()),
             https_redirect_exempt: true,
             strip_prefix: None,
@@ -12294,6 +12307,7 @@ struct AccessLogEvent<'a> {
     method: &'a str,
     host: Option<&'a str>,
     vhost: &'a str,
+    route: &'a str,
     path: Option<&'a str>,
     status: Option<u16>,
     status_class: Option<&'static str>,
@@ -12317,10 +12331,11 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     let body = format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
         json_escape(event.vhost),
+        json_escape(event.route),
         json_escape(path),
         status,
         status_class,
@@ -15917,6 +15932,7 @@ mod tests {
     fn route_strip_prefix_rewrites_path_and_preserves_query() {
         let request = pingora::http::RequestHeader::build("GET", b"/chat/room?id=7", None).unwrap();
         let route = super::RuntimeRoute {
+            name: "chat".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/chat/".to_owned()),
             https_redirect_exempt: false,
             strip_prefix: Some("/chat/".to_owned()),
@@ -15949,6 +15965,7 @@ mod tests {
         let request =
             pingora::http::RequestHeader::build("GET", b"/public/api/users?id=7", None).unwrap();
         let route = super::RuntimeRoute {
+            name: "api".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/public/api/".to_owned()),
             https_redirect_exempt: false,
             strip_prefix: Some("/public/api/".to_owned()),
@@ -15979,6 +15996,7 @@ mod tests {
     #[test]
     fn route_strip_prefix_rejects_traversal_suffixes() {
         let route = super::RuntimeRoute {
+            name: "api".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/api/".to_owned()),
             https_redirect_exempt: false,
             strip_prefix: Some("/api/".to_owned()),
@@ -20414,6 +20432,7 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             vhost: "main\"site",
+            route: "assets",
             path: Some("/asset path/one.js"),
             status: Some(200),
             status_class: Some(super::status_class(200)),
@@ -20429,6 +20448,7 @@ mod tests {
         assert!(log.contains("\"event\":\"access\""));
         assert!(log.contains("\"host\":\"example.test\""));
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
+        assert!(log.contains("\"route\":\"assets\""));
         assert!(log.contains("\"path\":\"/asset path/one.js\""));
         assert!(log.contains("\"status_class\":\"2xx\""));
         assert!(log.contains("\"request_id\":\"req-123\""));
@@ -20443,6 +20463,7 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             vhost: "main",
+            route: "private",
             path: None,
             status: Some(204),
             status_class: Some(super::status_class(204)),
@@ -20466,6 +20487,7 @@ mod tests {
             method: "GET",
             host: None,
             vhost: "main",
+            route: "root",
             path: Some("/"),
             status: Some(204),
             status_class: Some(super::status_class(204)),
@@ -20489,6 +20511,7 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             vhost: "main",
+            route: "root",
             path: Some("/"),
             status: Some(200),
             status_class: Some(super::status_class(200)),
