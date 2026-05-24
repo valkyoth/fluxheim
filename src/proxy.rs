@@ -363,6 +363,7 @@ impl FluxProxy {
         let status = session
             .response_written()
             .map(|response| response.status.as_u16());
+        let tls_identity = downstream_tls_client_identity(session);
         let latency_ms = ctx
             .started_at
             .map(|started_at| started_at.elapsed().as_millis())
@@ -399,6 +400,21 @@ impl FluxProxy {
                     .compression
                     .as_ref()
                     .map(|compression| compression.encoding),
+                tls_version: tls_identity
+                    .as_ref()
+                    .and_then(|identity| identity.version.as_deref()),
+                tls_cipher: tls_identity
+                    .as_ref()
+                    .and_then(|identity| identity.cipher.as_deref()),
+                tls_client_cert_sha256: tls_identity
+                    .as_ref()
+                    .and_then(|identity| identity.cert_sha256.as_deref()),
+                tls_client_cert_serial: tls_identity
+                    .as_ref()
+                    .and_then(|identity| identity.serial_number.as_deref()),
+                tls_client_cert_organization: tls_identity
+                    .as_ref()
+                    .and_then(|identity| identity.organization.as_deref()),
                 vhost,
                 route: if state.access_log.include_route {
                     route
@@ -12523,6 +12539,11 @@ struct AccessLogEvent<'a> {
         feature = "compression-zstd"
     ))]
     compression_encoding: Option<&'static str>,
+    tls_version: Option<&'a str>,
+    tls_cipher: Option<&'a str>,
+    tls_client_cert_sha256: Option<&'a str>,
+    tls_client_cert_serial: Option<&'a str>,
+    tls_client_cert_organization: Option<&'a str>,
     vhost: &'a str,
     route: &'a str,
     upstream: Option<&'a str>,
@@ -12563,16 +12584,26 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
         feature = "compression-zstd"
     )))]
     let compression_encoding = "";
+    let tls_version = event.tls_version.unwrap_or("");
+    let tls_cipher = event.tls_cipher.unwrap_or("");
+    let tls_client_cert_sha256 = event.tls_client_cert_sha256.unwrap_or("");
+    let tls_client_cert_serial = event.tls_client_cert_serial.unwrap_or("");
+    let tls_client_cert_organization = event.tls_client_cert_organization.unwrap_or("");
     let upstream = event.upstream.unwrap_or("");
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     let body = format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"cache_phase\":\"{}\",\"compression_encoding\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"cache_phase\":\"{}\",\"compression_encoding\":\"{}\",\"tls_version\":\"{}\",\"tls_cipher\":\"{}\",\"tls_client_cert_sha256\":\"{}\",\"tls_client_cert_serial\":\"{}\",\"tls_client_cert_organization\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
         json_escape(client_ip),
         json_escape(cache_phase),
         json_escape(compression_encoding),
+        json_escape(tls_version),
+        json_escape(tls_cipher),
+        json_escape(tls_client_cert_sha256),
+        json_escape(tls_client_cert_serial),
+        json_escape(tls_client_cert_organization),
         json_escape(event.vhost),
         json_escape(event.route),
         json_escape(upstream),
@@ -20686,6 +20717,11 @@ mod tests {
                 feature = "compression-zstd"
             ))]
             compression_encoding: Some("gzip"),
+            tls_version: Some("TLSv1.3"),
+            tls_cipher: Some("TLS_AES_128_GCM_SHA256"),
+            tls_client_cert_sha256: Some("aabbcc"),
+            tls_client_cert_serial: Some("01AB"),
+            tls_client_cert_organization: Some("Fluxheim Test"),
             vhost: "main\"site",
             route: "assets",
             upstream: Some("127.0.0.1:3000"),
@@ -20712,6 +20748,11 @@ mod tests {
             feature = "compression-zstd"
         ))]
         assert!(log.contains("\"compression_encoding\":\"gzip\""));
+        assert!(log.contains("\"tls_version\":\"TLSv1.3\""));
+        assert!(log.contains("\"tls_cipher\":\"TLS_AES_128_GCM_SHA256\""));
+        assert!(log.contains("\"tls_client_cert_sha256\":\"aabbcc\""));
+        assert!(log.contains("\"tls_client_cert_serial\":\"01AB\""));
+        assert!(log.contains("\"tls_client_cert_organization\":\"Fluxheim Test\""));
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
         assert!(log.contains("\"route\":\"assets\""));
         assert!(log.contains("\"upstream\":\"127.0.0.1:3000\""));
@@ -20737,6 +20778,11 @@ mod tests {
                 feature = "compression-zstd"
             ))]
             compression_encoding: None,
+            tls_version: None,
+            tls_cipher: None,
+            tls_client_cert_sha256: None,
+            tls_client_cert_serial: None,
+            tls_client_cert_organization: None,
             vhost: "main",
             route: "private",
             upstream: None,
@@ -20755,6 +20801,7 @@ mod tests {
         assert!(log.contains("\"path\":\"\""));
         assert!(log.contains("\"cache_phase\":\"\""));
         assert!(log.contains("\"compression_encoding\":\"\""));
+        assert!(log.contains("\"tls_client_cert_sha256\":\"\""));
         assert!(!log.contains("/private"));
     }
 
@@ -20773,6 +20820,11 @@ mod tests {
                 feature = "compression-zstd"
             ))]
             compression_encoding: None,
+            tls_version: None,
+            tls_cipher: None,
+            tls_client_cert_sha256: None,
+            tls_client_cert_serial: None,
+            tls_client_cert_organization: None,
             vhost: "main",
             route: "root",
             upstream: None,
@@ -20807,6 +20859,11 @@ mod tests {
                 feature = "compression-zstd"
             ))]
             compression_encoding: None,
+            tls_version: None,
+            tls_cipher: None,
+            tls_client_cert_sha256: None,
+            tls_client_cert_serial: None,
+            tls_client_cert_organization: None,
             vhost: "main",
             route: "root",
             upstream: None,

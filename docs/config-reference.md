@@ -373,6 +373,12 @@ Access log events include `compression_encoding` when Fluxheim applies response
 compression; the field is empty when the response is served without a Fluxheim
 compression encoder.
 
+Access log events include downstream TLS identity fields:
+`tls_version`, `tls_cipher`, `tls_client_cert_sha256`,
+`tls_client_cert_serial`, and `tls_client_cert_organization`. These fields are
+empty when the request is not TLS, when no client certificate was presented, or
+when the selected TLS backend does not expose a given certificate attribute.
+
 Access log events also include the resolved route name and selected upstream
 address when a request reaches a proxy action; fallback, local static, or
 unrouted requests emit empty `route` or `upstream` fields as applicable.

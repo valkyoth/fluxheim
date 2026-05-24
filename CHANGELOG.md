@@ -102,6 +102,9 @@ behavior when the change improves security or project direction.
   including `{tls.version}`, `{tls.cipher}`, `{tls.client_cert_sha256}`,
   `{tls.client_cert_serial}`, and `{tls.client_cert_organization}`, so verified
   mTLS identity can be forwarded explicitly to trusted origins.
+- Added the same downstream TLS/client-certificate identity values to structured
+  access logs as `tls_version`, `tls_cipher`, `tls_client_cert_sha256`,
+  `tls_client_cert_serial`, and `tls_client_cert_organization`.
 - Added upstream TLS verification controls for proxy origins:
   `upstream_verify_cert`, `upstream_verify_hostname`, and
   `upstream_alternative_cn`, while keeping certificate and hostname validation
