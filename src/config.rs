@@ -600,6 +600,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub trusted_proxies: Vec<String>,
     #[serde(default)]
+    pub proxy_protocol: DownstreamProxyProtocol,
+    #[serde(default)]
     pub limits: ServerLimitsConfig,
     #[serde(default)]
     pub process: ServerProcessConfig,
@@ -616,6 +618,7 @@ impl Default for ServerConfig {
             tls_listen: Vec::new(),
             default_vhost: None,
             trusted_proxies: Vec::new(),
+            proxy_protocol: DownstreamProxyProtocol::Off,
             limits: ServerLimitsConfig::default(),
             process: ServerProcessConfig::default(),
             https_redirect: HttpsRedirectConfig::default(),
@@ -637,6 +640,9 @@ impl ServerConfig {
         }
         if let Some(trusted_proxies) = fragment.trusted_proxies {
             self.trusted_proxies = trusted_proxies;
+        }
+        if let Some(proxy_protocol) = fragment.proxy_protocol {
+            self.proxy_protocol = proxy_protocol;
         }
         if let Some(limits) = fragment.limits {
             self.limits = limits;
@@ -701,6 +707,11 @@ impl ServerConfig {
                 });
             }
         }
+        if self.proxy_protocol != DownstreamProxyProtocol::Off && self.trusted_proxies.is_empty() {
+            return Err(ConfigError::InvalidServerProxyProtocolPolicy {
+                reason: "server.proxy_protocol requires server.trusted_proxies so client identity cannot be spoofed by direct peers",
+            });
+        }
 
         self.limits.validate()?;
         self.process
@@ -708,6 +719,14 @@ impl ServerConfig {
         self.https_redirect.validate()?;
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DownstreamProxyProtocol {
+    #[default]
+    Off,
+    V1,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -721,6 +740,8 @@ struct ServerConfigFragment {
     default_vhost: Option<String>,
     #[serde(default)]
     trusted_proxies: Option<Vec<String>>,
+    #[serde(default)]
+    proxy_protocol: Option<DownstreamProxyProtocol>,
     #[serde(default)]
     limits: Option<ServerLimitsConfig>,
     #[serde(default)]
@@ -8468,6 +8489,9 @@ pub enum ConfigError {
     InvalidTrustedProxy {
         value: String,
     },
+    InvalidServerProxyProtocolPolicy {
+        reason: &'static str,
+    },
     InvalidConfigListLength {
         field: String,
         max: usize,
@@ -9011,6 +9035,9 @@ impl Display for ConfigError {
                 formatter,
                 "server.trusted_proxies entries must be IP addresses or CIDR ranges, got {value:?}"
             ),
+            Self::InvalidServerProxyProtocolPolicy { reason } => {
+                write!(formatter, "server.proxy_protocol is invalid: {reason}")
+            }
             Self::InvalidConfigListLength { field, max } => {
                 write!(formatter, "{field} must contain at most {max} entries")
             }
@@ -11644,12 +11671,13 @@ mod tests {
         AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
         CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig,
         CacheStaleErrorKind, CompressionConfig, Config, ConfigError, ConfigLoadError,
-        HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoggingConfig, MetricsConfig,
-        ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig, StaticCertificateConfig,
-        TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference, TlsPolicyProfile,
-        TlsProtocolVersion, TracingConfig, UpstreamProxyProtocol, VhostConfig,
-        VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
-        valid_dynamic_header_variable, validate_dynamic_header_template,
+        DownstreamProxyProtocol, HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoggingConfig,
+        MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig,
+        StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode,
+        TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig,
+        UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
+        normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+        validate_dynamic_header_template,
     };
     #[cfg(feature = "cache")]
     use super::{CachePeerConfig, CachePeerFillConfig};
@@ -13430,6 +13458,7 @@ mod tests {
             r#"
             [server]
             trusted_proxies = ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
+            proxy_protocol = "v1"
 
             [server.limits]
             max_request_header_bytes = "32KiB"
@@ -13457,6 +13486,7 @@ mod tests {
             config.server.trusted_proxies,
             ["127.0.0.1", "10.0.0.0/8", "2001:db8::/32"]
         );
+        assert_eq!(config.server.proxy_protocol, DownstreamProxyProtocol::V1);
         config.validate().unwrap();
     }
 
@@ -13474,6 +13504,24 @@ mod tests {
             config.validate(),
             Err(ConfigError::InvalidTrustedProxy {
                 value: "10.0.0.0/99".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_proxy_protocol_without_trusted_proxies() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            proxy_protocol = "v1"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidServerProxyProtocolPolicy {
+                reason: "server.proxy_protocol requires server.trusted_proxies so client identity cannot be spoofed by direct peers"
             })
         );
     }

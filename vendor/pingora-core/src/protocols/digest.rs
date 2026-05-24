@@ -95,6 +95,31 @@ impl SocketDigest {
         }
     }
 
+    /// Return a digest for the same socket with an already-known peer address.
+    ///
+    /// Fluxheim uses this after parsing a trusted downstream PROXY protocol
+    /// header before TLS/HTTP starts. Existing local/original-destination
+    /// lookups are preserved when they were already initialized.
+    pub fn clone_with_peer_addr(&self, peer_addr: Option<SocketAddr>) -> SocketDigest {
+        let digest = SocketDigest {
+            #[cfg(unix)]
+            raw_fd: self.raw_fd,
+            #[cfg(windows)]
+            raw_sock: self.raw_sock,
+            peer_addr: OnceCell::new(),
+            local_addr: OnceCell::new(),
+            original_dst: OnceCell::new(),
+        };
+        let _ = digest.peer_addr.set(peer_addr);
+        if let Some(local_addr) = self.local_addr.get() {
+            let _ = digest.local_addr.set(local_addr.clone());
+        }
+        if let Some(original_dst) = self.original_dst.get() {
+            let _ = digest.original_dst.set(original_dst.clone());
+        }
+        digest
+    }
+
     #[cfg(unix)]
     pub fn peer_addr(&self) -> Option<&SocketAddr> {
         self.peer_addr

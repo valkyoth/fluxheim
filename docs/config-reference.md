@@ -64,6 +64,7 @@ listen = ["127.0.0.1:8080"]
 tls_listen = []
 default_vhost = "example.test"
 trusted_proxies = ["127.0.0.1"]
+proxy_protocol = "off"
 
 [server.limits]
 max_request_header_bytes = "64KiB"
@@ -114,6 +115,13 @@ Notes:
   Fluxheim walks `X-Forwarded-For` from right to left and restores the last
   non-trusted hop for generated client-IP headers, equivalent to nginx
   `real_ip_recursive on`. The list is capped at 512 entries.
+- `proxy_protocol` defaults to `off`. Set it to `v1` only on listeners reached
+  exclusively through trusted load balancers or edge proxies that send HAProxy
+  PROXY protocol v1 before TLS/HTTP bytes. Fluxheim requires
+  `server.trusted_proxies` when this is enabled, rejects direct peers outside
+  that trust list before parsing the header, and restores the PROXY source
+  address before TLS and HTTP handling. Binary PROXY protocol v2 is still
+  planned.
 - `[server.process]` maps safe process settings into Pingora's `ServerConf`.
   Changes to these values require a process upgrade, not a live snapshot
   reload. Keep `threads` conservative in containers because Pingora allocates

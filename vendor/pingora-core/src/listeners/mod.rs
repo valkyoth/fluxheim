@@ -74,21 +74,84 @@ pub mod tls;
 #[cfg(not(feature = "any_tls"))]
 pub use crate::tls::listeners as tls;
 
-use crate::protocols::{l4::socket::SocketAddr, tls::TlsRef, Stream};
+use crate::protocols::{l4::socket::SocketAddr, tls::TlsRef, GetSocketDigest, Stream};
 
 #[cfg(unix)]
 use crate::server::ListenFds;
 
 use async_trait::async_trait;
-use pingora_error::Result;
-use std::{any::Any, fs::Permissions, sync::Arc};
+use pingora_error::{Error, ErrorType, Result};
+use std::{
+    any::Any,
+    fs::Permissions,
+    net::{IpAddr, SocketAddr as StdSocketAddr},
+    sync::Arc,
+};
+use tokio::io::AsyncReadExt;
 
 use l4::{ListenerEndpoint, Stream as L4Stream};
 use tls::{Acceptor, TlsSettings};
 
 pub use crate::protocols::tls::ALPN;
-use crate::protocols::GetSocketDigest;
 pub use l4::{ServerAddress, TcpSocketOptions};
+
+const PROXY_PROTOCOL_V1_MAX_LINE: usize = 108;
+
+#[derive(Clone, Debug)]
+pub struct ProxyProtocolConfig {
+    trusted_sources: Arc<[ProxyProtocolTrustedSource]>,
+}
+
+impl ProxyProtocolConfig {
+    pub fn v1(trusted_sources: Vec<ProxyProtocolTrustedSource>) -> Self {
+        Self {
+            trusted_sources: trusted_sources.into(),
+        }
+    }
+
+    fn trusted(&self, address: &StdSocketAddr) -> bool {
+        self.trusted_sources
+            .iter()
+            .any(|source| source.contains(address.ip()))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ProxyProtocolTrustedSource {
+    Ip(IpAddr),
+    Cidr { network: IpAddr, prefix: u8 },
+}
+
+impl ProxyProtocolTrustedSource {
+    fn contains(&self, ip: IpAddr) -> bool {
+        match self {
+            Self::Ip(trusted) => *trusted == ip,
+            Self::Cidr { network, prefix } => ip_in_prefix(ip, *network, *prefix),
+        }
+    }
+}
+
+fn ip_in_prefix(ip: IpAddr, network: IpAddr, prefix: u8) -> bool {
+    match (ip, network) {
+        (IpAddr::V4(ip), IpAddr::V4(network)) if prefix <= 32 => {
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u32::MAX << (32 - prefix)
+            };
+            u32::from(ip) & mask == u32::from(network) & mask
+        }
+        (IpAddr::V6(ip), IpAddr::V6(network)) if prefix <= 128 => {
+            let mask = if prefix == 0 {
+                0
+            } else {
+                u128::MAX << (128 - prefix)
+            };
+            u128::from(ip) & mask == u128::from(network) & mask
+        }
+        _ => false,
+    }
+}
 
 /// The APIs to customize things like certificate during TLS server side handshake
 #[async_trait]
@@ -121,6 +184,7 @@ pub type TlsAcceptCallbacks = Box<dyn TlsAccept + Send + Sync>;
 struct TransportStackBuilder {
     l4: ServerAddress,
     tls: Option<TlsSettings>,
+    proxy_protocol: Option<Arc<ProxyProtocolConfig>>,
     #[cfg(feature = "connection_filter")]
     connection_filter: Option<Arc<dyn ConnectionFilter>>,
 }
@@ -148,6 +212,7 @@ impl TransportStackBuilder {
         Ok(TransportStack {
             l4,
             tls: self.tls.take().map(|tls| Arc::new(tls.build())),
+            proxy_protocol: self.proxy_protocol.clone(),
         })
     }
 }
@@ -156,6 +221,7 @@ impl TransportStackBuilder {
 pub(crate) struct TransportStack {
     l4: ListenerEndpoint,
     tls: Option<Arc<Acceptor>>,
+    proxy_protocol: Option<Arc<ProxyProtocolConfig>>,
 }
 
 impl TransportStack {
@@ -168,6 +234,7 @@ impl TransportStack {
         Ok(UninitializedStream {
             l4: stream,
             tls: self.tls.clone(),
+            proxy_protocol: self.proxy_protocol.clone(),
         })
     }
 
@@ -179,11 +246,15 @@ impl TransportStack {
 pub(crate) struct UninitializedStream {
     l4: L4Stream,
     tls: Option<Arc<Acceptor>>,
+    proxy_protocol: Option<Arc<ProxyProtocolConfig>>,
 }
 
 impl UninitializedStream {
     pub async fn handshake(mut self) -> Result<Stream> {
         self.l4.set_buffer();
+        if let Some(proxy_protocol) = &self.proxy_protocol {
+            apply_proxy_protocol_v1(&mut self.l4, proxy_protocol).await?;
+        }
         if let Some(tls) = self.tls {
             let tls_stream = tls.tls_handshake(self.l4).await?;
             Ok(Box::new(tls_stream))
@@ -200,9 +271,169 @@ impl UninitializedStream {
     }
 }
 
+async fn apply_proxy_protocol_v1(
+    stream: &mut L4Stream,
+    config: &ProxyProtocolConfig,
+) -> Result<()> {
+    let Some(digest) = stream.get_socket_digest() else {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "missing socket digest for PROXY protocol listener",
+        );
+    };
+    let direct_peer = digest.peer_addr().and_then(|address| address.as_inet());
+    let Some(direct_peer) = direct_peer else {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "PROXY protocol listener requires a TCP peer address",
+        );
+    };
+    if !config.trusted(direct_peer) {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "PROXY protocol peer is not trusted",
+        );
+    }
+
+    let parsed = read_proxy_protocol_v1_header(stream).await?;
+    if let Some(peer_addr) = parsed {
+        stream.set_socket_digest(digest.clone_with_peer_addr(Some(SocketAddr::Inet(peer_addr))));
+    }
+    Ok(())
+}
+
+async fn read_proxy_protocol_v1_header(stream: &mut L4Stream) -> Result<Option<StdSocketAddr>> {
+    let mut line = Vec::with_capacity(PROXY_PROTOCOL_V1_MAX_LINE);
+    loop {
+        let mut byte = [0u8; 1];
+        match stream.read_exact(&mut byte).await {
+            Ok(_) => {}
+            Err(error) => {
+                return Error::e_because(
+                    ErrorType::ReadError,
+                    "while reading PROXY protocol header",
+                    error,
+                );
+            }
+        }
+        line.push(byte[0]);
+        if line.ends_with(b"\r\n") {
+            break;
+        }
+        if line.len() >= PROXY_PROTOCOL_V1_MAX_LINE {
+            return Error::e_explain(
+                ErrorType::Custom("ProxyProtocolError"),
+                "PROXY protocol header exceeds v1 size limit",
+            );
+        }
+    }
+    parse_proxy_protocol_v1_header(&line)
+}
+
+fn parse_proxy_protocol_v1_header(line: &[u8]) -> Result<Option<StdSocketAddr>> {
+    let line = std::str::from_utf8(line).map_err(|error| {
+        Error::because(
+            ErrorType::Custom("ProxyProtocolError"),
+            "PROXY protocol header is not ASCII/UTF-8",
+            error,
+        )
+    })?;
+    let line = line.strip_suffix("\r\n").ok_or_else(|| {
+        Error::explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "PROXY protocol header is missing CRLF",
+        )
+    })?;
+    if line == "PROXY UNKNOWN" {
+        return Ok(None);
+    }
+
+    let mut fields = line.split(' ');
+    if fields.next() != Some("PROXY") {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "missing PROXY protocol prefix",
+        );
+    }
+    let Some(family) = fields.next() else {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "missing PROXY protocol family",
+        );
+    };
+    let Some(source_ip) = fields.next() else {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "missing PROXY protocol source address",
+        );
+    };
+    let Some(destination_ip) = fields.next() else {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "missing PROXY protocol destination address",
+        );
+    };
+    let Some(source_port) = fields.next() else {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "missing PROXY protocol source port",
+        );
+    };
+    let Some(destination_port) = fields.next() else {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "missing PROXY protocol destination port",
+        );
+    };
+    if fields.next().is_some() {
+        return Error::e_explain(
+            ErrorType::Custom("ProxyProtocolError"),
+            "unexpected PROXY protocol fields",
+        );
+    }
+
+    let source_ip = source_ip.parse::<IpAddr>().map_err(|error| {
+        Error::because(
+            ErrorType::Custom("ProxyProtocolError"),
+            "invalid PROXY protocol source address",
+            error,
+        )
+    })?;
+    let destination_ip = destination_ip.parse::<IpAddr>().map_err(|error| {
+        Error::because(
+            ErrorType::Custom("ProxyProtocolError"),
+            "invalid PROXY protocol destination address",
+            error,
+        )
+    })?;
+    match (family, source_ip, destination_ip) {
+        ("TCP4", IpAddr::V4(_), IpAddr::V4(_)) | ("TCP6", IpAddr::V6(_), IpAddr::V6(_)) => {}
+        _ => {
+            return Error::e_explain(
+                ErrorType::Custom("ProxyProtocolError"),
+                "PROXY protocol family does not match address types",
+            );
+        }
+    }
+    let source_port = parse_proxy_protocol_v1_port(source_port, "source")?;
+    let _destination_port = parse_proxy_protocol_v1_port(destination_port, "destination")?;
+    Ok(Some(StdSocketAddr::new(source_ip, source_port)))
+}
+
+fn parse_proxy_protocol_v1_port(value: &str, field: &'static str) -> Result<u16> {
+    value.parse::<u16>().map_err(|error| {
+        Error::because(
+            ErrorType::Custom("ProxyProtocolError"),
+            format!("invalid PROXY protocol {field} port"),
+            error,
+        )
+    })
+}
+
 /// The struct to hold one more multiple listening endpoints
 pub struct Listeners {
     stacks: Vec<TransportStackBuilder>,
+    proxy_protocol: Option<Arc<ProxyProtocolConfig>>,
     #[cfg(feature = "connection_filter")]
     connection_filter: Option<Arc<dyn ConnectionFilter>>,
 }
@@ -212,6 +443,7 @@ impl Listeners {
     pub fn new() -> Self {
         Listeners {
             stacks: vec![],
+            proxy_protocol: None,
             #[cfg(feature = "connection_filter")]
             connection_filter: None,
         }
@@ -299,9 +531,19 @@ impl Listeners {
         self.stacks.push(TransportStackBuilder {
             l4,
             tls,
+            proxy_protocol: self.proxy_protocol.clone(),
             #[cfg(feature = "connection_filter")]
             connection_filter: self.connection_filter.clone(),
         })
+    }
+
+    /// Enable trusted PROXY protocol v1 receive on all listener endpoints.
+    pub fn set_proxy_protocol_v1(&mut self, config: ProxyProtocolConfig) {
+        let config = Arc::new(config);
+        self.proxy_protocol = Some(config.clone());
+        for stack in &mut self.stacks {
+            stack.proxy_protocol = Some(config.clone());
+        }
     }
 
     pub(crate) async fn build(
@@ -338,6 +580,38 @@ mod test {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpStream;
     use tokio::time::{sleep, Duration};
+
+    #[test]
+    fn proxy_protocol_v1_parser_accepts_tcp4_and_unknown() {
+        let parsed =
+            parse_proxy_protocol_v1_header(b"PROXY TCP4 203.0.113.10 192.0.2.20 42300 443\r\n")
+                .unwrap();
+        assert_eq!(parsed, Some("203.0.113.10:42300".parse().unwrap()));
+        assert_eq!(
+            parse_proxy_protocol_v1_header(b"PROXY UNKNOWN\r\n").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn proxy_protocol_v1_parser_rejects_mismatched_family() {
+        assert!(
+            parse_proxy_protocol_v1_header(
+                b"PROXY TCP4 2001:db8::10 192.0.2.20 42300 443\r\n"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn proxy_protocol_trusted_sources_match_prefixes() {
+        let source = ProxyProtocolTrustedSource::Cidr {
+            network: "2001:db8::".parse().unwrap(),
+            prefix: 32,
+        };
+        assert!(source.contains("2001:db8::1".parse().unwrap()));
+        assert!(!source.contains("2001:db9::1".parse().unwrap()));
+    }
 
     #[tokio::test]
     async fn test_listen_tcp() {

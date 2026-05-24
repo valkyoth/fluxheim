@@ -25,7 +25,7 @@ use crate::config::AcmeChallenge;
 use crate::config::CachePurgerConfig;
 use crate::config::Config;
 #[cfg(feature = "proxy")]
-use crate::config::{LoggingFormat, LoggingTarget};
+use crate::config::{DownstreamProxyProtocol, LoggingFormat, LoggingTarget};
 
 #[cfg(all(feature = "proxy", feature = "cache", feature = "metrics"))]
 const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
@@ -126,6 +126,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
         proxy_service.add_tcp(listen);
     }
     let certificate_reloader = add_tls_listeners(&mut proxy_service, &config)?;
+    apply_downstream_proxy_protocol(&mut proxy_service, &config)?;
     #[cfg(not(feature = "acme-client"))]
     let _ = &certificate_reloader;
     #[cfg(all(feature = "acme-client", unix))]
@@ -192,6 +193,45 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     server.add_service(proxy_service);
     server.run_forever();
+}
+
+#[cfg(feature = "proxy")]
+fn apply_downstream_proxy_protocol<S>(
+    service: &mut pingora::services::listening::Service<S>,
+    config: &Config,
+) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    S: Send + Sync + 'static,
+{
+    if config.server.proxy_protocol == DownstreamProxyProtocol::Off {
+        return Ok(());
+    }
+    let trusted_sources = config
+        .server
+        .trusted_proxies
+        .iter()
+        .map(|source| parse_proxy_protocol_trusted_source(source))
+        .collect::<Result<Vec<_>, _>>()?;
+    log::info!(
+        "downstream PROXY protocol v1 receive enabled for {} trusted source(s)",
+        trusted_sources.len()
+    );
+    service.set_proxy_protocol_v1(pingora::listeners::ProxyProtocolConfig::v1(trusted_sources));
+    Ok(())
+}
+
+#[cfg(feature = "proxy")]
+fn parse_proxy_protocol_trusted_source(
+    value: &str,
+) -> Result<pingora::listeners::ProxyProtocolTrustedSource, Box<dyn Error + Send + Sync>> {
+    if let Some((address, prefix)) = value.split_once('/') {
+        let network = address.parse::<std::net::IpAddr>()?;
+        let prefix = prefix.parse::<u8>()?;
+        return Ok(pingora::listeners::ProxyProtocolTrustedSource::Cidr { network, prefix });
+    }
+    Ok(pingora::listeners::ProxyProtocolTrustedSource::Ip(
+        value.parse::<std::net::IpAddr>()?,
+    ))
 }
 
 #[cfg(all(feature = "proxy", feature = "acme-client", unix))]

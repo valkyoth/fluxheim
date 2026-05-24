@@ -23,7 +23,8 @@ use crate::listeners::tls::TlsSettings;
 #[cfg(feature = "connection_filter")]
 use crate::listeners::AcceptAllFilter;
 use crate::listeners::{
-    ConnectionFilter, Listeners, ServerAddress, TcpSocketOptions, TransportStack,
+    ConnectionFilter, Listeners, ProxyProtocolConfig, ServerAddress, TcpSocketOptions,
+    TransportStack,
 };
 use crate::protocols::Stream;
 #[cfg(unix)]
@@ -110,6 +111,11 @@ impl<A> Service<A> {
 
     #[cfg(not(feature = "connection_filter"))]
     pub fn set_connection_filter(&mut self, _filter: Arc<dyn ConnectionFilter>) {}
+
+    /// Enable trusted PROXY protocol v1 receive on all listener endpoints.
+    pub fn set_proxy_protocol_v1(&mut self, config: ProxyProtocolConfig) {
+        self.listeners.set_proxy_protocol_v1(config);
+    }
 
     /// Get the [`Listeners`], mostly to add more endpoints.
     pub fn endpoints(&mut self) -> &mut Listeners {

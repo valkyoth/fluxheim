@@ -1,7 +1,8 @@
 # Pingora Patches
 
-Fluxheim vendors `pingora-core 0.8.0` for two narrow rustls fixes required by
-the default `tls-rustls` build.
+Fluxheim vendors `pingora-core 0.8.0` for a small set of narrow proxy/TLS
+compatibility fixes required by the default `tls-rustls` build and the `1.4`
+production proxy parity line.
 
 ## Rustls Listener Certificate Resolver
 
@@ -27,12 +28,30 @@ This is a temporary compatibility patch, not a long-term fork. Keep it small,
 easy to audit, and limited to the rustls certificate resolver and upstream
 verification-policy gaps.
 
+## Listener PROXY Protocol v1 Receive
+
+Fluxheim also patches Pingora listeners with an opt-in PROXY protocol v1 receive
+hook that runs after the TCP accept and before downstream TLS or HTTP parsing.
+The patch adds:
+
+- `ProxyProtocolConfig::v1(...)` and `ProxyProtocolTrustedSource`;
+- `Service::set_proxy_protocol_v1(...)` / `Listeners::set_proxy_protocol_v1(...)`;
+- bounded v1 line parsing with the HAProxy 108-byte limit;
+- mandatory direct-peer trust checks before parsing;
+- socket-digest peer-address replacement only after a trusted, valid v1 header.
+
+This is needed because Fluxheim must restore client identity before TLS and HTTP
+handling when it sits behind a trusted load balancer that speaks PROXY protocol.
+Binary PROXY protocol v2 is intentionally not included in this patch.
+
 ## Removal Criteria
 
 Remove `vendor/pingora-core` and the `[patch.crates-io]` entry in
 `Cargo.toml` when an upstream Pingora release exposes equivalent rustls server
 certificate resolver support and applies per-peer rustls upstream verification
-policy without requiring ALPN or mTLS to clone the client config first.
+policy without requiring ALPN or mTLS to clone the client config first, and
+exposes an equivalent pre-TLS listener PROXY protocol receive hook with trusted
+peer enforcement.
 
 Before removing the patch, verify:
 
@@ -45,6 +64,8 @@ Before removing the patch, verify:
   ALPN or mTLS settings
 - a rustls upstream with `upstream_ca_path` validates against that per-peer CA
   bundle rather than the process default root store
+- a listener configured with `server.proxy_protocol = "v1"` rejects untrusted
+  direct peers and restores the v1 source address before TLS/HTTP handling
 
 ## Upstream Candidate
 
@@ -62,6 +83,9 @@ would be:
   clone the client config when a custom verifier is needed.
 - in the rustls connector, honor `PeerOptions.ca` when constructing the
   per-peer root store for both normal verification and custom verifier modes.
+- expose a pre-TLS listener hook for PROXY protocol v1/v2 receive, or native
+  listener support that can enforce trusted direct peers before overriding the
+  socket digest client address.
 
 Fluxheim should keep the vendored patch narrow and avoid unrelated edits to
 vendored Pingora source.
