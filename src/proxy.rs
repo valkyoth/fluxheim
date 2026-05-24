@@ -4,19 +4,14 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
-use std::sync::Arc;
-#[cfg(any(feature = "cache", feature = "php-fpm"))]
-use std::sync::Mutex;
 #[cfg(feature = "cache")]
 use std::sync::OnceLock;
 #[cfg(feature = "php-fpm")]
 use std::sync::atomic::AtomicBool;
 #[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(any(feature = "cache", feature = "php-fpm"))]
-use std::time::Duration;
-#[cfg(any(not(feature = "privacy-mode"), feature = "cache", feature = "php-fpm"))]
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
@@ -2532,6 +2527,19 @@ fn request_denied_by_access_policy(
         .unwrap_or(false)
 }
 
+fn request_limited_by_rate_policy(
+    session: &Session,
+    state: &ProxyRuntimeState,
+    vhost: &RuntimeVhost,
+    route_index: Option<usize>,
+) -> Option<u16> {
+    let client_ip = effective_acl_client_ip(session, state);
+    if let Some(status) = vhost.rate_limit.check(client_ip) {
+        return Some(status);
+    }
+    route_index.and_then(|route_index| vhost.route(route_index).rate_limit.check(client_ip))
+}
+
 fn effective_acl_client_ip(session: &Session, state: &ProxyRuntimeState) -> Option<IpAddr> {
     let direct_ip = session.client_addr().and_then(|addr| addr.as_inet())?.ip();
     let trusted_direct_peer = state.trusted_proxy(direct_ip);
@@ -2607,6 +2615,7 @@ struct RuntimeVhost {
     hosts: Vec<String>,
     max_request_body_bytes: Option<crate::config::ByteSize>,
     access: RuntimeAccessPolicy,
+    rate_limit: RuntimeRateLimit,
     proxy: RuntimeProxy,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
@@ -2643,6 +2652,7 @@ impl std::fmt::Debug for RuntimeVhost {
             .field("hosts", &self.hosts)
             .field("max_request_body_bytes", &self.max_request_body_bytes)
             .field("access", &self.access)
+            .field("rate_limit", &self.rate_limit)
             .field("proxy", &self.proxy)
             .field("request_headers", &self.request_headers)
             .field("response_headers", &self.response_headers);
@@ -2687,11 +2697,123 @@ struct RuntimeRoute {
     strip_prefix: Option<String>,
     max_request_body_bytes: Option<crate::config::ByteSize>,
     access: RuntimeAccessPolicy,
+    rate_limit: RuntimeRateLimit,
     action: RuntimeRouteAction,
     #[cfg(feature = "cache")]
     cache: Option<RuntimeRouteCache>,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum RateLimitKey {
+    Ip(IpAddr),
+    Indeterminate,
+}
+
+impl From<Option<IpAddr>> for RateLimitKey {
+    fn from(value: Option<IpAddr>) -> Self {
+        value.map(Self::Ip).unwrap_or(Self::Indeterminate)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RateLimitBucket {
+    tokens: f64,
+    updated_at: Instant,
+    last_seen: Instant,
+}
+
+#[derive(Debug)]
+struct RuntimeRateLimitState {
+    buckets: Mutex<HashMap<RateLimitKey, RateLimitBucket>>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeRateLimit {
+    enabled: bool,
+    requests_per_second: f64,
+    burst: f64,
+    status: u16,
+    table_max_entries: usize,
+    entry_ttl: Duration,
+    state: Arc<RuntimeRateLimitState>,
+}
+
+impl Default for RuntimeRateLimit {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            requests_per_second: 0.0,
+            burst: 0.0,
+            status: 429,
+            table_max_entries: 0,
+            entry_ttl: Duration::from_secs(300),
+            state: Arc::new(RuntimeRateLimitState {
+                buckets: Mutex::new(HashMap::new()),
+            }),
+        }
+    }
+}
+
+impl RuntimeRateLimit {
+    fn from_config(config: &crate::config::RateLimitConfig) -> Self {
+        let burst = if config.burst == 0 {
+            config.requests_per_second.max(1)
+        } else {
+            config.burst
+        };
+        Self {
+            enabled: config.enabled,
+            requests_per_second: f64::from(config.requests_per_second),
+            burst: f64::from(burst),
+            status: config.status,
+            table_max_entries: config.table_max_entries,
+            entry_ttl: Duration::from_secs(config.entry_ttl_secs),
+            state: Arc::new(RuntimeRateLimitState {
+                buckets: Mutex::new(HashMap::new()),
+            }),
+        }
+    }
+
+    fn check(&self, client_ip: Option<IpAddr>) -> Option<u16> {
+        if !self.enabled {
+            return None;
+        }
+
+        let now = Instant::now();
+        let key = RateLimitKey::from(client_ip);
+        let mut buckets = self
+            .state
+            .buckets
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !buckets.contains_key(&key) && buckets.len() >= self.table_max_entries {
+            buckets.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
+            if buckets.len() >= self.table_max_entries {
+                return Some(self.status);
+            }
+        }
+
+        let bucket = buckets.entry(key).or_insert(RateLimitBucket {
+            tokens: self.burst,
+            updated_at: now,
+            last_seen: now,
+        });
+        let elapsed = now.duration_since(bucket.updated_at).as_secs_f64();
+        bucket.tokens = self
+            .burst
+            .min(bucket.tokens + elapsed * self.requests_per_second);
+        bucket.updated_at = now;
+        bucket.last_seen = now;
+
+        if bucket.tokens >= 1.0 {
+            bucket.tokens -= 1.0;
+            None
+        } else {
+            Some(self.status)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4290,6 +4412,7 @@ impl RuntimeRoute {
             strip_prefix: route.strip_prefix.clone(),
             max_request_body_bytes: route.max_request_body_bytes,
             access: RuntimeAccessPolicy::from_config(&route.access)?,
+            rate_limit: RuntimeRateLimit::from_config(&route.rate_limit),
             action,
             #[cfg(feature = "cache")]
             cache: route
@@ -4314,6 +4437,7 @@ impl RuntimeRoute {
             strip_prefix: None,
             max_request_body_bytes: None,
             access: RuntimeAccessPolicy::default(),
+            rate_limit: RuntimeRateLimit::default(),
             action: RuntimeRouteAction::AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore::new(
                 storage, vhost_name,
             )),
@@ -4435,6 +4559,7 @@ impl RuntimeVhost {
             hosts: vec![],
             max_request_body_bytes: None,
             access: RuntimeAccessPolicy::default(),
+            rate_limit: RuntimeRateLimit::default(),
             #[cfg(feature = "load-balancer")]
             load_balancer,
             proxy: RuntimeProxy::from_config(&proxy, "default proxy")?,
@@ -4552,6 +4677,7 @@ impl RuntimeVhost {
             hosts: vhost.normalized_hosts(),
             max_request_body_bytes: vhost.max_request_body_bytes,
             access: RuntimeAccessPolicy::from_config(&vhost.access)?,
+            rate_limit: RuntimeRateLimit::from_config(&vhost.rate_limit),
             #[cfg(feature = "load-balancer")]
             load_balancer,
             proxy: RuntimeProxy::from_config(&vhost.proxy, &proxy_scope)?,
@@ -4765,6 +4891,12 @@ impl ProxyHttp for FluxProxy {
         ctx.route_index = vhost.route_index(session.req_header().uri.path());
         if request_denied_by_access_policy(session, &state, vhost, ctx.route_index) {
             respond_text_error(session, 403, Bytes::from_static(b"forbidden")).await?;
+            return Ok(true);
+        }
+        if let Some(status) =
+            request_limited_by_rate_policy(session, &state, vhost, ctx.route_index)
+        {
+            respond_text_error(session, status, Bytes::from_static(b"rate limited")).await?;
             return Ok(true);
         }
         ctx.request_body_limit_bytes = ctx
@@ -11662,12 +11794,12 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, HostRoutingRejectReason, RuntimeAccessPolicy, append_fluxheim_via_to_request,
-        append_fluxheim_via_to_response, approximate_request_header_bytes,
-        count_response_body_chunk, effective_client_ip_from_forwarded_for, http_peer_for_proxy,
-        https_redirect_location, normalize_cookie_headers, redirect_authority,
-        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
-        route_rewritten_path_and_query,
+        FluxProxy, HostRoutingRejectReason, RuntimeAccessPolicy, RuntimeRateLimit,
+        append_fluxheim_via_to_request, append_fluxheim_via_to_response,
+        approximate_request_header_bytes, count_response_body_chunk,
+        effective_client_ip_from_forwarded_for, http_peer_for_proxy, https_redirect_location,
+        normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
+        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -11794,6 +11926,27 @@ mod tests {
         assert_eq!(
             restored,
             "2001:db8::10".parse::<IpAddr>().expect("valid IPv6")
+        );
+    }
+
+    #[test]
+    fn rate_limit_consumes_burst_per_client_ip() {
+        let policy = RuntimeRateLimit::from_config(&crate::config::RateLimitConfig {
+            enabled: true,
+            requests_per_second: 1,
+            burst: 2,
+            status: 429,
+            table_max_entries: 16,
+            entry_ttl_secs: 60,
+        });
+        let client = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
+
+        assert_eq!(policy.check(client), None);
+        assert_eq!(policy.check(client), None);
+        assert_eq!(policy.check(client), Some(429));
+        assert_eq!(
+            policy.check(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 11)))),
+            None
         );
     }
 
@@ -13118,6 +13271,7 @@ mod tests {
                     hosts: vec!["one.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13136,6 +13290,7 @@ mod tests {
                     hosts: vec!["two.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13166,6 +13321,7 @@ mod tests {
                 hosts: vec!["default.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13197,6 +13353,7 @@ mod tests {
                 hosts: vec!["default.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13237,6 +13394,7 @@ mod tests {
                 hosts: vec!["old.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13258,6 +13416,7 @@ mod tests {
                 hosts: vec!["new.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13294,6 +13453,7 @@ mod tests {
                     hosts: vec!["one.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13309,6 +13469,7 @@ mod tests {
                     hosts: vec!["two.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13347,6 +13508,7 @@ mod tests {
                 hosts: vec!["example.test".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig {
@@ -13407,6 +13569,7 @@ mod tests {
                     hosts: vec!["example.test".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig {
@@ -13430,6 +13593,7 @@ mod tests {
                     hosts: vec!["www.example.test".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig {
                         enabled: true,
@@ -13482,6 +13646,7 @@ mod tests {
                     hosts: vec!["*.example.com".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13497,6 +13662,7 @@ mod tests {
                     hosts: vec!["api.example.com".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13580,6 +13746,7 @@ mod tests {
                 hosts: vec!["gateway.example".to_owned()],
                 max_request_body_bytes: Some(ByteSize::from_bytes(64 * 1024 * 1024)),
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13602,6 +13769,7 @@ mod tests {
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
+                        rate_limit: Default::default(),
                         proxy: None,
                         web: None,
                         php: None,
@@ -13622,6 +13790,7 @@ mod tests {
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
+                        rate_limit: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -13642,6 +13811,7 @@ mod tests {
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
+                        rate_limit: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -13662,6 +13832,7 @@ mod tests {
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
+                        rate_limit: Default::default(),
                         redirect: None,
                         web: None,
                         php: None,
@@ -13713,6 +13884,7 @@ mod tests {
             strip_prefix: Some("/chat/".to_owned()),
             max_request_body_bytes: None,
             access: Default::default(),
+            rate_limit: Default::default(),
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
@@ -13736,6 +13908,7 @@ mod tests {
             strip_prefix: Some("/api/".to_owned()),
             max_request_body_bytes: None,
             access: Default::default(),
+            rate_limit: Default::default(),
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
@@ -13854,6 +14027,7 @@ mod tests {
                 hosts: vec!["api.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -13966,6 +14140,7 @@ mod tests {
                     hosts: vec!["cached.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -13988,6 +14163,7 @@ mod tests {
                     hosts: vec!["uncached.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -14042,6 +14218,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14101,6 +14278,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14166,6 +14344,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14183,6 +14362,7 @@ mod tests {
                     strip_prefix: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -14253,6 +14433,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14270,6 +14451,7 @@ mod tests {
                     strip_prefix: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -14335,6 +14517,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14391,6 +14574,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14460,6 +14644,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14541,6 +14726,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14652,6 +14838,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14740,6 +14927,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14757,6 +14945,7 @@ mod tests {
                     strip_prefix: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -14833,6 +15022,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14896,6 +15086,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14951,6 +15142,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -14993,6 +15185,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15038,6 +15231,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15097,6 +15291,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15142,6 +15337,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15197,6 +15393,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15275,6 +15472,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15379,6 +15577,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15396,6 +15595,7 @@ mod tests {
                     strip_prefix: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -15475,6 +15675,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15502,6 +15703,7 @@ mod tests {
                     strip_prefix: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     redirect: None,
                     proxy: Some(ProxyConfig {
                         upstream: Some("127.0.0.1:3000".to_owned()),
@@ -15646,6 +15848,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15734,6 +15937,7 @@ mod tests {
                 hosts: vec!["cached.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: crate::config::VhostTlsConfig::default(),
@@ -15818,6 +16022,7 @@ mod tests {
                     hosts: vec!["one.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),
@@ -15836,6 +16041,7 @@ mod tests {
                     hosts: vec!["two.example".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: crate::config::VhostTlsConfig::default(),

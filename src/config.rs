@@ -3582,6 +3582,8 @@ pub struct VhostConfig {
     #[serde(default)]
     pub access: AccessPolicyConfig,
     #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+    #[serde(default)]
     pub tls: VhostTlsConfig,
     #[serde(default)]
     pub acme_challenge: VhostAcmeChallengeConfig,
@@ -3661,6 +3663,13 @@ impl VhostConfig {
             .map_err(|source| ConfigError::VhostSection {
                 vhost: self.name.clone(),
                 section: "access",
+                source: Box::new(source),
+            })?;
+        self.rate_limit
+            .validate("vhosts.rate_limit")
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: self.name.clone(),
+                section: "rate_limit",
                 source: Box::new(source),
             })?;
         self.cache
@@ -3814,6 +3823,110 @@ fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
     }
 }
 
+const MAX_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 1_000_000;
+const MAX_RATE_LIMIT_BURST: u32 = 1_000_000;
+const MAX_RATE_LIMIT_TABLE_ENTRIES: usize = 1_000_000;
+const MAX_RATE_LIMIT_ENTRY_TTL_SECS: u64 = 86_400;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimitConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub requests_per_second: u32,
+    #[serde(default)]
+    pub burst: u32,
+    #[serde(default = "default_rate_limit_status")]
+    pub status: u16,
+    #[serde(default = "default_rate_limit_table_max_entries")]
+    pub table_max_entries: usize,
+    #[serde(default = "default_rate_limit_entry_ttl_secs")]
+    pub entry_ttl_secs: u64,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            requests_per_second: 0,
+            burst: 0,
+            status: default_rate_limit_status(),
+            table_max_entries: default_rate_limit_table_max_entries(),
+            entry_ttl_secs: default_rate_limit_entry_ttl_secs(),
+        }
+    }
+}
+
+impl RateLimitConfig {
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.requests_per_second == 0
+            || self.requests_per_second > MAX_RATE_LIMIT_REQUESTS_PER_SECOND
+        {
+            return Err(ConfigError::InvalidRateLimit {
+                field: rate_limit_field(scope, "requests_per_second"),
+            });
+        }
+        if self.burst > MAX_RATE_LIMIT_BURST {
+            return Err(ConfigError::InvalidRateLimit {
+                field: rate_limit_field(scope, "burst"),
+            });
+        }
+        if !(400..=599).contains(&self.status) {
+            return Err(ConfigError::InvalidRateLimit {
+                field: rate_limit_field(scope, "status"),
+            });
+        }
+        if self.table_max_entries == 0 || self.table_max_entries > MAX_RATE_LIMIT_TABLE_ENTRIES {
+            return Err(ConfigError::InvalidRateLimit {
+                field: rate_limit_field(scope, "table_max_entries"),
+            });
+        }
+        if self.entry_ttl_secs == 0 || self.entry_ttl_secs > MAX_RATE_LIMIT_ENTRY_TTL_SECS {
+            return Err(ConfigError::InvalidRateLimit {
+                field: rate_limit_field(scope, "entry_ttl_secs"),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+fn default_rate_limit_status() -> u16 {
+    429
+}
+
+fn default_rate_limit_table_max_entries() -> usize {
+    65_536
+}
+
+fn default_rate_limit_entry_ttl_secs() -> u64 {
+    300
+}
+
+fn rate_limit_field(scope: &'static str, field: &'static str) -> &'static str {
+    match (scope, field) {
+        ("vhosts.rate_limit", "requests_per_second") => "vhosts.rate_limit.requests_per_second",
+        ("vhosts.rate_limit", "burst") => "vhosts.rate_limit.burst",
+        ("vhosts.rate_limit", "status") => "vhosts.rate_limit.status",
+        ("vhosts.rate_limit", "table_max_entries") => "vhosts.rate_limit.table_max_entries",
+        ("vhosts.rate_limit", "entry_ttl_secs") => "vhosts.rate_limit.entry_ttl_secs",
+        ("vhosts.routes.rate_limit", "requests_per_second") => {
+            "vhosts.routes.rate_limit.requests_per_second"
+        }
+        ("vhosts.routes.rate_limit", "burst") => "vhosts.routes.rate_limit.burst",
+        ("vhosts.routes.rate_limit", "status") => "vhosts.routes.rate_limit.status",
+        ("vhosts.routes.rate_limit", "table_max_entries") => {
+            "vhosts.routes.rate_limit.table_max_entries"
+        }
+        ("vhosts.routes.rate_limit", "entry_ttl_secs") => "vhosts.routes.rate_limit.entry_ttl_secs",
+        _ => "rate_limit",
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RouteConfig {
@@ -3832,6 +3945,8 @@ pub struct RouteConfig {
     pub max_request_body_bytes: Option<ByteSize>,
     #[serde(default)]
     pub access: AccessPolicyConfig,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub redirect: Option<RouteRedirectConfig>,
     #[serde(default)]
@@ -3937,6 +4052,14 @@ impl RouteConfig {
                 vhost: vhost.to_owned(),
                 route: self.name.clone(),
                 section: "access",
+                source: Box::new(source),
+            })?;
+        self.rate_limit
+            .validate("vhosts.routes.rate_limit")
+            .map_err(|source| ConfigError::RouteSection {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
+                section: "rate_limit",
                 source: Box::new(source),
             })?;
 
@@ -4100,6 +4223,7 @@ impl VhostRedirectConfig {
             strip_prefix: None,
             max_request_body_bytes: None,
             access: AccessPolicyConfig::default(),
+            rate_limit: RateLimitConfig::default(),
             redirect: Some(RouteRedirectConfig {
                 to,
                 status: self.status,
@@ -4326,6 +4450,7 @@ impl VhostAcmeChallengeConfig {
             strip_prefix: None,
             max_request_body_bytes: None,
             access: AccessPolicyConfig::default(),
+            rate_limit: RateLimitConfig::default(),
             redirect: None,
             proxy: Some(ProxyConfig {
                 upstream: self.upstream.clone(),
@@ -7849,6 +7974,9 @@ pub enum ConfigError {
         field: &'static str,
         value: String,
     },
+    InvalidRateLimit {
+        field: &'static str,
+    },
     MissingVhostRedirectTarget {
         vhost: String,
     },
@@ -8502,6 +8630,9 @@ impl Display for ConfigError {
             ),
             Self::DuplicateAccessRule { field, value } => {
                 write!(formatter, "{field} contains duplicate entry {value:?}")
+            }
+            Self::InvalidRateLimit { field } => {
+                write!(formatter, "{field} contains an invalid rate limit value")
             }
             Self::MissingVhostRedirectTarget { vhost } => write!(
                 formatter,
@@ -17603,6 +17734,7 @@ mod tests {
                 hosts: vec!["example.test".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 tls: VhostTlsConfig {
                     enabled: true,
                     certificate: Some(certificate),
@@ -17648,6 +17780,7 @@ mod tests {
                 hosts: vec!["example.test".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 tls: VhostTlsConfig {
                     enabled: true,
                     acme: super::VhostAcmeConfig {
@@ -18062,12 +18195,23 @@ mod tests {
             allow = ["10.0.0.0/8", "2001:db8::/32"]
             deny = ["10.9.0.0/16"]
 
+            [vhosts.rate_limit]
+            enabled = true
+            requests_per_second = 10
+            burst = 20
+
             [[vhosts.routes]]
             name = "admin"
             path_prefix = "/admin/"
 
             [vhosts.routes.access]
             allow = ["10.1.2.3"]
+
+            [vhosts.routes.rate_limit]
+            enabled = true
+            requests_per_second = 2
+            burst = 4
+            status = 429
 
             [vhosts.routes.proxy]
             upstream = "127.0.0.1:3000"
@@ -18082,6 +18226,8 @@ mod tests {
         );
         assert_eq!(config.vhosts[0].access.deny, ["10.9.0.0/16"]);
         assert_eq!(config.vhosts[0].routes[0].access.allow, ["10.1.2.3"]);
+        assert_eq!(config.vhosts[0].rate_limit.requests_per_second, 10);
+        assert_eq!(config.vhosts[0].routes[0].rate_limit.burst, 4);
     }
 
     #[test]
@@ -18103,6 +18249,31 @@ mod tests {
 
         let error = config.validate().unwrap_err().to_string();
         assert!(error.contains("vhosts.access.allow"), "{error}");
+    }
+
+    #[test]
+    fn rejects_invalid_vhost_rate_limit() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example.test"]
+
+            [vhosts.rate_limit]
+            enabled = true
+            requests_per_second = 0
+
+            [vhosts.proxy]
+            upstream = "127.0.0.1:3000"
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("vhosts.rate_limit.requests_per_second"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -18603,6 +18774,7 @@ mod tests {
                     hosts: vec!["Example.com".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
@@ -18618,6 +18790,7 @@ mod tests {
                     hosts: vec!["example.com:443".to_owned()],
                     max_request_body_bytes: None,
                     access: Default::default(),
+                    rate_limit: Default::default(),
                     acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                     redirect: crate::config::VhostRedirectConfig::default(),
                     tls: super::VhostTlsConfig::default(),
@@ -18655,6 +18828,7 @@ mod tests {
                 hosts: vec!["known.example".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),
@@ -18687,6 +18861,7 @@ mod tests {
                 hosts: vec!["*.example.com".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
                 redirect: crate::config::VhostRedirectConfig::default(),
                 tls: super::VhostTlsConfig::default(),

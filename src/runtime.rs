@@ -813,6 +813,7 @@ mod tests {
                 hosts: vec!["example.test".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 tls: crate::config::VhostTlsConfig {
                     enabled: true,
                     acme: crate::config::VhostAcmeConfig {
@@ -964,6 +965,7 @@ mod tests {
                 hosts: vec!["new-site.example.test".to_owned()],
                 max_request_body_bytes: None,
                 access: Default::default(),
+                rate_limit: Default::default(),
                 tls: crate::config::VhostTlsConfig {
                     enabled: true,
                     acme: crate::config::VhostAcmeConfig {

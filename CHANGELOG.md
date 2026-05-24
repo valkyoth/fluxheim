@@ -14,6 +14,9 @@ behavior when the change improves security or project direction.
 - Added the first production proxy parity edge-policy primitive:
   trusted-proxy-aware IP ACLs through `[vhosts.access]` and
   `[vhosts.routes.access]`, with exact IP/CIDR `allow` and `deny` lists.
+- Added opt-in local token-bucket request limiting through
+  `[vhosts.rate_limit]` and `[vhosts.routes.rate_limit]`, keyed by the
+  trusted-proxy-aware client IP.
 
 ### Planned
 

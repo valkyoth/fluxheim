@@ -1451,6 +1451,12 @@ access-control-allow-origin = "https://example.test"
 allow = ["198.51.100.0/24", "2001:db8:100::/48"]
 deny = ["198.51.100.66"]
 
+[vhosts.rate_limit]
+enabled = true
+requests_per_second = 50
+burst = 100
+status = 429
+
 # Second vhost. The tables below belong to api.example.test.
 [[vhosts]]
 name = "api.example.test"
@@ -1477,6 +1483,14 @@ direct peer matches `server.trusted_proxies`; only then does Fluxheim inspect
 `X-Forwarded-For` recursively. A vhost policy is evaluated before any matching
 route policy, so route ACLs can further restrict traffic but cannot bypass a
 vhost-level denial.
+
+`[vhosts.rate_limit]` and `[vhosts.routes.rate_limit]` enable local token-bucket
+request limiting. The first implementation keys by the same trusted-proxy-aware
+client IP used for ACLs. `requests_per_second` sets the refill rate, `burst`
+sets the bucket capacity, and `status` controls the rejection status. If `burst`
+is omitted or zero, Fluxheim uses `requests_per_second` as the burst. State is
+bounded by `table_max_entries` and stale entries are pruned after
+`entry_ttl_secs`. Vhost limits are checked before route limits.
 
 Vhosts can also contain ordered route tables. Exact matches win first, then the
 longest prefix match, then one optional fallback route. A route must define one
