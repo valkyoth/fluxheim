@@ -65,11 +65,11 @@ behavior when the change improves security or project direction.
   `headers.response.rewrite.cookie_path`.
 - Added route `rewrite_prefix` so a stripped public path prefix can be mapped
   onto a safe upstream path prefix before proxy forwarding.
-- Added trusted-proxy-aware client IP, resolved route name, and selected
-  upstream address to structured access log events, with
-  `logging.access.include_client_ip`, `logging.access.include_route`, and
-  `logging.access.include_upstream` controls for redaction-sensitive
-  deployments.
+- Added trusted-proxy-aware client IP, effective cache phase, resolved route
+  name, and selected upstream address to structured access log events, with
+  `logging.access.include_client_ip`, `logging.access.include_cache_phase`,
+  `logging.access.include_route`, and `logging.access.include_upstream`
+  controls for redaction-sensitive deployments.
 - Added `compression.max_output_bytes` so encoded responses stay bounded even
   when a compressible input is within `max_input_bytes`.
 - Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and

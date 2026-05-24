@@ -365,6 +365,10 @@ after Fluxheim resolves the request.
 When enabled, the logged address is the same trusted-proxy-aware client IP used
 by access policy and rate limiting.
 
+`logging.access.include_cache_phase = false` emits an empty `cache_phase` field.
+When enabled in cache-capable builds, Fluxheim logs the effective request cache
+phase, such as `hit`, `miss`, `bypass`, or `disabled`.
+
 Access log events also include the resolved route name and selected upstream
 address when a request reaches a proxy action; fallback, local static, or
 unrouted requests emit empty `route` or `upstream` fields as applicable.

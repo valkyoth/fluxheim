@@ -382,6 +382,12 @@ impl FluxProxy {
                 } else {
                     None
                 },
+                #[cfg(feature = "cache")]
+                cache_phase: if state.access_log.include_cache_phase {
+                    Some(effective_cache_phase(session, ctx).as_str())
+                } else {
+                    None
+                },
                 vhost,
                 route: if state.access_log.include_route {
                     route
@@ -12332,6 +12338,8 @@ struct AccessLogEvent<'a> {
     method: &'a str,
     host: Option<&'a str>,
     client_ip: Option<String>,
+    #[cfg(feature = "cache")]
+    cache_phase: Option<&'static str>,
     vhost: &'a str,
     route: &'a str,
     upstream: Option<&'a str>,
@@ -12356,14 +12364,19 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
     let status_class = event.status_class.unwrap_or("unknown");
     let host = event.host.unwrap_or("");
     let client_ip = event.client_ip.as_deref().unwrap_or("");
+    #[cfg(feature = "cache")]
+    let cache_phase = event.cache_phase.unwrap_or("");
+    #[cfg(not(feature = "cache"))]
+    let cache_phase = "";
     let upstream = event.upstream.unwrap_or("");
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     let body = format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"cache_phase\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
         json_escape(client_ip),
+        json_escape(cache_phase),
         json_escape(event.vhost),
         json_escape(event.route),
         json_escape(upstream),
@@ -20463,6 +20476,8 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             client_ip: Some("203.0.113.10".to_owned()),
+            #[cfg(feature = "cache")]
+            cache_phase: Some("hit"),
             vhost: "main\"site",
             route: "assets",
             upstream: Some("127.0.0.1:3000"),
@@ -20481,6 +20496,8 @@ mod tests {
         assert!(log.contains("\"event\":\"access\""));
         assert!(log.contains("\"host\":\"example.test\""));
         assert!(log.contains("\"client_ip\":\"203.0.113.10\""));
+        #[cfg(feature = "cache")]
+        assert!(log.contains("\"cache_phase\":\"hit\""));
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
         assert!(log.contains("\"route\":\"assets\""));
         assert!(log.contains("\"upstream\":\"127.0.0.1:3000\""));
@@ -20498,6 +20515,8 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             client_ip: None,
+            #[cfg(feature = "cache")]
+            cache_phase: None,
             vhost: "main",
             route: "private",
             upstream: None,
@@ -20514,6 +20533,7 @@ mod tests {
         });
 
         assert!(log.contains("\"path\":\"\""));
+        assert!(log.contains("\"cache_phase\":\"\""));
         assert!(!log.contains("/private"));
     }
 
@@ -20524,6 +20544,8 @@ mod tests {
             method: "GET",
             host: None,
             client_ip: None,
+            #[cfg(feature = "cache")]
+            cache_phase: None,
             vhost: "main",
             route: "root",
             upstream: None,
@@ -20550,6 +20572,8 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             client_ip: None,
+            #[cfg(feature = "cache")]
+            cache_phase: None,
             vhost: "main",
             route: "root",
             upstream: None,
