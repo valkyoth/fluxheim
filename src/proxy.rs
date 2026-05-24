@@ -2145,6 +2145,30 @@ impl ProxyRuntimeState {
     }
 }
 
+#[cfg(feature = "load-balancer")]
+fn configured_route_load_balancers<F>(
+    vhost: &crate::config::VhostConfig,
+    mut load_balancer: F,
+) -> io::Result<Vec<Option<UpstreamLoadBalancer>>>
+where
+    F: FnMut(&str, &ProxyConfig) -> io::Result<Option<UpstreamLoadBalancer>>,
+{
+    vhost
+        .acme_challenge
+        .route_config()
+        .into_iter()
+        .chain(vhost.routes.iter().cloned())
+        .chain(vhost.redirect.route_config())
+        .map(|route| {
+            route
+                .proxy
+                .as_ref()
+                .map(|proxy| load_balancer(&route.name, proxy))
+                .unwrap_or(Ok(None))
+        })
+        .collect()
+}
+
 impl FluxProxy {
     #[cfg(feature = "load-balancer")]
     pub fn from_config_with_background_services(
@@ -2195,11 +2219,16 @@ impl ProxyRuntimeState {
         } else {
             for configured in &config.vhosts {
                 let index = vhosts.len();
+                let route_load_balancers =
+                    configured_route_load_balancers(configured, |route_name, proxy| {
+                        load_balancer(&format!("{} route {route_name}", configured.name), proxy)
+                    })?;
                 let runtime = RuntimeVhost::from_config(
                     config,
                     configured,
                     &config.headers,
                     load_balancer(&configured.name, &configured.proxy)?,
+                    route_load_balancers,
                 )
                 .map_err(|error| {
                     io::Error::new(
@@ -2728,6 +2757,8 @@ struct RuntimeRoute {
     rate_limit: RuntimeRateLimit,
     concurrency: RuntimeConcurrencyLimit,
     action: RuntimeRouteAction,
+    #[cfg(feature = "load-balancer")]
+    load_balancer: Option<UpstreamLoadBalancer>,
     #[cfg(feature = "cache")]
     cache: Option<RuntimeRouteCache>,
     request_headers: crate::config::RequestHeaderPolicyConfig,
@@ -4418,6 +4449,7 @@ impl RuntimeRoute {
         vhost_name: &str,
         route: &crate::config::RouteConfig,
         base_headers: &crate::config::HeaderPolicyConfig,
+        #[cfg(feature = "load-balancer")] load_balancer: Option<UpstreamLoadBalancer>,
     ) -> io::Result<Self> {
         #[cfg(not(feature = "cache"))]
         let _ = vhost_name;
@@ -4514,6 +4546,8 @@ impl RuntimeRoute {
             rate_limit: RuntimeRateLimit::from_config(&route.rate_limit),
             concurrency: RuntimeConcurrencyLimit::from_config(&route.concurrency),
             action,
+            #[cfg(feature = "load-balancer")]
+            load_balancer,
             #[cfg(feature = "cache")]
             cache: route
                 .cache
@@ -4542,6 +4576,8 @@ impl RuntimeRoute {
             action: RuntimeRouteAction::AcmeHttp01(crate::acme::AcmeHttp01ChallengeStore::new(
                 storage, vhost_name,
             )),
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
             #[cfg(feature = "cache")]
             cache: None,
             request_headers: base_headers.request.clone(),
@@ -4696,6 +4732,9 @@ impl RuntimeVhost {
         vhost: &crate::config::VhostConfig,
         global_headers: &crate::config::HeaderPolicyConfig,
         #[cfg(feature = "load-balancer")] load_balancer: Option<UpstreamLoadBalancer>,
+        #[cfg(feature = "load-balancer")] mut route_load_balancers: Vec<
+            Option<UpstreamLoadBalancer>,
+        >,
     ) -> io::Result<Self> {
         let headers = global_headers.with_vhost_overlay(&vhost.headers);
         let route_base_headers = crate::config::HeaderPolicyConfig {
@@ -4723,7 +4762,21 @@ impl RuntimeVhost {
                 .into_iter()
                 .chain(vhost.routes.iter().cloned())
                 .chain(vhost.redirect.route_config())
-                .map(|route| RuntimeRoute::from_config(&vhost.name, &route, &route_base_headers))
+                .enumerate()
+                .map(|(index, route)| {
+                    #[cfg(feature = "load-balancer")]
+                    let route_load_balancer =
+                        route_load_balancers.get_mut(index).and_then(Option::take);
+                    #[cfg(not(feature = "load-balancer"))]
+                    let _ = index;
+                    RuntimeRoute::from_config(
+                        &vhost.name,
+                        &route,
+                        &route_base_headers,
+                        #[cfg(feature = "load-balancer")]
+                        route_load_balancer,
+                    )
+                })
                 .collect::<io::Result<Vec<_>>>()
                 .map_err(|error| {
                     io::Error::new(
@@ -5315,7 +5368,7 @@ impl ProxyHttp for FluxProxy {
         }
 
         #[cfg(feature = "load-balancer")]
-        if let Some(load_balancer) = &vhost.load_balancer
+        if let Some(load_balancer) = selected_upstream_load_balancer(vhost, ctx)
             && let Some(selected) = load_balancer.select(
                 session.req_header(),
                 effective_acl_client_ip(session, &state),
@@ -5327,7 +5380,7 @@ impl ProxyHttp for FluxProxy {
             return Ok(Box::new(peer));
         }
         #[cfg(feature = "load-balancer")]
-        if vhost.load_balancer.is_some() {
+        if selected_upstream_load_balancer(vhost, ctx).is_some() {
             return Error::e_explain(
                 ErrorType::ConnectError,
                 "no healthy load-balanced upstream is available",
@@ -5363,7 +5416,7 @@ impl ProxyHttp for FluxProxy {
             let vhost = state.vhost(vhost_index);
             let proxy = selected_runtime_proxy(vhost, ctx);
             let retry = &proxy.config.load_balance.retry;
-            if vhost.load_balancer.is_some()
+            if selected_upstream_load_balancer(vhost, ctx).is_some()
                 && retry.enabled
                 && ctx.upstream_load_balancer_retries < retry.max_retries
                 && load_balance_retry_method_allowed(retry, session.req_header().method.as_str())
@@ -10174,6 +10227,20 @@ fn selected_runtime_proxy<'a>(vhost: &'a RuntimeVhost, ctx: &RequestContext) -> 
         .unwrap_or(&vhost.proxy)
 }
 
+#[cfg(feature = "load-balancer")]
+fn selected_upstream_load_balancer<'a>(
+    vhost: &'a RuntimeVhost,
+    ctx: &RequestContext,
+) -> Option<&'a UpstreamLoadBalancer> {
+    if let Some(route_index) = ctx.route_index {
+        let route = vhost.route(route_index);
+        if matches!(route.action, RuntimeRouteAction::Proxy(_)) {
+            return route.load_balancer.as_ref();
+        }
+    }
+    vhost.load_balancer.as_ref()
+}
+
 fn normalize_cookie_headers(request: &mut RequestHeader) -> Result<()> {
     let cookies = request
         .headers
@@ -14468,6 +14535,8 @@ mod tests {
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
             #[cfg(feature = "cache")]
             cache: None,
             request_headers: crate::config::RequestHeaderPolicyConfig::default(),
@@ -14493,6 +14562,8 @@ mod tests {
             action: super::RuntimeRouteAction::Proxy(
                 super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
             ),
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
             #[cfg(feature = "cache")]
             cache: None,
             request_headers: crate::config::RequestHeaderPolicyConfig::default(),
@@ -16647,7 +16718,30 @@ mod tests {
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
-                    routes: Vec::new(),
+                    routes: vec![RouteConfig {
+                        name: "api".to_owned(),
+                        path_exact: None,
+                        path_prefix: Some("/api/".to_owned()),
+                        fallback: false,
+                        https_redirect_exempt: false,
+                        strip_prefix: None,
+                        max_request_body_bytes: None,
+                        access: Default::default(),
+                        rate_limit: Default::default(),
+                        concurrency: Default::default(),
+                        redirect: None,
+                        proxy: Some(ProxyConfig {
+                            upstreams: vec![
+                                "127.0.0.1:3011".to_owned(),
+                                "127.0.0.1:3012".to_owned(),
+                            ],
+                            ..ProxyConfig::default()
+                        }),
+                        web: None,
+                        php: None,
+                        cache: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    }],
                 },
                 VhostConfig {
                     name: "two".to_owned(),
@@ -16676,7 +16770,68 @@ mod tests {
         let (proxy, services) = FluxProxy::from_config_with_background_services(&config).unwrap();
 
         assert_eq!(proxy.route_host(Some("one.example")), "one");
-        assert_eq!(services.len(), 2);
+        assert_eq!(services.len(), 3);
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn route_single_proxy_does_not_inherit_vhost_load_balancer() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "one".to_owned(),
+                hosts: vec!["one.example".to_owned()],
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig {
+                    upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+                    ..ProxyConfig::default()
+                },
+                cache: CacheConfig::default(),
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "single".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/single/".to_owned()),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    max_request_body_bytes: None,
+                    access: Default::default(),
+                    rate_limit: Default::default(),
+                    concurrency: Default::default(),
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstream: Some("127.0.0.1:3010".to_owned()),
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    php: None,
+                    cache: None,
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost = snapshot.state.vhost(0);
+        let ctx = super::RequestContext {
+            route_index: Some(0),
+            ..super::RequestContext::default()
+        };
+
+        assert!(vhost.load_balancer.is_some());
+        assert!(super::selected_upstream_load_balancer(vhost, &ctx).is_none());
     }
 
     #[test]

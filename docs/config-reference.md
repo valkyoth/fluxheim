@@ -550,7 +550,9 @@ normal single proxy target in all builds and is resolved when requests are
 proxied, so a missing backend does not prevent the gateway from starting. Two
 or more entries activate the Pingora load-balancer path in builds compiled with
 `load-balancer`; those entries may be resolved by load-balancer setup and health
-checking.
+checking. The same `proxy.load_balance` policy applies inside
+`[[vhosts.routes.proxy]]` route proxy blocks; route-level pools get their own
+selection, passive-health, retry, and health-check state.
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
 optional. They map to the upstream connection timeout, upstream response/read
 timeout, and upstream request-body/write timeout.

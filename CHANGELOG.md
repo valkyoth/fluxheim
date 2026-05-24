@@ -33,6 +33,8 @@ behavior when the change improves security or project direction.
 - Added opt-in `proxy.load_balance.retry` redispatch for load-balanced
   connection failures before request forwarding, bounded by retry count and
   safe HTTP method policy.
+- Extended load-balanced upstream selection, passive health, and retry policy
+  to route-level proxy pools, not only vhost-level proxy pools.
 
 ### Planned
 
