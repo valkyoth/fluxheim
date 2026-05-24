@@ -55,6 +55,7 @@ const MAX_CACHE_INDEXED_PURGE_BATCHES: usize = 64;
 #[derive(Clone)]
 pub struct AdminApp {
     token: AdminToken,
+    client_certificate: AdminClientCertificatePolicy,
     store: SnapshotStore,
     current_config: Arc<ArcSwap<Config>>,
     proxy: FluxProxy,
@@ -67,6 +68,28 @@ pub struct AdminApp {
     max_error_rate_per_mille: u16,
     state: Arc<Mutex<AdminRuntimeState>>,
     auth_throttle: AdminAuthThrottle,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct AdminClientCertificatePolicy {
+    required: bool,
+    sha256_header: String,
+    allow_sha256: Vec<String>,
+    deny_sha256: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum AdminClientCertificateDecision {
+    Allowed,
+    Required,
+    Denied,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum AdminClientCertificateHeader {
+    Missing,
+    Present(String),
+    Invalid,
 }
 
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
@@ -373,6 +396,7 @@ impl AdminApp {
 
         let app = Self {
             token,
+            client_certificate: AdminClientCertificatePolicy::from_config(&config.admin),
             store: SnapshotStore::new(snapshot_store),
             current_config: Arc::new(ArcSwap::from_pointee(config.clone())),
             proxy,
@@ -448,6 +472,58 @@ impl AdminApp {
                 StatusCode::TOO_MANY_REQUESTS,
                 br#"{"error":"admin_auth_throttled"}"#,
             );
+        }
+
+        match self.client_certificate.allows(headers) {
+            AdminClientCertificateDecision::Allowed => {}
+            AdminClientCertificateDecision::Required => {
+                let scope = self.auth_throttle.record_failure(source);
+                record_admin_auth_event("failure", scope.unwrap_or(AdminAuthThrottleScope::Source));
+                log::warn!(
+                    target: "fluxheim::security",
+                    "admin client certificate required source={} throttled={}",
+                    auth_source_label(source),
+                    scope.map(AdminAuthThrottleScope::as_str).unwrap_or("none")
+                );
+                if scope.is_some() {
+                    record_admin_auth_event(
+                        "throttled",
+                        scope.unwrap_or(AdminAuthThrottleScope::Source),
+                    );
+                    return json_response(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        br#"{"error":"admin_auth_throttled"}"#,
+                    );
+                }
+                return json_response(
+                    StatusCode::FORBIDDEN,
+                    br#"{"error":"admin_client_certificate_required"}"#,
+                );
+            }
+            AdminClientCertificateDecision::Denied => {
+                let scope = self.auth_throttle.record_failure(source);
+                record_admin_auth_event("failure", scope.unwrap_or(AdminAuthThrottleScope::Source));
+                log::warn!(
+                    target: "fluxheim::security",
+                    "admin client certificate denied source={} throttled={}",
+                    auth_source_label(source),
+                    scope.map(AdminAuthThrottleScope::as_str).unwrap_or("none")
+                );
+                if scope.is_some() {
+                    record_admin_auth_event(
+                        "throttled",
+                        scope.unwrap_or(AdminAuthThrottleScope::Source),
+                    );
+                    return json_response(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        br#"{"error":"admin_auth_throttled"}"#,
+                    );
+                }
+                return json_response(
+                    StatusCode::FORBIDDEN,
+                    br#"{"error":"admin_client_certificate_denied"}"#,
+                );
+            }
         }
 
         if !authorized(authorization_header(headers), &self.token) {
@@ -1887,6 +1963,89 @@ fn authorization_header(headers: &HeaderMap) -> Option<&str> {
     header_value(headers, header::AUTHORIZATION.as_str())
 }
 
+impl AdminClientCertificatePolicy {
+    fn from_config(config: &AdminConfig) -> Self {
+        Self {
+            required: config.admin_client_certificate_required(),
+            sha256_header: config.client_certificate.sha256_header.to_ascii_lowercase(),
+            allow_sha256: normalized_sha256_fingerprints(&config.client_certificate.allow_sha256),
+            deny_sha256: normalized_sha256_fingerprints(&config.client_certificate.deny_sha256),
+        }
+    }
+
+    fn allows(&self, headers: &HeaderMap) -> AdminClientCertificateDecision {
+        if !self.active() {
+            return AdminClientCertificateDecision::Allowed;
+        }
+
+        let fingerprint = match single_sha256_header(headers, &self.sha256_header) {
+            AdminClientCertificateHeader::Present(fingerprint) => fingerprint,
+            AdminClientCertificateHeader::Invalid => {
+                return AdminClientCertificateDecision::Denied;
+            }
+            AdminClientCertificateHeader::Missing
+                if self.required || !self.allow_sha256.is_empty() =>
+            {
+                return AdminClientCertificateDecision::Required;
+            }
+            AdminClientCertificateHeader::Missing => {
+                return AdminClientCertificateDecision::Allowed;
+            }
+        };
+
+        if self.deny_sha256.iter().any(|denied| denied == &fingerprint) {
+            return AdminClientCertificateDecision::Denied;
+        }
+
+        if !self.allow_sha256.is_empty()
+            && !self
+                .allow_sha256
+                .iter()
+                .any(|allowed| allowed == &fingerprint)
+        {
+            return AdminClientCertificateDecision::Denied;
+        }
+
+        AdminClientCertificateDecision::Allowed
+    }
+
+    fn active(&self) -> bool {
+        self.required || !self.allow_sha256.is_empty() || !self.deny_sha256.is_empty()
+    }
+}
+
+impl AdminConfig {
+    fn admin_client_certificate_required(&self) -> bool {
+        self.client_certificate.required || !self.client_certificate.allow_sha256.is_empty()
+    }
+}
+
+fn single_sha256_header(headers: &HeaderMap, name: &str) -> AdminClientCertificateHeader {
+    let mut values = headers.get_all(name).iter();
+    let Some(value) = values.next() else {
+        return AdminClientCertificateHeader::Missing;
+    };
+    if values.next().is_some() {
+        return AdminClientCertificateHeader::Invalid;
+    }
+    let Ok(value) = value.to_str() else {
+        return AdminClientCertificateHeader::Invalid;
+    };
+    let value = value.trim();
+    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        AdminClientCertificateHeader::Present(value.to_ascii_lowercase())
+    } else {
+        AdminClientCertificateHeader::Invalid
+    }
+}
+
+fn normalized_sha256_fingerprints(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
 fn header_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
@@ -3031,8 +3190,9 @@ mod tests {
         error_response, json_response, read_bounded_secret_file, read_secret_file,
     };
     use crate::config::{
-        AdminAuthThrottleConfig, AdminConfig, AdminHealthConfig, AdminHealthResponseMode,
-        AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig, VhostConfig, WebConfig,
+        AdminAuthThrottleConfig, AdminClientCertificateConfig, AdminConfig, AdminHealthConfig,
+        AdminHealthResponseMode, AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig,
+        VhostConfig, WebConfig,
     };
     #[cfg(feature = "cache")]
     use crate::config::{ByteSize, CacheConfig, RouteConfig};
@@ -3085,10 +3245,12 @@ mod tests {
         }
         let proxy = FluxProxy::from_config(&config).unwrap();
         let auth_throttle = AdminAuthThrottle::new(config.admin.auth_throttle);
+        let client_certificate = super::AdminClientCertificatePolicy::from_config(&config.admin);
         let health_unauthenticated = config.admin.health.unauthenticated;
         let health_response = config.admin.health.response;
         AdminApp {
             token: AdminToken::new("secret-token", false),
+            client_certificate,
             store: SnapshotStore::new(store),
             current_config: Arc::new(ArcSwap::from_pointee(config)),
             proxy,
@@ -6004,6 +6166,74 @@ mod tests {
             )),
             &token
         ));
+    }
+
+    #[test]
+    fn admin_client_certificate_policy_requires_trusted_fingerprint_header() {
+        let app = app_with_config(Config {
+            admin: AdminConfig {
+                client_certificate: AdminClientCertificateConfig {
+                    required: true,
+                    allow_sha256: vec![
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_owned(),
+                    ],
+                    ..AdminClientCertificateConfig::default()
+                },
+                ..AdminConfig::default()
+            },
+            ..Config::default()
+        });
+
+        assert_eq!(
+            app.handle("GET", "/_fluxheim/status", None, &auth_headers())
+                .status,
+            StatusCode::FORBIDDEN
+        );
+
+        let mut headers = auth_headers();
+        headers.insert(
+            "x-client-cert-sha256",
+            HeaderValue::from_static(
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            ),
+        );
+        assert_eq!(
+            app.handle("GET", "/_fluxheim/status", None, &headers)
+                .status,
+            StatusCode::OK
+        );
+    }
+
+    #[test]
+    fn admin_client_certificate_policy_denies_blocked_fingerprint() {
+        let app = app_with_config(Config {
+            admin: AdminConfig {
+                client_certificate: AdminClientCertificateConfig {
+                    deny_sha256: vec![
+                        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_owned(),
+                    ],
+                    ..AdminClientCertificateConfig::default()
+                },
+                ..AdminConfig::default()
+            },
+            ..Config::default()
+        });
+
+        let mut headers = auth_headers();
+        headers.insert(
+            "x-client-cert-sha256",
+            HeaderValue::from_static(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+        );
+
+        assert_eq!(
+            app.handle("GET", "/_fluxheim/status", None, &headers)
+                .status,
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[test]

@@ -928,6 +928,8 @@ pub struct AdminConfig {
     pub auth_throttle: AdminAuthThrottleConfig,
     #[serde(default)]
     pub self_healing: AdminSelfHealingConfig,
+    #[serde(default)]
+    pub client_certificate: AdminClientCertificateConfig,
 }
 
 impl Default for AdminConfig {
@@ -943,6 +945,7 @@ impl Default for AdminConfig {
             health: AdminHealthConfig::default(),
             auth_throttle: AdminAuthThrottleConfig::default(),
             self_healing: AdminSelfHealingConfig::default(),
+            client_certificate: AdminClientCertificateConfig::default(),
         }
     }
 }
@@ -977,6 +980,7 @@ impl AdminConfig {
         validate_non_world_writable_parent("admin.snapshot_store", self.snapshot_store.as_deref())?;
         self.auth_throttle.validate()?;
         self.self_healing.validate()?;
+        self.client_certificate.validate()?;
 
         if !self.enabled {
             return Ok(());
@@ -1027,6 +1031,54 @@ pub enum AdminRemoteTransportMode {
     #[default]
     LocalOnly,
     TrustedTlsTerminator,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminClientCertificateConfig {
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default = "default_admin_client_certificate_sha256_header")]
+    pub sha256_header: String,
+    #[serde(default)]
+    pub allow_sha256: Vec<String>,
+    #[serde(default)]
+    pub deny_sha256: Vec<String>,
+}
+
+impl Default for AdminClientCertificateConfig {
+    fn default() -> Self {
+        Self {
+            required: false,
+            sha256_header: default_admin_client_certificate_sha256_header(),
+            allow_sha256: Vec::new(),
+            deny_sha256: Vec::new(),
+        }
+    }
+}
+
+impl AdminClientCertificateConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        validate_header_name(
+            "admin.client_certificate.sha256_header",
+            &self.sha256_header,
+        )?;
+        validate_client_cert_sha256_list(
+            "admin.client_certificate",
+            "allow_sha256",
+            &self.allow_sha256,
+        )?;
+        validate_client_cert_sha256_list(
+            "admin.client_certificate",
+            "deny_sha256",
+            &self.deny_sha256,
+        )?;
+        Ok(())
+    }
+}
+
+fn default_admin_client_certificate_sha256_header() -> String {
+    "x-client-cert-sha256".to_owned()
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -4901,6 +4953,8 @@ fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
         ("vhosts.routes.access", "deny_client_cert_sha256") => {
             "vhosts.routes.access.deny_client_cert_sha256"
         }
+        ("admin.client_certificate", "allow_sha256") => "admin.client_certificate.allow_sha256",
+        ("admin.client_certificate", "deny_sha256") => "admin.client_certificate.deny_sha256",
         _ => "access",
     }
 }
@@ -19553,6 +19607,11 @@ mod tests {
             max_lockout_secs = 120
             max_sources = 1024
 
+            [admin.client_certificate]
+            required = true
+            sha256_header = "x-client-cert-sha256"
+            allow_sha256 = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+
             [admin.self_healing]
             enabled = true
             validation_window_secs = 45
@@ -19581,6 +19640,28 @@ mod tests {
         );
         assert_eq!(config.admin.auth_throttle.per_source_failures, 3);
         assert_eq!(config.admin.auth_throttle.global_failures, 50);
+        assert!(config.admin.client_certificate.required);
+        assert_eq!(
+            config.admin.client_certificate.allow_sha256,
+            vec!["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_admin_client_certificate_fingerprint() {
+        let config: Config = toml::from_str(
+            r#"
+            [admin.client_certificate]
+            allow_sha256 = ["not-a-sha256"]
+            "#,
+        )
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("admin.client_certificate.allow_sha256"),
+            "{error}"
+        );
     }
 
     #[test]

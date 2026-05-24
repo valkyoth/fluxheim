@@ -1155,8 +1155,10 @@ Release shape:
     templates such as `{tls.client_cert_sha256}` and is included in structured
     access logs through bounded `tls_*` fields. Vhost and route access policies
     can require a verified client certificate or allow/deny specific
-    certificate SHA-256 fingerprints. Remaining work is s2n parity and
-    certificate-derived identity variables for admin hardening;
+    certificate SHA-256 fingerprints. The admin control plane can also require
+    or allow/deny SHA-256 client-certificate fingerprints supplied by a trusted
+    TLS/mTLS terminator through `[admin.client_certificate]`. Remaining work is
+    s2n parity;
   - upstream TLS controls: SNI override, trust roots, upstream mTLS client cert,
     protocol/cipher policy where supported, and auditable insecure-skip-verify
     behavior. SNI override already existed; certificate verification, hostname

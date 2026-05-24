@@ -108,6 +108,8 @@ behavior when the change improves security or project direction.
 - Added vhost and route access-policy controls for verified downstream client
   certificate fingerprints through `require_client_cert`,
   `allow_client_cert_sha256`, and `deny_client_cert_sha256`.
+- Added admin control-plane client-certificate fingerprint hardening for trusted
+  TLS/mTLS terminators through `[admin.client_certificate]`.
 - Added upstream TLS verification controls for proxy origins:
   `upstream_verify_cert`, `upstream_verify_hostname`, and
   `upstream_alternative_cn`, while keeping certificate and hostname validation

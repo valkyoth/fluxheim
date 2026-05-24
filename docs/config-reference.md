@@ -173,6 +173,12 @@ base_lockout_secs = 30
 max_lockout_secs = 900
 max_sources = 4096
 
+[admin.client_certificate]
+required = false
+sha256_header = "x-client-cert-sha256"
+allow_sha256 = []
+deny_sha256 = []
+
 [admin.self_healing]
 enabled = false
 validation_window_secs = 30
@@ -195,6 +201,17 @@ the operator explicitly declare that a trusted local sidecar, reverse proxy, or
 load balancer terminates TLS/mTLS before traffic reaches the plain admin
 listener. Direct first-class admin TLS/mTLS remains planned; do not expose the
 admin listener over cleartext networks.
+
+`admin.client_certificate` is an extra hardening gate for that trusted
+terminator pattern. The admin listener still receives plain HTTP from the
+trusted local sidecar, but Fluxheim can require a validated downstream client
+certificate fingerprint that the sidecar injects into `sha256_header`.
+`required = true` rejects requests without a single valid 64-character SHA-256
+hex value, `deny_sha256` rejects matching fingerprints, and `allow_sha256`
+restricts admin access to the listed fingerprints when it is non-empty. The
+trusted terminator must strip any incoming copy of this header before adding its
+own value; do not rely on this option for directly exposed cleartext admin
+listeners.
 
 Admin endpoint paths are capped at 2048 bytes and query strings are capped at
 16 KiB before endpoint-specific parsing. Prefer headers for long cache purge
