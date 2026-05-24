@@ -1155,7 +1155,9 @@ fn rustls_client_cert_verifier(
         .ca_path
         .as_deref()
         .ok_or("tls.client_auth.ca_path is required when client auth is enabled")?;
-    let mut reader = std::io::BufReader::new(std::fs::File::open(ca_path).map_err(|error| {
+    use rustls::pki_types::{CertificateDer, pem::PemObject};
+
+    let reader = std::io::BufReader::new(std::fs::File::open(ca_path).map_err(|error| {
         format!(
             "failed to open TLS client auth CA bundle {}: {error}",
             ca_path.display()
@@ -1163,7 +1165,7 @@ fn rustls_client_cert_verifier(
     })?);
     let mut roots = rustls::RootCertStore::empty();
     let mut loaded = 0usize;
-    for certificate in rustls_pemfile::certs(&mut reader) {
+    for certificate in CertificateDer::pem_reader_iter(reader) {
         let certificate = certificate.map_err(|error| {
             format!(
                 "failed to parse TLS client auth CA bundle {}: {error}",

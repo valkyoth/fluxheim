@@ -402,6 +402,14 @@ vary = ["Accept-Encoding"]
 [headers.response.operations]
 remove = ["x-origin-banner"]
 add = { x-content-source = "fluxheim" }
+
+[[headers.response.rewrite.location]]
+from = "http://backend.internal/"
+to = "https://www.example.com/"
+
+[[headers.response.rewrite.refresh]]
+from = "http://backend.internal/"
+to = "https://www.example.com/"
 ```
 
 `x_forwarded_for` values: `off`, `replace`, `append`. `x_real_ip = true`
@@ -478,6 +486,16 @@ Fluxheim sets `Server: fluxheim` and strips `X-Powered-By` by default. Operators
 who do not want a server banner can remove it with `remove = ["server"]`, and
 operators who want a different banner can set one through
 `[headers.response.add]`.
+
+`[[headers.response.rewrite.location]]` and
+`[[headers.response.rewrite.refresh]]` provide bounded prefix rewrites for
+upstream redirect headers, similar to NGINX `proxy_redirect` or Apache
+`ProxyPassReverse`. `Location` rewrites apply to the whole header value.
+`Refresh` rewrites apply only to the URL after `url=` and preserve the refresh
+delay. `from` and `to` values must be absolute `http://` / `https://` prefixes
+or absolute paths, must not contain control characters, and each header supports
+up to 32 rules. Vhost and route response-header policies inherit global rules
+and can append additional rules.
 
 ## Proxy
 

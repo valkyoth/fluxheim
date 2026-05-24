@@ -269,6 +269,7 @@ pub fn apply_response_policy(
     let unset = policy.effective_unset();
     let set = policy.effective_set();
     apply_response_mutations(response, &unset, &set, &policy.append)?;
+    apply_response_rewrites(response, &policy.rewrite)?;
     Ok(())
 }
 
@@ -347,6 +348,131 @@ fn apply_response_mutations(
     }
 
     Ok(())
+}
+
+fn apply_response_rewrites(
+    response: &mut pingora::http::ResponseHeader,
+    rewrite: &crate::config::ResponseHeaderRewriteConfig,
+) -> pingora::Result<()> {
+    rewrite_header_values(
+        response,
+        "location",
+        &rewrite.location,
+        rewrite_header_prefix,
+    )?;
+    rewrite_header_values(response, "refresh", &rewrite.refresh, rewrite_refresh_url)
+}
+
+fn rewrite_header_values(
+    response: &mut pingora::http::ResponseHeader,
+    name: &'static str,
+    rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
+    rewrite_value: fn(&str, &[crate::config::ResponseHeaderRewriteRuleConfig]) -> Option<String>,
+) -> pingora::Result<()> {
+    if rules.is_empty() {
+        return Ok(());
+    }
+
+    let values = response
+        .headers
+        .get_all(name)
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Ok(());
+    }
+
+    let mut rewritten = Vec::with_capacity(values.len());
+    let mut changed = false;
+    for value in values {
+        if let Ok(text) = value.to_str()
+            && let Some(next) = rewrite_value(text, rules)
+        {
+            rewritten.push(RewrittenResponseHeaderValue::Text(next));
+            changed = true;
+            continue;
+        }
+        rewritten.push(RewrittenResponseHeaderValue::Original(value));
+    }
+
+    if changed {
+        response.remove_header(name);
+        for value in rewritten {
+            match value {
+                RewrittenResponseHeaderValue::Original(value) => {
+                    response.append_header(name, value)?;
+                }
+                RewrittenResponseHeaderValue::Text(value) => {
+                    response.append_header(name, value.as_str())?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+enum RewrittenResponseHeaderValue {
+    Original(http::HeaderValue),
+    Text(String),
+}
+
+fn rewrite_header_prefix(
+    value: &str,
+    rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
+) -> Option<String> {
+    for rule in rules {
+        if value.starts_with(&rule.from) {
+            let mut rewritten =
+                String::with_capacity(rule.to.len() + value.len() - rule.from.len());
+            rewritten.push_str(&rule.to);
+            rewritten.push_str(&value[rule.from.len()..]);
+            return Some(rewritten);
+        }
+    }
+    None
+}
+
+fn rewrite_refresh_url(
+    value: &str,
+    rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
+) -> Option<String> {
+    let url_start = find_refresh_url_start(value)?;
+    let rewritten_url = rewrite_header_prefix(&value[url_start..], rules)?;
+    let mut rewritten = String::with_capacity(url_start + rewritten_url.len());
+    rewritten.push_str(&value[..url_start]);
+    rewritten.push_str(&rewritten_url);
+    Some(rewritten)
+}
+
+fn find_refresh_url_start(value: &str) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index + 3 <= bytes.len() {
+        let previous_is_separator = index == 0 || matches!(bytes[index - 1], b';' | b' ' | b'\t');
+        if previous_is_separator && bytes[index..index + 3].eq_ignore_ascii_case(b"url") {
+            let mut cursor = index + 3;
+            while bytes
+                .get(cursor)
+                .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                cursor += 1;
+            }
+            if bytes.get(cursor) == Some(&b'=') {
+                cursor += 1;
+                while bytes
+                    .get(cursor)
+                    .is_some_and(|byte| matches!(byte, b' ' | b'\t'))
+                {
+                    cursor += 1;
+                }
+                return Some(cursor);
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 #[cfg(not(feature = "privacy-mode"))]
@@ -654,6 +780,75 @@ mod tests {
                 .get("server")
                 .and_then(|value| value.to_str().ok()),
             Some("Fluxheim")
+        );
+    }
+
+    #[test]
+    fn rewrites_response_location_and_refresh_headers() {
+        let policy = crate::config::ResponseHeaderPolicyConfig {
+            rewrite: crate::config::ResponseHeaderRewriteConfig {
+                location: vec![crate::config::ResponseHeaderRewriteRuleConfig {
+                    from: "http://backend.internal/".to_owned(),
+                    to: "https://example.test/".to_owned(),
+                }],
+                refresh: vec![crate::config::ResponseHeaderRewriteRuleConfig {
+                    from: "http://backend.internal/".to_owned(),
+                    to: "https://example.test/".to_owned(),
+                }],
+            },
+            ..crate::config::ResponseHeaderPolicyConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(302, None).unwrap();
+        response
+            .insert_header("location", "http://backend.internal/login?next=/admin")
+            .unwrap();
+        response
+            .insert_header("refresh", "0; url = http://backend.internal/login")
+            .unwrap();
+
+        apply_response_policy(&mut response, &policy).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get("location")
+                .and_then(|value| value.to_str().ok()),
+            Some("https://example.test/login?next=/admin")
+        );
+        assert_eq!(
+            response
+                .headers
+                .get("refresh")
+                .and_then(|value| value.to_str().ok()),
+            Some("0; url = https://example.test/login")
+        );
+    }
+
+    #[test]
+    fn response_header_rewrite_preserves_non_matching_values() {
+        let policy = crate::config::ResponseHeaderPolicyConfig {
+            rewrite: crate::config::ResponseHeaderRewriteConfig {
+                location: vec![crate::config::ResponseHeaderRewriteRuleConfig {
+                    from: "http://backend.internal/".to_owned(),
+                    to: "https://example.test/".to_owned(),
+                }],
+                refresh: Vec::new(),
+            },
+            ..crate::config::ResponseHeaderPolicyConfig::default()
+        };
+        let mut response = pingora::http::ResponseHeader::build(302, None).unwrap();
+        response
+            .insert_header("location", "https://other.example/login")
+            .unwrap();
+
+        apply_response_policy(&mut response, &policy).unwrap();
+
+        assert_eq!(
+            response
+                .headers
+                .get("location")
+                .and_then(|value| value.to_str().ok()),
+            Some("https://other.example/login")
         );
     }
 

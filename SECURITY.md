@@ -54,8 +54,10 @@ Current reviewed dependency warnings:
 - `RUSTSEC-2024-0388` for `derivative 2.2.0`: warning-only unmaintained
   transitive through Pingora. Recheck on every Pingora upgrade.
 - `RUSTSEC-2025-0134` for `rustls-pemfile 2.2.0`: warning-only unmaintained
-  transitive through Pingora's Rustls stack. Recheck on every Pingora or Rustls
-  dependency upgrade.
+  transitive through Pingora's Rustls stack and `rustls-native-certs`.
+  Fluxheim no longer depends on it directly and uses
+  `rustls-pki-types::pem::PemObject` for local PEM parsing. Recheck on every
+  Pingora or Rustls dependency upgrade.
 
 ## Release Supply-Chain Evidence
 

@@ -82,4 +82,18 @@ if grep -q 'RUSTSEC-2024-0437' deny.toml .cargo/audit.toml; then
     fi
 fi
 
+if grep -q 'RUSTSEC-2025-0134' deny.toml .cargo/audit.toml \
+    && ! grep -q '^name = "rustls-pemfile"$' Cargo.lock; then
+    echo "release metadata: RUSTSEC-2025-0134 suppression must be removed because rustls-pemfile is no longer in Cargo.lock" >&2
+    exit 1
+fi
+
+if grep -q 'RUSTSEC-2025-0134' deny.toml .cargo/audit.toml; then
+    current_utc_date="$(date -u +%Y%m%d)"
+    if [ "$current_utc_date" -ge 20260901 ]; then
+        echo "release metadata: RUSTSEC-2025-0134 suppression passed its scheduled manual review date 2026-09-01" >&2
+        exit 1
+    fi
+fi
+
 echo "release metadata: ok"

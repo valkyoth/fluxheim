@@ -3691,8 +3691,9 @@ fn load_upstream_ca_bundle(
     path: &std::path::Path,
 ) -> io::Result<Arc<pingora::protocols::tls::CaType>> {
     let contents = read_upstream_tls_file(path)?;
-    let mut reader = std::io::BufReader::new(contents.as_slice());
-    let certs = rustls_pemfile::certs(&mut reader)
+    use rustls::pki_types::{CertificateDer, pem::PemObject};
+
+    let certs = CertificateDer::pem_slice_iter(&contents)
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| {
             io::Error::new(
@@ -3768,8 +3769,9 @@ fn load_upstream_client_cert_key(
     let cert_contents = read_upstream_tls_file(cert_path)?;
     let key_contents = read_upstream_tls_file(key_path)?;
 
-    let mut cert_reader = std::io::BufReader::new(cert_contents.as_slice());
-    let certs = rustls_pemfile::certs(&mut cert_reader)
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+
+    let certs = CertificateDer::pem_slice_iter(&cert_contents)
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| {
             io::Error::new(
@@ -3790,26 +3792,15 @@ fn load_upstream_client_cert_key(
         ));
     }
 
-    let mut key_reader = std::io::BufReader::new(key_contents.as_slice());
-    let key = rustls_pemfile::private_key(&mut key_reader)
-        .map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "failed to parse upstream client private key {}: {error}",
-                    key_path.display()
-                ),
-            )
-        })?
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "upstream client private key {} contains no private key",
-                    key_path.display()
-                ),
-            )
-        })?;
+    let key = PrivateKeyDer::from_pem_slice(&key_contents).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse upstream client private key {}: {error}",
+                key_path.display()
+            ),
+        )
+    })?;
 
     let cert_key = pingora::utils::tls::CertKey::try_new(
         certs

@@ -57,6 +57,9 @@ behavior when the change improves security or project direction.
 - Added route-level compression overrides so path prefixes such as
   `/wp-content/uploads/` can opt into or out of compression independently from
   the rest of the vhost.
+- Added response `Location` and `Refresh` prefix rewrite rules under
+  `headers.response.rewrite` for common `proxy_redirect` /
+  `ProxyPassReverse` migrations.
 - Added `compression.max_output_bytes` so encoded responses stay bounded even
   when a compressible input is within `max_input_bytes`.
 - Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and
@@ -102,6 +105,10 @@ behavior when the change improves security or project direction.
   `proxy.upstream_idle_timeout_secs`.
 - Added upstream TCP socket tuning for proxy origins, including TCP keepalive,
   Linux user timeout, receive-buffer size, DSCP, and TCP Fast Open controls.
+- Replaced Fluxheim's direct `rustls-pemfile` usage with
+  `rustls-pki-types::pem::PemObject`; the remaining `RUSTSEC-2025-0134`
+  warning is transitive through Pingora's rustls stack and documented in
+  `SECURITY.md`.
 
 ### Planned
 

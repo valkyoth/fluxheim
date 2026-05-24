@@ -1748,6 +1748,7 @@ impl VhostHeaderPolicyConfig {
 
 const MAX_HEADER_MUTATION_NAMES: usize = 128;
 const MAX_HEADER_APPEND_VALUES: usize = 32;
+const MAX_RESPONSE_HEADER_REWRITE_RULES: usize = 32;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1949,6 +1950,8 @@ pub struct ResponseHeaderPolicyConfig {
     pub append: BTreeMap<String, HeaderValues>,
     #[serde(default)]
     pub operations: HeaderOperationsConfig,
+    #[serde(default)]
+    pub rewrite: ResponseHeaderRewriteConfig,
 }
 
 impl Default for ResponseHeaderPolicyConfig {
@@ -1967,6 +1970,7 @@ impl Default for ResponseHeaderPolicyConfig {
             add: BTreeMap::new(),
             append: BTreeMap::new(),
             operations: HeaderOperationsConfig::default(),
+            rewrite: ResponseHeaderRewriteConfig::default(),
         }
     }
 }
@@ -2010,6 +2014,7 @@ impl ResponseHeaderPolicyConfig {
         let unset = self.effective_unset();
         let set = self.effective_set();
         validate_header_mutations("headers.response", &unset, &set, &self.append)?;
+        self.rewrite.validate("headers.response.rewrite")?;
 
         Ok(())
     }
@@ -2052,7 +2057,36 @@ impl ResponseHeaderPolicyConfig {
             &overlay.effective_set(),
             &overlay.append,
         );
+        self.rewrite.merge(&overlay.rewrite);
     }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseHeaderRewriteConfig {
+    #[serde(default)]
+    pub location: Vec<ResponseHeaderRewriteRuleConfig>,
+    #[serde(default)]
+    pub refresh: Vec<ResponseHeaderRewriteRuleConfig>,
+}
+
+impl ResponseHeaderRewriteConfig {
+    fn validate(&self, field: &'static str) -> Result<(), ConfigError> {
+        validate_response_header_rewrite_rules(field, "location", &self.location)?;
+        validate_response_header_rewrite_rules(field, "refresh", &self.refresh)
+    }
+
+    fn merge(&mut self, overlay: &Self) {
+        self.location.extend(overlay.location.iter().cloned());
+        self.refresh.extend(overlay.refresh.iter().cloned());
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponseHeaderRewriteRuleConfig {
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -2131,6 +2165,8 @@ pub struct ResponseHeaderPolicyOverlayConfig {
     pub append: BTreeMap<String, HeaderValues>,
     #[serde(default)]
     pub operations: HeaderOperationsConfig,
+    #[serde(default)]
+    pub rewrite: ResponseHeaderRewriteConfig,
 }
 
 impl ResponseHeaderPolicyOverlayConfig {
@@ -2177,7 +2213,8 @@ impl ResponseHeaderPolicyOverlayConfig {
         )?;
         let unset = self.effective_unset();
         let set = self.effective_set();
-        validate_header_mutations("vhosts.headers.response", &unset, &set, &self.append)
+        validate_header_mutations("vhosts.headers.response", &unset, &set, &self.append)?;
+        self.rewrite.validate("vhosts.headers.response.rewrite")
     }
 
     fn effective_unset(&self) -> Vec<String> {
@@ -11531,6 +11568,62 @@ fn validate_header_mutations(
     Ok(())
 }
 
+fn validate_response_header_rewrite_rules(
+    field: &'static str,
+    header: &'static str,
+    rules: &[ResponseHeaderRewriteRuleConfig],
+) -> Result<(), ConfigError> {
+    validate_header_mutation_len(
+        field,
+        header,
+        rules.len(),
+        MAX_RESPONSE_HEADER_REWRITE_RULES,
+    )?;
+
+    let mut seen = std::collections::BTreeSet::new();
+    for rule in rules {
+        validate_response_header_rewrite_endpoint(field, header, "from", &rule.from)?;
+        validate_response_header_rewrite_endpoint(field, header, "to", &rule.to)?;
+        if !seen.insert(rule.from.as_str()) {
+            return Err(ConfigError::ConflictingHeaderAdd {
+                field,
+                name: format!("{header}.from"),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_response_header_rewrite_endpoint(
+    field: &'static str,
+    header: &'static str,
+    side: &'static str,
+    value: &str,
+) -> Result<(), ConfigError> {
+    let valid_prefix =
+        value.starts_with("http://") || value.starts_with("https://") || value.starts_with('/');
+    let valid_path_prefix = !value.starts_with("//");
+    if value.is_empty()
+        || value.len() > 2048
+        || !valid_prefix
+        || !valid_path_prefix
+        || value.as_bytes().iter().any(|byte| {
+            matches!(
+                byte,
+                0x00..=0x08 | 0x0a..=0x1f | 0x7f
+            )
+        })
+    {
+        return Err(ConfigError::InvalidHeaderValue {
+            field,
+            name: format!("{header}.{side}"),
+        });
+    }
+
+    Ok(())
+}
+
 fn validate_header_mutation_len(
     field: &'static str,
     operation: &'static str,
@@ -13194,6 +13287,14 @@ mod tests {
             [headers.response.append]
             vary = ["Accept-Encoding", "Origin"]
             set-cookie = "fluxheim=1; HttpOnly; Secure; SameSite=Lax"
+
+            [[headers.response.rewrite.location]]
+            from = "http://backend.internal/"
+            to = "https://example.test/"
+
+            [[headers.response.rewrite.refresh]]
+            from = "/legacy/"
+            to = "/"
             "#,
         )
         .unwrap();
@@ -13225,7 +13326,62 @@ mod tests {
                 .map(|values| values.iter().collect::<Vec<_>>()),
             Some(vec!["Accept-Encoding", "Origin"])
         );
+        assert_eq!(
+            policy.rewrite.location,
+            [super::ResponseHeaderRewriteRuleConfig {
+                from: "http://backend.internal/".to_owned(),
+                to: "https://example.test/".to_owned()
+            }]
+        );
+        assert_eq!(
+            policy.rewrite.refresh,
+            [super::ResponseHeaderRewriteRuleConfig {
+                from: "/legacy/".to_owned(),
+                to: "/".to_owned()
+            }]
+        );
         config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_invalid_response_header_rewrite_rules() {
+        let config: Config = toml::from_str(
+            r#"
+            [[headers.response.rewrite.location]]
+            from = "backend.internal/"
+            to = "https://example.test/"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidHeaderValue {
+                field: "headers.response.rewrite",
+                name: "location.from".to_owned()
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[headers.response.rewrite.refresh]]
+            from = "https://backend.internal/"
+            to = "https://example.test/"
+
+            [[headers.response.rewrite.refresh]]
+            from = "https://backend.internal/"
+            to = "https://example.test/other/"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::ConflictingHeaderAdd {
+                field: "headers.response.rewrite",
+                name: "refresh.from".to_owned()
+            })
+        );
     }
 
     #[test]
