@@ -81,7 +81,8 @@ impl UpstreamLoadBalancer {
             }
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
-            | LoadBalanceSelection::HeaderHash => {
+            | LoadBalanceSelection::HeaderHash
+            | LoadBalanceSelection::CookieHash => {
                 let Some(inner) = configured_load_balancer::<FNVHash>(config)? else {
                     return Ok(None);
                 };
@@ -92,7 +93,8 @@ impl UpstreamLoadBalancer {
             }
             LoadBalanceSelection::ConsistentSourceHash
             | LoadBalanceSelection::ConsistentUriHash
-            | LoadBalanceSelection::ConsistentHeaderHash => {
+            | LoadBalanceSelection::ConsistentHeaderHash
+            | LoadBalanceSelection::ConsistentCookieHash => {
                 let Some(inner) = configured_load_balancer::<Consistent>(config)? else {
                     return Ok(None);
                 };
@@ -124,12 +126,14 @@ impl UpstreamLoadBalancer {
             }
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
-            | LoadBalanceSelection::HeaderHash => {
+            | LoadBalanceSelection::HeaderHash
+            | LoadBalanceSelection::CookieHash => {
                 background_service_for::<FNVHash>(name, config, UpstreamLoadBalancerInner::FnvHash)
             }
             LoadBalanceSelection::ConsistentSourceHash
             | LoadBalanceSelection::ConsistentUriHash
-            | LoadBalanceSelection::ConsistentHeaderHash => background_service_for::<Consistent>(
+            | LoadBalanceSelection::ConsistentHeaderHash
+            | LoadBalanceSelection::ConsistentCookieHash => background_service_for::<Consistent>(
                 name,
                 config,
                 UpstreamLoadBalancerInner::ConsistentHash,
@@ -322,6 +326,7 @@ enum LoadBalanceKeySource {
     SourceIp,
     Uri,
     Header(String),
+    Cookie(String),
 }
 
 impl LoadBalanceKeySource {
@@ -338,6 +343,12 @@ impl LoadBalanceKeySource {
                 .hash_header
                 .clone()
                 .map(Self::Header)
+                .unwrap_or(Self::None),
+            LoadBalanceSelection::CookieHash | LoadBalanceSelection::ConsistentCookieHash => config
+                .load_balance
+                .hash_cookie
+                .clone()
+                .map(Self::Cookie)
                 .unwrap_or(Self::None),
         }
     }
@@ -356,8 +367,26 @@ impl LoadBalanceKeySource {
                 }
                 (!key.is_empty()).then_some(key)
             }
+            Self::Cookie(name) => cookie_key(request, name),
         }
     }
+}
+
+fn cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
+    for header in request.headers.get_all("cookie") {
+        let Ok(header) = header.to_str() else {
+            continue;
+        };
+        for part in header.split(';') {
+            let Some((candidate, value)) = part.trim().split_once('=') else {
+                continue;
+            };
+            if candidate.trim() == name {
+                return Some(value.trim().as_bytes().to_vec());
+            }
+        }
+    }
+    None
 }
 
 fn configured_load_balancer<S>(config: &ProxyConfig) -> io::Result<Option<LoadBalancer<S>>>
@@ -537,6 +566,31 @@ mod tests {
 
         let mut request = request();
         request.insert_header("x-session", "abc").unwrap();
+        let first = balancer.select(&request, None).unwrap();
+        let second = balancer.select(&request, None).unwrap();
+        assert_eq!(first.backend.addr, second.backend.addr);
+    }
+
+    #[test]
+    fn builds_cookie_hash_selection_from_proxy_upstreams() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::CookieHash,
+                hash_cookie: Some("session".to_owned()),
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let mut request = request();
+        request
+            .insert_header("cookie", "other=1; session=abc; theme=dark")
+            .unwrap();
         let first = balancer.select(&request, None).unwrap();
         let second = balancer.select(&request, None).unwrap();
         assert_eq!(first.backend.addr, second.backend.addr);

@@ -25,7 +25,8 @@ behavior when the change improves security or project direction.
 - Added `proxy.upstream_weights` for weighted round-robin upstream selection in
   `load-balancer` builds.
 - Added `proxy.load_balance.selection` for least-connections, weighted source,
-  URI, header, and consistent-hash upstream selection in `load-balancer` builds.
+  URI, header, cookie, and consistent-hash upstream selection in
+  `load-balancer` builds.
 
 ### Planned
 

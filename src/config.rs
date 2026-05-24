@@ -3618,6 +3618,8 @@ pub struct LoadBalanceConfig {
     pub selection: LoadBalanceSelection,
     #[serde(default)]
     pub hash_header: Option<String>,
+    #[serde(default)]
+    pub hash_cookie: Option<String>,
     #[serde(default = "default_lb_max_iterations")]
     pub max_iterations: usize,
     #[serde(default)]
@@ -3629,6 +3631,7 @@ impl Default for LoadBalanceConfig {
         Self {
             selection: LoadBalanceSelection::default(),
             hash_header: None,
+            hash_cookie: None,
             max_iterations: default_lb_max_iterations(),
             health_check: LoadBalanceHealthCheckConfig::default(),
         }
@@ -3654,6 +3657,22 @@ impl LoadBalanceConfig {
                 reason: "proxy.load_balance.hash_header can only be used with header-hash selections",
             });
         }
+        if self.selection.requires_hash_cookie() {
+            let Some(cookie) = self.hash_cookie.as_deref() else {
+                return Err(ConfigError::InvalidLoadBalanceSelection {
+                    reason: "cookie-hash selections require proxy.load_balance.hash_cookie",
+                });
+            };
+            if !valid_http_header_name(cookie) {
+                return Err(ConfigError::InvalidLoadBalanceSelection {
+                    reason: "proxy.load_balance.hash_cookie must be a valid cookie name",
+                });
+            }
+        } else if self.hash_cookie.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.hash_cookie can only be used with cookie-hash selections",
+            });
+        }
         if self.max_iterations == 0 {
             return Err(ConfigError::InvalidLoadBalanceMaxIterations);
         }
@@ -3672,14 +3691,20 @@ pub enum LoadBalanceSelection {
     SourceHash,
     UriHash,
     HeaderHash,
+    CookieHash,
     ConsistentSourceHash,
     ConsistentUriHash,
     ConsistentHeaderHash,
+    ConsistentCookieHash,
 }
 
 impl LoadBalanceSelection {
     fn requires_hash_header(self) -> bool {
         matches!(self, Self::HeaderHash | Self::ConsistentHeaderHash)
+    }
+
+    fn requires_hash_cookie(self) -> bool {
+        matches!(self, Self::CookieHash | Self::ConsistentCookieHash)
     }
 }
 
@@ -12194,6 +12219,28 @@ mod tests {
         .unwrap();
         assert!(matches!(
             unused_header.validate(),
+            Err(ConfigError::InvalidLoadBalanceSelection { .. })
+        ));
+
+        let cookie: Config = toml::from_str(
+            r#"
+            [proxy.load_balance]
+            selection = "cookie-hash"
+            hash_cookie = "session"
+            "#,
+        )
+        .unwrap();
+        cookie.validate().unwrap();
+
+        let missing_cookie: Config = toml::from_str(
+            r#"
+            [proxy.load_balance]
+            selection = "consistent-cookie-hash"
+            "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            missing_cookie.validate(),
             Err(ConfigError::InvalidLoadBalanceSelection { .. })
         ));
     }
