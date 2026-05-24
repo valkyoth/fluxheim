@@ -62,6 +62,16 @@ structured access logging, host/header/cookie/redirect rewrite policy, upstream
 TLS controls, active HTTP health checks, retry budgets, and connection/socket
 tuning. The next `1.4.1` proxy-operations release owns the remaining discovery,
 mirroring, richer rewrite, local operational socket, and typed hook-point work.
+The highest-value missing NGINX migration items are now explicitly first in
+that queue: regex path routing with capture-aware rewrites, method-based
+routing, WebSocket/HTTP upgrade verification, and `auth_request`-style external
+authorization subrequests. Follow-up `1.4.2` work should cover optional GeoIP
+policy, advanced AND/OR/NOT ACL composition, local stick-table-style tracking,
+runtime backend drain/disable/enable operations, map-style variables, and
+bounded response body substitution. A separate `1.4.3` stream feature can add
+TCP proxying for NGINX stream / HAProxy TCP-mode parity; UDP proxying and
+HTTP/2 server push are intentionally deferred/skipped until a concrete
+requirement makes them worth the extra attack surface.
 Palo Alto-style security asks are tracked as policy integrations around this
 proxy surface: reputation/Geo decisions, TLS fingerprint signals, and future
 WAF/App-ID-like classification hooks without turning Fluxheim into a full
