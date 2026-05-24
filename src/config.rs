@@ -3962,6 +3962,8 @@ pub struct LoadBalancePassiveHealthConfig {
     pub ejection_secs: u64,
     #[serde(default)]
     pub failure_statuses: Vec<u16>,
+    #[serde(default)]
+    pub max_latency_ms: u64,
 }
 
 impl Default for LoadBalancePassiveHealthConfig {
@@ -3971,6 +3973,7 @@ impl Default for LoadBalancePassiveHealthConfig {
             consecutive_failure: default_lb_passive_consecutive_failure(),
             ejection_secs: default_lb_passive_ejection_secs(),
             failure_statuses: Vec::new(),
+            max_latency_ms: 0,
         }
     }
 }
@@ -3985,6 +3988,11 @@ impl LoadBalancePassiveHealthConfig {
         if self.ejection_secs == 0 || self.ejection_secs > 3600 {
             return Err(ConfigError::InvalidLoadBalancePassiveHealth {
                 field: "proxy.load_balance.passive_health.ejection_secs",
+            });
+        }
+        if self.max_latency_ms > 600_000 {
+            return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.max_latency_ms",
             });
         }
         if self.failure_statuses.len() > 64
@@ -12988,10 +12996,12 @@ mod tests {
             consecutive_failure = 2
             ejection_secs = 10
             failure_statuses = [500, 502, 503]
+            max_latency_ms = 250
             "#,
         )
         .unwrap();
         config.validate().unwrap();
+        assert_eq!(config.proxy.load_balance.passive_health.max_latency_ms, 250);
 
         let invalid_status: Config = toml::from_str(
             r#"
@@ -13005,6 +13015,20 @@ mod tests {
             invalid_status.validate(),
             Err(ConfigError::InvalidLoadBalancePassiveHealth {
                 field: "proxy.load_balance.passive_health.failure_statuses"
+            })
+        );
+
+        let invalid_latency: Config = toml::from_str(
+            r#"
+            [proxy.load_balance.passive_health]
+            max_latency_ms = 600001
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            invalid_latency.validate(),
+            Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.max_latency_ms"
             })
         );
     }

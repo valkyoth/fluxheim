@@ -30,6 +30,8 @@ behavior when the change improves security or project direction.
 - Added opt-in `proxy.load_balance.passive_health` outlier detection for
   load-balanced upstreams, with bounded consecutive-failure ejection for proxy
   failures and selected 5xx response statuses.
+- Added opt-in passive latency ejection with
+  `proxy.load_balance.passive_health.max_latency_ms`.
 - Added opt-in `proxy.load_balance.retry` redispatch for load-balanced
   connection failures before request forwarding, bounded by retry count and
   safe HTTP method policy.

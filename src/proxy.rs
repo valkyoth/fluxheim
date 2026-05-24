@@ -5029,6 +5029,8 @@ pub struct RequestContext {
     #[cfg(feature = "load-balancer")]
     upstream_load_balancer_outcome_recorded: bool,
     #[cfg(feature = "load-balancer")]
+    upstream_load_balancer_selected_at: Option<Instant>,
+    #[cfg(feature = "load-balancer")]
     upstream_load_balancer_retries: u8,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
@@ -5652,6 +5654,7 @@ impl ProxyHttp for FluxProxy {
             ctx.upstream_load_balancer_permit = None;
             ctx.upstream_load_balancer_reporter = None;
             ctx.upstream_load_balancer_outcome_recorded = false;
+            ctx.upstream_load_balancer_selected_at = None;
         }
 
         #[cfg(feature = "load-balancer")]
@@ -5663,6 +5666,7 @@ impl ProxyHttp for FluxProxy {
         {
             ctx.upstream_load_balancer_permit = selected.permit;
             ctx.upstream_load_balancer_reporter = selected.reporter;
+            ctx.upstream_load_balancer_selected_at = Some(Instant::now());
             let peer = http_peer_for_proxy(selected.backend, &proxy.config)?;
             return Ok(Box::new(peer));
         }
@@ -11607,7 +11611,10 @@ fn record_load_balanced_upstream_status(ctx: &mut RequestContext, status: u16) {
         return;
     }
     if let Some(reporter) = &ctx.upstream_load_balancer_reporter {
-        reporter.record_status(status);
+        let latency = ctx
+            .upstream_load_balancer_selected_at
+            .map(|selected_at| selected_at.elapsed());
+        reporter.record_status(status, latency);
         ctx.upstream_load_balancer_outcome_recorded = true;
     }
 }

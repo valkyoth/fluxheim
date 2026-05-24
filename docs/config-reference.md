@@ -509,6 +509,13 @@ reuse_connection = false
 enabled = false
 duration_secs = 30
 
+[proxy.load_balance.passive_health]
+enabled = false
+consecutive_failure = 3
+ejection_secs = 30
+failure_statuses = []
+max_latency_ms = 0
+
 [proxy.load_balance.retry]
 enabled = false
 max_retries = 1
@@ -562,8 +569,10 @@ Omit `port_override` to check the backend's normal port.
 detection. Fluxheim records selected upstream outcomes, treats 5xx responses as
 failures by default, and temporarily ejects a backend after
 `consecutive_failure` failures for `ejection_secs`. `failure_statuses` may
-narrow the failure set to specific 5xx status codes. Active health checks and
-passive ejection are combined; if no backend is currently selectable,
+narrow the failure set to specific 5xx status codes. `max_latency_ms = 0`
+disables latency ejection; a positive value treats responses at or above that
+latency as passive failures. Active health checks and passive ejection are
+combined; if no backend is currently selectable,
 Fluxheim returns a proxy error instead of falling back to a configured primary
 upstream.
 `proxy.load_balance.slow_start.enabled = true` warms newly seen and passively

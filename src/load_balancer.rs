@@ -377,8 +377,11 @@ impl SelectedUpstream {
 }
 
 impl LoadBalancedUpstreamReporter {
-    pub fn record_status(&self, status: u16) {
-        if let Some(restart_at) = self.passive_health.record_status(self.backend_key, status) {
+    pub fn record_status(&self, status: u16, latency: Option<Duration>) {
+        if let Some(restart_at) =
+            self.passive_health
+                .record_status(self.backend_key, status, latency)
+        {
             self.reset_slow_start(restart_at);
         }
     }
@@ -399,6 +402,7 @@ impl LoadBalancedUpstreamReporter {
 struct PassiveHealthState {
     consecutive_failure: usize,
     ejection: Duration,
+    max_latency: Option<Duration>,
     failure_statuses: Arc<[u16]>,
     backends: Arc<Mutex<std::collections::HashMap<u64, PassiveBackendHealth>>>,
 }
@@ -414,6 +418,8 @@ impl PassiveHealthState {
         Self {
             consecutive_failure: config.consecutive_failure,
             ejection: Duration::from_secs(config.ejection_secs),
+            max_latency: (config.max_latency_ms > 0)
+                .then(|| Duration::from_millis(config.max_latency_ms)),
             failure_statuses: config.failure_statuses.clone().into(),
             backends: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
@@ -438,8 +444,13 @@ impl PassiveHealthState {
         false
     }
 
-    fn record_status(&self, key: u64, status: u16) -> Option<Instant> {
-        if self.failure_status(status) {
+    fn record_status(&self, key: u64, status: u16, latency: Option<Duration>) -> Option<Instant> {
+        if self.failure_status(status)
+            || latency.is_some_and(|latency| {
+                self.max_latency
+                    .is_some_and(|max_latency| latency >= max_latency)
+            })
+        {
             self.record_failure(key)
         } else {
             self.record_success(key);
@@ -1278,7 +1289,7 @@ mod tests {
                     enabled: true,
                     consecutive_failure: 1,
                     ejection_secs: 60,
-                    failure_statuses: Vec::new(),
+                    ..LoadBalancePassiveHealthConfig::default()
                 },
                 ..LoadBalanceConfig::default()
             },
@@ -1289,7 +1300,38 @@ mod tests {
 
         let failed = balancer.select(&request(), None).unwrap();
         let failed_addr = failed.backend.addr.clone();
-        failed.reporter.unwrap().record_status(503);
+        failed.reporter.unwrap().record_status(503, None);
+        let next = balancer.select(&request(), None).unwrap();
+        assert_ne!(failed_addr, next.backend.addr);
+    }
+
+    #[test]
+    fn passive_health_ejects_slow_backend() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    max_latency_ms: 100,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let failed = balancer.select(&request(), None).unwrap();
+        let failed_addr = failed.backend.addr.clone();
+        failed
+            .reporter
+            .unwrap()
+            .record_status(200, Some(Duration::from_millis(150)));
         let next = balancer.select(&request(), None).unwrap();
         assert_ne!(failed_addr, next.backend.addr);
     }
@@ -1306,7 +1348,7 @@ mod tests {
                     enabled: true,
                     consecutive_failure: 1,
                     ejection_secs: 60,
-                    failure_statuses: Vec::new(),
+                    ..LoadBalancePassiveHealthConfig::default()
                 },
                 ..LoadBalanceConfig::default()
             },
