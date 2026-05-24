@@ -5,6 +5,7 @@ use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeV
 
 static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static EDGE_POLICY_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static RESPONSE_COMPRESSIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -59,6 +60,7 @@ pub fn enabled() -> bool {
 pub fn init() -> Result<(), prometheus::Error> {
     proxy_requests_total()?;
     host_routing_rejections_total()?;
+    edge_policy_events_total()?;
     response_compressions_total()?;
     admin_auth_events_total()?;
     acme_events_total()?;
@@ -198,6 +200,21 @@ pub fn record_host_routing_rejection(reason: &str) {
             .with_label_values(&[host_routing_reason_label(reason)])
             .inc(),
         Err(error) => log::debug!("metrics counter unavailable: {error}"),
+    }
+}
+
+pub fn record_edge_policy_event(vhost: &str, route: Option<&str>, policy: &str, outcome: &str) {
+    match edge_policy_events_total() {
+        Ok(counter) => counter
+            .with_label_values(&[
+                cache_scope_label(route),
+                vhost,
+                route.unwrap_or(""),
+                edge_policy_label(policy),
+                edge_policy_outcome_label(outcome),
+            ])
+            .inc(),
+        Err(error) => log::debug!("metrics edge policy counter unavailable: {error}"),
     }
 }
 
@@ -547,6 +564,30 @@ fn host_routing_rejections_total() -> Result<&'static IntCounterVec, prometheus:
     let _ = HOST_ROUTING_REJECTIONS_TOTAL.set(counter);
     HOST_ROUTING_REJECTIONS_TOTAL.get().ok_or_else(|| {
         prometheus::Error::Msg("host routing counter failed to initialize".to_owned())
+    })
+}
+
+fn edge_policy_events_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = EDGE_POLICY_EVENTS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_edge_policy_events_total",
+            "Total Fluxheim edge policy enforcement events by configured vhost, optional route, bounded policy, and bounded outcome.",
+        ),
+        &["scope", "vhost", "route", "policy", "outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = EDGE_POLICY_EVENTS_TOTAL.set(counter);
+    EDGE_POLICY_EVENTS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_edge_policy_events_total failed to initialize".to_owned())
     })
 }
 
@@ -1321,6 +1362,24 @@ fn compression_encoding_label(encoding: &str) -> &'static str {
     }
 }
 
+fn edge_policy_label(policy: &str) -> &'static str {
+    match policy {
+        "access" => "access",
+        "rate_limit" => "rate_limit",
+        "concurrency" => "concurrency",
+        _ => "other",
+    }
+}
+
+fn edge_policy_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "deny" => "deny",
+        "delay" => "delay",
+        "reject" => "reject",
+        _ => "other",
+    }
+}
+
 fn cache_event_label(event: &str) -> &'static str {
     match event {
         "hit" => "hit",
@@ -1496,10 +1555,10 @@ mod tests {
         cache_config_stats, init, method_bucket, record_acme_event, record_admin_auth_event,
         record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
         record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
-        record_cache_purger_run, record_config, record_host_routing_rejection,
-        record_metrics_otlp_export, record_php_fpm_pool_event, record_php_fpm_pool_idle,
-        record_php_fpm_retry, record_php_request, record_php_stderr, record_proxy_outcome,
-        record_response_compression, status_class,
+        record_cache_purger_run, record_config, record_edge_policy_event,
+        record_host_routing_rejection, record_metrics_otlp_export, record_php_fpm_pool_event,
+        record_php_fpm_pool_idle, record_php_fpm_retry, record_php_request, record_php_stderr,
+        record_proxy_outcome, record_response_compression, status_class,
     };
 
     #[test]
@@ -1547,6 +1606,44 @@ mod tests {
         assert!(output.contains(r#"encoding="br""#));
         assert!(output.contains(r#"encoding="other""#));
         assert!(!output.contains("attacker-encoding"));
+    }
+
+    #[test]
+    fn records_edge_policy_metrics_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_edge_policy_event("edge-policy-test", Some("assets"), "access", "deny");
+        record_edge_policy_event("edge-policy-test", Some("assets"), "rate_limit", "delay");
+        record_edge_policy_event("edge-policy-test", None, "concurrency", "reject");
+        record_edge_policy_event(
+            "edge-policy-test",
+            Some("assets"),
+            "attacker-policy",
+            "attacker-outcome",
+        );
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_edge_policy_events_total"));
+        assert!(output.contains(r#"scope="route""#));
+        assert!(output.contains(r#"scope="vhost""#));
+        assert!(output.contains(r#"vhost="edge-policy-test""#));
+        assert!(output.contains(r#"route="assets""#));
+        assert!(output.contains(r#"policy="access""#));
+        assert!(output.contains(r#"policy="rate_limit""#));
+        assert!(output.contains(r#"policy="concurrency""#));
+        assert!(output.contains(r#"policy="other""#));
+        assert!(output.contains(r#"outcome="deny""#));
+        assert!(output.contains(r#"outcome="delay""#));
+        assert!(output.contains(r#"outcome="reject""#));
+        assert!(output.contains(r#"outcome="other""#));
+        assert!(!output.contains("attacker-policy"));
+        assert!(!output.contains("attacker-outcome"));
     }
 
     #[test]

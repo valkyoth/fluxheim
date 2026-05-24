@@ -1795,7 +1795,8 @@ one allow entry. The effective client IP is the direct peer address unless the
 direct peer matches `server.trusted_proxies`; only then does Fluxheim inspect
 `X-Forwarded-For` recursively. A vhost policy is evaluated before any matching
 route policy, so route ACLs can further restrict traffic but cannot bypass a
-vhost-level denial.
+vhost-level denial. With metrics enabled, ACL denials are counted by
+`fluxheim_edge_policy_events_total` with bounded labels.
 
 `[vhosts.rate_limit]` and `[vhosts.routes.rate_limit]` enable local token-bucket
 request limiting. The first implementation keys by the same trusted-proxy-aware
@@ -1808,6 +1809,8 @@ rejects instead of queueing indefinitely. If `burst` is omitted or zero,
 Fluxheim uses `requests_per_second` as the burst. State is bounded by
 `table_max_entries` and stale entries are pruned after `entry_ttl_secs`. Vhost
 limits are checked before route limits.
+With metrics enabled, delayed and rejected rate-limit decisions are counted by
+`fluxheim_edge_policy_events_total` with bounded labels.
 
 `[vhosts.concurrency]` and `[vhosts.routes.concurrency]` cap active in-flight
 requests. They are local process limits, not distributed cluster limits.
@@ -1817,6 +1820,8 @@ immediately. A positive `queue_timeout_ms` lets Fluxheim wait briefly for a
 permit before rejecting, which is useful for short origin spikes but remains a
 bounded local queue. Vhost permits are acquired before route permits and are
 released automatically when the request finishes.
+With metrics enabled, concurrency-limit rejections are counted by
+`fluxheim_edge_policy_events_total` with bounded labels.
 
 Vhosts can also contain ordered route tables. Exact matches win first, then the
 longest prefix match, then one optional fallback route. A route must define one

@@ -5817,16 +5817,42 @@ impl ProxyHttp for FluxProxy {
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
         ctx.route_index = vhost.route_index(session.req_header().uri.path());
+        #[cfg(feature = "metrics")]
+        let edge_policy_route = ctx
+            .route_index
+            .and_then(|route_index| vhost.routes.get(route_index))
+            .map(|route| route.name.as_str());
         if request_denied_by_access_policy(session, &state, vhost, ctx.route_index) {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_edge_policy_event(
+                vhost.name.as_str(),
+                edge_policy_route,
+                "access",
+                "deny",
+            );
             respond_text_error(session, 403, Bytes::from_static(b"forbidden")).await?;
             return Ok(true);
         }
         match request_limited_by_rate_policy(session, &state, vhost, ctx.route_index) {
             RateLimitDecision::Allow => {}
             RateLimitDecision::Delay(delay) => {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_edge_policy_event(
+                    vhost.name.as_str(),
+                    edge_policy_route,
+                    "rate_limit",
+                    "delay",
+                );
                 tokio::time::sleep(delay).await;
             }
             RateLimitDecision::Reject(status) => {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_edge_policy_event(
+                    vhost.name.as_str(),
+                    edge_policy_route,
+                    "rate_limit",
+                    "reject",
+                );
                 respond_text_error(session, status, Bytes::from_static(b"rate limited")).await?;
                 return Ok(true);
             }
@@ -5834,6 +5860,13 @@ impl ProxyHttp for FluxProxy {
         match acquire_request_concurrency_permits(vhost, ctx.route_index).await {
             Ok(permits) => ctx.in_flight_permits = permits,
             Err(status) => {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_edge_policy_event(
+                    vhost.name.as_str(),
+                    edge_policy_route,
+                    "concurrency",
+                    "reject",
+                );
                 respond_text_error(session, status, Bytes::from_static(b"too many requests"))
                     .await?;
                 return Ok(true);

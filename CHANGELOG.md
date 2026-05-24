@@ -76,6 +76,8 @@ behavior when the change improves security or project direction.
   compression encoding when gzip, zstd, or brotli compression is used.
 - Added `fluxheim_response_compressions_total` to count Fluxheim-applied
   response compression by vhost, route scope, and bounded encoding.
+- Added `fluxheim_edge_policy_events_total` to count ACL denials, rate-limit
+  delays/rejections, and concurrency-limit rejections with bounded labels.
 - Added `compression.max_output_bytes` so encoded responses stay bounded even
   when a compressible input is within `max_input_bytes`.
 - Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and

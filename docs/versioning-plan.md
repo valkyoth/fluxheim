@@ -1199,7 +1199,9 @@ Stable scope:
 - Per-vhost and per-route upstream connection controls:
   - max in-flight requests/connections for a route or upstream target;
   - bounded request queue with queue timeout, max depth, overflow action, and
-    low-cardinality queue metrics;
+    low-cardinality queue metrics. Prometheus now counts concurrency-limit
+    rejections through bounded edge-policy labels; queue wait/depth histograms
+    remain later work;
   - optional priority classes derived from safe request attributes such as
     route, method, authenticated policy result, or configured header allow-list;
   - async backpressure so slow or saturated upstreams do not force unbounded
@@ -1209,10 +1211,12 @@ Stable scope:
     configured variable;
   - burst, delay/nodelay, dry-run, and custom rejection status/body;
   - bounded state tables with TTL and eviction behavior;
-  - low-cardinality metrics only by default.
+  - low-cardinality metrics only by default. Prometheus now counts rate-limit
+    delay and rejection decisions through bounded edge-policy labels.
 - IP filtering and route ACLs:
   - ordered allow/deny CIDR lists;
   - trusted-proxy-aware source IP selection;
+  - Prometheus now counts ACL denials through bounded edge-policy labels;
   - explicit behavior for missing/invalid forwarded identity;
   - route/vhost/listener inheritance and clear deny status.
 - Response compression:
