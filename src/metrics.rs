@@ -2020,6 +2020,7 @@ mod tests {
                     },
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),

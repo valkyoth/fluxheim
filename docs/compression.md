@@ -120,7 +120,7 @@ input share the same compressed response. Safe defaults:
 
 - do not compress admin, metrics, auth, or internal control responses;
 - do not compress responses with cookies or authorization-dependent content
-  unless explicitly enabled per route;
+  unless explicitly enabled for a selected vhost;
 - do not log compressed bytes or response bodies;
 - reject the module with `privacy-mode` until a no-retention, no-side-channel
   design is written and tested.
@@ -140,8 +140,28 @@ brotli = false
 brotli_quality = 4
 ```
 
-Compression is currently global. Per-vhost and per-route compression policy is
-tracked for later `1.4.x` work.
+The global block is the default for every vhost. A vhost can override it with
+`[vhosts.compression]`, which is useful when only selected sites should compress
+responses:
+
+```toml
+[compression]
+enabled = false
+
+[[vhosts]]
+name = "static-site"
+hosts = ["static.example.com"]
+
+[vhosts.compression]
+enabled = true
+gzip = true
+zstd = true
+brotli = true
+min_bytes = "1KiB"
+max_input_bytes = "2MiB"
+```
+
+Per-route compression policy is tracked for later `1.4.x` work.
 
 ## Test Plan
 

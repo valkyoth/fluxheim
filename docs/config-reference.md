@@ -601,6 +601,24 @@ zstd_level = 3
 brotli_quality = 4
 ```
 
+Each vhost inherits the global compression policy unless it declares
+`[vhosts.compression]`. This lets one site enable compression while another site
+continues to serve identity responses:
+
+```toml
+[[vhosts]]
+name = "docs"
+hosts = ["docs.example.com"]
+
+[vhosts.compression]
+enabled = true
+gzip = true
+zstd = true
+brotli = false
+min_bytes = "1KiB"
+max_input_bytes = "2MiB"
+```
+
 The compression path compresses only eligible `GET` responses with known
 `Content-Length`, status `200`, a matching client `Accept-Encoding`, no
 existing `Content-Encoding`, no `Set-Cookie`, no request `Cookie` or

@@ -41,6 +41,8 @@ behavior when the change improves security or project direction.
 - Added opt-in `compression-zstd` and `compression-brotli` codec features
   alongside gzip, with bounded levels and negotiation preference `br`, `zstd`,
   then `gzip`.
+- Added vhost-level compression overrides so operators can keep compression
+  disabled globally and enable it only for selected sites.
 
 ### Planned
 

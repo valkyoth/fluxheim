@@ -212,6 +212,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: crate::config::CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),

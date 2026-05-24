@@ -152,8 +152,6 @@ struct ProxyRuntimeState {
     limits: ServerLimitsConfig,
     https_redirect: HttpsRedirectConfig,
     host_routing: HostRoutingConfig,
-    #[cfg(feature = "compression")]
-    compression: crate::config::CompressionConfig,
     #[cfg(feature = "otel-tracing")]
     tracing: crate::config::TracingConfig,
     #[cfg(feature = "otel-otlp")]
@@ -2220,6 +2218,8 @@ impl ProxyRuntimeState {
             let runtime = RuntimeVhost::from_legacy(
                 config.proxy.clone(),
                 config.cache.clone(),
+                #[cfg(feature = "compression")]
+                config.compression.clone(),
                 config.headers.clone(),
                 config.web.clone(),
                 load_balancer("default", &config.proxy)?,
@@ -2279,8 +2279,6 @@ impl ProxyRuntimeState {
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
-            #[cfg(feature = "compression")]
-            compression: config.compression.clone(),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2301,6 +2299,8 @@ impl ProxyRuntimeState {
             let runtime = RuntimeVhost::from_legacy(
                 config.proxy.clone(),
                 config.cache.clone(),
+                #[cfg(feature = "compression")]
+                config.compression.clone(),
                 config.headers.clone(),
                 config.web.clone(),
             )
@@ -2349,8 +2349,6 @@ impl ProxyRuntimeState {
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
-            #[cfg(feature = "compression")]
-            compression: config.compression.clone(),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2703,6 +2701,8 @@ struct RuntimeVhost {
     pingora_cache_predictor: Option<&'static (dyn CacheablePredictor + Sync)>,
     #[cfg(feature = "cache")]
     cache_lock_wait_timeout: std::time::Duration,
+    #[cfg(feature = "compression")]
+    compression: crate::config::CompressionConfig,
     #[cfg(feature = "load-balancer")]
     load_balancer: Option<UpstreamLoadBalancer>,
     #[cfg(feature = "web")]
@@ -2725,6 +2725,8 @@ impl std::fmt::Debug for RuntimeVhost {
             .field("proxy", &self.proxy)
             .field("request_headers", &self.request_headers)
             .field("response_headers", &self.response_headers);
+        #[cfg(feature = "compression")]
+        debug.field("compression", &self.compression);
 
         #[cfg(feature = "cache")]
         debug
@@ -4671,6 +4673,7 @@ impl RuntimeVhost {
         proxy: ProxyConfig,
         #[cfg_attr(not(feature = "cache"), allow(unused_variables))]
         cache: crate::config::CacheConfig,
+        #[cfg(feature = "compression")] compression: crate::config::CompressionConfig,
         headers: crate::config::HeaderPolicyConfig,
         #[cfg_attr(not(feature = "web"), allow(unused_variables))] web: crate::config::WebConfig,
         #[cfg(feature = "load-balancer")] load_balancer: Option<UpstreamLoadBalancer>,
@@ -4715,6 +4718,8 @@ impl RuntimeVhost {
             proxy: RuntimeProxy::from_config(&proxy, "default proxy")?,
             request_headers: headers.request,
             response_headers: headers.response,
+            #[cfg(feature = "compression")]
+            compression,
             #[cfg(feature = "cache")]
             memory_cache: crate::cache::memory_image_cache_from_config(&cache),
             #[cfg(feature = "cache")]
@@ -4851,6 +4856,11 @@ impl RuntimeVhost {
             proxy: RuntimeProxy::from_config(&vhost.proxy, &proxy_scope)?,
             request_headers: headers.request,
             response_headers: headers.response,
+            #[cfg(feature = "compression")]
+            compression: vhost
+                .compression
+                .clone()
+                .unwrap_or_else(|| config.compression.clone()),
             #[cfg(feature = "cache")]
             memory_cache: crate::cache::memory_image_cache_from_config(&cache_config),
             #[cfg(feature = "cache")]
@@ -5926,7 +5936,7 @@ impl ProxyHttp for FluxProxy {
             feature = "compression-gzip",
             feature = "compression-zstd"
         ))]
-        prepare_response_compression(session.req_header(), response, &state.compression, ctx)?;
+        prepare_response_compression(session.req_header(), response, &vhost.compression, ctx)?;
         #[cfg(feature = "load-balancer")]
         record_load_balanced_upstream_status(ctx, response.status.as_u16());
         append_fluxheim_via_to_response(response)
@@ -12520,6 +12530,8 @@ mod tests {
 
     #[cfg(feature = "cache")]
     use super::CacheRangeRequest;
+    #[cfg(feature = "compression-gzip")]
+    use super::ProxyRuntimeState;
     #[cfg(all(feature = "php-fpm", unix))]
     use super::managed_php_fpm_path_env_from;
     #[cfg(all(feature = "php-fpm", unix))]
@@ -12650,6 +12662,41 @@ mod tests {
             gzip_level: 4,
             ..CompressionConfig::default()
         }
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn vhost_compression_overrides_global_disabled_policy() {
+        let config: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = false
+
+            [[vhosts]]
+            name = "docs"
+            hosts = ["docs.example"]
+
+            [vhosts.compression]
+            enabled = true
+            gzip = true
+            min_bytes = "1KiB"
+            max_input_bytes = "4KiB"
+            "#,
+        )
+        .unwrap();
+        config.validate().unwrap();
+        let state = ProxyRuntimeState::from_config(&config).unwrap();
+        let vhost = state.vhost(state.vhost_index(Some("docs.example")));
+
+        assert!(!config.compression.enabled);
+        assert_eq!(
+            selected_response_compression(
+                &compression_request(),
+                &compression_response(),
+                &vhost.compression
+            ),
+            Some(ResponseCompressionEncoding::Gzip)
+        );
     }
 
     #[cfg(feature = "compression-gzip")]
@@ -14259,6 +14306,7 @@ mod tests {
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14279,6 +14327,7 @@ mod tests {
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14308,6 +14357,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -14341,6 +14391,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -14383,6 +14434,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -14406,6 +14458,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -14444,6 +14497,7 @@ mod tests {
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14461,6 +14515,7 @@ mod tests {
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14509,6 +14564,7 @@ mod tests {
                 },
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -14571,6 +14627,7 @@ mod tests {
                     },
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14592,6 +14649,7 @@ mod tests {
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14642,6 +14700,7 @@ mod tests {
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14659,6 +14718,7 @@ mod tests {
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -14744,6 +14804,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15036,6 +15097,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig {
                     request: crate::config::RequestHeaderPolicyOverlayConfig {
                         x_forwarded_for: Some(crate::config::ForwardedClientIpHeaderMode::Off),
@@ -15157,6 +15219,7 @@ mod tests {
                         },
                         ..CacheConfig::default()
                     },
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -15174,6 +15237,7 @@ mod tests {
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -15239,6 +15303,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig {
@@ -15300,6 +15365,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig {
@@ -15358,6 +15424,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15449,6 +15516,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15549,6 +15617,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(2048),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15600,6 +15669,7 @@ mod tests {
                     },
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15672,6 +15742,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15755,6 +15826,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15870,6 +15942,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -15950,6 +16023,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16055,6 +16129,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(128),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16120,6 +16195,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16181,6 +16257,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16225,6 +16302,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16272,6 +16350,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16331,6 +16410,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16382,6 +16462,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16433,6 +16514,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16523,6 +16605,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(1024),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16611,6 +16694,7 @@ mod tests {
                 tls: crate::config::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16721,6 +16805,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16896,6 +16981,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -16984,6 +17070,7 @@ mod tests {
                     max_object_bytes: ByteSize::from_bytes(512),
                     ..CacheConfig::default()
                 },
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -17065,6 +17152,7 @@ mod tests {
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -17108,6 +17196,7 @@ mod tests {
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: crate::config::VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -17145,6 +17234,7 @@ mod tests {
                     ..ProxyConfig::default()
                 },
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: crate::config::VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),

@@ -4029,6 +4029,8 @@ pub struct VhostConfig {
     #[serde(default)]
     pub cache: CacheConfig,
     #[serde(default)]
+    pub compression: Option<CompressionConfig>,
+    #[serde(default)]
     pub headers: VhostHeaderPolicyConfig,
     #[serde(default)]
     pub php: PhpConfig,
@@ -4121,6 +4123,15 @@ impl VhostConfig {
                 section: "cache",
                 source: Box::new(source),
             })?;
+        if let Some(compression) = &self.compression {
+            compression
+                .validate()
+                .map_err(|source| ConfigError::VhostSection {
+                    vhost: self.name.clone(),
+                    section: "compression",
+                    source: Box::new(source),
+                })?;
+        }
         self.headers
             .validate()
             .map_err(|source| ConfigError::VhostSection {
@@ -11403,6 +11414,30 @@ mod tests {
                 field: "compression.min_bytes"
             })
         ));
+
+        let vhost_override: Config = toml::from_str(
+            r#"
+            [compression]
+            enabled = false
+
+            [[vhosts]]
+            name = "docs"
+            hosts = ["docs.example"]
+
+            [vhosts.compression]
+            enabled = true
+            gzip = false
+            zstd = true
+            min_bytes = "1KiB"
+            max_input_bytes = "2MiB"
+            "#,
+        )
+        .unwrap();
+        vhost_override.validate().unwrap();
+        let compression = vhost_override.vhosts[0].compression.as_ref().unwrap();
+        assert!(compression.enabled);
+        assert!(!compression.gzip);
+        assert!(compression.zstd);
     }
 
     #[test]
@@ -18604,6 +18639,7 @@ mod tests {
                 redirect: super::VhostRedirectConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -18655,6 +18691,7 @@ mod tests {
                 redirect: super::VhostRedirectConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -19682,6 +19719,7 @@ mod tests {
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -19699,6 +19737,7 @@ mod tests {
                     tls: super::VhostTlsConfig::default(),
                     proxy: ProxyConfig::default(),
                     cache: CacheConfig::default(),
+                    compression: None,
                     headers: VhostHeaderPolicyConfig::default(),
                     php: crate::config::PhpConfig::default(),
                     web: WebConfig::default(),
@@ -19738,6 +19777,7 @@ mod tests {
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
@@ -19772,6 +19812,7 @@ mod tests {
                 tls: super::VhostTlsConfig::default(),
                 proxy: ProxyConfig::default(),
                 cache: CacheConfig::default(),
+                compression: None,
                 headers: VhostHeaderPolicyConfig::default(),
                 php: crate::config::PhpConfig::default(),
                 web: WebConfig::default(),
