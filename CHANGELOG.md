@@ -74,6 +74,11 @@ behavior when the change improves security or project direction.
   `upstream_verify_cert`, `upstream_verify_hostname`, and
   `upstream_alternative_cn`, while keeping certificate and hostname validation
   enabled by default.
+- Added proxy upstream custom trust roots and upstream mTLS client certificate
+  loading through `upstream_ca_path`, `upstream_client_cert_path`, and
+  `upstream_client_key_path`. Rustls, OpenSSL, and BoringSSL are wired; s2n
+  fails closed until its upstream PEM loaders can be exposed without
+  panic-prone helpers.
 
 ### Planned
 

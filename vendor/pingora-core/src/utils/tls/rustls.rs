@@ -150,6 +150,24 @@ impl CertKey {
         }
     }
 
+    /// Create a new `CertKey`, returning an error instead of panicking if any
+    /// certificate cannot be parsed as X.509 DER.
+    pub fn try_new(
+        certificates: Vec<Vec<u8>>,
+        key: Vec<u8>,
+    ) -> std::result::Result<CertKey, String> {
+        if certificates.is_empty() || certificates.first().is_none_or(Vec::is_empty) {
+            return Err("expected a non-empty vector of certificates in CertKey::try_new".into());
+        }
+
+        let certificates = certificates
+            .into_iter()
+            .map(WrappedX509::try_from_der)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        Ok(CertKey { key, certificates })
+    }
+
     /// Peek at the leaf certificate.
     pub fn leaf(&self) -> &WrappedX509 {
         // This is safe due to the assertion in creation of a `CertKey`
@@ -178,6 +196,12 @@ impl CertKey {
 }
 
 impl WrappedX509 {
+    pub fn try_from_der(raw_cert: Vec<u8>) -> std::result::Result<Self, String> {
+        X509Certificate::from_der(raw_cert.as_slice())
+            .map_err(|error| format!("failed to parse certificate from DER format: {error:?}"))?;
+        Ok(WrappedX509::new(raw_cert, parse_x509))
+    }
+
     pub fn not_after(&self) -> String {
         self.borrow_cert().validity.not_after.to_string()
     }

@@ -1,5 +1,11 @@
 use std::cmp::Reverse;
 use std::collections::HashMap;
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+))]
+use std::fs::OpenOptions;
 use std::io;
 #[cfg(any(
     feature = "compression-brotli",
@@ -8,6 +14,15 @@ use std::io;
 ))]
 use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+#[cfg(all(
+    unix,
+    any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    )
+))]
+use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
 #[cfg(feature = "cache")]
@@ -96,6 +111,57 @@ static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>>
 static CACHE_PREDICTOR_REGISTRY: OnceLock<
     Mutex<HashMap<usize, &'static (dyn CacheablePredictor + Sync)>>,
 > = OnceLock::new();
+#[cfg(all(
+    any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ),
+    target_os = "linux"
+))]
+const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0o400000;
+#[cfg(all(
+    any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ),
+    any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    )
+))]
+const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0x0100;
+#[cfg(all(
+    unix,
+    any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ),
+    not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+compile_error!(
+    "O_NOFOLLOW is unknown on this Unix platform; audit upstream TLS file opening before building Fluxheim"
+);
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+))]
+const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;
 #[cfg(feature = "php-fpm")]
 static PHP_REQUEST_BODY_SPOOL_COUNTER: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "php-fpm")]
@@ -3231,10 +3297,34 @@ enum RuntimeRouteAction {
 struct RuntimeProxy {
     enabled: bool,
     config: ProxyConfig,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ))]
+    upstream_tls: RuntimeUpstreamTls,
     #[cfg(feature = "load-balancer")]
     retry_budget: Option<RuntimeRetryBudget>,
     error_pages: Vec<RuntimeErrorPage>,
 }
+
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+))]
+#[derive(Debug, Clone, Default)]
+struct RuntimeUpstreamTls {
+    ca: Option<Arc<pingora::protocols::tls::CaType>>,
+    client_cert_key: Option<Arc<pingora::utils::tls::CertKey>>,
+}
+
+#[cfg(not(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+)))]
+struct RuntimeUpstreamTls;
 
 #[cfg(feature = "load-balancer")]
 #[derive(Debug, Clone)]
@@ -3484,6 +3574,17 @@ impl RuntimeProxy {
         Ok(Self {
             enabled: config.has_configured_upstream(),
             config: config.clone(),
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl"
+            ))]
+            upstream_tls: RuntimeUpstreamTls::from_config(config).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("{scope}: upstream TLS material: {error}"),
+                )
+            })?,
             #[cfg(feature = "load-balancer")]
             retry_budget: RuntimeRetryBudget::from_config(&config.load_balance.retry),
             error_pages,
@@ -3493,6 +3594,277 @@ impl RuntimeProxy {
     fn error_page(&self, status: u16) -> Option<&RuntimeErrorPage> {
         self.error_pages.iter().find(|page| page.status == status)
     }
+}
+
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+))]
+impl RuntimeUpstreamTls {
+    fn from_config(config: &ProxyConfig) -> io::Result<Self> {
+        Ok(Self {
+            ca: config
+                .upstream_ca_path
+                .as_deref()
+                .map(load_upstream_ca_bundle)
+                .transpose()?,
+            client_cert_key: match (
+                config.upstream_client_cert_path.as_deref(),
+                config.upstream_client_key_path.as_deref(),
+            ) {
+                (Some(cert), Some(key)) => Some(load_upstream_client_cert_key(cert, key)?),
+                _ => None,
+            },
+        })
+    }
+}
+
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+))]
+fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "upstream TLS path is not a regular file: {}",
+                path.display()
+            ),
+        ));
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(UPSTREAM_TLS_O_NOFOLLOW);
+
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "upstream TLS path is not a regular file: {}",
+                path.display()
+            ),
+        ));
+    }
+    if metadata.len() > MAX_UPSTREAM_TLS_FILE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "upstream TLS file {} exceeds {} bytes",
+                path.display(),
+                MAX_UPSTREAM_TLS_FILE_BYTES
+            ),
+        ));
+    }
+
+    let mut contents = Vec::new();
+    let mut limited = std::io::Read::take(file, MAX_UPSTREAM_TLS_FILE_BYTES.saturating_add(1));
+    std::io::Read::read_to_end(&mut limited, &mut contents)?;
+    if contents.len() as u64 > MAX_UPSTREAM_TLS_FILE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "upstream TLS file {} exceeds {} bytes",
+                path.display(),
+                MAX_UPSTREAM_TLS_FILE_BYTES
+            ),
+        ));
+    }
+    Ok(contents)
+}
+
+#[cfg(all(
+    feature = "tls-rustls-backend",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+fn load_upstream_ca_bundle(
+    path: &std::path::Path,
+) -> io::Result<Arc<pingora::protocols::tls::CaType>> {
+    let contents = read_upstream_tls_file(path)?;
+    let mut reader = std::io::BufReader::new(contents.as_slice());
+    let certs = rustls_pemfile::certs(&mut reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse upstream CA bundle {}: {error}",
+                    path.display()
+                ),
+            )
+        })?;
+    if certs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "upstream CA bundle {} contains no certificates",
+                path.display()
+            ),
+        ));
+    }
+    let wrapped = certs
+        .into_iter()
+        .map(|cert| pingora::utils::tls::WrappedX509::try_from_der(cert.as_ref().to_vec()))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse upstream CA bundle {}: {error}",
+                    path.display()
+                ),
+            )
+        })?;
+    Ok(Arc::from(wrapped.into_boxed_slice()))
+}
+
+#[cfg(all(
+    any(feature = "tls-openssl", feature = "tls-boringssl"),
+    not(feature = "tls-rustls-backend")
+))]
+fn load_upstream_ca_bundle(
+    path: &std::path::Path,
+) -> io::Result<Arc<pingora::protocols::tls::CaType>> {
+    let contents = read_upstream_tls_file(path)?;
+    let certs = pingora::tls::x509::X509::stack_from_pem(&contents).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse upstream CA bundle {}: {error}",
+                path.display()
+            ),
+        )
+    })?;
+    if certs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "upstream CA bundle {} contains no certificates",
+                path.display()
+            ),
+        ));
+    }
+    Ok(Arc::from(certs.into_boxed_slice()))
+}
+
+#[cfg(all(
+    feature = "tls-rustls-backend",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+fn load_upstream_client_cert_key(
+    cert_path: &std::path::Path,
+    key_path: &std::path::Path,
+) -> io::Result<Arc<pingora::utils::tls::CertKey>> {
+    let cert_contents = read_upstream_tls_file(cert_path)?;
+    let key_contents = read_upstream_tls_file(key_path)?;
+
+    let mut cert_reader = std::io::BufReader::new(cert_contents.as_slice());
+    let certs = rustls_pemfile::certs(&mut cert_reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse upstream client certificate {}: {error}",
+                    cert_path.display()
+                ),
+            )
+        })?;
+    if certs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "upstream client certificate {} contains no certificates",
+                cert_path.display()
+            ),
+        ));
+    }
+
+    let mut key_reader = std::io::BufReader::new(key_contents.as_slice());
+    let key = rustls_pemfile::private_key(&mut key_reader)
+        .map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse upstream client private key {}: {error}",
+                    key_path.display()
+                ),
+            )
+        })?
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "upstream client private key {} contains no private key",
+                    key_path.display()
+                ),
+            )
+        })?;
+
+    let cert_key = pingora::utils::tls::CertKey::try_new(
+        certs
+            .into_iter()
+            .map(|cert| cert.as_ref().to_vec())
+            .collect(),
+        key.secret_der().to_vec(),
+    )
+    .map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse upstream client certificate {}: {error}",
+                cert_path.display()
+            ),
+        )
+    })?;
+    Ok(Arc::new(cert_key))
+}
+
+#[cfg(all(
+    any(feature = "tls-openssl", feature = "tls-boringssl"),
+    not(feature = "tls-rustls-backend")
+))]
+fn load_upstream_client_cert_key(
+    cert_path: &std::path::Path,
+    key_path: &std::path::Path,
+) -> io::Result<Arc<pingora::utils::tls::CertKey>> {
+    let cert_contents = read_upstream_tls_file(cert_path)?;
+    let key_contents = read_upstream_tls_file(key_path)?;
+    let certs = pingora::tls::x509::X509::stack_from_pem(&cert_contents).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse upstream client certificate {}: {error}",
+                cert_path.display()
+            ),
+        )
+    })?;
+    if certs.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "upstream client certificate {} contains no certificates",
+                cert_path.display()
+            ),
+        ));
+    }
+    let key = pingora::tls::pkey::PKey::private_key_from_pem(&key_contents).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "failed to parse upstream client private key {}: {error}",
+                key_path.display()
+            ),
+        )
+    })?;
+    Ok(Arc::new(pingora::utils::tls::CertKey::new(certs, key)))
 }
 
 #[cfg(feature = "load-balancer")]
@@ -5667,7 +6039,7 @@ impl ProxyHttp for FluxProxy {
             ctx.upstream_load_balancer_permit = selected.permit;
             ctx.upstream_load_balancer_reporter = selected.reporter;
             ctx.upstream_load_balancer_selected_at = Some(Instant::now());
-            let peer = http_peer_for_proxy(selected.backend, &proxy.config)?;
+            let peer = http_peer_for_runtime_proxy(selected.backend, proxy)?;
             return Ok(Box::new(peer));
         }
         #[cfg(feature = "load-balancer")]
@@ -5684,7 +6056,7 @@ impl ProxyHttp for FluxProxy {
                 "proxy upstream is not configured for selected vhost or route",
             )
         })?;
-        let peer = http_peer_for_proxy(upstream, &proxy.config)?;
+        let peer = http_peer_for_runtime_proxy(upstream, proxy)?;
 
         Ok(Box::new(peer))
     }
@@ -12546,7 +12918,50 @@ fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<S
     }))
 }
 
+#[cfg(test)]
 fn http_peer_for_proxy<A>(address: A, proxy: &ProxyConfig) -> Result<HttpPeer>
+where
+    A: ToSocketAddrs + std::fmt::Debug,
+{
+    http_peer_for_proxy_with_tls(address, proxy, None)
+}
+
+fn http_peer_for_runtime_proxy<A>(address: A, proxy: &RuntimeProxy) -> Result<HttpPeer>
+where
+    A: ToSocketAddrs + std::fmt::Debug,
+{
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ))]
+    {
+        http_peer_for_proxy_with_tls(address, &proxy.config, Some(&proxy.upstream_tls))
+    }
+
+    #[cfg(not(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    )))]
+    {
+        http_peer_for_proxy_with_tls(address, &proxy.config, None)
+    }
+}
+
+fn http_peer_for_proxy_with_tls<A>(
+    address: A,
+    proxy: &ProxyConfig,
+    #[cfg_attr(
+        not(any(
+            feature = "tls-rustls-backend",
+            feature = "tls-openssl",
+            feature = "tls-boringssl"
+        )),
+        allow(unused_variables)
+    )]
+    upstream_tls: Option<&RuntimeUpstreamTls>,
+) -> Result<HttpPeer>
 where
     A: ToSocketAddrs + std::fmt::Debug,
 {
@@ -12564,6 +12979,15 @@ where
         )
     })?;
     let mut peer = HttpPeer::new(address, proxy.upstream_tls, proxy.upstream_sni());
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ))]
+    if let Some(upstream_tls) = upstream_tls {
+        peer.options.ca = upstream_tls.ca.clone();
+        peer.client_cert_key = upstream_tls.client_cert_key.clone();
+    }
     apply_proxy_timeouts(&mut peer, proxy);
     apply_proxy_upstream_tls_policy(&mut peer, proxy);
     Ok(peer)
@@ -12757,12 +13181,12 @@ mod tests {
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
         FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
-        RuntimeConcurrencyLimit, RuntimeRateLimit, append_fluxheim_via_to_request,
+        RuntimeConcurrencyLimit, RuntimeProxy, RuntimeRateLimit, append_fluxheim_via_to_request,
         append_fluxheim_via_to_response, approximate_request_header_bytes,
         count_response_body_chunk, effective_client_ip_from_forwarded_for, http_peer_for_proxy,
-        https_redirect_location, normalize_cookie_headers, redirect_authority,
-        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
-        route_rewritten_path_and_query,
+        http_peer_for_runtime_proxy, https_redirect_location, normalize_cookie_headers,
+        redirect_authority, request_body_chunk_limit_status, request_limit_status,
+        route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -15366,6 +15790,29 @@ mod tests {
             peer.options.alternative_cn.as_deref(),
             Some("fallback-origin.example.test")
         );
+    }
+
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ))]
+    #[test]
+    fn proxy_upstream_tls_material_maps_to_pingora_peer() {
+        let proxy = ProxyConfig {
+            upstream: Some("127.0.0.1:6010".to_owned()),
+            upstream_tls: true,
+            upstream_ca_path: Some("tests/fixtures/tls/localhost-cert.pem".into()),
+            upstream_client_cert_path: Some("tests/fixtures/tls/localhost-cert.pem".into()),
+            upstream_client_key_path: Some("tests/fixtures/tls/localhost-key.pem".into()),
+            ..ProxyConfig::default()
+        };
+        let runtime = RuntimeProxy::from_config(&proxy, "test proxy").unwrap();
+
+        let peer = http_peer_for_runtime_proxy(proxy.primary_upstream(), &runtime).unwrap();
+
+        assert!(peer.options.ca.is_some());
+        assert!(peer.client_cert_key.is_some());
     }
 
     #[test]

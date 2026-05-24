@@ -43,6 +43,8 @@ Before removing the patch, verify:
 - a rustls upstream with `upstream_verify_cert = false` can connect to a
   self-signed or otherwise untrusted test origin without requiring unrelated
   ALPN or mTLS settings
+- a rustls upstream with `upstream_ca_path` validates against that per-peer CA
+  bundle rather than the process default root store
 
 ## Upstream Candidate
 
@@ -58,6 +60,8 @@ would be:
 - keep ALPN handling through the existing `enable_h2` and `set_alpn` methods.
 - in the rustls connector, compute per-peer verification mode independently and
   clone the client config when a custom verifier is needed.
+- in the rustls connector, honor `PeerOptions.ca` when constructing the
+  per-peer root store for both normal verification and custom verifier modes.
 
 Fluxheim should keep the vendored patch narrow and avoid unrelated edits to
 vendored Pingora source.

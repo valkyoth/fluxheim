@@ -134,13 +134,35 @@ where
     P: Peer + Send + Sync,
 {
     let config = &tls_ctx.config;
+    let peer_root_certs = match peer.get_ca() {
+        Some(ca_list) => {
+            let mut root_store = RootCertStore::empty();
+            for ca in ca_list.iter() {
+                root_store
+                    .add(CertificateDer::from(ca))
+                    .or_err(InvalidCert, "Failed to add peer CA certificate")?;
+            }
+            Some(Arc::new(root_store))
+        }
+        None => None,
+    };
+    let effective_root_certs = peer_root_certs
+        .as_ref()
+        .unwrap_or(&tls_ctx.ca_certs);
 
-    // TODO: setup CA/verify cert store from peer
-    // peer.get_ca() returns None by default. It must be replaced by the
-    // implementation of `peer`
     let key_pair = peer.get_client_cert_key();
     let mut updated_config_opt: Option<RusTlsClientConfig> = match key_pair {
-        None => None,
+        None if peer_root_certs.is_none() => None,
+        None => {
+            let builder = RusTlsClientConfig::builder_with_protocol_versions(&[
+                &version::TLS12,
+                &version::TLS13,
+            ])
+            .with_root_certificates(Arc::clone(effective_root_certs));
+            let mut updated_config = builder.with_no_client_auth();
+            updated_config.key_log = Arc::clone(&config.key_log);
+            Some(updated_config)
+        }
         Some(key_arc) => {
             debug!("setting client cert and key");
 
@@ -164,7 +186,7 @@ where
                 &version::TLS12,
                 &version::TLS13,
             ])
-            .with_root_certificates(Arc::clone(&tls_ctx.ca_certs));
+            .with_root_certificates(Arc::clone(effective_root_certs));
             debug!("added root ca certificates");
 
             let mut updated_config = builder.with_client_auth_cert(certs, private_key).or_err(
@@ -214,7 +236,7 @@ where
         });
 
         // Builds the custom_verifier when verification_mode is set.
-        let delegate = WebPkiServerVerifier::builder(Arc::clone(&tls_ctx.ca_certs))
+        let delegate = WebPkiServerVerifier::builder(Arc::clone(effective_root_certs))
             .build()
             .or_err(InvalidCert, "Failed to build WebPkiServerVerifier")?;
 

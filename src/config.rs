@@ -3419,6 +3419,12 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_alternative_cn: Option<String>,
     #[serde(default)]
+    pub upstream_ca_path: Option<PathBuf>,
+    #[serde(default)]
+    pub upstream_client_cert_path: Option<PathBuf>,
+    #[serde(default)]
+    pub upstream_client_key_path: Option<PathBuf>,
+    #[serde(default)]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default)]
     pub read_timeout_secs: Option<u64>,
@@ -3452,6 +3458,9 @@ impl Default for ProxyConfig {
             upstream_verify_cert: true,
             upstream_verify_hostname: true,
             upstream_alternative_cn: None,
+            upstream_ca_path: None,
+            upstream_client_cert_path: None,
+            upstream_client_key_path: None,
             connect_timeout_secs: None,
             read_timeout_secs: None,
             send_timeout_secs: None,
@@ -3494,6 +3503,21 @@ impl ProxyConfig {
     }
 
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.upstream_ca_path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+        if let Some(path) = &mut self.upstream_client_cert_path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+        if let Some(path) = &mut self.upstream_client_key_path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         for error_page in &mut self.error_pages {
             error_page.resolve_relative_paths(base_dir);
         }
@@ -3571,6 +3595,61 @@ impl ProxyConfig {
         if !self.upstream_verify_cert && self.upstream_verify_hostname {
             return Err(ConfigError::InvalidProxyTlsPolicy {
                 reason: "upstream_verify_hostname must be false when upstream_verify_cert = false",
+            });
+        }
+        if !self.upstream_tls
+            && (self.upstream_ca_path.is_some()
+                || self.upstream_client_cert_path.is_some()
+                || self.upstream_client_key_path.is_some())
+        {
+            return Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream TLS trust roots or client certificates require upstream_tls = true",
+            });
+        }
+        if !self.upstream_verify_cert && self.upstream_ca_path.is_some() {
+            return Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream_ca_path requires upstream_verify_cert = true",
+            });
+        }
+        match (
+            &self.upstream_client_cert_path,
+            &self.upstream_client_key_path,
+        ) {
+            (Some(_), Some(_)) | (None, None) => {}
+            _ => {
+                return Err(ConfigError::InvalidProxyTlsPolicy {
+                    reason: "upstream_client_cert_path and upstream_client_key_path must be configured together",
+                });
+            }
+        }
+        for (field, path) in [
+            ("proxy.upstream_ca_path", self.upstream_ca_path.as_deref()),
+            (
+                "proxy.upstream_client_cert_path",
+                self.upstream_client_cert_path.as_deref(),
+            ),
+            (
+                "proxy.upstream_client_key_path",
+                self.upstream_client_key_path.as_deref(),
+            ),
+        ] {
+            validate_path(field, path)?;
+            validate_non_world_writable_parent(field, path)?;
+        }
+        #[cfg(all(
+            feature = "tls-s2n",
+            not(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl"
+            ))
+        ))]
+        if self.upstream_ca_path.is_some()
+            || self.upstream_client_cert_path.is_some()
+            || self.upstream_client_key_path.is_some()
+        {
+            return Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "the s2n backend does not yet expose panic-free upstream CA and client certificate loading in Fluxheim; use rustls, OpenSSL, or BoringSSL for upstream mTLS and custom trust roots",
             });
         }
         if let Some(alternative_cn) = &self.upstream_alternative_cn {
@@ -11970,6 +12049,9 @@ mod tests {
             upstream_verify_cert = true
             upstream_verify_hostname = true
             upstream_alternative_cn = "fallback-origin.example.test"
+            upstream_ca_path = "tests/fixtures/tls/localhost-cert.pem"
+            upstream_client_cert_path = "tests/fixtures/tls/localhost-cert.pem"
+            upstream_client_key_path = "tests/fixtures/tls/localhost-key.pem"
 
             [proxy.load_balance]
             max_iterations = 16
@@ -12020,6 +12102,18 @@ mod tests {
         assert_eq!(
             config.proxy.upstream_alternative_cn.as_deref(),
             Some("fallback-origin.example.test")
+        );
+        assert_eq!(
+            config.proxy.upstream_ca_path.as_deref(),
+            Some(Path::new("tests/fixtures/tls/localhost-cert.pem"))
+        );
+        assert_eq!(
+            config.proxy.upstream_client_cert_path.as_deref(),
+            Some(Path::new("tests/fixtures/tls/localhost-cert.pem"))
+        );
+        assert_eq!(
+            config.proxy.upstream_client_key_path.as_deref(),
+            Some(Path::new("tests/fixtures/tls/localhost-key.pem"))
         );
         assert_eq!(config.proxy.error_pages.len(), 1);
         assert_eq!(config.proxy.error_pages[0].status, 502);
@@ -12103,6 +12197,40 @@ mod tests {
             zero.validate(),
             Err(ConfigError::InvalidProxyUpstreamWeights { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_invalid_proxy_upstream_tls_material_policy() {
+        let without_tls: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            upstream_ca_path = "tests/fixtures/tls/localhost-cert.pem"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            without_tls.validate(),
+            Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream TLS trust roots or client certificates require upstream_tls = true"
+            })
+        );
+
+        let incomplete_mtls: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3000"
+            upstream_tls = true
+            upstream_client_cert_path = "tests/fixtures/tls/localhost-cert.pem"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            incomplete_mtls.validate(),
+            Err(ConfigError::InvalidProxyTlsPolicy {
+                reason: "upstream_client_cert_path and upstream_client_key_path must be configured together"
+            })
+        );
     }
 
     #[test]

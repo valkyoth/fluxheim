@@ -486,6 +486,9 @@ upstream_sni = "origin.example.test"
 upstream_verify_cert = true
 upstream_verify_hostname = true
 upstream_alternative_cn = "fallback-origin.example.test"
+upstream_ca_path = "/etc/fluxheim/upstreams/origin-ca.pem"
+upstream_client_cert_path = "/etc/fluxheim/upstreams/client-chain.pem"
+upstream_client_key_path = "/etc/fluxheim/upstreams/client-key.pem"
 connect_timeout_secs = 5
 read_timeout_secs = 60
 send_timeout_secs = 30
@@ -546,9 +549,16 @@ upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
 also requires `upstream_verify_hostname = false` so the config cannot imply
 hostname validation while certificate validation is off. `upstream_alternative_cn`
 adds one additional hostname that may match the upstream certificate when the
-configured SNI does not. Wildcards are rejected for this field. Custom upstream
-trust roots and upstream mTLS client certificates are tracked as later 1.4 TLS
-work.
+configured SNI does not. Wildcards are rejected for this field.
+`upstream_ca_path` points at a PEM CA bundle used instead of the platform trust
+store for this proxy policy. `upstream_client_cert_path` and
+`upstream_client_key_path` configure an upstream client certificate and private
+key for origin mTLS and must be set together. These file paths are resolved
+relative to the containing config file, reject parent-directory traversal,
+reject symlinked existing path components, and reject group/world-writable
+existing parents. Rustls, OpenSSL, and BoringSSL builds support custom upstream
+trust roots and upstream client certificates. s2n builds currently reject these
+fields until Fluxheim has panic-free PEM loading for that backend.
 `upstream_weights` is optional and, when set, must contain one positive weight
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
