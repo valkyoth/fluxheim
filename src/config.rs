@@ -4280,6 +4280,15 @@ const MAX_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 1_000_000;
 const MAX_RATE_LIMIT_BURST: u32 = 1_000_000;
 const MAX_RATE_LIMIT_TABLE_ENTRIES: usize = 1_000_000;
 const MAX_RATE_LIMIT_ENTRY_TTL_SECS: u64 = 86_400;
+const MAX_RATE_LIMIT_DELAY_MS: u64 = 60_000;
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RateLimitMode {
+    #[default]
+    Nodelay,
+    Delay,
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -4296,6 +4305,10 @@ pub struct RateLimitConfig {
     pub table_max_entries: usize,
     #[serde(default = "default_rate_limit_entry_ttl_secs")]
     pub entry_ttl_secs: u64,
+    #[serde(default)]
+    pub mode: RateLimitMode,
+    #[serde(default = "default_rate_limit_max_delay_ms")]
+    pub max_delay_ms: u64,
 }
 
 impl Default for RateLimitConfig {
@@ -4307,6 +4320,8 @@ impl Default for RateLimitConfig {
             status: default_rate_limit_status(),
             table_max_entries: default_rate_limit_table_max_entries(),
             entry_ttl_secs: default_rate_limit_entry_ttl_secs(),
+            mode: RateLimitMode::Nodelay,
+            max_delay_ms: default_rate_limit_max_delay_ms(),
         }
     }
 }
@@ -4343,6 +4358,16 @@ impl RateLimitConfig {
                 field: rate_limit_field(scope, "entry_ttl_secs"),
             });
         }
+        if matches!(self.mode, RateLimitMode::Delay) && self.max_delay_ms == 0 {
+            return Err(ConfigError::InvalidRateLimit {
+                field: rate_limit_field(scope, "max_delay_ms"),
+            });
+        }
+        if self.max_delay_ms > MAX_RATE_LIMIT_DELAY_MS {
+            return Err(ConfigError::InvalidRateLimit {
+                field: rate_limit_field(scope, "max_delay_ms"),
+            });
+        }
 
         Ok(())
     }
@@ -4360,6 +4385,10 @@ fn default_rate_limit_entry_ttl_secs() -> u64 {
     300
 }
 
+fn default_rate_limit_max_delay_ms() -> u64 {
+    1000
+}
+
 fn rate_limit_field(scope: &'static str, field: &'static str) -> &'static str {
     match (scope, field) {
         ("vhosts.rate_limit", "requests_per_second") => "vhosts.rate_limit.requests_per_second",
@@ -4367,6 +4396,7 @@ fn rate_limit_field(scope: &'static str, field: &'static str) -> &'static str {
         ("vhosts.rate_limit", "status") => "vhosts.rate_limit.status",
         ("vhosts.rate_limit", "table_max_entries") => "vhosts.rate_limit.table_max_entries",
         ("vhosts.rate_limit", "entry_ttl_secs") => "vhosts.rate_limit.entry_ttl_secs",
+        ("vhosts.rate_limit", "max_delay_ms") => "vhosts.rate_limit.max_delay_ms",
         ("vhosts.routes.rate_limit", "requests_per_second") => {
             "vhosts.routes.rate_limit.requests_per_second"
         }
@@ -4376,6 +4406,7 @@ fn rate_limit_field(scope: &'static str, field: &'static str) -> &'static str {
             "vhosts.routes.rate_limit.table_max_entries"
         }
         ("vhosts.routes.rate_limit", "entry_ttl_secs") => "vhosts.routes.rate_limit.entry_ttl_secs",
+        ("vhosts.routes.rate_limit", "max_delay_ms") => "vhosts.routes.rate_limit.max_delay_ms",
         _ => "rate_limit",
     }
 }
@@ -11224,7 +11255,7 @@ mod tests {
         AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
         CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig,
         CacheStaleErrorKind, CompressionConfig, Config, ConfigError, ConfigLoadError,
-        HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, ServerConfig,
+        HeaderPolicyConfig, LoggingConfig, MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig,
         ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite,
         TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, VhostConfig,
         VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
@@ -19150,6 +19181,8 @@ mod tests {
             enabled = true
             requests_per_second = 10
             burst = 20
+            mode = "delay"
+            max_delay_ms = 250
 
             [vhosts.concurrency]
             enabled = true
@@ -19186,6 +19219,8 @@ mod tests {
         assert_eq!(config.vhosts[0].access.deny, ["10.9.0.0/16"]);
         assert_eq!(config.vhosts[0].routes[0].access.allow, ["10.1.2.3"]);
         assert_eq!(config.vhosts[0].rate_limit.requests_per_second, 10);
+        assert_eq!(config.vhosts[0].rate_limit.mode, RateLimitMode::Delay);
+        assert_eq!(config.vhosts[0].rate_limit.max_delay_ms, 250);
         assert_eq!(config.vhosts[0].routes[0].rate_limit.burst, 4);
         assert_eq!(config.vhosts[0].concurrency.max_in_flight, 100);
         assert_eq!(config.vhosts[0].routes[0].concurrency.max_in_flight, 10);

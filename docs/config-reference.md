@@ -1565,6 +1565,7 @@ deny = ["198.51.100.66"]
 enabled = true
 requests_per_second = 50
 burst = 100
+mode = "nodelay"
 status = 429
 
 [vhosts.concurrency]
@@ -1602,10 +1603,14 @@ vhost-level denial.
 `[vhosts.rate_limit]` and `[vhosts.routes.rate_limit]` enable local token-bucket
 request limiting. The first implementation keys by the same trusted-proxy-aware
 client IP used for ACLs. `requests_per_second` sets the refill rate, `burst`
-sets the bucket capacity, and `status` controls the rejection status. If `burst`
-is omitted or zero, Fluxheim uses `requests_per_second` as the burst. State is
-bounded by `table_max_entries` and stale entries are pruned after
-`entry_ttl_secs`. Vhost limits are checked before route limits.
+sets the bucket capacity, and `status` controls the rejection status. `mode =
+"nodelay"` consumes burst capacity immediately and rejects once the bucket is
+empty. `mode = "delay"` reserves future tokens and sleeps the request up to
+`max_delay_ms`; if the backlog would exceed that bounded delay budget, Fluxheim
+rejects instead of queueing indefinitely. If `burst` is omitted or zero,
+Fluxheim uses `requests_per_second` as the burst. State is bounded by
+`table_max_entries` and stale entries are pruned after `entry_ttl_secs`. Vhost
+limits are checked before route limits.
 
 `[vhosts.concurrency]` and `[vhosts.routes.concurrency]` cap active in-flight
 requests. They are local process limits, not distributed cluster limits.

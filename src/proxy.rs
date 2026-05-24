@@ -58,8 +58,8 @@ use pingora::{
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
 use crate::config::{
-    Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig, RouteRedirectConfig,
-    ServerLimitsConfig, normalize_host,
+    Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig, RateLimitMode,
+    RouteRedirectConfig, ServerLimitsConfig, normalize_host,
 };
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{UpstreamLoadBalancer, UpstreamLoadBalancerService};
@@ -2580,12 +2580,27 @@ fn request_limited_by_rate_policy(
     state: &ProxyRuntimeState,
     vhost: &RuntimeVhost,
     route_index: Option<usize>,
-) -> Option<u16> {
+) -> RateLimitDecision {
     let client_ip = effective_acl_client_ip(session, state);
-    if let Some(status) = vhost.rate_limit.check(client_ip) {
-        return Some(status);
+    let mut delay = None;
+    match vhost.rate_limit.check(client_ip) {
+        RateLimitDecision::Allow => {}
+        RateLimitDecision::Delay(vhost_delay) => delay = Some(vhost_delay),
+        decision => return decision,
     }
-    route_index.and_then(|route_index| vhost.route(route_index).rate_limit.check(client_ip))
+    if let Some(route_index) = route_index {
+        match vhost.route(route_index).rate_limit.check(client_ip) {
+            RateLimitDecision::Allow => {}
+            RateLimitDecision::Delay(route_delay) => {
+                delay = Some(delay.map_or(route_delay, |current| current.max(route_delay)));
+            }
+            decision => return decision,
+        }
+    }
+
+    delay
+        .map(RateLimitDecision::Delay)
+        .unwrap_or(RateLimitDecision::Allow)
 }
 
 fn acquire_request_concurrency_permits(
@@ -2875,6 +2890,13 @@ struct RuntimeRateLimitState {
     buckets: Mutex<HashMap<RateLimitKey, RateLimitBucket>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RateLimitDecision {
+    Allow,
+    Delay(Duration),
+    Reject(u16),
+}
+
 #[derive(Debug, Clone)]
 struct RuntimeRateLimit {
     enabled: bool,
@@ -2883,6 +2905,8 @@ struct RuntimeRateLimit {
     status: u16,
     table_max_entries: usize,
     entry_ttl: Duration,
+    mode: RateLimitMode,
+    max_delay: Duration,
     state: Arc<RuntimeRateLimitState>,
 }
 
@@ -2895,6 +2919,8 @@ impl Default for RuntimeRateLimit {
             status: 429,
             table_max_entries: 0,
             entry_ttl: Duration::from_secs(300),
+            mode: RateLimitMode::Nodelay,
+            max_delay: Duration::from_millis(1000),
             state: Arc::new(RuntimeRateLimitState {
                 buckets: Mutex::new(HashMap::new()),
             }),
@@ -2916,15 +2942,17 @@ impl RuntimeRateLimit {
             status: config.status,
             table_max_entries: config.table_max_entries,
             entry_ttl: Duration::from_secs(config.entry_ttl_secs),
+            mode: config.mode,
+            max_delay: Duration::from_millis(config.max_delay_ms),
             state: Arc::new(RuntimeRateLimitState {
                 buckets: Mutex::new(HashMap::new()),
             }),
         }
     }
 
-    fn check(&self, client_ip: Option<IpAddr>) -> Option<u16> {
+    fn check(&self, client_ip: Option<IpAddr>) -> RateLimitDecision {
         if !self.enabled {
-            return None;
+            return RateLimitDecision::Allow;
         }
 
         let now = Instant::now();
@@ -2937,7 +2965,7 @@ impl RuntimeRateLimit {
         if !buckets.contains_key(&key) && buckets.len() >= self.table_max_entries {
             buckets.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
             if buckets.len() >= self.table_max_entries {
-                return Some(self.status);
+                return RateLimitDecision::Reject(self.status);
             }
         }
 
@@ -2955,10 +2983,20 @@ impl RuntimeRateLimit {
 
         if bucket.tokens >= 1.0 {
             bucket.tokens -= 1.0;
-            None
-        } else {
-            Some(self.status)
+            return RateLimitDecision::Allow;
         }
+
+        if !matches!(self.mode, RateLimitMode::Delay) || bucket.tokens <= -self.burst {
+            return RateLimitDecision::Reject(self.status);
+        }
+
+        let wait = Duration::from_secs_f64((1.0 - bucket.tokens) / self.requests_per_second);
+        if wait > self.max_delay {
+            return RateLimitDecision::Reject(self.status);
+        }
+
+        bucket.tokens -= 1.0;
+        RateLimitDecision::Delay(wait)
     }
 }
 
@@ -5239,11 +5277,15 @@ impl ProxyHttp for FluxProxy {
             respond_text_error(session, 403, Bytes::from_static(b"forbidden")).await?;
             return Ok(true);
         }
-        if let Some(status) =
-            request_limited_by_rate_policy(session, &state, vhost, ctx.route_index)
-        {
-            respond_text_error(session, status, Bytes::from_static(b"rate limited")).await?;
-            return Ok(true);
+        match request_limited_by_rate_policy(session, &state, vhost, ctx.route_index) {
+            RateLimitDecision::Allow => {}
+            RateLimitDecision::Delay(delay) => {
+                tokio::time::sleep(delay).await;
+            }
+            RateLimitDecision::Reject(status) => {
+                respond_text_error(session, status, Bytes::from_static(b"rate limited")).await?;
+                return Ok(true);
+            }
         }
         match acquire_request_concurrency_permits(vhost, ctx.route_index) {
             Ok(permits) => ctx.in_flight_permits = permits,
@@ -12544,7 +12586,8 @@ mod tests {
     use crate::config::CompressionConfig;
     use crate::config::{
         ByteSize, CacheConfig, Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig,
-        RouteConfig, RouteRedirectConfig, ServerConfig, ServerLimitsConfig, VhostConfig, WebConfig,
+        RateLimitMode, RouteConfig, RouteRedirectConfig, ServerConfig, ServerLimitsConfig,
+        VhostConfig, WebConfig,
     };
     #[cfg(any(feature = "cache", feature = "web"))]
     use crate::test_support::unique_temp_path;
@@ -12575,12 +12618,13 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     use super::{
-        FluxProxy, HostRoutingRejectReason, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
-        RuntimeRateLimit, append_fluxheim_via_to_request, append_fluxheim_via_to_response,
-        approximate_request_header_bytes, count_response_body_chunk,
-        effective_client_ip_from_forwarded_for, http_peer_for_proxy, https_redirect_location,
-        normalize_cookie_headers, redirect_authority, request_body_chunk_limit_status,
-        request_limit_status, route_redirect_location, route_rewritten_path_and_query,
+        FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
+        RuntimeConcurrencyLimit, RuntimeRateLimit, append_fluxheim_via_to_request,
+        append_fluxheim_via_to_response, approximate_request_header_bytes,
+        count_response_body_chunk, effective_client_ip_from_forwarded_for, http_peer_for_proxy,
+        https_redirect_location, normalize_cookie_headers, redirect_authority,
+        request_body_chunk_limit_status, request_limit_status, route_redirect_location,
+        route_rewritten_path_and_query,
     };
     #[cfg(feature = "php-fpm")]
     use super::{
@@ -13022,16 +13066,43 @@ mod tests {
             status: 429,
             table_max_entries: 16,
             entry_ttl_secs: 60,
+            mode: RateLimitMode::Nodelay,
+            max_delay_ms: 1000,
         });
         let client = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
 
-        assert_eq!(policy.check(client), None);
-        assert_eq!(policy.check(client), None);
-        assert_eq!(policy.check(client), Some(429));
+        assert_eq!(policy.check(client), RateLimitDecision::Allow);
+        assert_eq!(policy.check(client), RateLimitDecision::Allow);
+        assert_eq!(policy.check(client), RateLimitDecision::Reject(429));
         assert_eq!(
             policy.check(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 11)))),
-            None
+            RateLimitDecision::Allow
         );
+    }
+
+    #[test]
+    fn rate_limit_delay_mode_reserves_future_tokens() {
+        let policy = RuntimeRateLimit::from_config(&crate::config::RateLimitConfig {
+            enabled: true,
+            requests_per_second: 1,
+            burst: 1,
+            status: 429,
+            table_max_entries: 16,
+            entry_ttl_secs: 60,
+            mode: RateLimitMode::Delay,
+            max_delay_ms: 1500,
+        });
+        let client = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
+
+        assert_eq!(policy.check(client), RateLimitDecision::Allow);
+        match policy.check(client) {
+            RateLimitDecision::Delay(delay) => {
+                assert!(delay >= Duration::from_millis(90), "{delay:?}");
+                assert!(delay <= Duration::from_millis(1100), "{delay:?}");
+            }
+            decision => panic!("expected delay decision, got {decision:?}"),
+        }
+        assert_eq!(policy.check(client), RateLimitDecision::Reject(429));
     }
 
     #[test]

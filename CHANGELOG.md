@@ -46,6 +46,9 @@ behavior when the change improves security or project direction.
 - Added route-level compression overrides so path prefixes such as
   `/wp-content/uploads/` can opt into or out of compression independently from
   the rest of the vhost.
+- Added rate-limit delay mode with a bounded `max_delay_ms` budget so vhost and
+  route token buckets can smooth short bursts without creating an unbounded
+  request queue.
 
 ### Planned
 
