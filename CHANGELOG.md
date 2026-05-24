@@ -65,6 +65,11 @@ behavior when the change improves security or project direction.
 - Added `queue_timeout_ms` to vhost and route concurrency limits so saturated
   policies can wait briefly for an in-flight permit before returning their
   configured rejection status.
+- Added listener-level downstream client certificate authentication through
+  `[tls.client_auth]` with `off`, `optional`, and `required` modes plus a safe
+  CA bundle path. The first implementation wires rustls and OpenSSL/BoringSSL
+  listeners and fails closed for s2n until its CA loader can be exposed without
+  panic-prone helpers.
 
 ### Planned
 

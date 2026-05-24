@@ -1135,8 +1135,10 @@ Release shape:
     and latency ejection; active HTTP health checks may land here if they fit.
 - `1.4.2` - TLS, identity, and protocol parity:
   - listener-level mTLS/client certificate auth with `off`, `optional`, and
-    `required` modes, safe CA file handling, and identity variables for logs,
-    headers, route policy, and admin hardening;
+    `required` modes plus safe CA file handling for rustls and
+    OpenSSL/BoringSSL is implemented; remaining work is s2n parity and
+    certificate-derived identity variables for logs, headers, route policy, and
+    admin hardening;
   - upstream TLS controls: SNI override, trust roots, upstream mTLS client cert,
     protocol/cipher policy where supported, and auditable insecure-skip-verify
     behavior;

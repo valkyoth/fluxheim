@@ -60,15 +60,15 @@ use crate::config::{TlsAlpnPolicy, TlsConfig, TlsProtocolVersion};
         feature = "tls-boringssl"
     )
 ))]
-use crate::config::{TlsCipherSuite, TlsCurvePreference};
+use crate::config::{TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference};
 #[cfg(all(
     feature = "proxy",
     any(feature = "tls-openssl", feature = "tls-boringssl")
 ))]
 use pingora::tls::{
     pkey::{PKey, Private},
-    ssl::SslVersion,
-    x509::X509,
+    ssl::{SslVerifyMode, SslVersion},
+    x509::{X509, X509Name},
 };
 
 #[cfg(feature = "proxy")]
@@ -1077,8 +1077,78 @@ fn apply_tls_policy(
         TlsProtocolVersion::Tls12 => settings.set_min_protocol_tls12(),
         TlsProtocolVersion::Tls13 => settings.set_min_protocol_tls13(),
     }
+    if let Some(verifier) = rustls_client_cert_verifier(tls)? {
+        settings.set_client_cert_verifier(verifier);
+    }
     settings.set_require_fips(fips_required);
     Ok(())
+}
+
+#[cfg(all(
+    feature = "proxy",
+    feature = "tls-rustls-backend",
+    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+))]
+fn rustls_client_cert_verifier(
+    tls: &TlsConfig,
+) -> Result<
+    Option<std::sync::Arc<dyn rustls::server::danger::ClientCertVerifier>>,
+    Box<dyn Error + Send + Sync>,
+> {
+    if tls.client_auth.mode == TlsClientAuthMode::Off {
+        return Ok(None);
+    }
+    let ca_path = tls
+        .client_auth
+        .ca_path
+        .as_deref()
+        .ok_or("tls.client_auth.ca_path is required when client auth is enabled")?;
+    let mut reader = std::io::BufReader::new(std::fs::File::open(ca_path).map_err(|error| {
+        format!(
+            "failed to open TLS client auth CA bundle {}: {error}",
+            ca_path.display()
+        )
+    })?);
+    let mut roots = rustls::RootCertStore::empty();
+    let mut loaded = 0usize;
+    for certificate in rustls_pemfile::certs(&mut reader) {
+        let certificate = certificate.map_err(|error| {
+            format!(
+                "failed to parse TLS client auth CA bundle {}: {error}",
+                ca_path.display()
+            )
+        })?;
+        roots.add(certificate).map_err(|error| {
+            format!(
+                "failed to add certificate from TLS client auth CA bundle {}: {error}",
+                ca_path.display()
+            )
+        })?;
+        loaded += 1;
+    }
+    if loaded == 0 {
+        return Err(format!(
+            "TLS client auth CA bundle {} does not contain any certificates",
+            ca_path.display()
+        )
+        .into());
+    }
+
+    let builder = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        std::sync::Arc::new(roots),
+        std::sync::Arc::new(crate::tls::rustls_crypto_provider()),
+    );
+    let builder = match tls.client_auth.mode {
+        TlsClientAuthMode::Off => return Ok(None),
+        TlsClientAuthMode::Required => builder,
+        TlsClientAuthMode::Optional => builder.allow_unauthenticated(),
+    };
+    Ok(Some(builder.build().map_err(|error| {
+        format!(
+            "failed to build TLS client certificate verifier from {}: {error}",
+            ca_path.display()
+        )
+    })?))
 }
 
 #[cfg(all(
@@ -1310,6 +1380,7 @@ fn apply_tls_policy(
         TlsProtocolVersion::Tls13 => SslVersion::TLS1_3,
     };
     settings.set_min_proto_version(Some(min_version))?;
+    apply_openssl_client_auth(settings, tls)?;
     Ok(())
 }
 
@@ -1333,6 +1404,37 @@ fn apply_tls_policy(
         TlsProtocolVersion::Tls13 => SslVersion::TLS1_3,
     };
     settings.set_min_proto_version(Some(min_version))?;
+    apply_openssl_client_auth(settings, tls)?;
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "proxy",
+    any(feature = "tls-openssl", feature = "tls-boringssl")
+))]
+fn apply_openssl_client_auth(
+    settings: &mut pingora::listeners::tls::TlsSettings,
+    tls: &TlsConfig,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if tls.client_auth.mode == TlsClientAuthMode::Off {
+        return Ok(());
+    }
+    let ca_path = tls
+        .client_auth
+        .ca_path
+        .as_deref()
+        .ok_or("tls.client_auth.ca_path is required when client auth is enabled")?;
+    let ca_path = ca_path
+        .to_str()
+        .ok_or("tls.client_auth.ca_path must be valid UTF-8 for the TLS backend")?;
+    let verify = match tls.client_auth.mode {
+        TlsClientAuthMode::Off => SslVerifyMode::NONE,
+        TlsClientAuthMode::Optional => SslVerifyMode::PEER,
+        TlsClientAuthMode::Required => SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+    };
+    settings.set_verify(verify);
+    settings.set_ca_file(ca_path)?;
+    settings.set_client_ca_list(X509Name::load_client_ca_file(ca_path)?);
     Ok(())
 }
 

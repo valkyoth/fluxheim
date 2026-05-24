@@ -1074,6 +1074,7 @@ dependencies = [
  "rpassword",
  "rustix",
  "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "sha2",

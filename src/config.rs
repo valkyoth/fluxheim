@@ -2385,6 +2385,8 @@ pub struct TlsConfig {
     #[serde(default)]
     pub cipher_suites: Vec<TlsCipherSuite>,
     #[serde(default)]
+    pub client_auth: TlsClientAuthConfig,
+    #[serde(default)]
     pub certificates: Vec<StaticCertificateConfig>,
     #[serde(default)]
     pub fips: TlsFipsConfig,
@@ -2404,6 +2406,7 @@ struct TlsConfigFragment {
     alpn: Option<TlsAlpnPolicy>,
     curve_preferences: Option<Vec<TlsCurvePreference>>,
     cipher_suites: Option<Vec<TlsCipherSuite>>,
+    client_auth: Option<TlsClientAuthConfigFragment>,
     certificates: Option<Vec<StaticCertificateConfig>>,
     fips: Option<TlsFipsConfigFragment>,
     iso19790: Option<TlsIso19790ConfigFragment>,
@@ -2432,6 +2435,9 @@ impl TlsConfig {
         }
         if let Some(cipher_suites) = fragment.cipher_suites {
             self.cipher_suites = cipher_suites;
+        }
+        if let Some(client_auth) = fragment.client_auth {
+            self.client_auth.merge(client_auth);
         }
         if let Some(certificates) = fragment.certificates {
             self.certificates = certificates;
@@ -2507,6 +2513,12 @@ impl TlsConfig {
                     reason: "the s2n backend does not expose Fluxheim-controlled listener cipher allow-lists yet",
                 });
             }
+            if self.client_auth.mode != TlsClientAuthMode::Off {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.client_auth.mode",
+                    reason: "the s2n backend has mTLS primitives, but Fluxheim does not yet expose panic-free CA bundle loading for listener client auth; use rustls, OpenSSL, or BoringSSL for client certificate authentication",
+                });
+            }
         }
         if self.backend == TlsBackend::Boringssl
             && self.cipher_suites.iter().any(|cipher| !cipher.is_tls12())
@@ -2528,6 +2540,7 @@ impl TlsConfig {
             });
         }
         self.validate_fips_policy()?;
+        self.client_auth.validate()?;
 
         for certificate in &self.certificates {
             certificate.validate("tls.certificates")?;
@@ -2630,6 +2643,9 @@ impl TlsConfig {
 
 impl TlsConfigFragment {
     fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(client_auth) = &mut self.client_auth {
+            client_auth.resolve_relative_paths(base_dir);
+        }
         if let Some(certificates) = &mut self.certificates {
             for certificate in certificates {
                 certificate.resolve_relative_paths(base_dir);
@@ -2639,6 +2655,77 @@ impl TlsConfigFragment {
             acme.resolve_relative_paths(base_dir);
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsClientAuthConfig {
+    #[serde(default)]
+    pub mode: TlsClientAuthMode,
+    #[serde(default)]
+    pub ca_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TlsClientAuthConfigFragment {
+    mode: Option<TlsClientAuthMode>,
+    ca_path: Option<PathBuf>,
+}
+
+impl TlsClientAuthConfig {
+    fn merge(&mut self, fragment: TlsClientAuthConfigFragment) {
+        if let Some(mode) = fragment.mode {
+            self.mode = mode;
+        }
+        if let Some(ca_path) = fragment.ca_path {
+            self.ca_path = Some(ca_path);
+        }
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        match (self.mode, &self.ca_path) {
+            (TlsClientAuthMode::Off, None) => return Ok(()),
+            (TlsClientAuthMode::Optional | TlsClientAuthMode::Required, None) => {
+                return Err(ConfigError::InvalidTlsPolicy {
+                    field: "tls.client_auth.ca_path",
+                    reason: "tls.client_auth.mode requires a client CA bundle path",
+                });
+            }
+            (_, Some(_)) => {}
+        }
+        let Some(ca_path) = &self.ca_path else {
+            return Ok(());
+        };
+        if ca_path.as_os_str().is_empty() {
+            return Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.client_auth.ca_path",
+                reason: "tls.client_auth.ca_path cannot be empty",
+            });
+        }
+        validate_path("tls.client_auth.ca_path", Some(ca_path))?;
+        validate_non_world_writable_parent("tls.client_auth.ca_path", Some(ca_path))?;
+        Ok(())
+    }
+}
+
+impl TlsClientAuthConfigFragment {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(path) = &mut self.ca_path
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TlsClientAuthMode {
+    #[default]
+    Off,
+    Optional,
+    Required,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -11430,9 +11517,9 @@ mod tests {
         CacheStaleErrorKind, CompressionConfig, Config, ConfigError, ConfigLoadError,
         HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoggingConfig, MetricsConfig,
         ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig, StaticCertificateConfig,
-        TlsAlpnPolicy, TlsCipherSuite, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion,
-        TracingConfig, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
-        normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+        TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference, TlsPolicyProfile,
+        TlsProtocolVersion, TracingConfig, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig,
+        WebConfig, normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
         validate_dynamic_header_template,
     };
     #[cfg(feature = "cache")]
@@ -13824,6 +13911,69 @@ mod tests {
             Err(ConfigError::InvalidConfigListLength {
                 field: "tls.certificates".to_owned(),
                 max: super::MAX_TLS_CERTIFICATES,
+            })
+        );
+    }
+
+    #[test]
+    fn accepts_tls_client_auth_required_with_ca_bundle() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.client_auth]
+            mode = "required"
+            ca_path = "tests/fixtures/tls/localhost-cert.pem"
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+        assert_eq!(config.tls.client_auth.mode, TlsClientAuthMode::Required);
+        assert_eq!(
+            config.tls.client_auth.ca_path.as_deref(),
+            Some(std::path::Path::new(
+                "tests/fixtures/tls/localhost-cert.pem"
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_tls_client_auth_without_ca_bundle() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls.client_auth]
+            mode = "optional"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.client_auth.ca_path",
+                reason: "tls.client_auth.mode requires a client CA bundle path"
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_tls_client_auth_with_s2n_for_now() {
+        let config: Config = toml::from_str(
+            r#"
+            [tls]
+            backend = "s2n"
+
+            [tls.client_auth]
+            mode = "required"
+            ca_path = "tests/fixtures/tls/localhost-cert.pem"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidTlsPolicy {
+                field: "tls.client_auth.mode",
+                reason: "the s2n backend has mTLS primitives, but Fluxheim does not yet expose panic-free CA bundle loading for listener client auth; use rustls, OpenSSL, or BoringSSL for client certificate authentication"
             })
         );
     }

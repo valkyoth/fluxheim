@@ -1252,6 +1252,10 @@ require_disk_cache_encryption = false
 [[tls.certificates]]
 cert_path = "tls/fullchain.pem"
 key_path = "tls/key.pem"
+
+[tls.client_auth]
+mode = "off"
+# ca_path = "tls/client-ca.pem"
 ```
 
 TLS backend values: `rustls`, `openssl`, `boringssl`, `s2n`.
@@ -1319,6 +1323,27 @@ backends use their native certificate callback APIs. TLS backends without SNI
 certificate selection support reject vhost-specific certificates at startup
 instead of silently serving the default certificate.
 The global `[[tls.certificates]]` table is capped at 1024 certificate pairs.
+
+Downstream client certificate authentication is configured globally for TLS
+listeners:
+
+```toml
+[tls.client_auth]
+mode = "required" # "off", "optional", or "required"
+ca_path = "/etc/fluxheim/tls/client-ca.pem"
+```
+
+`mode = "required"` rejects TLS handshakes that do not present a certificate
+chain trusted by `ca_path`. `mode = "optional"` asks for a client certificate
+and verifies it when present, but still accepts clients without one. The CA
+bundle path uses the same safe-path validation as other TLS files: no
+parent-directory traversal, no symlinked path components, and no group- or
+world-writable existing parent directory. The current implementation wires
+rustls and OpenSSL/BoringSSL listeners. The s2n backend fails closed when client
+auth is enabled until Fluxheim exposes panic-free CA bundle loading for that
+backend. Certificate-derived routing variables and forwarded identity headers
+remain future 1.4 work; do not forward client identity from TLS termination to
+upstreams unless a later release documents that exact behavior.
 
 Release validation must still scan every release candidate with a TLS scanner
 before publishing a stable release.
