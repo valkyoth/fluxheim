@@ -374,6 +374,14 @@ impl FluxProxy {
             .started_at
             .map(|started_at| started_at.elapsed().as_millis())
             .unwrap_or(0);
+        #[cfg(feature = "load-balancer")]
+        let upstream_alias = ctx.upstream_load_balancer_alias.as_deref();
+        #[cfg(not(feature = "load-balancer"))]
+        let upstream_alias = None;
+        #[cfg(feature = "load-balancer")]
+        let upstream_retries = ctx.upstream_load_balancer_retries;
+        #[cfg(not(feature = "load-balancer"))]
+        let upstream_retries = 0;
 
         log::info!(
             target: "fluxheim::access",
@@ -432,6 +440,12 @@ impl FluxProxy {
                     .include_upstream
                     .then_some(ctx.upstream.as_deref())
                     .flatten(),
+                upstream_alias: state
+                    .access_log
+                    .include_upstream
+                    .then_some(upstream_alias)
+                    .flatten(),
+                upstream_retries,
                 path: state
                     .access_log
                     .include_path
@@ -13188,6 +13202,8 @@ struct AccessLogEvent<'a> {
     vhost: &'a str,
     route: &'a str,
     upstream: Option<&'a str>,
+    upstream_alias: Option<&'a str>,
+    upstream_retries: u8,
     path: Option<&'a str>,
     status: Option<u16>,
     status_class: Option<&'static str>,
@@ -13231,10 +13247,11 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
     let tls_client_cert_serial = event.tls_client_cert_serial.unwrap_or("");
     let tls_client_cert_organization = event.tls_client_cert_organization.unwrap_or("");
     let upstream = event.upstream.unwrap_or("");
+    let upstream_alias = event.upstream_alias.unwrap_or("");
     let path = event.path.unwrap_or("");
     let request_id = event.request_id.unwrap_or("");
     let body = format!(
-        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"cache_phase\":\"{}\",\"compression_encoding\":\"{}\",\"tls_version\":\"{}\",\"tls_cipher\":\"{}\",\"tls_client_cert_sha256\":\"{}\",\"tls_client_cert_serial\":\"{}\",\"tls_client_cert_organization\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
+        "{{\"event\":\"access\",\"method\":\"{}\",\"host\":\"{}\",\"client_ip\":\"{}\",\"cache_phase\":\"{}\",\"compression_encoding\":\"{}\",\"tls_version\":\"{}\",\"tls_cipher\":\"{}\",\"tls_client_cert_sha256\":\"{}\",\"tls_client_cert_serial\":\"{}\",\"tls_client_cert_organization\":\"{}\",\"vhost\":\"{}\",\"route\":\"{}\",\"upstream\":\"{}\",\"upstream_alias\":\"{}\",\"upstream_retries\":{},\"path\":\"{}\",\"status\":{},\"status_class\":\"{}\",\"error\":{},\"request_id\":\"{}\",\"request_body_bytes\":{},\"response_body_bytes\":{},\"latency_ms\":{}}}",
         json_escape(event.method),
         json_escape(host),
         json_escape(client_ip),
@@ -13248,6 +13265,8 @@ fn access_log_json(event: AccessLogEvent<'_>) -> String {
         json_escape(event.vhost),
         json_escape(event.route),
         json_escape(upstream),
+        json_escape(upstream_alias),
+        event.upstream_retries,
         json_escape(path),
         status,
         status_class,
@@ -21874,6 +21893,8 @@ mod tests {
             vhost: "main\"site",
             route: "assets",
             upstream: Some("127.0.0.1:3000"),
+            upstream_alias: Some("origin-a"),
+            upstream_retries: 2,
             path: Some("/asset path/one.js"),
             status: Some(200),
             status_class: Some(super::status_class(200)),
@@ -21905,6 +21926,8 @@ mod tests {
         assert!(log.contains("\"vhost\":\"main\\\"site\""));
         assert!(log.contains("\"route\":\"assets\""));
         assert!(log.contains("\"upstream\":\"127.0.0.1:3000\""));
+        assert!(log.contains("\"upstream_alias\":\"origin-a\""));
+        assert!(log.contains("\"upstream_retries\":2"));
         assert!(log.contains("\"path\":\"/asset path/one.js\""));
         assert!(log.contains("\"status_class\":\"2xx\""));
         assert!(log.contains("\"request_id\":\"req-123\""));
@@ -21935,6 +21958,8 @@ mod tests {
             vhost: "main",
             route: "private",
             upstream: None,
+            upstream_alias: None,
+            upstream_retries: 0,
             path: None,
             status: Some(204),
             status_class: Some(super::status_class(204)),
@@ -21948,6 +21973,8 @@ mod tests {
         });
 
         assert!(log.contains("\"path\":\"\""));
+        assert!(log.contains("\"upstream_alias\":\"\""));
+        assert!(log.contains("\"upstream_retries\":0"));
         assert!(log.contains("\"cache_phase\":\"\""));
         assert!(log.contains("\"compression_encoding\":\"\""));
         assert!(log.contains("\"tls_client_cert_sha256\":\"\""));
@@ -21977,6 +22004,8 @@ mod tests {
             vhost: "main",
             route: "root",
             upstream: None,
+            upstream_alias: None,
+            upstream_retries: 0,
             path: Some("/"),
             status: Some(204),
             status_class: Some(super::status_class(204)),
@@ -22016,6 +22045,8 @@ mod tests {
             vhost: "main",
             route: "root",
             upstream: None,
+            upstream_alias: None,
+            upstream_retries: 0,
             path: Some("/"),
             status: Some(200),
             status_class: Some(super::status_class(200)),

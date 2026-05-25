@@ -99,7 +99,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Read-only ops socket | ✅ | `1.4.1-dev`; Unix-domain local status/cache/snapshot/health endpoint with owner/group-only permissions. |
 | Prometheus metrics | ✅ | Native metrics profile and bounded labels for edge/cache/LB/PHP events. |
 | OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
-| Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream, TLS identity, and compression fields. |
+| Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream/alias/retries, TLS identity, and compression fields. |
 | Config tester | ✅ | Release-page config diagnostics through `fluxheim-config-tester`. |
 | Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/cache/proxy/PHP images. |
 | Native services | ✅ | systemd units and RPM packaging files. |

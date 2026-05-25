@@ -419,10 +419,14 @@ when the selected TLS backend does not expose a given certificate attribute.
 Access log events also include the resolved route name and selected upstream
 address when a request reaches a proxy action; fallback, local static, or
 unrouted requests emit empty `route` or `upstream` fields as applicable.
+Load-balanced requests also include `upstream_alias` when configured through
+`proxy.upstream_aliases`, plus `upstream_retries` for the number of retry
+attempts Fluxheim made after the first selected upstream.
 
 `logging.access.include_route = false` emits an empty `route` field.
-`logging.access.include_upstream = false` emits an empty `upstream` field, which
-is useful when internal backend addresses should not appear in logs.
+`logging.access.include_upstream = false` emits empty `upstream` and
+`upstream_alias` fields, which is useful when internal backend addresses or
+operator-defined backend labels should not appear in logs.
 
 ## Headers
 

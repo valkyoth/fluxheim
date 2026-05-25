@@ -37,6 +37,10 @@ behavior when the change improves security or project direction.
   for status, cache status, snapshots, and health checks. The socket is
   owner/group permission constrained and does not route mutating admin
   operations.
+- Added richer structured access-log fields for load-balanced proxy requests:
+  `upstream_alias` and `upstream_retries`. The alias follows
+  `logging.access.include_upstream` so operators can still suppress backend
+  identity from logs.
 
 ### Planned
 
