@@ -7,6 +7,17 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.4.1-dev - Unreleased
+
+### Planned
+
+- Start the proxy-operations follow-up after the `1.4.0` proxy parity
+  baseline. Scope is limited to HTTP migration blockers and read-only
+  operational visibility: regex routing behind an explicit global opt-in,
+  method routing, WebSocket/HTTP upgrade verification,
+  `auth_request`-style subrequests, discovery/mirroring, local operational
+  sockets, richer rewrite policy, and typed operator hook points.
+
 ## 1.4.0 - 2026-05-25
 
 ### Added

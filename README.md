@@ -22,7 +22,7 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current release target is
+[Pingora](https://github.com/cloudflare/pingora). The current stable release is
 `1.4.0`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
@@ -33,7 +33,8 @@ diagnostics, OpenSSL and rustls/AWS-LC FIPS/ISO-capable build paths, and the
 first production proxy-parity set: edge ACLs, rate/concurrency limits,
 compression, advanced upstream selection, passive health, retry budgets,
 PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
-origin controls, and gRPC pass-through policy.
+origin controls, and gRPC pass-through policy. The active development target is
+`1.4.1`, focused on HTTP migration blockers and proxy operations.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
