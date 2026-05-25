@@ -1207,12 +1207,12 @@ Release shape:
     evaluation, stick-table tracking, runtime backend mutation, response body
     substitution, TCP stream proxying, UDP proxying, HTTP/3, gRPC
     transcoding, or arbitrary Wasm/Lua execution in `1.4.1`;
-  - regex path routing using Rust's `regex` crate. Matching order should be
-    exact routes first, then prefix routes, then configured regex routes in
-    documented order. Regex size limits and config-time compilation failures
-    are required; untrusted catastrophic-backtracking behavior is avoided by
-    the Rust regex engine design. Regex routing must be disabled by default
-    behind an explicit global config opt-in such as
+  - regex path routing using Rust's `regex` crate. The first slice is bounded
+    route matching: exact routes first, then prefix routes, then configured
+    regex routes in documented order. Regex size limits and config-time
+    compilation failures are required; untrusted catastrophic-backtracking
+    behavior is avoided by the Rust regex engine design. Regex routing must be
+    disabled by default behind an explicit global config opt-in such as
     `server.regex_enabled = true`; config validation must reject route regexes,
     capture-aware rewrites, and regex-backed templates unless that global opt-in
     is set. This keeps accidental high-cardinality or overly broad regex policy

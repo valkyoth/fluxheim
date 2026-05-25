@@ -60,6 +60,8 @@ const MAX_TLS_CERTIFICATES: usize = 1024;
 const MAX_ACME_ISSUERS: usize = 128;
 const MAX_VHOST_ACME_DOMAINS: usize = 64;
 const MAX_WEB_INDEX_FILES: usize = 32;
+const MAX_ROUTE_REGEX_BYTES: usize = 4096;
+pub(crate) const MAX_ROUTE_REGEX_PROGRAM_BYTES: usize = 1024 * 1024;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -409,7 +411,7 @@ impl Config {
         let mut seen_hosts = std::collections::HashSet::new();
 
         for vhost in &self.vhosts {
-            vhost.validate()?;
+            vhost.validate(self.server.regex_enabled)?;
             vhost
                 .validate_tls(&self.tls, self.vhost_has_shared_managed_acme_source(vhost))
                 .map_err(|source| ConfigError::VhostSection {
@@ -602,6 +604,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub proxy_protocol: DownstreamProxyProtocol,
     #[serde(default)]
+    pub regex_enabled: bool,
+    #[serde(default)]
     pub limits: ServerLimitsConfig,
     #[serde(default)]
     pub process: ServerProcessConfig,
@@ -619,6 +623,7 @@ impl Default for ServerConfig {
             default_vhost: None,
             trusted_proxies: Vec::new(),
             proxy_protocol: DownstreamProxyProtocol::Off,
+            regex_enabled: false,
             limits: ServerLimitsConfig::default(),
             process: ServerProcessConfig::default(),
             https_redirect: HttpsRedirectConfig::default(),
@@ -643,6 +648,9 @@ impl ServerConfig {
         }
         if let Some(proxy_protocol) = fragment.proxy_protocol {
             self.proxy_protocol = proxy_protocol;
+        }
+        if let Some(regex_enabled) = fragment.regex_enabled {
+            self.regex_enabled = regex_enabled;
         }
         if let Some(limits) = fragment.limits {
             self.limits = limits;
@@ -743,6 +751,8 @@ struct ServerConfigFragment {
     trusted_proxies: Option<Vec<String>>,
     #[serde(default)]
     proxy_protocol: Option<DownstreamProxyProtocol>,
+    #[serde(default)]
+    regex_enabled: Option<bool>,
     #[serde(default)]
     limits: Option<ServerLimitsConfig>,
     #[serde(default)]
@@ -4724,7 +4734,7 @@ impl VhostConfig {
         }
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    fn validate(&self, regex_enabled: bool) -> Result<(), ConfigError> {
         if self.name.trim().is_empty() {
             return Err(ConfigError::EmptyVhostName);
         }
@@ -4818,7 +4828,7 @@ impl VhostConfig {
                 section: "web",
                 source: Box::new(source),
             })?;
-        self.validate_routes()?;
+        self.validate_routes(regex_enabled)?;
         if matches!(self.max_request_body_bytes, Some(bytes) if bytes.as_u64() == 0) {
             return Err(ConfigError::InvalidVhostLimit {
                 vhost: self.name.clone(),
@@ -4838,10 +4848,10 @@ impl VhostConfig {
         Ok(())
     }
 
-    fn validate_routes(&self) -> Result<(), ConfigError> {
+    fn validate_routes(&self, regex_enabled: bool) -> Result<(), ConfigError> {
         let mut fallback_seen = false;
         for route in &self.routes {
-            route.validate(&self.name)?;
+            route.validate(&self.name, regex_enabled)?;
             if route.fallback {
                 if fallback_seen {
                     return Err(ConfigError::DuplicateFallbackRoute {
@@ -5246,6 +5256,8 @@ pub struct RouteConfig {
     #[serde(default)]
     pub path_prefix: Option<String>,
     #[serde(default)]
+    pub path_regex: Option<String>,
+    #[serde(default)]
     pub fallback: bool,
     #[serde(default)]
     pub https_redirect_exempt: bool,
@@ -5295,7 +5307,7 @@ impl RouteConfig {
         }
     }
 
-    fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
+    fn validate(&self, vhost: &str, regex_enabled: bool) -> Result<(), ConfigError> {
         if self.name.trim().is_empty() {
             return Err(ConfigError::EmptyRouteName {
                 vhost: vhost.to_owned(),
@@ -5310,6 +5322,7 @@ impl RouteConfig {
 
         let matcher_count = usize::from(self.path_exact.is_some())
             + usize::from(self.path_prefix.is_some())
+            + usize::from(self.path_regex.is_some())
             + usize::from(self.fallback);
         if matcher_count != 1 {
             return Err(ConfigError::InvalidRouteMatcher {
@@ -5332,6 +5345,18 @@ impl RouteConfig {
                     vhost: vhost.to_owned(),
                     route: self.name.clone(),
                 }
+            })?;
+        }
+        if let Some(pattern) = &self.path_regex {
+            if !regex_enabled {
+                return Err(ConfigError::RouteRegexDisabled {
+                    vhost: vhost.to_owned(),
+                    route: self.name.clone(),
+                });
+            }
+            validate_route_regex(pattern).map_err(|_| ConfigError::InvalidRouteRegex {
+                vhost: vhost.to_owned(),
+                route: self.name.clone(),
             })?;
         }
         if let Some(path) = &self.strip_prefix {
@@ -5596,6 +5621,7 @@ impl VhostRedirectConfig {
             name: "vhost-redirect".to_owned(),
             path_exact: None,
             path_prefix: None,
+            path_regex: None,
             fallback: true,
             https_redirect_exempt: false,
             strip_prefix: None,
@@ -5827,6 +5853,7 @@ impl VhostAcmeChallengeConfig {
             name: "acme-http-01".to_owned(),
             path_exact: None,
             path_prefix: Some(ACME_HTTP_CHALLENGE_PREFIX.to_owned()),
+            path_regex: None,
             fallback: false,
             https_redirect_exempt: true,
             strip_prefix: None,
@@ -9411,6 +9438,14 @@ pub enum ConfigError {
         vhost: String,
         route: String,
     },
+    RouteRegexDisabled {
+        vhost: String,
+        route: String,
+    },
+    InvalidRouteRegex {
+        vhost: String,
+        route: String,
+    },
     DuplicateFallbackRoute {
         vhost: String,
     },
@@ -10123,7 +10158,15 @@ impl Display for ConfigError {
             }
             Self::InvalidRouteMatcher { vhost, route } => write!(
                 formatter,
-                "vhost {vhost:?} route {route:?} must define exactly one of path_exact, path_prefix, or fallback = true"
+                "vhost {vhost:?} route {route:?} must define exactly one of path_exact, path_prefix, path_regex, or fallback = true"
+            ),
+            Self::RouteRegexDisabled { vhost, route } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} uses path_regex but server.regex_enabled is false"
+            ),
+            Self::InvalidRouteRegex { vhost, route } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} path_regex must be a valid bounded Rust regex for request paths"
             ),
             Self::DuplicateFallbackRoute { vhost } => {
                 write!(
@@ -11032,6 +11075,27 @@ fn validate_route_rewrite_prefix_path(value: &str) -> Result<(), ConfigError> {
             route: String::new(),
         });
     }
+    Ok(())
+}
+
+fn validate_route_regex(value: &str) -> Result<(), ConfigError> {
+    if value.is_empty()
+        || value.len() > MAX_ROUTE_REGEX_BYTES
+        || value.contains('\0')
+        || value.chars().any(char::is_control)
+    {
+        return Err(ConfigError::InvalidRouteRegex {
+            vhost: String::new(),
+            route: String::new(),
+        });
+    }
+    regex::RegexBuilder::new(value)
+        .size_limit(MAX_ROUTE_REGEX_PROGRAM_BYTES)
+        .build()
+        .map_err(|_| ConfigError::InvalidRouteRegex {
+            vhost: String::new(),
+            route: String::new(),
+        })?;
     Ok(())
 }
 
@@ -21259,6 +21323,87 @@ mod tests {
     }
 
     #[test]
+    fn validates_regex_route_opt_in() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            regex_enabled = true
+
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "versioned-api"
+            path_regex = "^/api/v[0-9]+/"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_regex_route_without_server_opt_in() {
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "versioned-api"
+            path_regex = "^/api/v[0-9]+/"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::RouteRegexDisabled {
+                vhost: "gateway".to_owned(),
+                route: "versioned-api".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_regex_route_pattern() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            regex_enabled = true
+
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_regex = "["
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidRouteRegex {
+                vhost: "gateway".to_owned(),
+                route: "bad".to_owned(),
+            })
+        );
+    }
+
+    #[test]
     fn rejects_grpc_route_without_http2_upstream() {
         let config: Config = toml::from_str(
             r#"
@@ -21642,6 +21787,34 @@ mod tests {
             name = "bad"
             path_exact = "/one"
             path_prefix = "/one/"
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::InvalidRouteMatcher {
+                vhost: "gateway".to_owned(),
+                route: "bad".to_owned(),
+            })
+        );
+
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            regex_enabled = true
+
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_prefix = "/api/"
+            path_regex = "^/api/v[0-9]+/"
 
             [vhosts.routes.proxy]
             upstreams = ["127.0.0.1:6012"]

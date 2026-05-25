@@ -3463,10 +3463,11 @@ fn skip_fluxheim_predictor_custom_reason(_reason: &'static str) -> bool {
     true
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 enum RuntimeRouteMatcher {
     Exact(String),
     Prefix(String),
+    Regex(regex::Regex),
     Fallback,
 }
 
@@ -5143,6 +5144,21 @@ impl RuntimeRoute {
             RuntimeRouteMatcher::Exact(path.clone())
         } else if let Some(path) = &route.path_prefix {
             RuntimeRouteMatcher::Prefix(path.clone())
+        } else if let Some(pattern) = &route.path_regex {
+            RuntimeRouteMatcher::Regex(
+                regex::RegexBuilder::new(pattern)
+                    .size_limit(crate::config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
+                    .build()
+                    .map_err(|error| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!(
+                                "vhost {vhost_name:?} route {:?} path_regex failed to compile: {error}",
+                                route.name
+                            ),
+                        )
+                    })?,
+            )
         } else {
             RuntimeRouteMatcher::Fallback
         };
@@ -5327,6 +5343,7 @@ impl RuntimeVhost {
     fn route_index(&self, path: &str) -> Option<usize> {
         let mut fallback = None;
         let mut best_prefix: Option<(usize, usize)> = None;
+        let mut first_regex = None;
 
         for (index, route) in self.routes.iter().enumerate() {
             match &route.matcher {
@@ -5337,12 +5354,20 @@ impl RuntimeVhost {
                 {
                     best_prefix = Some((index, prefix.len()));
                 }
+                RuntimeRouteMatcher::Regex(regex)
+                    if first_regex.is_none() && regex.is_match(path) =>
+                {
+                    first_regex = Some(index);
+                }
                 RuntimeRouteMatcher::Fallback => fallback = Some(index),
                 _ => {}
             }
         }
 
-        best_prefix.map(|(index, _)| index).or(fallback)
+        best_prefix
+            .map(|(index, _)| index)
+            .or(first_regex)
+            .or(fallback)
     }
 
     fn route(&self, index: usize) -> &RuntimeRoute {
@@ -16344,6 +16369,10 @@ mod tests {
     #[test]
     fn vhost_routes_pick_exact_then_longest_prefix_then_fallback() {
         let config = Config {
+            server: crate::config::ServerConfig {
+                regex_enabled: true,
+                ..crate::config::ServerConfig::default()
+            },
             vhosts: vec![VhostConfig {
                 name: "gateway".to_owned(),
                 hosts: vec!["gateway.example".to_owned()],
@@ -16370,6 +16399,7 @@ mod tests {
                         }),
                         path_exact: None,
                         path_prefix: None,
+                        path_regex: None,
                         strip_prefix: None,
                         rewrite_prefix: None,
                         https_redirect_exempt: false,
@@ -16394,6 +16424,7 @@ mod tests {
                             ..ProxyConfig::default()
                         }),
                         path_exact: None,
+                        path_regex: None,
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
@@ -16419,6 +16450,33 @@ mod tests {
                             ..ProxyConfig::default()
                         }),
                         path_exact: None,
+                        path_regex: None,
+                        fallback: false,
+                        strip_prefix: None,
+                        rewrite_prefix: None,
+                        https_redirect_exempt: false,
+                        max_request_body_bytes: None,
+                        access: Default::default(),
+                        rate_limit: Default::default(),
+                        concurrency: Default::default(),
+                        grpc: Default::default(),
+                        redirect: None,
+                        web: None,
+                        php: None,
+                        cache: None,
+                        compression: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                    RouteConfig {
+                        name: "regex-assets".to_owned(),
+                        path_regex: Some(r"^/asset-[0-9]+\.txt$".to_owned()),
+                        proxy: Some(ProxyConfig {
+                            upstreams: vec!["127.0.0.1:6004".to_owned()],
+                            upstream: None,
+                            ..ProxyConfig::default()
+                        }),
+                        path_exact: None,
+                        path_prefix: None,
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
@@ -16444,6 +16502,7 @@ mod tests {
                             ..ProxyConfig::default()
                         }),
                         path_prefix: None,
+                        path_regex: None,
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
@@ -16474,9 +16533,10 @@ mod tests {
             vhost.max_request_body_bytes,
             Some(ByteSize::from_bytes(64 * 1024 * 1024))
         );
-        assert_eq!(vhost.route_index("/api/v2/status"), Some(3));
+        assert_eq!(vhost.route_index("/api/v2/status"), Some(4));
         assert_eq!(vhost.route_index("/api/v2/users"), Some(2));
         assert_eq!(vhost.route_index("/api/users"), Some(1));
+        assert_eq!(vhost.route_index("/asset-42.txt"), Some(3));
         assert_eq!(vhost.route_index("/missing"), Some(0));
     }
 
@@ -17253,6 +17313,7 @@ mod tests {
                     name: "assets".to_owned(),
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
+                    path_regex: None,
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -17348,6 +17409,7 @@ mod tests {
                     name: "assets".to_owned(),
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
+                    path_regex: None,
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -17858,6 +17920,7 @@ mod tests {
                     name: "assets".to_owned(),
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
+                    path_regex: None,
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -18532,6 +18595,7 @@ mod tests {
                     name: "assets".to_owned(),
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
+                    path_regex: None,
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -18646,6 +18710,7 @@ mod tests {
                     name: "assets".to_owned(),
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
+                    path_regex: None,
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -19013,6 +19078,7 @@ mod tests {
                         name: "api".to_owned(),
                         path_exact: None,
                         path_prefix: Some("/api/".to_owned()),
+                        path_regex: None,
                         fallback: false,
                         https_redirect_exempt: false,
                         strip_prefix: None,
@@ -19098,6 +19164,7 @@ mod tests {
                     name: "single".to_owned(),
                     path_exact: None,
                     path_prefix: Some("/single/".to_owned()),
+                    path_regex: None,
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,

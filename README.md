@@ -47,6 +47,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Static websites | ✅ | MIME detection, index files, `GET`/`HEAD`, `ETag`, conditional `304`, and single byte ranges. |
 | Vhosts | ✅ | Host-header routing, default-vhost fallback, wildcard hosts, and opt-in strict host routing. |
 | Route actions | ✅ | Static, proxy, redirect, and route-level policy blocks. |
+| Regex path routing | ✅ | `1.4.1-dev`; requires explicit global `server.regex_enabled = true`. |
 | HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
 | Secure headers | ✅ | Request/response header policy, `Server: fluxheim` by default, removable by config. |
 | PHP-FPM applications | ✅ | External php-fpm for existing pools. |
@@ -103,7 +104,6 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| Regex path routing | ❌ | Planned for `1.4.1`. |
 | `auth_request`-style subrequests | ❌ | Planned for `1.4.1`. |
 | Traffic mirroring | ❌ | Planned for `1.4.1`. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.2`. |

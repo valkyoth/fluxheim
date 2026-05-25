@@ -1070,6 +1070,7 @@ dependencies = [
  "prometheus",
  "proptest",
  "rcgen",
+ "regex",
  "ring",
  "rpassword",
  "rustix",

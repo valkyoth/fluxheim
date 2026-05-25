@@ -65,6 +65,7 @@ tls_listen = []
 default_vhost = "example.test"
 trusted_proxies = ["127.0.0.1"]
 proxy_protocol = "off"
+regex_enabled = false
 
 [server.limits]
 max_request_header_bytes = "64KiB"
@@ -1898,8 +1899,13 @@ With metrics enabled, concurrency-limit rejections are counted by
 `fluxheim_edge_policy_events_total` with bounded labels.
 
 Vhosts can also contain ordered route tables. Exact matches win first, then the
-longest prefix match, then one optional fallback route. A route must define one
-action: `redirect`, `proxy`, `web`, or `php`.
+longest prefix match, then the first configured regex route, then one optional
+fallback route. Regex routes require explicit global opt-in with
+`server.regex_enabled = true`; configs that use `path_regex` without that flag
+are rejected. Regex patterns use Rust's bounded `regex` engine and are checked
+at config load time. A route must define exactly one matcher: `path_exact`,
+`path_prefix`, `path_regex`, or `fallback = true`, and one action: `redirect`,
+`proxy`, `web`, or `php`.
 
 ```toml
 [[vhosts.routes]]
@@ -1918,6 +1924,13 @@ send_timeout_secs = 600
 [vhosts.routes.grpc]
 enabled = false
 require_content_type = true
+
+[[vhosts.routes]]
+name = "versioned-api"
+path_regex = "^/api/v[0-9]+/"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:6013"]
 
 [vhosts.routes.cache]
 enabled = true

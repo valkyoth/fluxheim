@@ -9,12 +9,18 @@ behavior when the change improves security or project direction.
 
 ## 1.4.1-dev - Unreleased
 
+### Added
+
+- Added opt-in regex route matching through `server.regex_enabled = true` and
+  route-level `path_regex`. Regex routes are validated with Rust's bounded
+  regex engine at config load time and are selected after exact and longest
+  prefix routes, before fallback routes.
+
 ### Planned
 
 - Start the proxy-operations follow-up after the `1.4.0` proxy parity
-  baseline. Scope is limited to HTTP migration blockers and read-only
-  operational visibility: regex routing behind an explicit global opt-in,
-  method routing, WebSocket/HTTP upgrade verification,
+  baseline. Remaining scope is limited to HTTP migration blockers and read-only
+  operational visibility: method routing, WebSocket/HTTP upgrade verification,
   `auth_request`-style subrequests, discovery/mirroring, local operational
   sockets, richer rewrite policy, and typed operator hook points.
 
