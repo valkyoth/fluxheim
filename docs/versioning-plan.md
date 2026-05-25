@@ -1226,10 +1226,11 @@ Release shape:
     or duplicated vhosts. The first slice treats method lists as route match
     conditions rather than deny policies: a method mismatch keeps searching
     later routes or fallback;
-  - WebSocket and generic HTTP/1.1 upgrade parity: explicit
-    `proxy.websocket = true` / upgrade policy, tested `101 Switching
-    Protocols` handling, hop-by-hop header behavior, timeout semantics, and
-    forced compression/cache bypass for upgraded connections;
+  - WebSocket and generic HTTP/1.1 upgrade parity: first slice is explicit
+    `proxy.websocket = true` upgrade policy on HTTP/1 upstream routes, strict
+    hop-by-hop upgrade header forwarding, and forced cache bypass for upgraded
+    connections. Remaining coverage should focus on end-to-end `101 Switching
+    Protocols` fixtures and long-lived timeout behavior;
   - `auth_request`-style external authorization for vhosts and routes. The
     first implementation should make one bounded HTTP subrequest before
     forwarding, send only configured request headers, enforce connect/read
@@ -2890,8 +2891,8 @@ the exception while the cache server is being completed as a focused sequence:
   PROXY protocol, upstream TLS controls, HTTP/2 origin controls, and gRPC
   pass-through policy.
 - `v1.4.1`: discovery, mirroring, structured logs, richer rewrite policy,
-  regex and method routing, WebSocket/upgrade verification, auth subrequests,
-  local operational sockets, and typed operator hook points.
+  regex and method routing, explicit WebSocket/HTTP upgrade proxying, auth
+  subrequests, local operational sockets, and typed operator hook points.
 - `v1.4.2`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local

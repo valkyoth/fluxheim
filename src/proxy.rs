@@ -6493,6 +6493,11 @@ impl ProxyHttp for FluxProxy {
                 tls_identity: tls_identity.as_ref(),
             },
         )?;
+        apply_websocket_upgrade_headers_if_enabled(
+            session.req_header(),
+            upstream_request,
+            &selected_runtime_proxy(vhost, ctx).config,
+        )?;
         normalize_cookie_headers(upstream_request)?;
         append_fluxheim_via_to_request(upstream_request)?;
 
@@ -6957,6 +6962,19 @@ impl ProxyHttp for FluxProxy {
         let cache_config = route_cache
             .map(|cache| &cache.config)
             .unwrap_or(&vhost.cache);
+
+        if proxy_upgrade_request_allowed(
+            session.req_header(),
+            &selected_runtime_proxy(vhost, ctx).config,
+        ) {
+            #[cfg(feature = "metrics")]
+            record_cache_policy_activity(vhost, ctx.route_index, "bypass");
+            ctx.cache_status_override = Some(CacheStatusOverride {
+                status: "BYPASS",
+                reason: Some(CACHE_UPGRADE_BYPASS_REASON),
+            });
+            return Ok(());
+        }
 
         if let Some(reason) = request_cache_bypass_reason(session.req_header(), cache_config) {
             #[cfg(feature = "metrics")]
@@ -11472,6 +11490,68 @@ fn normalize_cookie_headers(request: &mut RequestHeader) -> Result<()> {
     Ok(())
 }
 
+fn proxy_upgrade_request_allowed(request: &RequestHeader, proxy: &ProxyConfig) -> bool {
+    proxy.websocket && http_upgrade_request_value(request).is_some()
+}
+
+fn apply_websocket_upgrade_headers_if_enabled(
+    downstream_request: &RequestHeader,
+    upstream_request: &mut RequestHeader,
+    proxy: &ProxyConfig,
+) -> Result<()> {
+    let Some(upgrade) = http_upgrade_request_value(downstream_request) else {
+        return Ok(());
+    };
+    if !proxy.websocket {
+        return Ok(());
+    }
+
+    upstream_request.remove_header("connection");
+    upstream_request.remove_header("upgrade");
+    upstream_request.insert_header("connection", "upgrade")?;
+    upstream_request.insert_header("upgrade", upgrade)?;
+    Ok(())
+}
+
+fn http_upgrade_request_value(request: &RequestHeader) -> Option<&str> {
+    if !request_header_values(request, "connection")
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .any(|token| token.eq_ignore_ascii_case("upgrade"))
+    {
+        return None;
+    }
+    request_header_values(request, "upgrade")
+        .map(str::trim)
+        .find(|value| valid_http_upgrade_token(value))
+}
+
+fn valid_http_upgrade_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            matches!(
+                byte,
+                b'!' | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'.'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'|'
+                    | b'~'
+                    | b'0'..=b'9'
+                    | b'A'..=b'Z'
+                    | b'a'..=b'z'
+            )
+        })
+}
+
 async fn continue_to_proxy_or_not_found(
     session: &mut Session,
     vhost: &RuntimeVhost,
@@ -12104,6 +12184,9 @@ const CACHE_PASS_REASON: &str = "cache-pass";
 
 #[cfg(feature = "cache")]
 const CACHE_HEAD_BYPASS_REASON: &str = "method-head";
+
+#[cfg(feature = "cache")]
+const CACHE_UPGRADE_BYPASS_REASON: &str = "upgrade";
 
 #[cfg(feature = "cache")]
 fn proxy_cache_method_temporarily_bypassed(method: &str) -> bool {
@@ -13936,11 +14019,12 @@ mod tests {
     use super::{
         FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
         RuntimeConcurrencyLimit, RuntimeProxy, RuntimeRateLimit, append_fluxheim_via_to_request,
-        append_fluxheim_via_to_response, approximate_request_header_bytes,
-        count_response_body_chunk, effective_client_ip_from_forwarded_for, grpc_content_type,
-        grpc_route_rejection_status, http_peer_for_proxy, http_peer_for_runtime_proxy,
-        https_redirect_location, normalize_cookie_headers, proxy_protocol_v1_header,
-        proxy_protocol_v2_header, redirect_authority, request_body_chunk_limit_status,
+        append_fluxheim_via_to_response, apply_websocket_upgrade_headers_if_enabled,
+        approximate_request_header_bytes, count_response_body_chunk,
+        effective_client_ip_from_forwarded_for, grpc_content_type, grpc_route_rejection_status,
+        http_peer_for_proxy, http_peer_for_runtime_proxy, https_redirect_location,
+        normalize_cookie_headers, proxy_protocol_v1_header, proxy_protocol_v2_header,
+        proxy_upgrade_request_allowed, redirect_authority, request_body_chunk_limit_status,
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
     #[cfg(feature = "php-fpm")]
@@ -16702,6 +16786,64 @@ mod tests {
             route_redirect_location(&request, &redirect).as_deref(),
             Some("https://example.test/old/path?x=1")
         );
+    }
+
+    #[test]
+    fn websocket_upgrade_policy_preserves_required_hop_by_hop_headers() {
+        let mut downstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        downstream
+            .insert_header("connection", "keep-alive, Upgrade")
+            .unwrap();
+        downstream.insert_header("upgrade", "websocket").unwrap();
+
+        let mut upstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        upstream.insert_header("connection", "close").unwrap();
+        upstream.insert_header("upgrade", "h2c").unwrap();
+        let proxy = ProxyConfig {
+            websocket: true,
+            ..ProxyConfig::default()
+        };
+
+        assert!(proxy_upgrade_request_allowed(&downstream, &proxy));
+        apply_websocket_upgrade_headers_if_enabled(&downstream, &mut upstream, &proxy).unwrap();
+
+        assert_eq!(
+            upstream
+                .headers
+                .get("connection")
+                .and_then(|v| v.to_str().ok()),
+            Some("upgrade")
+        );
+        assert_eq!(
+            upstream
+                .headers
+                .get("upgrade")
+                .and_then(|v| v.to_str().ok()),
+            Some("websocket")
+        );
+    }
+
+    #[test]
+    fn websocket_upgrade_policy_is_explicit_opt_in() {
+        let mut downstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        downstream.insert_header("connection", "upgrade").unwrap();
+        downstream.insert_header("upgrade", "websocket").unwrap();
+        let proxy = ProxyConfig::default();
+
+        assert!(!proxy_upgrade_request_allowed(&downstream, &proxy));
+    }
+
+    #[test]
+    fn websocket_upgrade_policy_rejects_invalid_upgrade_tokens() {
+        let mut downstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        downstream.insert_header("connection", "upgrade").unwrap();
+        downstream.insert_header("upgrade", "web socket").unwrap();
+        let proxy = ProxyConfig {
+            websocket: true,
+            ..ProxyConfig::default()
+        };
+
+        assert!(!proxy_upgrade_request_allowed(&downstream, &proxy));
     }
 
     #[test]

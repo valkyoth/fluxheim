@@ -66,10 +66,11 @@ The highest-value NGINX migration items are now explicitly first in that queue:
 regex path routing first as bounded route matching, then capture-aware rewrites,
 method-based routing, WebSocket/HTTP upgrade verification, and
 `auth_request`-style external authorization subrequests. Bounded regex and
-method route matching are the first implemented slices of this queue. Regex
-routing should remain off by default and require an explicit global config
-opt-in, for example `server.regex_enabled = true`, before any vhost or route
-can use regex matchers or capture-aware rewrites. Follow-up `1.4.2` work
+method route matching plus explicit HTTP/1.1 websocket/upgrade proxying are the
+first implemented slices of this queue. Regex routing should remain off by
+default and require an explicit global config opt-in, for example
+`server.regex_enabled = true`, before any vhost or route can use regex matchers
+or capture-aware rewrites. Follow-up `1.4.2` work
 should cover optional GeoIP
 as a bounded Geo-Context foundation before the later enterprise load-balancer
 track: local MaxMind GeoIP2/ASN databases, safe path loading, atomic context

@@ -87,6 +87,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | PROXY protocol | ✅ | v1/v2 receive and upstream send. |
 | HTTP/2 origins | ✅ | Upstream HTTP version controls and bounded HTTP/2 settings. |
 | gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |
+| WebSocket / HTTP upgrade | ✅ | `1.4.1-dev`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
 
 ### Operations And Packaging
 

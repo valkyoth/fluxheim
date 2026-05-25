@@ -593,6 +593,7 @@ upstream_client_cert_path = "/etc/fluxheim/upstreams/client-chain.pem"
 upstream_client_key_path = "/etc/fluxheim/upstreams/client-key.pem"
 upstream_proxy_protocol = "off"
 upstream_http_version = "http1"
+websocket = false
 # upstream_h2_max_streams = 64
 # upstream_h2_ping_interval_secs = 30
 connect_timeout_secs = 5
@@ -786,6 +787,10 @@ selection, passive-health, retry, and health-check state.
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
 optional. They map to the upstream connection timeout, upstream response/read
 timeout, and upstream request-body/write timeout.
+`websocket = true` enables HTTP/1.1 upgrade forwarding for websocket-style or
+other token-based upgrade requests on that proxy block. Fluxheim validates this
+with `upstream_http_version = "http1"` because HTTP/2 origins do not use the
+same hop-by-hop upgrade mechanism.
 `downstream_write_timeout_secs` and
 `downstream_min_send_rate_bytes_per_sec` protect the client-facing side of
 proxied responses. The write timeout caps stalled downstream writes; the minimum
@@ -793,10 +798,13 @@ send rate asks Pingora to derive a timeout from each response chunk size and is
 mainly useful against slow HTTP/1 clients. These fields are optional and can be
 set globally, per vhost, or on a route-level proxy block.
 
-For websocket-style upgrades, Fluxheim keeps the downstream `Connection:
-Upgrade` and `Upgrade` headers unless your header policy removes or replaces
-them. Route-level proxy blocks can use longer read/send timeouts for these
-long-lived paths without changing the whole vhost.
+When `websocket = true` and the downstream request contains a valid
+`Connection: Upgrade` token plus a valid `Upgrade` token, Fluxheim forwards the
+request upstream with `Connection: upgrade` and the downstream upgrade token.
+Upgrade requests bypass proxy cache policy and should normally use route-level
+read/send timeouts sized for long-lived connections. Leave `websocket = false`
+on normal HTTP routes so hop-by-hop upgrade headers are not forwarded
+accidentally.
 
 `[[proxy.error_pages]]` entries are internal static fallback pages for proxy
 failures. The `path` is an internal request path resolved below the entry's

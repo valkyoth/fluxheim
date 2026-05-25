@@ -18,15 +18,18 @@ behavior when the change improves security or project direction.
 - Added route-level `methods = ["GET", "HEAD"]` matching. Method lists are
   optional, bounded, uppercase HTTP tokens and let one path route to different
   actions or upstreams by request method.
+- Added explicit HTTP/1.1 upgrade proxying with `proxy.websocket = true`.
+  Upgrade requests preserve the required `Connection: upgrade` and `Upgrade`
+  token upstream, require `upstream_http_version = "http1"`, and bypass proxy
+  cache policy for long-lived websocket-style connections.
 
 ### Planned
 
 - Start the proxy-operations follow-up after the `1.4.0` proxy parity
   baseline. Remaining scope is limited to HTTP migration blockers and read-only
-  operational visibility: WebSocket/HTTP upgrade verification,
-  `auth_request`-style subrequests, discovery/mirroring, local operational
-  sockets, richer rewrite policy, regex capture variables, and typed operator
-  hook points.
+  operational visibility: `auth_request`-style subrequests,
+  discovery/mirroring, local operational sockets, richer rewrite policy, regex
+  capture variables, and typed operator hook points.
 
 ## 1.4.0 - 2026-05-25
 

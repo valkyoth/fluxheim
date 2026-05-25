@@ -3585,6 +3585,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_http_version: UpstreamHttpVersion,
     #[serde(default)]
+    pub websocket: bool,
+    #[serde(default)]
     pub upstream_h2_max_streams: Option<usize>,
     #[serde(default)]
     pub upstream_h2_ping_interval_secs: Option<u64>,
@@ -3668,6 +3670,7 @@ impl Default for ProxyConfig {
             upstream_client_key_path: None,
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_http_version: UpstreamHttpVersion::Http1,
+            websocket: false,
             upstream_h2_max_streams: None,
             upstream_h2_ping_interval_secs: None,
             connect_timeout_secs: None,
@@ -3890,6 +3893,12 @@ impl ProxyConfig {
             return Err(ConfigError::InvalidProxyUpstreamPolicy {
                 field: "proxy.upstream_http_version",
                 reason: "requires a configured proxy upstream",
+            });
+        }
+        if self.websocket && self.upstream_http_version != UpstreamHttpVersion::Http1 {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.websocket",
+                reason: "HTTP/1.1 upgrade proxying requires upstream_http_version = \"http1\"",
             });
         }
         if self.upstream_h2_max_streams.is_some()
@@ -13172,6 +13181,34 @@ mod tests {
 
     #[test]
     fn rejects_invalid_proxy_upstream_policy() {
+        let websocket: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            websocket = true
+            "#,
+        )
+        .unwrap();
+        assert!(websocket.validate().is_ok());
+        assert!(websocket.proxy.websocket);
+
+        let websocket_with_h2: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+            websocket = true
+            upstream_http_version = "http2"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            websocket_with_h2.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.websocket",
+                reason: "HTTP/1.1 upgrade proxying requires upstream_http_version = \"http1\"",
+            })
+        );
+
         let unknown_backup: Config = toml::from_str(
             r#"
             [proxy]
