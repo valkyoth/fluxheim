@@ -58,12 +58,12 @@ behavior when the change improves security or project direction.
 - Added low-cardinality `auth_request` allow/deny/error outcomes to
   `fluxheim_edge_policy_events_total`.
 
-### Planned
+### Deferred
 
-- Start the proxy-operations follow-up after the `1.4.0` proxy parity
-  baseline. Remaining scope is limited to HTTP migration blockers and read-only
-  operational visibility: discovery, richer rewrite policy, regex capture
-  variables, and typed operator hook points.
+- Keep broader typed operator hook points, advanced policy composition,
+  stick-table tracking, runtime backend mutation, GeoIP policy, response body
+  substitution, TCP stream proxying, and arbitrary Wasm/Lua execution outside
+  `1.4.1`.
 
 ## 1.4.0 - 2026-05-25
 
