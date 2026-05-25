@@ -39,36 +39,76 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 ## What Works Today
 
-- Static website hosting with MIME detection, index files, `GET`/`HEAD`,
-  `ETag`, conditional `304`, and single byte ranges.
-- Vhost routing by Host header with default-vhost fallback, plus opt-in strict
-  host routing for hardened multi-tenant deployments.
-- Whole-vhost and route-level reverse proxying.
-- Admin control-plane bearer-token authentication with loopback defaults and
-  built-in brute-force throttling; admin health is authenticated by default and
-  non-loopback admin listeners require an explicit trusted TLS terminator mode.
-- Static/bought certificate support with rustls as the default TLS backend.
-- Multi-certificate SNI selection on the default rustls TLS backend.
-- Managed ACME certificate issuance and renewal for HTTP-01 and rustls
-  TLS-ALPN-01 builds.
-- Opt-in PHP-FPM serving for WordPress-style front-controller applications,
-  including strict script resolution, bounded FastCGI request/response handling,
-  and browser-validated login/admin flows.
-- Route-level static, proxy, and redirect actions.
-- Route-scoped proxy cache policies with memory, disk, and tiered storage.
-- Cache operations for hit/miss status headers, cache locks, stale serving,
-  cache warming, protected purge/status endpoints, and deploy-time key/lookup
-  assertions.
-- Optional local static-file caching, storage-bin disk cache, encrypted disk
-  cache, peer fill, and bounded range caching for large proxy-cache objects.
-- Prometheus metrics and OpenTelemetry metrics/tracing export profiles.
-- Optional global HTTP-to-HTTPS redirect with safe Host validation.
-- External ACME HTTP-01 challenge forwarding helper.
-- Secure request/response header policy, including `Server: fluxheim` by
-  default and removable by config.
-- Native systemd/RPM deployment files.
-- Rootless Podman containers for Wolfi, Alpine, SUSE Micro, and Debian.
-- Packaged default page at `/srv/fluxheim/index.html` with no external assets.
+### Serving And Routing
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Static websites | ✅ | MIME detection, index files, `GET`/`HEAD`, `ETag`, conditional `304`, and single byte ranges. |
+| Vhosts | ✅ | Host-header routing, default-vhost fallback, wildcard hosts, and opt-in strict host routing. |
+| Route actions | ✅ | Static, proxy, redirect, and route-level policy blocks. |
+| HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
+| Secure headers | ✅ | Request/response header policy, `Server: fluxheim` by default, removable by config. |
+| PHP-FPM applications | ✅ | External and managed php-fpm modes for WordPress-style front-controller applications. |
+| Built-in pure PHP engine | ❌ | Not included; managed php-fpm is the supported zero-admin PHP direction. |
+
+### Cache
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Proxy cache | ✅ | Vhost and route-scoped cache policies. |
+| Memory cache | ✅ | Bounded in-memory cache tier. |
+| Disk cache | ✅ | Filesystem and storage-bin disk backends. |
+| Tiered cache | ✅ | Memory plus disk storage plans. |
+| Encrypted disk cache | ✅ | Optional local-key and OpenBao transit encryption paths. |
+| Static-file cache | ✅ | Optional local static-file caching. |
+| Range and slice cache | ✅ | Bounded range caching and fixed-slice composition for large objects. |
+| Peer fill | ✅ | Optional peer-assisted cache fill for cache-edge deployments. |
+| Cache operations | ✅ | Hit/miss headers, cache locks, stale serving, cache warming, protected purge/status endpoints, and key/lookup diagnostics. |
+
+### Proxy, TLS, And Edge Policy
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
+| Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
+| Load balancing | ✅ | Weighted round-robin, least connections, power-of-two, hash, consistent-hash, backup, drain, slow start, and retry budgets. |
+| Passive health | ✅ | Failure, selected 5xx, and latency-based ejection. |
+| Active health checks | ✅ | TCP/TLS and HTTP health checks. |
+| Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
+| Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
+| IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
+| mTLS/client certificates | ✅ | Listener client-auth, fingerprint ACLs, and safe upstream identity forwarding templates. |
+| TLS backends | ✅ | rustls default, plus OpenSSL/BoringSSL/s2n build paths where supported. |
+| FIPS/ISO-capable builds | ✅ | OpenSSL FIPS provider path and rustls/AWS-LC FIPS-capable candidate path. |
+| ACME | ✅ | Managed HTTP-01 and rustls TLS-ALPN-01 issuance/renewal, plus external HTTP-01 forwarding helper. |
+| PROXY protocol | ✅ | v1/v2 receive and upstream send. |
+| HTTP/2 origins | ✅ | Upstream HTTP version controls and bounded HTTP/2 settings. |
+| gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |
+
+### Operations And Packaging
+
+| Capability | Status | Notes |
+| --- | --- | --- |
+| Admin API | ✅ | Bearer-token auth, loopback defaults, brute-force throttling, authenticated health by default, snapshots, rollback, cache operations. |
+| Prometheus metrics | ✅ | Native metrics profile and bounded labels for edge/cache/LB/PHP events. |
+| OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
+| Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream, TLS identity, and compression fields. |
+| Config tester | ✅ | Release-page config diagnostics through `fluxheim-config-tester`. |
+| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/cache/proxy/PHP images. |
+| Native services | ✅ | systemd units and RPM packaging files. |
+| Default page | ✅ | Packaged `/srv/fluxheim/index.html` with no external assets. |
+
+### Planned Or Not Yet
+
+| Capability | Status | Target |
+| --- | --- | --- |
+| Regex path routing | ❌ | Planned for `1.4.1`. |
+| `auth_request`-style subrequests | ❌ | Planned for `1.4.1`. |
+| Traffic mirroring | ❌ | Planned for `1.4.1`. |
+| GeoIP/Geo-Context policy | ❌ | Planned for `1.4.2`. |
+| TCP stream proxying | ❌ | Planned for `1.4.3`. |
+| HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
+| WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
 stable-core promise and deployment checks.
