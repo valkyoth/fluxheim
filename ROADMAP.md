@@ -66,12 +66,12 @@ The highest-value NGINX migration items are now explicitly first in that queue:
 regex path routing first as bounded route matching, then capture-aware rewrites,
 method-based routing, WebSocket/HTTP upgrade verification, and
 `auth_request`-style external authorization subrequests. Bounded regex and
-method route matching, explicit HTTP/1.1 websocket/upgrade proxying, and the
-first bounded `auth_request` subrequest hook are the first implemented slices of
-this queue. Regex routing should remain off by default and require an explicit
-global config opt-in, for example `server.regex_enabled = true`, before any
-vhost or route can use regex matchers or capture-aware rewrites. Follow-up
-`1.4.2` work
+method route matching, explicit HTTP/1.1 websocket/upgrade proxying, the first
+bounded `auth_request` subrequest hook, and safe bodyless traffic mirroring are
+the first implemented slices of this queue. Regex routing should remain off by
+default and require an explicit global config opt-in, for example
+`server.regex_enabled = true`, before any vhost or route can use regex matchers
+or capture-aware rewrites. Follow-up `1.4.2` work
 should cover optional GeoIP
 as a bounded Geo-Context foundation before the later enterprise load-balancer
 track: local MaxMind GeoIP2/ASN databases, safe path loading, atomic context
@@ -1459,18 +1459,21 @@ without parsing text fixtures for every module.
      default/privacy build absence checks.
 
 21. **1.4 Traffic Mirroring**
-   - Plan as an optional compile-time `traffic-mirror` module in the `1.4`
-     production proxy parity line after route buffering, metrics, privacy
-     profiles, and request body streaming limits are stable.
+   - Implemented first slice as an optional compile-time `traffic-mirror`
+     module in `1.4.1`.
    - Goal: safely shadow a bounded portion of production traffic to a test or
      analysis upstream while the live client receives only the primary
      response.
    - Planned features:
-     - per-vhost and per-route mirror rules;
-     - percentage, header, identity-claim, and method based sampling;
+     - per-vhost and per-route mirror rules are supported through inherited
+       proxy blocks;
+     - percentage and method-based sampling are supported; header and
+       identity-claim sampling remain future work;
      - request body size caps and body redaction/transformation policies;
-     - mirror timeout budgets that cannot affect the primary request;
-     - mirror result metrics without storing sensitive request data.
+     - mirror timeout budgets that cannot affect the primary request are
+       supported;
+     - mirror result metrics reuse low-cardinality edge-policy labels without
+       storing sensitive request data.
    - Never mirror by default. The operator must explicitly opt in and choose
      what fields may be copied. Unsafe methods such as `POST`, `PUT`, `PATCH`,
      and `DELETE` require a stronger explicit config than idempotent requests.

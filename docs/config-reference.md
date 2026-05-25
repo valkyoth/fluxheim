@@ -604,6 +604,15 @@ connect_timeout_secs = 2
 read_timeout_secs = 5
 max_response_bytes = "64KiB"
 
+[proxy.mirror]
+enabled = false
+# base_url = "http://127.0.0.1:9000/shadow"
+sample_per_mille = 1000
+methods = ["GET", "HEAD", "OPTIONS"]
+forward_headers = ["user-agent"]
+timeout_secs = 2
+max_response_bytes = "16KiB"
+
 # upstream_h2_max_streams = 64
 # upstream_h2_ping_interval_secs = 30
 connect_timeout_secs = 5
@@ -832,6 +841,20 @@ client evidence is routed through the selected validated provider.
 failures. The `path` is an internal request path resolved below the entry's
 `web.root`; it is not exposed as a public route unless you also configure a
 route for that root.
+
+`[proxy.mirror]` is an opt-in traffic shadowing hook available in binaries
+built with the `traffic-mirror` feature. The first implementation mirrors only
+safe, bodyless requests (`GET`, `HEAD`, `OPTIONS`, or `TRACE`) to `base_url`
+and appends the original path and query. Mirror requests are fire-and-forget:
+timeouts, response statuses, and failures never affect the primary response.
+Only headers listed in `forward_headers` are copied; credentials and cookies are
+not mirrored unless explicitly allow-listed. `sample_per_mille` deterministically
+selects 1 through 1000 requests per 1000 for a stable method/host/path key.
+`max_response_bytes` bounds how much of the mirror response Fluxheim drains
+before discarding it. Mirroring is rejected in `privacy-mode`; in FIPS/ISO
+required mode it is limited to numeric local `http://127.0.0.1/...` or
+`http://[::1]/...` sidecars until outbound TLS client evidence is routed through
+the selected validated provider.
 
 ## Compression
 

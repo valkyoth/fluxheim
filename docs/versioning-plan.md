@@ -1127,7 +1127,7 @@ Reference parity map:
 | PROXY protocol | NGINX/HAProxy/Envoy listener and upstream support | Accept v1/v2 only from trusted peers; optionally send v1/v2 upstream |
 | gRPC | Envoy first-class gRPC/trailers, NGINX `grpc_pass` | Preserve HTTP/2 trailers/status/body limits/timeouts; no transcoding in 1.4 |
 | HTTP/3/QUIC | NGINX/Caddy/Envoy support | Track behind a protocol milestone; do not block 1.4 unless Pingora server support is stable enough |
-| Traffic mirroring | NGINX `mirror`, Envoy shadowing | Bounded shadow requests with body on/off, sampling, timeout, redaction, and no effect on primary response |
+| Traffic mirroring | NGINX `mirror`, Envoy shadowing | First slice: safe bodyless shadow requests with deterministic sampling, timeout budgets, allow-listed headers, and no effect on primary response; body mirroring/redaction later |
 | Dynamic discovery | Envoy xDS, Caddy dynamic upstreams, DNS/service integrations | DNS refresh and file-watched upstream lists first; xDS/Kubernetes/Consul later |
 | Regex routing and rewrites | NGINX `location ~`, named captures, `rewrite`; HAProxy regex ACLs | Rust `regex`-based route matchers, capture variables, and bounded rewrite/header templates |
 | External auth subrequest | NGINX `auth_request`, OAuth2 proxy patterns, Envoy external authz | Route/vhost auth subrequest policy with bounded header forwarding, timeout, response handling, and metrics |
@@ -1241,8 +1241,12 @@ Release shape:
     decision metrics and richer deny/error policy;
   - DNS-refreshing upstreams for container/service-name targets;
   - file-watched upstream lists for service discovery without full config reload;
-  - traffic mirroring/shadowing with sampling, body controls, redaction,
-    timeout budgets, and metrics;
+  - traffic mirroring/shadowing: first slice is an optional `traffic-mirror`
+    feature for safe bodyless methods only, deterministic per-mille sampling,
+    allow-listed request headers, timeout budgets, bounded response draining,
+    FIPS/ISO local-sidecar enforcement, and low-cardinality mirror outcomes via
+    edge-policy metrics. Body mirroring, redaction/transformation policies, and
+    header/identity-claim sampling remain later work;
   - custom proxy error pages at vhost/route scope, loaded from safe filesystem
     paths and used by fail-to-proxy/error-response paths;
   - richer typed proxy variables and structured JSON access logs. Structured
@@ -2894,7 +2898,8 @@ the exception while the cache server is being completed as a focused sequence:
   pass-through policy.
 - `v1.4.1`: discovery, mirroring, structured logs, richer rewrite policy,
   regex and method routing, explicit WebSocket/HTTP upgrade proxying, bounded
-  auth subrequests, local operational sockets, and typed operator hook points.
+  auth subrequests, safe bodyless traffic mirroring, local operational sockets,
+  and typed operator hook points.
 - `v1.4.2`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local

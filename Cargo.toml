@@ -39,6 +39,7 @@ compression-brotli = ["compression", "dep:brotli"]
 compression-gzip = ["compression", "dep:flate2"]
 compression-zstd = ["compression", "dep:zstd"]
 load-balancer = ["proxy", "pingora/lb"]
+traffic-mirror = ["proxy"]
 cache = ["dep:bytes", "dep:moka", "dep:sha2", "pingora?/cache"]
 web = [
     "dep:bytes",
@@ -104,6 +105,7 @@ profile-observability = ["profile-core", "metrics", "metrics-otlp", "otel-tracin
 profile-privacy = ["proxy", "web", "tls-rustls", "privacy-mode", "security"]
 profile-full = [
     "profile-load-balancer",
+    "traffic-mirror",
 ]
 profile-development = [
     "profile-full",

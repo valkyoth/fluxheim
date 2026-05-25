@@ -27,14 +27,19 @@ behavior when the change improves security or project direction.
   headers, copies allow-listed auth response headers into the upstream request
   on 2xx, and constrains FIPS/ISO-required deployments to numeric local
   `http://` auth sidecars.
+- Added opt-in `[proxy.mirror]` traffic shadowing behind the `traffic-mirror`
+  feature. The first slice mirrors safe bodyless methods only, uses
+  deterministic per-mille sampling, copies only allow-listed headers, drains a
+  bounded mirror response, records low-cardinality mirror outcomes through edge
+  policy metrics when metrics are enabled, and never changes the primary
+  response.
 
 ### Planned
 
 - Start the proxy-operations follow-up after the `1.4.0` proxy parity
   baseline. Remaining scope is limited to HTTP migration blockers and read-only
-  operational visibility: discovery/mirroring, local operational sockets,
-  richer rewrite policy, regex capture variables, and typed operator hook
-  points.
+  operational visibility: discovery, local operational sockets, richer rewrite
+  policy, regex capture variables, and typed operator hook points.
 
 ## 1.4.0 - 2026-05-25
 

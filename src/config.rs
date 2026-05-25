@@ -340,6 +340,7 @@ impl Config {
             });
         }
         validate_auth_request_compliance_internal_crypto(&self.proxy, "proxy.auth_request")?;
+        validate_traffic_mirror_compliance_internal_crypto(&self.proxy, "proxy.mirror")?;
 
         let require_disk_cache_encryption = self.tls.fips.require_disk_cache_encryption
             || self.tls.iso19790.require_disk_cache_encryption;
@@ -369,6 +370,12 @@ impl Config {
                 section: "proxy",
                 source: Box::new(source),
             })?;
+            validate_traffic_mirror_compliance_internal_crypto(&vhost.proxy, "vhosts.proxy.mirror")
+                .map_err(|source| ConfigError::VhostSection {
+                    vhost: vhost.name.clone(),
+                    section: "proxy",
+                    source: Box::new(source),
+                })?;
             for route in &vhost.routes {
                 if let Some(cache) = &route.cache {
                     validate_cache_compliance_internal_crypto(
@@ -387,6 +394,16 @@ impl Config {
                     validate_auth_request_compliance_internal_crypto(
                         proxy,
                         "vhosts.routes.proxy.auth_request",
+                    )
+                    .map_err(|source| ConfigError::RouteSection {
+                        vhost: vhost.name.clone(),
+                        route: route.name.clone(),
+                        section: "proxy",
+                        source: Box::new(source),
+                    })?;
+                    validate_traffic_mirror_compliance_internal_crypto(
+                        proxy,
+                        "vhosts.routes.proxy.mirror",
                     )
                     .map_err(|source| ConfigError::RouteSection {
                         vhost: vhost.name.clone(),
@@ -3611,6 +3628,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub auth_request: AuthRequestConfig,
     #[serde(default)]
+    pub mirror: TrafficMirrorConfig,
+    #[serde(default)]
     pub upstream_h2_max_streams: Option<usize>,
     #[serde(default)]
     pub upstream_h2_ping_interval_secs: Option<u64>,
@@ -3696,6 +3715,7 @@ impl Default for ProxyConfig {
             upstream_http_version: UpstreamHttpVersion::Http1,
             websocket: false,
             auth_request: AuthRequestConfig::default(),
+            mirror: TrafficMirrorConfig::default(),
             upstream_h2_max_streams: None,
             upstream_h2_ping_interval_secs: None,
             connect_timeout_secs: None,
@@ -3927,6 +3947,7 @@ impl ProxyConfig {
             });
         }
         self.auth_request.validate("proxy.auth_request")?;
+        self.mirror.validate("proxy.mirror")?;
         if self.upstream_h2_max_streams.is_some()
             && self.upstream_http_version == UpstreamHttpVersion::Http1
         {
@@ -4231,6 +4252,153 @@ fn default_auth_request_read_timeout_secs() -> u64 {
 
 fn default_auth_request_max_response_bytes() -> ByteSize {
     ByteSize::from_bytes(64 * 1024)
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrafficMirrorConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default = "default_traffic_mirror_sample_per_mille")]
+    pub sample_per_mille: u16,
+    #[serde(default = "default_traffic_mirror_methods")]
+    pub methods: Vec<String>,
+    #[serde(default)]
+    pub forward_headers: Vec<String>,
+    #[serde(default = "default_traffic_mirror_timeout_secs")]
+    pub timeout_secs: u64,
+    #[serde(default = "default_traffic_mirror_max_response_bytes")]
+    pub max_response_bytes: ByteSize,
+}
+
+impl Default for TrafficMirrorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: None,
+            sample_per_mille: default_traffic_mirror_sample_per_mille(),
+            methods: default_traffic_mirror_methods(),
+            forward_headers: Vec::new(),
+            timeout_secs: default_traffic_mirror_timeout_secs(),
+            max_response_bytes: default_traffic_mirror_max_response_bytes(),
+        }
+    }
+}
+
+impl TrafficMirrorConfig {
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if !cfg!(feature = "traffic-mirror") {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "traffic mirroring requires building Fluxheim with the traffic-mirror feature",
+            });
+        }
+        if cfg!(feature = "privacy-mode") {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "traffic mirroring is not available in privacy-mode builds",
+            });
+        }
+        let Some(base_url) = self.base_url.as_deref() else {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "enabled traffic mirroring requires base_url",
+            });
+        };
+        if !valid_http_base_url(base_url) {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "base_url must be an absolute http:// or https:// URL without userinfo, query, fragment, or control characters",
+            });
+        }
+        if self.sample_per_mille == 0 || self.sample_per_mille > 1000 {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "sample_per_mille must be between 1 and 1000",
+            });
+        }
+        validate_config_list_len(
+            format!("{scope}.methods"),
+            self.methods.len(),
+            MAX_TRAFFIC_MIRROR_METHODS,
+        )?;
+        let mut seen = BTreeSet::new();
+        for method in &self.methods {
+            if method.is_empty()
+                || method.len() > 32
+                || !method
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
+            {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: scope,
+                    reason: "methods must be uppercase HTTP method tokens",
+                });
+            }
+            if !seen.insert(method.clone()) {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: scope,
+                    reason: "methods contains duplicate method names",
+                });
+            }
+            if !LB_SAFE_RETRY_METHODS.iter().any(|safe| safe == method) {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: scope,
+                    reason: "traffic mirroring only allows safe methods GET, HEAD, OPTIONS, and TRACE in this release",
+                });
+            }
+        }
+        validate_config_list_len(
+            format!("{scope}.forward_headers"),
+            self.forward_headers.len(),
+            MAX_TRAFFIC_MIRROR_HEADERS,
+        )?;
+        seen.clear();
+        for header in &self.forward_headers {
+            validate_header_name(scope, header)?;
+            if !seen.insert(header.to_ascii_lowercase()) {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: scope,
+                    reason: "forward_headers contains duplicate header names",
+                });
+            }
+        }
+        validate_required_timeout_secs("proxy.mirror.timeout_secs", self.timeout_secs)?;
+        if self.max_response_bytes.as_u64() == 0
+            || self.max_response_bytes.as_u64() > MAX_TRAFFIC_MIRROR_RESPONSE_BYTES
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "max_response_bytes must be between 1 byte and 1 MiB",
+            });
+        }
+        Ok(())
+    }
+}
+
+const MAX_TRAFFIC_MIRROR_METHODS: usize = 16;
+const MAX_TRAFFIC_MIRROR_HEADERS: usize = 32;
+const MAX_TRAFFIC_MIRROR_RESPONSE_BYTES: u64 = 1024 * 1024;
+
+fn default_traffic_mirror_sample_per_mille() -> u16 {
+    1000
+}
+
+fn default_traffic_mirror_methods() -> Vec<String> {
+    vec!["GET".to_owned(), "HEAD".to_owned(), "OPTIONS".to_owned()]
+}
+
+fn default_traffic_mirror_timeout_secs() -> u64 {
+    2
+}
+
+fn default_traffic_mirror_max_response_bytes() -> ByteSize {
+    ByteSize::from_bytes(16 * 1024)
 }
 
 fn validate_proxy_upstream_subset(
@@ -6661,6 +6829,25 @@ fn validate_auth_request_compliance_internal_crypto(
     Err(ConfigError::InvalidCompliancePolicy {
         field: scope,
         reason: "FIPS/ISO-required mode allows auth_request only to a numeric local http://127.0.0.1 or http://[::1] loopback endpoint; remote or HTTPS auth subrequests need provider-aligned outbound TLS evidence first",
+    })
+}
+
+fn validate_traffic_mirror_compliance_internal_crypto(
+    proxy: &ProxyConfig,
+    scope: &'static str,
+) -> Result<(), ConfigError> {
+    if !proxy.mirror.enabled {
+        return Ok(());
+    }
+    let Some(base_url) = proxy.mirror.base_url.as_deref() else {
+        return Ok(());
+    };
+    if fips_allowed_local_mirror_endpoint(base_url) {
+        return Ok(());
+    }
+    Err(ConfigError::InvalidCompliancePolicy {
+        field: scope,
+        reason: "FIPS/ISO-required mode allows traffic mirroring only to a numeric local http://127.0.0.1 or http://[::1] loopback endpoint; remote or HTTPS mirror export needs provider-aligned outbound TLS evidence first",
     })
 }
 
@@ -10579,6 +10766,25 @@ fn fips_allowed_local_auth_request_endpoint(endpoint: &str) -> bool {
     !path.is_empty() && openbao_plain_http_authority_is_loopback(authority)
 }
 
+fn fips_allowed_local_mirror_endpoint(endpoint: &str) -> bool {
+    let Some(rest) = endpoint.strip_prefix("http://") else {
+        return false;
+    };
+    if rest.is_empty()
+        || rest.len() > 2048
+        || rest.contains('@')
+        || rest.contains('?')
+        || rest.contains('#')
+        || rest
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
+        return false;
+    }
+    let authority = rest.split('/').next().unwrap_or_default();
+    openbao_plain_http_authority_is_loopback(authority)
+}
+
 fn valid_http_endpoint_url(endpoint: &str) -> bool {
     let Some(rest) = endpoint
         .strip_prefix("http://")
@@ -10601,6 +10807,28 @@ fn valid_http_endpoint_url(endpoint: &str) -> bool {
         return false;
     };
     !authority.is_empty() && !path.is_empty() && valid_http_authority(authority)
+}
+
+fn valid_http_base_url(endpoint: &str) -> bool {
+    let Some(rest) = endpoint
+        .strip_prefix("http://")
+        .or_else(|| endpoint.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    if rest.is_empty()
+        || rest.len() > 2048
+        || rest.contains('@')
+        || rest.contains('?')
+        || rest.contains('#')
+        || rest
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
+        return false;
+    }
+    let authority = rest.split('/').next().unwrap_or_default();
+    !authority.is_empty() && valid_http_authority(authority)
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
@@ -13416,6 +13644,53 @@ mod tests {
             })
         );
 
+        let mirror_without_url: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+
+            [proxy.mirror]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        #[cfg(feature = "traffic-mirror")]
+        assert_eq!(
+            mirror_without_url.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.mirror",
+                reason: "enabled traffic mirroring requires base_url",
+            })
+        );
+        #[cfg(not(feature = "traffic-mirror"))]
+        assert_eq!(
+            mirror_without_url.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.mirror",
+                reason: "traffic mirroring requires building Fluxheim with the traffic-mirror feature",
+            })
+        );
+
+        #[cfg(feature = "traffic-mirror")]
+        {
+            let mirror: Config = toml::from_str(
+                r#"
+                [proxy]
+                upstream = "127.0.0.1:3001"
+
+                [proxy.mirror]
+                enabled = true
+                base_url = "http://127.0.0.1:9000"
+                sample_per_mille = 250
+                methods = ["GET", "HEAD"]
+                forward_headers = ["user-agent"]
+                "#,
+            )
+            .unwrap();
+            assert!(mirror.validate().is_ok());
+            assert!(mirror.proxy.mirror.enabled);
+        }
+
         let websocket: Config = toml::from_str(
             r#"
             [proxy]
@@ -15567,6 +15842,25 @@ mod tests {
         ));
         assert!(!super::fips_allowed_local_auth_request_endpoint(
             "http://[::1]attacker.example.test/auth"
+        ));
+    }
+
+    #[test]
+    fn fips_mirror_endpoint_accepts_numeric_loopback_http_only() {
+        assert!(super::fips_allowed_local_mirror_endpoint(
+            "http://127.0.0.1:9000"
+        ));
+        assert!(super::fips_allowed_local_mirror_endpoint(
+            "http://[::1]:9000/shadow"
+        ));
+        assert!(!super::fips_allowed_local_mirror_endpoint(
+            "http://localhost:9000"
+        ));
+        assert!(!super::fips_allowed_local_mirror_endpoint(
+            "https://127.0.0.1:9000"
+        ));
+        assert!(!super::fips_allowed_local_mirror_endpoint(
+            "http://[::1]attacker.example.test"
         ));
     }
 

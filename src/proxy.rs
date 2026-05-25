@@ -70,6 +70,8 @@ use pingora::{
     cache::CacheMeta, cache::CacheOptionOverrides, cache::CachePhase, cache::ForcedFreshness,
     cache::HitHandler, cache::NoCacheReason, cache::RespCacheable,
 };
+#[cfg(feature = "traffic-mirror")]
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -6136,6 +6138,7 @@ impl ProxyHttp for FluxProxy {
                     if respond_proxy_cache_only_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
                     }
+                    spawn_proxy_mirror_if_enabled(session.req_header(), vhost, ctx);
                     return Ok(false);
                 }
                 #[cfg(feature = "acme")]
@@ -11704,6 +11707,198 @@ fn auth_request_io_error(error: impl std::fmt::Display) -> io::Error {
     io::Error::other(error.to_string())
 }
 
+#[cfg(feature = "traffic-mirror")]
+#[derive(Debug)]
+struct TrafficMirrorRequest {
+    method: String,
+    url: String,
+    headers: Vec<(String, String)>,
+    timeout_secs: u64,
+    max_response_bytes: u64,
+    #[cfg(feature = "metrics")]
+    metric_vhost: String,
+    #[cfg(feature = "metrics")]
+    metric_route: Option<String>,
+}
+
+fn spawn_proxy_mirror_if_enabled(
+    request: &RequestHeader,
+    vhost: &RuntimeVhost,
+    ctx: &RequestContext,
+) {
+    #[cfg(not(feature = "traffic-mirror"))]
+    {
+        let _ = request;
+        let _ = vhost;
+        let _ = ctx;
+    }
+
+    #[cfg(feature = "traffic-mirror")]
+    {
+        let mirror = &selected_runtime_proxy(vhost, ctx).config.mirror;
+        let Some(mirror_request) = traffic_mirror_request(request, mirror, vhost, ctx) else {
+            return;
+        };
+        tokio::task::spawn_blocking(move || {
+            let result = send_traffic_mirror_request(&mirror_request);
+            if let Err(error) = &result {
+                log::debug!(
+                    target: "fluxheim::traffic_mirror",
+                    "traffic mirror request failed: {error}"
+                );
+            }
+            #[cfg(feature = "metrics")]
+            {
+                let outcome = if result.is_ok() { "success" } else { "error" };
+                crate::metrics::record_edge_policy_event(
+                    &mirror_request.metric_vhost,
+                    mirror_request.metric_route.as_deref(),
+                    "mirror",
+                    outcome,
+                );
+            }
+        });
+    }
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn traffic_mirror_request(
+    request: &RequestHeader,
+    mirror: &crate::config::TrafficMirrorConfig,
+    vhost: &RuntimeVhost,
+    ctx: &RequestContext,
+) -> Option<TrafficMirrorRequest> {
+    #[cfg(not(feature = "metrics"))]
+    {
+        let _ = vhost;
+        let _ = ctx;
+    }
+
+    if !mirror.enabled
+        || !mirror
+            .methods
+            .iter()
+            .any(|method| method == request.method.as_str())
+        || !traffic_mirror_sample_selected(request, mirror.sample_per_mille)
+    {
+        return None;
+    }
+    let base_url = mirror.base_url.as_deref()?;
+    let url = traffic_mirror_url(
+        base_url,
+        request.uri.path_and_query().map_or("/", |pq| pq.as_str()),
+    )?;
+    let headers = traffic_mirror_forwarded_headers(request, mirror);
+    Some(TrafficMirrorRequest {
+        method: request.method.as_str().to_owned(),
+        url,
+        headers,
+        timeout_secs: mirror.timeout_secs,
+        max_response_bytes: mirror.max_response_bytes.as_u64(),
+        #[cfg(feature = "metrics")]
+        metric_vhost: vhost.name.clone(),
+        #[cfg(feature = "metrics")]
+        metric_route: ctx
+            .route_index
+            .and_then(|route_index| vhost.routes.get(route_index))
+            .map(|route| route.name.clone()),
+    })
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn traffic_mirror_forwarded_headers(
+    request: &RequestHeader,
+    mirror: &crate::config::TrafficMirrorConfig,
+) -> Vec<(String, String)> {
+    let mut headers = Vec::new();
+    for name in &mirror.forward_headers {
+        if let Some(value) = request_header_values_joined(request, name) {
+            headers.push((name.clone(), value));
+        }
+    }
+    headers
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn traffic_mirror_sample_selected(request: &RequestHeader, sample_per_mille: u16) -> bool {
+    if sample_per_mille >= 1000 {
+        return true;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(request.method.as_str().as_bytes());
+    hasher.update(b"\n");
+    hasher.update(
+        request
+            .uri
+            .path_and_query()
+            .map_or("/", |pq| pq.as_str())
+            .as_bytes(),
+    );
+    if let Some(host) = request_host_header(request) {
+        hasher.update(b"\n");
+        hasher.update(host.as_bytes());
+    }
+    let digest = hasher.finalize();
+    let bucket = u16::from_be_bytes([digest[0], digest[1]]) % 1000;
+    bucket < sample_per_mille
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn traffic_mirror_url(base_url: &str, path_and_query: &str) -> Option<String> {
+    if !path_and_query.starts_with('/') {
+        return None;
+    }
+    let mut url = base_url.trim_end_matches('/').to_owned();
+    url.push_str(path_and_query);
+    Some(url)
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn send_traffic_mirror_request(request: &TrafficMirrorRequest) -> io::Result<()> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(request.timeout_secs)))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut builder = match request.method.as_str() {
+        "GET" => agent.get(&request.url),
+        "HEAD" => agent.head(&request.url),
+        "OPTIONS" => agent.options(&request.url),
+        "TRACE" => agent.trace(&request.url),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "traffic mirror method is not supported",
+            ));
+        }
+    }
+    .header("cache-control", "no-store")
+    .header("x-fluxheim-mirror", "1");
+    for (name, value) in &request.headers {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    let mut response = builder.call().map_err(traffic_mirror_io_error)?;
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(request.max_response_bytes.saturating_add(1))
+        .read_to_vec()
+        .map_err(traffic_mirror_io_error)?;
+    if body.len() as u64 > request.max_response_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "traffic mirror response exceeds configured body limit",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn traffic_mirror_io_error(error: impl std::fmt::Display) -> io::Error {
+    io::Error::other(error.to_string())
+}
+
 async fn continue_to_proxy_or_not_found(
     session: &mut Session,
     vhost: &RuntimeVhost,
@@ -11713,6 +11908,7 @@ async fn continue_to_proxy_or_not_found(
         if authorize_proxy_request(session, ctx, vhost).await? {
             return Ok(true);
         }
+        spawn_proxy_mirror_if_enabled(session.req_header(), vhost, ctx);
         Ok(false)
     } else {
         session.respond_error(404).await?;
@@ -14136,6 +14332,8 @@ mod tests {
     use crate::config::CompressionConfig;
     #[cfg(feature = "load-balancer")]
     use crate::config::LoadBalanceRetryConfig;
+    #[cfg(feature = "traffic-mirror")]
+    use crate::config::TrafficMirrorConfig;
     use crate::config::{
         AuthRequestConfig, ByteSize, CacheConfig, Config, GrpcRouteConfig, HostRoutingConfig,
         HttpsRedirectConfig, ProxyConfig, RateLimitMode, RouteConfig, RouteRedirectConfig,
@@ -14225,6 +14423,10 @@ mod tests {
         capture_revalidation_304_headers, request_cache_bypass, request_cache_bypass_reason,
         request_cache_only_if_cached, request_cache_revalidation_requested,
         response_with_revalidation_304_headers, revalidation_304_vary_changed,
+    };
+    #[cfg(feature = "traffic-mirror")]
+    use super::{
+        traffic_mirror_forwarded_headers, traffic_mirror_sample_selected, traffic_mirror_url,
     };
 
     #[test]
@@ -17022,6 +17224,54 @@ mod tests {
                 ("authorization".to_owned(), "Bearer abc".to_owned()),
                 ("cookie".to_owned(), "a=1".to_owned())
             ]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "traffic-mirror")]
+    fn traffic_mirror_builds_shadow_url_and_forwarded_headers() {
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/api/items?q=1", None).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        request
+            .insert_header("user-agent", "fluxheim-test")
+            .unwrap();
+        request.insert_header("cookie", "secret=1").unwrap();
+        let mirror = TrafficMirrorConfig {
+            enabled: true,
+            base_url: Some("http://127.0.0.1:9000/shadow".to_owned()),
+            forward_headers: vec!["user-agent".to_owned()],
+            ..TrafficMirrorConfig::default()
+        };
+
+        assert_eq!(
+            traffic_mirror_url(
+                mirror.base_url.as_deref().unwrap(),
+                request.uri.path_and_query().unwrap().as_str()
+            )
+            .as_deref(),
+            Some("http://127.0.0.1:9000/shadow/api/items?q=1")
+        );
+        assert_eq!(
+            traffic_mirror_forwarded_headers(&request, &mirror),
+            [("user-agent".to_owned(), "fluxheim-test".to_owned())]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "traffic-mirror")]
+    fn traffic_mirror_sampling_is_deterministic() {
+        let request = pingora::http::RequestHeader::build("GET", b"/api/items?q=1", None).unwrap();
+
+        assert!(traffic_mirror_sample_selected(&request, 1000));
+        assert!(!traffic_mirror_sample_selected(&request, 0));
+        assert_eq!(
+            traffic_mirror_sample_selected(&request, 125),
+            traffic_mirror_sample_selected(&request, 125)
+        );
+        assert_eq!(
+            traffic_mirror_url("http://127.0.0.1:9000/base/", "/path?q=1").as_deref(),
+            Some("http://127.0.0.1:9000/base/path?q=1")
         );
     }
 

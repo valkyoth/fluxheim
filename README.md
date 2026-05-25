@@ -89,6 +89,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |
 | WebSocket / HTTP upgrade | ✅ | `1.4.1-dev`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
 | External auth subrequests | ✅ | `1.4.1-dev`; `[proxy.auth_request]` with bounded header/body forwarding. |
+| Traffic mirroring | ✅ | `1.4.1-dev`; `traffic-mirror` feature with safe bodyless shadow requests. |
 
 ### Operations And Packaging
 
@@ -107,7 +108,6 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| Traffic mirroring | ❌ | Planned for `1.4.1`. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.2`. |
 | TCP stream proxying | ❌ | Planned for `1.4.3`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
@@ -399,9 +399,10 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   policy, PROXY protocol v1/v2, upstream TLS controls, HTTP/2 origin controls,
   and gRPC pass-through policy.
 - `1.4.1` is planned for the remaining proxy-operations work: dynamic upstream
-  discovery, file-watched upstream lists, traffic mirroring, richer structured
-  logs, regex/template rewrite policy, local operational sockets, and typed
-  hook points.
+  discovery, file-watched upstream lists, richer structured logs,
+  regex/template rewrite policy, local operational sockets, and typed hook
+  points. Safe bodyless traffic mirroring is already available behind the
+  `traffic-mirror` feature.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
