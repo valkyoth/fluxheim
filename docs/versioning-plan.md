@@ -1239,7 +1239,10 @@ Release shape:
     deployments to numeric local `http://` auth sidecars until outbound TLS
     client evidence is provider-aligned. Follow-up work can add low-cardinality
     decision metrics and richer deny/error policy;
-  - DNS-refreshing upstreams for container/service-name targets;
+  - DNS-refreshing upstreams for container/service-name targets. First slice is
+    `upstream_dns_refresh_secs` for load-balancer builds, resolved by Pingora
+    service discovery and deliberately kept separate from weights, aliases,
+    backups, and drains until backend metadata has a stable dynamic format;
   - file-watched upstream lists for service discovery without full config
     reload. First slice is `upstreams_file` for load-balancer builds: one
     `host:port` or `ip:port` authority per line, safe file handling, bounded

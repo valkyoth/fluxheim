@@ -2,7 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -932,7 +932,10 @@ where
     S: BackendSelection + 'static,
     S::Iter: BackendIter,
 {
-    if config.upstreams.len() < 2 && config.upstreams_file.is_none() {
+    if config.upstreams.len() < 2
+        && config.upstreams_file.is_none()
+        && config.upstream_dns_refresh_secs.is_none()
+    {
         return Ok(None);
     }
 
@@ -941,6 +944,8 @@ where
         load_balancer.update_frequency = Some(Duration::from_secs(
             config.upstreams_file_refresh_secs.clamp(1, 300),
         ));
+    } else if let Some(refresh_secs) = config.upstream_dns_refresh_secs {
+        load_balancer.update_frequency = Some(Duration::from_secs(refresh_secs.clamp(1, 300)));
     }
     load_balancer
         .update()
@@ -988,6 +993,48 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
                 )
             })?;
             backends.insert(backend);
+        }
+        Ok((backends, std::collections::HashMap::new()))
+    }
+}
+
+struct DnsUpstreamDiscovery {
+    upstreams: Arc<[String]>,
+}
+
+#[async_trait]
+impl ServiceDiscovery for DnsUpstreamDiscovery {
+    async fn discover(
+        &self,
+    ) -> pingora::Result<(
+        std::collections::BTreeSet<Backend>,
+        std::collections::HashMap<u64, bool>,
+    )> {
+        let mut backends = std::collections::BTreeSet::new();
+        for upstream in self.upstreams.iter() {
+            let resolved = upstream.to_socket_addrs().map_err(|error| {
+                Error::because(
+                    ErrorType::ConnectError,
+                    "failed to resolve proxy upstream",
+                    error,
+                )
+            })?;
+            for address in resolved {
+                let backend = Backend::new(&address.to_string()).map_err(|error| {
+                    Error::because(
+                        ErrorType::InternalError,
+                        "resolved proxy upstream is not usable as a backend",
+                        io::Error::other(error.to_string()),
+                    )
+                })?;
+                backends.insert(backend);
+            }
+        }
+        if backends.is_empty() {
+            return Error::e_explain(
+                ErrorType::ConnectError,
+                "DNS discovery resolved no proxy upstreams",
+            );
         }
         Ok((backends, std::collections::HashMap::new()))
     }
@@ -1102,6 +1149,11 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {
     if let Some(path) = &config.upstreams_file {
         return Ok(Backends::new(Box::new(FileUpstreamDiscovery {
             path: path.clone(),
+        })));
+    }
+    if config.upstream_dns_refresh_secs.is_some() {
+        return Ok(Backends::new(Box::new(DnsUpstreamDiscovery {
+            upstreams: config.upstreams.clone().into(),
         })));
     }
 
@@ -1222,6 +1274,26 @@ mod tests {
         .unwrap();
 
         assert_eq!(balancer.backend_count(), 2);
+        assert!(balancer.select(&request(), None).is_some());
+    }
+
+    #[test]
+    fn builds_round_robin_from_dns_refreshed_proxy_upstreams() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstream: None,
+            upstreams: vec!["localhost:3000".to_owned()],
+            upstream_dns_refresh_secs: Some(2),
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert!(balancer.backend_count() >= 1);
         assert!(balancer.select(&request(), None).is_some());
     }
 

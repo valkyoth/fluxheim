@@ -75,6 +75,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
 | Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
 | Load balancing | ✅ | Weighted round-robin, least connections, power-of-two, hash, consistent-hash, backup, drain, slow start, and retry budgets. |
+| DNS-refreshed upstream pools | ✅ | `1.4.1-dev`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
 | File-refreshed upstream pools | ✅ | `1.4.1-dev`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |

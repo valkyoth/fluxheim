@@ -708,6 +708,13 @@ used for other operator-controlled files. In this release, file-refreshed pools
 cannot be combined with `upstream_weights`, `upstream_aliases`,
 `backup_upstreams`, or `drain_upstreams`; use static `upstreams` for those
 policies.
+For DNS-based service names, load-balancer builds can set
+`upstream_dns_refresh_secs = 5` together with `upstreams = ["app.service:8080"]`.
+Fluxheim resolves those authorities at startup and then refreshes them on the
+configured 1 through 300 second interval. This first DNS-refresh slice is
+mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
+`upstream_aliases`, `backup_upstreams`, and `drain_upstreams`; use the static
+pool form when those richer backend policies are required.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
@@ -832,8 +839,8 @@ normal single proxy target in all builds and is resolved when requests are
 proxied, so a missing backend does not prevent the gateway from starting. Two
 or more entries activate the Pingora load-balancer path in builds compiled with
 `load-balancer`; those entries may be resolved by load-balancer setup and health
-checking. File-refreshed pools also use the load-balancer path and keep serving
-the previous healthy set when a later file refresh is invalid. The same
+checking. File-refreshed and DNS-refreshed pools also use the load-balancer path
+and keep serving the previous healthy set when a later refresh is invalid. The same
 `proxy.load_balance` policy applies inside
 `[[vhosts.routes.proxy]]` route proxy blocks; route-level pools get their own
 selection, passive-health, retry, and health-check state.

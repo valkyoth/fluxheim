@@ -247,9 +247,11 @@ as a public route unless another `web` route serves that same path.
 
 ## Current 1.0 Boundaries
 
-- Active DNS refresh and resolver TTL controls are not stable yet. For dynamic
-  local service discovery in load-balancer builds, use `upstreams_file` with a
-  sidecar or orchestrator that writes one `host:port` backend per line.
+- DNS refresh is available for load-balancer builds through
+  `upstream_dns_refresh_secs`, and local sidecar/orchestrator discovery can use
+  `upstreams_file` with one `host:port` backend per line. Rich dynamic backend
+  metadata such as weights, aliases, backups, and drains still requires static
+  `upstreams` in this release.
 - Per-route proxy, static, redirect, upload limit, timeout, header policy,
   prefix stripping, and internal error-page fallback are the supported gateway
   building blocks.

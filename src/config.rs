@@ -3702,6 +3702,8 @@ pub struct ProxyConfig {
     #[serde(default = "default_proxy_upstreams_file_refresh_secs")]
     pub upstreams_file_refresh_secs: u64,
     #[serde(default)]
+    pub upstream_dns_refresh_secs: Option<u64>,
+    #[serde(default)]
     pub upstream_weights: Vec<usize>,
     #[serde(default)]
     pub upstream_aliases: Vec<String>,
@@ -3796,6 +3798,10 @@ const MAX_PROXY_UPSTREAMS: usize = 64;
 const MAX_PROXY_UPSTREAMS_FILE_BYTES: u64 = 64 * 1024;
 const MIN_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 1;
 const MAX_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 300;
+#[cfg(feature = "load-balancer")]
+const MIN_PROXY_UPSTREAM_DNS_REFRESH_SECS: u64 = 1;
+#[cfg(feature = "load-balancer")]
+const MAX_PROXY_UPSTREAM_DNS_REFRESH_SECS: u64 = 300;
 const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_ERROR_PAGES: usize = 64;
@@ -3811,6 +3817,7 @@ impl Default for ProxyConfig {
             upstreams: Vec::new(),
             upstreams_file: None,
             upstreams_file_refresh_secs: default_proxy_upstreams_file_refresh_secs(),
+            upstream_dns_refresh_secs: None,
             upstream_weights: Vec::new(),
             upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
@@ -3962,6 +3969,46 @@ impl ProxyConfig {
                 field: "proxy.upstreams_file_refresh_secs",
                 reason: "must be between 1 and 300 seconds",
             });
+        }
+        if let Some(refresh_secs) = self.upstream_dns_refresh_secs {
+            #[cfg(not(feature = "load-balancer"))]
+            {
+                let _ = refresh_secs;
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_dns_refresh_secs",
+                    reason: "requires the load-balancer feature",
+                });
+            }
+            #[cfg(feature = "load-balancer")]
+            {
+                if !(MIN_PROXY_UPSTREAM_DNS_REFRESH_SECS..=MAX_PROXY_UPSTREAM_DNS_REFRESH_SECS)
+                    .contains(&refresh_secs)
+                {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_dns_refresh_secs",
+                        reason: "must be between 1 and 300 seconds",
+                    });
+                }
+                if self.upstream.is_some()
+                    || self.upstreams.is_empty()
+                    || self.upstreams_file.is_some()
+                {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_dns_refresh_secs",
+                        reason: "requires proxy.upstreams and cannot be used with proxy.upstream or proxy.upstreams_file",
+                    });
+                }
+                if !self.upstream_weights.is_empty()
+                    || !self.upstream_aliases.is_empty()
+                    || !self.backup_upstreams.is_empty()
+                    || !self.drain_upstreams.is_empty()
+                {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_dns_refresh_secs",
+                        reason: "cannot be combined with upstream_weights, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                    });
+                }
+            }
         }
         if self.upstreams.len() > MAX_PROXY_UPSTREAMS {
             return Err(ConfigError::TooManyProxyUpstreams {
@@ -13765,6 +13812,22 @@ mod tests {
             Some(upstreams_file.as_path())
         );
         assert_eq!(config.proxy.upstreams_file_refresh_secs, 2);
+        config.validate().unwrap();
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn parses_proxy_upstream_dns_refresh() {
+        let config: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstreams = ["localhost:3001"]
+            upstream_dns_refresh_secs = 2
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.proxy.upstream_dns_refresh_secs, Some(2));
         config.validate().unwrap();
     }
 

@@ -44,6 +44,10 @@ behavior when the change improves security or project direction.
 - Added file-refreshed upstream pools for load-balancer builds with
   `upstreams_file` and bounded refresh intervals. The first format is one
   authority per line with safe file handling and no weights/aliases yet.
+- Added DNS-refreshed upstream pools for load-balancer builds with
+  `upstream_dns_refresh_secs`, intended for container/service-name targets.
+  The first slice keeps dynamic DNS separate from weights, aliases, backups,
+  and drains.
 
 ### Planned
 
