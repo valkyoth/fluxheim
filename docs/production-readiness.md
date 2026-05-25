@@ -226,8 +226,10 @@ HTTP health checks, bounded proxy metrics, upstream connection and socket
 tuning, listener/client-certificate policy, PROXY protocol v1/v2 receive/send,
 upstream TLS trust and mTLS controls, HTTP/2 origin controls, and gRPC
 pass-through policy. Dynamic discovery, traffic mirroring, richer rewrite
-templates, local operational sockets, and typed hook points remain `1.4.1`
-work.
+templates, local operational sockets, and typed hook points are the `1.4.1`
+follow-up line. The first `1.4.1` slices already include DNS/file-refreshed
+upstream pools, safe bodyless traffic mirroring, bounded regex
+`rewrite_template`, and the read-only Unix ops socket.
 
 ## Operator Checks
 

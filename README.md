@@ -48,6 +48,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Vhosts | ✅ | Host-header routing, default-vhost fallback, wildcard hosts, and opt-in strict host routing. |
 | Route actions | ✅ | Static, proxy, redirect, and route-level policy blocks. |
 | Regex path routing | ✅ | `1.4.1-dev`; requires explicit global `server.regex_enabled = true`. |
+| Regex capture variables | ✅ | `1.4.1-dev`; bounded `{route.regex.1}` and `{route.regex.name}` variables for request headers and path-only rewrites. |
+| Regex path rewrite templates | ✅ | `1.4.1-dev`; `rewrite_template` maps regex routes to safe upstream paths without nginx-style rewrite loops or `if`. |
 | Method-based routing | ✅ | `1.4.1-dev`; optional route `methods = ["GET", "HEAD"]` filters. |
 | HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
 | Secure headers | ✅ | Request/response header policy, `Server: fluxheim` by default, removable by config. |
@@ -403,8 +405,9 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   and gRPC pass-through policy.
 - `1.4.1` is planned for the remaining proxy-operations work: dynamic upstream
   discovery, file-watched upstream lists, richer structured logs,
-  regex/template rewrite policy, and typed hook points. Safe bodyless traffic
-  mirroring and a read-only Unix ops socket are already available.
+  regex/template rewrite policy, and typed hook points. Regex capture variables,
+  bounded path-only `rewrite_template`, safe bodyless traffic mirroring, and a
+  read-only Unix ops socket are already available.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
