@@ -113,6 +113,8 @@ type FluxCachePredictor = Predictor<CACHE_PREDICTOR_SHARDS>;
 #[cfg(feature = "cache")]
 const PEER_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
+const SLICE_FILL_CONCURRENCY_MAX_KEYS: usize = 4096;
+#[cfg(feature = "cache")]
 static PEER_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> = OnceLock::new();
 #[cfg(feature = "cache")]
 static CACHE_PREDICTOR_REGISTRY: OnceLock<
@@ -3125,6 +3127,7 @@ struct RuntimeRateLimit {
     entry_ttl: Duration,
     mode: RateLimitMode,
     max_delay: Duration,
+    reject_indeterminate: bool,
     state: Arc<RuntimeRateLimitState>,
 }
 
@@ -3139,6 +3142,7 @@ impl Default for RuntimeRateLimit {
             entry_ttl: Duration::from_secs(300),
             mode: RateLimitMode::Nodelay,
             max_delay: Duration::from_millis(1000),
+            reject_indeterminate: false,
             state: Arc::new(RuntimeRateLimitState {
                 buckets: Mutex::new(HashMap::new()),
             }),
@@ -3162,6 +3166,7 @@ impl RuntimeRateLimit {
             entry_ttl: Duration::from_secs(config.entry_ttl_secs),
             mode: config.mode,
             max_delay: Duration::from_millis(config.max_delay_ms),
+            reject_indeterminate: config.reject_indeterminate,
             state: Arc::new(RuntimeRateLimitState {
                 buckets: Mutex::new(HashMap::new()),
             }),
@@ -3175,11 +3180,19 @@ impl RuntimeRateLimit {
 
         let now = Instant::now();
         let key = RateLimitKey::from(client_ip);
-        let mut buckets = self
-            .state
-            .buckets
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if matches!(key, RateLimitKey::Indeterminate) && self.reject_indeterminate {
+            return RateLimitDecision::Reject(self.status);
+        }
+        let mut buckets = match self.state.buckets.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "rate-limit bucket lock poisoned; aborting to avoid inconsistent edge limits"
+                );
+                std::process::abort();
+            }
+        };
         if !buckets.contains_key(&key) && buckets.len() >= self.table_max_entries {
             buckets.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
             if buckets.len() >= self.table_max_entries {
@@ -8634,12 +8647,28 @@ fn acquire_slice_fill_permit(key: String) -> Option<SliceFillPermit> {
     static SLICE_FILL_CONCURRENCY: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
         OnceLock::new();
     let counter = {
-        let mut counters = SLICE_FILL_CONCURRENCY
+        let mut counters = match SLICE_FILL_CONCURRENCY
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        {
+            Ok(guard) => guard,
+            Err(_) => {
+                log::error!(
+                    target: "fluxheim::security",
+                    "slice-fill concurrency lock poisoned; aborting to avoid inconsistent cache-fill limits"
+                );
+                std::process::abort();
+            }
+        };
+        prune_inactive_cache_fill_concurrency_counters(
+            &mut counters,
+            SLICE_FILL_CONCURRENCY_MAX_KEYS,
+        );
+        if counters.len() >= SLICE_FILL_CONCURRENCY_MAX_KEYS && !counters.contains_key(&key) {
+            return None;
+        }
         counters
-            .entry(key)
+            .entry(key.clone())
             .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
             .clone()
     };
@@ -8694,7 +8723,7 @@ fn acquire_peer_fill_concurrency_permit(
                 std::process::abort();
             }
         };
-        prune_inactive_peer_fill_concurrency_counters(
+        prune_inactive_cache_fill_concurrency_counters(
             &mut counters,
             PEER_FILL_CONCURRENCY_MAX_KEYS,
         );
@@ -8727,7 +8756,7 @@ fn acquire_peer_fill_concurrency_permit(
 }
 
 #[cfg(feature = "cache")]
-fn prune_inactive_peer_fill_concurrency_counters(
+fn prune_inactive_cache_fill_concurrency_counters(
     counters: &mut HashMap<String, Arc<AtomicUsize>>,
     max_keys: usize,
 ) {
@@ -13891,7 +13920,7 @@ mod tests {
     use super::{
         PeerFillResponse, acquire_peer_fill_concurrency_permit, peer_fill_concurrency_key,
         peer_fill_request_from_header, peer_fill_url,
-        prune_inactive_peer_fill_concurrency_counters,
+        prune_inactive_cache_fill_concurrency_counters,
     };
     #[cfg(any(
         feature = "compression-brotli",
@@ -14363,6 +14392,7 @@ mod tests {
             entry_ttl_secs: 60,
             mode: RateLimitMode::Nodelay,
             max_delay_ms: 1000,
+            reject_indeterminate: false,
         });
         let client = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
 
@@ -14386,6 +14416,7 @@ mod tests {
             entry_ttl_secs: 60,
             mode: RateLimitMode::Delay,
             max_delay_ms: 1500,
+            reject_indeterminate: false,
         });
         let client = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
 
@@ -14398,6 +14429,23 @@ mod tests {
             decision => panic!("expected delay decision, got {decision:?}"),
         }
         assert_eq!(policy.check(client), RateLimitDecision::Reject(429));
+    }
+
+    #[test]
+    fn rate_limit_can_reject_indeterminate_client_ip() {
+        let policy = RuntimeRateLimit::from_config(&crate::config::RateLimitConfig {
+            enabled: true,
+            requests_per_second: 1,
+            burst: 1,
+            status: 429,
+            table_max_entries: 16,
+            entry_ttl_secs: 60,
+            mode: RateLimitMode::Nodelay,
+            max_delay_ms: 1000,
+            reject_indeterminate: true,
+        });
+
+        assert_eq!(policy.check(None), RateLimitDecision::Reject(429));
     }
 
     #[test]
@@ -19459,7 +19507,7 @@ mod tests {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         );
 
-        prune_inactive_peer_fill_concurrency_counters(&mut counters, 2);
+        prune_inactive_cache_fill_concurrency_counters(&mut counters, 2);
 
         assert!(counters.contains_key("active"));
         assert!(!counters.contains_key("inactive"));

@@ -448,10 +448,9 @@ impl Error for SnapshotError {}
 fn new_snapshot_id() -> String {
     let now = unix_duration();
     format!(
-        "s{}-{:09}-{}-{}",
+        "s{}-{:09}-{}",
         now.as_secs(),
         now.subsec_nanos(),
-        std::process::id(),
         unique_sequence()
     )
 }

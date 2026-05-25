@@ -20,8 +20,8 @@ Use an operator-chosen state directory, for example
 /var/lib/fluxheim/snapshots
 ├── current
 └── configs
-    ├── s1777900000-123456789-1200.toml
-    └── s1777900000-123456789-1200.meta.toml
+    ├── s1777900000-123456789-42.toml
+    └── s1777900000-123456789-42.meta.toml
 ```
 
 `current` contains the active snapshot id. Fluxheim uses an atomically replaced
@@ -34,6 +34,8 @@ Snapshot config files contain the validated effective config, written back as
 TOML. Metadata files contain the snapshot id, creation time, and optional
 operator message. Operator messages are trimmed and limited to 4096 bytes of
 non-control text before they are written or loaded.
+Generated snapshot ids contain Unix time plus a process-local sequence; they do
+not include the Fluxheim process id.
 
 The store is deliberately conservative about filesystem indirection. Snapshot
 ids may only contain ASCII letters, digits, `_`, and `-`, and are limited to
@@ -79,7 +81,7 @@ fluxheim rollback --store /var/lib/fluxheim/snapshots
 Move to a specific snapshot:
 
 ```bash
-fluxheim rollback --store /var/lib/fluxheim/snapshots --to s1777900000-123456789-1200
+fluxheim rollback --store /var/lib/fluxheim/snapshots --to s1777900000-123456789-42
 ```
 
 Rollback updates the durable current pointer by default. Before applying a
@@ -167,7 +169,7 @@ Move the durable current pointer to a specific snapshot:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
-  "http://127.0.0.1:9090/_fluxheim/rollback?to=s1777900000-123456789-1200"
+  "http://127.0.0.1:9090/_fluxheim/rollback?to=s1777900000-123456789-42"
 ```
 
 Live-apply the previous snapshot when it is snapshot-safe:

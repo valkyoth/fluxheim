@@ -1825,6 +1825,7 @@ requests_per_second = 50
 burst = 100
 mode = "nodelay"
 status = 429
+reject_indeterminate = false
 
 [vhosts.concurrency]
 enabled = true
@@ -1880,7 +1881,8 @@ Fluxheim uses `requests_per_second` as the burst. State is bounded by
 limits are checked before route limits. If Fluxheim cannot determine an
 effective client IP, the request uses one shared anonymous bucket for that
 vhost or route; do not rely on anonymous-IP rate limiting as the only
-protection for sensitive internal paths.
+protection for sensitive internal paths. Set `reject_indeterminate = true` to
+reject those requests instead of placing them in the shared bucket.
 With metrics enabled, delayed and rejected rate-limit decisions are counted by
 `fluxheim_edge_policy_events_total` with bounded labels.
 

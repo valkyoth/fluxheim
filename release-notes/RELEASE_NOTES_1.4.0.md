@@ -50,6 +50,13 @@ small unreleased milestones.
 - Rejected TLS identity templates in request-header append policies. Use
   `add`/`set` for TLS identity headers so Fluxheim strips any inbound spoofed
   copy before forwarding the trusted value.
+- Added `reject_indeterminate` to rate-limit policies so operators can reject
+  requests when no effective client IP is available instead of sharing one
+  anonymous bucket.
+- Bounded process-global slice-cache fill concurrency keys and abort on a
+  poisoned slice-fill lock.
+- Removed the process ID from generated snapshot IDs returned by the
+  authenticated admin API.
 - Documented the shared anonymous rate-limit bucket used when no effective
   client IP is available, and added a startup security warning for
   admin-client-certificate header gates on loopback listeners.
