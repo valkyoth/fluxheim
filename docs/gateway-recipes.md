@@ -138,9 +138,11 @@ host = "{host}"
 Use dynamic header templates only when a backend needs an exact value that is
 not covered by a typed field. The supported variables are intentionally small:
 `{host}`, `{remote_addr}`, `{scheme}`, `{uri}`, `{path}`, `{query}`,
-`{request_id}`, and `{http.<header-name>}`. Unknown variables fail config
-validation, and rendered values still pass HTTP header validation before they
-are sent upstream.
+`{request_id}`, TLS client-certificate variables, `{http.<header-name>}`, and
+bounded regex route captures such as `{route.regex.1}` or
+`{route.regex.version}` when the matched route uses `path_regex`. Unknown
+variables fail config validation, and rendered values still pass HTTP header
+validation before they are sent upstream.
 
 ### Browser Login Probe For WordPress
 

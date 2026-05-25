@@ -15,6 +15,9 @@ behavior when the change improves security or project direction.
   route-level `path_regex`. Regex routes are validated with Rust's bounded
   regex engine at config load time and are selected after exact and longest
   prefix routes, before fallback routes.
+- Added bounded regex route capture variables for request-header templates:
+  `{route.regex.0}`, numbered captures through `{route.regex.15}`, and named
+  captures such as `{route.regex.version}`.
 - Added route-level `methods = ["GET", "HEAD"]` matching. Method lists are
   optional, bounded, uppercase HTTP tokens and let one path route to different
   actions or upstreams by request method.

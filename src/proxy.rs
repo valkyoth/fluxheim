@@ -3488,6 +3488,9 @@ enum RuntimeRouteMatcher {
     Fallback,
 }
 
+const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
+const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
+
 #[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 enum RuntimeRouteAction {
@@ -5396,6 +5399,38 @@ impl RuntimeVhost {
         &self.routes[index]
     }
 
+    fn route_regex_captures(
+        &self,
+        route_index: Option<usize>,
+        path: &str,
+    ) -> Option<crate::headers::RouteRegexCaptures> {
+        let route = route_index.and_then(|index| self.routes.get(index))?;
+        let RuntimeRouteMatcher::Regex(regex) = &route.matcher else {
+            return None;
+        };
+        let captures = regex.captures(path)?;
+        let numbered = captures
+            .iter()
+            .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
+            .map(bounded_route_regex_capture)
+            .collect::<Vec<_>>();
+        let named = regex
+            .capture_names()
+            .enumerate()
+            .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
+            .filter_map(|(index, name)| {
+                name.and_then(|name| {
+                    captures
+                        .get(index)
+                        .and_then(|value| bounded_route_regex_capture(Some(value)))
+                        .map(|value| (name.to_owned(), value))
+                })
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        Some(crate::headers::RouteRegexCaptures::new(numbered, named))
+    }
+
     #[cfg(test)]
     fn route_index_by_path_for_tests(&self, path: &str) -> Option<usize> {
         self.route_index("GET", path)
@@ -5616,6 +5651,11 @@ impl RuntimeVhost {
             routes,
         })
     }
+}
+
+fn bounded_route_regex_capture(value: Option<regex::Match<'_>>) -> Option<String> {
+    let value = value?.as_str();
+    (value.len() <= MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES).then(|| value.to_owned())
 }
 
 fn route_method_matches(route: &RuntimeRoute, method: &str) -> bool {
@@ -6502,6 +6542,8 @@ impl ProxyHttp for FluxProxy {
         #[cfg(feature = "privacy-mode")]
         let request_id = None;
         let tls_identity = downstream_tls_client_identity(session);
+        let route_regex_captures =
+            vhost.route_regex_captures(ctx.route_index, session.req_header().uri.path());
         crate::headers::apply_upstream_request_policy(
             upstream_request,
             request_headers,
@@ -6512,6 +6554,7 @@ impl ProxyHttp for FluxProxy {
                 downstream_tls,
                 request_id,
                 tls_identity: tls_identity.as_ref(),
+                route_regex_captures: route_regex_captures.as_ref(),
             },
         )?;
         for (name, value) in &ctx.auth_request_headers {

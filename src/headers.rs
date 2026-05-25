@@ -45,6 +45,7 @@ pub struct UpstreamRequestPolicyContext<'a> {
     pub downstream_tls: bool,
     pub request_id: Option<&'a str>,
     pub tls_identity: Option<&'a RequestTlsClientIdentity>,
+    pub route_regex_captures: Option<&'a RouteRegexCaptures>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -74,6 +75,33 @@ impl RequestTlsClientIdentity {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct RouteRegexCaptures {
+    numbered: Vec<Option<String>>,
+    named: std::collections::BTreeMap<String, String>,
+}
+
+impl RouteRegexCaptures {
+    pub fn new(
+        numbered: Vec<Option<String>>,
+        named: std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        Self { numbered, named }
+    }
+
+    fn variable(&self, variable: &str) -> Option<&str> {
+        let key = variable.strip_prefix("route.regex.")?;
+        if key.bytes().all(|byte| byte.is_ascii_digit()) {
+            return key
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| self.numbered.get(index))
+                .and_then(Option::as_deref);
+        }
+        self.named.get(key).map(String::as_str)
+    }
+}
+
 #[cfg(feature = "privacy-mode")]
 fn apply_privacy_upstream_request_policy(
     request: &mut pingora::http::RequestHeader,
@@ -83,7 +111,8 @@ fn apply_privacy_upstream_request_policy(
     if policy.enabled {
         let unset = policy.effective_unset();
         let set = policy.effective_set();
-        let context = RequestHeaderTemplateContext::new(request, None, false, request_id, None);
+        let context =
+            RequestHeaderTemplateContext::new(request, None, false, request_id, None, None);
         apply_request_mutations(request, &unset, &set, &policy.append, &context)?;
     }
     for header in SPOOFABLE_CLIENT_IP_HEADERS {
@@ -188,6 +217,7 @@ fn apply_standard_upstream_request_policy(
         context.downstream_tls,
         context.request_id,
         context.tls_identity,
+        context.route_regex_captures,
     );
     apply_request_mutations(request, &unset, &set, &policy.append, &context)?;
     Ok(())
@@ -203,6 +233,7 @@ struct RequestHeaderTemplateContext {
     query: String,
     request_id: Option<String>,
     tls_identity: Option<RequestTlsClientIdentity>,
+    route_regex_captures: Option<RouteRegexCaptures>,
 }
 
 impl RequestHeaderTemplateContext {
@@ -212,6 +243,7 @@ impl RequestHeaderTemplateContext {
         downstream_tls: bool,
         request_id: Option<&str>,
         tls_identity: Option<&RequestTlsClientIdentity>,
+        route_regex_captures: Option<&RouteRegexCaptures>,
     ) -> Self {
         let host = request
             .headers
@@ -238,6 +270,7 @@ impl RequestHeaderTemplateContext {
             query,
             request_id: request_id.map(str::to_owned),
             tls_identity: tls_identity.cloned(),
+            route_regex_captures: route_regex_captures.cloned(),
         }
     }
 
@@ -270,10 +303,16 @@ impl RequestHeaderTemplateContext {
                 .tls_identity
                 .as_ref()
                 .and_then(|identity| identity.cert_sha256.as_deref()),
-            variable => variable
-                .strip_prefix("http.")
-                .and_then(|name| self.headers.get(name))
-                .and_then(|value| value.to_str().ok()),
+            variable => self
+                .route_regex_captures
+                .as_ref()
+                .and_then(|captures| captures.variable(variable))
+                .or_else(|| {
+                    variable
+                        .strip_prefix("http.")
+                        .and_then(|name| self.headers.get(name))
+                        .and_then(|value| value.to_str().ok())
+                }),
         }
     }
 }
@@ -803,7 +842,10 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
     #[cfg(not(feature = "privacy-mode"))]
-    use super::{RequestHeaderTemplateContext, RequestTlsClientIdentity, render_header_template};
+    use super::{
+        RequestHeaderTemplateContext, RequestTlsClientIdentity, RouteRegexCaptures,
+        render_header_template,
+    };
     use super::{
         UpstreamRequestPolicyContext, apply_response_policy, apply_upstream_request_policy,
     };
@@ -826,6 +868,7 @@ mod tests {
             downstream_tls,
             request_id,
             tls_identity,
+            route_regex_captures: None,
         }
     }
 
@@ -1396,6 +1439,7 @@ mod tests {
                 serial_number: Some("01AB".to_owned()),
                 cert_sha256: Some("aabbcc".to_owned()),
             }),
+            None,
         )
     }
 
@@ -1457,6 +1501,7 @@ mod tests {
                 cert_sha256: Some("aa\tbb".to_owned()),
                 ..RequestTlsClientIdentity::default()
             }),
+            route_regex_captures: None,
         };
 
         let rendered = render_header_template(
@@ -1472,6 +1517,40 @@ mod tests {
             rendered
                 .bytes()
                 .all(|byte| !matches!(byte, 0x00..=0x1f | 0x7f))
+        );
+    }
+
+    #[cfg(not(feature = "privacy-mode"))]
+    #[test]
+    fn dynamic_header_rendering_supports_route_regex_captures() {
+        let mut named = std::collections::BTreeMap::new();
+        named.insert("version".to_owned(), "2".to_owned());
+        let captures = RouteRegexCaptures::new(
+            vec![
+                Some("/api/v2/users".to_owned()),
+                Some("2".to_owned()),
+                Some("users".to_owned()),
+            ],
+            named,
+        );
+        let mut request =
+            pingora::http::RequestHeader::build("GET", b"/api/v2/users", Some(8)).unwrap();
+        request.insert_header("host", "example.test").unwrap();
+        let context = RequestHeaderTemplateContext::new(
+            &request,
+            Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))),
+            true,
+            Some("req-123"),
+            None,
+            Some(&captures),
+        );
+
+        assert_eq!(
+            render_header_template(
+                "{route.regex.0} {route.regex.1} {route.regex.2} {route.regex.version} {route.regex.missing}",
+                &context,
+            ),
+            "/api/v2/users 2 users 2 "
         );
     }
 
@@ -1753,6 +1832,7 @@ mod tests {
                 downstream_tls: true,
                 request_id: None,
                 tls_identity: None,
+                route_regex_captures: None,
             },
         )
         .unwrap();

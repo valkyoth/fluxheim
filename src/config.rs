@@ -62,6 +62,8 @@ const MAX_VHOST_ACME_DOMAINS: usize = 64;
 const MAX_WEB_INDEX_FILES: usize = 32;
 const MAX_ROUTE_METHODS: usize = 16;
 const MAX_ROUTE_REGEX_BYTES: usize = 4096;
+const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
+const MAX_ROUTE_REGEX_CAPTURE_NAME_BYTES: usize = 64;
 pub(crate) const MAX_ROUTE_REGEX_PROGRAM_BYTES: usize = 1024 * 1024;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
@@ -13083,8 +13085,28 @@ fn valid_dynamic_header_variable(variable: &str) -> bool {
             | "tls.client_cert_serial"
             | "tls.client_cert_sha256"
     ) || variable
-        .strip_prefix("http.")
-        .is_some_and(valid_http_header_name)
+        .strip_prefix("route.regex.")
+        .is_some_and(valid_route_regex_capture_variable)
+        || variable
+            .strip_prefix("http.")
+            .is_some_and(valid_http_header_name)
+}
+
+fn valid_route_regex_capture_variable(value: &str) -> bool {
+    if value
+        .parse::<usize>()
+        .is_ok_and(|index| index < MAX_ROUTE_REGEX_CAPTURE_VALUES)
+    {
+        return true;
+    }
+    value.len() <= MAX_ROUTE_REGEX_CAPTURE_NAME_BYTES
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 fn valid_http_header_name(name: &str) -> bool {
@@ -22045,6 +22067,9 @@ mod tests {
                 "tls.client_cert_organization",
                 "tls.client_cert_serial",
                 "tls.client_cert_sha256",
+                "route.regex.0",
+                "route.regex.1",
+                "route.regex.version",
                 "http.upgrade",
                 "http.x-forwarded-host",
             ]),
@@ -22068,6 +22093,34 @@ mod tests {
 
             prop_assert!(result.is_err());
         }
+    }
+
+    #[test]
+    fn dynamic_header_templates_validate_route_regex_capture_variables() {
+        assert!(
+            validate_dynamic_header_template(
+                "headers.request",
+                "x-version",
+                "{route.regex.0}-{route.regex.15}-{route.regex.version}",
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            validate_dynamic_header_template("headers.request", "x-bad", "{route.regex.16}"),
+            Err(ConfigError::InvalidHeaderTemplate {
+                field: "headers.request",
+                name: "x-bad".to_owned(),
+                variable: "route.regex.16".to_owned(),
+            })
+        );
+        assert_eq!(
+            validate_dynamic_header_template("headers.request", "x-bad", "{route.regex.-1}"),
+            Err(ConfigError::InvalidHeaderTemplate {
+                field: "headers.request",
+                name: "x-bad".to_owned(),
+                variable: "route.regex.-1".to_owned(),
+            })
+        );
     }
 
     #[test]

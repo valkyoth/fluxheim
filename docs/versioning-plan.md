@@ -1218,9 +1218,9 @@ Release shape:
     is set. This keeps accidental high-cardinality or overly broad regex policy
     out of normal prefix/exact-route deployments;
   - named and numbered regex captures exposed as bounded typed variables for
-    `rewrite_prefix` successors, request-header templates, structured logs,
-    and future typed hooks. Capture variables must not become metric labels by
-    default;
+    request-header templates in the first slice. `rewrite_prefix` successors,
+    structured logs, and future typed hooks remain follow-up work. Capture
+    variables must not become metric labels by default;
   - method-based route matching through `methods = ["GET", "HEAD"]`, with
     config-time validation, so read/write routing can be expressed without Lua
     or duplicated vhosts. The first slice treats method lists as route match

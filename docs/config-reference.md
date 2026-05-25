@@ -2002,9 +2002,14 @@ then the first configured regex route, then one optional fallback route. Regex
 routes require explicit global opt-in with
 `server.regex_enabled = true`; configs that use `path_regex` without that flag
 are rejected. Regex patterns use Rust's bounded `regex` engine and are checked
-at config load time. A route must define exactly one matcher: `path_exact`,
-`path_prefix`, `path_regex`, or `fallback = true`, and one action: `redirect`,
-`proxy`, `web`, or `php`.
+at config load time. Regex routes expose bounded request-header template
+variables for migration patterns: `{route.regex.0}` is the full match,
+`{route.regex.1}` through `{route.regex.15}` are numbered captures, and
+`{route.regex.name}` reads a named capture such as `(?P<name>...)`. Capture
+values are capped before template rendering and are not used as metric labels.
+A route must define exactly one matcher: `path_exact`, `path_prefix`,
+`path_regex`, or `fallback = true`, and one action: `redirect`, `proxy`, `web`,
+or `php`.
 
 ```toml
 [[vhosts.routes]]
@@ -2027,7 +2032,10 @@ require_content_type = true
 
 [[vhosts.routes]]
 name = "versioned-api"
-path_regex = "^/api/v[0-9]+/"
+path_regex = "^/api/v(?P<version>[0-9]+)/"
+
+[vhosts.routes.headers.request.add]
+x-api-version = "{route.regex.version}"
 
 [vhosts.routes.proxy]
 upstreams = ["127.0.0.1:6013"]
