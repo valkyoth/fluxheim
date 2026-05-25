@@ -3698,6 +3698,10 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstreams: Vec<String>,
     #[serde(default)]
+    pub upstreams_file: Option<PathBuf>,
+    #[serde(default = "default_proxy_upstreams_file_refresh_secs")]
+    pub upstreams_file_refresh_secs: u64,
+    #[serde(default)]
     pub upstream_weights: Vec<usize>,
     #[serde(default)]
     pub upstream_aliases: Vec<String>,
@@ -3788,6 +3792,10 @@ pub enum UpstreamHttpVersion {
 }
 
 const MAX_PROXY_UPSTREAMS: usize = 64;
+#[cfg(feature = "load-balancer")]
+const MAX_PROXY_UPSTREAMS_FILE_BYTES: u64 = 64 * 1024;
+const MIN_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 1;
+const MAX_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 300;
 const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_ERROR_PAGES: usize = 64;
@@ -3801,6 +3809,8 @@ impl Default for ProxyConfig {
         Self {
             upstream: Some(default_upstream()),
             upstreams: Vec::new(),
+            upstreams_file: None,
+            upstreams_file_refresh_secs: default_proxy_upstreams_file_refresh_secs(),
             upstream_weights: Vec::new(),
             upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
@@ -3849,7 +3859,7 @@ impl ProxyConfig {
     }
 
     pub fn has_configured_upstream(&self) -> bool {
-        self.upstream.is_some() || !self.upstreams.is_empty()
+        self.upstream.is_some() || !self.upstreams.is_empty() || self.upstreams_file.is_some()
     }
 
     pub fn configured_primary_upstream(&self) -> Option<&str> {
@@ -3876,6 +3886,11 @@ impl ProxyConfig {
         {
             *path = base_dir.join(&path);
         }
+        if let Some(path) = &mut self.upstreams_file
+            && path.is_relative()
+        {
+            *path = base_dir.join(&path);
+        }
         if let Some(path) = &mut self.upstream_client_cert_path
             && path.is_relative()
         {
@@ -3892,8 +3907,61 @@ impl ProxyConfig {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        if self.upstream.is_some() && !self.upstreams.is_empty() {
+        if self.upstream.is_some() && (!self.upstreams.is_empty() || self.upstreams_file.is_some())
+            || !self.upstreams.is_empty() && self.upstreams_file.is_some()
+        {
             return Err(ConfigError::ConflictingProxyUpstreams);
+        }
+        if let Some(path) = &self.upstreams_file {
+            #[cfg(not(feature = "load-balancer"))]
+            {
+                let _ = path;
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstreams_file",
+                    reason: "requires the load-balancer feature",
+                });
+            }
+            #[cfg(feature = "load-balancer")]
+            {
+                validate_path("proxy.upstreams_file", Some(path))?;
+                validate_non_world_writable_parent("proxy.upstreams_file", Some(path))?;
+                let upstreams = read_proxy_upstreams_file(path).map_err(|_| {
+                    ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstreams_file",
+                        reason: "must be a readable regular file containing 2-64 unique host:port entries",
+                    }
+                })?;
+                if upstreams.len() < 2 {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstreams_file",
+                        reason: "must contain at least two upstreams",
+                    });
+                }
+                if !self.upstream_weights.is_empty()
+                    || !self.upstream_aliases.is_empty()
+                    || !self.backup_upstreams.is_empty()
+                    || !self.drain_upstreams.is_empty()
+                {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstreams_file",
+                        reason: "cannot be combined with upstream_weights, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                    });
+                }
+                if self.upstream_tls && self.upstream_sni.is_none() {
+                    return Err(ConfigError::InvalidProxyTlsPolicy {
+                        reason: "upstreams_file with upstream_tls requires explicit upstream_sni",
+                    });
+                }
+            }
+        }
+        if self.upstreams_file.is_some()
+            && !(MIN_PROXY_UPSTREAMS_FILE_REFRESH_SECS..=MAX_PROXY_UPSTREAMS_FILE_REFRESH_SECS)
+                .contains(&self.upstreams_file_refresh_secs)
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstreams_file_refresh_secs",
+                reason: "must be between 1 and 300 seconds",
+            });
         }
         if self.upstreams.len() > MAX_PROXY_UPSTREAMS {
             return Err(ConfigError::TooManyProxyUpstreams {
@@ -10280,7 +10348,7 @@ impl Display for ConfigError {
             }
             Self::ConflictingProxyUpstreams => write!(
                 formatter,
-                "proxy.upstream and proxy.upstreams cannot both be configured; use proxy.upstreams for one or many targets"
+                "proxy.upstream, proxy.upstreams, and proxy.upstreams_file are mutually exclusive; use proxy.upstreams for static pools or proxy.upstreams_file for file-refreshed pools"
             ),
             Self::TooManyProxyUpstreams { max } => write!(
                 formatter,
@@ -11177,6 +11245,10 @@ fn default_upstream() -> String {
     "127.0.0.1:3000".to_owned()
 }
 
+fn default_proxy_upstreams_file_refresh_secs() -> u64 {
+    5
+}
+
 fn disabled_proxy_config() -> ProxyConfig {
     ProxyConfig::disabled()
 }
@@ -11479,6 +11551,88 @@ fn read_regular_config_file_to_string(path: &Path) -> Result<String, ConfigLoadE
         )));
     }
     Ok(contents)
+}
+
+#[cfg(feature = "load-balancer")]
+pub(crate) fn read_proxy_upstreams_file(path: &Path) -> std::io::Result<Vec<String>> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "proxy upstreams file must be a regular file",
+        ));
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(O_NOFOLLOW);
+
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "proxy upstreams file must be a regular file",
+        ));
+    }
+    if metadata.len() > MAX_PROXY_UPSTREAMS_FILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "proxy upstreams file is too large",
+        ));
+    }
+
+    let mut contents = String::new();
+    let mut limited = file.take(MAX_PROXY_UPSTREAMS_FILE_BYTES.saturating_add(1));
+    limited.read_to_string(&mut contents)?;
+    if contents.len() as u64 > MAX_PROXY_UPSTREAMS_FILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "proxy upstreams file changed while reading and became too large",
+        ));
+    }
+
+    parse_proxy_upstreams_file_contents(&contents)
+}
+
+#[cfg(feature = "load-balancer")]
+fn parse_proxy_upstreams_file_contents(contents: &str) -> std::io::Result<Vec<String>> {
+    let mut upstreams = Vec::new();
+    let mut seen = HashSet::new();
+    for (line_index, line) in contents.lines().enumerate() {
+        let value = line.trim();
+        if value.is_empty() || value.starts_with('#') {
+            continue;
+        }
+        if !valid_authority(value) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "proxy upstreams file line {} is not a host:port or ip:port authority",
+                    line_index + 1
+                ),
+            ));
+        }
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "proxy upstreams file line {} repeats an upstream",
+                    line_index + 1
+                ),
+            ));
+        }
+        upstreams.push(value.to_owned());
+        if upstreams.len() > MAX_PROXY_UPSTREAMS {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "proxy upstreams file contains too many upstreams",
+            ));
+        }
+    }
+
+    Ok(upstreams)
 }
 
 fn existing_path_contains_symlink(path: &Path) -> std::io::Result<bool> {
@@ -13584,6 +13738,53 @@ mod tests {
         assert!(config.proxy.load_balance.slow_start.enabled);
         assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
         config.validate().unwrap();
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn parses_proxy_upstreams_file() {
+        let root = secure_test_dir("config-proxy-upstreams-file");
+        let upstreams_file = root.join("upstreams.txt");
+        fs::write(
+            &upstreams_file,
+            "# generated by service discovery\n127.0.0.1:3001\n127.0.0.1:3002\n",
+        )
+        .unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [proxy]
+            upstreams_file = "{}"
+            upstreams_file_refresh_secs = 2
+            "#,
+            upstreams_file.display()
+        ))
+        .unwrap();
+
+        assert_eq!(
+            config.proxy.upstreams_file.as_deref(),
+            Some(upstreams_file.as_path())
+        );
+        assert_eq!(config.proxy.upstreams_file_refresh_secs, 2);
+        config.validate().unwrap();
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn rejects_invalid_proxy_upstreams_file_contents() {
+        let root = secure_test_dir("config-proxy-upstreams-file-invalid");
+        let upstreams_file = root.join("upstreams.txt");
+        fs::write(&upstreams_file, "127.0.0.1:3001\n127.0.0.1:3001\n").unwrap();
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [proxy]
+            upstreams_file = "{}"
+            "#,
+            upstreams_file.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("proxy.upstreams_file"), "{error}");
     }
 
     #[test]

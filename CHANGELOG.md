@@ -41,6 +41,9 @@ behavior when the change improves security or project direction.
   `upstream_alias` and `upstream_retries`. The alias follows
   `logging.access.include_upstream` so operators can still suppress backend
   identity from logs.
+- Added file-refreshed upstream pools for load-balancer builds with
+  `upstreams_file` and bounded refresh intervals. The first format is one
+  authority per line with safe file handling and no weights/aliases yet.
 
 ### Planned
 

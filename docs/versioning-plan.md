@@ -1240,7 +1240,10 @@ Release shape:
     client evidence is provider-aligned. Follow-up work can add low-cardinality
     decision metrics and richer deny/error policy;
   - DNS-refreshing upstreams for container/service-name targets;
-  - file-watched upstream lists for service discovery without full config reload;
+  - file-watched upstream lists for service discovery without full config
+    reload. First slice is `upstreams_file` for load-balancer builds: one
+    `host:port` or `ip:port` authority per line, safe file handling, bounded
+    refresh intervals, and no weights/aliases/backup/drain line metadata yet;
   - traffic mirroring/shadowing: first slice is an optional `traffic-mirror`
     feature for safe bodyless methods only, deterministic per-mille sampling,
     allow-listed request headers, timeout budgets, bounded response draining,

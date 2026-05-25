@@ -247,9 +247,9 @@ as a public route unless another `web` route serves that same path.
 
 ## Current 1.0 Boundaries
 
-- Active DNS refresh and resolver TTL controls are not stable yet. Use stable
-  container/service names or IPs, and rely on your container runtime or host
-  resolver behavior for now.
+- Active DNS refresh and resolver TTL controls are not stable yet. For dynamic
+  local service discovery in load-balancer builds, use `upstreams_file` with a
+  sidecar or orchestrator that writes one `host:port` backend per line.
 - Per-route proxy, static, redirect, upload limit, timeout, header policy,
   prefix stripping, and internal error-page fallback are the supported gateway
   building blocks.

@@ -3,16 +3,18 @@ use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use futures::FutureExt;
 use pingora::http::RequestHeader;
 use pingora::lb::Backend;
 use pingora::lb::Backends;
-use pingora::lb::discovery::Static;
+use pingora::lb::discovery::{ServiceDiscovery, Static};
 use pingora::lb::health_check::{HttpHealthCheck, TcpHealthCheck};
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{
@@ -930,12 +932,16 @@ where
     S: BackendSelection + 'static,
     S::Iter: BackendIter,
 {
-    if config.upstreams.len() < 2 {
+    if config.upstreams.len() < 2 && config.upstreams_file.is_none() {
         return Ok(None);
     }
 
-    let backends = configured_backends(config)?;
-    let mut load_balancer = LoadBalancer::from_backends(Backends::new(Static::new(backends)));
+    let mut load_balancer = LoadBalancer::from_backends(configured_backend_discovery(config)?);
+    if config.upstreams_file.is_some() {
+        load_balancer.update_frequency = Some(Duration::from_secs(
+            config.upstreams_file_refresh_secs.clamp(1, 300),
+        ));
+    }
     load_balancer
         .update()
         .now_or_never()
@@ -951,6 +957,40 @@ where
     }
 
     Ok(Some(load_balancer))
+}
+
+struct FileUpstreamDiscovery {
+    path: PathBuf,
+}
+
+#[async_trait]
+impl ServiceDiscovery for FileUpstreamDiscovery {
+    async fn discover(
+        &self,
+    ) -> pingora::Result<(
+        std::collections::BTreeSet<Backend>,
+        std::collections::HashMap<u64, bool>,
+    )> {
+        let upstreams = crate::config::read_proxy_upstreams_file(&self.path).map_err(|error| {
+            Error::because(
+                ErrorType::ReadError,
+                "failed to read proxy upstreams file",
+                error,
+            )
+        })?;
+        let mut backends = std::collections::BTreeSet::new();
+        for upstream in upstreams {
+            let backend = Backend::new(&upstream).map_err(|error| {
+                Error::because(
+                    ErrorType::InvalidHTTPHeader,
+                    "proxy upstreams file contains an invalid backend",
+                    io::Error::other(error.to_string()),
+                )
+            })?;
+            backends.insert(backend);
+        }
+        Ok((backends, std::collections::HashMap::new()))
+    }
 }
 
 fn configured_health_check(
@@ -1058,6 +1098,16 @@ fn configured_backends(config: &ProxyConfig) -> io::Result<std::collections::BTr
     Ok(backends)
 }
 
+fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {
+    if let Some(path) = &config.upstreams_file {
+        return Ok(Backends::new(Box::new(FileUpstreamDiscovery {
+            path: path.clone(),
+        })));
+    }
+
+    Ok(Backends::new(Static::new(configured_backends(config)?)))
+}
+
 #[cfg(test)]
 fn backend_weights<S>(inner: &LoadBalancer<S>) -> Vec<usize>
 where
@@ -1091,6 +1141,7 @@ mod tests {
         LoadBalancedUpstreamReporter, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
         backend_connection_key, configured_http_health_check,
     };
+    use crate::test_support::unique_temp_path;
 
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]
@@ -1145,6 +1196,33 @@ mod tests {
             ),
             "selected alias should come from configured upstream_aliases"
         );
+    }
+
+    #[test]
+    fn builds_round_robin_from_proxy_upstreams_file() {
+        install_test_crypto_provider();
+        let root = unique_temp_path("lb-upstreams-file");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("upstreams.txt");
+        std::fs::write(
+            &path,
+            "# generated service-discovery output\n127.0.0.1:3000\n127.0.0.1:3001\n",
+        )
+        .unwrap();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstream: None,
+            upstreams_file: Some(path),
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(balancer.backend_count(), 2);
+        assert!(balancer.select(&request(), None).is_some());
     }
 
     #[test]

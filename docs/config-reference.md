@@ -697,6 +697,17 @@ Every `upstreams` entry must be an authority such as
 `127.0.0.1:3000` or `origin.example.test:443`.
 Proxy upstream lists are capped at 64 entries and reject duplicates
 case-insensitively. Proxy error-page lists are also capped at 64 entries.
+For load-balancer builds, `upstreams_file = "/run/fluxheim/backends/app.txt"`
+can be used instead of `upstream` or `upstreams`. The file is read at startup
+and refreshed every `upstreams_file_refresh_secs` seconds, with a default of
+5 seconds and a bounded range of 1 through 300 seconds. The first file format is
+deliberately small: one `host:port` or `ip:port` authority per line, blank lines
+and full-line `#` comments ignored, 2 through 64 unique entries required.
+Fluxheim reads the file with the same symlink and parent-permission hardening
+used for other operator-controlled files. In this release, file-refreshed pools
+cannot be combined with `upstream_weights`, `upstream_aliases`,
+`backup_upstreams`, or `drain_upstreams`; use static `upstreams` for those
+policies.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
@@ -812,15 +823,18 @@ redispatch attempts for this vhost or route over a moving window. Fluxheim does
 not retry after response streaming has started; status-code retries remain a
 later buffering-aware feature.
 
-`upstreams` is the preferred proxy target form for both one and many origins.
+`upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple
 configs, but do not set both fields in the same proxy block. Fluxheim rejects
-that as ambiguous. A single `upstreams = ["host:port"]` entry behaves like a
+that as ambiguous. `upstreams_file` is also mutually exclusive with both static
+forms. A single `upstreams = ["host:port"]` entry behaves like a
 normal single proxy target in all builds and is resolved when requests are
 proxied, so a missing backend does not prevent the gateway from starting. Two
 or more entries activate the Pingora load-balancer path in builds compiled with
 `load-balancer`; those entries may be resolved by load-balancer setup and health
-checking. The same `proxy.load_balance` policy applies inside
+checking. File-refreshed pools also use the load-balancer path and keep serving
+the previous healthy set when a later file refresh is invalid. The same
+`proxy.load_balance` policy applies inside
 `[[vhosts.routes.proxy]]` route proxy blocks; route-level pools get their own
 selection, passive-health, retry, and health-check state.
 `connect_timeout_secs`, `read_timeout_secs`, and `send_timeout_secs` are
