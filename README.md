@@ -48,8 +48,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Route actions | ✅ | Static, proxy, redirect, and route-level policy blocks. |
 | HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
 | Secure headers | ✅ | Request/response header policy, `Server: fluxheim` by default, removable by config. |
-| PHP-FPM applications | ✅ | External and managed php-fpm modes for WordPress-style front-controller applications. |
-| Built-in pure PHP engine | ❌ | Not included; managed php-fpm is the supported zero-admin PHP direction. |
+| PHP-FPM applications | ✅ | External php-fpm for existing pools. |
+| Managed PHP-FPM | ✅ | Fluxheim-supervised php-fpm pools for zero-admin WordPress-style deployments. |
 
 ### Cache
 

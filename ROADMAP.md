@@ -65,7 +65,10 @@ mirroring, richer rewrite, local operational socket, and typed hook-point work.
 The highest-value missing NGINX migration items are now explicitly first in
 that queue: regex path routing with capture-aware rewrites, method-based
 routing, WebSocket/HTTP upgrade verification, and `auth_request`-style external
-authorization subrequests. Follow-up `1.4.2` work should cover optional GeoIP
+authorization subrequests. Regex routing should remain off by default and
+require an explicit global config opt-in, for example
+`server.regex_enabled = true`, before any vhost or route can use regex matchers
+or capture-aware rewrites. Follow-up `1.4.2` work should cover optional GeoIP
 as a bounded Geo-Context foundation before the later enterprise load-balancer
 track: local MaxMind GeoIP2/ASN databases, safe path loading, atomic context
 replacement on config reload, country/ASN route and ACL decisions, privacy

@@ -1211,7 +1211,12 @@ Release shape:
     exact routes first, then prefix routes, then configured regex routes in
     documented order. Regex size limits and config-time compilation failures
     are required; untrusted catastrophic-backtracking behavior is avoided by
-    the Rust regex engine design;
+    the Rust regex engine design. Regex routing must be disabled by default
+    behind an explicit global config opt-in such as
+    `server.regex_enabled = true`; config validation must reject route regexes,
+    capture-aware rewrites, and regex-backed templates unless that global opt-in
+    is set. This keeps accidental high-cardinality or overly broad regex policy
+    out of normal prefix/exact-route deployments;
   - named and numbered regex captures exposed as bounded typed variables for
     `rewrite_prefix` successors, request-header templates, structured logs,
     and future typed hooks. Capture variables must not become metric labels by
