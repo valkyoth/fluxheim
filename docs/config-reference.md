@@ -1898,9 +1898,11 @@ permits and are released automatically when the request finishes.
 With metrics enabled, concurrency-limit rejections are counted by
 `fluxheim_edge_policy_events_total` with bounded labels.
 
-Vhosts can also contain ordered route tables. Exact matches win first, then the
-longest prefix match, then the first configured regex route, then one optional
-fallback route. Regex routes require explicit global opt-in with
+Vhosts can also contain ordered route tables. Routes may optionally set
+`methods = ["GET", "HEAD"]`; when present, the route only matches those
+uppercase HTTP methods. Exact matches win first, then the longest prefix match,
+then the first configured regex route, then one optional fallback route. Regex
+routes require explicit global opt-in with
 `server.regex_enabled = true`; configs that use `path_regex` without that flag
 are rejected. Regex patterns use Rust's bounded `regex` engine and are checked
 at config load time. A route must define exactly one matcher: `path_exact`,
@@ -1911,6 +1913,7 @@ at config load time. A route must define exactly one matcher: `path_exact`,
 [[vhosts.routes]]
 name = "chat"
 path_prefix = "/chat/"
+methods = ["GET", "HEAD"]
 strip_prefix = "/chat/"
 rewrite_prefix = "/backend/chat/"
 max_request_body_bytes = "64MiB"

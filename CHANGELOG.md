@@ -15,14 +15,18 @@ behavior when the change improves security or project direction.
   route-level `path_regex`. Regex routes are validated with Rust's bounded
   regex engine at config load time and are selected after exact and longest
   prefix routes, before fallback routes.
+- Added route-level `methods = ["GET", "HEAD"]` matching. Method lists are
+  optional, bounded, uppercase HTTP tokens and let one path route to different
+  actions or upstreams by request method.
 
 ### Planned
 
 - Start the proxy-operations follow-up after the `1.4.0` proxy parity
   baseline. Remaining scope is limited to HTTP migration blockers and read-only
-  operational visibility: method routing, WebSocket/HTTP upgrade verification,
+  operational visibility: WebSocket/HTTP upgrade verification,
   `auth_request`-style subrequests, discovery/mirroring, local operational
-  sockets, richer rewrite policy, and typed operator hook points.
+  sockets, richer rewrite policy, regex capture variables, and typed operator
+  hook points.
 
 ## 1.4.0 - 2026-05-25
 

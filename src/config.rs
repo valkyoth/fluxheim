@@ -60,6 +60,7 @@ const MAX_TLS_CERTIFICATES: usize = 1024;
 const MAX_ACME_ISSUERS: usize = 128;
 const MAX_VHOST_ACME_DOMAINS: usize = 64;
 const MAX_WEB_INDEX_FILES: usize = 32;
+const MAX_ROUTE_METHODS: usize = 16;
 const MAX_ROUTE_REGEX_BYTES: usize = 4096;
 pub(crate) const MAX_ROUTE_REGEX_PROGRAM_BYTES: usize = 1024 * 1024;
 const DEFAULT_ADMIN_HEALTH_PATH: &str = "/_fluxheim/health";
@@ -5258,6 +5259,8 @@ pub struct RouteConfig {
     #[serde(default)]
     pub path_regex: Option<String>,
     #[serde(default)]
+    pub methods: Vec<String>,
+    #[serde(default)]
     pub fallback: bool,
     #[serde(default)]
     pub https_redirect_exempt: bool,
@@ -5359,6 +5362,7 @@ impl RouteConfig {
                 route: self.name.clone(),
             })?;
         }
+        validate_route_methods(vhost, &self.name, &self.methods)?;
         if let Some(path) = &self.strip_prefix {
             validate_route_path("vhosts.routes.strip_prefix", path, true).map_err(|_| {
                 ConfigError::InvalidRouteStripPrefix {
@@ -5622,6 +5626,7 @@ impl VhostRedirectConfig {
             path_exact: None,
             path_prefix: None,
             path_regex: None,
+            methods: Vec::new(),
             fallback: true,
             https_redirect_exempt: false,
             strip_prefix: None,
@@ -5854,6 +5859,7 @@ impl VhostAcmeChallengeConfig {
             path_exact: None,
             path_prefix: Some(ACME_HTTP_CHALLENGE_PREFIX.to_owned()),
             path_regex: None,
+            methods: Vec::new(),
             fallback: false,
             https_redirect_exempt: true,
             strip_prefix: None,
@@ -9446,6 +9452,11 @@ pub enum ConfigError {
         vhost: String,
         route: String,
     },
+    InvalidRouteMethods {
+        vhost: String,
+        route: String,
+        reason: &'static str,
+    },
     DuplicateFallbackRoute {
         vhost: String,
     },
@@ -10167,6 +10178,14 @@ impl Display for ConfigError {
             Self::InvalidRouteRegex { vhost, route } => write!(
                 formatter,
                 "vhost {vhost:?} route {route:?} path_regex must be a valid bounded Rust regex for request paths"
+            ),
+            Self::InvalidRouteMethods {
+                vhost,
+                route,
+                reason,
+            } => write!(
+                formatter,
+                "vhost {vhost:?} route {route:?} methods policy is invalid: {reason}"
             ),
             Self::DuplicateFallbackRoute { vhost } => {
                 write!(
@@ -11096,6 +11115,39 @@ fn validate_route_regex(value: &str) -> Result<(), ConfigError> {
             vhost: String::new(),
             route: String::new(),
         })?;
+    Ok(())
+}
+
+fn validate_route_methods(vhost: &str, route: &str, methods: &[String]) -> Result<(), ConfigError> {
+    if methods.len() > MAX_ROUTE_METHODS {
+        return Err(ConfigError::InvalidRouteMethods {
+            vhost: vhost.to_owned(),
+            route: route.to_owned(),
+            reason: "at most 16 methods are allowed",
+        });
+    }
+
+    let mut seen = HashSet::new();
+    for method in methods {
+        if method.is_empty()
+            || method.len() > 32
+            || !valid_http_token(method)
+            || method.chars().any(char::is_lowercase)
+        {
+            return Err(ConfigError::InvalidRouteMethods {
+                vhost: vhost.to_owned(),
+                route: route.to_owned(),
+                reason: "methods must be uppercase HTTP method tokens",
+            });
+        }
+        if !seen.insert(method) {
+            return Err(ConfigError::InvalidRouteMethods {
+                vhost: vhost.to_owned(),
+                route: route.to_owned(),
+                reason: "contains duplicate methods",
+            });
+        }
+    }
     Ok(())
 }
 
@@ -21241,6 +21293,7 @@ mod tests {
             [[vhosts.routes]]
             name = "chat"
             path_prefix = "/chat/"
+            methods = ["GET", "HEAD"]
             https_redirect_exempt = true
             strip_prefix = "/chat/"
             rewrite_prefix = "/backend/chat/"
@@ -21286,6 +21339,7 @@ mod tests {
             ["127.0.0.1:8080"]
         );
         assert_eq!(config.vhosts[0].routes[0].name, "chat");
+        assert_eq!(config.vhosts[0].routes[0].methods, ["GET", "HEAD"]);
         assert!(config.vhosts[0].routes[0].grpc.enabled);
         assert!(config.vhosts[0].routes[0].https_redirect_exempt);
         assert_eq!(
@@ -21829,6 +21883,32 @@ mod tests {
                 route: "bad".to_owned(),
             })
         );
+
+        let config: Config = toml::from_str(
+            r#"
+            [[vhosts]]
+            name = "gateway"
+            hosts = ["gateway.example"]
+
+            [[vhosts.routes]]
+            name = "bad"
+            path_prefix = "/api/"
+            methods = ["GET", "get"]
+
+            [vhosts.routes.proxy]
+            upstreams = ["127.0.0.1:6012"]
+            "#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::InvalidRouteMethods {
+                vhost,
+                route,
+                ..
+            }) if vhost == "gateway" && route == "bad"
+        ));
 
         let config: Config = toml::from_str(
             r#"

@@ -1222,8 +1222,10 @@ Release shape:
     and future typed hooks. Capture variables must not become metric labels by
     default;
   - method-based route matching through `methods = ["GET", "HEAD"]`, with
-    config-time normalization and validation, so read/write routing can be
-    expressed without Lua or duplicated vhosts;
+    config-time validation, so read/write routing can be expressed without Lua
+    or duplicated vhosts. The first slice treats method lists as route match
+    conditions rather than deny policies: a method mismatch keeps searching
+    later routes or fallback;
   - WebSocket and generic HTTP/1.1 upgrade parity: explicit
     `proxy.websocket = true` / upgrade policy, tested `101 Switching
     Protocols` handling, hop-by-hop header behavior, timeout semantics, and

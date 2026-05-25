@@ -1127,7 +1127,7 @@ impl ProxySnapshot {
         let host = request_host_header(request);
         let vhost_index = self.state.vhost_index(host);
         let vhost = self.state.vhost(vhost_index);
-        let route_index = vhost.route_index(request.uri.path());
+        let route_index = vhost.route_index(request.method.as_str(), request.uri.path());
         let route_cache = route_index.and_then(|index| vhost.route(index).cache.as_ref());
         let cache_config = route_cache
             .map(|cache| &cache.config)
@@ -1236,7 +1236,7 @@ impl ProxySnapshot {
         let host = request_host_header(request);
         let vhost_index = self.state.vhost_index(host);
         let vhost = self.state.vhost(vhost_index);
-        let route_index = vhost.route_index(request.uri.path());
+        let route_index = vhost.route_index(request.method.as_str(), request.uri.path());
         let route_cache = route_index.and_then(|index| vhost.route(index).cache.as_ref());
         let Some(key) = self.state.pingora_effective_cache_key_for_request_header(
             request,
@@ -2942,6 +2942,7 @@ struct RuntimeRoute {
     #[cfg_attr(feature = "privacy-mode", allow(dead_code))]
     name: String,
     matcher: RuntimeRouteMatcher,
+    methods: Vec<String>,
     https_redirect_exempt: bool,
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
@@ -5240,6 +5241,7 @@ impl RuntimeRoute {
         Ok(Self {
             name: route.name.clone(),
             matcher,
+            methods: route.methods.clone(),
             https_redirect_exempt: route.https_redirect_exempt,
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
@@ -5273,6 +5275,7 @@ impl RuntimeRoute {
         Self {
             name: "acme-http-01".to_owned(),
             matcher: RuntimeRouteMatcher::Prefix("/.well-known/acme-challenge/".to_owned()),
+            methods: Vec::new(),
             https_redirect_exempt: true,
             strip_prefix: None,
             rewrite_prefix: None,
@@ -5340,12 +5343,15 @@ fn managed_http_01_owner_vhost<'a>(
 }
 
 impl RuntimeVhost {
-    fn route_index(&self, path: &str) -> Option<usize> {
+    fn route_index(&self, method: &str, path: &str) -> Option<usize> {
         let mut fallback = None;
         let mut best_prefix: Option<(usize, usize)> = None;
         let mut first_regex = None;
 
         for (index, route) in self.routes.iter().enumerate() {
+            if !route_method_matches(route, method) {
+                continue;
+            }
             match &route.matcher {
                 RuntimeRouteMatcher::Exact(exact) if path == exact => return Some(index),
                 RuntimeRouteMatcher::Prefix(prefix)
@@ -5372,6 +5378,11 @@ impl RuntimeVhost {
 
     fn route(&self, index: usize) -> &RuntimeRoute {
         &self.routes[index]
+    }
+
+    #[cfg(test)]
+    fn route_index_by_path_for_tests(&self, path: &str) -> Option<usize> {
+        self.route_index("GET", path)
     }
 
     fn from_legacy(
@@ -5589,6 +5600,10 @@ impl RuntimeVhost {
             routes,
         })
     }
+}
+
+fn route_method_matches(route: &RuntimeRoute, method: &str) -> bool {
+    route.methods.is_empty() || route.methods.iter().any(|configured| configured == method)
 }
 
 #[cfg(feature = "web")]
@@ -5967,7 +5982,10 @@ impl ProxyHttp for FluxProxy {
         };
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
-        ctx.route_index = vhost.route_index(session.req_header().uri.path());
+        ctx.route_index = vhost.route_index(
+            session.req_header().method.as_str(),
+            session.req_header().uri.path(),
+        );
         #[cfg(feature = "metrics")]
         let edge_policy_route = ctx
             .route_index
@@ -16156,7 +16174,7 @@ mod tests {
             .state
             .vhost(snapshot.state.vhost_index(Some("example.test")));
         let route_index = vhost
-            .route_index("/.well-known/acme-challenge/token_123")
+            .route_index_by_path_for_tests("/.well-known/acme-challenge/token_123")
             .unwrap();
         let route = vhost.route(route_index);
 
@@ -16165,7 +16183,7 @@ mod tests {
             route.action,
             super::RuntimeRouteAction::AcmeHttp01(_)
         ));
-        assert_eq!(vhost.route_index("/other"), None);
+        assert_eq!(vhost.route_index_by_path_for_tests("/other"), None);
     }
 
     #[cfg(feature = "acme")]
@@ -16242,7 +16260,7 @@ mod tests {
             .state
             .vhost(snapshot.state.vhost_index(Some("www.example.test")));
         let route_index = vhost
-            .route_index("/.well-known/acme-challenge/token_123")
+            .route_index_by_path_for_tests("/.well-known/acme-challenge/token_123")
             .unwrap();
         let route = vhost.route(route_index);
 
@@ -16400,6 +16418,7 @@ mod tests {
                         path_exact: None,
                         path_prefix: None,
                         path_regex: None,
+                        methods: Vec::new(),
                         strip_prefix: None,
                         rewrite_prefix: None,
                         https_redirect_exempt: false,
@@ -16425,6 +16444,7 @@ mod tests {
                         }),
                         path_exact: None,
                         path_regex: None,
+                        methods: Vec::new(),
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
@@ -16451,6 +16471,7 @@ mod tests {
                         }),
                         path_exact: None,
                         path_regex: None,
+                        methods: Vec::new(),
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
@@ -16470,6 +16491,7 @@ mod tests {
                     RouteConfig {
                         name: "regex-assets".to_owned(),
                         path_regex: Some(r"^/asset-[0-9]+\.txt$".to_owned()),
+                        methods: Vec::new(),
                         proxy: Some(ProxyConfig {
                             upstreams: vec!["127.0.0.1:6004".to_owned()],
                             upstream: None,
@@ -16503,6 +16525,7 @@ mod tests {
                         }),
                         path_prefix: None,
                         path_regex: None,
+                        methods: Vec::new(),
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
@@ -16533,11 +16556,136 @@ mod tests {
             vhost.max_request_body_bytes,
             Some(ByteSize::from_bytes(64 * 1024 * 1024))
         );
-        assert_eq!(vhost.route_index("/api/v2/status"), Some(4));
-        assert_eq!(vhost.route_index("/api/v2/users"), Some(2));
-        assert_eq!(vhost.route_index("/api/users"), Some(1));
-        assert_eq!(vhost.route_index("/asset-42.txt"), Some(3));
-        assert_eq!(vhost.route_index("/missing"), Some(0));
+        assert_eq!(
+            vhost.route_index_by_path_for_tests("/api/v2/status"),
+            Some(4)
+        );
+        assert_eq!(
+            vhost.route_index_by_path_for_tests("/api/v2/users"),
+            Some(2)
+        );
+        assert_eq!(vhost.route_index_by_path_for_tests("/api/users"), Some(1));
+        assert_eq!(
+            vhost.route_index_by_path_for_tests("/asset-42.txt"),
+            Some(3)
+        );
+        assert_eq!(vhost.route_index_by_path_for_tests("/missing"), Some(0));
+    }
+
+    #[test]
+    fn vhost_routes_can_match_by_method() {
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "gateway".to_owned(),
+                hosts: vec!["gateway.example".to_owned()],
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig::default(),
+                cache: CacheConfig::default(),
+                compression: None,
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![
+                    RouteConfig {
+                        name: "fallback".to_owned(),
+                        path_exact: None,
+                        path_prefix: None,
+                        path_regex: None,
+                        methods: Vec::new(),
+                        fallback: true,
+                        https_redirect_exempt: false,
+                        strip_prefix: None,
+                        rewrite_prefix: None,
+                        max_request_body_bytes: None,
+                        access: Default::default(),
+                        rate_limit: Default::default(),
+                        concurrency: Default::default(),
+                        grpc: Default::default(),
+                        redirect: Some(RouteRedirectConfig {
+                            to: "https://gateway.example{uri}".to_owned(),
+                            status: 308,
+                        }),
+                        proxy: None,
+                        web: None,
+                        php: None,
+                        cache: None,
+                        compression: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                    RouteConfig {
+                        name: "read".to_owned(),
+                        path_exact: Some("/resource".to_owned()),
+                        path_prefix: None,
+                        path_regex: None,
+                        methods: vec!["GET".to_owned(), "HEAD".to_owned()],
+                        fallback: false,
+                        https_redirect_exempt: false,
+                        strip_prefix: None,
+                        rewrite_prefix: None,
+                        max_request_body_bytes: None,
+                        access: Default::default(),
+                        rate_limit: Default::default(),
+                        concurrency: Default::default(),
+                        grpc: Default::default(),
+                        redirect: None,
+                        proxy: Some(ProxyConfig {
+                            upstreams: vec!["127.0.0.1:6001".to_owned()],
+                            upstream: None,
+                            ..ProxyConfig::default()
+                        }),
+                        web: None,
+                        php: None,
+                        cache: None,
+                        compression: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                    RouteConfig {
+                        name: "write".to_owned(),
+                        path_exact: Some("/resource".to_owned()),
+                        path_prefix: None,
+                        path_regex: None,
+                        methods: vec!["POST".to_owned()],
+                        fallback: false,
+                        https_redirect_exempt: false,
+                        strip_prefix: None,
+                        rewrite_prefix: None,
+                        max_request_body_bytes: None,
+                        access: Default::default(),
+                        rate_limit: Default::default(),
+                        concurrency: Default::default(),
+                        grpc: Default::default(),
+                        redirect: None,
+                        proxy: Some(ProxyConfig {
+                            upstreams: vec!["127.0.0.1:6002".to_owned()],
+                            upstream: None,
+                            ..ProxyConfig::default()
+                        }),
+                        web: None,
+                        php: None,
+                        cache: None,
+                        compression: None,
+                        headers: crate::config::VhostHeaderPolicyConfig::default(),
+                    },
+                ],
+            }],
+            ..Config::default()
+        };
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let snapshot = proxy.snapshot();
+        let vhost = snapshot
+            .state
+            .vhost(snapshot.state.vhost_index(Some("gateway.example")));
+
+        assert_eq!(vhost.route_index("GET", "/resource"), Some(1));
+        assert_eq!(vhost.route_index("HEAD", "/resource"), Some(1));
+        assert_eq!(vhost.route_index("POST", "/resource"), Some(2));
+        assert_eq!(vhost.route_index("PUT", "/resource"), Some(0));
     }
 
     #[test]
@@ -16562,6 +16710,7 @@ mod tests {
         let route = super::RuntimeRoute {
             name: "chat".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/chat/".to_owned()),
+            methods: Vec::new(),
             https_redirect_exempt: false,
             strip_prefix: Some("/chat/".to_owned()),
             rewrite_prefix: None,
@@ -16596,6 +16745,7 @@ mod tests {
         let route = super::RuntimeRoute {
             name: "api".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/public/api/".to_owned()),
+            methods: Vec::new(),
             https_redirect_exempt: false,
             strip_prefix: Some("/public/api/".to_owned()),
             rewrite_prefix: Some("/internal/v1/".to_owned()),
@@ -16628,6 +16778,7 @@ mod tests {
         let route = super::RuntimeRoute {
             name: "api".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/api/".to_owned()),
+            methods: Vec::new(),
             https_redirect_exempt: false,
             strip_prefix: Some("/api/".to_owned()),
             rewrite_prefix: None,
@@ -17314,6 +17465,7 @@ mod tests {
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
                     path_regex: None,
+                    methods: Vec::new(),
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -17353,7 +17505,9 @@ mod tests {
         let snapshot = proxy.snapshot();
         let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
         let vhost = snapshot.state.vhost(vhost_index);
-        let route_index = vhost.route_index("/assets/logo.png").unwrap();
+        let route_index = vhost
+            .route_index_by_path_for_tests("/assets/logo.png")
+            .unwrap();
         let route_cache = vhost.route(route_index).cache.as_ref().unwrap();
         assert!(route_cache.pingora_memory_storage.is_some());
         assert!(route_cache.pingora_cache_lock.is_some());
@@ -17410,6 +17564,7 @@ mod tests {
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
                     path_regex: None,
+                    methods: Vec::new(),
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -17921,6 +18076,7 @@ mod tests {
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
                     path_regex: None,
+                    methods: Vec::new(),
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -17958,7 +18114,9 @@ mod tests {
         let snapshot = proxy.snapshot();
         let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
         let vhost = snapshot.state.vhost(vhost_index);
-        let route_index = vhost.route_index("/assets/logo.png").unwrap();
+        let route_index = vhost
+            .route_index_by_path_for_tests("/assets/logo.png")
+            .unwrap();
         let route = vhost.route(route_index);
         let route_cache = route.cache.as_ref().unwrap();
         let storage = route_cache.pingora_disk_storage.unwrap();
@@ -18596,6 +18754,7 @@ mod tests {
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
                     path_regex: None,
+                    methods: Vec::new(),
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -18711,6 +18870,7 @@ mod tests {
                     path_exact: None,
                     path_prefix: Some("/assets/".to_owned()),
                     path_regex: None,
+                    methods: Vec::new(),
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
@@ -19079,6 +19239,7 @@ mod tests {
                         path_exact: None,
                         path_prefix: Some("/api/".to_owned()),
                         path_regex: None,
+                        methods: Vec::new(),
                         fallback: false,
                         https_redirect_exempt: false,
                         strip_prefix: None,
@@ -19165,6 +19326,7 @@ mod tests {
                     path_exact: None,
                     path_prefix: Some("/single/".to_owned()),
                     path_regex: None,
+                    methods: Vec::new(),
                     fallback: false,
                     https_redirect_exempt: false,
                     strip_prefix: None,
