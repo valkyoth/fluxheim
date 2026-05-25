@@ -3625,15 +3625,17 @@ fn spawn_managed_php_fpm_cleanup(
         Err(error) => {
             log::warn!(
                 target: "fluxheim::php_fpm",
-                "failed to spawn managed php-fpm cleanup thread; forcing child termination inline: {error}"
+                "failed to spawn managed php-fpm cleanup thread; sending managed php-fpm kill inline without blocking wait: {error}"
             );
             let child = match child.lock() {
                 Ok(mut guard) => guard.take(),
                 Err(poisoned) => poisoned.into_inner().take(),
             };
             if let Some(mut child) = child {
+                // Drop can run on a Tokio worker after the last request releases an
+                // old runtime snapshot. If cleanup-thread creation fails, do not
+                // block that worker on Child::wait().
                 let _ = child.kill();
-                let _ = child.wait();
             }
             cleanup_managed_php_fpm_files(&socket, &config_path, &pid_path);
         }
