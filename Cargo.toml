@@ -27,7 +27,6 @@ proxy = [
     "dep:async-trait",
     "dep:base64-ng",
     "dep:ring",
-    "dep:regex",
     "dep:rustix",
     "dep:serde_json",
     "dep:sha2",
@@ -181,7 +180,7 @@ percent-encoding = { version = "2.3.2", optional = true }
 pingora = { version = "0.8.0", default-features = false, features = ["proxy"], optional = true }
 prometheus = { version = "0.13.4", optional = true }
 rcgen = { version = "0.14.7", default-features = false, features = ["pem", "ring"], optional = true }
-regex = { version = "1.12.3", optional = true }
+regex = "1.12.3"
 ring = { version = "0.17.14", optional = true }
 rpassword = { version = "7.5.3", optional = true }
 rustls = { version = "0.23.40", optional = true }
