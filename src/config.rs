@@ -973,6 +973,8 @@ pub struct AdminConfig {
     #[serde(default)]
     pub transport: AdminTransportConfig,
     #[serde(default)]
+    pub ops_socket: AdminOpsSocketConfig,
+    #[serde(default)]
     pub health: AdminHealthConfig,
     #[serde(default)]
     pub auth_throttle: AdminAuthThrottleConfig,
@@ -992,6 +994,7 @@ impl Default for AdminConfig {
             token_file: None,
             snapshot_store: None,
             transport: AdminTransportConfig::default(),
+            ops_socket: AdminOpsSocketConfig::default(),
             health: AdminHealthConfig::default(),
             auth_throttle: AdminAuthThrottleConfig::default(),
             self_healing: AdminSelfHealingConfig::default(),
@@ -1012,6 +1015,7 @@ impl AdminConfig {
         {
             *snapshot_store = base_dir.join(&snapshot_store);
         }
+        self.ops_socket.resolve_relative_paths(base_dir);
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -1031,8 +1035,15 @@ impl AdminConfig {
         self.auth_throttle.validate()?;
         self.self_healing.validate()?;
         self.client_certificate.validate()?;
+        self.ops_socket.validate()?;
 
         if !self.enabled {
+            if self.ops_socket.enabled {
+                return Err(ConfigError::InvalidAdminOpsSocket {
+                    field: "admin.ops_socket.enabled",
+                    reason: "admin ops socket requires admin.enabled = true",
+                });
+            }
             return Ok(());
         }
 
@@ -1076,6 +1087,97 @@ impl AdminConfig {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdminOpsSocketConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_admin_ops_socket_path")]
+    pub path: PathBuf,
+    #[serde(default = "default_admin_ops_socket_mode")]
+    pub mode: String,
+}
+
+impl Default for AdminOpsSocketConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: default_admin_ops_socket_path(),
+            mode: default_admin_ops_socket_mode(),
+        }
+    }
+}
+
+impl AdminOpsSocketConfig {
+    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if self.path.is_relative() {
+            self.path = base_dir.join(&self.path);
+        }
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            return Err(ConfigError::InvalidAdminOpsSocket {
+                field: "admin.ops_socket.enabled",
+                reason: "admin ops socket requires Unix-domain socket support",
+            });
+        }
+
+        #[cfg(unix)]
+        {
+            validate_required_process_path("admin.ops_socket.path", &self.path)?;
+            if self.path.to_str().is_none() {
+                return Err(ConfigError::InvalidAdminOpsSocket {
+                    field: "admin.ops_socket.path",
+                    reason: "admin ops socket path must be valid UTF-8",
+                });
+            }
+            let mode = parse_admin_ops_socket_mode(&self.mode)?;
+            if mode & 0o007 != 0 || mode & 0o600 != 0o600 || mode & !0o770 != 0 {
+                return Err(ConfigError::InvalidAdminOpsSocket {
+                    field: "admin.ops_socket.mode",
+                    reason: "admin ops socket mode must grant owner read/write, may grant group read/write, and must not grant world access",
+                });
+            }
+            Ok(())
+        }
+    }
+
+    #[cfg(all(unix, any(test, feature = "proxy")))]
+    pub(crate) fn mode_bits(&self) -> u32 {
+        parse_admin_ops_socket_mode(&self.mode).unwrap_or(0o600)
+    }
+}
+
+fn default_admin_ops_socket_path() -> PathBuf {
+    PathBuf::from("/run/fluxheim/fluxheim-ops.sock")
+}
+
+fn default_admin_ops_socket_mode() -> String {
+    "0600".to_owned()
+}
+
+#[cfg(unix)]
+fn parse_admin_ops_socket_mode(value: &str) -> Result<u32, ConfigError> {
+    let value = value.trim();
+    let raw = value.strip_prefix("0o").unwrap_or(value);
+    if raw.len() != 3 && raw.len() != 4 {
+        return Err(ConfigError::InvalidAdminOpsSocket {
+            field: "admin.ops_socket.mode",
+            reason: "admin ops socket mode must be an octal string such as \"0600\" or \"0660\"",
+        });
+    }
+    let mode = u32::from_str_radix(raw, 8).map_err(|_| ConfigError::InvalidAdminOpsSocket {
+        field: "admin.ops_socket.mode",
+        reason: "admin ops socket mode must be an octal string such as \"0600\" or \"0660\"",
+    })?;
+    Ok(mode)
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
@@ -9376,6 +9478,10 @@ pub enum ConfigError {
     InvalidAdminAuthThrottle {
         field: &'static str,
     },
+    InvalidAdminOpsSocket {
+        field: &'static str,
+        reason: &'static str,
+    },
     InvalidAdminHealthPath {
         path: String,
     },
@@ -9966,6 +10072,9 @@ impl Display for ConfigError {
             }
             Self::InvalidAdminAuthThrottle { field } => {
                 write!(formatter, "{field} must be within the allowed range")
+            }
+            Self::InvalidAdminOpsSocket { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
             }
             Self::InvalidAdminHealthPath { path } => write!(
                 formatter,
@@ -20493,6 +20602,61 @@ mod tests {
             config.admin.client_certificate.allow_sha256,
             vec!["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_admin_read_only_ops_socket() {
+        let snapshot_store = secure_test_dir("config-admin-ops-snapshots");
+        let socket_dir = secure_test_dir("config-admin-ops-runtime");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [admin]
+            enabled = true
+            listen = "127.0.0.1:9090"
+            token_env = "FLUXHEIM_ADMIN_TOKEN"
+            snapshot_store = "{}"
+
+            [admin.ops_socket]
+            enabled = true
+            path = "{}/fluxheim-ops.sock"
+            mode = "0660"
+            "#,
+            snapshot_store.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        config.validate().unwrap();
+        assert!(config.admin.ops_socket.enabled);
+        assert_eq!(config.admin.ops_socket.mode_bits(), 0o660);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_world_accessible_admin_ops_socket() {
+        let snapshot_store = secure_test_dir("config-admin-ops-world-snapshots");
+        let socket_dir = secure_test_dir("config-admin-ops-world-runtime");
+        let config: Config = toml::from_str(&format!(
+            r#"
+            [admin]
+            enabled = true
+            listen = "127.0.0.1:9090"
+            token_env = "FLUXHEIM_ADMIN_TOKEN"
+            snapshot_store = "{}"
+
+            [admin.ops_socket]
+            enabled = true
+            path = "{}/fluxheim-ops.sock"
+            mode = "0666"
+            "#,
+            snapshot_store.display(),
+            socket_dir.display()
+        ))
+        .unwrap();
+
+        let error = config.validate().unwrap_err().to_string();
+        assert!(error.contains("admin.ops_socket.mode"), "{error}");
     }
 
     #[test]

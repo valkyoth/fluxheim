@@ -144,6 +144,14 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
             log::info!("admin self-healing watchdog enabled");
             server.add_service(watchdog);
         }
+        #[cfg(unix)]
+        if let Some(ops_socket) = admin_services.ops_socket {
+            log::info!(
+                "admin read-only ops socket enabled on {}",
+                config.admin.ops_socket.path.display()
+            );
+            server.add_service(ops_socket);
+        }
         server.add_service(admin_services.control_plane);
     }
 

@@ -7,6 +7,8 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::{fs::Permissions, os::unix::fs::PermissionsExt};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -345,6 +347,8 @@ fn auth_source_label(source: Option<IpAddr>) -> String {
 
 pub struct AdminServices {
     pub control_plane: Service<HttpServer<AdminApp>>,
+    #[cfg(unix)]
+    pub ops_socket: Option<Service<HttpServer<AdminOpsApp>>>,
     pub watchdog: Option<GenBackgroundService<AdminApp>>,
 }
 
@@ -367,13 +371,38 @@ pub fn admin_services_from_config(
     };
     let mut service = Service::new(
         "Fluxheim Admin Control Plane".to_owned(),
-        HttpServer::new_app(app),
+        HttpServer::new_app(app.clone()),
     );
     service.add_tcp(&config.admin.listen);
+    #[cfg(unix)]
+    let ops_socket = if config.admin.ops_socket.enabled {
+        let Some(path) = config.admin.ops_socket.path.to_str() else {
+            return Err("admin.ops_socket.path must be valid UTF-8".into());
+        };
+        let mut ops_service = Service::new(
+            "Fluxheim Local Ops Socket".to_owned(),
+            HttpServer::new_app(AdminOpsApp { app: app.clone() }),
+        );
+        ops_service.add_uds(
+            path,
+            Some(Permissions::from_mode(config.admin.ops_socket.mode_bits())),
+        );
+        Some(ops_service)
+    } else {
+        None
+    };
     Ok(Some(AdminServices {
         control_plane: service,
+        #[cfg(unix)]
+        ops_socket,
         watchdog,
     }))
+}
+
+#[cfg(unix)]
+#[derive(Clone)]
+pub struct AdminOpsApp {
+    app: AdminApp,
 }
 
 impl AdminApp {
@@ -715,6 +744,38 @@ impl AdminApp {
                 StatusCode::METHOD_NOT_ALLOWED,
                 br#"{"error":"method_not_allowed"}"#,
             ),
+        }
+    }
+
+    #[cfg(unix)]
+    fn handle_ops_socket(&self, method: &str, path: &str, query: Option<&str>) -> AdminResponse {
+        if path.len() > MAX_ADMIN_PATH_BYTES {
+            return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"path_too_large"}"#);
+        }
+        if query.is_some_and(|query| query.len() > MAX_ADMIN_QUERY_BYTES) {
+            return json_response(StatusCode::URI_TOO_LONG, br#"{"error":"query_too_large"}"#);
+        }
+        let known_read_only_path = matches!(
+            path,
+            "/_fluxheim/status" | "/_fluxheim/cache/status" | "/_fluxheim/snapshots"
+        ) || path == self.health_path;
+        if method != "GET" {
+            return if known_read_only_path {
+                json_response(
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    br#"{"error":"method_not_allowed"}"#,
+                )
+            } else {
+                json_response(StatusCode::NOT_FOUND, br#"{"error":"not_found"}"#)
+            };
+        }
+
+        match path {
+            "/_fluxheim/status" => self.status_response(),
+            "/_fluxheim/cache/status" => self.cache_status_response(),
+            "/_fluxheim/snapshots" => self.snapshots_response(),
+            path if path == self.health_path => self.health_response(),
+            _ => json_response(StatusCode::NOT_FOUND, br#"{"error":"not_found"}"#),
         }
     }
 
@@ -1936,25 +1997,42 @@ impl ServeHttp for AdminApp {
             source,
         );
 
-        let body_len = response.body.len();
-        match Response::builder()
-            .status(response.status)
-            .header(header::CONTENT_TYPE, response.content_type)
-            .header(header::CONTENT_LENGTH, body_len)
-            .header(header::CACHE_CONTROL, "no-store")
-            .body(response.body)
-        {
-            Ok(response) => response,
-            Err(error) => {
-                log::error!("failed to build admin response: {error}");
-                let mut fallback = Response::new(br#"{"error":"internal_server_error"}"#.to_vec());
-                *fallback.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                fallback.headers_mut().insert(
-                    header::CONTENT_TYPE,
-                    http::HeaderValue::from_static("application/json"),
-                );
-                fallback
-            }
+        admin_http_response(response)
+    }
+}
+
+#[cfg(unix)]
+#[async_trait]
+impl ServeHttp for AdminOpsApp {
+    async fn response(&self, session: &mut ServerSession) -> Response<Vec<u8>> {
+        let request = session.req_header();
+        admin_http_response(self.app.handle_ops_socket(
+            request.method.as_str(),
+            request.uri.path(),
+            request.uri.query(),
+        ))
+    }
+}
+
+fn admin_http_response(response: AdminResponse) -> Response<Vec<u8>> {
+    let body_len = response.body.len();
+    match Response::builder()
+        .status(response.status)
+        .header(header::CONTENT_TYPE, response.content_type)
+        .header(header::CONTENT_LENGTH, body_len)
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(response.body)
+    {
+        Ok(response) => response,
+        Err(error) => {
+            log::error!("failed to build admin response: {error}");
+            let mut fallback = Response::new(br#"{"error":"internal_server_error"}"#.to_vec());
+            *fallback.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            fallback.headers_mut().insert(
+                header::CONTENT_TYPE,
+                http::HeaderValue::from_static("application/json"),
+            );
+            fallback
         }
     }
 }
@@ -3318,6 +3396,23 @@ mod tests {
 
         assert_eq!(response.status, StatusCode::NO_CONTENT);
         assert!(response.body.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ops_socket_exposes_only_read_only_status_without_bearer_auth() {
+        let app = app();
+
+        let response = app.handle_ops_socket("GET", "/_fluxheim/status", None);
+        assert_eq!(response.status, StatusCode::OK);
+        let body = String::from_utf8(response.body).unwrap();
+        assert!(body.contains(r#""status":"ok""#));
+
+        let response = app.handle_ops_socket("POST", "/_fluxheim/status", None);
+        assert_eq!(response.status, StatusCode::METHOD_NOT_ALLOWED);
+
+        let response = app.handle_ops_socket("POST", "/_fluxheim/reload", None);
+        assert_eq!(response.status, StatusCode::NOT_FOUND);
     }
 
     #[test]

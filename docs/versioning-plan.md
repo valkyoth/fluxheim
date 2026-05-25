@@ -1259,8 +1259,11 @@ Release shape:
     `Set-Cookie` response rewrites are already implemented through the
     inherited response-header policy path, and route `rewrite_prefix` handles
     simple upstream path-prefix mapping;
-  - local Unix operational socket for read-only pool, queue, rate-limit,
-    circuit, and mirror status;
+  - local Unix operational socket: first slice is `[admin.ops_socket]`, a
+    read-only Unix-domain HTTP endpoint for status, cache status, snapshots, and
+    health checks with owner/group-only socket permissions. Pool, queue,
+    rate-limit, circuit, and mirror-specific detail can be added without
+    exposing mutating commands;
   - typed hook points for future Wasm/Lua-like policy without executing plugins
     in 1.4.
 - `1.4.2` - advanced policy and HAProxy-style operations:
@@ -1482,12 +1485,11 @@ Stable scope:
   - JSON output and existing access-log privacy controls;
   - no raw query/cookie/authorization values unless explicitly enabled.
 - Local operational socket:
-  - Unix-domain socket for fast local status and counters, similar in spirit to
-    HAProxy's stats socket;
-  - root/service-owner permissions, strict path validation, no network bind by
-    default;
-  - read-only status first, with any mutating commands deferred or separately
-    authorized.
+  - first slice implemented as `[admin.ops_socket]`, a Unix-domain HTTP socket
+    for fast local status, cache status, snapshots, and health checks;
+  - root/service-owner or dedicated-group permissions, strict path validation,
+    no network bind by default;
+  - mutating commands remain deferred or separately authorized.
 - Regex-based request/response header and URI rewrite rules using Rust's
   memory-safe regex engine:
   - route-scoped allow-list of operations;
@@ -2898,8 +2900,8 @@ the exception while the cache server is being completed as a focused sequence:
   pass-through policy.
 - `v1.4.1`: discovery, mirroring, structured logs, richer rewrite policy,
   regex and method routing, explicit WebSocket/HTTP upgrade proxying, bounded
-  auth subrequests, safe bodyless traffic mirroring, local operational sockets,
-  and typed operator hook points.
+  auth subrequests, safe bodyless traffic mirroring, a read-only Unix ops
+  socket, and typed operator hook points.
 - `v1.4.2`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local

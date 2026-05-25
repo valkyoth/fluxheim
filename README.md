@@ -96,6 +96,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Admin API | ✅ | Bearer-token auth, loopback defaults, brute-force throttling, authenticated health by default, snapshots, rollback, cache operations. |
+| Read-only ops socket | ✅ | `1.4.1-dev`; Unix-domain local status/cache/snapshot/health endpoint with owner/group-only permissions. |
 | Prometheus metrics | ✅ | Native metrics profile and bounded labels for edge/cache/LB/PHP events. |
 | OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
 | Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream, TLS identity, and compression fields. |
@@ -400,9 +401,8 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   and gRPC pass-through policy.
 - `1.4.1` is planned for the remaining proxy-operations work: dynamic upstream
   discovery, file-watched upstream lists, richer structured logs,
-  regex/template rewrite policy, local operational sockets, and typed hook
-  points. Safe bodyless traffic mirroring is already available behind the
-  `traffic-mirror` feature.
+  regex/template rewrite policy, and typed hook points. Safe bodyless traffic
+  mirroring and a read-only Unix ops socket are already available.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

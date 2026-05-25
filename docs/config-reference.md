@@ -161,6 +161,11 @@ snapshot_store = "/var/lib/fluxheim/snapshots"
 [admin.transport]
 mode = "local_only"
 
+[admin.ops_socket]
+enabled = false
+path = "/run/fluxheim/fluxheim-ops.sock"
+mode = "0600"
+
 [admin.health]
 unauthenticated = false
 response = "status"
@@ -202,6 +207,17 @@ the operator explicitly declare that a trusted local sidecar, reverse proxy, or
 load balancer terminates TLS/mTLS before traffic reaches the plain admin
 listener. Direct first-class admin TLS/mTLS remains planned; do not expose the
 admin listener over cleartext networks.
+
+`[admin.ops_socket]` enables a separate Unix-domain HTTP socket for local,
+read-only operational checks. It exposes only `GET /_fluxheim/status`,
+`GET /_fluxheim/cache/status`, `GET /_fluxheim/snapshots`, and the configured
+admin health path; mutating admin endpoints such as reload, rollback, and cache
+purge are not routed on this socket. The socket requires `admin.enabled = true`,
+is Unix-only, and validates its path with the same parent traversal, symlink, and
+unsafe-writable-parent checks used for process sockets. `mode` must grant owner
+read/write access, may grant group read/write access, and must not grant world
+access; use `0600` for service-owner-only status or `0660` for a dedicated
+operator group.
 
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the

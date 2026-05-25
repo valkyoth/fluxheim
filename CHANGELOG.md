@@ -33,13 +33,17 @@ behavior when the change improves security or project direction.
   bounded mirror response, records low-cardinality mirror outcomes through edge
   policy metrics when metrics are enabled, and never changes the primary
   response.
+- Added `[admin.ops_socket]`, a Unix-only read-only local operational socket
+  for status, cache status, snapshots, and health checks. The socket is
+  owner/group permission constrained and does not route mutating admin
+  operations.
 
 ### Planned
 
 - Start the proxy-operations follow-up after the `1.4.0` proxy parity
   baseline. Remaining scope is limited to HTTP migration blockers and read-only
-  operational visibility: discovery, local operational sockets, richer rewrite
-  policy, regex capture variables, and typed operator hook points.
+  operational visibility: discovery, richer rewrite policy, regex capture
+  variables, and typed operator hook points.
 
 ## 1.4.0 - 2026-05-25
 

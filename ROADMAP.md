@@ -61,17 +61,17 @@ certificate authentication, PROXY protocol, gRPC-safe HTTP/2 proxying,
 structured access logging, host/header/cookie/redirect rewrite policy, upstream
 TLS controls, active HTTP health checks, retry budgets, and connection/socket
 tuning. The next `1.4.1` proxy-operations release owns the remaining discovery,
-mirroring, richer rewrite, local operational socket, and typed hook-point work.
+mirroring, richer rewrite, local operational visibility, and typed hook-point work.
 The highest-value NGINX migration items are now explicitly first in that queue:
 regex path routing first as bounded route matching, then capture-aware rewrites,
 method-based routing, WebSocket/HTTP upgrade verification, and
 `auth_request`-style external authorization subrequests. Bounded regex and
 method route matching, explicit HTTP/1.1 websocket/upgrade proxying, the first
-bounded `auth_request` subrequest hook, and safe bodyless traffic mirroring are
-the first implemented slices of this queue. Regex routing should remain off by
-default and require an explicit global config opt-in, for example
-`server.regex_enabled = true`, before any vhost or route can use regex matchers
-or capture-aware rewrites. Follow-up `1.4.2` work
+bounded `auth_request` subrequest hook, safe bodyless traffic mirroring, and the
+first read-only Unix ops socket are the first implemented slices of this queue.
+Regex routing should remain off by default and require an explicit global config
+opt-in, for example `server.regex_enabled = true`, before any vhost or route can
+use regex matchers or capture-aware rewrites. Follow-up `1.4.2` work
 should cover optional GeoIP
 as a bounded Geo-Context foundation before the later enterprise load-balancer
 track: local MaxMind GeoIP2/ASN databases, safe path loading, atomic context
