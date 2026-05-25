@@ -385,11 +385,11 @@ raw = raw.replace(
 open(target, "w", encoding="utf-8").write(raw)
 PY
     if cargo run --quiet -- --check-config --config "$TMP_DIR/fluxheim-conflicting-upstreams.toml" >"$TMP_DIR/conflicting-upstreams-check.log" 2>&1; then
-        echo "1.0 core smoke failed: conflicting proxy upstream aliases were accepted" >&2
+        echo "1.0 core smoke failed: conflicting proxy upstreams were accepted" >&2
         exit 1
     fi
-    if ! grep -q "proxy.upstream and proxy.upstreams cannot both be configured" "$TMP_DIR/conflicting-upstreams-check.log"; then
-        echo "1.0 core smoke failed: conflicting proxy upstream aliases returned an unexpected error" >&2
+    if ! grep -q "proxy.upstream, proxy.upstreams, and proxy.upstreams_file are mutually exclusive" "$TMP_DIR/conflicting-upstreams-check.log"; then
+        echo "1.0 core smoke failed: conflicting proxy upstreams returned an unexpected error" >&2
         cat "$TMP_DIR/conflicting-upstreams-check.log" >&2
         exit 1
     fi
