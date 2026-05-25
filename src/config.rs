@@ -5034,6 +5034,8 @@ pub struct RateLimitConfig {
     pub mode: RateLimitMode,
     #[serde(default = "default_rate_limit_max_delay_ms")]
     pub max_delay_ms: u64,
+    #[serde(default)]
+    pub reject_indeterminate: bool,
 }
 
 impl Default for RateLimitConfig {
@@ -5047,6 +5049,7 @@ impl Default for RateLimitConfig {
             entry_ttl_secs: default_rate_limit_entry_ttl_secs(),
             mode: RateLimitMode::Nodelay,
             max_delay_ms: default_rate_limit_max_delay_ms(),
+            reject_indeterminate: false,
         }
     }
 }

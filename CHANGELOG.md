@@ -161,6 +161,15 @@ behavior when the change improves security or project direction.
   verified TLS-derived value.
 - Switched admin and route/vhost client-certificate fingerprint list checks to
   full-list constant-time-oriented comparisons.
+- Added `reject_indeterminate` to vhost and route rate-limit policies so
+  operators can reject requests when no trusted-proxy-aware client IP can be
+  determined instead of using the shared anonymous bucket.
+- Bounded process-global slice-cache fill concurrency keys and abort on a
+  poisoned slice-fill lock so high-cardinality cache misses cannot grow that
+  map indefinitely.
+- Removed the process ID from generated snapshot IDs; uniqueness now comes from
+  timestamp plus a process-local sequence without disclosing PID information
+  through the authenticated admin API.
 - Documented the anonymous shared rate-limit bucket used when no effective
   client IP is available, and warn when admin client-certificate header gates
   are configured on loopback listeners without an enforced terminator boundary.
