@@ -876,7 +876,10 @@ bounded text body. Other auth statuses are treated as a gateway-side auth
 failure. The hook can be configured globally, per vhost proxy, or per route
 proxy block. In FIPS/ISO-required mode, auth subrequests are limited to numeric
 local `http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS
-client evidence is routed through the selected validated provider.
+client evidence is routed through the selected validated provider. With metrics
+enabled, auth subrequest decisions are counted by
+`fluxheim_edge_policy_events_total` with bounded `auth_request` policy labels
+and `allow`, `deny`, or `error` outcomes.
 
 `[[proxy.error_pages]]` entries are internal static fallback pages for proxy
 failures. The `path` is an internal request path resolved below the entry's

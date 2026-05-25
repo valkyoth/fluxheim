@@ -1237,8 +1237,9 @@ Release shape:
     allow, returns bounded 4xx/5xx auth denials, copies allow-listed auth
     response headers into the upstream request, and constrains FIPS/ISO-required
     deployments to numeric local `http://` auth sidecars until outbound TLS
-    client evidence is provider-aligned. Follow-up work can add low-cardinality
-    decision metrics and richer deny/error policy;
+    client evidence is provider-aligned. Low-cardinality decision metrics are
+    recorded through edge-policy events; richer deny/error policy remains later
+    work;
   - DNS-refreshing upstreams for container/service-name targets. First slice is
     `upstream_dns_refresh_secs` for load-balancer builds, resolved by Pingora
     service discovery and deliberately kept separate from weights, aliases,

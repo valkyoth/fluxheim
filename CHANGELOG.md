@@ -48,6 +48,8 @@ behavior when the change improves security or project direction.
   `upstream_dns_refresh_secs`, intended for container/service-name targets.
   The first slice keeps dynamic DNS separate from weights, aliases, backups,
   and drains.
+- Added low-cardinality `auth_request` allow/deny/error outcomes to
+  `fluxheim_edge_policy_events_total`.
 
 ### Planned
 

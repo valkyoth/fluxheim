@@ -1415,6 +1415,7 @@ fn edge_policy_label(policy: &str) -> &'static str {
         "access" => "access",
         "rate_limit" => "rate_limit",
         "concurrency" => "concurrency",
+        "auth_request" => "auth_request",
         _ => "other",
     }
 }
@@ -1422,8 +1423,10 @@ fn edge_policy_label(policy: &str) -> &'static str {
 fn edge_policy_outcome_label(outcome: &str) -> &'static str {
     match outcome {
         "deny" => "deny",
+        "allow" => "allow",
         "delay" => "delay",
         "reject" => "reject",
+        "error" => "error",
         _ => "other",
     }
 }
@@ -1690,6 +1693,8 @@ mod tests {
         init().unwrap();
 
         record_edge_policy_event("edge-policy-test", Some("assets"), "access", "deny");
+        record_edge_policy_event("edge-policy-test", Some("assets"), "auth_request", "allow");
+        record_edge_policy_event("edge-policy-test", Some("assets"), "auth_request", "error");
         record_edge_policy_event("edge-policy-test", Some("assets"), "rate_limit", "delay");
         record_edge_policy_event("edge-policy-test", None, "concurrency", "reject");
         record_edge_policy_event(
@@ -1711,12 +1716,15 @@ mod tests {
         assert!(output.contains(r#"vhost="edge-policy-test""#));
         assert!(output.contains(r#"route="assets""#));
         assert!(output.contains(r#"policy="access""#));
+        assert!(output.contains(r#"policy="auth_request""#));
         assert!(output.contains(r#"policy="rate_limit""#));
         assert!(output.contains(r#"policy="concurrency""#));
         assert!(output.contains(r#"policy="other""#));
         assert!(output.contains(r#"outcome="deny""#));
+        assert!(output.contains(r#"outcome="allow""#));
         assert!(output.contains(r#"outcome="delay""#));
         assert!(output.contains(r#"outcome="reject""#));
+        assert!(output.contains(r#"outcome="error""#));
         assert!(output.contains(r#"outcome="other""#));
         assert!(!output.contains("attacker-policy"));
         assert!(!output.contains("attacker-outcome"));

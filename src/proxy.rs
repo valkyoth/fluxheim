@@ -11514,6 +11514,7 @@ fn normalize_cookie_headers(request: &mut RequestHeader) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(not(feature = "cache"), allow(dead_code))]
 fn proxy_upgrade_request_allowed(request: &RequestHeader, proxy: &ProxyConfig) -> bool {
     proxy.websocket && http_upgrade_request_value(request).is_some()
 }
@@ -11596,31 +11597,67 @@ async fn authorize_proxy_request(
     if !auth.enabled {
         return Ok(false);
     }
+    #[cfg(feature = "metrics")]
+    let edge_policy_route = ctx
+        .route_index
+        .and_then(|route_index| vhost.routes.get(route_index))
+        .map(|route| route.name.as_str());
     let input = auth_request_input(session.req_header(), auth);
     let auth = auth.clone();
-    let decision = tokio::task::spawn_blocking(move || fetch_auth_request_decision(&auth, &input))
-        .await
-        .map_err(|error| {
-            Error::because(
-                ErrorType::InternalError,
-                "auth_request worker task failed",
-                error,
-            )
-        })?
-        .map_err(|error| {
-            Error::because(
-                ErrorType::HTTPStatus(502),
-                "auth_request subrequest failed",
-                error,
-            )
-        })?;
+    let decision =
+        match tokio::task::spawn_blocking(move || fetch_auth_request_decision(&auth, &input)).await
+        {
+            Ok(Ok(decision)) => decision,
+            Ok(Err(error)) => {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_edge_policy_event(
+                    vhost.name.as_str(),
+                    edge_policy_route,
+                    "auth_request",
+                    "error",
+                );
+                return Err(Error::because(
+                    ErrorType::HTTPStatus(502),
+                    "auth_request subrequest failed",
+                    error,
+                ));
+            }
+            Err(error) => {
+                #[cfg(feature = "metrics")]
+                crate::metrics::record_edge_policy_event(
+                    vhost.name.as_str(),
+                    edge_policy_route,
+                    "auth_request",
+                    "error",
+                );
+                return Err(Error::because(
+                    ErrorType::InternalError,
+                    "auth_request worker task failed",
+                    error,
+                ));
+            }
+        };
 
     match decision {
         AuthRequestDecision::Allow { headers } => {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_edge_policy_event(
+                vhost.name.as_str(),
+                edge_policy_route,
+                "auth_request",
+                "allow",
+            );
             ctx.auth_request_headers = headers;
             Ok(false)
         }
         AuthRequestDecision::Deny { status, body } => {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_edge_policy_event(
+                vhost.name.as_str(),
+                edge_policy_route,
+                "auth_request",
+                "deny",
+            );
             respond_text_error(session, status, body).await?;
             Ok(true)
         }
@@ -13877,7 +13914,6 @@ fn response_header_values<'a>(
         .filter_map(|value| value.to_str().ok())
 }
 
-#[cfg(any(feature = "web", feature = "cache"))]
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
     let mut values = request_header_values(request, name);
     let first = values.next()?.to_owned();
