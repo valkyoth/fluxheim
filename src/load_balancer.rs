@@ -2,7 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -976,24 +976,7 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
         std::collections::BTreeSet<Backend>,
         std::collections::HashMap<u64, bool>,
     )> {
-        let path = self.path.clone();
-        let upstreams =
-            tokio::task::spawn_blocking(move || crate::config::read_proxy_upstreams_file(&path))
-                .await
-                .map_err(|error| {
-                    Error::because(
-                        ErrorType::InternalError,
-                        "proxy upstreams file discovery task failed",
-                        io::Error::other(error.to_string()),
-                    )
-                })?
-                .map_err(|error| {
-                    Error::because(
-                        ErrorType::ReadError,
-                        "failed to read proxy upstreams file",
-                        error,
-                    )
-                })?;
+        let upstreams = read_proxy_upstreams_file_for_discovery(self.path.clone()).await?;
         let mut backends = std::collections::BTreeSet::new();
         for upstream in upstreams {
             let backend = Backend::new(&upstream).map_err(|error| {
@@ -1007,6 +990,33 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
         }
         Ok((backends, std::collections::HashMap::new()))
     }
+}
+
+async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> pingora::Result<Vec<String>> {
+    let result = if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::spawn_blocking(move || crate::config::read_proxy_upstreams_file(&path))
+            .await
+            .map_err(|error| {
+                Error::because(
+                    ErrorType::InternalError,
+                    "proxy upstreams file discovery task failed",
+                    io::Error::other(error.to_string()),
+                )
+            })?
+    } else {
+        // Pingora performs the initial load-balancer update synchronously during
+        // construction. There is no Tokio reactor yet in that path, so this
+        // bootstrap read must stay immediately ready for now_or_never().
+        crate::config::read_proxy_upstreams_file(&path)
+    };
+
+    result.map_err(|error| {
+        Error::because(
+            ErrorType::ReadError,
+            "failed to read proxy upstreams file",
+            error,
+        )
+    })
 }
 
 struct DnsUpstreamDiscovery {
@@ -1023,15 +1033,7 @@ impl ServiceDiscovery for DnsUpstreamDiscovery {
     )> {
         let mut backends = std::collections::BTreeSet::new();
         for upstream in self.upstreams.iter() {
-            let resolved = tokio::net::lookup_host(upstream.as_str())
-                .await
-                .map_err(|error| {
-                    Error::because(
-                        ErrorType::ConnectError,
-                        "failed to resolve proxy upstream",
-                        error,
-                    )
-                })?;
+            let resolved = resolve_proxy_upstream_for_discovery(upstream).await?;
             for address in resolved {
                 let backend = Backend::new(&address.to_string()).map_err(|error| {
                     Error::because(
@@ -1051,6 +1053,29 @@ impl ServiceDiscovery for DnsUpstreamDiscovery {
         }
         Ok((backends, std::collections::HashMap::new()))
     }
+}
+
+async fn resolve_proxy_upstream_for_discovery(upstream: &str) -> pingora::Result<Vec<SocketAddr>> {
+    let result = if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::net::lookup_host(upstream)
+            .await
+            .map(|resolved| resolved.collect())
+    } else {
+        // See read_proxy_upstreams_file_for_discovery(): construction-time
+        // update is polled synchronously before a reactor is available. Later
+        // refreshes run under Tokio and use lookup_host().
+        upstream
+            .to_socket_addrs()
+            .map(|resolved| resolved.collect::<Vec<_>>())
+    };
+
+    result.map_err(|error| {
+        Error::because(
+            ErrorType::ConnectError,
+            "failed to resolve proxy upstream",
+            error,
+        )
+    })
 }
 
 fn configured_health_check(
