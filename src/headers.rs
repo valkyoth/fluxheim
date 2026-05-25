@@ -89,7 +89,7 @@ impl RouteRegexCaptures {
         Self { numbered, named }
     }
 
-    fn variable(&self, variable: &str) -> Option<&str> {
+    pub fn variable(&self, variable: &str) -> Option<&str> {
         let key = variable.strip_prefix("route.regex.")?;
         if key.bytes().all(|byte| byte.is_ascii_digit()) {
             return key

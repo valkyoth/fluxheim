@@ -1218,9 +1218,9 @@ Release shape:
     is set. This keeps accidental high-cardinality or overly broad regex policy
     out of normal prefix/exact-route deployments;
   - named and numbered regex captures exposed as bounded typed variables for
-    request-header templates in the first slice. `rewrite_prefix` successors,
-    structured logs, and future typed hooks remain follow-up work. Capture
-    variables must not become metric labels by default;
+    request-header templates and path-only `rewrite_template` routes in the
+    first slice. Structured logs and future typed hooks remain follow-up work.
+    Capture variables must not become metric labels by default;
   - method-based route matching through `methods = ["GET", "HEAD"]`, with
     config-time validation, so read/write routing can be expressed without Lua
     or duplicated vhosts. The first slice treats method lists as route match
@@ -1265,8 +1265,10 @@ Release shape:
     Prometheus metrics count applied compression by bounded encoding;
   - route-scoped regex/template rewrite policy. `Location`, `Refresh`, and
     `Set-Cookie` response rewrites are already implemented through the
-    inherited response-header policy path, and route `rewrite_prefix` handles
-    simple upstream path-prefix mapping;
+    inherited response-header policy path, route `rewrite_prefix` handles
+    simple upstream path-prefix mapping, and regex routes can use bounded
+    path-only `rewrite_template` capture expansion. Do not add nginx-style
+    sequential rewrite loops or `if` blocks in `1.4.1`;
   - local Unix operational socket: first slice is `[admin.ops_socket]`, a
     read-only Unix-domain HTTP endpoint for status, cache status, snapshots, and
     health checks with owner/group-only socket permissions. Pool, queue,
@@ -1535,7 +1537,9 @@ Out of scope for `1.4`:
   upstream-blocked until Pingora exposes stable server-side QUIC support.
 - Arbitrary Lua/Wasm script execution. `1.4` should define typed hook points and
   bounded policy surfaces; the shared Wasm runtime remains a separate `1.6`
-  line.
+  line. NGINX rewrite-module-style `if` conditions should be evaluated there
+  as sandboxed policy hooks rather than copied into TOML as a second ad-hoc
+  language.
 - HTTP/2 server push should be skipped permanently unless the browser ecosystem
   reverses course; mainstream clients removed or never enabled it, so it is not
   a useful parity target.
@@ -2014,6 +2018,9 @@ Stable scope:
 - Request header hook.
 - Response header hook.
 - Access-control hook returning allow, deny, or continue.
+- Conditional request-policy hooks that can cover nginx rewrite-module-style
+  `if` use cases only inside the sandbox, with no URI rewrite loops by default
+  and with explicit limits on returned decisions and mutations.
 - Cache-policy hooks inspired by VCL, but designed as a constrained Rust/Wasm
   ABI rather than an embedded language:
   - lookup/admission hook for bypass, pass, continue, or deny decisions;

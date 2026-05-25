@@ -2962,6 +2962,7 @@ struct RuntimeRoute {
     https_redirect_exempt: bool,
     strip_prefix: Option<String>,
     rewrite_prefix: Option<String>,
+    rewrite_template: Option<String>,
     max_request_body_bytes: Option<crate::config::ByteSize>,
     access: RuntimeAccessPolicy,
     rate_limit: RuntimeRateLimit,
@@ -5264,6 +5265,7 @@ impl RuntimeRoute {
             https_redirect_exempt: route.https_redirect_exempt,
             strip_prefix: route.strip_prefix.clone(),
             rewrite_prefix: route.rewrite_prefix.clone(),
+            rewrite_template: route.rewrite_template.clone(),
             max_request_body_bytes: route.max_request_body_bytes,
             access: RuntimeAccessPolicy::from_config(&route.access)?,
             rate_limit: RuntimeRateLimit::from_config(&route.rate_limit),
@@ -5298,6 +5300,7 @@ impl RuntimeRoute {
             https_redirect_exempt: true,
             strip_prefix: None,
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             access: RuntimeAccessPolicy::default(),
             rate_limit: RuntimeRateLimit::default(),
@@ -13139,6 +13142,17 @@ fn route_redirect_location(
 }
 
 fn route_rewritten_path_and_query(request: &RequestHeader, route: &RuntimeRoute) -> Option<String> {
+    if let Some(template) = route.rewrite_template.as_deref() {
+        let rewritten_path = route_rewrite_template_path(request.uri.path(), route, template)?;
+        if !safe_forward_path(&rewritten_path) {
+            return None;
+        }
+        return match request.uri.query() {
+            Some(query) => Some(format!("{rewritten_path}?{query}")),
+            None => Some(rewritten_path),
+        };
+    }
+
     let strip_prefix = route.strip_prefix.as_deref()?;
     let path = request.uri.path();
     let suffix = path.strip_prefix(strip_prefix)?;
@@ -13158,6 +13172,49 @@ fn route_rewritten_path_and_query(request: &RequestHeader, route: &RuntimeRoute)
         Some(query) => Some(format!("{rewritten_path}?{query}")),
         None => Some(rewritten_path),
     }
+}
+
+fn route_rewrite_template_path(path: &str, route: &RuntimeRoute, template: &str) -> Option<String> {
+    let RuntimeRouteMatcher::Regex(regex) = &route.matcher else {
+        return None;
+    };
+    let captures = regex.captures(path)?;
+    let numbered = captures
+        .iter()
+        .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
+        .map(bounded_route_regex_capture)
+        .collect::<Vec<_>>();
+    let named = regex
+        .capture_names()
+        .enumerate()
+        .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
+        .filter_map(|(index, name)| {
+            name.and_then(|name| {
+                captures
+                    .get(index)
+                    .and_then(|value| bounded_route_regex_capture(Some(value)))
+                    .map(|value| (name.to_owned(), value))
+            })
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let captures = crate::headers::RouteRegexCaptures::new(numbered, named);
+    let mut rewritten = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        rewritten.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        let close = after_open.find('}')?;
+        let variable = &after_open[..close];
+        if let Some(value) = captures.variable(variable) {
+            rewritten.push_str(value);
+        }
+        rest = &after_open[close + 1..];
+    }
+    rewritten.push_str(rest);
+    if rewritten.contains('{') || rewritten.contains('}') {
+        return None;
+    }
+    Some(rewritten)
 }
 
 fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<String> {
@@ -16960,6 +17017,7 @@ mod tests {
                         methods: Vec::new(),
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
@@ -16987,6 +17045,7 @@ mod tests {
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
@@ -17014,6 +17073,7 @@ mod tests {
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
@@ -17041,6 +17101,7 @@ mod tests {
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
@@ -17068,6 +17129,7 @@ mod tests {
                         fallback: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         https_redirect_exempt: false,
                         max_request_body_bytes: None,
                         access: Default::default(),
@@ -17141,6 +17203,7 @@ mod tests {
                         https_redirect_exempt: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
@@ -17167,6 +17230,7 @@ mod tests {
                         https_redirect_exempt: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
@@ -17194,6 +17258,7 @@ mod tests {
                         https_redirect_exempt: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
@@ -17383,6 +17448,7 @@ mod tests {
             https_redirect_exempt: false,
             strip_prefix: Some("/chat/".to_owned()),
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
@@ -17418,6 +17484,7 @@ mod tests {
             https_redirect_exempt: false,
             strip_prefix: Some("/public/api/".to_owned()),
             rewrite_prefix: Some("/internal/v1/".to_owned()),
+            rewrite_template: None,
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
@@ -17443,6 +17510,57 @@ mod tests {
     }
 
     #[test]
+    fn route_rewrite_template_uses_regex_captures() {
+        let request =
+            pingora::http::RequestHeader::build("GET", b"/api/v2/users?id=7", None).unwrap();
+        let route = super::RuntimeRoute {
+            name: "api".to_owned(),
+            matcher: super::RuntimeRouteMatcher::Regex(
+                regex::Regex::new(r"^/api/v(?P<version>[0-9]+)/(?P<rest>.*)$").unwrap(),
+            ),
+            methods: Vec::new(),
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: Some(
+                "/internal/v{route.regex.version}/{route.regex.rest}".to_owned(),
+            ),
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            grpc: Default::default(),
+            action: super::RuntimeRouteAction::Proxy(
+                super::RuntimeProxy::from_config(&ProxyConfig::default(), "test proxy").unwrap(),
+            ),
+            #[cfg(feature = "load-balancer")]
+            load_balancer: None,
+            #[cfg(feature = "cache")]
+            cache: None,
+            #[cfg(feature = "compression")]
+            compression: None,
+            request_headers: crate::config::RequestHeaderPolicyConfig::default(),
+            response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
+        };
+
+        assert_eq!(
+            route_rewritten_path_and_query(&request, &route).as_deref(),
+            Some("/internal/v2/users?id=7")
+        );
+
+        let traversal =
+            pingora::http::RequestHeader::build("GET", b"/api/v2/../admin", None).unwrap();
+        assert_eq!(route_rewritten_path_and_query(&traversal, &route), None);
+
+        let encoded_separator =
+            pingora::http::RequestHeader::build("GET", b"/api/v2/users%2fadmin", None).unwrap();
+        assert_eq!(
+            route_rewritten_path_and_query(&encoded_separator, &route),
+            None
+        );
+    }
+
+    #[test]
     fn route_strip_prefix_rejects_traversal_suffixes() {
         let route = super::RuntimeRoute {
             name: "api".to_owned(),
@@ -17451,6 +17569,7 @@ mod tests {
             https_redirect_exempt: false,
             strip_prefix: Some("/api/".to_owned()),
             rewrite_prefix: None,
+            rewrite_template: None,
             max_request_body_bytes: None,
             access: Default::default(),
             rate_limit: Default::default(),
@@ -18139,6 +18258,7 @@ mod tests {
                     https_redirect_exempt: false,
                     strip_prefix: None,
                     rewrite_prefix: None,
+                    rewrite_template: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
@@ -18238,6 +18358,7 @@ mod tests {
                     https_redirect_exempt: false,
                     strip_prefix: None,
                     rewrite_prefix: None,
+                    rewrite_template: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
@@ -18750,6 +18871,7 @@ mod tests {
                     https_redirect_exempt: false,
                     strip_prefix: None,
                     rewrite_prefix: None,
+                    rewrite_template: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
@@ -19428,6 +19550,7 @@ mod tests {
                     https_redirect_exempt: false,
                     strip_prefix: None,
                     rewrite_prefix: None,
+                    rewrite_template: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
@@ -19544,6 +19667,7 @@ mod tests {
                     https_redirect_exempt: false,
                     strip_prefix: None,
                     rewrite_prefix: None,
+                    rewrite_template: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),
@@ -19913,6 +20037,7 @@ mod tests {
                         https_redirect_exempt: false,
                         strip_prefix: None,
                         rewrite_prefix: None,
+                        rewrite_template: None,
                         max_request_body_bytes: None,
                         access: Default::default(),
                         rate_limit: Default::default(),
@@ -20000,6 +20125,7 @@ mod tests {
                     https_redirect_exempt: false,
                     strip_prefix: None,
                     rewrite_prefix: None,
+                    rewrite_template: None,
                     max_request_body_bytes: None,
                     access: Default::default(),
                     rate_limit: Default::default(),

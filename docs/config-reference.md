@@ -2009,7 +2009,10 @@ variables for migration patterns: `{route.regex.0}` is the full match,
 values are capped before template rendering and are not used as metric labels.
 A route must define exactly one matcher: `path_exact`, `path_prefix`,
 `path_regex`, or `fallback = true`, and one action: `redirect`, `proxy`, `web`,
-or `php`.
+or `php`. Regex routes may also set `rewrite_template` to build a new upstream
+path from bounded regex captures. `rewrite_template` is path-only, preserves the
+original query string, rejects unsafe rendered paths, and cannot be combined
+with `strip_prefix` or `rewrite_prefix`.
 
 ```toml
 [[vhosts.routes]]
@@ -2032,7 +2035,8 @@ require_content_type = true
 
 [[vhosts.routes]]
 name = "versioned-api"
-path_regex = "^/api/v(?P<version>[0-9]+)/"
+path_regex = "^/api/v(?P<version>[0-9]+)/(?P<rest>.*)$"
+rewrite_template = "/internal/v{route.regex.version}/{route.regex.rest}"
 
 [vhosts.routes.headers.request.add]
 x-api-version = "{route.regex.version}"
