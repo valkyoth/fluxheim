@@ -119,6 +119,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"xou={self.headers.get('x-original-uri', '')}",
                 f"xpb={self.headers.get('x-proxy-by', '')}",
                 f"xcu={self.headers.get('x-client-upgrade', '')}",
+                f"xav={self.headers.get('x-api-version', '')}",
             ]
         ).encode("ascii")
         self.send_response(200)
@@ -163,6 +164,7 @@ listen = ["127.0.0.1:$FLUXHEIM_PORT"]
 tls_listen = ["127.0.0.1:$FLUXHEIM_TLS_PORT"]
 default_vhost = "static.test"
 trusted_proxies = []
+regex_enabled = true
 
 [server.process]
 daemon = false
@@ -299,6 +301,18 @@ upstreams = ["127.0.0.1:$ORIGIN_PORT"]
 upstream_tls = false
 read_timeout_secs = 600
 send_timeout_secs = 600
+
+[[vhosts.routes]]
+name = "versioned-api"
+path_regex = "^/api/v(?P<version>[0-9]+)/(?P<rest>.*)$"
+rewrite_template = "/internal/v{route.regex.version}/{route.regex.rest}"
+
+[vhosts.routes.headers.request.add]
+x-api-version = "{route.regex.version}"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_PORT"]
+upstream_tls = false
 
 [[vhosts.routes]]
 name = "fallback"
@@ -473,6 +487,16 @@ for expected in "proxy-ok" "path=/api/check" "xfh=app.test" "xfp=http" "xri=127.
     if ! grep -q "^$expected$" "$PROXY_BODY"; then
         echo "1.0 core smoke failed: proxied response missing $expected" >&2
         cat "$PROXY_BODY" >&2
+        exit 1
+    fi
+done
+
+REWRITE_BODY="$TMP_DIR/rewrite-template-body.txt"
+curl -fsS -H "Host: app.test" "http://127.0.0.1:$FLUXHEIM_PORT/api/v2/users?id=7" > "$REWRITE_BODY"
+for expected in "path=/internal/v2/users?id=7" "xav=2"; do
+    if ! grep -q "^$expected$" "$REWRITE_BODY"; then
+        echo "1.0 core smoke failed: regex rewrite_template response missing $expected" >&2
+        cat "$REWRITE_BODY" >&2
         exit 1
     fi
 done
