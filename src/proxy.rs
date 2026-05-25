@@ -5656,6 +5656,7 @@ pub struct RequestContext {
     cache_range: Option<CacheRangeRequest>,
     #[cfg(feature = "cache")]
     revalidation_304_headers: Option<Revalidation304Headers>,
+    auth_request_headers: Vec<(String, String)>,
     #[cfg(all(feature = "php-fpm", feature = "otel-otlp"))]
     php_outcome: Option<&'static str>,
     #[cfg(any(
@@ -6124,6 +6125,9 @@ impl ProxyHttp for FluxProxy {
                         }
                         return Ok(true);
                     }
+                    if authorize_proxy_request(session, ctx, vhost).await? {
+                        return Ok(true);
+                    }
                     #[cfg(feature = "cache")]
                     if respond_proxy_slice_cache_request(session, ctx, &state, vhost_index).await? {
                         return Ok(true);
@@ -6493,6 +6497,9 @@ impl ProxyHttp for FluxProxy {
                 tls_identity: tls_identity.as_ref(),
             },
         )?;
+        for (name, value) in &ctx.auth_request_headers {
+            upstream_request.insert_header(name.clone(), value.clone())?;
+        }
         apply_websocket_upgrade_headers_if_enabled(
             session.req_header(),
             upstream_request,
@@ -11552,12 +11559,160 @@ fn valid_http_upgrade_token(value: &str) -> bool {
         })
 }
 
+#[derive(Debug)]
+struct AuthRequestInput {
+    headers: Vec<(String, String)>,
+}
+
+#[derive(Debug)]
+enum AuthRequestDecision {
+    Allow { headers: Vec<(String, String)> },
+    Deny { status: u16, body: Bytes },
+}
+
+async fn authorize_proxy_request(
+    session: &mut Session,
+    ctx: &mut RequestContext,
+    vhost: &RuntimeVhost,
+) -> Result<bool> {
+    let auth = &selected_runtime_proxy(vhost, ctx).config.auth_request;
+    if !auth.enabled {
+        return Ok(false);
+    }
+    let input = auth_request_input(session.req_header(), auth);
+    let auth = auth.clone();
+    let decision = tokio::task::spawn_blocking(move || fetch_auth_request_decision(&auth, &input))
+        .await
+        .map_err(|error| {
+            Error::because(
+                ErrorType::InternalError,
+                "auth_request worker task failed",
+                error,
+            )
+        })?
+        .map_err(|error| {
+            Error::because(
+                ErrorType::HTTPStatus(502),
+                "auth_request subrequest failed",
+                error,
+            )
+        })?;
+
+    match decision {
+        AuthRequestDecision::Allow { headers } => {
+            ctx.auth_request_headers = headers;
+            Ok(false)
+        }
+        AuthRequestDecision::Deny { status, body } => {
+            respond_text_error(session, status, body).await?;
+            Ok(true)
+        }
+    }
+}
+
+fn auth_request_input(
+    request: &RequestHeader,
+    auth: &crate::config::AuthRequestConfig,
+) -> AuthRequestInput {
+    let mut headers = Vec::new();
+    for name in &auth.forward_headers {
+        if let Some(value) = request_header_values_joined(request, name) {
+            headers.push((name.clone(), value));
+        }
+    }
+    AuthRequestInput { headers }
+}
+
+fn fetch_auth_request_decision(
+    auth: &crate::config::AuthRequestConfig,
+    input: &AuthRequestInput,
+) -> io::Result<AuthRequestDecision> {
+    let url = auth.url.as_deref().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "enabled auth_request requires url",
+        )
+    })?;
+    let timeout = Duration::from_secs(
+        auth.connect_timeout_secs
+            .saturating_add(auth.read_timeout_secs),
+    );
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut builder = agent.get(url).header("cache-control", "no-store");
+    for (name, value) in &input.headers {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    let mut response = builder.call().map_err(auth_request_io_error)?;
+    let status = response.status().as_u16();
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(auth.max_response_bytes.as_u64().saturating_add(1))
+        .read_to_vec()
+        .map_err(auth_request_io_error)?;
+    if body.len() as u64 > auth.max_response_bytes.as_u64() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "auth_request response exceeds configured body limit",
+        ));
+    }
+    if (200..300).contains(&status) {
+        return Ok(AuthRequestDecision::Allow {
+            headers: auth_response_allowed_headers(auth, &response),
+        });
+    }
+    let status = if (400..600).contains(&status) {
+        status
+    } else {
+        500
+    };
+    Ok(AuthRequestDecision::Deny {
+        status,
+        body: Bytes::from(body),
+    })
+}
+
+fn auth_response_allowed_headers(
+    auth: &crate::config::AuthRequestConfig,
+    response: &ureq::http::Response<ureq::Body>,
+) -> Vec<(String, String)> {
+    response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            if !auth
+                .allow_response_headers
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(name.as_str()))
+            {
+                return None;
+            }
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_owned()))
+        })
+        .collect()
+}
+
+fn auth_request_io_error(error: impl std::fmt::Display) -> io::Error {
+    io::Error::other(error.to_string())
+}
+
 async fn continue_to_proxy_or_not_found(
     session: &mut Session,
     vhost: &RuntimeVhost,
-    ctx: &RequestContext,
+    ctx: &mut RequestContext,
 ) -> Result<bool> {
     if selected_runtime_proxy(vhost, ctx).enabled {
+        if authorize_proxy_request(session, ctx, vhost).await? {
+            return Ok(true);
+        }
         Ok(false)
     } else {
         session.respond_error(404).await?;
@@ -13982,9 +14137,9 @@ mod tests {
     #[cfg(feature = "load-balancer")]
     use crate::config::LoadBalanceRetryConfig;
     use crate::config::{
-        ByteSize, CacheConfig, Config, GrpcRouteConfig, HostRoutingConfig, HttpsRedirectConfig,
-        ProxyConfig, RateLimitMode, RouteConfig, RouteRedirectConfig, ServerConfig,
-        ServerLimitsConfig, UpstreamHttpVersion, VhostConfig, WebConfig,
+        AuthRequestConfig, ByteSize, CacheConfig, Config, GrpcRouteConfig, HostRoutingConfig,
+        HttpsRedirectConfig, ProxyConfig, RateLimitMode, RouteConfig, RouteRedirectConfig,
+        ServerConfig, ServerLimitsConfig, UpstreamHttpVersion, VhostConfig, WebConfig,
     };
     #[cfg(any(feature = "cache", feature = "web"))]
     use crate::test_support::unique_temp_path;
@@ -14020,7 +14175,7 @@ mod tests {
         FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
         RuntimeConcurrencyLimit, RuntimeProxy, RuntimeRateLimit, append_fluxheim_via_to_request,
         append_fluxheim_via_to_response, apply_websocket_upgrade_headers_if_enabled,
-        approximate_request_header_bytes, count_response_body_chunk,
+        approximate_request_header_bytes, auth_request_input, count_response_body_chunk,
         effective_client_ip_from_forwarded_for, grpc_content_type, grpc_route_rejection_status,
         http_peer_for_proxy, http_peer_for_runtime_proxy, https_redirect_location,
         normalize_cookie_headers, proxy_protocol_v1_header, proxy_protocol_v2_header,
@@ -16844,6 +16999,30 @@ mod tests {
         };
 
         assert!(!proxy_upgrade_request_allowed(&downstream, &proxy));
+    }
+
+    #[test]
+    fn auth_request_input_forwards_only_configured_headers() {
+        let mut request = pingora::http::RequestHeader::build("GET", b"/private", None).unwrap();
+        request
+            .insert_header("authorization", "Bearer abc")
+            .unwrap();
+        request.insert_header("cookie", "a=1").unwrap();
+        request.insert_header("x-ignored", "no").unwrap();
+        let auth = AuthRequestConfig {
+            enabled: true,
+            url: Some("http://127.0.0.1:4180/auth".to_owned()),
+            forward_headers: vec!["authorization".to_owned(), "cookie".to_owned()],
+            ..AuthRequestConfig::default()
+        };
+
+        assert_eq!(
+            auth_request_input(&request, &auth).headers,
+            [
+                ("authorization".to_owned(), "Bearer abc".to_owned()),
+                ("cookie".to_owned(), "a=1".to_owned())
+            ]
+        );
     }
 
     #[test]

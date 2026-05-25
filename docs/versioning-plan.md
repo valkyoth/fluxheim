@@ -1231,12 +1231,14 @@ Release shape:
     hop-by-hop upgrade header forwarding, and forced cache bypass for upgraded
     connections. Remaining coverage should focus on end-to-end `101 Switching
     Protocols` fixtures and long-lived timeout behavior;
-  - `auth_request`-style external authorization for vhosts and routes. The
-    first implementation should make one bounded HTTP subrequest before
-    forwarding, send only configured request headers, enforce connect/read
-    timeouts, treat 2xx as allow and 4xx/5xx as deny/error according to policy,
-    optionally copy allow-listed auth response headers into the upstream
-    request, and count decisions with low-cardinality metrics;
+  - `auth_request`-style external authorization for proxy actions. The first
+    slice makes one bounded `GET` subrequest before forwarding, sends only
+    configured request headers, enforces connect/read/body limits, treats 2xx as
+    allow, returns bounded 4xx/5xx auth denials, copies allow-listed auth
+    response headers into the upstream request, and constrains FIPS/ISO-required
+    deployments to numeric local `http://` auth sidecars until outbound TLS
+    client evidence is provider-aligned. Follow-up work can add low-cardinality
+    decision metrics and richer deny/error policy;
   - DNS-refreshing upstreams for container/service-name targets;
   - file-watched upstream lists for service discovery without full config reload;
   - traffic mirroring/shadowing with sampling, body controls, redaction,
@@ -2891,8 +2893,8 @@ the exception while the cache server is being completed as a focused sequence:
   PROXY protocol, upstream TLS controls, HTTP/2 origin controls, and gRPC
   pass-through policy.
 - `v1.4.1`: discovery, mirroring, structured logs, richer rewrite policy,
-  regex and method routing, explicit WebSocket/HTTP upgrade proxying, auth
-  subrequests, local operational sockets, and typed operator hook points.
+  regex and method routing, explicit WebSocket/HTTP upgrade proxying, bounded
+  auth subrequests, local operational sockets, and typed operator hook points.
 - `v1.4.2`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local

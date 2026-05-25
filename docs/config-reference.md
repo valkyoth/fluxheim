@@ -594,6 +594,16 @@ upstream_client_key_path = "/etc/fluxheim/upstreams/client-key.pem"
 upstream_proxy_protocol = "off"
 upstream_http_version = "http1"
 websocket = false
+
+[proxy.auth_request]
+enabled = false
+# url = "http://127.0.0.1:4180/auth"
+forward_headers = ["authorization", "cookie"]
+allow_response_headers = ["x-auth-request-user", "x-auth-request-email"]
+connect_timeout_secs = 2
+read_timeout_secs = 5
+max_response_bytes = "64KiB"
+
 # upstream_h2_max_streams = 64
 # upstream_h2_ping_interval_secs = 30
 connect_timeout_secs = 5
@@ -805,6 +815,18 @@ Upgrade requests bypass proxy cache policy and should normally use route-level
 read/send timeouts sized for long-lived connections. Leave `websocket = false`
 on normal HTTP routes so hop-by-hop upgrade headers are not forwarded
 accidentally.
+
+`[proxy.auth_request]` is Fluxheim's NGINX-style external authorization hook for
+proxy actions. When enabled, Fluxheim sends a bounded `GET` subrequest to `url`
+before forwarding the real request. Only headers listed in `forward_headers`
+are copied to the auth endpoint. Any 2xx auth response allows the request and
+headers listed in `allow_response_headers` are copied into the upstream request;
+4xx/5xx auth responses stop the request and return the auth status with a
+bounded text body. Other auth statuses are treated as a gateway-side auth
+failure. The hook can be configured globally, per vhost proxy, or per route
+proxy block. In FIPS/ISO-required mode, auth subrequests are limited to numeric
+local `http://127.0.0.1/...` or `http://[::1]/...` sidecars until outbound TLS
+client evidence is routed through the selected validated provider.
 
 `[[proxy.error_pages]]` entries are internal static fallback pages for proxy
 failures. The `path` is an internal request path resolved below the entry's

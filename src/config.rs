@@ -339,6 +339,7 @@ impl Config {
                 reason: "FIPS/ISO-required mode allows OTLP trace export only to a numeric local http://127.0.0.1 or http://[::1] loopback collector; remote, localhost, or HTTPS OTLP export needs provider-aligned outbound TLS evidence first",
             });
         }
+        validate_auth_request_compliance_internal_crypto(&self.proxy, "proxy.auth_request")?;
 
         let require_disk_cache_encryption = self.tls.fips.require_disk_cache_encryption
             || self.tls.iso19790.require_disk_cache_encryption;
@@ -359,6 +360,15 @@ impl Config {
                 section: "cache",
                 source: Box::new(source),
             })?;
+            validate_auth_request_compliance_internal_crypto(
+                &vhost.proxy,
+                "vhosts.proxy.auth_request",
+            )
+            .map_err(|source| ConfigError::VhostSection {
+                vhost: vhost.name.clone(),
+                section: "proxy",
+                source: Box::new(source),
+            })?;
             for route in &vhost.routes {
                 if let Some(cache) = &route.cache {
                     validate_cache_compliance_internal_crypto(
@@ -370,6 +380,18 @@ impl Config {
                         vhost: vhost.name.clone(),
                         route: route.name.clone(),
                         section: "cache",
+                        source: Box::new(source),
+                    })?;
+                }
+                if let Some(proxy) = &route.proxy {
+                    validate_auth_request_compliance_internal_crypto(
+                        proxy,
+                        "vhosts.routes.proxy.auth_request",
+                    )
+                    .map_err(|source| ConfigError::RouteSection {
+                        vhost: vhost.name.clone(),
+                        route: route.name.clone(),
+                        section: "proxy",
                         source: Box::new(source),
                     })?;
                 }
@@ -3587,6 +3609,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub websocket: bool,
     #[serde(default)]
+    pub auth_request: AuthRequestConfig,
+    #[serde(default)]
     pub upstream_h2_max_streams: Option<usize>,
     #[serde(default)]
     pub upstream_h2_ping_interval_secs: Option<u64>,
@@ -3671,6 +3695,7 @@ impl Default for ProxyConfig {
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_http_version: UpstreamHttpVersion::Http1,
             websocket: false,
+            auth_request: AuthRequestConfig::default(),
             upstream_h2_max_streams: None,
             upstream_h2_ping_interval_secs: None,
             connect_timeout_secs: None,
@@ -3901,6 +3926,7 @@ impl ProxyConfig {
                 reason: "HTTP/1.1 upgrade proxying requires upstream_http_version = \"http1\"",
             });
         }
+        self.auth_request.validate("proxy.auth_request")?;
         if self.upstream_h2_max_streams.is_some()
             && self.upstream_http_version == UpstreamHttpVersion::Http1
         {
@@ -4090,6 +4116,121 @@ impl ProxyConfig {
         }
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthRequestConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub forward_headers: Vec<String>,
+    #[serde(default)]
+    pub allow_response_headers: Vec<String>,
+    #[serde(default = "default_auth_request_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+    #[serde(default = "default_auth_request_read_timeout_secs")]
+    pub read_timeout_secs: u64,
+    #[serde(default = "default_auth_request_max_response_bytes")]
+    pub max_response_bytes: ByteSize,
+}
+
+impl Default for AuthRequestConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: None,
+            forward_headers: Vec::new(),
+            allow_response_headers: Vec::new(),
+            connect_timeout_secs: default_auth_request_connect_timeout_secs(),
+            read_timeout_secs: default_auth_request_read_timeout_secs(),
+            max_response_bytes: default_auth_request_max_response_bytes(),
+        }
+    }
+}
+
+impl AuthRequestConfig {
+    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        let Some(url) = self.url.as_deref() else {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "enabled auth_request requires url",
+            });
+        };
+        if !valid_http_endpoint_url(url) {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "url must be an absolute http:// or https:// URL without userinfo, query, fragment, control characters, or an empty path",
+            });
+        }
+        validate_config_list_len(
+            format!("{scope}.forward_headers"),
+            self.forward_headers.len(),
+            MAX_AUTH_REQUEST_HEADERS,
+        )?;
+        validate_config_list_len(
+            format!("{scope}.allow_response_headers"),
+            self.allow_response_headers.len(),
+            MAX_AUTH_REQUEST_HEADERS,
+        )?;
+        let mut seen = BTreeSet::new();
+        for header in &self.forward_headers {
+            validate_header_name(scope, header)?;
+            if !seen.insert(header.to_ascii_lowercase()) {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: scope,
+                    reason: "forward_headers contains duplicate header names",
+                });
+            }
+        }
+        seen.clear();
+        for header in &self.allow_response_headers {
+            validate_header_name(scope, header)?;
+            if !seen.insert(header.to_ascii_lowercase()) {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: scope,
+                    reason: "allow_response_headers contains duplicate header names",
+                });
+            }
+        }
+        validate_required_timeout_secs(
+            "proxy.auth_request.connect_timeout_secs",
+            self.connect_timeout_secs,
+        )?;
+        validate_required_timeout_secs(
+            "proxy.auth_request.read_timeout_secs",
+            self.read_timeout_secs,
+        )?;
+        if self.max_response_bytes.as_u64() == 0
+            || self.max_response_bytes.as_u64() > MAX_AUTH_REQUEST_RESPONSE_BYTES
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "max_response_bytes must be between 1 byte and 1 MiB",
+            });
+        }
+        Ok(())
+    }
+}
+
+const MAX_AUTH_REQUEST_HEADERS: usize = 32;
+const MAX_AUTH_REQUEST_RESPONSE_BYTES: u64 = 1024 * 1024;
+
+fn default_auth_request_connect_timeout_secs() -> u64 {
+    2
+}
+
+fn default_auth_request_read_timeout_secs() -> u64 {
+    5
+}
+
+fn default_auth_request_max_response_bytes() -> ByteSize {
+    ByteSize::from_bytes(64 * 1024)
 }
 
 fn validate_proxy_upstream_subset(
@@ -6502,6 +6643,25 @@ fn validate_cache_compliance_internal_crypto(
             Ok(())
         }
     }
+}
+
+fn validate_auth_request_compliance_internal_crypto(
+    proxy: &ProxyConfig,
+    scope: &'static str,
+) -> Result<(), ConfigError> {
+    if !proxy.auth_request.enabled {
+        return Ok(());
+    }
+    let Some(url) = proxy.auth_request.url.as_deref() else {
+        return Ok(());
+    };
+    if fips_allowed_local_auth_request_endpoint(url) {
+        return Ok(());
+    }
+    Err(ConfigError::InvalidCompliancePolicy {
+        field: scope,
+        reason: "FIPS/ISO-required mode allows auth_request only to a numeric local http://127.0.0.1 or http://[::1] loopback endpoint; remote or HTTPS auth subrequests need provider-aligned outbound TLS evidence first",
+    })
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
@@ -10398,6 +10558,51 @@ fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
     !path.is_empty() && openbao_plain_http_authority_is_loopback(authority)
 }
 
+fn fips_allowed_local_auth_request_endpoint(endpoint: &str) -> bool {
+    let Some(rest) = endpoint.strip_prefix("http://") else {
+        return false;
+    };
+    if rest.is_empty()
+        || rest.len() > 2048
+        || rest.contains('@')
+        || rest.contains('?')
+        || rest.contains('#')
+        || rest
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
+        return false;
+    }
+    let Some((authority, path)) = rest.split_once('/') else {
+        return false;
+    };
+    !path.is_empty() && openbao_plain_http_authority_is_loopback(authority)
+}
+
+fn valid_http_endpoint_url(endpoint: &str) -> bool {
+    let Some(rest) = endpoint
+        .strip_prefix("http://")
+        .or_else(|| endpoint.strip_prefix("https://"))
+    else {
+        return false;
+    };
+    if rest.is_empty()
+        || rest.len() > 2048
+        || rest.contains('@')
+        || rest.contains('?')
+        || rest.contains('#')
+        || rest
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ')
+    {
+        return false;
+    }
+    let Some((authority, path)) = rest.split_once('/') else {
+        return false;
+    };
+    !authority.is_empty() && !path.is_empty() && valid_http_authority(authority)
+}
+
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint
@@ -10447,7 +10652,6 @@ fn warn_plaintext_remote_otlp_endpoint(field: &str, endpoint: &str) {
     }
 }
 
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_authority(authority: &str) -> bool {
     if authority.starts_with('[') {
         let Some(end) = authority.find(']') else {
@@ -10466,17 +10670,14 @@ fn valid_http_authority(authority: &str) -> bool {
     valid_http_host(host) && valid_port(port)
 }
 
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_port_tail(tail: &str) -> bool {
     tail.strip_prefix(':').is_some_and(valid_port)
 }
 
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_port(port: &str) -> bool {
     port.parse::<u16>().is_ok_and(|port| port != 0)
 }
 
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn valid_http_host(host: &str) -> bool {
     !host.is_empty()
         && !host.starts_with('-')
@@ -13181,6 +13382,40 @@ mod tests {
 
     #[test]
     fn rejects_invalid_proxy_upstream_policy() {
+        let auth_request: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+
+            [proxy.auth_request]
+            enabled = true
+            url = "http://127.0.0.1:4180/auth"
+            forward_headers = ["authorization", "cookie"]
+            allow_response_headers = ["x-auth-request-user"]
+            "#,
+        )
+        .unwrap();
+        assert!(auth_request.validate().is_ok());
+        assert!(auth_request.proxy.auth_request.enabled);
+
+        let auth_request_without_url: Config = toml::from_str(
+            r#"
+            [proxy]
+            upstream = "127.0.0.1:3001"
+
+            [proxy.auth_request]
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            auth_request_without_url.validate(),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.auth_request",
+                reason: "enabled auth_request requires url",
+            })
+        );
+
         let websocket: Config = toml::from_str(
             r#"
             [proxy]
@@ -15310,6 +15545,28 @@ mod tests {
         ));
         assert!(!super::fips_allowed_local_openbao_endpoint(
             "http://[::1]attacker.example.test"
+        ));
+    }
+
+    #[test]
+    fn fips_auth_request_endpoint_accepts_numeric_loopback_http_only() {
+        assert!(super::fips_allowed_local_auth_request_endpoint(
+            "http://127.0.0.1:4180/auth"
+        ));
+        assert!(super::fips_allowed_local_auth_request_endpoint(
+            "http://[::1]:4180/auth"
+        ));
+        assert!(!super::fips_allowed_local_auth_request_endpoint(
+            "http://127.0.0.1:4180"
+        ));
+        assert!(!super::fips_allowed_local_auth_request_endpoint(
+            "http://localhost:4180/auth"
+        ));
+        assert!(!super::fips_allowed_local_auth_request_endpoint(
+            "https://127.0.0.1:4180/auth"
+        ));
+        assert!(!super::fips_allowed_local_auth_request_endpoint(
+            "http://[::1]attacker.example.test/auth"
         ));
     }
 

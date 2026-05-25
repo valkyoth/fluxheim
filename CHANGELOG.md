@@ -22,14 +22,19 @@ behavior when the change improves security or project direction.
   Upgrade requests preserve the required `Connection: upgrade` and `Upgrade`
   token upstream, require `upstream_http_version = "http1"`, and bypass proxy
   cache policy for long-lived websocket-style connections.
+- Added `[proxy.auth_request]` external authorization for proxy actions. The
+  first slice sends bounded `GET` subrequests, forwards only configured request
+  headers, copies allow-listed auth response headers into the upstream request
+  on 2xx, and constrains FIPS/ISO-required deployments to numeric local
+  `http://` auth sidecars.
 
 ### Planned
 
 - Start the proxy-operations follow-up after the `1.4.0` proxy parity
   baseline. Remaining scope is limited to HTTP migration blockers and read-only
-  operational visibility: `auth_request`-style subrequests,
-  discovery/mirroring, local operational sockets, richer rewrite policy, regex
-  capture variables, and typed operator hook points.
+  operational visibility: discovery/mirroring, local operational sockets,
+  richer rewrite policy, regex capture variables, and typed operator hook
+  points.
 
 ## 1.4.0 - 2026-05-25
 

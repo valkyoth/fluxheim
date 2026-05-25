@@ -88,6 +88,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | HTTP/2 origins | ✅ | Upstream HTTP version controls and bounded HTTP/2 settings. |
 | gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |
 | WebSocket / HTTP upgrade | ✅ | `1.4.1-dev`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
+| External auth subrequests | ✅ | `1.4.1-dev`; `[proxy.auth_request]` with bounded header/body forwarding. |
 
 ### Operations And Packaging
 
@@ -106,7 +107,6 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| `auth_request`-style subrequests | ❌ | Planned for `1.4.1`. |
 | Traffic mirroring | ❌ | Planned for `1.4.1`. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.2`. |
 | TCP stream proxying | ❌ | Planned for `1.4.3`. |
