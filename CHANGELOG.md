@@ -37,9 +37,9 @@ behavior when the change improves security or project direction.
 - Added opt-in `[proxy.mirror]` traffic shadowing behind the `traffic-mirror`
   feature. The first slice mirrors safe bodyless methods only, uses
   deterministic per-mille sampling, copies only allow-listed headers, drains a
-  bounded mirror response, records low-cardinality mirror outcomes through edge
-  policy metrics when metrics are enabled, and never changes the primary
-  response.
+  bounded mirror response, caps per-vhost/route in-flight mirror worker tasks,
+  records low-cardinality mirror outcomes through edge policy metrics when
+  metrics are enabled, and never changes the primary response.
 - Added `[admin.ops_socket]`, a Unix-only read-only local operational socket
   for status, cache status, snapshots, and health checks. The socket is
   owner/group permission constrained and does not route mutating admin
@@ -57,6 +57,11 @@ behavior when the change improves security or project direction.
   and drains.
 - Added low-cardinality `auth_request` allow/deny/error outcomes to
   `fluxheim_edge_policy_events_total`.
+
+### Fixed
+
+- Moved file-refreshed and DNS-refreshed upstream discovery off blocking Tokio
+  executor paths.
 
 ### Deferred
 

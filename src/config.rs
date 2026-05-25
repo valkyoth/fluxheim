@@ -4490,6 +4490,8 @@ pub struct TrafficMirrorConfig {
     pub timeout_secs: u64,
     #[serde(default = "default_traffic_mirror_max_response_bytes")]
     pub max_response_bytes: ByteSize,
+    #[serde(default = "default_traffic_mirror_max_in_flight")]
+    pub max_in_flight: usize,
 }
 
 impl Default for TrafficMirrorConfig {
@@ -4502,6 +4504,7 @@ impl Default for TrafficMirrorConfig {
             forward_headers: Vec::new(),
             timeout_secs: default_traffic_mirror_timeout_secs(),
             max_response_bytes: default_traffic_mirror_max_response_bytes(),
+            max_in_flight: default_traffic_mirror_max_in_flight(),
         }
     }
 }
@@ -4596,6 +4599,12 @@ impl TrafficMirrorConfig {
                 reason: "max_response_bytes must be between 1 byte and 1 MiB",
             });
         }
+        if self.max_in_flight == 0 || self.max_in_flight > MAX_TRAFFIC_MIRROR_IN_FLIGHT {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: scope,
+                reason: "max_in_flight must be between 1 and 1024",
+            });
+        }
         Ok(())
     }
 }
@@ -4603,6 +4612,7 @@ impl TrafficMirrorConfig {
 const MAX_TRAFFIC_MIRROR_METHODS: usize = 16;
 const MAX_TRAFFIC_MIRROR_HEADERS: usize = 32;
 const MAX_TRAFFIC_MIRROR_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_TRAFFIC_MIRROR_IN_FLIGHT: usize = 1024;
 
 fn default_traffic_mirror_sample_per_mille() -> u16 {
     1000
@@ -4618,6 +4628,10 @@ fn default_traffic_mirror_timeout_secs() -> u64 {
 
 fn default_traffic_mirror_max_response_bytes() -> ByteSize {
     ByteSize::from_bytes(16 * 1024)
+}
+
+fn default_traffic_mirror_max_in_flight() -> usize {
+    64
 }
 
 fn validate_proxy_upstream_subset(
@@ -14157,11 +14171,13 @@ mod tests {
                 sample_per_mille = 250
                 methods = ["GET", "HEAD"]
                 forward_headers = ["user-agent"]
+                max_in_flight = 8
                 "#,
             )
             .unwrap();
             assert!(mirror.validate().is_ok());
             assert!(mirror.proxy.mirror.enabled);
+            assert_eq!(mirror.proxy.mirror.max_in_flight, 8);
         }
 
         let websocket: Config = toml::from_str(

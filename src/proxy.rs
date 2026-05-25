@@ -25,7 +25,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
-#[cfg(feature = "cache")]
+#[cfg(any(feature = "cache", feature = "traffic-mirror"))]
 use std::sync::OnceLock;
 #[cfg(feature = "php-fpm")]
 use std::sync::atomic::AtomicBool;
@@ -98,6 +98,8 @@ const MAX_VARY_FIELDS: usize = 16;
 const CACHE_MIN_USES_REASON: &str = "cache-min-uses";
 #[cfg(feature = "cache")]
 const CACHE_MIN_USES_COUNTER_CAPACITY: u64 = 65_536;
+#[cfg(feature = "traffic-mirror")]
+const TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
 const CACHE_MIN_USES_COUNTER_TTL_SECS: u64 = 600;
 #[cfg(feature = "cache")]
@@ -11812,6 +11814,8 @@ struct TrafficMirrorRequest {
     headers: Vec<(String, String)>,
     timeout_secs: u64,
     max_response_bytes: u64,
+    max_in_flight: usize,
+    slot_key: String,
     #[cfg(feature = "metrics")]
     metric_vhost: String,
     #[cfg(feature = "metrics")]
@@ -11836,7 +11840,20 @@ fn spawn_proxy_mirror_if_enabled(
         let Some(mirror_request) = traffic_mirror_request(request, mirror, vhost, ctx) else {
             return;
         };
+        let Some(mirror_slot) =
+            acquire_traffic_mirror_slot(&mirror_request.slot_key, mirror_request.max_in_flight)
+        else {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_edge_policy_event(
+                &mirror_request.metric_vhost,
+                mirror_request.metric_route.as_deref(),
+                "mirror",
+                "skipped",
+            );
+            return;
+        };
         tokio::task::spawn_blocking(move || {
+            let _mirror_slot = mirror_slot;
             let result = send_traffic_mirror_request(&mirror_request);
             if let Err(error) = &result {
                 log::debug!(
@@ -11892,6 +11909,8 @@ fn traffic_mirror_request(
         headers,
         timeout_secs: mirror.timeout_secs,
         max_response_bytes: mirror.max_response_bytes.as_u64(),
+        max_in_flight: mirror.max_in_flight,
+        slot_key: traffic_mirror_slot_key(vhost, ctx),
         #[cfg(feature = "metrics")]
         metric_vhost: vhost.name.clone(),
         #[cfg(feature = "metrics")]
@@ -11900,6 +11919,67 @@ fn traffic_mirror_request(
             .and_then(|route_index| vhost.routes.get(route_index))
             .map(|route| route.name.clone()),
     })
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn traffic_mirror_slot_key(vhost: &RuntimeVhost, ctx: &RequestContext) -> String {
+    let route = ctx
+        .route_index
+        .and_then(|route_index| vhost.routes.get(route_index))
+        .map(|route| route.name.as_str())
+        .unwrap_or("-");
+    format!("{}\n{route}", vhost.name)
+}
+
+#[cfg(feature = "traffic-mirror")]
+struct TrafficMirrorSlot {
+    counter: Arc<AtomicUsize>,
+}
+
+#[cfg(feature = "traffic-mirror")]
+impl Drop for TrafficMirrorSlot {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(feature = "traffic-mirror")]
+fn acquire_traffic_mirror_slot(key: &str, max_in_flight: usize) -> Option<TrafficMirrorSlot> {
+    static TRAFFIC_MIRROR_INFLIGHT: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
+        OnceLock::new();
+    let mut map = TRAFFIC_MIRROR_INFLIGHT
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|_| {
+            log::error!(
+                target: "fluxheim::security",
+                "traffic mirror in-flight lock poisoned; aborting"
+            );
+            std::process::abort();
+        });
+    if map.len() >= TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS && !map.contains_key(key) {
+        map.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
+        if map.len() >= TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS {
+            return None;
+        }
+    }
+    let counter = map
+        .entry(key.to_owned())
+        .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
+        .clone();
+    drop(map);
+
+    loop {
+        let current = counter.load(Ordering::Acquire);
+        if current >= max_in_flight {
+            return None;
+        }
+        let next = current.checked_add(1)?;
+        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Some(TrafficMirrorSlot { counter }),
+            Err(_) => continue,
+        }
+    }
 }
 
 #[cfg(feature = "traffic-mirror")]
@@ -14524,6 +14604,7 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
+    #[allow(unused_imports)]
     use super::{
         FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
         RuntimeConcurrencyLimit, RuntimeProxy, RuntimeRateLimit, append_fluxheim_via_to_request,
@@ -17419,6 +17500,17 @@ mod tests {
             traffic_mirror_forwarded_headers(&request, &mirror),
             [("user-agent".to_owned(), "fluxheim-test".to_owned())]
         );
+    }
+
+    #[test]
+    #[cfg(feature = "traffic-mirror")]
+    fn traffic_mirror_slots_enforce_per_key_limit() {
+        let key = "traffic-mirror-slot-test";
+        let first = super::acquire_traffic_mirror_slot(key, 1);
+        assert!(first.is_some());
+        assert!(super::acquire_traffic_mirror_slot(key, 1).is_none());
+        drop(first);
+        assert!(super::acquire_traffic_mirror_slot(key, 1).is_some());
     }
 
     #[test]

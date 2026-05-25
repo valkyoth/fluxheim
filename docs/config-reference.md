@@ -632,6 +632,7 @@ methods = ["GET", "HEAD", "OPTIONS"]
 forward_headers = ["user-agent"]
 timeout_secs = 2
 max_response_bytes = "16KiB"
+max_in_flight = 64
 
 # upstream_h2_max_streams = 64
 # upstream_h2_ping_interval_secs = 30
@@ -895,10 +896,12 @@ Only headers listed in `forward_headers` are copied; credentials and cookies are
 not mirrored unless explicitly allow-listed. `sample_per_mille` deterministically
 selects 1 through 1000 requests per 1000 for a stable method/host/path key.
 `max_response_bytes` bounds how much of the mirror response Fluxheim drains
-before discarding it. Mirroring is rejected in `privacy-mode`; in FIPS/ISO
-required mode it is limited to numeric local `http://127.0.0.1/...` or
-`http://[::1]/...` sidecars until outbound TLS client evidence is routed through
-the selected validated provider.
+before discarding it. `max_in_flight` caps outstanding mirror worker tasks per
+vhost/route mirror key; requests above the cap skip mirroring and continue on
+the primary path. Mirroring is rejected in `privacy-mode`; in FIPS/ISO required
+mode it is limited to numeric local `http://127.0.0.1/...` or
+`http://[::1]/...` sidecars until outbound TLS client evidence is routed
+through the selected validated provider.
 
 ## Compression
 

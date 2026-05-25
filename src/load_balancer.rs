@@ -2,7 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -976,13 +976,24 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
         std::collections::BTreeSet<Backend>,
         std::collections::HashMap<u64, bool>,
     )> {
-        let upstreams = crate::config::read_proxy_upstreams_file(&self.path).map_err(|error| {
-            Error::because(
-                ErrorType::ReadError,
-                "failed to read proxy upstreams file",
-                error,
-            )
-        })?;
+        let path = self.path.clone();
+        let upstreams =
+            tokio::task::spawn_blocking(move || crate::config::read_proxy_upstreams_file(&path))
+                .await
+                .map_err(|error| {
+                    Error::because(
+                        ErrorType::InternalError,
+                        "proxy upstreams file discovery task failed",
+                        io::Error::other(error.to_string()),
+                    )
+                })?
+                .map_err(|error| {
+                    Error::because(
+                        ErrorType::ReadError,
+                        "failed to read proxy upstreams file",
+                        error,
+                    )
+                })?;
         let mut backends = std::collections::BTreeSet::new();
         for upstream in upstreams {
             let backend = Backend::new(&upstream).map_err(|error| {
@@ -1012,13 +1023,15 @@ impl ServiceDiscovery for DnsUpstreamDiscovery {
     )> {
         let mut backends = std::collections::BTreeSet::new();
         for upstream in self.upstreams.iter() {
-            let resolved = upstream.to_socket_addrs().map_err(|error| {
-                Error::because(
-                    ErrorType::ConnectError,
-                    "failed to resolve proxy upstream",
-                    error,
-                )
-            })?;
+            let resolved = tokio::net::lookup_host(upstream.as_str())
+                .await
+                .map_err(|error| {
+                    Error::because(
+                        ErrorType::ConnectError,
+                        "failed to resolve proxy upstream",
+                        error,
+                    )
+                })?;
             for address in resolved {
                 let backend = Backend::new(&address.to_string()).map_err(|error| {
                     Error::because(

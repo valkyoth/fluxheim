@@ -1416,6 +1416,7 @@ fn edge_policy_label(policy: &str) -> &'static str {
         "rate_limit" => "rate_limit",
         "concurrency" => "concurrency",
         "auth_request" => "auth_request",
+        "mirror" => "mirror",
         _ => "other",
     }
 }
@@ -1427,6 +1428,8 @@ fn edge_policy_outcome_label(outcome: &str) -> &'static str {
         "delay" => "delay",
         "reject" => "reject",
         "error" => "error",
+        "success" => "success",
+        "skipped" => "skipped",
         _ => "other",
     }
 }
@@ -1697,6 +1700,8 @@ mod tests {
         record_edge_policy_event("edge-policy-test", Some("assets"), "auth_request", "error");
         record_edge_policy_event("edge-policy-test", Some("assets"), "rate_limit", "delay");
         record_edge_policy_event("edge-policy-test", None, "concurrency", "reject");
+        record_edge_policy_event("edge-policy-test", Some("assets"), "mirror", "success");
+        record_edge_policy_event("edge-policy-test", Some("assets"), "mirror", "skipped");
         record_edge_policy_event(
             "edge-policy-test",
             Some("assets"),
@@ -1719,12 +1724,15 @@ mod tests {
         assert!(output.contains(r#"policy="auth_request""#));
         assert!(output.contains(r#"policy="rate_limit""#));
         assert!(output.contains(r#"policy="concurrency""#));
+        assert!(output.contains(r#"policy="mirror""#));
         assert!(output.contains(r#"policy="other""#));
         assert!(output.contains(r#"outcome="deny""#));
         assert!(output.contains(r#"outcome="allow""#));
         assert!(output.contains(r#"outcome="delay""#));
         assert!(output.contains(r#"outcome="reject""#));
         assert!(output.contains(r#"outcome="error""#));
+        assert!(output.contains(r#"outcome="success""#));
+        assert!(output.contains(r#"outcome="skipped""#));
         assert!(output.contains(r#"outcome="other""#));
         assert!(!output.contains("attacker-policy"));
         assert!(!output.contains("attacker-outcome"));
