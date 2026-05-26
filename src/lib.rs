@@ -15,6 +15,12 @@ pub mod admin;
 pub mod cache;
 pub mod cache_headers;
 pub mod cli;
+#[cfg(any(
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd"
+))]
+mod compression;
 pub mod config;
 pub mod config_tester;
 mod fs_trust;

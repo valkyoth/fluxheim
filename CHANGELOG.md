@@ -17,6 +17,10 @@ behavior when the change improves security or project direction.
 - Extract structured access-log formatting, request-id generation, status-class
   labeling, and response-body byte accounting from `proxy.rs` into a focused
   `access_log` module.
+- Extract response compression negotiation, encoder lifecycle, output bounding,
+  and `Vary: Accept-Encoding` mutation from `proxy.rs` into a focused
+  `compression` module while preserving the existing vhost and route policy
+  behavior.
 
 ## 1.4.1 - 2026-05-26
 
