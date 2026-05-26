@@ -116,7 +116,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Proxy module split | 🟡 | `1.4.2` in progress; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, and PHP-FPM process/spool handling are split out first, with a new rule that future feature domains start in focused modules. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.3` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
 | TCP stream proxying | ❌ | Planned for `1.4.4`. |
-| Apple Silicon macOS dev builds | ❌ | Planned for `1.4.5` as a developer-support target while Pingora macOS support remains experimental. |
+| Apple Silicon macOS dev builds | ❌ | Planned for `1.4.5` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
 | WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
 

@@ -1414,14 +1414,22 @@ Release shape:
   - no HTTP headers, cache, auth subrequest, compression, or PHP behavior on
     stream routes.
 - `1.4.5` - Apple Silicon macOS developer support:
-  - stop line: make Fluxheim build and run for local development on
-    `aarch64-apple-darwin` only. Do not claim macOS production support, FIPS
-    evidence, launchd packaging, Homebrew distribution, or parity with the
+  - stop line: Level 1 support only. Make Fluxheim build and run for local
+    development on `aarch64-apple-darwin` with documented dev configs and one
+    smoke gate. Do not claim macOS production support, FIPS evidence, launchd
+    packaging, Homebrew distribution, notarized binaries, or parity with the
     Linux release gates in `1.4.5`;
-  - add a macOS CI or documented manual gate for the development profile first:
-    `cargo check --locked --no-default-features --features web --lib`, then
-    proxy/static-site profile checks, then one runtime smoke test on an
-    Apple Silicon runner or local M-series machine;
+  - add a macOS CI or documented manual gate for the development profile:
+    `cargo check --locked --no-default-features --features web --lib`,
+    `profile-static-site`, `profile-reverse-proxy`, `profile-full`, and
+    `profile-development` for `fluxheim` and `fluxheim-acme`;
+  - add macOS developer examples that keep runtime state under project-local
+    or `/tmp` paths instead of Linux service paths: run sockets, pid files,
+    admin snapshots, ACME storage, disk cache, access/file logs, and PHP-FPM
+    socket directories must all be writable by an unprivileged Mac user;
+  - add one runtime smoke test on an Apple Silicon runner or local M-series
+    machine for static serving, reverse proxying, disk cache with a Mac-safe
+    path, structured logs, and managed PHP-FPM when Homebrew PHP is available;
   - audit native dependency behavior on macOS, especially `ring`,
     `aws-lc-sys`, `zstd-sys`, `libz-ng-sys`, OpenSSL/BoringSSL/S2N optional
     TLS backends, and PHP-FPM process management. Prefer feature/profile fixes
@@ -1433,6 +1441,16 @@ Release shape:
     contributor development and local site testing until Pingora's macOS
     support is no longer experimental and Fluxheim has regular macOS smoke
     coverage.
+- Future macOS production support:
+  - track as a later release line after `1.4.x`, not as spillover from the
+    developer-support milestone. Production macOS requires regular macOS CI,
+    runtime smoke coverage, packaging policy, launchd service files, signed or
+    notarized binary decisions, Homebrew formula maintenance, and a security
+    review of APFS, macOS ACLs, symlink behavior, Unix sockets, process
+    supervision, and certificate/key storage;
+  - do not include FIPS/ISO-19790 claims in macOS production support unless a
+    separate provider-specific evidence package exists for macOS. The current
+    compliance evidence remains Linux/operator-environment focused.
 
 Version discipline for the rest of `1.4.x`:
 
@@ -3029,8 +3047,14 @@ the exception while the cache server is being completed as a focused sequence:
   routing only after a bounded ClientHello parser is proven.
 - `v1.4.5`: Apple Silicon macOS developer support. Scope stops at local
   `aarch64-apple-darwin` build/check/smoke coverage for development profiles,
-  dependency/profile cleanup for unused native crates, and setup docs; it is
-  not a production, FIPS, Homebrew, or launchd packaging milestone.
+  Mac-safe dev configs for runtime paths/cache/logs/PHP-FPM, dependency/profile
+  cleanup for unused native crates, and setup docs; it is not a production,
+  FIPS, Homebrew, notarized-binary, or launchd packaging milestone.
+- Later macOS production line: only after Level 1 developer support is stable.
+  Requires regular macOS CI, runtime smoke coverage, launchd/Homebrew or other
+  packaging decisions, signed/notarized binary policy, and a macOS-specific
+  filesystem/security review. Keep Linux as the production baseline until that
+  line is explicitly scheduled.
 - `v1.5.1`: fixes for enterprise load-balancer operations.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 

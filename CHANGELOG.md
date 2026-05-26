@@ -140,8 +140,9 @@ behavior when the change improves security or project direction.
   Open datasets, normalized typed country/ASN context, and ordered local
   fallback without built-in remote lookup or database downloading.
 - Add `1.4.5` as an Apple Silicon macOS developer-support stop for local
-  `aarch64-apple-darwin` build/check/smoke coverage while Pingora macOS support
-  remains experimental.
+  `aarch64-apple-darwin` build/check/smoke coverage, Mac-safe dev runtime
+  paths, and explicit deferral of production macOS packaging/security support
+  while Pingora macOS support remains experimental.
 
 ## 1.4.0 - 2026-05-25
 
