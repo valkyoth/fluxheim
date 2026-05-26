@@ -28,6 +28,8 @@ behavior when the change improves security or project direction.
   module.
 - Extract trusted-proxy parsing, access policy checks, rate limiting, and
   request concurrency admission into a focused `edge_policy` module.
+- Extract route matcher construction, method checks, regex capture extraction,
+  and path rewrite rendering into a focused `route_policy` module.
 
 ## 1.4.1 - 2026-05-26
 

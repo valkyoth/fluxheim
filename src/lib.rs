@@ -44,6 +44,8 @@ mod otlp_http;
 #[cfg(feature = "proxy")]
 pub mod proxy;
 pub mod reload;
+#[cfg(feature = "proxy")]
+mod route_policy;
 #[cfg(feature = "security")]
 pub mod security;
 pub mod snapshot;

@@ -83,6 +83,7 @@ use crate::edge_policy::{
 use crate::load_balancer::{
     LoadBalancedUpstreamOutcome, UpstreamLoadBalancer, UpstreamLoadBalancerService,
 };
+use crate::route_policy::{RuntimeRouteMatcher, route_method_matches};
 #[cfg(feature = "web")]
 use crate::web::{ResolveResult, StaticFileServer};
 use tokio::io::AsyncWriteExt as _;
@@ -3102,17 +3103,6 @@ fn skip_fluxheim_predictor_custom_reason(_reason: &'static str) -> bool {
 }
 
 #[derive(Debug, Clone)]
-enum RuntimeRouteMatcher {
-    Exact(String),
-    Prefix(String),
-    Regex(regex::Regex),
-    Fallback,
-}
-
-const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
-const MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES: usize = 256;
-
-#[derive(Debug, Clone)]
 #[allow(clippy::large_enum_variant)]
 enum RuntimeRouteAction {
     Redirect(RouteRedirectConfig),
@@ -4781,28 +4771,7 @@ impl RuntimeRoute {
         let _ = vhost_name;
 
         let headers = base_headers.with_vhost_overlay(&route.headers);
-        let matcher = if let Some(path) = &route.path_exact {
-            RuntimeRouteMatcher::Exact(path.clone())
-        } else if let Some(path) = &route.path_prefix {
-            RuntimeRouteMatcher::Prefix(path.clone())
-        } else if let Some(pattern) = &route.path_regex {
-            RuntimeRouteMatcher::Regex(
-                regex::RegexBuilder::new(pattern)
-                    .size_limit(crate::config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
-                    .build()
-                    .map_err(|error| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!(
-                                "vhost {vhost_name:?} route {:?} path_regex failed to compile: {error}",
-                                route.name
-                            ),
-                        )
-                    })?,
-            )
-        } else {
-            RuntimeRouteMatcher::Fallback
-        };
+        let matcher = RuntimeRouteMatcher::from_config(vhost_name, route)?;
         let action = if let Some(redirect) = &route.redirect {
             RuntimeRouteAction::Redirect(redirect.clone())
         } else if let Some(proxy) = &route.proxy {
@@ -4991,19 +4960,21 @@ impl RuntimeVhost {
         let mut first_regex = None;
 
         for (index, route) in self.routes.iter().enumerate() {
-            if !route_method_matches(route, method) {
+            if !route_method_matches(&route.methods, method) {
                 continue;
             }
             match &route.matcher {
-                RuntimeRouteMatcher::Exact(exact) if path == exact => return Some(index),
-                RuntimeRouteMatcher::Prefix(prefix)
-                    if path.starts_with(prefix)
-                        && best_prefix.is_none_or(|(_, len)| prefix.len() > len) =>
-                {
-                    best_prefix = Some((index, prefix.len()));
+                RuntimeRouteMatcher::Exact(_) if route.matcher.matches_path(path) => {
+                    return Some(index);
                 }
-                RuntimeRouteMatcher::Regex(regex)
-                    if first_regex.is_none() && regex.is_match(path) =>
+                RuntimeRouteMatcher::Prefix(_) if route.matcher.matches_path(path) => {
+                    let prefix_len = route.matcher.prefix_len().unwrap_or(0);
+                    if best_prefix.is_none_or(|(_, len)| prefix_len > len) {
+                        best_prefix = Some((index, prefix_len));
+                    }
+                }
+                RuntimeRouteMatcher::Regex(_)
+                    if first_regex.is_none() && route.matcher.matches_path(path) =>
                 {
                     first_regex = Some(index);
                 }
@@ -5028,30 +4999,7 @@ impl RuntimeVhost {
         path: &str,
     ) -> Option<crate::headers::RouteRegexCaptures> {
         let route = route_index.and_then(|index| self.routes.get(index))?;
-        let RuntimeRouteMatcher::Regex(regex) = &route.matcher else {
-            return None;
-        };
-        let captures = regex.captures(path)?;
-        let numbered = captures
-            .iter()
-            .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
-            .map(bounded_route_regex_capture)
-            .collect::<Vec<_>>();
-        let named = regex
-            .capture_names()
-            .enumerate()
-            .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
-            .filter_map(|(index, name)| {
-                name.and_then(|name| {
-                    captures
-                        .get(index)
-                        .and_then(|value| bounded_route_regex_capture(Some(value)))
-                        .map(|value| (name.to_owned(), value))
-                })
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-
-        Some(crate::headers::RouteRegexCaptures::new(numbered, named))
+        crate::route_policy::route_regex_captures(&route.matcher, path)
     }
 
     #[cfg(test)]
@@ -5274,15 +5222,6 @@ impl RuntimeVhost {
             routes,
         })
     }
-}
-
-fn bounded_route_regex_capture(value: Option<regex::Match<'_>>) -> Option<String> {
-    let value = value?.as_str();
-    (value.len() <= MAX_ROUTE_REGEX_CAPTURE_VALUE_BYTES).then(|| value.to_owned())
-}
-
-fn route_method_matches(route: &RuntimeRoute, method: &str) -> bool {
-    route.methods.is_empty() || route.methods.iter().any(|configured| configured == method)
 }
 
 #[cfg(feature = "web")]
@@ -12042,103 +11981,13 @@ fn route_redirect_location(
 }
 
 fn route_rewritten_path_and_query(request: &RequestHeader, route: &RuntimeRoute) -> Option<String> {
-    if let Some(template) = route.rewrite_template.as_deref() {
-        let rewritten_path = route_rewrite_template_path(request.uri.path(), route, template)?;
-        if !safe_forward_path(&rewritten_path) {
-            return None;
-        }
-        return match request.uri.query() {
-            Some(query) => Some(format!("{rewritten_path}?{query}")),
-            None => Some(rewritten_path),
-        };
-    }
-
-    let strip_prefix = route.strip_prefix.as_deref()?;
-    let path = request.uri.path();
-    let suffix = path.strip_prefix(strip_prefix)?;
-    let rewritten_path = if let Some(rewrite_prefix) = route.rewrite_prefix.as_deref() {
-        join_route_rewrite_prefix(rewrite_prefix, suffix)?
-    } else if suffix.is_empty() {
-        "/".to_owned()
-    } else if suffix.starts_with('/') {
-        suffix.to_owned()
-    } else {
-        format!("/{suffix}")
-    };
-    if !safe_forward_path(&rewritten_path) {
-        return None;
-    }
-    match request.uri.query() {
-        Some(query) => Some(format!("{rewritten_path}?{query}")),
-        None => Some(rewritten_path),
-    }
-}
-
-fn route_rewrite_template_path(path: &str, route: &RuntimeRoute, template: &str) -> Option<String> {
-    let RuntimeRouteMatcher::Regex(regex) = &route.matcher else {
-        return None;
-    };
-    let captures = regex.captures(path)?;
-    let numbered = captures
-        .iter()
-        .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
-        .map(bounded_route_regex_capture)
-        .collect::<Vec<_>>();
-    let named = regex
-        .capture_names()
-        .enumerate()
-        .take(MAX_ROUTE_REGEX_CAPTURE_VALUES)
-        .filter_map(|(index, name)| {
-            name.and_then(|name| {
-                captures
-                    .get(index)
-                    .and_then(|value| bounded_route_regex_capture(Some(value)))
-                    .map(|value| (name.to_owned(), value))
-            })
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let captures = crate::headers::RouteRegexCaptures::new(numbered, named);
-    let mut rewritten = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        rewritten.push_str(&rest[..open]);
-        let after_open = &rest[open + 1..];
-        let close = after_open.find('}')?;
-        let variable = &after_open[..close];
-        if let Some(value) = captures.variable(variable) {
-            rewritten.push_str(value);
-        }
-        rest = &after_open[close + 1..];
-    }
-    rewritten.push_str(rest);
-    if rewritten.contains('{') || rewritten.contains('}') {
-        return None;
-    }
-    Some(rewritten)
-}
-
-fn join_route_rewrite_prefix(rewrite_prefix: &str, suffix: &str) -> Option<String> {
-    if rewrite_prefix == "/" {
-        return Some(if suffix.is_empty() {
-            "/".to_owned()
-        } else if suffix.starts_with('/') {
-            suffix.to_owned()
-        } else {
-            format!("/{suffix}")
-        });
-    }
-
-    let rewritten_path = if suffix.is_empty() {
-        rewrite_prefix.to_owned()
-    } else if rewrite_prefix.ends_with('/') && suffix.starts_with('/') {
-        format!("{}{}", rewrite_prefix, &suffix[1..])
-    } else if rewrite_prefix.ends_with('/') || suffix.starts_with('/') {
-        format!("{rewrite_prefix}{suffix}")
-    } else {
-        format!("{rewrite_prefix}/{suffix}")
-    };
-
-    safe_forward_path(&rewritten_path).then_some(rewritten_path)
+    crate::route_policy::route_rewritten_path_and_query(
+        request,
+        &route.matcher,
+        route.strip_prefix.as_deref(),
+        route.rewrite_prefix.as_deref(),
+        route.rewrite_template.as_deref(),
+    )
 }
 
 #[cfg(feature = "cache")]
@@ -12149,6 +11998,7 @@ fn safe_forward_path_and_query(path_and_query: &str) -> bool {
     safe_forward_path(path)
 }
 
+#[cfg(feature = "cache")]
 fn safe_forward_path(path: &str) -> bool {
     if !path.starts_with('/')
         || path.chars().any(char::is_control)
@@ -12160,6 +12010,7 @@ fn safe_forward_path(path: &str) -> bool {
     path.split('/').all(safe_forward_path_segment)
 }
 
+#[cfg(feature = "cache")]
 fn safe_forward_path_segment(segment: &str) -> bool {
     if segment == ".." {
         return false;
@@ -12184,6 +12035,7 @@ fn safe_forward_path_segment(segment: &str) -> bool {
     true
 }
 
+#[cfg(feature = "cache")]
 fn unsafe_decoded_forward_path_segment(segment: &[u8]) -> bool {
     segment == b".."
         || segment
@@ -12191,6 +12043,7 @@ fn unsafe_decoded_forward_path_segment(segment: &[u8]) -> bool {
             .any(|byte| byte.is_ascii_control() || matches!(byte, b'/' | b'\\'))
 }
 
+#[cfg(feature = "cache")]
 fn percent_decode_path_segment(segment: &str) -> Option<Vec<u8>> {
     let bytes = segment.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
@@ -12209,6 +12062,7 @@ fn percent_decode_path_segment(segment: &str) -> Option<Vec<u8>> {
     Some(decoded)
 }
 
+#[cfg(feature = "cache")]
 fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
