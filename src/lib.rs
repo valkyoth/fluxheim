@@ -69,6 +69,8 @@ pub mod tls;
 pub mod trace_context;
 #[cfg(feature = "traffic-mirror")]
 mod traffic_mirror;
+#[cfg(feature = "proxy")]
+mod upstream_tls;
 #[cfg(feature = "web")]
 pub mod web;
 

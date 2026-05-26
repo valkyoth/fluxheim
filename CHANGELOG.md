@@ -62,6 +62,9 @@ behavior when the change improves security or project direction.
 - Extract traversal-safe forwarded path validation into `forward_path`, giving
   peer-fill and future forwarding code a shared security helper outside the
   proxy orchestration layer.
+- Extract upstream TLS trust-root and client-certificate material loading into
+  `upstream_tls`, keeping O_NOFOLLOW, regular-file, and size-limit checks out
+  of the proxy orchestration layer.
 - Document the source-boundary rule for future work: new feature domains should
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split
