@@ -412,9 +412,10 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
 - `1.4.2` is the maintenance architecture release that splits the large proxy
   runtime into focused modules before adding more large proxy features. Access
   logs, compression, auth subrequests, traffic mirroring, edge policy, and
-  route policy are extracted domains. PHP-FPM process supervision, request-body
-  spooling, FastCGI transport, retry/timeout handling, and response parsing now
-  live in `php_fpm`; the remaining PHP code in `proxy.rs` is the Pingora
+  route policy are extracted domains. Outbound PROXY protocol framing lives in
+  `proxy_protocol`. PHP-FPM process supervision, request-body spooling, FastCGI
+  transport, retry/timeout handling, and response parsing now live in
+  `php_fpm`; the remaining PHP code in `proxy.rs` is the Pingora
   request/session integration layer. The first `proxy_cache` slice holds
   request-side cache policy, response admission, `Vary` helpers, and bounded
   range/slice request, key, admission, freshness, status-header, and stale

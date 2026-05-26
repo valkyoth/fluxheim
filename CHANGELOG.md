@@ -56,6 +56,9 @@ behavior when the change improves security or project direction.
   response-header mutation policy into `proxy_cache`. Stateful min-use/pass
   counters remain in `proxy.rs` until their optional-cache dependencies are
   split behind a cleaner cache-runtime boundary.
+- Extract outbound PROXY protocol v1/v2 frame construction and the L4 connector
+  that writes those frames before upstream traffic into a focused
+  `proxy_protocol` module.
 - Document the source-boundary rule for future work: new feature domains should
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split

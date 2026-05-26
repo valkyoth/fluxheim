@@ -47,6 +47,8 @@ pub(crate) mod php_fpm;
 pub mod proxy;
 #[cfg(all(feature = "proxy", feature = "cache"))]
 mod proxy_cache;
+#[cfg(feature = "proxy")]
+mod proxy_protocol;
 pub mod reload;
 #[cfg(feature = "proxy")]
 mod route_policy;

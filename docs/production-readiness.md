@@ -234,15 +234,15 @@ are the `1.4.1` follow-up line.
 the next large proxy feature. The stop line is structural: preserve behavior
 while splitting the current monolithic proxy runtime. Access logging,
 compression, auth subrequests, traffic mirroring, edge policy, route policy,
-PHP-FPM process supervision, request-body spooling, FastCGI transport,
-timeout/retry classification, and CGI response parsing are extracted domains.
-The remaining PHP code in `proxy.rs` is the Pingora request/session integration
-layer. The first `proxy_cache` slices hold request-side cache identity, bypass,
-revalidation, response admission, `Vary` helpers, and bounded range-cache
-request/key/admission policy plus fixed-slice range planning, freshness,
-status-header, stale-serving, and response-header mutation policy; cache
-runtime/storage, slice object assembly, and the remaining proxy core
-orchestration stay in scope for this maintenance line.
+outbound PROXY protocol framing, PHP-FPM process supervision, request-body
+spooling, FastCGI transport, timeout/retry classification, and CGI response
+parsing are extracted domains. The remaining PHP code in `proxy.rs` is the
+Pingora request/session integration layer. The first `proxy_cache` slices hold
+request-side cache identity, bypass, revalidation, response admission, `Vary`
+helpers, and bounded range-cache request/key/admission policy plus fixed-slice
+range planning, freshness, status-header, stale-serving, and response-header
+mutation policy; cache runtime/storage, slice object assembly, and the
+remaining proxy core orchestration stay in scope for this maintenance line.
 
 Going forward, large optional features should not be added directly to the
 proxy/runtime files. A feature with its own config, validation rules, metrics,
