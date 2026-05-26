@@ -99,11 +99,13 @@ use crate::php_fpm::{
 };
 #[cfg(feature = "cache")]
 use crate::proxy_cache::{
-    CacheRangeRequest, VaryCachePolicy, append_cache_key_component, cache_request_from_header,
-    cache_vary_policy, range_cache_key, range_response_cache_admission_rejection,
-    request_cache_bypass_reason, request_cache_revalidation_requested,
+    CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest, VaryCachePolicy,
+    cache_request_from_header, cache_vary_policy, range_cache_key,
+    range_response_cache_admission_rejection, request_cache_bypass_reason,
+    request_cache_revalidation_requested, required_slice_bounds, resolve_client_slice_ranges,
     response_cache_admission_rejection, response_range_cache_admission_rejection,
-    selected_cache_range_request, vary_request_hash,
+    selected_cache_range_request, selected_cache_slice_range_request, slice_cache_key,
+    slice_request_within_policy, vary_request_hash,
 };
 use crate::route_policy::{RuntimeRouteMatcher, route_method_matches};
 #[cfg(feature = "web")]
@@ -4228,42 +4230,6 @@ struct CacheStatusOverride {
 }
 
 #[cfg(feature = "cache")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum CacheClientRange {
-    Bounded { start: u64, end: u64 },
-    OpenEnded { start: u64 },
-    Suffix { len: u64 },
-}
-
-#[cfg(feature = "cache")]
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CacheSliceRangeRequest {
-    ranges: Vec<CacheClientRange>,
-    if_range: Option<String>,
-}
-
-#[cfg(feature = "cache")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CacheSliceBounds {
-    start: u64,
-    end: u64,
-}
-
-#[cfg(feature = "cache")]
-impl CacheSliceBounds {
-    fn len(self) -> u64 {
-        self.end.saturating_sub(self.start).saturating_add(1)
-    }
-
-    fn range_request(self) -> CacheRangeRequest {
-        CacheRangeRequest {
-            start: self.start,
-            end: self.end,
-        }
-    }
-}
-
-#[cfg(feature = "cache")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CacheContentRange {
     start: u64,
@@ -6369,158 +6335,6 @@ fn origin_slice_url(proxy: &ProxyConfig, path_and_query: &str) -> std::io::Resul
         proxy.primary_upstream(),
         path_and_query
     ))
-}
-
-#[cfg(feature = "cache")]
-fn selected_cache_slice_range_request(
-    request: &RequestHeader,
-    cache: &crate::config::CacheConfig,
-) -> Option<CacheSliceRangeRequest> {
-    if !cache.range.enabled || !cache.range.slice.enabled || request.method.as_str() != "GET" {
-        return None;
-    }
-    let mut values = request_header_values(request, "range");
-    let range = values.next()?;
-    if values.next().is_some() {
-        return None;
-    }
-    let if_range = request_header_values_joined(request, "if-range");
-    parse_cache_client_ranges(range).map(|ranges| CacheSliceRangeRequest { ranges, if_range })
-}
-
-#[cfg(feature = "cache")]
-fn parse_cache_client_ranges(value: &str) -> Option<Vec<CacheClientRange>> {
-    let value = value.trim();
-    let value = value.strip_prefix("bytes=")?;
-    let mut ranges = Vec::new();
-    for part in value.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            return None;
-        }
-        let (start, end) = part.split_once('-')?;
-        if start.is_empty() {
-            let len = end.parse::<u64>().ok()?;
-            if len == 0 {
-                return None;
-            }
-            ranges.push(CacheClientRange::Suffix { len });
-        } else if end.is_empty() {
-            ranges.push(CacheClientRange::OpenEnded {
-                start: start.parse::<u64>().ok()?,
-            });
-        } else {
-            let start = start.parse::<u64>().ok()?;
-            let end = end.parse::<u64>().ok()?;
-            if end < start {
-                return None;
-            }
-            ranges.push(CacheClientRange::Bounded { start, end });
-        }
-    }
-    (!ranges.is_empty()).then_some(ranges)
-}
-
-#[cfg(feature = "cache")]
-fn resolve_client_slice_ranges(
-    ranges: &[CacheClientRange],
-    total: u64,
-) -> Option<Vec<CacheSliceBounds>> {
-    if total == 0 {
-        return Some(Vec::new());
-    }
-    let last = total.saturating_sub(1);
-    let mut resolved = Vec::new();
-    for range in ranges {
-        match *range {
-            CacheClientRange::Bounded { start, end } => {
-                if start > last {
-                    continue;
-                }
-                resolved.push(CacheSliceBounds {
-                    start,
-                    end: end.min(last),
-                });
-            }
-            CacheClientRange::OpenEnded { start } => {
-                if start > last {
-                    continue;
-                }
-                resolved.push(CacheSliceBounds { start, end: last });
-            }
-            CacheClientRange::Suffix { len } => {
-                if len == 0 {
-                    continue;
-                }
-                resolved.push(CacheSliceBounds {
-                    start: total.saturating_sub(len),
-                    end: last,
-                });
-            }
-        }
-    }
-    Some(resolved)
-}
-
-#[cfg(feature = "cache")]
-fn slice_request_within_policy(
-    ranges: &[CacheSliceBounds],
-    cache: &crate::config::CacheConfig,
-    slice_size: u64,
-) -> bool {
-    let requested_bytes = ranges
-        .iter()
-        .try_fold(0_u64, |sum, range| sum.checked_add(range.len()));
-    let Some(requested_bytes) = requested_bytes else {
-        return false;
-    };
-    if requested_bytes > cache.range.max_bytes.as_u64() {
-        return false;
-    }
-    let slices = required_slice_bounds(ranges, slice_size, u64::MAX);
-    !slices.is_empty() && slices.len() <= cache.range.slice.max_slices as usize
-}
-
-#[cfg(feature = "cache")]
-fn required_slice_bounds(
-    ranges: &[CacheSliceBounds],
-    slice_size: u64,
-    total: u64,
-) -> Vec<CacheSliceBounds> {
-    let mut slices = Vec::new();
-    let last = total.saturating_sub(1);
-    for range in ranges {
-        let mut start = (range.start / slice_size).saturating_mul(slice_size);
-        while start <= range.end && start <= last {
-            let end = start.saturating_add(slice_size.saturating_sub(1)).min(last);
-            let slice = CacheSliceBounds { start, end };
-            if !slices.contains(&slice) {
-                slices.push(slice);
-            }
-            let Some(next) = start.checked_add(slice_size) else {
-                break;
-            };
-            start = next;
-        }
-    }
-    slices.sort_by_key(|slice| slice.start);
-    slices
-}
-
-#[cfg(feature = "cache")]
-fn slice_cache_key(mut base: PingoraCacheKey, range: CacheRangeRequest) -> Result<PingoraCacheKey> {
-    let namespace = base.namespace().to_vec();
-    let user_tag = base.user_tag.clone();
-    let Some(primary) = base.primary_key_str() else {
-        return Error::e_explain(
-            ErrorType::InternalError,
-            "cache slice key requires utf-8 primary key material",
-        );
-    };
-    let mut primary = primary.to_owned();
-    append_cache_key_component(&mut primary, "slice", &range.component());
-    base = PingoraCacheKey::new(namespace, primary, user_tag);
-    Ok(base)
 }
 
 #[cfg(feature = "cache")]
@@ -10746,14 +10560,12 @@ mod tests {
     use super::RuntimeRetryBudget;
     #[cfg(feature = "cache")]
     use super::{
-        CACHE_PASS_REASON, CacheClientRange, CacheSliceBounds, CacheStaleEvent,
-        CacheStatusOverride, apply_cache_status_ttl, cache_min_uses_allows_store,
-        cache_pass_record_cacheable, cache_pass_record_uncacheable, cache_pass_should_bypass,
-        cache_request_participated, cache_should_serve_stale, cache_stale_status_allows,
-        cache_status_header_value, cache_status_reason_header_value, ignore_origin_cache_headers,
-        lookup_proxy_cache_only_object, parse_cache_client_ranges, read_cache_hit_body,
-        remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
-        response_age_secs, response_vary_variance, slice_cache_key, slice_request_within_policy,
+        CACHE_PASS_REASON, CacheStaleEvent, CacheStatusOverride, apply_cache_status_ttl,
+        cache_min_uses_allows_store, cache_pass_record_cacheable, cache_pass_record_uncacheable,
+        cache_pass_should_bypass, cache_request_participated, cache_should_serve_stale,
+        cache_stale_status_allows, cache_status_header_value, cache_status_reason_header_value,
+        ignore_origin_cache_headers, lookup_proxy_cache_only_object, read_cache_hit_body,
+        remaining_fresh_ttl_secs, response_age_secs, response_vary_variance,
         strip_cache_response_headers,
     };
     #[cfg(feature = "cache")]
@@ -10823,11 +10635,13 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use crate::proxy_cache::{
-        CacheRangeRequest, MAX_VARY_FIELDS, VaryCachePolicy, cache_vary_policy,
-        parse_bounded_single_range, range_cache_key, range_response_cache_admission_rejection,
-        request_cache_bypass, request_cache_bypass_reason, request_cache_revalidation_requested,
-        response_cache_admission_rejection, selected_cache_range_request, vary_cache_policy,
-        vary_request_hash,
+        CacheClientRange, CacheRangeRequest, CacheSliceBounds, MAX_VARY_FIELDS, VaryCachePolicy,
+        cache_vary_policy, parse_bounded_single_range, parse_cache_client_ranges, range_cache_key,
+        range_response_cache_admission_rejection, request_cache_bypass,
+        request_cache_bypass_reason, request_cache_revalidation_requested, required_slice_bounds,
+        resolve_client_slice_ranges, response_cache_admission_rejection,
+        selected_cache_range_request, slice_cache_key, slice_request_within_policy,
+        vary_cache_policy, vary_request_hash,
     };
     #[cfg(feature = "traffic-mirror")]
     use crate::traffic_mirror::{

@@ -105,6 +105,38 @@ impl CacheRangeRequest {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum CacheClientRange {
+    Bounded { start: u64, end: u64 },
+    OpenEnded { start: u64 },
+    Suffix { len: u64 },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CacheSliceRangeRequest {
+    pub(crate) ranges: Vec<CacheClientRange>,
+    pub(crate) if_range: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CacheSliceBounds {
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+}
+
+impl CacheSliceBounds {
+    pub(crate) fn len(self) -> u64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    pub(crate) fn range_request(self) -> CacheRangeRequest {
+        CacheRangeRequest {
+            start: self.start,
+            end: self.end,
+        }
+    }
+}
+
 pub(crate) fn selected_cache_range_request(
     request: &RequestHeader,
     cache: &crate::config::CacheConfig,
@@ -142,6 +174,137 @@ pub(crate) fn parse_bounded_single_range(range: &str) -> Option<CacheRangeReques
     Some(CacheRangeRequest { start, end })
 }
 
+pub(crate) fn selected_cache_slice_range_request(
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<CacheSliceRangeRequest> {
+    if !cache.range.enabled || !cache.range.slice.enabled || request.method.as_str() != "GET" {
+        return None;
+    }
+    let mut values = request_header_values(request, "range");
+    let range = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    let if_range = request_header_values_joined(request, "if-range");
+    parse_cache_client_ranges(range).map(|ranges| CacheSliceRangeRequest { ranges, if_range })
+}
+
+pub(crate) fn parse_cache_client_ranges(value: &str) -> Option<Vec<CacheClientRange>> {
+    let value = value.trim();
+    let value = value.strip_prefix("bytes=")?;
+    let mut ranges = Vec::new();
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            return None;
+        }
+        let (start, end) = part.split_once('-')?;
+        if start.is_empty() {
+            let len = end.parse::<u64>().ok()?;
+            if len == 0 {
+                return None;
+            }
+            ranges.push(CacheClientRange::Suffix { len });
+        } else if end.is_empty() {
+            ranges.push(CacheClientRange::OpenEnded {
+                start: start.parse::<u64>().ok()?,
+            });
+        } else {
+            let start = start.parse::<u64>().ok()?;
+            let end = end.parse::<u64>().ok()?;
+            if end < start {
+                return None;
+            }
+            ranges.push(CacheClientRange::Bounded { start, end });
+        }
+    }
+    (!ranges.is_empty()).then_some(ranges)
+}
+
+pub(crate) fn resolve_client_slice_ranges(
+    ranges: &[CacheClientRange],
+    total: u64,
+) -> Option<Vec<CacheSliceBounds>> {
+    if total == 0 {
+        return Some(Vec::new());
+    }
+    let last = total.saturating_sub(1);
+    let mut resolved = Vec::new();
+    for range in ranges {
+        match *range {
+            CacheClientRange::Bounded { start, end } => {
+                if start > last {
+                    continue;
+                }
+                resolved.push(CacheSliceBounds {
+                    start,
+                    end: end.min(last),
+                });
+            }
+            CacheClientRange::OpenEnded { start } => {
+                if start > last {
+                    continue;
+                }
+                resolved.push(CacheSliceBounds { start, end: last });
+            }
+            CacheClientRange::Suffix { len } => {
+                if len == 0 {
+                    continue;
+                }
+                resolved.push(CacheSliceBounds {
+                    start: total.saturating_sub(len),
+                    end: last,
+                });
+            }
+        }
+    }
+    Some(resolved)
+}
+
+pub(crate) fn slice_request_within_policy(
+    ranges: &[CacheSliceBounds],
+    cache: &crate::config::CacheConfig,
+    slice_size: u64,
+) -> bool {
+    let requested_bytes = ranges
+        .iter()
+        .try_fold(0_u64, |sum, range| sum.checked_add(range.len()));
+    let Some(requested_bytes) = requested_bytes else {
+        return false;
+    };
+    if requested_bytes > cache.range.max_bytes.as_u64() {
+        return false;
+    }
+    let slices = required_slice_bounds(ranges, slice_size, u64::MAX);
+    !slices.is_empty() && slices.len() <= cache.range.slice.max_slices as usize
+}
+
+pub(crate) fn required_slice_bounds(
+    ranges: &[CacheSliceBounds],
+    slice_size: u64,
+    total: u64,
+) -> Vec<CacheSliceBounds> {
+    let mut slices = Vec::new();
+    let last = total.saturating_sub(1);
+    for range in ranges {
+        let mut start = (range.start / slice_size).saturating_mul(slice_size);
+        while start <= range.end && start <= last {
+            let end = start.saturating_add(slice_size.saturating_sub(1)).min(last);
+            let slice = CacheSliceBounds { start, end };
+            if !slices.contains(&slice) {
+                slices.push(slice);
+            }
+            let Some(next) = start.checked_add(slice_size) else {
+                break;
+            };
+            start = next;
+        }
+    }
+    slices.sort_by_key(|slice| slice.start);
+    slices
+}
+
 pub(crate) fn range_cache_key(
     mut base: PingoraCacheKey,
     range: CacheRangeRequest,
@@ -156,6 +319,24 @@ pub(crate) fn range_cache_key(
     };
     let mut primary = primary.to_owned();
     append_cache_key_component(&mut primary, "range", &range.component());
+    base = PingoraCacheKey::new(namespace, primary, user_tag);
+    Ok(base)
+}
+
+pub(crate) fn slice_cache_key(
+    mut base: PingoraCacheKey,
+    range: CacheRangeRequest,
+) -> Result<PingoraCacheKey> {
+    let namespace = base.namespace().to_vec();
+    let user_tag = base.user_tag.clone();
+    let Some(primary) = base.primary_key_str() else {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "cache slice key requires utf-8 primary key material",
+        );
+    };
+    let mut primary = primary.to_owned();
+    append_cache_key_component(&mut primary, "slice", &range.component());
     base = PingoraCacheKey::new(namespace, primary, user_tag);
     Ok(base)
 }
@@ -508,6 +689,16 @@ fn request_header_values<'a>(
         .get_all(name)
         .iter()
         .filter_map(|value| value.to_str().ok())
+}
+
+fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
+    let mut values = request_header_values(request, name);
+    let first = values.next()?.to_owned();
+    Some(values.fold(first, |mut joined, value| {
+        joined.push_str(", ");
+        joined.push_str(value);
+        joined
+    }))
 }
 
 fn response_header_values<'a>(
