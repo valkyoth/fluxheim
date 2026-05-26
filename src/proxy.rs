@@ -7,7 +7,7 @@ use std::collections::HashMap;
 ))]
 use std::fs::OpenOptions;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv6Addr, ToSocketAddrs};
 #[cfg(all(
     unix,
     any(
@@ -19,12 +19,15 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
+use std::sync::Arc;
+#[cfg(any(feature = "cache", feature = "load-balancer", feature = "php-fpm"))]
+use std::sync::Mutex;
 #[cfg(feature = "cache")]
 use std::sync::OnceLock;
 #[cfg(feature = "php-fpm")]
 use std::sync::atomic::AtomicBool;
+#[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -54,8 +57,6 @@ use pingora::{
     cache::CacheMeta, cache::CacheOptionOverrides, cache::CachePhase, cache::ForcedFreshness,
     cache::HitHandler, cache::NoCacheReason, cache::RespCacheable,
 };
-use subtle::ConstantTimeEq;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::access_log::count_response_body_chunk;
 #[cfg(feature = "otel-otlp")]
@@ -71,9 +72,12 @@ use crate::compression::ResponseCompressionEncoder;
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
 use crate::config::{
-    Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig, RateLimitMode,
-    RouteRedirectConfig, ServerLimitsConfig, UpstreamHttpVersion, UpstreamProxyProtocol,
-    normalize_host,
+    Config, HostRoutingConfig, HttpsRedirectConfig, ProxyConfig, RouteRedirectConfig,
+    ServerLimitsConfig, UpstreamHttpVersion, UpstreamProxyProtocol, normalize_host,
+};
+use crate::edge_policy::{
+    InFlightPermit, RateLimitDecision, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
+    RuntimeRateLimit, TrustedProxy, parse_trusted_proxies,
 };
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{
@@ -231,12 +235,6 @@ struct ProxyRuntimeState {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum TrustedProxy {
-    Exact(IpAddr),
-    Cidr { network: IpAddr, prefix: u8 },
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum HostRoutingRejectReason {
     Missing,
     Invalid,
@@ -264,29 +262,6 @@ impl HostRoutingRejectReason {
             Self::Missing => b"missing host header",
             Self::Invalid => b"invalid host header",
             Self::Unknown => b"unknown host",
-        }
-    }
-}
-
-impl TrustedProxy {
-    fn contains(self, address: IpAddr) -> bool {
-        match (self, address) {
-            (Self::Exact(trusted), address) => trusted == address,
-            (
-                Self::Cidr {
-                    network: IpAddr::V4(network),
-                    prefix,
-                },
-                IpAddr::V4(address),
-            ) => ipv4_prefix_match(network, address, prefix),
-            (
-                Self::Cidr {
-                    network: IpAddr::V6(network),
-                    prefix,
-                },
-                IpAddr::V6(address),
-            ) => ipv6_prefix_match(network, address, prefix),
-            _ => false,
         }
     }
 }
@@ -2970,354 +2945,6 @@ struct RuntimeRoute {
     compression: Option<crate::config::CompressionConfig>,
     request_headers: crate::config::RequestHeaderPolicyConfig,
     response_headers: crate::config::ResponseHeaderPolicyConfig,
-}
-
-#[derive(Debug)]
-struct InFlightPermit {
-    permit: Option<OwnedSemaphorePermit>,
-}
-
-impl Drop for InFlightPermit {
-    fn drop(&mut self) {
-        let _ = self.permit.take();
-    }
-}
-
-#[derive(Debug)]
-struct QueuedConcurrencyWaiter {
-    queued: Arc<AtomicUsize>,
-}
-
-impl Drop for QueuedConcurrencyWaiter {
-    fn drop(&mut self) {
-        self.queued.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeConcurrencyLimit {
-    enabled: bool,
-    max_queue: usize,
-    status: u16,
-    queue_timeout: Duration,
-    semaphore: Arc<Semaphore>,
-    queued: Arc<AtomicUsize>,
-}
-
-impl Default for RuntimeConcurrencyLimit {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_queue: 0,
-            status: 503,
-            queue_timeout: Duration::ZERO,
-            semaphore: Arc::new(Semaphore::new(0)),
-            queued: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-}
-
-impl RuntimeConcurrencyLimit {
-    fn from_config(config: &crate::config::ConcurrencyLimitConfig) -> Self {
-        let max_queue = if config.max_queue == 0 {
-            config
-                .max_in_flight
-                .saturating_mul(4)
-                .max(config.max_in_flight)
-                .min(1_000_000)
-        } else {
-            config.max_queue
-        };
-        Self {
-            enabled: config.enabled,
-            max_queue,
-            status: config.status,
-            queue_timeout: Duration::from_millis(config.queue_timeout_ms),
-            semaphore: Arc::new(Semaphore::new(config.max_in_flight)),
-            queued: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    async fn acquire(&self) -> std::result::Result<Option<InFlightPermit>, u16> {
-        if !self.enabled {
-            return Ok(None);
-        }
-
-        match Arc::clone(&self.semaphore).try_acquire_owned() {
-            Ok(permit) => {
-                return Ok(Some(InFlightPermit {
-                    permit: Some(permit),
-                }));
-            }
-            Err(_) if self.queue_timeout.is_zero() => return Err(self.status),
-            Err(_) => {}
-        }
-
-        if !self.try_enter_queue() {
-            return Err(self.status);
-        }
-        let queued = QueuedConcurrencyWaiter {
-            queued: Arc::clone(&self.queued),
-        };
-
-        let result = tokio::time::timeout(
-            self.queue_timeout,
-            Arc::clone(&self.semaphore).acquire_owned(),
-        )
-        .await;
-        drop(queued);
-
-        match result {
-            Ok(Ok(permit)) => Ok(Some(InFlightPermit {
-                permit: Some(permit),
-            })),
-            Ok(Err(_)) | Err(_) => Err(self.status),
-        }
-    }
-
-    fn try_enter_queue(&self) -> bool {
-        let mut current = self.queued.load(Ordering::Acquire);
-        loop {
-            if current >= self.max_queue {
-                return false;
-            }
-            let Some(next) = current.checked_add(1) else {
-                return false;
-            };
-            match self.queued.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return true,
-                Err(observed) => current = observed,
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum RateLimitKey {
-    Ip(IpAddr),
-    Indeterminate,
-}
-
-impl From<Option<IpAddr>> for RateLimitKey {
-    fn from(value: Option<IpAddr>) -> Self {
-        value.map(Self::Ip).unwrap_or(Self::Indeterminate)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct RateLimitBucket {
-    tokens: f64,
-    updated_at: Instant,
-    last_seen: Instant,
-}
-
-#[derive(Debug)]
-struct RuntimeRateLimitState {
-    buckets: Mutex<HashMap<RateLimitKey, RateLimitBucket>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum RateLimitDecision {
-    Allow,
-    Delay(Duration),
-    Reject(u16),
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeRateLimit {
-    enabled: bool,
-    requests_per_second: f64,
-    burst: f64,
-    status: u16,
-    table_max_entries: usize,
-    entry_ttl: Duration,
-    mode: RateLimitMode,
-    max_delay: Duration,
-    reject_indeterminate: bool,
-    state: Arc<RuntimeRateLimitState>,
-}
-
-impl Default for RuntimeRateLimit {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            requests_per_second: 0.0,
-            burst: 0.0,
-            status: 429,
-            table_max_entries: 0,
-            entry_ttl: Duration::from_secs(300),
-            mode: RateLimitMode::Nodelay,
-            max_delay: Duration::from_millis(1000),
-            reject_indeterminate: false,
-            state: Arc::new(RuntimeRateLimitState {
-                buckets: Mutex::new(HashMap::new()),
-            }),
-        }
-    }
-}
-
-impl RuntimeRateLimit {
-    fn from_config(config: &crate::config::RateLimitConfig) -> Self {
-        let burst = if config.burst == 0 {
-            config.requests_per_second.max(1)
-        } else {
-            config.burst
-        };
-        Self {
-            enabled: config.enabled,
-            requests_per_second: f64::from(config.requests_per_second),
-            burst: f64::from(burst),
-            status: config.status,
-            table_max_entries: config.table_max_entries,
-            entry_ttl: Duration::from_secs(config.entry_ttl_secs),
-            mode: config.mode,
-            max_delay: Duration::from_millis(config.max_delay_ms),
-            reject_indeterminate: config.reject_indeterminate,
-            state: Arc::new(RuntimeRateLimitState {
-                buckets: Mutex::new(HashMap::new()),
-            }),
-        }
-    }
-
-    fn check(&self, client_ip: Option<IpAddr>) -> RateLimitDecision {
-        if !self.enabled {
-            return RateLimitDecision::Allow;
-        }
-
-        let now = Instant::now();
-        let key = RateLimitKey::from(client_ip);
-        if matches!(key, RateLimitKey::Indeterminate) && self.reject_indeterminate {
-            return RateLimitDecision::Reject(self.status);
-        }
-        let mut buckets = match self.state.buckets.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                log::error!(
-                    target: "fluxheim::security",
-                    "rate-limit bucket lock poisoned; aborting to avoid inconsistent edge limits"
-                );
-                std::process::abort();
-            }
-        };
-        if !buckets.contains_key(&key) && buckets.len() >= self.table_max_entries {
-            buckets.retain(|_, bucket| now.duration_since(bucket.last_seen) <= self.entry_ttl);
-            if buckets.len() >= self.table_max_entries {
-                return RateLimitDecision::Reject(self.status);
-            }
-        }
-
-        let bucket = buckets.entry(key).or_insert(RateLimitBucket {
-            tokens: self.burst,
-            updated_at: now,
-            last_seen: now,
-        });
-        let elapsed = now.duration_since(bucket.updated_at).as_secs_f64();
-        bucket.tokens = self
-            .burst
-            .min(bucket.tokens + elapsed * self.requests_per_second);
-        bucket.updated_at = now;
-        bucket.last_seen = now;
-
-        if bucket.tokens >= 1.0 {
-            bucket.tokens -= 1.0;
-            return RateLimitDecision::Allow;
-        }
-
-        if !matches!(self.mode, RateLimitMode::Delay) || bucket.tokens <= -self.burst {
-            return RateLimitDecision::Reject(self.status);
-        }
-
-        let wait = Duration::from_secs_f64((1.0 - bucket.tokens) / self.requests_per_second);
-        if wait > self.max_delay {
-            return RateLimitDecision::Reject(self.status);
-        }
-
-        bucket.tokens -= 1.0;
-        RateLimitDecision::Delay(wait)
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct RuntimeAccessPolicy {
-    enabled: bool,
-    allow: Vec<TrustedProxy>,
-    deny: Vec<TrustedProxy>,
-    require_client_cert: bool,
-    allow_client_cert_sha256: Vec<String>,
-    deny_client_cert_sha256: Vec<String>,
-}
-
-impl RuntimeAccessPolicy {
-    fn from_config(config: &crate::config::AccessPolicyConfig) -> io::Result<Self> {
-        Ok(Self {
-            enabled: config.enabled,
-            allow: parse_trusted_proxies(&config.allow)?,
-            deny: parse_trusted_proxies(&config.deny)?,
-            require_client_cert: config.require_client_cert,
-            allow_client_cert_sha256: normalized_cert_fingerprints(
-                &config.allow_client_cert_sha256,
-            ),
-            deny_client_cert_sha256: normalized_cert_fingerprints(&config.deny_client_cert_sha256),
-        })
-    }
-
-    fn allows(
-        &self,
-        client_ip: Option<IpAddr>,
-        tls_identity: Option<&crate::headers::RequestTlsClientIdentity>,
-    ) -> bool {
-        if !self.enabled {
-            return true;
-        }
-        let ip_restrictive = !self.allow.is_empty() || !self.deny.is_empty();
-        if let Some(client_ip) = client_ip {
-            if self.deny.iter().any(|rule| rule.contains(client_ip)) {
-                return false;
-            }
-            if !self.allow.is_empty() && !self.allow.iter().any(|rule| rule.contains(client_ip)) {
-                return false;
-            }
-        } else if ip_restrictive {
-            return false;
-        }
-
-        let cert_sha256 = tls_identity
-            .and_then(|identity| identity.cert_sha256.as_deref())
-            .map(str::to_ascii_lowercase);
-        if self.require_client_cert && cert_sha256.is_none() {
-            return false;
-        }
-        if let Some(cert_sha256) = cert_sha256.as_deref() {
-            if cert_fingerprint_list_contains(&self.deny_client_cert_sha256, cert_sha256) {
-                return false;
-            }
-            self.allow_client_cert_sha256.is_empty()
-                || cert_fingerprint_list_contains(&self.allow_client_cert_sha256, cert_sha256)
-        } else {
-            self.allow_client_cert_sha256.is_empty()
-        }
-    }
-}
-
-fn normalized_cert_fingerprints(values: &[String]) -> Vec<String> {
-    values
-        .iter()
-        .map(|value| value.to_ascii_lowercase())
-        .collect()
-}
-
-fn cert_fingerprint_list_contains(values: &[String], fingerprint: &str) -> bool {
-    let fingerprint = fingerprint.as_bytes();
-    let mut matched = 0u8;
-    for value in values {
-        matched |= value.as_bytes().ct_eq(fingerprint).unwrap_u8();
-    }
-    matched == 1
 }
 
 #[cfg(feature = "cache")]
@@ -12591,67 +12218,6 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-fn parse_trusted_proxies(values: &[String]) -> io::Result<Vec<TrustedProxy>> {
-    values
-        .iter()
-        .map(|value| parse_trusted_proxy(value))
-        .collect()
-}
-
-fn parse_trusted_proxy(value: &str) -> io::Result<TrustedProxy> {
-    let value = value.trim();
-    if let Some((address, prefix)) = value.split_once('/') {
-        let network = address.parse::<IpAddr>().map_err(invalid_trusted_proxy)?;
-        let prefix = prefix.parse::<u8>().map_err(invalid_trusted_proxy)?;
-        let valid_prefix = match network {
-            IpAddr::V4(_) => prefix <= 32,
-            IpAddr::V6(_) => prefix <= 128,
-        };
-        if !valid_prefix {
-            return Err(invalid_trusted_proxy("invalid prefix length"));
-        }
-        return Ok(TrustedProxy::Cidr { network, prefix });
-    }
-
-    value
-        .parse::<IpAddr>()
-        .map(TrustedProxy::Exact)
-        .map_err(invalid_trusted_proxy)
-}
-
-fn invalid_trusted_proxy(error: impl std::fmt::Display) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidInput,
-        format!("invalid trusted proxy: {error}"),
-    )
-}
-
-fn ipv4_prefix_match(network: Ipv4Addr, address: Ipv4Addr, prefix: u8) -> bool {
-    let mask = prefix_mask_u32(prefix);
-    u32::from(network) & mask == u32::from(address) & mask
-}
-
-fn ipv6_prefix_match(network: Ipv6Addr, address: Ipv6Addr, prefix: u8) -> bool {
-    let mask = prefix_mask_u128(prefix);
-    u128::from(network) & mask == u128::from(address) & mask
-}
-
-fn prefix_mask_u32(prefix: u8) -> u32 {
-    if prefix == 0 {
-        0
-    } else {
-        u32::MAX << (32 - prefix)
-    }
-}
-
-fn prefix_mask_u128(prefix: u8) -> u128 {
-    if prefix == 0 {
-        0
-    } else {
-        u128::MAX << (128 - prefix)
-    }
-}
-
 fn proxy_health_signal(session: &Session, error: Option<&Error>) -> Option<ProxyHealthSignal> {
     if error.is_some() {
         return Some(ProxyHealthSignal::Failure);
@@ -13604,8 +13170,7 @@ mod tests {
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
     #[allow(unused_imports)]
     use super::{
-        FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
-        RuntimeConcurrencyLimit, RuntimeProxy, RuntimeRateLimit, append_fluxheim_via_to_request,
+        FluxProxy, HostRoutingRejectReason, RuntimeProxy, append_fluxheim_via_to_request,
         append_fluxheim_via_to_response, apply_websocket_upgrade_headers_if_enabled,
         approximate_request_header_bytes, count_response_body_chunk,
         effective_client_ip_from_forwarded_for, grpc_content_type, grpc_route_rejection_status,
@@ -13655,6 +13220,9 @@ mod tests {
     use crate::compression::{
         ResponseCompressionEncoder, ResponseCompressionEncoding, gzip_response_eligible,
         request_accepts_gzip, selected_response_compression,
+    };
+    use crate::edge_policy::{
+        RateLimitDecision, RuntimeAccessPolicy, RuntimeConcurrencyLimit, RuntimeRateLimit,
     };
     #[cfg(feature = "traffic-mirror")]
     use crate::traffic_mirror::{

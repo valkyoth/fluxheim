@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
 - Extract traffic-mirror request construction, sampling, in-flight limits, and
   outbound shadow delivery from `proxy.rs` into a focused `traffic_mirror`
   module.
+- Extract trusted-proxy parsing, access policy checks, rate limiting, and
+  request concurrency admission into a focused `edge_policy` module.
 
 ## 1.4.1 - 2026-05-26
 

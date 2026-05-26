@@ -25,6 +25,8 @@ pub mod cli;
 mod compression;
 pub mod config;
 pub mod config_tester;
+#[cfg(feature = "proxy")]
+mod edge_policy;
 mod fs_trust;
 #[cfg(feature = "proxy")]
 pub mod headers;
