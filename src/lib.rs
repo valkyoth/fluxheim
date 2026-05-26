@@ -27,6 +27,8 @@ pub mod config;
 pub mod config_tester;
 #[cfg(feature = "proxy")]
 mod edge_policy;
+#[cfg(all(feature = "proxy", feature = "cache"))]
+mod forward_path;
 mod fs_trust;
 #[cfg(feature = "proxy")]
 pub mod headers;

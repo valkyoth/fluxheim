@@ -59,6 +59,9 @@ behavior when the change improves security or project direction.
 - Extract outbound PROXY protocol v1/v2 frame construction and the L4 connector
   that writes those frames before upstream traffic into a focused
   `proxy_protocol` module.
+- Extract traversal-safe forwarded path validation into `forward_path`, giving
+  peer-fill and future forwarding code a shared security helper outside the
+  proxy orchestration layer.
 - Document the source-boundary rule for future work: new feature domains should
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split
