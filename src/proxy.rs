@@ -99,13 +99,17 @@ use crate::php_fpm::{
 };
 #[cfg(feature = "cache")]
 use crate::proxy_cache::{
-    CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest, VaryCachePolicy,
-    cache_request_from_header, cache_vary_policy, range_cache_key,
-    range_response_cache_admission_rejection, request_cache_bypass_reason,
-    request_cache_revalidation_requested, required_slice_bounds, resolve_client_slice_ranges,
-    response_cache_admission_rejection, response_range_cache_admission_rejection,
-    selected_cache_range_request, selected_cache_slice_range_request, slice_cache_key,
-    slice_request_within_policy, vary_request_hash,
+    CacheRangeRequest, CacheSliceBounds, CacheSliceRangeRequest, CacheStaleEvent,
+    CacheStatusOverride, VaryCachePolicy, apply_cache_status_ttl, cache_request_from_header,
+    cache_response_fresh_ttl_secs, cache_should_serve_stale, cache_stale_error_kind,
+    cache_status_header_value, cache_status_reason_header_value, cache_vary_policy,
+    ignore_origin_cache_headers, proxy_cache_method_temporarily_bypassed, range_cache_key,
+    range_response_cache_admission_rejection, remaining_fresh_ttl_secs,
+    request_cache_bypass_reason, request_cache_revalidation_requested, required_slice_bounds,
+    resolve_client_slice_ranges, response_age_secs, response_cache_admission_rejection,
+    response_range_cache_admission_rejection, selected_cache_range_request,
+    selected_cache_slice_range_request, slice_cache_key, slice_request_within_policy,
+    strip_cache_response_headers, vary_request_hash,
 };
 use crate::route_policy::{RuntimeRouteMatcher, route_method_matches};
 #[cfg(feature = "web")]
@@ -4220,13 +4224,6 @@ pub struct RequestContext {
         feature = "compression-zstd"
     ))]
     compression: Option<ResponseCompressionEncoder>,
-}
-
-#[cfg(feature = "cache")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CacheStatusOverride {
-    status: &'static str,
-    reason: Option<&'static str>,
 }
 
 #[cfg(feature = "cache")]
@@ -8506,37 +8503,6 @@ fn static_cached_body_for_plan(
 }
 
 #[cfg(feature = "cache")]
-fn cache_response_fresh_ttl_secs(
-    cache: &crate::config::CacheConfig,
-    response: &ResponseHeader,
-) -> Option<u32> {
-    cache
-        .status_ttls
-        .get(&response.status.as_u16())
-        .copied()
-        .or(cache.default_status_ttl_secs)
-        .or_else(|| response_cache_control_max_age(response))
-        .filter(|ttl| *ttl > 0)
-}
-
-#[cfg(feature = "cache")]
-fn remaining_fresh_ttl_secs(ttl_secs: u32, age_secs: u64) -> Option<u32> {
-    let remaining = u64::from(ttl_secs).checked_sub(age_secs)?;
-    u32::try_from(remaining).ok().filter(|ttl| *ttl > 0)
-}
-
-#[cfg(feature = "cache")]
-fn response_age_secs(response: &ResponseHeader) -> u64 {
-    response
-        .headers
-        .get_all("age")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find_map(|value| value.trim().parse::<u64>().ok())
-        .unwrap_or(0)
-}
-
-#[cfg(feature = "cache")]
 fn response_vary_variance(
     meta: &CacheMeta,
     request: &RequestHeader,
@@ -8547,26 +8513,6 @@ fn response_vary_variance(
     } else {
         None
     }
-}
-
-#[cfg(feature = "cache")]
-fn response_cache_control_max_age(response: &ResponseHeader) -> Option<u32> {
-    response
-        .headers
-        .get_all("cache-control")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .find_map(|directive| {
-            let (name, value) = directive.trim().split_once('=')?;
-            if name.trim().eq_ignore_ascii_case("s-maxage")
-                || name.trim().eq_ignore_ascii_case("max-age")
-            {
-                value.trim().trim_matches('"').parse::<u32>().ok()
-            } else {
-                None
-            }
-        })
 }
 
 fn selected_runtime_proxy<'a>(vhost: &'a RuntimeVhost, ctx: &RequestContext) -> &'a RuntimeProxy {
@@ -8952,84 +8898,6 @@ fn effective_cache_phase(session: &Session, ctx: &RequestContext) -> CachePhase 
         .unwrap_or_else(|| session.cache.phase())
 }
 
-#[cfg(feature = "cache")]
-fn ignore_origin_cache_headers(
-    response: &mut ResponseHeader,
-    cache: &crate::config::CacheConfig,
-    phase: CachePhase,
-) {
-    if !cache_request_participated(phase) || !cache.ignore_origin_cache_headers {
-        return;
-    }
-    response.remove_header("cache-control");
-    response.remove_header("expires");
-}
-
-#[cfg(feature = "cache")]
-fn apply_cache_status_ttl(
-    response: &mut ResponseHeader,
-    cache: &crate::config::CacheConfig,
-    phase: CachePhase,
-) -> Result<()> {
-    if !cache_request_participated(phase) {
-        return Ok(());
-    }
-    let status = response.status.as_u16();
-    if let Some(ttl_secs) = cache
-        .status_ttls
-        .get(&status)
-        .copied()
-        .or(cache.default_status_ttl_secs)
-    {
-        response.remove_header("expires");
-        return response.insert_header(
-            "cache-control",
-            cache_control_freshness_value(
-                ttl_secs,
-                cache.stale_while_revalidate_secs,
-                cache.stale_if_error_secs,
-            ),
-        );
-    }
-
-    if !response.headers.contains_key("cache-control")
-        || response_cache_admission_rejection(response, cache).is_some()
-    {
-        return Ok(());
-    }
-
-    if let Some(stale_while_revalidate_secs) = cache.stale_while_revalidate_secs {
-        append_cache_control_directive(
-            response,
-            &format!("stale-while-revalidate={stale_while_revalidate_secs}"),
-            "stale-while-revalidate",
-        )?;
-    }
-    if let Some(stale_if_error_secs) = cache.stale_if_error_secs {
-        append_cache_control_directive(
-            response,
-            &format!("stale-if-error={stale_if_error_secs}"),
-            "stale-if-error",
-        )?;
-    }
-
-    Ok(())
-}
-
-#[cfg(feature = "cache")]
-fn strip_cache_response_headers(
-    response: &mut ResponseHeader,
-    cache: &crate::config::CacheConfig,
-    phase: CachePhase,
-) {
-    if !cache_request_participated(phase) {
-        return;
-    }
-    for header in &cache.hide_response_headers {
-        response.remove_header(header.as_str());
-    }
-}
-
 #[cfg(feature = "php-fpm")]
 fn strip_php_response_headers(response: &mut ResponseHeader, php: &crate::config::PhpConfig) {
     let connection_header_tokens = response
@@ -9280,64 +9148,6 @@ const PHP_HOP_BY_HOP_RESPONSE_HEADERS: &[&str] = &[
 ];
 
 #[cfg(feature = "cache")]
-fn cache_control_freshness_value(
-    ttl_secs: u32,
-    stale_while_revalidate_secs: Option<u32>,
-    stale_if_error_secs: Option<u32>,
-) -> String {
-    let mut value = format!("public, max-age={ttl_secs}");
-    if let Some(stale_while_revalidate_secs) = stale_while_revalidate_secs {
-        value.push_str(", stale-while-revalidate=");
-        value.push_str(&stale_while_revalidate_secs.to_string());
-    }
-    if let Some(stale_if_error_secs) = stale_if_error_secs {
-        value.push_str(", stale-if-error=");
-        value.push_str(&stale_if_error_secs.to_string());
-    }
-    value
-}
-
-#[cfg(feature = "cache")]
-fn append_cache_control_directive(
-    response: &mut ResponseHeader,
-    directive: &str,
-    directive_name: &str,
-) -> Result<()> {
-    let mut directives = Vec::new();
-    for value in response.headers.get_all("cache-control") {
-        let Ok(value) = value.to_str() else {
-            return Ok(());
-        };
-        directives.extend(
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|part| {
-                    !part.is_empty()
-                        && !part
-                            .split_once('=')
-                            .map(|(name, _)| name.trim())
-                            .unwrap_or(part)
-                            .eq_ignore_ascii_case(directive_name)
-                })
-                .map(str::to_owned),
-        );
-    }
-
-    directives.push(directive.to_owned());
-    response.remove_header("cache-control");
-    response.insert_header("cache-control", directives.join(", "))
-}
-
-#[cfg(feature = "cache")]
-fn cache_request_participated(phase: CachePhase) -> bool {
-    !matches!(
-        phase,
-        CachePhase::Disabled(NoCacheReason::NeverEnabled) | CachePhase::Uninit | CachePhase::Bypass
-    )
-}
-
-#[cfg(feature = "cache")]
 fn cache_min_uses_counter() -> &'static moka::sync::Cache<String, u32> {
     static COUNTER: OnceLock<moka::sync::Cache<String, u32>> = OnceLock::new();
     COUNTER.get_or_init(|| {
@@ -9422,124 +9232,6 @@ const CACHE_HEAD_BYPASS_REASON: &str = "method-head";
 
 #[cfg(feature = "cache")]
 const CACHE_UPGRADE_BYPASS_REASON: &str = "upgrade";
-
-#[cfg(feature = "cache")]
-fn proxy_cache_method_temporarily_bypassed(method: &str) -> bool {
-    method == "HEAD"
-}
-
-#[cfg(feature = "cache")]
-fn cache_should_serve_stale(cache: &crate::config::CacheConfig, event: CacheStaleEvent) -> bool {
-    match event {
-        CacheStaleEvent::UpstreamError(kind) => {
-            cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)
-        }
-        CacheStaleEvent::UpstreamHttpStatus(status) => {
-            cache.stale_if_error_secs.is_some()
-                && cache
-                    .stale_if_error_on
-                    .contains(&crate::config::CacheStaleErrorKind::HttpStatus)
-                && cache_stale_status_allows(cache, status)
-        }
-        CacheStaleEvent::OtherError => false,
-        CacheStaleEvent::Updating => cache.stale_while_revalidate_secs.is_some(),
-    }
-}
-
-#[cfg(feature = "cache")]
-fn cache_stale_status_allows(cache: &crate::config::CacheConfig, status: u16) -> bool {
-    (500..=599).contains(&status)
-        && (cache.stale_if_error_statuses.is_empty()
-            || cache.stale_if_error_statuses.contains(&status))
-}
-
-#[cfg(feature = "cache")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CacheStaleEvent {
-    Updating,
-    UpstreamError(crate::config::CacheStaleErrorKind),
-    UpstreamHttpStatus(u16),
-    OtherError,
-}
-
-#[cfg(feature = "cache")]
-fn cache_stale_error_kind(error: &Error) -> crate::config::CacheStaleErrorKind {
-    match error.etype() {
-        ErrorType::ConnectTimedout
-        | ErrorType::TLSHandshakeTimedout
-        | ErrorType::ReadTimedout
-        | ErrorType::WriteTimedout => crate::config::CacheStaleErrorKind::Timeout,
-        ErrorType::ConnectRefused
-        | ErrorType::ConnectNoRoute
-        | ErrorType::ConnectError
-        | ErrorType::SocketError
-        | ErrorType::ConnectProxyFailure => crate::config::CacheStaleErrorKind::Connect,
-        ErrorType::ReadError => crate::config::CacheStaleErrorKind::Read,
-        ErrorType::WriteError => crate::config::CacheStaleErrorKind::Write,
-        ErrorType::ConnectionClosed => crate::config::CacheStaleErrorKind::ConnectionClosed,
-        ErrorType::InvalidHTTPHeader
-        | ErrorType::H1Error
-        | ErrorType::H2Error
-        | ErrorType::H2Downgrade
-        | ErrorType::InvalidH2 => crate::config::CacheStaleErrorKind::Protocol,
-        ErrorType::TLSWantX509Lookup
-        | ErrorType::TLSHandshakeFailure
-        | ErrorType::InvalidCert
-        | ErrorType::HandshakeError => crate::config::CacheStaleErrorKind::Tls,
-        ErrorType::HTTPStatus(_) => crate::config::CacheStaleErrorKind::HttpStatus,
-        _ => crate::config::CacheStaleErrorKind::Other,
-    }
-}
-
-#[cfg(feature = "cache")]
-fn cache_status_header_value(
-    phase: CachePhase,
-    override_status: Option<CacheStatusOverride>,
-) -> Option<&'static str> {
-    if let Some(override_status) = override_status {
-        return Some(override_status.status);
-    }
-
-    match phase {
-        CachePhase::Disabled(NoCacheReason::NeverEnabled)
-        | CachePhase::Uninit
-        | CachePhase::CacheKey => None,
-        CachePhase::Disabled(_) | CachePhase::Bypass => Some("BYPASS"),
-        CachePhase::Hit => Some("HIT"),
-        CachePhase::Miss => Some("MISS"),
-        CachePhase::Stale => Some("STALE"),
-        CachePhase::StaleUpdating => Some("STALE-UPDATING"),
-        CachePhase::Expired => Some("EXPIRED"),
-        CachePhase::Revalidated => Some("REVALIDATED"),
-        CachePhase::RevalidatedNoCache(_) => Some("REVALIDATED-NOCACHE"),
-    }
-}
-
-#[cfg(feature = "cache")]
-fn cache_status_reason_header_value(
-    phase: CachePhase,
-    override_status: Option<CacheStatusOverride>,
-) -> Option<&'static str> {
-    if let Some(override_status) = override_status {
-        return override_status.reason;
-    }
-
-    match phase {
-        CachePhase::Disabled(NoCacheReason::NeverEnabled)
-        | CachePhase::Uninit
-        | CachePhase::Bypass
-        | CachePhase::CacheKey
-        | CachePhase::Hit
-        | CachePhase::Miss
-        | CachePhase::Stale
-        | CachePhase::StaleUpdating
-        | CachePhase::Expired
-        | CachePhase::Revalidated => None,
-        CachePhase::Disabled(reason) | CachePhase::RevalidatedNoCache(reason) => {
-            Some(reason.as_str())
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct DownstreamFlowControl {
@@ -10560,13 +10252,9 @@ mod tests {
     use super::RuntimeRetryBudget;
     #[cfg(feature = "cache")]
     use super::{
-        CACHE_PASS_REASON, CacheStaleEvent, CacheStatusOverride, apply_cache_status_ttl,
-        cache_min_uses_allows_store, cache_pass_record_cacheable, cache_pass_record_uncacheable,
-        cache_pass_should_bypass, cache_request_participated, cache_should_serve_stale,
-        cache_stale_status_allows, cache_status_header_value, cache_status_reason_header_value,
-        ignore_origin_cache_headers, lookup_proxy_cache_only_object, read_cache_hit_body,
-        remaining_fresh_ttl_secs, response_age_secs, response_vary_variance,
-        strip_cache_response_headers,
+        CACHE_PASS_REASON, cache_min_uses_allows_store, cache_pass_record_cacheable,
+        cache_pass_record_uncacheable, cache_pass_should_bypass, lookup_proxy_cache_only_object,
+        read_cache_hit_body, response_vary_variance,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -10635,13 +10323,17 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use crate::proxy_cache::{
-        CacheClientRange, CacheRangeRequest, CacheSliceBounds, MAX_VARY_FIELDS, VaryCachePolicy,
-        cache_vary_policy, parse_bounded_single_range, parse_cache_client_ranges, range_cache_key,
-        range_response_cache_admission_rejection, request_cache_bypass,
-        request_cache_bypass_reason, request_cache_revalidation_requested, required_slice_bounds,
-        resolve_client_slice_ranges, response_cache_admission_rejection,
-        selected_cache_range_request, slice_cache_key, slice_request_within_policy,
-        vary_cache_policy, vary_request_hash,
+        CacheClientRange, CacheRangeRequest, CacheSliceBounds, CacheStaleEvent,
+        CacheStatusOverride, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
+        cache_request_participated, cache_should_serve_stale, cache_stale_status_allows,
+        cache_status_header_value, cache_status_reason_header_value, cache_vary_policy,
+        ignore_origin_cache_headers, parse_bounded_single_range, parse_cache_client_ranges,
+        range_cache_key, range_response_cache_admission_rejection, remaining_fresh_ttl_secs,
+        request_cache_bypass, request_cache_bypass_reason, request_cache_revalidation_requested,
+        required_slice_bounds, resolve_client_slice_ranges, response_age_secs,
+        response_cache_admission_rejection, selected_cache_range_request, slice_cache_key,
+        slice_request_within_policy, strip_cache_response_headers, vary_cache_policy,
+        vary_request_hash,
     };
     #[cfg(feature = "traffic-mirror")]
     use crate::traffic_mirror::{

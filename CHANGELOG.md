@@ -52,6 +52,10 @@ behavior when the change improves security or project direction.
   and slice cache-key derivation into `proxy_cache`. The remaining slice code
   in `proxy.rs` is object lookup/fill/composition tied to Pingora storage and
   response streaming.
+- Move stateless cache freshness, status-header, stale-serving, and
+  response-header mutation policy into `proxy_cache`. Stateful min-use/pass
+  counters remain in `proxy.rs` until their optional-cache dependencies are
+  split behind a cleaner cache-runtime boundary.
 - Document the source-boundary rule for future work: new feature domains should
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split

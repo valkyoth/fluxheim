@@ -1,5 +1,5 @@
-use pingora::cache::CacheKey as PingoraCacheKey;
 use pingora::cache::key::HashBinary;
+use pingora::cache::{CacheKey as PingoraCacheKey, CachePhase, NoCacheReason};
 use pingora::http::{RequestHeader, ResponseHeader, StatusCode};
 use pingora::prelude::Result;
 use pingora::{Error, ErrorType};
@@ -135,6 +135,20 @@ impl CacheSliceBounds {
             end: self.end,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CacheStatusOverride {
+    pub(crate) status: &'static str,
+    pub(crate) reason: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CacheStaleEvent {
+    Updating,
+    UpstreamError(crate::config::CacheStaleErrorKind),
+    UpstreamHttpStatus(u16),
+    OtherError,
 }
 
 pub(crate) fn selected_cache_range_request(
@@ -439,6 +453,289 @@ pub(crate) fn response_range_cache_admission_rejection(
     }
 
     response_cache_header_policy_rejection(response, cache)
+}
+
+pub(crate) fn cache_response_fresh_ttl_secs(
+    cache: &crate::config::CacheConfig,
+    response: &ResponseHeader,
+) -> Option<u32> {
+    cache
+        .status_ttls
+        .get(&response.status.as_u16())
+        .copied()
+        .or(cache.default_status_ttl_secs)
+        .or_else(|| response_cache_control_max_age(response))
+        .filter(|ttl| *ttl > 0)
+}
+
+pub(crate) fn remaining_fresh_ttl_secs(ttl_secs: u32, age_secs: u64) -> Option<u32> {
+    let remaining = u64::from(ttl_secs).checked_sub(age_secs)?;
+    u32::try_from(remaining).ok().filter(|ttl| *ttl > 0)
+}
+
+pub(crate) fn response_age_secs(response: &ResponseHeader) -> u64 {
+    response
+        .headers
+        .get_all("age")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+pub(crate) fn response_cache_control_max_age(response: &ResponseHeader) -> Option<u32> {
+    response
+        .headers
+        .get_all("cache-control")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .find_map(|directive| {
+            let (name, value) = directive.trim().split_once('=')?;
+            if name.trim().eq_ignore_ascii_case("s-maxage")
+                || name.trim().eq_ignore_ascii_case("max-age")
+            {
+                value.trim().trim_matches('"').parse::<u32>().ok()
+            } else {
+                None
+            }
+        })
+}
+
+pub(crate) fn ignore_origin_cache_headers(
+    response: &mut ResponseHeader,
+    cache: &crate::config::CacheConfig,
+    phase: CachePhase,
+) {
+    if !cache_request_participated(phase) || !cache.ignore_origin_cache_headers {
+        return;
+    }
+    response.remove_header("cache-control");
+    response.remove_header("expires");
+}
+
+pub(crate) fn apply_cache_status_ttl(
+    response: &mut ResponseHeader,
+    cache: &crate::config::CacheConfig,
+    phase: CachePhase,
+) -> Result<()> {
+    if !cache_request_participated(phase) {
+        return Ok(());
+    }
+    let status = response.status.as_u16();
+    if let Some(ttl_secs) = cache
+        .status_ttls
+        .get(&status)
+        .copied()
+        .or(cache.default_status_ttl_secs)
+    {
+        response.remove_header("expires");
+        return response.insert_header(
+            "cache-control",
+            cache_control_freshness_value(
+                ttl_secs,
+                cache.stale_while_revalidate_secs,
+                cache.stale_if_error_secs,
+            ),
+        );
+    }
+
+    if !response.headers.contains_key("cache-control")
+        || response_cache_admission_rejection(response, cache).is_some()
+    {
+        return Ok(());
+    }
+
+    if let Some(stale_while_revalidate_secs) = cache.stale_while_revalidate_secs {
+        append_cache_control_directive(
+            response,
+            &format!("stale-while-revalidate={stale_while_revalidate_secs}"),
+            "stale-while-revalidate",
+        )?;
+    }
+    if let Some(stale_if_error_secs) = cache.stale_if_error_secs {
+        append_cache_control_directive(
+            response,
+            &format!("stale-if-error={stale_if_error_secs}"),
+            "stale-if-error",
+        )?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn strip_cache_response_headers(
+    response: &mut ResponseHeader,
+    cache: &crate::config::CacheConfig,
+    phase: CachePhase,
+) {
+    if !cache_request_participated(phase) {
+        return;
+    }
+    for header in &cache.hide_response_headers {
+        response.remove_header(header.as_str());
+    }
+}
+
+pub(crate) fn cache_request_participated(phase: CachePhase) -> bool {
+    !matches!(
+        phase,
+        CachePhase::Disabled(NoCacheReason::NeverEnabled) | CachePhase::Uninit | CachePhase::Bypass
+    )
+}
+
+pub(crate) fn proxy_cache_method_temporarily_bypassed(method: &str) -> bool {
+    method == "HEAD"
+}
+
+pub(crate) fn cache_should_serve_stale(
+    cache: &crate::config::CacheConfig,
+    event: CacheStaleEvent,
+) -> bool {
+    match event {
+        CacheStaleEvent::UpstreamError(kind) => {
+            cache.stale_if_error_secs.is_some() && cache.stale_if_error_on.contains(&kind)
+        }
+        CacheStaleEvent::UpstreamHttpStatus(status) => {
+            cache.stale_if_error_secs.is_some()
+                && cache
+                    .stale_if_error_on
+                    .contains(&crate::config::CacheStaleErrorKind::HttpStatus)
+                && cache_stale_status_allows(cache, status)
+        }
+        CacheStaleEvent::OtherError => false,
+        CacheStaleEvent::Updating => cache.stale_while_revalidate_secs.is_some(),
+    }
+}
+
+pub(crate) fn cache_stale_status_allows(cache: &crate::config::CacheConfig, status: u16) -> bool {
+    (500..=599).contains(&status)
+        && (cache.stale_if_error_statuses.is_empty()
+            || cache.stale_if_error_statuses.contains(&status))
+}
+
+pub(crate) fn cache_stale_error_kind(error: &Error) -> crate::config::CacheStaleErrorKind {
+    match error.etype() {
+        ErrorType::ConnectTimedout
+        | ErrorType::TLSHandshakeTimedout
+        | ErrorType::ReadTimedout
+        | ErrorType::WriteTimedout => crate::config::CacheStaleErrorKind::Timeout,
+        ErrorType::ConnectRefused
+        | ErrorType::ConnectNoRoute
+        | ErrorType::ConnectError
+        | ErrorType::SocketError
+        | ErrorType::ConnectProxyFailure => crate::config::CacheStaleErrorKind::Connect,
+        ErrorType::ReadError => crate::config::CacheStaleErrorKind::Read,
+        ErrorType::WriteError => crate::config::CacheStaleErrorKind::Write,
+        ErrorType::ConnectionClosed => crate::config::CacheStaleErrorKind::ConnectionClosed,
+        ErrorType::InvalidHTTPHeader
+        | ErrorType::H1Error
+        | ErrorType::H2Error
+        | ErrorType::H2Downgrade
+        | ErrorType::InvalidH2 => crate::config::CacheStaleErrorKind::Protocol,
+        ErrorType::TLSWantX509Lookup
+        | ErrorType::TLSHandshakeFailure
+        | ErrorType::InvalidCert
+        | ErrorType::HandshakeError => crate::config::CacheStaleErrorKind::Tls,
+        ErrorType::HTTPStatus(_) => crate::config::CacheStaleErrorKind::HttpStatus,
+        _ => crate::config::CacheStaleErrorKind::Other,
+    }
+}
+
+pub(crate) fn cache_status_header_value(
+    phase: CachePhase,
+    override_status: Option<CacheStatusOverride>,
+) -> Option<&'static str> {
+    if let Some(override_status) = override_status {
+        return Some(override_status.status);
+    }
+
+    match phase {
+        CachePhase::Disabled(NoCacheReason::NeverEnabled)
+        | CachePhase::Uninit
+        | CachePhase::CacheKey => None,
+        CachePhase::Disabled(_) | CachePhase::Bypass => Some("BYPASS"),
+        CachePhase::Hit => Some("HIT"),
+        CachePhase::Miss => Some("MISS"),
+        CachePhase::Stale => Some("STALE"),
+        CachePhase::StaleUpdating => Some("STALE-UPDATING"),
+        CachePhase::Expired => Some("EXPIRED"),
+        CachePhase::Revalidated => Some("REVALIDATED"),
+        CachePhase::RevalidatedNoCache(_) => Some("REVALIDATED-NOCACHE"),
+    }
+}
+
+pub(crate) fn cache_status_reason_header_value(
+    phase: CachePhase,
+    override_status: Option<CacheStatusOverride>,
+) -> Option<&'static str> {
+    if let Some(override_status) = override_status {
+        return override_status.reason;
+    }
+
+    match phase {
+        CachePhase::Disabled(NoCacheReason::NeverEnabled)
+        | CachePhase::Uninit
+        | CachePhase::Bypass
+        | CachePhase::CacheKey
+        | CachePhase::Hit
+        | CachePhase::Miss
+        | CachePhase::Stale
+        | CachePhase::StaleUpdating
+        | CachePhase::Expired
+        | CachePhase::Revalidated => None,
+        CachePhase::Disabled(reason) | CachePhase::RevalidatedNoCache(reason) => {
+            Some(reason.as_str())
+        }
+    }
+}
+
+pub(crate) fn cache_control_freshness_value(
+    ttl_secs: u32,
+    stale_while_revalidate_secs: Option<u32>,
+    stale_if_error_secs: Option<u32>,
+) -> String {
+    let mut value = format!("public, max-age={ttl_secs}");
+    if let Some(stale_while_revalidate_secs) = stale_while_revalidate_secs {
+        value.push_str(", stale-while-revalidate=");
+        value.push_str(&stale_while_revalidate_secs.to_string());
+    }
+    if let Some(stale_if_error_secs) = stale_if_error_secs {
+        value.push_str(", stale-if-error=");
+        value.push_str(&stale_if_error_secs.to_string());
+    }
+    value
+}
+
+pub(crate) fn append_cache_control_directive(
+    response: &mut ResponseHeader,
+    directive: &str,
+    directive_name: &str,
+) -> Result<()> {
+    let mut directives = Vec::new();
+    for value in response.headers.get_all("cache-control") {
+        let Ok(value) = value.to_str() else {
+            return Ok(());
+        };
+        directives.extend(
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|part| {
+                    !part.is_empty()
+                        && !part
+                            .split_once('=')
+                            .map(|(name, _)| name.trim())
+                            .unwrap_or(part)
+                            .eq_ignore_ascii_case(directive_name)
+                })
+                .map(str::to_owned),
+        );
+    }
+
+    directives.push(directive.to_owned());
+    response.remove_header("cache-control");
+    response.insert_header("cache-control", directives.join(", "))
 }
 
 fn response_cache_header_policy_rejection(
