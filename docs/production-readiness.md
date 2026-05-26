@@ -237,6 +237,13 @@ compression, auth subrequests, traffic mirroring, edge policy, and route policy
 are the first extracted domains; PHP-FPM, proxy cache glue, and the remaining
 proxy core orchestration stay in scope for this maintenance line.
 
+Going forward, large optional features should not be added directly to the
+proxy/runtime files. A feature with its own config, validation rules, metrics,
+external dependencies, or security boundary should start as a focused module
+with small integration hooks. GeoIP/Geo-Context is the reference pattern for
+future work: an optional domain module first, then thin config, policy, logging,
+metrics, and tracing integration.
+
 ## Operator Checks
 
 Before using a Fluxheim build for a real site, run the stable gate from the repo

@@ -113,7 +113,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| Proxy module split | 🟡 | `1.4.2` in progress; access logs, compression, auth subrequests, traffic mirroring, edge policy, and route policy are split out first. |
+| Proxy module split | 🟡 | `1.4.2` in progress; access logs, compression, auth subrequests, traffic mirroring, edge policy, and route policy are split out first, with a new rule that future feature domains start in focused modules. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.3`. |
 | TCP stream proxying | ❌ | Planned for `1.4.4`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |

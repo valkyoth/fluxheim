@@ -30,6 +30,10 @@ behavior when the change improves security or project direction.
   request concurrency admission into a focused `edge_policy` module.
 - Extract route matcher construction, method checks, regex capture extraction,
   and path rewrite rendering into a focused `route_policy` module.
+- Document the source-boundary rule for future work: new feature domains should
+  start in focused modules once they have their own validation, tests, metrics,
+  dependencies, or security boundary. The same audit tracks future split
+  candidates in `config.rs`, `cache.rs`, `admin.rs`, and `cli.rs`.
 
 ## 1.4.1 - 2026-05-26
 

@@ -1292,6 +1292,21 @@ Release shape:
     behavior tests as regression coverage for the extraction;
   - preserve feature-gated builds so default/no-default/profile builds continue
     proving that optional domains compile in and out cleanly;
+  - source-boundary rule going forward: new product domains should start in
+    their own module once they have independent validation, tests, metrics,
+    external dependencies, or security policy. `proxy.rs` should remain the
+    Pingora lifecycle and request/response orchestration layer; `config.rs`
+    may keep the serde-facing config surface, but substantial feature-specific
+    validation and helper logic should move into focused config/domain modules;
+  - non-proxy split candidates to track after the active proxy extraction:
+    `config.rs` can be separated by admin, TLS/compliance, proxy/routing,
+    cache, PHP, and ACME validation domains; `cache.rs` can separate storage
+    registries, disk/storage-bin backends, encryption/OpenBao transit, purge
+    indexing, and cache-key policy; `admin.rs` can separate auth/throttle,
+    JSON/status responses, local ops socket, self-healing, and cache purge
+    endpoints; `cli.rs` can separate cache inspection/warmup commands from
+    top-level command dispatch. These are maintenance refactors, not release
+    blockers unless touched by a feature;
 - `1.4.3` - advanced policy, Geo-Context, and HAProxy-style operations:
   - stop line: ship advanced HTTP policy and backend operations only. Do not
     add TCP stream listeners, TLS passthrough SNI routing, UDP proxying,
@@ -1304,6 +1319,10 @@ Release shape:
     databases, load database files with the same safe path rules used for other
     operator-supplied files, and reload by atomically swapping an `Arc` on
     config reload;
+  - implement GeoIP as its own `geoip`/`geo_context` module from the start,
+    with only thin hooks in config, proxy policy, access logs, metrics, and
+    tracing. Do not add GeoIP lookup or policy logic directly to `proxy.rs` or
+    grow `config.rs` with large database-management helpers;
   - expose GeoIP as typed request context, not spoofable inbound headers.
     Initial fields are country ISO code and ASN; city/latitude/longitude should
     stay out of the first stable surface unless an operator explicitly enables
