@@ -113,7 +113,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| Proxy module split | ❌ | Planned for `1.4.2`; extract proxy domains before adding more large proxy features. |
+| Proxy module split | 🟡 | `1.4.2` in progress; access logs, compression, auth subrequests, traffic mirroring, and edge policy are split out first. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.3`. |
 | TCP stream proxying | ❌ | Planned for `1.4.4`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
@@ -409,11 +409,11 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   regex/template rewrite policy, route method matching, explicit WebSocket
   upgrade proxying, bounded auth subrequests, safe bodyless traffic mirroring,
   and a read-only Unix ops socket.
-- `1.4.2` is planned as a maintenance architecture release that splits the
-  large proxy runtime into focused modules before adding more large proxy
-  features. Target extractions are `php_fpm`, `compression`, route matching and
-  rewrites, traffic mirroring, auth subrequests, proxy cache glue, access logs,
-  and proxy security helpers.
+- `1.4.2` is the maintenance architecture release that splits the large proxy
+  runtime into focused modules before adding more large proxy features. Access
+  logs, compression, auth subrequests, traffic mirroring, and edge policy are
+  the first extracted domains; remaining target extractions are `php_fpm`,
+  route matching and rewrites, proxy cache glue, and the remaining proxy core.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

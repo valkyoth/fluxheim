@@ -232,9 +232,10 @@ are the `1.4.1` follow-up line.
 
 `1.4.2` is intentionally reserved for proxy runtime module extraction before
 the next large proxy feature. The stop line is structural: preserve behavior
-while splitting PHP-FPM, compression, route matching/rewrite policy, traffic
-mirroring, auth subrequests, proxy cache glue, access logging, and proxy
-security helpers out of the current monolithic proxy runtime.
+while splitting the current monolithic proxy runtime. Access logging,
+compression, auth subrequests, traffic mirroring, and edge policy are the first
+extracted domains; PHP-FPM, route matching/rewrite policy, proxy cache glue, and
+the remaining proxy core orchestration stay in scope for this maintenance line.
 
 ## Operator Checks
 

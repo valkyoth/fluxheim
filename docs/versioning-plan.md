@@ -1282,9 +1282,10 @@ Release shape:
     metrics/logs stable, and pass the existing `1.4.1` smoke and security
     matrix before moving on;
   - split the large HTTP proxy runtime into focused domains before adding more
-    proxy surface: `php_fpm`, `compression`, route matching/rewrite policy,
-    traffic mirroring, auth subrequests, proxy cache glue, access logging, and
-    proxy security helpers;
+    proxy surface. Completed first-pass extractions: access logging,
+    compression, auth subrequests, traffic mirroring, and edge policy. Remaining
+    domains: `php_fpm`, route matching/rewrite policy, proxy cache glue, and
+    the remaining proxy core orchestration;
   - keep `FluxProxy` and the Pingora `ProxyHttp` lifecycle as the orchestration
     layer while extracting domain logic behind small, testable APIs;
   - move tests with their domains where practical, and keep the existing
