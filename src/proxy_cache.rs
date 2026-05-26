@@ -1,5 +1,8 @@
+use pingora::cache::CacheKey as PingoraCacheKey;
 use pingora::cache::key::HashBinary;
 use pingora::http::{RequestHeader, ResponseHeader, StatusCode};
+use pingora::prelude::Result;
+use pingora::{Error, ErrorType};
 
 pub(crate) const MAX_VARY_FIELDS: usize = 16;
 const MAX_VARY_HEADER_BYTES: usize = 2048;
@@ -84,6 +87,138 @@ pub(crate) fn request_cache_revalidation_requested(
         request_header_values(request, "cache-control"),
         request_header_values(request, "pragma"),
     )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CacheRangeRequest {
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+}
+
+impl CacheRangeRequest {
+    pub(crate) fn len(self) -> u64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
+    }
+
+    pub(crate) fn component(self) -> String {
+        format!("bytes={}-{}", self.start, self.end)
+    }
+}
+
+pub(crate) fn selected_cache_range_request(
+    request: &RequestHeader,
+    cache: &crate::config::CacheConfig,
+) -> Option<CacheRangeRequest> {
+    if !cache.range.enabled || request.method.as_str() != "GET" {
+        return None;
+    }
+    let mut values = request_header_values(request, "range");
+    let range = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    if request_header_values(request, "if-range").next().is_some() {
+        return None;
+    }
+    let parsed = parse_bounded_single_range(range)?;
+    (parsed.len() <= cache.range.max_bytes.as_u64()).then_some(parsed)
+}
+
+pub(crate) fn parse_bounded_single_range(range: &str) -> Option<CacheRangeRequest> {
+    let range = range.trim();
+    let range = range.strip_prefix("bytes=")?;
+    if range.contains(',') {
+        return None;
+    }
+    let (start, end) = range.split_once('-')?;
+    if start.is_empty() || end.is_empty() {
+        return None;
+    }
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    if end < start {
+        return None;
+    }
+    Some(CacheRangeRequest { start, end })
+}
+
+pub(crate) fn range_cache_key(
+    mut base: PingoraCacheKey,
+    range: CacheRangeRequest,
+) -> Result<PingoraCacheKey> {
+    let namespace = base.namespace().to_vec();
+    let user_tag = base.user_tag.clone();
+    let Some(primary) = base.primary_key_str() else {
+        return Error::e_explain(
+            ErrorType::InternalError,
+            "cache range key requires utf-8 primary key material",
+        );
+    };
+    let mut primary = primary.to_owned();
+    append_cache_key_component(&mut primary, "range", &range.component());
+    base = PingoraCacheKey::new(namespace, primary, user_tag);
+    Ok(base)
+}
+
+pub(crate) fn append_cache_key_component(key: &mut String, label: &str, value: &str) {
+    use std::fmt::Write as _;
+    let _ = write!(key, "{label}:{}:{value};", value.len());
+}
+
+pub(crate) fn range_response_cache_admission_rejection(
+    response: &ResponseHeader,
+    range: Option<CacheRangeRequest>,
+) -> Option<&'static str> {
+    match range {
+        Some(range) => {
+            if response.status != StatusCode::PARTIAL_CONTENT {
+                return Some("range-cache-non-partial");
+            }
+            if !content_range_matches(response, range) {
+                return Some("range-cache-content-range");
+            }
+            if !content_length_matches_range(response, range) {
+                return Some("range-cache-content-length");
+            }
+            None
+        }
+        None if response.status == StatusCode::PARTIAL_CONTENT => Some("range-response"),
+        None => None,
+    }
+}
+
+fn content_range_matches(response: &ResponseHeader, expected: CacheRangeRequest) -> bool {
+    response
+        .headers
+        .get_all("content-range")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| {
+            parse_content_range_bounds(value)
+                .is_some_and(|range| range.start == expected.start && range.end == expected.end)
+        })
+}
+
+fn parse_content_range_bounds(value: &str) -> Option<CacheRangeRequest> {
+    let value = value.trim();
+    let rest = value.strip_prefix("bytes ")?;
+    let (range, _complete_len) = rest.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = start.parse::<u64>().ok()?;
+    let end = end.parse::<u64>().ok()?;
+    if end < start {
+        return None;
+    }
+    Some(CacheRangeRequest { start, end })
+}
+
+fn content_length_matches_range(response: &ResponseHeader, expected: CacheRangeRequest) -> bool {
+    response
+        .headers
+        .get_all("content-length")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value.trim().parse::<u64>().ok() == Some(expected.len()))
 }
 
 pub(crate) fn response_cache_admission_rejection(

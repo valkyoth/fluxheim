@@ -44,6 +44,10 @@ behavior when the change improves security or project direction.
 - Move response-side cache admission and `Vary` policy helpers into
   `proxy_cache`, including content-type admission, no-store checks, configured
   response-header rejection, range-response admission, and variance hashing.
+- Move range-cache request selection, bounded `Range` parsing, range cache-key
+  derivation, and partial-response admission checks into `proxy_cache`; the
+  remaining cache code in `proxy.rs` is storage, slice assembly, and Pingora
+  request/session orchestration.
 - Document the source-boundary rule for future work: new feature domains should
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split

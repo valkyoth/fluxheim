@@ -416,8 +416,9 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   spooling, FastCGI transport, retry/timeout handling, and response parsing now
   live in `php_fpm`; the remaining PHP code in `proxy.rs` is the Pingora
   request/session integration layer. The first `proxy_cache` slice holds
-  request-side cache policy, response admission, and `Vary` helpers; remaining
-  target extractions are cache storage/range glue and the proxy core.
+  request-side cache policy, response admission, `Vary` helpers, and bounded
+  range-cache request/key/admission policy; remaining target extractions are
+  cache storage/slice glue and the proxy core.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

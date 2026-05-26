@@ -238,9 +238,9 @@ PHP-FPM process supervision, request-body spooling, FastCGI transport,
 timeout/retry classification, and CGI response parsing are extracted domains.
 The remaining PHP code in `proxy.rs` is the Pingora request/session integration
 layer. The first `proxy_cache` slices hold request-side cache identity, bypass,
-revalidation, response admission, and `Vary` helpers; cache storage/range glue
-and the remaining proxy core orchestration stay in scope for this maintenance
-line.
+revalidation, response admission, `Vary` helpers, and bounded range-cache
+request/key/admission policy; cache storage/slice glue and the remaining proxy
+core orchestration stay in scope for this maintenance line.
 
 Going forward, large optional features should not be added directly to the
 proxy/runtime files. A feature with its own config, validation rules, metrics,
