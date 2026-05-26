@@ -45,6 +45,8 @@ mod otlp_http;
 pub(crate) mod php_fpm;
 #[cfg(feature = "proxy")]
 pub mod proxy;
+#[cfg(all(feature = "proxy", feature = "cache"))]
+mod proxy_cache;
 pub mod reload;
 #[cfg(feature = "proxy")]
 mod route_policy;

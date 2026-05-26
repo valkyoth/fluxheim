@@ -38,6 +38,9 @@ behavior when the change improves security or project direction.
   header parsing into `php_fpm`. The remaining PHP code in `proxy.rs` is the
   Pingora session integration layer that resolves requests, builds CGI params,
   applies response policy, and coordinates static offload.
+- Start the proxy-cache split with a focused `proxy_cache` module for
+  request-side cache policy helpers: request identity conversion,
+  bypass/revalidation checks, and header/cookie/query matching.
 - Document the source-boundary rule for future work: new feature domains should
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split
