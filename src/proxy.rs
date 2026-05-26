@@ -26,7 +26,14 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 #[cfg(any(feature = "cache", feature = "php-fpm"))]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(any(
+    feature = "cache",
+    feature = "load-balancer",
+    feature = "php-fpm",
+    not(feature = "privacy-mode")
+))]
+use std::time::Instant;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;

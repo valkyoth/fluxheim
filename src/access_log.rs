@@ -1,4 +1,5 @@
 use bytes::Bytes;
+#[cfg(not(feature = "privacy-mode"))]
 use pingora::http::RequestHeader;
 
 #[cfg(not(feature = "privacy-mode"))]
