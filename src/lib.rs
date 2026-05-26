@@ -11,6 +11,8 @@ pub mod acme;
 pub mod acme_companion;
 #[cfg(feature = "proxy")]
 pub mod admin;
+#[cfg(feature = "proxy")]
+mod auth_request;
 #[cfg(feature = "cache")]
 pub mod cache;
 pub mod cache_headers;
@@ -53,6 +55,8 @@ pub mod snapshot;
 pub mod tls;
 #[cfg(feature = "otel-tracing")]
 pub mod trace_context;
+#[cfg(feature = "traffic-mirror")]
+mod traffic_mirror;
 #[cfg(feature = "web")]
 pub mod web;
 

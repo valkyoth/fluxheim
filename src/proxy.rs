@@ -19,7 +19,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "php-fpm")]
 use std::path::PathBuf;
-#[cfg(any(feature = "cache", feature = "traffic-mirror"))]
+#[cfg(feature = "cache")]
 use std::sync::OnceLock;
 #[cfg(feature = "php-fpm")]
 use std::sync::atomic::AtomicBool;
@@ -54,8 +54,6 @@ use pingora::{
     cache::CacheMeta, cache::CacheOptionOverrides, cache::CachePhase, cache::ForcedFreshness,
     cache::HitHandler, cache::NoCacheReason, cache::RespCacheable,
 };
-#[cfg(feature = "traffic-mirror")]
-use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -93,8 +91,6 @@ const MAX_VARY_FIELDS: usize = 16;
 const CACHE_MIN_USES_REASON: &str = "cache-min-uses";
 #[cfg(feature = "cache")]
 const CACHE_MIN_USES_COUNTER_CAPACITY: u64 = 65_536;
-#[cfg(feature = "traffic-mirror")]
-const TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
 #[cfg(feature = "cache")]
 const CACHE_MIN_USES_COUNTER_TTL_SECS: u64 = 600;
 #[cfg(feature = "cache")]
@@ -11165,17 +11161,6 @@ fn valid_http_upgrade_token(value: &str) -> bool {
         })
 }
 
-#[derive(Debug)]
-struct AuthRequestInput {
-    headers: Vec<(String, String)>,
-}
-
-#[derive(Debug)]
-enum AuthRequestDecision {
-    Allow { headers: Vec<(String, String)> },
-    Deny { status: u16, body: Bytes },
-}
-
 async fn authorize_proxy_request(
     session: &mut Session,
     ctx: &mut RequestContext,
@@ -11190,44 +11175,46 @@ async fn authorize_proxy_request(
         .route_index
         .and_then(|route_index| vhost.routes.get(route_index))
         .map(|route| route.name.as_str());
-    let input = auth_request_input(session.req_header(), auth);
+    let input = crate::auth_request::auth_request_input(session.req_header(), auth);
     let auth = auth.clone();
-    let decision =
-        match tokio::task::spawn_blocking(move || fetch_auth_request_decision(&auth, &input)).await
-        {
-            Ok(Ok(decision)) => decision,
-            Ok(Err(error)) => {
-                #[cfg(feature = "metrics")]
-                crate::metrics::record_edge_policy_event(
-                    vhost.name.as_str(),
-                    edge_policy_route,
-                    "auth_request",
-                    "error",
-                );
-                return Err(Error::because(
-                    ErrorType::HTTPStatus(502),
-                    "auth_request subrequest failed",
-                    error,
-                ));
-            }
-            Err(error) => {
-                #[cfg(feature = "metrics")]
-                crate::metrics::record_edge_policy_event(
-                    vhost.name.as_str(),
-                    edge_policy_route,
-                    "auth_request",
-                    "error",
-                );
-                return Err(Error::because(
-                    ErrorType::InternalError,
-                    "auth_request worker task failed",
-                    error,
-                ));
-            }
-        };
+    let decision = match tokio::task::spawn_blocking(move || {
+        crate::auth_request::fetch_auth_request_decision(&auth, &input)
+    })
+    .await
+    {
+        Ok(Ok(decision)) => decision,
+        Ok(Err(error)) => {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_edge_policy_event(
+                vhost.name.as_str(),
+                edge_policy_route,
+                "auth_request",
+                "error",
+            );
+            return Err(Error::because(
+                ErrorType::HTTPStatus(502),
+                "auth_request subrequest failed",
+                error,
+            ));
+        }
+        Err(error) => {
+            #[cfg(feature = "metrics")]
+            crate::metrics::record_edge_policy_event(
+                vhost.name.as_str(),
+                edge_policy_route,
+                "auth_request",
+                "error",
+            );
+            return Err(Error::because(
+                ErrorType::InternalError,
+                "auth_request worker task failed",
+                error,
+            ));
+        }
+    };
 
     match decision {
-        AuthRequestDecision::Allow { headers } => {
+        crate::auth_request::AuthRequestDecision::Allow { headers } => {
             #[cfg(feature = "metrics")]
             crate::metrics::record_edge_policy_event(
                 vhost.name.as_str(),
@@ -11238,7 +11225,7 @@ async fn authorize_proxy_request(
             ctx.auth_request_headers = headers;
             Ok(false)
         }
-        AuthRequestDecision::Deny { status, body } => {
+        crate::auth_request::AuthRequestDecision::Deny { status, body } => {
             #[cfg(feature = "metrics")]
             crate::metrics::record_edge_policy_event(
                 vhost.name.as_str(),
@@ -11250,116 +11237,6 @@ async fn authorize_proxy_request(
             Ok(true)
         }
     }
-}
-
-fn auth_request_input(
-    request: &RequestHeader,
-    auth: &crate::config::AuthRequestConfig,
-) -> AuthRequestInput {
-    let mut headers = Vec::new();
-    for name in &auth.forward_headers {
-        if let Some(value) = request_header_values_joined(request, name) {
-            headers.push((name.clone(), value));
-        }
-    }
-    AuthRequestInput { headers }
-}
-
-fn fetch_auth_request_decision(
-    auth: &crate::config::AuthRequestConfig,
-    input: &AuthRequestInput,
-) -> io::Result<AuthRequestDecision> {
-    let url = auth.url.as_deref().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "enabled auth_request requires url",
-        )
-    })?;
-    let timeout = Duration::from_secs(
-        auth.connect_timeout_secs
-            .saturating_add(auth.read_timeout_secs),
-    );
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .max_redirects(0)
-        .http_status_as_error(false)
-        .build()
-        .into();
-    let mut builder = agent.get(url).header("cache-control", "no-store");
-    for (name, value) in &input.headers {
-        builder = builder.header(name.as_str(), value.as_str());
-    }
-    let mut response = builder.call().map_err(auth_request_io_error)?;
-    let status = response.status().as_u16();
-    let body = response
-        .body_mut()
-        .with_config()
-        .limit(auth.max_response_bytes.as_u64().saturating_add(1))
-        .read_to_vec()
-        .map_err(auth_request_io_error)?;
-    if body.len() as u64 > auth.max_response_bytes.as_u64() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "auth_request response exceeds configured body limit",
-        ));
-    }
-    if (200..300).contains(&status) {
-        return Ok(AuthRequestDecision::Allow {
-            headers: auth_response_allowed_headers(auth, &response),
-        });
-    }
-    let status = if (400..600).contains(&status) {
-        status
-    } else {
-        500
-    };
-    Ok(AuthRequestDecision::Deny {
-        status,
-        body: Bytes::from(body),
-    })
-}
-
-fn auth_response_allowed_headers(
-    auth: &crate::config::AuthRequestConfig,
-    response: &ureq::http::Response<ureq::Body>,
-) -> Vec<(String, String)> {
-    response
-        .headers()
-        .iter()
-        .filter_map(|(name, value)| {
-            if !auth
-                .allow_response_headers
-                .iter()
-                .any(|allowed| allowed.eq_ignore_ascii_case(name.as_str()))
-            {
-                return None;
-            }
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_ascii_lowercase(), value.to_owned()))
-        })
-        .collect()
-}
-
-fn auth_request_io_error(error: impl std::fmt::Display) -> io::Error {
-    io::Error::other(error.to_string())
-}
-
-#[cfg(feature = "traffic-mirror")]
-#[derive(Debug)]
-struct TrafficMirrorRequest {
-    method: String,
-    url: String,
-    headers: Vec<(String, String)>,
-    timeout_secs: u64,
-    max_response_bytes: u64,
-    max_in_flight: usize,
-    slot_key: String,
-    #[cfg(feature = "metrics")]
-    metric_vhost: String,
-    #[cfg(feature = "metrics")]
-    metric_route: Option<String>,
 }
 
 fn spawn_proxy_mirror_if_enabled(
@@ -11377,243 +11254,19 @@ fn spawn_proxy_mirror_if_enabled(
     #[cfg(feature = "traffic-mirror")]
     {
         let mirror = &selected_runtime_proxy(vhost, ctx).config.mirror;
-        let Some(mirror_request) = traffic_mirror_request(request, mirror, vhost, ctx) else {
-            return;
-        };
-        let Some(mirror_slot) =
-            acquire_traffic_mirror_slot(&mirror_request.slot_key, mirror_request.max_in_flight)
-        else {
-            #[cfg(feature = "metrics")]
-            crate::metrics::record_edge_policy_event(
-                &mirror_request.metric_vhost,
-                mirror_request.metric_route.as_deref(),
-                "mirror",
-                "skipped",
-            );
-            return;
-        };
-        tokio::task::spawn_blocking(move || {
-            let _mirror_slot = mirror_slot;
-            let result = send_traffic_mirror_request(&mirror_request);
-            if let Err(error) = &result {
-                log::debug!(
-                    target: "fluxheim::traffic_mirror",
-                    "traffic mirror request failed: {error}"
-                );
-            }
-            #[cfg(feature = "metrics")]
-            {
-                let outcome = if result.is_ok() { "success" } else { "error" };
-                crate::metrics::record_edge_policy_event(
-                    &mirror_request.metric_vhost,
-                    mirror_request.metric_route.as_deref(),
-                    "mirror",
-                    outcome,
-                );
-            }
-        });
-    }
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn traffic_mirror_request(
-    request: &RequestHeader,
-    mirror: &crate::config::TrafficMirrorConfig,
-    vhost: &RuntimeVhost,
-    ctx: &RequestContext,
-) -> Option<TrafficMirrorRequest> {
-    #[cfg(not(feature = "metrics"))]
-    {
-        let _ = vhost;
-        let _ = ctx;
-    }
-
-    if !mirror.enabled
-        || !mirror
-            .methods
-            .iter()
-            .any(|method| method == request.method.as_str())
-        || !traffic_mirror_sample_selected(request, mirror.sample_per_mille)
-    {
-        return None;
-    }
-    let base_url = mirror.base_url.as_deref()?;
-    let url = traffic_mirror_url(
-        base_url,
-        request.uri.path_and_query().map_or("/", |pq| pq.as_str()),
-    )?;
-    let headers = traffic_mirror_forwarded_headers(request, mirror);
-    Some(TrafficMirrorRequest {
-        method: request.method.as_str().to_owned(),
-        url,
-        headers,
-        timeout_secs: mirror.timeout_secs,
-        max_response_bytes: mirror.max_response_bytes.as_u64(),
-        max_in_flight: mirror.max_in_flight,
-        slot_key: traffic_mirror_slot_key(vhost, ctx),
-        #[cfg(feature = "metrics")]
-        metric_vhost: vhost.name.clone(),
-        #[cfg(feature = "metrics")]
-        metric_route: ctx
+        let route_name = ctx
             .route_index
             .and_then(|route_index| vhost.routes.get(route_index))
-            .map(|route| route.name.clone()),
-    })
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn traffic_mirror_slot_key(vhost: &RuntimeVhost, ctx: &RequestContext) -> String {
-    let route = ctx
-        .route_index
-        .and_then(|route_index| vhost.routes.get(route_index))
-        .map(|route| route.name.as_str())
-        .unwrap_or("-");
-    format!("{}\n{route}", vhost.name)
-}
-
-#[cfg(feature = "traffic-mirror")]
-struct TrafficMirrorSlot {
-    counter: Arc<AtomicUsize>,
-}
-
-#[cfg(feature = "traffic-mirror")]
-impl Drop for TrafficMirrorSlot {
-    fn drop(&mut self) {
-        self.counter.fetch_sub(1, Ordering::AcqRel);
+            .map(|route| route.name.as_str());
+        crate::traffic_mirror::spawn_proxy_mirror_if_enabled(
+            request,
+            mirror,
+            crate::traffic_mirror::TrafficMirrorRouteContext {
+                vhost_name: vhost.name.as_str(),
+                route_name,
+            },
+        );
     }
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn acquire_traffic_mirror_slot(key: &str, max_in_flight: usize) -> Option<TrafficMirrorSlot> {
-    static TRAFFIC_MIRROR_INFLIGHT: OnceLock<Mutex<HashMap<String, Arc<AtomicUsize>>>> =
-        OnceLock::new();
-    let mut map = TRAFFIC_MIRROR_INFLIGHT
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .unwrap_or_else(|_| {
-            log::error!(
-                target: "fluxheim::security",
-                "traffic mirror in-flight lock poisoned; aborting"
-            );
-            std::process::abort();
-        });
-    if map.len() >= TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS && !map.contains_key(key) {
-        map.retain(|_, counter| counter.load(Ordering::Acquire) > 0);
-        if map.len() >= TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS {
-            return None;
-        }
-    }
-    let counter = map
-        .entry(key.to_owned())
-        .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
-        .clone();
-    drop(map);
-
-    loop {
-        let current = counter.load(Ordering::Acquire);
-        if current >= max_in_flight {
-            return None;
-        }
-        let next = current.checked_add(1)?;
-        match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
-            Ok(_) => return Some(TrafficMirrorSlot { counter }),
-            Err(_) => continue,
-        }
-    }
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn traffic_mirror_forwarded_headers(
-    request: &RequestHeader,
-    mirror: &crate::config::TrafficMirrorConfig,
-) -> Vec<(String, String)> {
-    let mut headers = Vec::new();
-    for name in &mirror.forward_headers {
-        if let Some(value) = request_header_values_joined(request, name) {
-            headers.push((name.clone(), value));
-        }
-    }
-    headers
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn traffic_mirror_sample_selected(request: &RequestHeader, sample_per_mille: u16) -> bool {
-    if sample_per_mille >= 1000 {
-        return true;
-    }
-    let mut hasher = Sha256::new();
-    hasher.update(request.method.as_str().as_bytes());
-    hasher.update(b"\n");
-    hasher.update(
-        request
-            .uri
-            .path_and_query()
-            .map_or("/", |pq| pq.as_str())
-            .as_bytes(),
-    );
-    if let Some(host) = request_host_header(request) {
-        hasher.update(b"\n");
-        hasher.update(host.as_bytes());
-    }
-    let digest = hasher.finalize();
-    let bucket = u16::from_be_bytes([digest[0], digest[1]]) % 1000;
-    bucket < sample_per_mille
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn traffic_mirror_url(base_url: &str, path_and_query: &str) -> Option<String> {
-    if !path_and_query.starts_with('/') {
-        return None;
-    }
-    let mut url = base_url.trim_end_matches('/').to_owned();
-    url.push_str(path_and_query);
-    Some(url)
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn send_traffic_mirror_request(request: &TrafficMirrorRequest) -> io::Result<()> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(request.timeout_secs)))
-        .max_redirects(0)
-        .http_status_as_error(false)
-        .build()
-        .into();
-    let mut builder = match request.method.as_str() {
-        "GET" => agent.get(&request.url),
-        "HEAD" => agent.head(&request.url),
-        "OPTIONS" => agent.options(&request.url),
-        "TRACE" => agent.trace(&request.url),
-        _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "traffic mirror method is not supported",
-            ));
-        }
-    }
-    .header("cache-control", "no-store")
-    .header("x-fluxheim-mirror", "1");
-    for (name, value) in &request.headers {
-        builder = builder.header(name.as_str(), value.as_str());
-    }
-    let mut response = builder.call().map_err(traffic_mirror_io_error)?;
-    let body = response
-        .body_mut()
-        .with_config()
-        .limit(request.max_response_bytes.saturating_add(1))
-        .read_to_vec()
-        .map_err(traffic_mirror_io_error)?;
-    if body.len() as u64 > request.max_response_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "traffic mirror response exceeds configured body limit",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(feature = "traffic-mirror")]
-fn traffic_mirror_io_error(error: impl std::fmt::Display) -> io::Error {
-    io::Error::other(error.to_string())
 }
 
 async fn continue_to_proxy_or_not_found(
@@ -13437,6 +13090,7 @@ fn response_header_values<'a>(
         .filter_map(|value| value.to_str().ok())
 }
 
+#[allow(dead_code)]
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {
     let mut values = request_header_values(request, name);
     let first = values.next()?.to_owned();
@@ -13953,7 +13607,7 @@ mod tests {
         FluxProxy, HostRoutingRejectReason, RateLimitDecision, RuntimeAccessPolicy,
         RuntimeConcurrencyLimit, RuntimeProxy, RuntimeRateLimit, append_fluxheim_via_to_request,
         append_fluxheim_via_to_response, apply_websocket_upgrade_headers_if_enabled,
-        approximate_request_header_bytes, auth_request_input, count_response_body_chunk,
+        approximate_request_header_bytes, count_response_body_chunk,
         effective_client_ip_from_forwarded_for, grpc_content_type, grpc_route_rejection_status,
         http_peer_for_proxy, http_peer_for_runtime_proxy, https_redirect_location,
         normalize_cookie_headers, proxy_protocol_v1_header, proxy_protocol_v2_header,
@@ -13996,14 +13650,16 @@ mod tests {
         request_cache_only_if_cached, request_cache_revalidation_requested,
         response_with_revalidation_304_headers, revalidation_304_vary_changed,
     };
-    #[cfg(feature = "traffic-mirror")]
-    use super::{
-        traffic_mirror_forwarded_headers, traffic_mirror_sample_selected, traffic_mirror_url,
-    };
+    use crate::auth_request::auth_request_input;
     #[cfg(feature = "compression-gzip")]
     use crate::compression::{
         ResponseCompressionEncoder, ResponseCompressionEncoding, gzip_response_eligible,
         request_accepts_gzip, selected_response_compression,
+    };
+    #[cfg(feature = "traffic-mirror")]
+    use crate::traffic_mirror::{
+        acquire_traffic_mirror_slot, traffic_mirror_forwarded_headers,
+        traffic_mirror_sample_selected, traffic_mirror_url,
     };
 
     #[test]
@@ -16847,11 +16503,11 @@ mod tests {
     #[cfg(feature = "traffic-mirror")]
     fn traffic_mirror_slots_enforce_per_key_limit() {
         let key = "traffic-mirror-slot-test";
-        let first = super::acquire_traffic_mirror_slot(key, 1);
+        let first = acquire_traffic_mirror_slot(key, 1);
         assert!(first.is_some());
-        assert!(super::acquire_traffic_mirror_slot(key, 1).is_none());
+        assert!(acquire_traffic_mirror_slot(key, 1).is_none());
         drop(first);
-        assert!(super::acquire_traffic_mirror_slot(key, 1).is_some());
+        assert!(acquire_traffic_mirror_slot(key, 1).is_some());
     }
 
     #[test]

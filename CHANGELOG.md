@@ -21,6 +21,11 @@ behavior when the change improves security or project direction.
   and `Vary: Accept-Encoding` mutation from `proxy.rs` into a focused
   `compression` module while preserving the existing vhost and route policy
   behavior.
+- Extract `auth_request` input construction and outbound decision fetching from
+  `proxy.rs` into a focused `auth_request` module.
+- Extract traffic-mirror request construction, sampling, in-flight limits, and
+  outbound shadow delivery from `proxy.rs` into a focused `traffic_mirror`
+  module.
 
 ## 1.4.1 - 2026-05-26
 
