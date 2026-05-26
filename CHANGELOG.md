@@ -135,6 +135,13 @@ behavior when the change improves security or project direction.
 - Reserve `1.4.2` for proxy runtime module extraction before the next large
   proxy feature. GeoIP/Geo-Context and TCP stream proxying move to later
   `1.4.x` stops.
+- Clarify the later GeoIP/Geo-Context plan: the `1.4.3` target should use a
+  provider-agnostic local MMDB layer for MaxMind GeoIP2/GeoLite2 and CIRCL Geo
+  Open datasets, normalized typed country/ASN context, and ordered local
+  fallback without built-in remote lookup or database downloading.
+- Add `1.4.5` as an Apple Silicon macOS developer-support stop for local
+  `aarch64-apple-darwin` build/check/smoke coverage while Pingora macOS support
+  remains experimental.
 
 ## 1.4.0 - 2026-05-25
 

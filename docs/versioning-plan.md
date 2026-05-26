@@ -1132,8 +1132,9 @@ Reference parity map:
 | Regex routing and rewrites | NGINX `location ~`, named captures, `rewrite`; HAProxy regex ACLs | Rust `regex`-based route matchers, capture variables, and bounded rewrite/header templates |
 | External auth subrequest | NGINX `auth_request`, OAuth2 proxy patterns, Envoy external authz | Route/vhost auth subrequest policy with bounded header forwarding, timeout, response handling, and metrics |
 | Response and URI rewrites | NGINX `proxy_redirect`, Apache `ProxyPassReverse`, NGINX `proxy_cookie_domain`/`proxy_cookie_path`, NGINX `rewrite`/HAProxy path replace | Bounded `Location`, `Refresh`, `Set-Cookie` domain/path rewrites, route `strip_prefix`/`rewrite_prefix`, then regex/template rewrite policy |
-| Geo policy | NGINX GeoIP2 module, HAProxy maps/ACLs | Optional `geoip` feature using MaxMind DB for country/ASN variables, ACLs, and route selection |
+| Geo policy | NGINX GeoIP2 module, HAProxy maps/ACLs | Optional `geoip` feature using provider-agnostic MMDB readers for MaxMind GeoIP2/GeoLite2 and European CIRCL Geo Open datasets, with country/ASN variables, ACLs, and route selection |
 | TCP stream proxy | NGINX stream, HAProxy TCP mode | Separate stream feature with byte-copy proxying, TLS passthrough/SNI sniffing later, TCP metrics, and no HTTP semantics |
+| Apple Silicon macOS development | NGINX/Homebrew developer workflows | Developer-build and smoke-test support for `aarch64-apple-darwin`; not a production/FIPS support claim while Pingora macOS remains experimental |
 | Extension hooks | NGINX/HAProxy Lua, Envoy Wasm | Typed policy inputs and hook points in 1.4; actual shared Wasm runtime remains 1.6 |
 
 Release shape:
@@ -1323,18 +1324,35 @@ Release shape:
     GeoIP database downloading, remote GeoIP lookup fallbacks, or impossible
     travel/anomaly engines in `1.4.3`;
   - optional `geoip` Cargo feature as a bounded Geo-Context foundation, not a
-    broad programmable geo engine. Use `maxminddb` for local MaxMind GeoIP2/ASN
-    databases, load database files with the same safe path rules used for other
+    broad programmable geo engine. Implement a provider-agnostic MMDB layer:
+    the hot-path should ask a typed `GeoProvider`/`GeoDatabase` abstraction for
+    `lookup(ip)` and receive Fluxheim's normalized `GeoContext`, not provider
+    structs. Initial supported local providers are MaxMind GeoIP2/GeoLite2
+    country/ASN databases and European CIRCL Geo Open datasets when supplied in
+    MMDB-compatible form. Use the same `maxminddb` reader path for both, but
+    validate database metadata/record shape at config load so an incompatible
+    MMDB fails closed with a clear error;
+  - GeoIP config should support an ordered local database list such as
+    `[[geoip.databases]] provider = "maxmind"` and
+    `provider = "circl-geo-open"` with `path = "..."`, plus an explicit
+    `fallback_enabled` switch. Fallback means "try the next local MMDB when the
+    primary has no usable country/ASN result", not remote lookup or silent
+    best-effort compliance bypass;
+  - load database files with the same safe path rules used for other
     operator-supplied files, and reload by atomically swapping an `Arc` on
-    config reload;
+    config reload. Do not make database downloading/updating part of the proxy
+    process in `1.4.3`; document a systemd timer/sidecar pattern that downloads
+    MaxMind/CIRCL files, verifies checksums or signatures where the provider
+    publishes them, writes atomically, and then triggers Fluxheim reload;
   - implement GeoIP as its own `geoip`/`geo_context` module from the start,
     with only thin hooks in config, proxy policy, access logs, metrics, and
     tracing. Do not add GeoIP lookup or policy logic directly to `proxy.rs` or
     grow `config.rs` with large database-management helpers;
   - expose GeoIP as typed request context, not spoofable inbound headers.
-    Initial fields are country ISO code and ASN; city/latitude/longitude should
-    stay out of the first stable surface unless an operator explicitly enables
-    them because they are more privacy-sensitive;
+    Initial normalized fields are country ISO code, ASN, and provider/source
+    identifier for diagnostics. City/latitude/longitude should stay out of the
+    first stable surface unless an operator explicitly enables them because
+    they are more privacy-sensitive;
   - use the typed geo context in route/access policy, request-header templates,
     structured access logs, and OTLP span attributes. Metric labels must be
     bounded to low-cardinality values such as country and policy decision;
@@ -1343,10 +1361,11 @@ Release shape:
     policy-only country/ASN evaluation with no logs, trace attributes, headers,
     or persisted request context. Decide before implementation and test both
     compile-time and config-time behavior;
-  - defer GeoIP auto-update sidecars, ETag/Last-Modified URL polling, L1 lookup
-    caches, remote sidecar lookup fallbacks, adaptive rate-limit weighting,
-    programmable rhai/Wasm geo logic, and impossible-travel detection to `1.5`
-    or `1.6` after the typed context and policy model are stable;
+  - defer built-in GeoIP auto-downloaders, ETag/Last-Modified URL polling, L1
+    lookup caches, remote sidecar lookup fallbacks, adaptive rate-limit
+    weighting, programmable rhai/Wasm geo logic, and impossible-travel
+    detection to `1.5` or `1.6` after the typed context and policy model are
+    stable;
   - implementation order: define the typed geo context and privacy behavior
     before adding policy consumers; wire it into ACL/routing decisions before
     any load-balancer weighting; keep enterprise load-balancer operations in
@@ -1394,6 +1413,26 @@ Release shape:
     must forward the original bytes unmodified after peeking;
   - no HTTP headers, cache, auth subrequest, compression, or PHP behavior on
     stream routes.
+- `1.4.5` - Apple Silicon macOS developer support:
+  - stop line: make Fluxheim build and run for local development on
+    `aarch64-apple-darwin` only. Do not claim macOS production support, FIPS
+    evidence, launchd packaging, Homebrew distribution, or parity with the
+    Linux release gates in `1.4.5`;
+  - add a macOS CI or documented manual gate for the development profile first:
+    `cargo check --locked --no-default-features --features web --lib`, then
+    proxy/static-site profile checks, then one runtime smoke test on an
+    Apple Silicon runner or local M-series machine;
+  - audit native dependency behavior on macOS, especially `ring`,
+    `aws-lc-sys`, `zstd-sys`, `libz-ng-sys`, OpenSSL/BoringSSL/S2N optional
+    TLS backends, and PHP-FPM process management. Prefer feature/profile fixes
+    that avoid compiling unused native dependencies for developer builds;
+  - document required local prerequisites such as Xcode Command Line Tools,
+    Rust target/toolchain, CMake when selected features need it, and optional
+    Homebrew PHP-FPM for managed PHP development tests;
+  - keep Linux as the production support baseline. macOS support is for
+    contributor development and local site testing until Pingora's macOS
+    support is no longer experimental and Fluxheim has regular macOS smoke
+    coverage.
 
 Version discipline for the rest of `1.4.x`:
 
@@ -2980,12 +3019,18 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.4.3`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local
-  MMDB country/ASN context, privacy controls, route/access decisions, and
-  bounded observability; dynamic database downloaders, remote lookup sidecars,
-  programmable geo logic, and anomaly engines are later work.
+  provider-agnostic MMDB country/ASN context for MaxMind GeoIP2/GeoLite2 and
+  CIRCL Geo Open datasets, privacy controls, route/access decisions, ordered
+  local fallback, and bounded observability; built-in dynamic database
+  downloaders, remote lookup sidecars, programmable geo logic, and anomaly
+  engines are later work.
 - `v1.4.4`: TCP stream proxy foundation with separate stream semantics,
   listener/upstream trust boundaries, metrics, and optional TLS passthrough SNI
   routing only after a bounded ClientHello parser is proven.
+- `v1.4.5`: Apple Silicon macOS developer support. Scope stops at local
+  `aarch64-apple-darwin` build/check/smoke coverage for development profiles,
+  dependency/profile cleanup for unused native crates, and setup docs; it is
+  not a production, FIPS, Homebrew, or launchd packaging milestone.
 - `v1.5.1`: fixes for enterprise load-balancer operations.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 
