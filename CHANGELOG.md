@@ -69,6 +69,9 @@ behavior when the change improves security or project direction.
   stick-table tracking, runtime backend mutation, GeoIP policy, response body
   substitution, TCP stream proxying, and arbitrary Wasm/Lua execution outside
   `1.4.1`.
+- Reserve `1.4.2` for proxy runtime module extraction before the next large
+  proxy feature. GeoIP/Geo-Context and TCP stream proxying move to later
+  `1.4.x` stops.
 
 ## 1.4.0 - 2026-05-25
 

@@ -113,8 +113,9 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| GeoIP/Geo-Context policy | ❌ | Planned for `1.4.2`. |
-| TCP stream proxying | ❌ | Planned for `1.4.3`. |
+| Proxy module split | ❌ | Planned for `1.4.2`; extract proxy domains before adding more large proxy features. |
+| GeoIP/Geo-Context policy | ❌ | Planned for `1.4.3`. |
+| TCP stream proxying | ❌ | Planned for `1.4.4`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
 | WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
 
@@ -405,9 +406,14 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   and gRPC pass-through policy.
 - `1.4.1` is planned for the remaining proxy-operations work: dynamic upstream
   discovery, file-watched upstream lists, richer structured logs,
-  regex/template rewrite policy, and typed hook points. Regex capture variables,
-  bounded path-only `rewrite_template`, safe bodyless traffic mirroring, and a
-  read-only Unix ops socket are already available.
+  regex/template rewrite policy, route method matching, explicit WebSocket
+  upgrade proxying, bounded auth subrequests, safe bodyless traffic mirroring,
+  and a read-only Unix ops socket.
+- `1.4.2` is planned as a maintenance architecture release that splits the
+  large proxy runtime into focused modules before adding more large proxy
+  features. Target extractions are `php_fpm`, `compression`, route matching and
+  rewrites, traffic mirroring, auth subrequests, proxy cache glue, access logs,
+  and proxy security helpers.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

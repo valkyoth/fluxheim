@@ -2915,15 +2915,22 @@ the exception while the cache server is being completed as a focused sequence:
   pass-through policy.
 - `v1.4.1`: discovery, mirroring, structured logs, richer rewrite policy,
   regex and method routing, explicit WebSocket/HTTP upgrade proxying, bounded
-  auth subrequests, safe bodyless traffic mirroring, a read-only Unix ops
-  socket, and typed operator hook points.
-- `v1.4.2`: optional bounded Geo-Context foundation, advanced ACL composition,
+  auth subrequests, safe bodyless traffic mirroring, and a read-only Unix ops
+  socket. Broader typed hook points remain deferred.
+- `v1.4.2`: proxy module split and maintenance architecture release. Stop line:
+  no new operator-facing proxy feature surface unless required to preserve
+  behavior during extraction. Split the current large proxy runtime into focused
+  domains such as `php_fpm`, `compression`, route matching/rewrite policy,
+  traffic mirroring, auth subrequests, proxy cache glue, access logging, and
+  proxy security helpers. Preserve config compatibility and pass the existing
+  1.4.1 smoke/security matrix before moving on.
+- `v1.4.3`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local
   MMDB country/ASN context, privacy controls, route/access decisions, and
   bounded observability; dynamic database downloaders, remote lookup sidecars,
   programmable geo logic, and anomaly engines are later work.
-- `v1.4.3`: TCP stream proxy foundation with separate stream semantics,
+- `v1.4.4`: TCP stream proxy foundation with separate stream semantics,
   listener/upstream trust boundaries, metrics, and optional TLS passthrough SNI
   routing only after a bounded ClientHello parser is proven.
 - `v1.5.1`: fixes for enterprise load-balancer operations.
