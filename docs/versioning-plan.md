@@ -1283,9 +1283,10 @@ Release shape:
     matrix before moving on;
   - split the large HTTP proxy runtime into focused domains before adding more
     proxy surface. Completed first-pass extractions: access logging,
-    compression, auth subrequests, traffic mirroring, edge policy, and route
-    policy. Remaining domains: `php_fpm`, proxy cache glue, and the remaining
-    proxy core orchestration;
+    compression, auth subrequests, traffic mirroring, edge policy, route
+    policy, and the first `php_fpm` slices for managed-process lifecycle and
+    request-body spooling. Remaining domains: PHP FastCGI execution/response
+    parsing, proxy cache glue, and the remaining proxy core orchestration;
   - keep `FluxProxy` and the Pingora `ProxyHttp` lifecycle as the orchestration
     layer while extracting domain logic behind small, testable APIs;
   - move tests with their domains where practical, and keep the existing

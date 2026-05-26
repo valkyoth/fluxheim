@@ -41,6 +41,8 @@ pub mod metrics_otlp;
 pub mod otel_otlp;
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 mod otlp_http;
+#[cfg(feature = "php-fpm")]
+pub(crate) mod php_fpm;
 #[cfg(feature = "proxy")]
 pub mod proxy;
 pub mod reload;
