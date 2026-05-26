@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use pingora::http::{ResponseHeader, StatusCode};
+
 use crate::config::{PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager};
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
@@ -64,6 +66,677 @@ impl PhpRequestBody {
                 ))
             }
         }
+    }
+}
+
+pub(crate) struct PhpFpmPool {
+    endpoint: PhpFpmEndpoint,
+    metric_vhost: String,
+    metric_pool: String,
+    max_idle: usize,
+    idle_timeout: Duration,
+    max_response_bytes: u64,
+    idle: tokio::sync::Mutex<Vec<PhpFpmPoolEntry>>,
+}
+
+impl std::fmt::Debug for PhpFpmPool {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PhpFpmPool")
+            .field("endpoint", &self.endpoint)
+            .field("metric_vhost", &self.metric_vhost)
+            .field("metric_pool", &self.metric_pool)
+            .field("max_idle", &self.max_idle)
+            .field("idle_timeout", &self.idle_timeout)
+            .field("max_response_bytes", &self.max_response_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) enum PhpFpmEndpoint {
+    Tcp(String),
+    #[cfg(unix)]
+    Unix(PathBuf),
+}
+
+struct PhpFpmPoolEntry {
+    client: PhpFpmPooledClient,
+    last_used: Instant,
+}
+
+enum PhpFpmPooledClient {
+    Tcp(
+        fastcgi_client::Client<
+            fastcgi_client::io::TokioCompat<tokio::net::TcpStream>,
+            fastcgi_client::conn::KeepAlive,
+        >,
+    ),
+    #[cfg(unix)]
+    Unix(
+        fastcgi_client::Client<
+            fastcgi_client::io::TokioCompat<tokio::net::UnixStream>,
+            fastcgi_client::conn::KeepAlive,
+        >,
+    ),
+}
+
+pub(crate) struct PhpFpmParsedResponse {
+    pub(crate) response: ResponseHeader,
+    pub(crate) body: Vec<u8>,
+    pub(crate) stderr: Option<Vec<u8>>,
+}
+
+pub(crate) fn php_fpm_endpoints_from_config(config: &PhpFpmConfig) -> Vec<PhpFpmEndpoint> {
+    if !config.tcp_upstreams.is_empty() {
+        return config
+            .tcp_upstreams
+            .iter()
+            .cloned()
+            .map(PhpFpmEndpoint::Tcp)
+            .collect();
+    }
+    if let Some(address) = config.tcp.as_deref() {
+        return vec![PhpFpmEndpoint::Tcp(address.to_owned())];
+    }
+    if let Some(socket) = config.socket.as_deref() {
+        #[cfg(unix)]
+        {
+            return vec![PhpFpmEndpoint::Unix(socket.to_path_buf())];
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = socket;
+            return Vec::new();
+        }
+    }
+    Vec::new()
+}
+
+pub(crate) fn php_fpm_keepalive_pools_from_config(
+    config: &PhpConfig,
+    metric_vhost: &str,
+    metric_pool: &str,
+) -> Vec<Arc<PhpFpmPool>> {
+    if !config.fpm.keepalive {
+        return Vec::new();
+    }
+    let endpoints = php_fpm_endpoints_from_config(&config.fpm);
+    let multiple_endpoints = endpoints.len() > 1;
+    endpoints
+        .into_iter()
+        .enumerate()
+        .map(|(index, endpoint)| {
+            let pool_label = if multiple_endpoints {
+                format!("{metric_pool}-{index}")
+            } else {
+                metric_pool.to_owned()
+            };
+            Arc::new(PhpFpmPool::from_endpoint(
+                endpoint,
+                &config.fpm,
+                metric_vhost,
+                &pool_label,
+                config.max_response_bytes.as_u64(),
+            ))
+        })
+        .collect()
+}
+
+impl PhpFpmPool {
+    #[cfg(test)]
+    pub(crate) fn metric_pool(&self) -> &str {
+        &self.metric_pool
+    }
+
+    fn from_endpoint(
+        endpoint: PhpFpmEndpoint,
+        config: &PhpFpmConfig,
+        metric_vhost: &str,
+        metric_pool: &str,
+        max_response_bytes: u64,
+    ) -> Self {
+        Self {
+            endpoint,
+            metric_vhost: metric_vhost.to_owned(),
+            metric_pool: metric_pool.to_owned(),
+            max_idle: config.pool_max_idle,
+            idle_timeout: Duration::from_secs(config.idle_timeout_secs),
+            max_response_bytes,
+            idle: tokio::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn record_pool_event(&self, event: &str) {
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_php_fpm_pool_event(&self.metric_vhost, &self.metric_pool, event);
+        let _ = event;
+    }
+
+    fn record_pool_idle(&self, idle_connections: usize) {
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_php_fpm_pool_idle(
+            &self.metric_vhost,
+            &self.metric_pool,
+            idle_connections,
+        );
+        let _ = idle_connections;
+    }
+
+    pub(crate) async fn execute(
+        &self,
+        params: fastcgi_client::Params<'_>,
+        body: &PhpRequestBody,
+        connect_timeout: Duration,
+        request_timeout: Duration,
+    ) -> io::Result<fastcgi_client::Response> {
+        let mut entry = self.checkout(connect_timeout).await?;
+        let result = entry
+            .execute(params, body, request_timeout, self.max_response_bytes)
+            .await;
+        if result.is_ok() {
+            self.checkin(entry).await;
+        }
+        result
+    }
+
+    async fn checkout(&self, connect_timeout: Duration) -> io::Result<PhpFpmPoolEntry> {
+        let now = Instant::now();
+        {
+            let mut idle = self.idle.lock().await;
+            let before_retain = idle.len();
+            idle.retain(|entry| now.duration_since(entry.last_used) <= self.idle_timeout);
+            if before_retain > idle.len() {
+                self.record_pool_event("drop_stale");
+            }
+            if let Some(entry) = idle.pop() {
+                self.record_pool_event("reuse");
+                self.record_pool_idle(idle.len());
+                return Ok(entry);
+            }
+            self.record_pool_idle(idle.len());
+        }
+        let client = self.connect_client(connect_timeout).await?;
+        self.record_pool_event("connect");
+        Ok(PhpFpmPoolEntry {
+            client,
+            last_used: now,
+        })
+    }
+
+    async fn checkin(&self, mut entry: PhpFpmPoolEntry) {
+        entry.last_used = Instant::now();
+        let mut idle = self.idle.lock().await;
+        let before_retain = idle.len();
+        idle.retain(|entry| entry.last_used.elapsed() <= self.idle_timeout);
+        if before_retain > idle.len() {
+            self.record_pool_event("drop_stale");
+        }
+        if idle.len() < self.max_idle {
+            idle.push(entry);
+            self.record_pool_event("return");
+        } else {
+            self.record_pool_event("discard_full");
+        }
+        self.record_pool_idle(idle.len());
+    }
+
+    async fn connect_client(&self, timeout: Duration) -> io::Result<PhpFpmPooledClient> {
+        match &self.endpoint {
+            PhpFpmEndpoint::Tcp(address) => {
+                let stream = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(address))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+                Ok(PhpFpmPooledClient::Tcp(
+                    fastcgi_client::Client::new_keep_alive_tokio(stream),
+                ))
+            }
+            #[cfg(unix)]
+            PhpFpmEndpoint::Unix(socket) => {
+                let stream = tokio::time::timeout(timeout, tokio::net::UnixStream::connect(socket))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+                Ok(PhpFpmPooledClient::Unix(
+                    fastcgi_client::Client::new_keep_alive_tokio(stream),
+                ))
+            }
+        }
+    }
+}
+
+impl PhpFpmPoolEntry {
+    async fn execute(
+        &mut self,
+        params: fastcgi_client::Params<'_>,
+        body: &PhpRequestBody,
+        timeout: Duration,
+        max_response_bytes: u64,
+    ) -> io::Result<fastcgi_client::Response> {
+        self.client
+            .execute(params, body, timeout, max_response_bytes)
+            .await
+    }
+}
+
+impl PhpFpmPooledClient {
+    async fn execute(
+        &mut self,
+        params: fastcgi_client::Params<'_>,
+        body: &PhpRequestBody,
+        timeout: Duration,
+        max_response_bytes: u64,
+    ) -> io::Result<fastcgi_client::Response> {
+        let request = fastcgi_client::Request::new(params, body.reader().await?);
+        match self {
+            Self::Tcp(client) => {
+                let stream = tokio::time::timeout(timeout, client.execute_stream(request))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
+                    .map_err(|error| io::Error::other(error.to_string()))?;
+                collect_php_fpm_response_stream(stream, max_response_bytes).await
+            }
+            #[cfg(unix)]
+            Self::Unix(client) => {
+                let stream = tokio::time::timeout(timeout, client.execute_stream(request))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
+                    .map_err(|error| io::Error::other(error.to_string()))?;
+                collect_php_fpm_response_stream(stream, max_response_bytes).await
+            }
+        }
+    }
+}
+
+pub(crate) async fn execute_php_fpm_once(
+    pool: Option<&PhpFpmPool>,
+    endpoint: &PhpFpmEndpoint,
+    params: fastcgi_client::Params<'_>,
+    body: &PhpRequestBody,
+    connect_timeout: Duration,
+    timeout: Duration,
+    max_response_bytes: u64,
+) -> io::Result<fastcgi_client::Response> {
+    if let Some(pool) = pool {
+        return pool.execute(params, body, connect_timeout, timeout).await;
+    }
+
+    match endpoint {
+        PhpFpmEndpoint::Tcp(address) => {
+            let stream =
+                tokio::time::timeout(connect_timeout, tokio::net::TcpStream::connect(address))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+            execute_php_fpm_stream(stream, params, body, timeout, max_response_bytes).await
+        }
+        #[cfg(unix)]
+        PhpFpmEndpoint::Unix(socket) => {
+            let stream =
+                tokio::time::timeout(connect_timeout, tokio::net::UnixStream::connect(socket))
+                    .await
+                    .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Connect))??;
+            execute_php_fpm_stream(stream, params, body, timeout, max_response_bytes).await
+        }
+    }
+}
+
+pub(crate) fn php_fpm_effective_connect_timeout(
+    fpm: &PhpFpmConfig,
+    request_timeout: Duration,
+) -> Duration {
+    fpm.connect_timeout_secs
+        .map(Duration::from_secs)
+        .map(|connect_timeout| connect_timeout.min(request_timeout))
+        .unwrap_or(request_timeout)
+}
+
+pub(crate) fn php_fpm_effective_request_timeout(
+    fpm: &PhpFpmConfig,
+    request_timeout: Duration,
+) -> Duration {
+    [fpm.read_timeout_secs, fpm.write_timeout_secs]
+        .into_iter()
+        .flatten()
+        .map(Duration::from_secs)
+        .fold(request_timeout, Duration::min)
+}
+
+fn php_fpm_retry_method_allowed(fpm: &PhpFpmConfig, method: &str) -> bool {
+    fpm.retry_methods
+        .iter()
+        .any(|retry_method| retry_method.eq_ignore_ascii_case(method))
+}
+
+#[cfg(test)]
+pub(crate) fn php_fpm_retry_attempts(fpm: &PhpFpmConfig, method: &str) -> u8 {
+    php_fpm_retry_attempts_for_endpoint_count(fpm, method, 1)
+}
+
+pub(crate) fn php_fpm_retry_attempts_for_endpoint_count(
+    fpm: &PhpFpmConfig,
+    method: &str,
+    endpoint_count: usize,
+) -> u8 {
+    if !php_fpm_retry_method_allowed(fpm, method) {
+        return 0;
+    }
+    let failover_retries = endpoint_count.saturating_sub(1).min(usize::from(u8::MAX)) as u8;
+    fpm.max_retries.max(failover_retries)
+}
+
+pub(crate) fn php_fpm_retry_deadline(retry_timeout_secs: Option<u64>) -> Option<Instant> {
+    retry_timeout_secs.and_then(|secs| Instant::now().checked_add(Duration::from_secs(secs)))
+}
+
+pub(crate) fn php_fpm_retry_deadline_allows(deadline: Option<Instant>) -> bool {
+    match deadline {
+        Some(deadline) => Instant::now() < deadline,
+        None => true,
+    }
+}
+
+pub(crate) fn php_fpm_retryable_response(fpm: &PhpFpmConfig, status: StatusCode) -> bool {
+    fpm.retry_statuses
+        .iter()
+        .any(|retry_status| *retry_status == status.as_u16())
+}
+
+pub(crate) fn php_fpm_retryable_error(error: &io::Error) -> bool {
+    match error.kind() {
+        io::ErrorKind::TimedOut => php_fpm_timeout_kind(error) == Some(PhpFpmTimeoutKind::Connect),
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe
+        | io::ErrorKind::NotConnected
+        | io::ErrorKind::AddrInUse
+        | io::ErrorKind::AddrNotAvailable
+        | io::ErrorKind::NotFound
+        | io::ErrorKind::UnexpectedEof => true,
+        _ => false,
+    }
+}
+
+pub(crate) async fn collect_php_fpm_response_stream<S>(
+    mut stream: S,
+    max_response_bytes: u64,
+) -> io::Result<fastcgi_client::Response>
+where
+    S: fastcgi_client::StreamExt<
+            Item = fastcgi_client::ClientResult<fastcgi_client::response::Content>,
+        > + Unpin,
+{
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut total_bytes = 0_u64;
+    while let Some(content) = stream.next().await {
+        match content.map_err(|error| io::Error::other(error.to_string()))? {
+            fastcgi_client::response::Content::Stdout(chunk) => {
+                push_php_fpm_stream_chunk(
+                    &mut stdout,
+                    &chunk,
+                    &mut total_bytes,
+                    max_response_bytes,
+                )?;
+            }
+            fastcgi_client::response::Content::Stderr(chunk) => {
+                push_php_fpm_stream_chunk(
+                    &mut stderr,
+                    &chunk,
+                    &mut total_bytes,
+                    max_response_bytes,
+                )?;
+            }
+        }
+    }
+
+    let mut response = fastcgi_client::Response::default();
+    response.stdout = (!stdout.is_empty()).then_some(stdout);
+    response.stderr = (!stderr.is_empty()).then_some(stderr);
+    Ok(response)
+}
+
+pub(crate) fn push_php_fpm_stream_chunk(
+    target: &mut Vec<u8>,
+    chunk: &[u8],
+    total_bytes: &mut u64,
+    max_response_bytes: u64,
+) -> io::Result<()> {
+    let chunk_len = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+    let Some(next_total) = total_bytes.checked_add(chunk_len) else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response exceeds maximum buffered size",
+        ));
+    };
+    if next_total > max_response_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response exceeds maximum buffered size",
+        ));
+    }
+    *total_bytes = next_total;
+    target.extend_from_slice(chunk);
+    Ok(())
+}
+
+async fn execute_php_fpm_stream<S>(
+    stream: S,
+    params: fastcgi_client::Params<'_>,
+    body: &PhpRequestBody,
+    timeout: Duration,
+    max_response_bytes: u64,
+) -> io::Result<fastcgi_client::Response>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let client = fastcgi_client::Client::new_tokio(stream);
+    let request = fastcgi_client::Request::new(params, body.reader().await?);
+    let stream = tokio::time::timeout(timeout, client.execute_once_stream(request))
+        .await
+        .map_err(|_| php_fpm_timeout_error(PhpFpmTimeoutKind::Request))?
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    collect_php_fpm_response_stream(stream, max_response_bytes).await
+}
+
+pub(crate) fn parse_php_response(
+    stdout: &[u8],
+    max_response_bytes: u64,
+    max_response_header_bytes: u64,
+) -> io::Result<(ResponseHeader, Vec<u8>)> {
+    if stdout.len() as u64 > max_response_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response exceeds maximum buffered size",
+        ));
+    }
+    let (header_bytes, body) = split_php_response(stdout)?;
+    if header_bytes.len() as u64 > max_response_header_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "php-fpm response headers exceed maximum size",
+        ));
+    }
+
+    let mut status = 200;
+    let mut response = php_response_header(status)?;
+    for line in header_bytes.split(|byte| *byte == b'\n') {
+        let line = trim_ascii_cr(line);
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_first_colon() else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "php-fpm response header is malformed",
+            ));
+        };
+        let name = trim_ascii(name);
+        let value = trim_ascii(value);
+        if !safe_php_header_name(name) || !safe_php_header_value(value) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "php-fpm response header contains unsafe bytes",
+            ));
+        }
+        if name.eq_ignore_ascii_case(b"status") {
+            status = parse_php_status(value)?;
+            response.status = StatusCode::from_u16(status)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+            continue;
+        }
+        let name = std::str::from_utf8(name)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let value = std::str::from_utf8(value)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        response
+            .append_header(name.to_owned(), value.to_owned())
+            .map_err(|error| io::Error::other(error.to_string()))?;
+    }
+
+    Ok((response, body.to_vec()))
+}
+
+pub fn fuzz_parse_php_response(stdout: &[u8]) -> io::Result<()> {
+    let _ = parse_php_response(stdout, 1024 * 1024, 64 * 1024)?;
+    Ok(())
+}
+
+pub(crate) fn php_response_header(status: u16) -> io::Result<ResponseHeader> {
+    ResponseHeader::build(status, Some(8)).map_err(|error| io::Error::other(error.to_string()))
+}
+
+fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
+    if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
+        return Ok((&stdout[..index], &stdout[index + 4..]));
+    }
+    if let Some(index) = stdout.windows(2).position(|window| window == b"\n\n") {
+        return Ok((&stdout[..index], &stdout[index + 2..]));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "php-fpm response is missing header terminator",
+    ))
+}
+
+fn parse_php_status(value: &[u8]) -> io::Result<u16> {
+    let text = std::str::from_utf8(value)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let status = text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty PHP Status header"))?
+        .parse::<u16>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if !(100..=599).contains(&status) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PHP Status header is outside HTTP status range",
+        ));
+    }
+    Ok(status)
+}
+
+fn trim_ascii_cr(value: &[u8]) -> &[u8] {
+    value.strip_suffix(b"\r").unwrap_or(value)
+}
+
+fn trim_ascii(mut value: &[u8]) -> &[u8] {
+    while matches!(value.first(), Some(b' ' | b'\t')) {
+        value = &value[1..];
+    }
+    while matches!(value.last(), Some(b' ' | b'\t')) {
+        value = &value[..value.len() - 1];
+    }
+    value
+}
+
+fn safe_php_header_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.iter().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+pub(crate) fn safe_php_header_value(value: &[u8]) -> bool {
+    value
+        .iter()
+        .all(|byte| matches!(byte, b' ' | b'\t' | 0x21..=0x7E))
+}
+
+trait SplitFirstColon {
+    fn split_first_colon(&self) -> Option<(&[u8], &[u8])>;
+}
+
+impl SplitFirstColon for [u8] {
+    fn split_first_colon(&self) -> Option<(&[u8], &[u8])> {
+        let index = self.iter().position(|byte| *byte == b':')?;
+        Some((&self[..index], &self[index + 1..]))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum PhpFpmTimeoutKind {
+    Connect,
+    Request,
+}
+
+impl std::fmt::Display for PhpFpmTimeoutKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connect => write!(formatter, "php-fpm connect timed out"),
+            Self::Request => write!(formatter, "php-fpm request timed out"),
+        }
+    }
+}
+
+impl std::error::Error for PhpFpmTimeoutKind {}
+
+pub(crate) fn php_fpm_timeout_error(kind: PhpFpmTimeoutKind) -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, kind)
+}
+
+pub(crate) fn php_fpm_timeout_kind(error: &io::Error) -> Option<PhpFpmTimeoutKind> {
+    error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<PhpFpmTimeoutKind>())
+        .copied()
+}
+
+pub(crate) fn php_fpm_error_outcome(error: &io::Error) -> &'static str {
+    match error.kind() {
+        io::ErrorKind::TimedOut => match php_fpm_timeout_kind(error) {
+            Some(PhpFpmTimeoutKind::Connect) => "connect_timeout",
+            Some(PhpFpmTimeoutKind::Request) | None => "request_timeout",
+        },
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe
+        | io::ErrorKind::NotConnected
+        | io::ErrorKind::AddrInUse
+        | io::ErrorKind::AddrNotAvailable
+        | io::ErrorKind::NotFound
+        | io::ErrorKind::UnexpectedEof => "connection_error",
+        io::ErrorKind::InvalidInput | io::ErrorKind::Unsupported => "configuration_error",
+        io::ErrorKind::InvalidData => "invalid_response",
+        _ => "fpm_error",
     }
 }
 

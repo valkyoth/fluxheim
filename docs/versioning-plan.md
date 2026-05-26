@@ -1284,9 +1284,10 @@ Release shape:
   - split the large HTTP proxy runtime into focused domains before adding more
     proxy surface. Completed first-pass extractions: access logging,
     compression, auth subrequests, traffic mirroring, edge policy, route
-    policy, and the first `php_fpm` slices for managed-process lifecycle and
-    request-body spooling. Remaining domains: PHP FastCGI execution/response
-    parsing, proxy cache glue, and the remaining proxy core orchestration;
+    policy, and `php_fpm` slices for managed-process lifecycle, request-body
+    spooling, FastCGI endpoint/pool transport, timeout/retry classification,
+    and CGI response parsing. Remaining domains: high-level PHP request/session
+    orchestration, proxy cache glue, and the remaining proxy core orchestration;
   - keep `FluxProxy` and the Pingora `ProxyHttp` lifecycle as the orchestration
     layer while extracting domain logic behind small, testable APIs;
   - move tests with their domains where practical, and keep the existing
@@ -2958,8 +2959,12 @@ the exception while the cache server is being completed as a focused sequence:
   behavior during extraction. Split the current large proxy runtime into focused
   domains such as `php_fpm`, `compression`, route matching/rewrite policy,
   traffic mirroring, auth subrequests, proxy cache glue, access logging, and
-  proxy security helpers. Preserve config compatibility and pass the existing
-  1.4.1 smoke/security matrix before moving on.
+  proxy security helpers. PHP-FPM process supervision, spooling, FastCGI
+  transport, retry/timeout classification, and response parsing live in
+  `php_fpm`; the remaining PHP code in `proxy.rs` should stay limited to
+  Pingora request/session orchestration until the proxy core itself is split.
+  Preserve config compatibility and pass the existing 1.4.1 smoke/security
+  matrix before moving on.
 - `v1.4.3`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local

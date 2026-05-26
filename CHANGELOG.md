@@ -33,6 +33,11 @@ behavior when the change improves security or project direction.
 - Extract managed PHP-FPM process lifecycle, watchdog/cleanup handling,
   generated pool configuration, and PHP request-body spool file handling into a
   focused `php_fpm` module.
+- Extract PHP-FPM endpoint construction, keepalive pool transport,
+  timeout/retry classification, FastCGI response buffering, and CGI response
+  header parsing into `php_fpm`. The remaining PHP code in `proxy.rs` is the
+  Pingora session integration layer that resolves requests, builds CGI params,
+  applies response policy, and coordinates static offload.
 - Document the source-boundary rule for future work: new feature domains should
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split
