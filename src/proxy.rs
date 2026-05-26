@@ -92,17 +92,15 @@ use crate::php_fpm::{
 };
 #[cfg(feature = "cache")]
 use crate::proxy_cache::{
-    cache_request_from_header, request_cache_bypass_reason, request_cache_revalidation_requested,
+    VaryCachePolicy, cache_request_from_header, cache_vary_policy, request_cache_bypass_reason,
+    request_cache_revalidation_requested, response_cache_admission_rejection,
+    response_range_cache_admission_rejection, vary_request_hash,
 };
 use crate::route_policy::{RuntimeRouteMatcher, route_method_matches};
 #[cfg(feature = "web")]
 use crate::web::{ResolveResult, StaticFileServer};
 use tokio::io::AsyncWriteExt as _;
 
-#[cfg(feature = "cache")]
-const MAX_VARY_HEADER_BYTES: usize = 2048;
-#[cfg(feature = "cache")]
-const MAX_VARY_FIELDS: usize = 16;
 #[cfg(feature = "cache")]
 const CACHE_MIN_USES_REASON: &str = "cache-min-uses";
 #[cfg(feature = "cache")]
@@ -10368,234 +10366,6 @@ fn proxy_metrics_vhost(ctx: &RequestContext) -> &str {
         .unwrap_or("unknown")
 }
 
-#[cfg(feature = "cache")]
-fn response_cache_admission_rejection(
-    response: &ResponseHeader,
-    cache: &crate::config::CacheConfig,
-) -> Option<&'static str> {
-    let headers = &response.headers;
-    let status = response.status.as_u16();
-    let status_has_ttl =
-        cache.status_ttls.contains_key(&status) || cache.default_status_ttl_secs.is_some();
-    if response.status != StatusCode::OK && !status_has_ttl {
-        return Some("status-not-cacheable");
-    }
-
-    if response.status == StatusCode::OK && !response_content_type_is_cacheable(headers, cache) {
-        return if headers.contains_key("content-type") {
-            Some("content-type-not-cacheable")
-        } else {
-            Some("content-type-missing")
-        };
-    }
-
-    response_cache_header_policy_rejection(response, cache)
-}
-
-#[cfg(feature = "cache")]
-fn response_range_cache_admission_rejection(
-    response: &ResponseHeader,
-    cache: &crate::config::CacheConfig,
-) -> Option<&'static str> {
-    let headers = &response.headers;
-    if !response_content_type_is_cacheable(headers, cache) {
-        return if headers.contains_key("content-type") {
-            Some("content-type-not-cacheable")
-        } else {
-            Some("content-type-missing")
-        };
-    }
-
-    response_cache_header_policy_rejection(response, cache)
-}
-
-#[cfg(feature = "cache")]
-fn response_cache_header_policy_rejection(
-    response: &ResponseHeader,
-    cache: &crate::config::CacheConfig,
-) -> Option<&'static str> {
-    let headers = &response.headers;
-    if headers.contains_key("set-cookie") {
-        return Some("set-cookie");
-    }
-    if cache
-        .no_store_response_headers
-        .iter()
-        .any(|header| headers.contains_key(header.as_str()))
-    {
-        return Some("configured-no-store-response-header");
-    }
-    if response_headers_match_cache_no_store_value(response, &cache.no_store_response_header_values)
-    {
-        return Some("configured-no-store-response-header-value");
-    }
-    if let Some(reason) = crate::cache_headers::response_values_forbid_shared_cache(
-        response_header_values(response, "cache-control"),
-    ) {
-        return Some(reason);
-    }
-    match vary_cache_policy(headers) {
-        VaryCachePolicy::Uncacheable(reason) => Some(reason),
-        VaryCachePolicy::None | VaryCachePolicy::Fields(_) => None,
-    }
-}
-
-#[cfg(feature = "cache")]
-fn response_headers_match_cache_no_store_value(
-    response: &ResponseHeader,
-    configured_values: &std::collections::BTreeMap<String, String>,
-) -> bool {
-    !configured_values.is_empty()
-        && configured_values.iter().any(|(header, configured)| {
-            response_header_values(response, header).any(|value| value == configured)
-        })
-}
-
-#[cfg(feature = "cache")]
-fn cache_vary_policy(
-    headers: &http::HeaderMap,
-    cache: &crate::config::CacheConfig,
-) -> VaryCachePolicy {
-    let mut fields = match vary_cache_policy(headers) {
-        VaryCachePolicy::None => Vec::new(),
-        VaryCachePolicy::Fields(fields) => fields,
-        VaryCachePolicy::Uncacheable(reason) => return VaryCachePolicy::Uncacheable(reason),
-    };
-
-    for configured in &cache.vary_request_headers {
-        let field = configured.to_ascii_lowercase();
-        if !fields.contains(&field) {
-            fields.push(field);
-        }
-        if fields.len() > MAX_VARY_FIELDS {
-            return VaryCachePolicy::Uncacheable("vary-too-many-fields");
-        }
-    }
-
-    if fields.is_empty() {
-        VaryCachePolicy::None
-    } else {
-        fields.sort();
-        VaryCachePolicy::Fields(fields)
-    }
-}
-
-#[cfg(feature = "cache")]
-fn response_content_type_is_cacheable(
-    headers: &http::HeaderMap,
-    cache: &crate::config::CacheConfig,
-) -> bool {
-    let Some(media_type) = headers
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(';').next())
-        .map(str::trim)
-    else {
-        return false;
-    };
-    cache
-        .content_types
-        .iter()
-        .any(|candidate| content_type_pattern_matches(candidate, media_type))
-}
-
-#[cfg(feature = "cache")]
-fn content_type_pattern_matches(pattern: &str, media_type: &str) -> bool {
-    let pattern = pattern.trim();
-    let media_type = media_type.trim();
-    if let Some(prefix) = pattern.strip_suffix("/*") {
-        let Some((kind, _subtype)) = media_type.split_once('/') else {
-            return false;
-        };
-        return kind.eq_ignore_ascii_case(prefix);
-    }
-    pattern.eq_ignore_ascii_case(media_type)
-}
-
-#[cfg(feature = "cache")]
-#[derive(Debug, Clone, Eq, PartialEq)]
-enum VaryCachePolicy {
-    None,
-    Fields(Vec<String>),
-    Uncacheable(&'static str),
-}
-
-#[cfg(feature = "cache")]
-fn vary_cache_policy(headers: &http::HeaderMap) -> VaryCachePolicy {
-    let mut fields = Vec::new();
-    let mut total_bytes = 0usize;
-
-    for value in headers.get_all("vary").iter() {
-        total_bytes = total_bytes.saturating_add(value.as_bytes().len());
-        if total_bytes > MAX_VARY_HEADER_BYTES {
-            return VaryCachePolicy::Uncacheable("vary-too-large");
-        }
-
-        let Ok(line) = value.to_str() else {
-            return VaryCachePolicy::Uncacheable("vary-invalid");
-        };
-
-        for raw_field in line.split(',') {
-            let field = raw_field.trim();
-            if field.is_empty() {
-                return VaryCachePolicy::Uncacheable("vary-invalid");
-            }
-            if field == "*" {
-                return VaryCachePolicy::Uncacheable("vary-star");
-            }
-            if http::header::HeaderName::from_bytes(field.as_bytes()).is_err() {
-                return VaryCachePolicy::Uncacheable("vary-invalid");
-            }
-
-            let field = field.to_ascii_lowercase();
-            if is_sensitive_vary_field(&field) {
-                return VaryCachePolicy::Uncacheable("vary-sensitive-field");
-            }
-            if !fields.contains(&field) {
-                fields.push(field);
-            }
-            if fields.len() > MAX_VARY_FIELDS {
-                return VaryCachePolicy::Uncacheable("vary-too-many-fields");
-            }
-        }
-    }
-
-    if fields.is_empty() {
-        VaryCachePolicy::None
-    } else {
-        fields.sort();
-        VaryCachePolicy::Fields(fields)
-    }
-}
-
-#[cfg(feature = "cache")]
-fn is_sensitive_vary_field(field: &str) -> bool {
-    matches!(field, "authorization" | "cookie" | "proxy-authorization")
-}
-
-#[cfg(feature = "cache")]
-fn vary_request_hash(fields: &[String], request: &RequestHeader) -> HashBinary {
-    let mut material = Vec::new();
-    material.extend_from_slice(b"fluxheim-vary-v2");
-
-    for field in fields {
-        append_vary_hash_component(&mut material, field.as_bytes());
-        let values = request.headers.get_all(field.as_str());
-        material.extend_from_slice(&(values.iter().count() as u32).to_le_bytes());
-        for value in request.headers.get_all(field.as_str()).iter() {
-            append_vary_hash_component(&mut material, value.as_bytes());
-        }
-    }
-
-    pingora::cache::key::hash_key(material)
-}
-
-#[cfg(feature = "cache")]
-fn append_vary_hash_component(material: &mut Vec<u8>, bytes: &[u8]) {
-    material.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-    material.extend_from_slice(bytes);
-}
-
 fn request_header_values<'a>(
     request: &'a RequestHeader,
     name: &'a str,
@@ -10613,18 +10383,6 @@ fn request_header_value<'a>(request: &'a RequestHeader, name: &str) -> Option<&'
         .headers
         .get(name)
         .and_then(|value| value.to_str().ok())
-}
-
-#[cfg(feature = "cache")]
-fn response_header_values<'a>(
-    response: &'a ResponseHeader,
-    name: &'a str,
-) -> impl Iterator<Item = &'a str> + 'a {
-    response
-        .headers
-        .get_all(name)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
 }
 
 #[allow(dead_code)]
@@ -11121,17 +10879,15 @@ mod tests {
     #[cfg(feature = "cache")]
     use super::{
         CACHE_PASS_REASON, CacheClientRange, CacheSliceBounds, CacheStaleEvent,
-        CacheStatusOverride, MAX_VARY_FIELDS, VaryCachePolicy, apply_cache_status_ttl,
-        cache_min_uses_allows_store, cache_pass_record_cacheable, cache_pass_record_uncacheable,
-        cache_pass_should_bypass, cache_request_participated, cache_should_serve_stale,
-        cache_stale_status_allows, cache_status_header_value, cache_status_reason_header_value,
-        cache_vary_policy, ignore_origin_cache_headers, lookup_proxy_cache_only_object,
-        parse_bounded_single_range, parse_cache_client_ranges, range_cache_key,
-        range_response_cache_admission_rejection, read_cache_hit_body, remaining_fresh_ttl_secs,
-        required_slice_bounds, resolve_client_slice_ranges, response_age_secs,
-        response_cache_admission_rejection, response_vary_variance, selected_cache_range_request,
-        slice_cache_key, slice_request_within_policy, strip_cache_response_headers,
-        vary_cache_policy, vary_request_hash,
+        CacheStatusOverride, apply_cache_status_ttl, cache_min_uses_allows_store,
+        cache_pass_record_cacheable, cache_pass_record_uncacheable, cache_pass_should_bypass,
+        cache_request_participated, cache_should_serve_stale, cache_stale_status_allows,
+        cache_status_header_value, cache_status_reason_header_value, ignore_origin_cache_headers,
+        lookup_proxy_cache_only_object, parse_bounded_single_range, parse_cache_client_ranges,
+        range_cache_key, range_response_cache_admission_rejection, read_cache_hit_body,
+        remaining_fresh_ttl_secs, required_slice_bounds, resolve_client_slice_ranges,
+        response_age_secs, response_vary_variance, selected_cache_range_request, slice_cache_key,
+        slice_request_within_policy, strip_cache_response_headers,
     };
     #[cfg(feature = "cache")]
     use super::{CacheBulkPurgeRequest, CachePurgeRequest};
@@ -11200,7 +10956,9 @@ mod tests {
     };
     #[cfg(feature = "cache")]
     use crate::proxy_cache::{
-        request_cache_bypass, request_cache_bypass_reason, request_cache_revalidation_requested,
+        MAX_VARY_FIELDS, VaryCachePolicy, cache_vary_policy, request_cache_bypass,
+        request_cache_bypass_reason, request_cache_revalidation_requested,
+        response_cache_admission_rejection, vary_cache_policy, vary_request_hash,
     };
     #[cfg(feature = "traffic-mirror")]
     use crate::traffic_mirror::{

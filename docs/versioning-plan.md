@@ -1286,10 +1286,10 @@ Release shape:
     compression, auth subrequests, traffic mirroring, edge policy, route
     policy, and `php_fpm` slices for managed-process lifecycle, request-body
     spooling, FastCGI endpoint/pool transport, timeout/retry classification,
-    and CGI response parsing. The first `proxy_cache` slice covers request-side
-    cache identity, bypass, and revalidation helpers. Remaining domains:
-    high-level PHP request/session orchestration, proxy cache storage/admission
-    glue, and the remaining proxy core orchestration;
+    and CGI response parsing. The first `proxy_cache` slices cover request-side
+    cache identity, bypass, revalidation, response admission, and `Vary`
+    helpers. Remaining domains: high-level PHP request/session orchestration,
+    proxy cache storage/range glue, and the remaining proxy core orchestration;
   - keep `FluxProxy` and the Pingora `ProxyHttp` lifecycle as the orchestration
     layer while extracting domain logic behind small, testable APIs;
   - move tests with their domains where practical, and keep the existing
@@ -2965,10 +2965,10 @@ the exception while the cache server is being completed as a focused sequence:
   transport, retry/timeout classification, and response parsing live in
   `php_fpm`; the remaining PHP code in `proxy.rs` should stay limited to
   Pingora request/session orchestration until the proxy core itself is split.
-  The first `proxy_cache` slice owns request-side cache policy helpers; later
-  cache slices can move storage/admission/range helpers without changing config.
-  Preserve config compatibility and pass the existing 1.4.1 smoke/security
-  matrix before moving on.
+  The first `proxy_cache` slices own request-side cache policy, response
+  admission, and `Vary` helpers; later cache slices can move storage/range
+  helpers without changing config. Preserve config compatibility and pass the
+  existing 1.4.1 smoke/security matrix before moving on.
 - `v1.4.3`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local
