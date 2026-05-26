@@ -47,10 +47,10 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Static websites | ✅ | MIME detection, index files, `GET`/`HEAD`, `ETag`, conditional `304`, and single byte ranges. |
 | Vhosts | ✅ | Host-header routing, default-vhost fallback, wildcard hosts, and opt-in strict host routing. |
 | Route actions | ✅ | Static, proxy, redirect, and route-level policy blocks. |
-| Regex path routing | ✅ | `1.4.1-dev`; requires explicit global `server.regex_enabled = true`. |
-| Regex capture variables | ✅ | `1.4.1-dev`; bounded `{route.regex.1}` and `{route.regex.name}` variables for request headers and path-only rewrites. |
-| Regex path rewrite templates | ✅ | `1.4.1-dev`; `rewrite_template` maps regex routes to safe upstream paths without nginx-style rewrite loops or `if`. |
-| Method-based routing | ✅ | `1.4.1-dev`; optional route `methods = ["GET", "HEAD"]` filters. |
+| Regex path routing | ✅ | `1.4.1`; requires explicit global `server.regex_enabled = true`. |
+| Regex capture variables | ✅ | `1.4.1`; bounded `{route.regex.1}` and `{route.regex.name}` variables for request headers and path-only rewrites. |
+| Regex path rewrite templates | ✅ | `1.4.1`; `rewrite_template` maps regex routes to safe upstream paths without nginx-style rewrite loops or `if`. |
+| Method-based routing | ✅ | `1.4.1`; optional route `methods = ["GET", "HEAD"]` filters. |
 | HTTPS redirects | ✅ | Optional global HTTP-to-HTTPS redirects with safe Host validation. |
 | Secure headers | ✅ | Request/response header policy, `Server: fluxheim` by default, removable by config. |
 | PHP-FPM applications | ✅ | External php-fpm for existing pools. |
@@ -77,8 +77,8 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
 | Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
 | Load balancing | ✅ | Weighted round-robin, least connections, power-of-two, hash, consistent-hash, backup, drain, slow start, and retry budgets. |
-| DNS-refreshed upstream pools | ✅ | `1.4.1-dev`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
-| File-refreshed upstream pools | ✅ | `1.4.1-dev`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
+| DNS-refreshed upstream pools | ✅ | `1.4.1`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
+| File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
@@ -91,16 +91,16 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | PROXY protocol | ✅ | v1/v2 receive and upstream send. |
 | HTTP/2 origins | ✅ | Upstream HTTP version controls and bounded HTTP/2 settings. |
 | gRPC pass-through | ✅ | Route-scoped HTTP/2 gRPC policy; no transcoding. |
-| WebSocket / HTTP upgrade | ✅ | `1.4.1-dev`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
-| External auth subrequests | ✅ | `1.4.1-dev`; `[proxy.auth_request]` with bounded header/body forwarding. |
-| Traffic mirroring | ✅ | `1.4.1-dev`; `traffic-mirror` feature with safe bodyless shadow requests. |
+| WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
+| External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding. |
+| Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
 
 ### Operations And Packaging
 
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Admin API | ✅ | Bearer-token auth, loopback defaults, brute-force throttling, authenticated health by default, snapshots, rollback, cache operations. |
-| Read-only ops socket | ✅ | `1.4.1-dev`; Unix-domain local status/cache/snapshot/health endpoint with owner/group-only permissions. |
+| Read-only ops socket | ✅ | `1.4.1`; Unix-domain local status/cache/snapshot/health endpoint with owner/group-only permissions. |
 | Prometheus metrics | ✅ | Native metrics profile and bounded labels for edge/cache/LB/PHP events. |
 | OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
 | Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream/alias/retries, TLS identity, and compression fields. |
@@ -404,7 +404,7 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   checks, bounded metrics, upstream connection/socket tuning, mTLS/client cert
   policy, PROXY protocol v1/v2, upstream TLS controls, HTTP/2 origin controls,
   and gRPC pass-through policy.
-- `1.4.1` is planned for the remaining proxy-operations work: dynamic upstream
+- `1.4.1` completes the remaining proxy-operations work: dynamic upstream
   discovery, file-watched upstream lists, richer structured logs,
   regex/template rewrite policy, route method matching, explicit WebSocket
   upgrade proxying, bounded auth subrequests, safe bodyless traffic mirroring,

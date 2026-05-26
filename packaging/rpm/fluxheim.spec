@@ -7,8 +7,8 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.4.0
-Release:        0.dev%{?dist}
+Version:        1.4.1
+Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
 URL:            https://github.com/valkyoth/fluxheim
@@ -47,10 +47,11 @@ Requires(pre):   shadow-utils
 Requires:       ca-certificates
 
 %description
-Fluxheim is a modular Rust edge server built on Pingora. The 1.3 release starts
-the shared ingress/TLS feature split while keeping the packaged native build on
+Fluxheim is a modular Rust edge server built on Pingora. The 1.4 line provides
+the production proxy parity baseline while keeping the packaged native build on
 the full production feature set: proxy, static web serving, cache, load
-balancing, managed ACME, Prometheus metrics, and OpenTelemetry export support.
+balancing, managed ACME, Prometheus metrics, OpenTelemetry export support, and
+the 1.4 proxy-operations feature set.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -152,6 +153,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue May 26 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.1-1
+- Release 1.4.1 proxy operations: regex/method routing, regex capture rewrite
+  templates, WebSocket upgrades, auth subrequests, traffic mirroring,
+  DNS/file-refreshed upstream pools, structured access-log additions, and the
+  read-only ops socket.
+
 * Sat May 23 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.0-0.dev
 - Start the 1.4 production proxy parity development line.
 

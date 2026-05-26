@@ -1276,13 +1276,28 @@ Release shape:
     exposing mutating commands;
   - typed hook points for future Wasm/Lua-like policy without executing plugins
     in 1.4.
-- `1.4.2` - advanced policy and HAProxy-style operations:
+- `1.4.2` - proxy module split and maintenance architecture:
+  - stop line: no new operator-facing proxy feature surface unless required to
+    preserve behavior during extraction. Keep config compatibility, keep public
+    metrics/logs stable, and pass the existing `1.4.1` smoke and security
+    matrix before moving on;
+  - split the large HTTP proxy runtime into focused domains before adding more
+    proxy surface: `php_fpm`, `compression`, route matching/rewrite policy,
+    traffic mirroring, auth subrequests, proxy cache glue, access logging, and
+    proxy security helpers;
+  - keep `FluxProxy` and the Pingora `ProxyHttp` lifecycle as the orchestration
+    layer while extracting domain logic behind small, testable APIs;
+  - move tests with their domains where practical, and keep the existing
+    behavior tests as regression coverage for the extraction;
+  - preserve feature-gated builds so default/no-default/profile builds continue
+    proving that optional domains compile in and out cleanly;
+- `1.4.3` - advanced policy, Geo-Context, and HAProxy-style operations:
   - stop line: ship advanced HTTP policy and backend operations only. Do not
     add TCP stream listeners, TLS passthrough SNI routing, UDP proxying,
     HTTP/3, gRPC transcoding, xDS/Kubernetes/Consul control planes, global
     distributed rate-limit services, arbitrary Wasm/Lua execution, built-in
     GeoIP database downloading, remote GeoIP lookup fallbacks, or impossible
-    travel/anomaly engines in `1.4.2`;
+    travel/anomaly engines in `1.4.3`;
   - optional `geoip` Cargo feature as a bounded Geo-Context foundation, not a
     broad programmable geo engine. Use `maxminddb` for local MaxMind GeoIP2/ASN
     databases, load database files with the same safe path rules used for other
@@ -1307,7 +1322,7 @@ Release shape:
   - implementation order: define the typed geo context and privacy behavior
     before adding policy consumers; wire it into ACL/routing decisions before
     any load-balancer weighting; keep enterprise load-balancer operations in
-    `1.5` unless they are required to make the `1.4.2` ACL surface correct;
+    `1.5` unless they are required to make the `1.4.3` ACL surface correct;
   - advanced ACL composition with a small typed boolean expression AST:
     `and`, `or`, `not`, plus leaf conditions for source IP, client certificate
     fingerprint, method, path prefix, path regex, host, safe header values, and
@@ -1330,11 +1345,11 @@ Release shape:
     text content types only, input/output size caps, ETag stripping, correct
     interaction order with compression, and identity pass-through for bodies
     above the configured limit.
-- `1.4.3` - TCP stream proxy foundation:
+- `1.4.4` - TCP stream proxy foundation:
   - stop line: ship L4 TCP stream proxy basics only. Do not add UDP proxying,
     DNS-specific UDP load balancing, generic L7 policy on stream routes,
     HTTP cache/compression/auth/PHP behavior on stream routes, xDS/Kubernetes
-    service discovery, or Wasm/Lua stream filters in `1.4.3`;
+    service discovery, or Wasm/Lua stream filters in `1.4.4`;
   - compile-time feature separate from HTTP proxy if needed;
   - port/listener-based stream routing to one or more upstreams, reusing the
     load-balancer selection and health primitives where they are transport
@@ -1477,7 +1492,7 @@ Stable scope:
   - strict validation before replacing an active pool;
   - later xDS/Kubernetes/Consul support only after the local discovery model is
     stable.
-- TCP stream proxy foundation is tracked as `1.4.3`, not as part of the HTTP
+- TCP stream proxy foundation is tracked as `1.4.4`, not as part of the HTTP
   proxy runtime. It should reuse listener/TLS/load-balancer building blocks
   where possible but remain a separate stream feature with no HTTP semantics.
 - UDP proxying is deliberately deferred. Pingora does not provide UDP support,
