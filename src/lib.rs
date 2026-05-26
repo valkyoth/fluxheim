@@ -4,6 +4,8 @@
     deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
 )]
 
+#[cfg(feature = "proxy")]
+mod access_log;
 #[cfg(feature = "acme")]
 pub mod acme;
 pub mod acme_companion;

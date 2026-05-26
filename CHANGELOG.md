@@ -7,6 +7,17 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.4.2-dev - Unreleased
+
+### Changed
+
+- Start the proxy module split and maintenance architecture release. This
+  release is intentionally scoped to behavior-preserving extraction of the large
+  proxy runtime into focused domains before adding more large proxy features.
+- Extract structured access-log formatting, request-id generation, status-class
+  labeling, and response-body byte accounting from `proxy.rs` into a focused
+  `access_log` module.
+
 ## 1.4.1 - 2026-05-26
 
 ### Added
