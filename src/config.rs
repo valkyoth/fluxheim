@@ -8,16 +8,16 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 
-use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use toml::value::{Datetime, Offset};
 
+pub use crate::config_loader::ConfigLoadError;
 use crate::config_loader::{
     canonical_config_source, config_directory_files, read_regular_config_file_to_string,
     regular_visible_toml_file, toml_files,
 };
+pub use crate::config_types::{ByteSize, ByteSizeParseError};
 
 #[cfg(all(feature = "load-balancer", unix))]
 use std::os::unix::fs::OpenOptionsExt;
@@ -2541,117 +2541,6 @@ impl Default for ServerLimitsConfig {
         }
     }
 }
-
-#[derive(Debug, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ByteSize(u64);
-
-impl ByteSize {
-    pub const fn from_bytes(bytes: u64) -> Self {
-        Self(bytes)
-    }
-
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
-
-    pub fn as_usize(self) -> usize {
-        self.0.try_into().unwrap_or(usize::MAX)
-    }
-}
-
-impl Serialize for ByteSize {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u64(self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for ByteSize {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(ByteSizeVisitor)
-    }
-}
-
-struct ByteSizeVisitor;
-
-impl Visitor<'_> for ByteSizeVisitor {
-    type Value = ByteSize;
-
-    fn expecting(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("a byte count integer or string like \"64KiB\"")
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(ByteSize(value))
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        let value = u64::try_from(value).map_err(E::custom)?;
-        Ok(ByteSize(value))
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        ByteSize::from_str(value).map_err(E::custom)
-    }
-}
-
-impl FromStr for ByteSize {
-    type Err = ByteSizeParseError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let input = input.trim();
-        if input.is_empty() {
-            return Err(ByteSizeParseError);
-        }
-
-        let split_at = input
-            .find(|character: char| !character.is_ascii_digit())
-            .unwrap_or(input.len());
-        let (digits, unit) = input.split_at(split_at);
-        if digits.is_empty() {
-            return Err(ByteSizeParseError);
-        }
-
-        let value = digits.parse::<u64>().map_err(|_| ByteSizeParseError)?;
-        let multiplier = match unit.trim().to_ascii_lowercase().as_str() {
-            "" | "b" => 1,
-            "k" | "kb" | "kib" => 1024,
-            "m" | "mb" | "mib" => 1024 * 1024,
-            "g" | "gb" | "gib" => 1024 * 1024 * 1024,
-            _ => return Err(ByteSizeParseError),
-        };
-
-        value
-            .checked_mul(multiplier)
-            .map(ByteSize)
-            .ok_or(ByteSizeParseError)
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct ByteSizeParseError;
-
-impl Display for ByteSizeParseError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("invalid byte size")
-    }
-}
-
-impl Error for ByteSizeParseError {}
 
 impl ServerLimitsConfig {
     fn validate(&self) -> Result<(), ConfigError> {
@@ -9469,107 +9358,6 @@ impl DirectoryListingConfig {
     fn validate(&self) -> Result<(), ConfigError> {
         Ok(())
     }
-}
-
-#[derive(Debug)]
-pub enum ConfigLoadError {
-    InvalidPath {
-        path: PathBuf,
-    },
-    Read(std::io::Error),
-    Parse {
-        path: PathBuf,
-        source: toml::de::Error,
-    },
-    Validate(ConfigError),
-}
-
-impl Display for ConfigLoadError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidPath { path } => {
-                write!(
-                    formatter,
-                    "config path must be a readable .toml file or directory, got {}",
-                    path.display()
-                )
-            }
-            Self::Read(error) => write!(formatter, "failed to read config: {error}"),
-            Self::Parse { path, source } => {
-                write!(
-                    formatter,
-                    "failed to parse config {}: {source}",
-                    path.display()
-                )?;
-                if let Some(hint) = config_parse_hint(source) {
-                    write!(formatter, "\n{hint}")?;
-                }
-                Ok(())
-            }
-            Self::Validate(error) => write!(formatter, "invalid config: {error}"),
-        }
-    }
-}
-
-impl Error for ConfigLoadError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::InvalidPath { .. } => None,
-            Self::Read(error) => Some(error),
-            Self::Parse { source, .. } => Some(source),
-            Self::Validate(error) => Some(error),
-        }
-    }
-}
-
-fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
-    let message = error.to_string();
-    if message.contains("vhosts.proxy.error_pages.web") {
-        return Some(
-            "hint: proxy error pages are arrays; define [[vhosts.proxy.error_pages]] before [vhosts.proxy.error_pages.web]",
-        );
-    }
-    if message.contains("vhosts.routes.proxy.error_pages.web") {
-        return Some(
-            "hint: route proxy error pages are arrays; define [[vhosts.routes.proxy.error_pages]] before [vhosts.routes.proxy.error_pages.web]",
-        );
-    }
-    if message.contains("unknown field `vhost`") {
-        return Some("hint: virtual hosts are configured with [[vhosts]], not [[vhost]]");
-    }
-    if message.contains("unknown field `action`") && message.contains("path_prefix") {
-        return Some(
-            "hint: routes select their action by defining one nested table: [vhosts.routes.proxy], [vhosts.routes.web], or [vhosts.routes.redirect]; do not set action = \"proxy\"",
-        );
-    }
-    if message.contains("vhosts.routes.")
-        && message.contains("invalid type: map, expected a sequence")
-    {
-        return Some(
-            "hint: start each route with [[vhosts.routes]] before nested route tables such as [vhosts.routes.proxy] or [vhosts.routes.web]",
-        );
-    }
-    if message.contains("invalid type: map, expected a sequence") {
-        return Some(
-            "hint: start each virtual host with [[vhosts]] before nested tables such as [vhosts.proxy]",
-        );
-    }
-    if message.contains("[[vhosts.routes.") {
-        return Some(
-            "hint: route action/config tables use single-bracket tables such as [vhosts.routes.proxy], not arrays such as [[vhosts.routes.proxy]]",
-        );
-    }
-    if message.contains("[[vhosts.proxy]]") {
-        return Some(
-            "hint: vhost proxy config uses [vhosts.proxy], not [[vhosts.proxy]]; proxy is a nested table inside one [[vhosts]] block",
-        );
-    }
-    if message.contains("unknown field `certificates`") {
-        return Some(
-            "hint: vhost TLS uses [vhosts.tls.certificate] for one certificate pair; use global [[tls.certificates]] for additional listener certificates",
-        );
-    }
-    None
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

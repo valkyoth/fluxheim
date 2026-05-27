@@ -20,6 +20,9 @@ behavior when the change improves security or project direction.
   and `1.4.6` is TCP stream proxying.
 - Extract path-safe TOML source discovery and bounded config-file loading into
   `config_loader`, preserving the existing `crate::config::*` public API.
+- Move config load errors and the shared `ByteSize` parser/serializer into
+  focused config support modules while keeping their existing
+  `crate::config::*` re-export paths stable.
 
 ## 1.4.2 - 2026-05-27
 

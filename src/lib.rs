@@ -28,6 +28,7 @@ mod compression;
 pub mod config;
 mod config_loader;
 pub mod config_tester;
+mod config_types;
 #[cfg(feature = "proxy")]
 mod edge_policy;
 mod fs_trust;

@@ -2,7 +2,10 @@ use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::config::ConfigLoadError;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+
+use crate::config::ConfigError;
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -39,6 +42,57 @@ compile_error!(
 
 pub(crate) const MAX_CONFIG_DIRECTORY_FILES: usize = 256;
 pub(crate) const MAX_CONFIG_FILE_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug)]
+pub enum ConfigLoadError {
+    InvalidPath {
+        path: PathBuf,
+    },
+    Read(std::io::Error),
+    Parse {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
+    Validate(ConfigError),
+}
+
+impl Display for ConfigLoadError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPath { path } => {
+                write!(
+                    formatter,
+                    "config path must be a readable .toml file or directory, got {}",
+                    path.display()
+                )
+            }
+            Self::Read(error) => write!(formatter, "failed to read config: {error}"),
+            Self::Parse { path, source } => {
+                write!(
+                    formatter,
+                    "failed to parse config {}: {source}",
+                    path.display()
+                )?;
+                if let Some(hint) = config_parse_hint(source) {
+                    write!(formatter, "\n{hint}")?;
+                }
+                Ok(())
+            }
+            Self::Validate(error) => write!(formatter, "invalid config: {error}"),
+        }
+    }
+}
+
+impl Error for ConfigLoadError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::InvalidPath { .. } => None,
+            Self::Read(error) => Some(error),
+            Self::Parse { source, .. } => Some(source),
+            Self::Validate(error) => Some(error),
+        }
+    }
+}
 
 pub(crate) fn canonical_config_source(path: &Path) -> Result<PathBuf, ConfigLoadError> {
     if existing_path_contains_symlink(path).map_err(ConfigLoadError::Read)? {
@@ -199,4 +253,54 @@ fn is_visible_toml_file(path: &Path) -> bool {
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| extension.eq_ignore_ascii_case("toml"))
+}
+
+fn config_parse_hint(error: &toml::de::Error) -> Option<&'static str> {
+    let message = error.to_string();
+    if message.contains("vhosts.proxy.error_pages.web") {
+        return Some(
+            "hint: proxy error pages are arrays; define [[vhosts.proxy.error_pages]] before [vhosts.proxy.error_pages.web]",
+        );
+    }
+    if message.contains("vhosts.routes.proxy.error_pages.web") {
+        return Some(
+            "hint: route proxy error pages are arrays; define [[vhosts.routes.proxy.error_pages]] before [vhosts.routes.proxy.error_pages.web]",
+        );
+    }
+    if message.contains("unknown field `vhost`") {
+        return Some("hint: virtual hosts are configured with [[vhosts]], not [[vhost]]");
+    }
+    if message.contains("unknown field `action`") && message.contains("path_prefix") {
+        return Some(
+            "hint: routes select their action by defining one nested table: [vhosts.routes.proxy], [vhosts.routes.web], or [vhosts.routes.redirect]; do not set action = \"proxy\"",
+        );
+    }
+    if message.contains("vhosts.routes.")
+        && message.contains("invalid type: map, expected a sequence")
+    {
+        return Some(
+            "hint: start each route with [[vhosts.routes]] before nested route tables such as [vhosts.routes.proxy] or [vhosts.routes.web]",
+        );
+    }
+    if message.contains("invalid type: map, expected a sequence") {
+        return Some(
+            "hint: start each virtual host with [[vhosts]] before nested tables such as [vhosts.proxy]",
+        );
+    }
+    if message.contains("[[vhosts.routes.") {
+        return Some(
+            "hint: route action/config tables use single-bracket tables such as [vhosts.routes.proxy], not arrays such as [[vhosts.routes.proxy]]",
+        );
+    }
+    if message.contains("[[vhosts.proxy]]") {
+        return Some(
+            "hint: vhost proxy config uses [vhosts.proxy], not [[vhosts.proxy]]; proxy is a nested table inside one [[vhosts]] block",
+        );
+    }
+    if message.contains("unknown field `certificates`") {
+        return Some(
+            "hint: vhost TLS uses [vhosts.tls.certificate] for one certificate pair; use global [[tls.certificates]] for additional listener certificates",
+        );
+    }
+    None
 }
