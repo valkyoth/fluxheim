@@ -2007,15 +2007,7 @@ fn write_new_file(
     #[cfg(unix)]
     if let Some(directory_fd) = directory_fd {
         let name = certificate_file_name_in_directory(directory, path)?;
-        let raw_mode: rustix::fs::RawMode =
-            mode.try_into()
-                .map_err(|_| AcmeCertificateInstallError::Io {
-                    path: path.to_path_buf(),
-                    error: io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "certificate file mode is unsupported on this platform",
-                    ),
-                })?;
+        let raw_mode = certificate_file_raw_mode(path, mode)?;
         let fd = rustix::fs::openat(
             directory_fd,
             name,
@@ -2067,6 +2059,29 @@ fn write_new_file(
             path: path.to_path_buf(),
             error,
         })
+}
+
+#[cfg(all(unix, target_os = "macos"))]
+fn certificate_file_raw_mode(
+    path: &Path,
+    mode: u32,
+) -> Result<rustix::fs::RawMode, AcmeCertificateInstallError> {
+    mode.try_into()
+        .map_err(|_| AcmeCertificateInstallError::Io {
+            path: path.to_path_buf(),
+            error: io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "certificate file mode is unsupported on this platform",
+            ),
+        })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn certificate_file_raw_mode(
+    _path: &Path,
+    mode: u32,
+) -> Result<rustix::fs::RawMode, AcmeCertificateInstallError> {
+    Ok(mode)
 }
 
 #[cfg(unix)]
