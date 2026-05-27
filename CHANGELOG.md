@@ -74,6 +74,8 @@ behavior when the change improves security or project direction.
   and curve policy, and static certificate path validation into `config_tls`.
 - Move header policy config structs, overlay merge logic, HSTS defaults, and
   response rewrite policy types into `config_header`.
+- Move access policy, rate limit, and concurrency limit config into
+  `config_access`.
 
 ## 1.4.2 - 2026-05-27
 
