@@ -3,10 +3,11 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use pingora::http::RequestHeader;
+use zeroize::Zeroizing;
 
 #[derive(Debug)]
 pub(crate) struct AuthRequestInput {
-    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) headers: Vec<(String, Zeroizing<String>)>,
 }
 
 #[derive(Debug)]
@@ -22,7 +23,7 @@ pub(crate) fn auth_request_input(
     let mut headers = Vec::new();
     for name in &auth.forward_headers {
         if let Some(value) = request_header_values_joined(request, name) {
-            headers.push((name.clone(), value));
+            headers.push((name.clone(), Zeroizing::new(value)));
         }
     }
     AuthRequestInput { headers }

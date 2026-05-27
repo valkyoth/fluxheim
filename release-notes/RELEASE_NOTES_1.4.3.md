@@ -19,6 +19,15 @@ focused modules before the next `1.4.x` policy features.
 - Existing `crate::config::*` type paths are preserved for runtime modules and
   downstream internal callers.
 
+## Security Hardening
+
+- Path forwarding safety now rejects traversal that only appears after a third
+  percent-decode pass, while still bounding decode work.
+- Auth-request copied forwarded header values now use zeroizing storage after
+  the subrequest completes.
+- A private admin path helper was renamed so maintainers do not confuse the
+  empty-path check with full traversal/symlink path validation.
+
 ## Compatibility Notes
 
 - No configuration migration is required from 1.4.2.

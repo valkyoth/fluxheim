@@ -12204,8 +12204,13 @@ mod tests {
             ..AuthRequestConfig::default()
         };
 
+        let headers = auth_request_input(&request, &auth).headers;
+        let headers = headers
+            .iter()
+            .map(|(name, value)| (name.clone(), value.as_str().to_owned()))
+            .collect::<Vec<_>>();
         assert_eq!(
-            auth_request_input(&request, &auth).headers,
+            headers,
             [
                 ("authorization".to_owned(), "Bearer abc".to_owned()),
                 ("cookie".to_owned(), "a=1".to_owned())

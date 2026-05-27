@@ -11,6 +11,9 @@ behavior when the change improves security or project direction.
 
 ### Changed
 
+- Harden path forwarding safety against triple-encoded traversal segments,
+  zeroize copied auth-request forwarded header values, and rename the private
+  admin empty-path validator to avoid confusion with full path-safety checks.
 - Start the config module split and maintenance architecture release. This
   release is intentionally scoped to behavior-preserving extraction of the
   large `config.rs` surface into focused loading, validation, and domain slices

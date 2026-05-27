@@ -84,8 +84,8 @@ impl AdminConfig {
         })?;
 
         validate_optional_env("admin.token_env", self.token_env.as_deref())?;
-        validate_optional_path("admin.token_file", self.token_file.as_deref())?;
-        validate_optional_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
+        reject_empty_admin_path("admin.token_file", self.token_file.as_deref())?;
+        reject_empty_admin_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
         validate_path("admin.token_file", self.token_file.as_deref())?;
         validate_path("admin.snapshot_store", self.snapshot_store.as_deref())?;
         validate_non_world_writable_parent("admin.token_file", self.token_file.as_deref())?;
@@ -512,7 +512,7 @@ fn validate_optional_env(field: &'static str, env: Option<&str>) -> Result<(), C
     Ok(())
 }
 
-fn validate_optional_path(field: &'static str, path: Option<&Path>) -> Result<(), ConfigError> {
+fn reject_empty_admin_path(field: &'static str, path: Option<&Path>) -> Result<(), ConfigError> {
     if path.is_some_and(|path| path.as_os_str().is_empty()) {
         return Err(ConfigError::EmptyAdminPath { field });
     }
