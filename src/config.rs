@@ -2,10 +2,6 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-#[cfg(feature = "load-balancer")]
-use std::fs::OpenOptions;
-#[cfg(feature = "load-balancer")]
-use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
@@ -13,51 +9,13 @@ use serde::{Deserialize, Serialize};
 use toml::value::{Datetime, Offset};
 
 pub use crate::config_loader::ConfigLoadError;
+#[cfg(feature = "load-balancer")]
+pub(crate) use crate::config_loader::read_proxy_upstreams_file;
 use crate::config_loader::{
     canonical_config_source, config_directory_files, read_regular_config_file_to_string,
     regular_visible_toml_file, toml_files,
 };
 pub use crate::config_types::{ByteSize, ByteSizeParseError};
-
-#[cfg(all(feature = "load-balancer", unix))]
-use std::os::unix::fs::OpenOptionsExt;
-
-#[cfg(all(
-    feature = "load-balancer",
-    any(target_os = "linux", target_os = "android")
-))]
-const O_NOFOLLOW: i32 = 0o400000;
-
-#[cfg(all(
-    feature = "load-balancer",
-    any(
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    )
-))]
-const O_NOFOLLOW: i32 = 0x0100;
-
-#[cfg(all(
-    feature = "load-balancer",
-    unix,
-    not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))
-))]
-compile_error!(
-    "O_NOFOLLOW is unknown on this Unix platform; audit symlink-safe file opening before building Fluxheim"
-);
 
 #[cfg(test)]
 use crate::config_loader::{MAX_CONFIG_DIRECTORY_FILES, MAX_CONFIG_FILE_BYTES};
@@ -3700,9 +3658,7 @@ pub enum UpstreamHttpVersion {
     Http1AndHttp2,
 }
 
-const MAX_PROXY_UPSTREAMS: usize = 64;
-#[cfg(feature = "load-balancer")]
-const MAX_PROXY_UPSTREAMS_FILE_BYTES: u64 = 64 * 1024;
+pub(crate) const MAX_PROXY_UPSTREAMS: usize = 64;
 const MIN_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 1;
 const MAX_PROXY_UPSTREAMS_FILE_REFRESH_SECS: u64 = 300;
 #[cfg(feature = "load-balancer")]
@@ -11315,89 +11271,7 @@ fn default_response_unset_headers() -> Vec<String> {
     vec!["x-powered-by".to_owned()]
 }
 
-#[cfg(feature = "load-balancer")]
-pub(crate) fn read_proxy_upstreams_file(path: &Path) -> std::io::Result<Vec<String>> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "proxy upstreams file must be a regular file",
-        ));
-    }
-
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    options.custom_flags(O_NOFOLLOW);
-
-    let file = options.open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "proxy upstreams file must be a regular file",
-        ));
-    }
-    if metadata.len() > MAX_PROXY_UPSTREAMS_FILE_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "proxy upstreams file is too large",
-        ));
-    }
-
-    let mut contents = String::new();
-    let mut limited = file.take(MAX_PROXY_UPSTREAMS_FILE_BYTES.saturating_add(1));
-    limited.read_to_string(&mut contents)?;
-    if contents.len() as u64 > MAX_PROXY_UPSTREAMS_FILE_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "proxy upstreams file changed while reading and became too large",
-        ));
-    }
-
-    parse_proxy_upstreams_file_contents(&contents)
-}
-
-#[cfg(feature = "load-balancer")]
-fn parse_proxy_upstreams_file_contents(contents: &str) -> std::io::Result<Vec<String>> {
-    let mut upstreams = Vec::new();
-    let mut seen = HashSet::new();
-    for (line_index, line) in contents.lines().enumerate() {
-        let value = line.trim();
-        if value.is_empty() || value.starts_with('#') {
-            continue;
-        }
-        if !valid_authority(value) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "proxy upstreams file line {} is not a host:port or ip:port authority",
-                    line_index + 1
-                ),
-            ));
-        }
-        if !seen.insert(value.to_ascii_lowercase()) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "proxy upstreams file line {} repeats an upstream",
-                    line_index + 1
-                ),
-            ));
-        }
-        upstreams.push(value.to_owned());
-        if upstreams.len() > MAX_PROXY_UPSTREAMS {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "proxy upstreams file contains too many upstreams",
-            ));
-        }
-    }
-
-    Ok(upstreams)
-}
-
-fn valid_authority(authority: &str) -> bool {
+pub(crate) fn valid_authority(authority: &str) -> bool {
     authority.parse::<SocketAddr>().is_ok() || split_host_port(authority).is_some()
 }
 

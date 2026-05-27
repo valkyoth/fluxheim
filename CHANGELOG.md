@@ -23,6 +23,8 @@ behavior when the change improves security or project direction.
 - Move config load errors and the shared `ByteSize` parser/serializer into
   focused config support modules while keeping their existing
   `crate::config::*` re-export paths stable.
+- Move file-refreshed proxy upstream pool loading into `config_loader`, keeping
+  the existing `crate::config::read_proxy_upstreams_file` internal path stable.
 
 ## 1.4.2 - 2026-05-27
 
