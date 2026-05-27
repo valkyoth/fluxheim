@@ -11,9 +11,9 @@ use toml::value::{Datetime, Offset};
 use crate::config_access::{validate_access_rule_list, validate_client_cert_sha256_list};
 use crate::config_header::{
     combined_header_set, combined_header_unset, merge_header_mutations, valid_http_header_name,
-    valid_route_regex_capture_variable, validate_cookie_domain_rewrite_rules,
-    validate_cookie_path_rewrite_rules, validate_header_add_aliases, validate_header_mutations,
-    validate_header_name, validate_no_tls_header_append, validate_optional_header_value,
+    validate_cookie_domain_rewrite_rules, validate_cookie_path_rewrite_rules,
+    validate_header_add_aliases, validate_header_mutations, validate_header_name,
+    validate_no_tls_header_append, validate_optional_header_value,
     validate_response_header_rewrite_rules,
 };
 #[cfg(test)]
@@ -41,6 +41,10 @@ use crate::config_path::{
     validate_non_world_writable_parent, validate_optional_process_path, validate_path,
     validate_required_process_path,
 };
+use crate::config_route::{
+    valid_redirect_target_template, validate_route_methods, validate_route_path,
+    validate_route_regex, validate_route_rewrite_prefix_path, validate_route_rewrite_template_path,
+};
 pub use crate::config_types::{ByteSize, ByteSizeParseError};
 
 #[cfg(test)]
@@ -60,8 +64,6 @@ const MAX_TLS_CERTIFICATES: usize = 1024;
 const MAX_ACME_ISSUERS: usize = 128;
 const MAX_VHOST_ACME_DOMAINS: usize = 64;
 const MAX_WEB_INDEX_FILES: usize = 32;
-const MAX_ROUTE_METHODS: usize = 16;
-const MAX_ROUTE_REGEX_BYTES: usize = 4096;
 pub(crate) const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
 pub(crate) const MAX_ROUTE_REGEX_CAPTURE_NAME_BYTES: usize = 64;
 pub(crate) const MAX_ROUTE_REGEX_PROGRAM_BYTES: usize = 1024 * 1024;
@@ -10989,7 +10991,7 @@ fn default_response_unset_headers() -> Vec<String> {
     vec!["x-powered-by".to_owned()]
 }
 
-fn valid_http_token(value: &str) -> bool {
+pub(crate) fn valid_http_token(value: &str) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| {
             matches!(
@@ -11062,181 +11064,6 @@ fn validate_required_timeout_secs(field: &'static str, value: u64) -> Result<(),
         return Err(ConfigError::InvalidProxyTimeout { field });
     }
     Ok(())
-}
-
-fn validate_route_path(
-    _field: &'static str,
-    value: &str,
-    _prefix: bool,
-) -> Result<(), ConfigError> {
-    if !value.starts_with('/')
-        || value.contains('\0')
-        || value.contains('\\')
-        || value.contains('?')
-        || value.contains('#')
-        || value.chars().any(char::is_control)
-        || value.split('/').any(|segment| segment == "..")
-    {
-        return Err(ConfigError::InvalidRouteMatcher {
-            vhost: String::new(),
-            route: String::new(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_route_rewrite_prefix_path(value: &str) -> Result<(), ConfigError> {
-    validate_route_path("vhosts.routes.rewrite_prefix", value, true)?;
-    if value.contains('%') || value.chars().any(char::is_whitespace) {
-        return Err(ConfigError::InvalidRouteMatcher {
-            vhost: String::new(),
-            route: String::new(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_route_rewrite_template_path(value: &str) -> Result<(), ConfigError> {
-    if !value.starts_with('/')
-        || value.contains('\0')
-        || value.contains('\\')
-        || value.contains('?')
-        || value.contains('#')
-        || value.contains('%')
-        || value
-            .chars()
-            .any(|character| character.is_control() || character.is_whitespace())
-    {
-        return Err(ConfigError::InvalidRouteMatcher {
-            vhost: String::new(),
-            route: String::new(),
-        });
-    }
-
-    let mut rest = value;
-    while let Some(open) = rest.find('{') {
-        let after_open = &rest[open + 1..];
-        let Some(close) = after_open.find('}') else {
-            return Err(ConfigError::InvalidRouteMatcher {
-                vhost: String::new(),
-                route: String::new(),
-            });
-        };
-        let variable = &after_open[..close];
-        if !variable
-            .strip_prefix("route.regex.")
-            .is_some_and(valid_route_regex_capture_variable)
-        {
-            return Err(ConfigError::InvalidRouteMatcher {
-                vhost: String::new(),
-                route: String::new(),
-            });
-        }
-        rest = &after_open[close + 1..];
-    }
-
-    if rest.contains('}') {
-        return Err(ConfigError::InvalidRouteMatcher {
-            vhost: String::new(),
-            route: String::new(),
-        });
-    }
-
-    Ok(())
-}
-
-fn validate_route_regex(value: &str) -> Result<(), ConfigError> {
-    if value.is_empty()
-        || value.len() > MAX_ROUTE_REGEX_BYTES
-        || value.contains('\0')
-        || value.chars().any(char::is_control)
-    {
-        return Err(ConfigError::InvalidRouteRegex {
-            vhost: String::new(),
-            route: String::new(),
-        });
-    }
-    regex::RegexBuilder::new(value)
-        .size_limit(MAX_ROUTE_REGEX_PROGRAM_BYTES)
-        .build()
-        .map_err(|_| ConfigError::InvalidRouteRegex {
-            vhost: String::new(),
-            route: String::new(),
-        })?;
-    Ok(())
-}
-
-fn validate_route_methods(vhost: &str, route: &str, methods: &[String]) -> Result<(), ConfigError> {
-    if methods.len() > MAX_ROUTE_METHODS {
-        return Err(ConfigError::InvalidRouteMethods {
-            vhost: vhost.to_owned(),
-            route: route.to_owned(),
-            reason: "at most 16 methods are allowed",
-        });
-    }
-
-    let mut seen = HashSet::new();
-    for method in methods {
-        if method.is_empty()
-            || method.len() > 32
-            || !valid_http_token(method)
-            || method.chars().any(char::is_lowercase)
-        {
-            return Err(ConfigError::InvalidRouteMethods {
-                vhost: vhost.to_owned(),
-                route: route.to_owned(),
-                reason: "methods must be uppercase HTTP method tokens",
-            });
-        }
-        if !seen.insert(method) {
-            return Err(ConfigError::InvalidRouteMethods {
-                vhost: vhost.to_owned(),
-                route: route.to_owned(),
-                reason: "contains duplicate methods",
-            });
-        }
-    }
-    Ok(())
-}
-
-fn valid_redirect_target_template(value: &str) -> bool {
-    let value = value.trim();
-    if !(value.starts_with("https://") || value.starts_with("http://"))
-        || value
-            .chars()
-            .any(|character| character.is_control() || character.is_whitespace())
-    {
-        return false;
-    }
-
-    let expanded = value
-        .replace("{uri}", "/")
-        .replace("{path}", "/")
-        .replace("{query}", "");
-    if expanded.contains('{') || expanded.contains('}') {
-        return false;
-    }
-    if expanded.contains("\\") {
-        return false;
-    }
-
-    let Some(rest) = expanded
-        .strip_prefix("https://")
-        .or_else(|| expanded.strip_prefix("http://"))
-    else {
-        return false;
-    };
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default()
-        .trim_matches(['[', ']']);
-    !authority.is_empty()
-        && !authority.contains('@')
-        && !authority.contains('\\')
-        && !authority.chars().any(|character| {
-            character.is_control() || character.is_whitespace() || matches!(character, '/' | '#')
-        })
 }
 
 fn invalid_email(value: &str) -> bool {

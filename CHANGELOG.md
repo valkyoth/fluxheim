@@ -37,6 +37,8 @@ behavior when the change improves security or project direction.
   response/cookie rewrite validation helpers into `config_header`.
 - Extract access allow/deny and client-certificate SHA-256 list validation into
   `config_access`.
+- Extract route path, regex matcher, method, rewrite-template, and redirect
+  target validation helpers into `config_route`.
 
 ## 1.4.2 - 2026-05-27
 
