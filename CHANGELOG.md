@@ -58,6 +58,8 @@ behavior when the change improves security or project direction.
   `crate::config::*` type paths.
 - Move logging and access-log config into `config_logging`, including file-log
   path validation and request-id header validation.
+- Move metrics and tracing config into `config_observability`, keeping OTLP
+  endpoint validation routed through the shared HTTP config helpers.
 
 ## 1.4.2 - 2026-05-27
 
