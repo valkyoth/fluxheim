@@ -30,6 +30,7 @@ mod config_access;
 mod config_compression;
 mod config_header;
 mod config_http;
+mod config_load_balance;
 mod config_loader;
 mod config_net;
 mod config_path;

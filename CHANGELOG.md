@@ -53,6 +53,9 @@ behavior when the change improves security or project direction.
 - Move `CompressionConfig`, compression defaults, and compression policy
   validation into `config_compression` while re-exporting
   `crate::config::CompressionConfig`.
+- Move load-balancer selection, health-check, passive-health, slow-start, and
+  retry policy config into `config_load_balance` while preserving the existing
+  `crate::config::*` type paths.
 
 ## 1.4.2 - 2026-05-27
 
