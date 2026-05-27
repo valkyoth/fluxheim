@@ -82,7 +82,9 @@ fn hex_value(byte: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_forward_path, safe_forward_path_and_query};
+    use super::safe_forward_path;
+    #[cfg(feature = "cache")]
+    use super::safe_forward_path_and_query;
 
     #[test]
     fn rejects_multi_encoded_parent_segments() {
@@ -97,6 +99,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "cache")]
     fn accepts_safe_percent_encoded_path_and_query() {
         assert!(safe_forward_path_and_query("/assets/%66ile.css?v=%252e"));
     }
