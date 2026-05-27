@@ -113,7 +113,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| Proxy module split | 🟡 | `1.4.2` in progress; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, and PHP-FPM process/spool handling are split out first, with a new rule that future feature domains start in focused modules. |
+| Proxy module split | 🟡 | `1.4.2` in progress; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, and PHP-FPM process/spool handling are split out first, with a new rule that future feature domains start in focused modules. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.3` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
 | TCP stream proxying | ❌ | Planned for `1.4.4`. |
 | Apple Silicon macOS dev builds | ❌ | Planned for `1.4.5` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
@@ -420,8 +420,9 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   request/session integration layer. The first `proxy_cache` slice holds
   request-side cache policy, response admission, `Vary` helpers, and bounded
   range/slice request, key, admission, freshness, status-header, and stale
-  policy; remaining target extractions are stateful cache runtime/storage,
-  slice object assembly, and the proxy core.
+  policy; cache admin/API request and result DTOs live in `cache_api`;
+  remaining target extractions are stateful cache runtime/storage, slice object
+  assembly, and the proxy core.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

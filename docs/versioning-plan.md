@@ -1292,9 +1292,11 @@ Release shape:
     revalidation, response admission, `Vary` helpers, bounded range-cache
     request/key/admission policy, and fixed-slice range planning. Freshness,
     status-header, stale-serving, and response-header mutation policy also live
-    in `proxy_cache`. Remaining domains: high-level PHP request/session
-    orchestration, stateful proxy cache runtime/storage, slice object assembly,
-    and the remaining proxy core orchestration;
+    in `proxy_cache`. Cache admin/API request and result DTOs live in
+    `cache_api` so admin response shapes are no longer stranded in `proxy.rs`.
+    Remaining domains: high-level PHP request/session orchestration, stateful
+    proxy cache runtime/storage, slice object assembly, and the remaining proxy
+    core orchestration;
   - keep `FluxProxy` and the Pingora `ProxyHttp` lifecycle as the orchestration
     layer while extracting domain logic behind small, testable APIs;
   - move tests with their domains where practical, and keep the existing
@@ -3030,10 +3032,10 @@ the exception while the cache server is being completed as a focused sequence:
   The first `proxy_cache` slices own request-side cache policy, response
   admission, `Vary` helpers, bounded range-cache request/key/admission policy,
   fixed-slice range planning, freshness, status-header, stale-serving, and
-  response-header mutation policy; later cache slices can move stateful
-  runtime/storage and slice object helpers without changing config. Preserve
-  config compatibility and pass the existing 1.4.1 smoke/security matrix before
-  moving on.
+  response-header mutation policy. Cache admin/API request and result DTOs live
+  in `cache_api`; later cache slices can move stateful runtime/storage and
+  slice object helpers without changing config. Preserve config compatibility
+  and pass the existing 1.4.1 smoke/security matrix before moving on.
 - `v1.4.3`: optional bounded Geo-Context foundation, advanced ACL composition,
   local stick-table-style tracking, runtime backend management, map-style
   variables, and bounded response body substitution. GeoIP scope stops at local

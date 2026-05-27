@@ -241,8 +241,9 @@ Pingora request/session integration layer. The first `proxy_cache` slices hold
 request-side cache identity, bypass, revalidation, response admission, `Vary`
 helpers, and bounded range-cache request/key/admission policy plus fixed-slice
 range planning, freshness, status-header, stale-serving, and response-header
-mutation policy; cache runtime/storage, slice object assembly, and the
-remaining proxy core orchestration stay in scope for this maintenance line.
+mutation policy. Cache admin/API request and result DTOs live in `cache_api`;
+cache runtime/storage, slice object assembly, and the remaining proxy core
+orchestration stay in scope for this maintenance line.
 
 Going forward, large optional features should not be added directly to the
 proxy/runtime files. A feature with its own config, validation rules, metrics,

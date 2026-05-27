@@ -15,6 +15,8 @@ pub mod admin;
 mod auth_request;
 #[cfg(feature = "cache")]
 pub mod cache;
+#[cfg(all(feature = "proxy", feature = "cache"))]
+mod cache_api;
 pub mod cache_headers;
 pub mod cli;
 #[cfg(any(
