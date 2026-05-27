@@ -80,6 +80,8 @@ behavior when the change improves security or project direction.
   config modules.
 - Move PHP and managed PHP-FPM config types, defaults, and path validation into
   `config_php`.
+- Move route, gRPC route, route redirect, and vhost redirect config into
+  `config_route`.
 
 ## 1.4.2 - 2026-05-27
 

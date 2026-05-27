@@ -80,9 +80,9 @@ pub use crate::config_php::{
     PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager, PhpPathInfoMode, PhpPreset,
     PhpRuntime, PhpStderrLogLevel, PhpTryFilesMode,
 };
-use crate::config_route::{
-    valid_redirect_target_template, validate_route_methods, validate_route_path,
-    validate_route_regex, validate_route_rewrite_prefix_path, validate_route_rewrite_template_path,
+use crate::config_route::validate_route_path;
+pub use crate::config_route::{
+    GrpcRouteConfig, RouteConfig, RouteRedirectConfig, VhostRedirectConfig,
 };
 use crate::config_server::ServerConfigFragment;
 pub use crate::config_server::{
@@ -114,7 +114,7 @@ const MAX_VHOSTS: usize = 1024;
 const MAX_VHOST_NAME_BYTES: usize = 128;
 const MAX_VHOST_HOSTS: usize = 64;
 const MAX_VHOST_ROUTES: usize = 256;
-const MAX_ROUTE_NAME_BYTES: usize = 128;
+pub(crate) const MAX_ROUTE_NAME_BYTES: usize = 128;
 pub(crate) const MAX_ROUTE_REGEX_CAPTURE_VALUES: usize = 16;
 pub(crate) const MAX_ROUTE_REGEX_CAPTURE_NAME_BYTES: usize = 64;
 pub(crate) const MAX_ROUTE_REGEX_PROGRAM_BYTES: usize = 1024 * 1024;
@@ -642,7 +642,7 @@ impl ConfigFragment {
         })
     }
 
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(server) = &mut self.server {
             server.resolve_relative_paths(base_dir);
         }
@@ -871,7 +871,7 @@ impl ProxyConfig {
             .unwrap_or_else(|| upstream_host(self.primary_upstream()).unwrap_or_default())
     }
 
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.upstream_ca_path
             && path.is_relative()
         {
@@ -897,7 +897,7 @@ impl ProxyConfig {
         }
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.upstream.is_some() && (!self.upstreams.is_empty() || self.upstreams_file.is_some())
             || !self.upstreams.is_empty() && self.upstreams_file.is_some()
         {
@@ -1724,7 +1724,7 @@ impl VhostConfig {
             .collect()
     }
 
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
         self.tls.resolve_relative_paths(base_dir);
         self.proxy.resolve_relative_paths(base_dir);
         self.cache.resolve_relative_paths(base_dir);
@@ -1881,446 +1881,6 @@ impl VhostConfig {
             global_tls,
             has_shared_certificate_source,
         )
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct GrpcRouteConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_true")]
-    pub require_content_type: bool,
-}
-
-impl Default for GrpcRouteConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            require_content_type: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct RouteConfig {
-    pub name: String,
-    #[serde(default)]
-    pub path_exact: Option<String>,
-    #[serde(default)]
-    pub path_prefix: Option<String>,
-    #[serde(default)]
-    pub path_regex: Option<String>,
-    #[serde(default)]
-    pub methods: Vec<String>,
-    #[serde(default)]
-    pub fallback: bool,
-    #[serde(default)]
-    pub https_redirect_exempt: bool,
-    #[serde(default)]
-    pub strip_prefix: Option<String>,
-    #[serde(default)]
-    pub rewrite_prefix: Option<String>,
-    #[serde(default)]
-    pub rewrite_template: Option<String>,
-    #[serde(default)]
-    pub max_request_body_bytes: Option<ByteSize>,
-    #[serde(default)]
-    pub access: AccessPolicyConfig,
-    #[serde(default)]
-    pub rate_limit: RateLimitConfig,
-    #[serde(default)]
-    pub concurrency: ConcurrencyLimitConfig,
-    #[serde(default)]
-    pub grpc: GrpcRouteConfig,
-    #[serde(default)]
-    pub redirect: Option<RouteRedirectConfig>,
-    #[serde(default)]
-    pub proxy: Option<ProxyConfig>,
-    #[serde(default)]
-    pub web: Option<WebConfig>,
-    #[serde(default)]
-    pub php: Option<PhpConfig>,
-    #[serde(default)]
-    pub cache: Option<CacheConfig>,
-    #[serde(default)]
-    pub compression: Option<CompressionConfig>,
-    #[serde(default)]
-    pub headers: VhostHeaderPolicyConfig,
-}
-
-impl RouteConfig {
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(proxy) = &mut self.proxy {
-            proxy.resolve_relative_paths(base_dir);
-        }
-        if let Some(web) = &mut self.web {
-            web.resolve_relative_paths(base_dir);
-        }
-        if let Some(php) = &mut self.php {
-            php.resolve_relative_paths(base_dir);
-        }
-        if let Some(cache) = &mut self.cache {
-            cache.resolve_relative_paths(base_dir);
-        }
-    }
-
-    fn validate(&self, vhost: &str, regex_enabled: bool) -> Result<(), ConfigError> {
-        if self.name.trim().is_empty() {
-            return Err(ConfigError::EmptyRouteName {
-                vhost: vhost.to_owned(),
-            });
-        }
-        if self.name.len() > MAX_ROUTE_NAME_BYTES {
-            return Err(ConfigError::InvalidConfigNameLength {
-                field: "vhosts.routes.name",
-                max: MAX_ROUTE_NAME_BYTES,
-            });
-        }
-
-        let matcher_count = usize::from(self.path_exact.is_some())
-            + usize::from(self.path_prefix.is_some())
-            + usize::from(self.path_regex.is_some())
-            + usize::from(self.fallback);
-        if matcher_count != 1 {
-            return Err(ConfigError::InvalidRouteMatcher {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-            });
-        }
-
-        if let Some(path) = &self.path_exact {
-            validate_route_path("vhosts.routes.path_exact", path, false).map_err(|_| {
-                ConfigError::InvalidRouteMatcher {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                }
-            })?;
-        }
-        if let Some(path) = &self.path_prefix {
-            validate_route_path("vhosts.routes.path_prefix", path, true).map_err(|_| {
-                ConfigError::InvalidRouteMatcher {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                }
-            })?;
-        }
-        if let Some(pattern) = &self.path_regex {
-            if !regex_enabled {
-                return Err(ConfigError::RouteRegexDisabled {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                });
-            }
-            validate_route_regex(pattern).map_err(|_| ConfigError::InvalidRouteRegex {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-            })?;
-        }
-        validate_route_methods(vhost, &self.name, &self.methods)?;
-        if let Some(path) = &self.strip_prefix {
-            validate_route_path("vhosts.routes.strip_prefix", path, true).map_err(|_| {
-                ConfigError::InvalidRouteStripPrefix {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                }
-            })?;
-            let Some(prefix) = &self.path_prefix else {
-                return Err(ConfigError::InvalidRouteStripPrefix {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                });
-            };
-            if !prefix.starts_with(path) && !path.starts_with(prefix) {
-                return Err(ConfigError::InvalidRouteStripPrefix {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                });
-            }
-        }
-        if let Some(path) = &self.rewrite_prefix {
-            validate_route_rewrite_prefix_path(path).map_err(|_| {
-                ConfigError::InvalidRouteRewritePrefix {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                }
-            })?;
-            if self.strip_prefix.is_none() {
-                return Err(ConfigError::InvalidRouteRewritePrefix {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                });
-            }
-        }
-        if let Some(template) = &self.rewrite_template {
-            validate_route_rewrite_template_path(template).map_err(|_| {
-                ConfigError::InvalidRouteRewriteTemplate {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                }
-            })?;
-            if self.path_regex.is_none()
-                || self.strip_prefix.is_some()
-                || self.rewrite_prefix.is_some()
-            {
-                return Err(ConfigError::InvalidRouteRewriteTemplate {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                });
-            }
-        }
-        if self
-            .max_request_body_bytes
-            .is_some_and(|bytes| bytes.as_u64() == 0)
-        {
-            return Err(ConfigError::InvalidRouteLimit {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                field: "max_request_body_bytes",
-            });
-        }
-        self.access
-            .validate("vhosts.routes.access")
-            .map_err(|source| ConfigError::RouteSection {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                section: "access",
-                source: Box::new(source),
-            })?;
-        self.rate_limit
-            .validate("vhosts.routes.rate_limit")
-            .map_err(|source| ConfigError::RouteSection {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                section: "rate_limit",
-                source: Box::new(source),
-            })?;
-        self.concurrency
-            .validate("vhosts.routes.concurrency")
-            .map_err(|source| ConfigError::RouteSection {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                section: "concurrency",
-                source: Box::new(source),
-            })?;
-        if self.grpc.enabled && !self.grpc.require_content_type {
-            return Err(ConfigError::InvalidRouteGrpcPolicy {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                reason: "require_content_type must remain true for gRPC routes",
-            });
-        }
-
-        let action_count = usize::from(self.redirect.is_some())
-            + usize::from(self.proxy.is_some())
-            + usize::from(self.web.is_some())
-            + usize::from(self.php.is_some());
-        if action_count != 1 {
-            return Err(ConfigError::InvalidRouteAction {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-            });
-        }
-
-        if let Some(redirect) = &self.redirect {
-            redirect.validate(vhost, &self.name)?;
-        }
-        if let Some(proxy) = &self.proxy {
-            proxy
-                .validate()
-                .map_err(|source| ConfigError::RouteSection {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                    section: "proxy",
-                    source: Box::new(source),
-                })?;
-            if self.grpc.enabled && proxy.upstream_http_version == UpstreamHttpVersion::Http1 {
-                return Err(ConfigError::InvalidRouteGrpcPolicy {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                    reason: "gRPC routes require proxy.upstream_http_version = \"http2\" or \"http1-and-http2\"",
-                });
-            }
-        }
-        if self.grpc.enabled && self.proxy.is_none() {
-            return Err(ConfigError::InvalidRouteGrpcPolicy {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                reason: "gRPC routes must use a proxy action",
-            });
-        }
-        if let Some(web) = &self.web {
-            web.validate().map_err(|source| ConfigError::RouteSection {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                section: "web",
-                source: Box::new(source),
-            })?;
-            if !web.enabled() {
-                return Err(ConfigError::InvalidRouteAction {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                });
-            }
-        }
-        if let Some(php) = &self.php {
-            php.validate("vhosts.routes.php")
-                .map_err(|source| ConfigError::RouteSection {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                    section: "php",
-                    source: Box::new(source),
-                })?;
-            if !php.enabled {
-                return Err(ConfigError::InvalidRouteAction {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                });
-            }
-        }
-        if let Some(cache) = &self.cache {
-            cache
-                .validate("vhosts.routes.cache")
-                .map_err(|source| ConfigError::RouteSection {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                    section: "cache",
-                    source: Box::new(source),
-                })?;
-            if self.grpc.enabled && cache.enabled {
-                return Err(ConfigError::InvalidRouteGrpcPolicy {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                    reason: "gRPC routes cannot enable response caching because trailers and streaming status must pass through",
-                });
-            }
-        }
-        if let Some(compression) = &self.compression {
-            compression
-                .validate()
-                .map_err(|source| ConfigError::RouteSection {
-                    vhost: vhost.to_owned(),
-                    route: self.name.clone(),
-                    section: "compression",
-                    source: Box::new(source),
-                })?;
-        }
-        self.headers
-            .validate()
-            .map_err(|source| ConfigError::RouteSection {
-                vhost: vhost.to_owned(),
-                route: self.name.clone(),
-                section: "headers",
-                source: Box::new(source),
-            })?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct RouteRedirectConfig {
-    pub to: String,
-    #[serde(default = "default_route_redirect_status")]
-    pub status: u16,
-}
-
-impl RouteRedirectConfig {
-    fn validate(&self, vhost: &str, route: &str) -> Result<(), ConfigError> {
-        if !matches!(self.status, 301 | 302 | 307 | 308) {
-            return Err(ConfigError::InvalidRouteRedirectStatus {
-                vhost: vhost.to_owned(),
-                route: route.to_owned(),
-                status: self.status,
-            });
-        }
-        if !valid_redirect_target_template(&self.to) {
-            return Err(ConfigError::InvalidRouteRedirectTarget {
-                vhost: vhost.to_owned(),
-                route: route.to_owned(),
-            });
-        }
-        Ok(())
-    }
-}
-
-fn default_route_redirect_status() -> u16 {
-    308
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct VhostRedirectConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub to: Option<String>,
-    #[serde(default = "default_route_redirect_status")]
-    pub status: u16,
-}
-
-impl Default for VhostRedirectConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            to: None,
-            status: default_route_redirect_status(),
-        }
-    }
-}
-
-impl VhostRedirectConfig {
-    fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
-        if !self.enabled {
-            return Ok(());
-        }
-
-        let Some(to) = &self.to else {
-            return Err(ConfigError::MissingVhostRedirectTarget {
-                vhost: vhost.to_owned(),
-            });
-        };
-        RouteRedirectConfig {
-            to: to.clone(),
-            status: self.status,
-        }
-        .validate(vhost, "vhost-redirect")
-    }
-
-    pub fn route_config(&self) -> Option<RouteConfig> {
-        if !self.enabled {
-            return None;
-        }
-        let to = self.to.clone()?;
-
-        Some(RouteConfig {
-            name: "vhost-redirect".to_owned(),
-            path_exact: None,
-            path_prefix: None,
-            path_regex: None,
-            methods: Vec::new(),
-            fallback: true,
-            https_redirect_exempt: false,
-            strip_prefix: None,
-            rewrite_prefix: None,
-            rewrite_template: None,
-            max_request_body_bytes: None,
-            access: AccessPolicyConfig::default(),
-            rate_limit: RateLimitConfig::default(),
-            concurrency: ConcurrencyLimitConfig::default(),
-            grpc: GrpcRouteConfig::default(),
-            redirect: Some(RouteRedirectConfig {
-                to,
-                status: self.status,
-            }),
-            proxy: None,
-            web: None,
-            php: None,
-            cache: None,
-            compression: None,
-            headers: VhostHeaderPolicyConfig::default(),
-        })
     }
 }
 
@@ -2549,7 +2109,7 @@ impl CacheConfig {
         );
     }
 
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
         if let Some(path) = &mut self.disk.path
             && path.is_relative()
         {
@@ -2558,7 +2118,7 @@ impl CacheConfig {
         self.disk.encryption.resolve_relative_paths(base_dir);
     }
 
-    fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
+    pub(crate) fn validate(&self, scope: &'static str) -> Result<(), ConfigError> {
         validate_cache_list_len(
             scope,
             "hide_response_headers",
