@@ -40,6 +40,7 @@ mod config_php;
 mod config_route;
 pub mod config_tester;
 mod config_types;
+mod config_web;
 #[cfg(feature = "proxy")]
 mod edge_policy;
 mod fs_trust;

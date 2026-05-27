@@ -60,6 +60,8 @@ behavior when the change improves security or project direction.
   path validation and request-id header validation.
 - Move metrics and tracing config into `config_observability`, keeping OTLP
   endpoint validation routed through the shared HTTP config helpers.
+- Move static web serving config into `config_web`, including index-file,
+  cache-control, expires, root path, and directory-listing validation.
 
 ## 1.4.2 - 2026-05-27
 
