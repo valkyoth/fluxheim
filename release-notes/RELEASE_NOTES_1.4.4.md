@@ -17,6 +17,9 @@ macOS developer smoke gate.
   supported development profile checks.
 - Document macOS developer release artifacts as target-triple tarballs rather
   than Linux production packages.
+- Add `scripts/build_release_assets.sh` so release archives use normalized
+  platform labels such as `x86_64-linux`, `aarch64-linux`, and
+  `aarch64-macos`.
 
 ## Compatibility Notes
 
@@ -24,9 +27,9 @@ macOS developer smoke gate.
 - macOS support is developer-level only in this release. It is not a FIPS/ISO
   evidence claim, not a launchd/Homebrew packaging milestone, and not a
   notarized-binary support claim.
-- ARM release artifacts are target-specific: `aarch64-apple-darwin` for
-  Apple Silicon macOS, `x86_64-apple-darwin` for Intel macOS, and
-  `aarch64-unknown-linux-gnu` for Linux ARM64.
+- ARM release artifacts are target-specific: `aarch64-macos` for Apple Silicon
+  macOS developer builds and `aarch64-linux` for Linux ARM64 production
+  builds.
 
 ## Suggested Checks
 

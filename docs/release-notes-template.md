@@ -70,6 +70,18 @@ release. Include whether the dependency is direct or transitive.
 
 - Source archive checksum:
 - Binary checksums:
+  - `fluxheim-VERSION-full-x86_64-linux.tar.gz`
+  - `fluxheim-VERSION-cache-x86_64-linux.tar.gz`
+  - `fluxheim-VERSION-proxy-x86_64-linux.tar.gz`
+  - `fluxheim-VERSION-php-x86_64-linux.tar.gz`
+  - `fluxheim-VERSION-config-tester-x86_64-linux.tar.gz`
+  - `fluxheim-VERSION-full-aarch64-linux.tar.gz`
+  - `fluxheim-VERSION-cache-aarch64-linux.tar.gz`
+  - `fluxheim-VERSION-proxy-aarch64-linux.tar.gz`
+  - `fluxheim-VERSION-php-aarch64-linux.tar.gz`
+  - `fluxheim-VERSION-config-tester-aarch64-linux.tar.gz`
+  - `fluxheim-VERSION-dev-aarch64-macos.tar.gz` when published
+  - `fluxheim-VERSION-dev-x86_64-macos.tar.gz` when published
 - SBOM checksums:
 - Reproducible build hash:
 - Container digests:

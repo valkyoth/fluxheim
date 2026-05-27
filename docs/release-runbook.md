@@ -12,7 +12,6 @@ TAG="v${RELEASE_VERSION}"
 TITLE="Fluxheim ${RELEASE_VERSION}"
 RELEASE_NOTES="release-notes/RELEASE_NOTES_${RELEASE_VERSION}.md"
 TARGET="$(rustc -vV | sed -n 's/^host: //p')"
-DIST_NAME="fluxheim-${RELEASE_VERSION}-full-${TARGET}"
 ```
 
 ## 1. Preflight
@@ -105,108 +104,59 @@ Record the `Good "git" signature ...` line from `git tag -v`.
 
 Pushing the tag starts the container image workflow.
 
-## 4. Build The Binary Release Asset
+## 4. Build The Binary Release Assets
 
-Build the full production release binary:
+Build Linux runtime and config-tester release assets with the helper script.
+It names artifacts by normalized platform label instead of raw Rust target
+triple:
 
-```bash
-cargo build --release --locked --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp --bin fluxheim --bin fluxheim-acme
-```
+| Rust target | Artifact label |
+| --- | --- |
+| `x86_64-unknown-linux-gnu` | `x86_64-linux` |
+| `aarch64-unknown-linux-gnu` | `aarch64-linux` |
+| `x86_64-apple-darwin` | `x86_64-macos` |
+| `aarch64-apple-darwin` | `aarch64-macos` |
 
-Create the release bundle:
-
-```bash
-mkdir -p "dist/${DIST_NAME}"
-cp target/release/fluxheim "dist/${DIST_NAME}/"
-cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
-cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
-tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
-sha256sum "dist/${DIST_NAME}.tar.gz"
-```
-
-For the cache-focused binary profile, rebuild with:
+Build the current Linux host target:
 
 ```bash
-DIST_NAME="fluxheim-${RELEASE_VERSION}-cache-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-cache-edge,acme-client --bin fluxheim --bin fluxheim-acme
-rm -rf "dist/${DIST_NAME}"
-mkdir -p "dist/${DIST_NAME}"
-cp target/release/fluxheim "dist/${DIST_NAME}/"
-cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
-cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
-tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
-sha256sum "dist/${DIST_NAME}.tar.gz"
+scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind linux
 ```
 
-For the proxy-focused binary profile, rebuild with:
+Build Linux ARM64 on an ARM64 Linux builder or configured cross-builder:
 
 ```bash
-DIST_NAME="fluxheim-${RELEASE_VERSION}-proxy-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-proxy-edge,acme-client --bin fluxheim --bin fluxheim-acme
-rm -rf "dist/${DIST_NAME}"
-mkdir -p "dist/${DIST_NAME}"
-cp target/release/fluxheim "dist/${DIST_NAME}/"
-cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
-cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
-tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
-sha256sum "dist/${DIST_NAME}.tar.gz"
+rustup target add aarch64-unknown-linux-gnu
+scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind linux --target aarch64-unknown-linux-gnu
 ```
 
-For the PHP-FPM web binary profile, rebuild with:
+This produces, for each Linux target, the full/cache/proxy/php runtime archives
+and the config-tester archive:
+
+```text
+fluxheim-${RELEASE_VERSION}-full-x86_64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-cache-x86_64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-proxy-x86_64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-php-x86_64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-config-tester-x86_64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-full-aarch64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-cache-aarch64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-proxy-aarch64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-php-aarch64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-config-tester-aarch64-linux.tar.gz
+```
+
+For Level 1 macOS developer artifacts, build on the matching Mac host. These
+artifacts are developer conveniences, not production packages:
 
 ```bash
-DIST_NAME="fluxheim-${RELEASE_VERSION}-php-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-web-server,php-fpm,acme-client --bin fluxheim --bin fluxheim-acme
-rm -rf "dist/${DIST_NAME}"
-mkdir -p "dist/${DIST_NAME}"
-cp target/release/fluxheim "dist/${DIST_NAME}/"
-cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
-cp -r docs examples packaging release-notes "dist/${DIST_NAME}/"
-tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
-sha256sum "dist/${DIST_NAME}.tar.gz"
+scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
 ```
 
-Build one unified config-tester release asset. The tester is compiled with the
-broad development feature set and validates the intended runtime shape with
-`--profile full`, `--profile cache`, `--profile proxy`, or `--profile web-php`.
-
-```bash
-TESTER_DIST_NAME="fluxheim-${RELEASE_VERSION}-config-tester-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-development --bin fluxheim-config-tester
-rm -rf "dist/${TESTER_DIST_NAME}"
-mkdir -p "dist/${TESTER_DIST_NAME}"
-cp target/release/fluxheim-config-tester "dist/${TESTER_DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "dist/${TESTER_DIST_NAME}/"
-tar -C dist -czf "dist/${TESTER_DIST_NAME}.tar.gz" "${TESTER_DIST_NAME}"
-sha256sum "dist/${TESTER_DIST_NAME}.tar.gz"
-```
+Apple Silicon Macs produce `fluxheim-${RELEASE_VERSION}-dev-aarch64-macos.tar.gz`.
+Intel Macs produce `fluxheim-${RELEASE_VERSION}-dev-x86_64-macos.tar.gz`.
 
 Record all runtime and config-tester binary checksums.
-
-For Level 1 macOS developer artifacts, build on the matching Mac host and use
-the host target triple in the artifact name. Apple Silicon Macs should produce
-`aarch64-apple-darwin`; Intel Macs should produce `x86_64-apple-darwin`.
-These artifacts are developer conveniences, not production packages:
-
-```bash
-TARGET="$(rustc -vV | sed -n 's/^host: //p')"
-DIST_NAME="fluxheim-${RELEASE_VERSION}-dev-${TARGET}"
-cargo build --release --locked --no-default-features --features profile-development \
-  --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
-rm -rf "dist/${DIST_NAME}"
-mkdir -p "dist/${DIST_NAME}"
-cp target/release/fluxheim "dist/${DIST_NAME}/"
-cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
-cp target/release/fluxheim-config-tester "dist/${DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
-cp -r docs examples release-notes "dist/${DIST_NAME}/"
-tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
-shasum -a 256 "dist/${DIST_NAME}.tar.gz"
-```
 
 Generate SBOMs for the tagged source tree:
 
@@ -297,11 +247,11 @@ On GitHub:
 4. Use `$TITLE` as the release title.
 5. Paste the contents of `$RELEASE_NOTES`.
 6. Upload every runtime profile archive built in step 4:
-   `dist/fluxheim-${RELEASE_VERSION}-{full,cache,proxy,php}-${TARGET}.tar.gz`.
+   `dist/fluxheim-${RELEASE_VERSION}-{full,cache,proxy,php}-{x86_64,aarch64}-linux.tar.gz`.
 7. Upload the unified config-tester archive built in step 4:
-   `dist/fluxheim-${RELEASE_VERSION}-config-tester-${TARGET}.tar.gz`.
+   `dist/fluxheim-${RELEASE_VERSION}-config-tester-{x86_64,aarch64}-linux.tar.gz`.
 8. If the release includes Level 1 macOS developer artifacts, upload
-   `dist/fluxheim-${RELEASE_VERSION}-dev-{aarch64,x86_64}-apple-darwin.tar.gz`
+   `dist/fluxheim-${RELEASE_VERSION}-dev-{aarch64,x86_64}-macos.tar.gz`
    for the Mac targets that were actually built.
 9. Upload `target/release-evidence/fluxheim.spdx.json`.
 10. Upload `target/release-evidence/fluxheim.cyclonedx.json`.

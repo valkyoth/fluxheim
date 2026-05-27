@@ -15,8 +15,8 @@ support remains experimental.
 | --- | --- |
 | `aarch64-apple-darwin` | Primary Apple Silicon developer target for M-series Macs. |
 | `x86_64-apple-darwin` | Intel Mac developer target when a maintainer can test it. |
-| `aarch64-unknown-linux-gnu` | Linux ARM64 release target, separate from macOS. |
-| `x86_64-unknown-linux-gnu` | Main Linux production release target. |
+| `aarch64-unknown-linux-gnu` | Linux ARM64 release target, released as `aarch64-linux`. |
+| `x86_64-unknown-linux-gnu` | Main Linux production release target, released as `x86_64-linux`. |
 
 ARM is not one release artifact. The Rust target triple defines the operating
 system ABI and CPU baseline. For normal server ARM64 hardware such as Apple
@@ -89,32 +89,19 @@ world-writable parents.
 ## Release Assets
 
 If macOS developer binaries are attached to a GitHub release, build them on
-macOS and name them by target triple:
+macOS with the release helper:
 
 ```bash
 RELEASE_VERSION=1.4.4
-TARGET="$(rustc -vV | sed -n 's/^host: //p')"
-DIST_NAME="fluxheim-${RELEASE_VERSION}-dev-${TARGET}"
-
-cargo build --release --locked --no-default-features --features profile-development \
-  --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
-
-mkdir -p "dist/${DIST_NAME}"
-cp target/release/fluxheim "dist/${DIST_NAME}/"
-cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
-cp target/release/fluxheim-config-tester "dist/${DIST_NAME}/"
-cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
-cp -r docs examples release-notes "dist/${DIST_NAME}/"
-tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
-shasum -a 256 "dist/${DIST_NAME}.tar.gz"
+scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
 ```
 
 Preferred release naming examples:
 
-- `fluxheim-1.4.4-dev-aarch64-apple-darwin.tar.gz`
-- `fluxheim-1.4.4-dev-x86_64-apple-darwin.tar.gz`
-- `fluxheim-1.4.4-full-x86_64-unknown-linux-gnu.tar.gz`
-- `fluxheim-1.4.4-full-aarch64-unknown-linux-gnu.tar.gz`
+- `fluxheim-1.4.4-dev-aarch64-macos.tar.gz`
+- `fluxheim-1.4.4-dev-x86_64-macos.tar.gz`
+- `fluxheim-1.4.4-full-x86_64-linux.tar.gz`
+- `fluxheim-1.4.4-full-aarch64-linux.tar.gz`
 
 Universal macOS binaries are optional and can be produced with `lipo` from
 separate Intel and Apple Silicon builds, but per-target tarballs are simpler
