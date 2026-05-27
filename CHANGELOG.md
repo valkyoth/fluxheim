@@ -39,6 +39,9 @@ behavior when the change improves security or project direction.
   `config_access`.
 - Extract route path, regex matcher, method, rewrite-template, and redirect
   target validation helpers into `config_route`.
+- Extract PHP custom parameter validation and protected FastCGI parameter guards
+  into `config_php`, preserving `crate::config::protected_php_param_name` for
+  PHP-FPM runtime code.
 
 ## 1.4.2 - 2026-05-27
 

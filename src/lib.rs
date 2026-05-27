@@ -32,6 +32,7 @@ mod config_http;
 mod config_loader;
 mod config_net;
 mod config_path;
+mod config_php;
 mod config_route;
 pub mod config_tester;
 mod config_types;
