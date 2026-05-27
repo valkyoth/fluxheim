@@ -78,6 +78,8 @@ behavior when the change improves security or project direction.
   `config_access`.
 - Move vhost TLS and vhost ACME challenge config into the existing TLS/ACME
   config modules.
+- Move PHP and managed PHP-FPM config types, defaults, and path validation into
+  `config_php`.
 
 ## 1.4.2 - 2026-05-27
 
