@@ -42,6 +42,10 @@ use crate::config_loader::{
     canonical_config_source, config_directory_files, read_regular_config_file_to_string,
     regular_visible_toml_file, toml_files,
 };
+pub use crate::config_logging::{
+    AccessLoggingConfig, LoggingConfig, LoggingFileConfig, LoggingFormat, LoggingLevel,
+    LoggingTarget,
+};
 use crate::config_net::{
     http_authority_is_loopback, http_authority_is_numeric_loopback, upstream_host, valid_authority,
     valid_trusted_proxy, valid_upstream_alias,
@@ -1787,177 +1791,6 @@ impl CachePurgerConfig {
                 field: "cache_purger.batches",
                 reason: "batches must be between 1 and 100",
             });
-        }
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoggingConfig {
-    #[serde(default)]
-    pub level: LoggingLevel,
-    #[serde(default)]
-    pub format: LoggingFormat,
-    #[serde(default)]
-    pub target: LoggingTarget,
-    #[serde(default)]
-    pub file: LoggingFileConfig,
-    #[serde(default)]
-    pub access: AccessLoggingConfig,
-}
-
-impl LoggingConfig {
-    fn resolve_relative_paths(&mut self, base_dir: &Path) {
-        if let Some(path) = &mut self.file.path
-            && path.is_relative()
-        {
-            *path = base_dir.join(&path);
-        }
-    }
-
-    fn validate(&self) -> Result<(), ConfigError> {
-        self.file.validate()?;
-        self.access.validate()
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoggingFileConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default)]
-    pub path: Option<PathBuf>,
-    #[serde(default = "default_true")]
-    pub append: bool,
-}
-
-impl Default for LoggingFileConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            path: None,
-            append: true,
-        }
-    }
-}
-
-impl LoggingFileConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
-        #[cfg(feature = "privacy-mode")]
-        if self.enabled {
-            return Err(ConfigError::PrivacyModeFileLogging);
-        }
-
-        if self.enabled && self.path.is_none() {
-            return Err(ConfigError::MissingLoggingFilePath);
-        }
-
-        if self
-            .path
-            .as_ref()
-            .is_some_and(|path| path.as_os_str().is_empty())
-        {
-            return Err(ConfigError::EmptyLoggingFilePath);
-        }
-
-        validate_path("logging.file.path", self.path.as_deref())?;
-        validate_non_world_writable_parent("logging.file.path", self.path.as_deref())?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LoggingLevel {
-    Trace,
-    Debug,
-    #[default]
-    Info,
-    Warn,
-    Error,
-    Off,
-}
-
-impl LoggingLevel {
-    pub fn as_filter(self) -> &'static str {
-        match self {
-            Self::Trace => "trace",
-            Self::Debug => "debug",
-            Self::Info => "info",
-            Self::Warn => "warn",
-            Self::Error => "error",
-            Self::Off => "off",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LoggingFormat {
-    Text,
-    #[default]
-    Json,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LoggingTarget {
-    Stdout,
-    #[default]
-    Stderr,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AccessLoggingConfig {
-    #[serde(default = "default_access_logging_enabled")]
-    pub enabled: bool,
-    #[serde(default = "default_true")]
-    pub include_host: bool,
-    #[serde(default = "default_true")]
-    pub include_client_ip: bool,
-    #[serde(default = "default_true")]
-    pub include_cache_phase: bool,
-    #[serde(default = "default_true")]
-    pub include_path: bool,
-    #[serde(default = "default_true")]
-    pub include_route: bool,
-    #[serde(default = "default_true")]
-    pub include_upstream: bool,
-    #[serde(default = "default_true")]
-    pub request_id: bool,
-    #[serde(default = "default_request_id_header")]
-    pub request_id_header: String,
-}
-
-impl Default for AccessLoggingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_access_logging_enabled(),
-            include_host: true,
-            include_client_ip: true,
-            include_cache_phase: true,
-            include_path: true,
-            include_route: true,
-            include_upstream: true,
-            request_id: true,
-            request_id_header: default_request_id_header(),
-        }
-    }
-}
-
-impl AccessLoggingConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
-        #[cfg(feature = "privacy-mode")]
-        if self.enabled {
-            return Err(ConfigError::PrivacyModeAccessLogging);
-        }
-
-        if self.request_id {
-            validate_header_name("logging.access.request_id_header", &self.request_id_header)?;
         }
 
         Ok(())
@@ -9812,14 +9645,6 @@ fn warn_plaintext_remote_otlp_endpoint(field: &str, endpoint: &str) {
             "{field} uses plaintext HTTP to a non-loopback host; use https:// or restrict OTLP export to a local collector"
         );
     }
-}
-
-fn default_access_logging_enabled() -> bool {
-    !cfg!(feature = "privacy-mode")
-}
-
-fn default_request_id_header() -> String {
-    "x-request-id".to_owned()
 }
 
 fn default_max_request_header_bytes() -> ByteSize {

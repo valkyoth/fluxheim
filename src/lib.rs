@@ -32,6 +32,7 @@ mod config_header;
 mod config_http;
 mod config_load_balance;
 mod config_loader;
+mod config_logging;
 mod config_net;
 mod config_path;
 mod config_php;

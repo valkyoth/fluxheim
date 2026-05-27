@@ -56,6 +56,8 @@ behavior when the change improves security or project direction.
 - Move load-balancer selection, health-check, passive-health, slow-start, and
   retry policy config into `config_load_balance` while preserving the existing
   `crate::config::*` type paths.
+- Move logging and access-log config into `config_logging`, including file-log
+  path validation and request-id header validation.
 
 ## 1.4.2 - 2026-05-27
 
