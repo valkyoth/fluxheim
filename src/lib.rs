@@ -29,6 +29,7 @@ pub mod config;
 mod config_http;
 mod config_loader;
 mod config_net;
+mod config_path;
 pub mod config_tester;
 mod config_types;
 #[cfg(feature = "proxy")]

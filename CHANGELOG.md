@@ -31,6 +31,8 @@ behavior when the change improves security or project direction.
 - Extract HTTP/OTLP endpoint URL validation and local FIPS endpoint exception
   helpers into `config_http`, with shared HTTP authority parsing in
   `config_net`.
+- Extract generic config path inspection, symlink checks, parent-permission
+  checks, and process path validation into `config_path`.
 
 ## 1.4.2 - 2026-05-27
 
