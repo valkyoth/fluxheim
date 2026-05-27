@@ -8,6 +8,12 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use toml::value::{Datetime, Offset};
 
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+use crate::config_http::valid_http_otlp_endpoint;
+use crate::config_http::{
+    fips_allowed_local_auth_request_endpoint, fips_allowed_local_mirror_endpoint,
+    fips_allowed_local_otlp_endpoint, valid_http_base_url, valid_http_endpoint_url,
+};
 pub use crate::config_loader::ConfigLoadError;
 #[cfg(feature = "load-balancer")]
 pub(crate) use crate::config_loader::read_proxy_upstreams_file;
@@ -15,10 +21,11 @@ use crate::config_loader::{
     canonical_config_source, config_directory_files, read_regular_config_file_to_string,
     regular_visible_toml_file, toml_files,
 };
-pub use crate::config_net::{normalize_host, normalize_host_pattern};
 use crate::config_net::{
-    upstream_host, valid_authority, valid_ip_matcher, valid_trusted_proxy, valid_upstream_alias,
+    http_authority_is_loopback, http_authority_is_numeric_loopback, upstream_host, valid_authority,
+    valid_ip_matcher, valid_trusted_proxy, valid_upstream_alias,
 };
+pub use crate::config_net::{normalize_host, normalize_host_pattern};
 pub use crate::config_types::{ByteSize, ByteSizeParseError};
 
 #[cfg(test)]
@@ -7631,44 +7638,6 @@ fn cache_peer_authority_is_loopback(authority: &str) -> bool {
     http_authority_is_loopback(authority)
 }
 
-fn http_authority_is_loopback(authority: &str) -> bool {
-    if authority.contains('@') {
-        return false;
-    }
-    let host = if authority.starts_with('[') {
-        let Some(end) = authority.find(']') else {
-            return false;
-        };
-        let tail = &authority[end + 1..];
-        if !tail.is_empty() && !http_authority_valid_port_tail(tail) {
-            return false;
-        }
-        &authority[1..end]
-    } else {
-        match authority.rsplit_once(':') {
-            Some((host, port)) => {
-                if host.contains(':') || !valid_u16_port(port) {
-                    return false;
-                }
-                host
-            }
-            None => authority,
-        }
-    };
-    host.eq_ignore_ascii_case("localhost")
-        || host
-            .parse::<IpAddr>()
-            .is_ok_and(|address| address.is_loopback())
-}
-
-fn http_authority_valid_port_tail(tail: &str) -> bool {
-    tail.strip_prefix(':').is_some_and(valid_u16_port)
-}
-
-fn valid_u16_port(port: &str) -> bool {
-    port.parse::<u16>().is_ok_and(|port| port != 0)
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CacheMemoryConfig {
@@ -8092,30 +8061,7 @@ fn invalid_cache_encryption_openbao_address(value: &str) -> bool {
 }
 
 fn openbao_plain_http_authority_is_loopback(authority: &str) -> bool {
-    if authority.contains('@') {
-        return false;
-    }
-    let host = if authority.starts_with('[') {
-        let Some(end) = authority.find(']') else {
-            return false;
-        };
-        let tail = &authority[end + 1..];
-        if !tail.is_empty() && !http_authority_valid_port_tail(tail) {
-            return false;
-        }
-        &authority[1..end]
-    } else {
-        match authority.rsplit_once(':') {
-            Some((host, port)) => {
-                if host.contains(':') || !valid_u16_port(port) {
-                    return false;
-                }
-                host
-            }
-            None => authority,
-        }
-    };
-    host == "127.0.0.1" || host == "::1"
+    http_authority_is_numeric_loopback(authority)
 }
 
 fn fips_allowed_local_openbao_endpoint(endpoint: &str) -> bool {
@@ -10759,138 +10705,6 @@ fn default_cache_purger_batches() -> usize {
     1
 }
 
-fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
-    let Some(rest) = endpoint.strip_prefix("http://") else {
-        return false;
-    };
-    if rest.contains('@')
-        || rest.contains('?')
-        || rest.contains('#')
-        || rest
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
-    {
-        return false;
-    }
-    let Some((authority, path)) = rest.split_once('/') else {
-        return false;
-    };
-    !path.is_empty() && openbao_plain_http_authority_is_loopback(authority)
-}
-
-fn fips_allowed_local_auth_request_endpoint(endpoint: &str) -> bool {
-    let Some(rest) = endpoint.strip_prefix("http://") else {
-        return false;
-    };
-    if rest.is_empty()
-        || rest.len() > 2048
-        || rest.contains('@')
-        || rest.contains('?')
-        || rest.contains('#')
-        || rest
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
-    {
-        return false;
-    }
-    let Some((authority, path)) = rest.split_once('/') else {
-        return false;
-    };
-    !path.is_empty() && openbao_plain_http_authority_is_loopback(authority)
-}
-
-fn fips_allowed_local_mirror_endpoint(endpoint: &str) -> bool {
-    let Some(rest) = endpoint.strip_prefix("http://") else {
-        return false;
-    };
-    if rest.is_empty()
-        || rest.len() > 2048
-        || rest.contains('@')
-        || rest.contains('?')
-        || rest.contains('#')
-        || rest
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
-    {
-        return false;
-    }
-    let authority = rest.split('/').next().unwrap_or_default();
-    openbao_plain_http_authority_is_loopback(authority)
-}
-
-fn valid_http_endpoint_url(endpoint: &str) -> bool {
-    let Some(rest) = endpoint
-        .strip_prefix("http://")
-        .or_else(|| endpoint.strip_prefix("https://"))
-    else {
-        return false;
-    };
-    if rest.is_empty()
-        || rest.len() > 2048
-        || rest.contains('@')
-        || rest.contains('?')
-        || rest.contains('#')
-        || rest
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
-    {
-        return false;
-    }
-    let Some((authority, path)) = rest.split_once('/') else {
-        return false;
-    };
-    !authority.is_empty() && !path.is_empty() && valid_http_authority(authority)
-}
-
-fn valid_http_base_url(endpoint: &str) -> bool {
-    let Some(rest) = endpoint
-        .strip_prefix("http://")
-        .or_else(|| endpoint.strip_prefix("https://"))
-    else {
-        return false;
-    };
-    if rest.is_empty()
-        || rest.len() > 2048
-        || rest.contains('@')
-        || rest.contains('?')
-        || rest.contains('#')
-        || rest
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
-    {
-        return false;
-    }
-    let authority = rest.split('/').next().unwrap_or_default();
-    !authority.is_empty() && valid_http_authority(authority)
-}
-
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
-    let Some(rest) = endpoint
-        .strip_prefix("http://")
-        .or_else(|| endpoint.strip_prefix("https://"))
-    else {
-        return false;
-    };
-    if rest.is_empty()
-        || rest.contains('@')
-        || rest.contains('?')
-        || rest.contains('#')
-        || rest
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || byte == b' ')
-    {
-        return false;
-    }
-    let Some((authority, path)) = rest.split_once('/') else {
-        return false;
-    };
-    if authority.is_empty() || path.is_empty() {
-        return false;
-    }
-    valid_http_authority(authority)
-}
-
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn validate_otlp_ca_cert_path(field: &str, path: Option<&Path>) -> Result<(), &'static str> {
     let Some(path) = path else {
@@ -10911,41 +10725,6 @@ fn warn_plaintext_remote_otlp_endpoint(field: &str, endpoint: &str) {
             "{field} uses plaintext HTTP to a non-loopback host; use https:// or restrict OTLP export to a local collector"
         );
     }
-}
-
-fn valid_http_authority(authority: &str) -> bool {
-    if authority.starts_with('[') {
-        let Some(end) = authority.find(']') else {
-            return false;
-        };
-        if end <= 1 {
-            return false;
-        }
-        let tail = &authority[end + 1..];
-        return tail.is_empty() || valid_port_tail(tail);
-    }
-
-    let Some((host, port)) = authority.rsplit_once(':') else {
-        return valid_http_host(authority);
-    };
-    valid_http_host(host) && valid_port(port)
-}
-
-fn valid_port_tail(tail: &str) -> bool {
-    tail.strip_prefix(':').is_some_and(valid_port)
-}
-
-fn valid_port(port: &str) -> bool {
-    port.parse::<u16>().is_ok_and(|port| port != 0)
-}
-
-fn valid_http_host(host: &str) -> bool {
-    !host.is_empty()
-        && !host.starts_with('-')
-        && !host.ends_with('-')
-        && host
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]

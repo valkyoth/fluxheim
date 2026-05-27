@@ -97,9 +97,81 @@ pub(crate) fn valid_upstream_alias(alias: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
+pub(crate) fn http_authority_is_loopback(authority: &str) -> bool {
+    let Some(host) = http_authority_host(authority) else {
+        return false;
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+pub(crate) fn http_authority_is_numeric_loopback(authority: &str) -> bool {
+    http_authority_host(authority).is_some_and(|host| host == "127.0.0.1" || host == "::1")
+}
+
+pub(crate) fn valid_http_authority(authority: &str) -> bool {
+    if authority.starts_with('[') {
+        let Some(end) = authority.find(']') else {
+            return false;
+        };
+        if end <= 1 {
+            return false;
+        }
+        let tail = &authority[end + 1..];
+        return tail.is_empty() || valid_http_authority_port_tail(tail);
+    }
+
+    let Some((host, port)) = authority.rsplit_once(':') else {
+        return valid_http_host(authority);
+    };
+    valid_http_host(host) && valid_u16_port(port)
+}
+
 fn valid_port_suffix(rest: &str) -> bool {
     rest.strip_prefix(':')
         .is_some_and(|port| !port.is_empty() && port.parse::<u16>().is_ok())
+}
+
+fn http_authority_host(authority: &str) -> Option<&str> {
+    if authority.contains('@') {
+        return None;
+    }
+    if authority.starts_with('[') {
+        let end = authority.find(']')?;
+        let tail = &authority[end + 1..];
+        if !tail.is_empty() && !valid_http_authority_port_tail(tail) {
+            return None;
+        }
+        return Some(&authority[1..end]);
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port)) => {
+            if host.contains(':') || !valid_u16_port(port) {
+                return None;
+            }
+            Some(host)
+        }
+        None => Some(authority),
+    }
+}
+
+fn valid_http_authority_port_tail(tail: &str) -> bool {
+    tail.strip_prefix(':').is_some_and(valid_u16_port)
+}
+
+fn valid_u16_port(port: &str) -> bool {
+    port.parse::<u16>().is_ok_and(|port| port != 0)
+}
+
+fn valid_http_host(host: &str) -> bool {
+    !host.is_empty()
+        && !host.starts_with('-')
+        && !host.ends_with('-')
+        && host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
 fn split_host_port(authority: &str) -> Option<(&str, u16)> {
