@@ -42,6 +42,8 @@ behavior when the change improves security or project direction.
 - Extract PHP custom parameter validation and protected FastCGI parameter guards
   into `config_php`, preserving `crate::config::protected_php_param_name` for
   PHP-FPM runtime code.
+- Move PHP-FPM retry method/status validation and PHP intercepted-error status
+  validation into `config_php`.
 
 ## 1.4.2 - 2026-05-27
 

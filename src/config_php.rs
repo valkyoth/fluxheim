@@ -1,10 +1,16 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use crate::config::ConfigError;
 
 pub(crate) const MAX_PHP_PARAMS: usize = 128;
+pub(crate) const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
+pub(crate) const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
+pub(crate) const MAX_PHP_INTERCEPT_ERROR_STATUSES: usize = 200;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
+const PHP_FPM_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 
 pub(crate) fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(), ConfigError> {
     if params.len() > MAX_PHP_PARAMS {
@@ -17,6 +23,92 @@ pub(crate) fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(
         validate_php_param_name(name)?;
         validate_php_param_value(value)?;
         warn_high_risk_php_param(name, value);
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError> {
+    if methods.len() > MAX_PHP_FPM_RETRY_METHODS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.retry_methods",
+            reason: "at most 16 methods are allowed",
+        });
+    }
+    let mut seen = HashSet::new();
+    for method in methods {
+        if method.is_empty()
+            || method.len() > 32
+            || !method
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_methods",
+                reason: "methods must be uppercase HTTP method tokens",
+            });
+        }
+        if !seen.insert(method.clone()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_methods",
+                reason: "contains duplicate methods",
+            });
+        }
+        if !PHP_FPM_SAFE_RETRY_METHODS.iter().any(|safe| safe == method) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_methods",
+                reason: "only safe HTTP methods GET, HEAD, OPTIONS, and TRACE are allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+    if statuses.len() > MAX_PHP_FPM_RETRY_STATUSES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.fpm.retry_statuses",
+            reason: "at most 100 statuses are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for status in statuses {
+        if !(500..=599).contains(status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_statuses",
+                reason: "statuses must be HTTP server error statuses from 500 through 599",
+            });
+        }
+        if !seen.insert(*status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.fpm.retry_statuses",
+                reason: "duplicate statuses are not allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
+    if statuses.len() > MAX_PHP_INTERCEPT_ERROR_STATUSES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.intercept_error_statuses",
+            reason: "at most 200 statuses are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for status in statuses {
+        if !(400..=599).contains(status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.intercept_error_statuses",
+                reason: "statuses must be HTTP error statuses from 400 through 599",
+            });
+        }
+        if !seen.insert(*status) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.intercept_error_statuses",
+                reason: "duplicate statuses are not allowed",
+            });
+        }
     }
     Ok(())
 }

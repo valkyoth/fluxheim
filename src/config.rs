@@ -41,11 +41,17 @@ use crate::config_path::{
     validate_non_world_writable_parent, validate_optional_process_path, validate_path,
     validate_required_process_path,
 };
-#[cfg(test)]
-pub(crate) use crate::config_php::MAX_PHP_PARAMS;
 #[cfg(feature = "php-fpm")]
 pub(crate) use crate::config_php::protected_php_param_name;
-use crate::config_php::validate_php_params;
+#[cfg(test)]
+pub(crate) use crate::config_php::{
+    MAX_PHP_FPM_RETRY_METHODS, MAX_PHP_FPM_RETRY_STATUSES, MAX_PHP_INTERCEPT_ERROR_STATUSES,
+    MAX_PHP_PARAMS,
+};
+use crate::config_php::{
+    validate_php_fpm_retry_methods, validate_php_fpm_retry_statuses,
+    validate_php_intercept_error_statuses, validate_php_params,
+};
 use crate::config_route::{
     valid_redirect_target_template, validate_route_methods, validate_route_path,
     validate_route_regex, validate_route_rewrite_prefix_path, validate_route_rewrite_template_path,
@@ -8672,9 +8678,6 @@ impl Default for PhpFpmConfig {
 
 const MAX_PHP_FPM_POOL_MAX_IDLE: usize = 1024;
 const MAX_PHP_FPM_RETRIES: u8 = 10;
-const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
-const PHP_FPM_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
-const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
 const MAX_PHP_FPM_TCP_UPSTREAMS: usize = 64;
 const MAX_PHP_FPM_MANAGED_WORKERS: usize = 256;
 const MAX_PHP_FPM_MANAGED_MAX_REQUESTS: usize = 1_000_000;
@@ -8686,7 +8689,6 @@ const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
 const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
 const MAX_PHP_ERROR_PAGES: usize = 64;
 const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
-const MAX_PHP_INTERCEPT_ERROR_STATUSES: usize = 200;
 const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
 const MAX_PHP_STDERR_FAILURE_PATTERN_BYTES: usize = 512;
 const MAX_PHP_STDERR_LOG_BYTES: usize = 1024 * 1024;
@@ -11316,92 +11318,6 @@ fn validate_php_hide_response_headers(headers: &[String]) -> Result<(), ConfigEr
             return Err(ConfigError::InvalidPhpConfig {
                 field: "php.hide_response_headers",
                 reason: "duplicate headers are not allowed",
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_php_fpm_retry_methods(methods: &[String]) -> Result<(), ConfigError> {
-    if methods.len() > MAX_PHP_FPM_RETRY_METHODS {
-        return Err(ConfigError::InvalidPhpConfig {
-            field: "php.fpm.retry_methods",
-            reason: "at most 16 methods are allowed",
-        });
-    }
-    let mut seen = HashSet::new();
-    for method in methods {
-        if method.is_empty()
-            || method.len() > 32
-            || !method
-                .bytes()
-                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
-        {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.retry_methods",
-                reason: "methods must be uppercase HTTP method tokens",
-            });
-        }
-        if !seen.insert(method.clone()) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.retry_methods",
-                reason: "contains duplicate methods",
-            });
-        }
-        if !PHP_FPM_SAFE_RETRY_METHODS.iter().any(|safe| safe == method) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.retry_methods",
-                reason: "only safe HTTP methods GET, HEAD, OPTIONS, and TRACE are allowed",
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_php_fpm_retry_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
-    if statuses.len() > MAX_PHP_FPM_RETRY_STATUSES {
-        return Err(ConfigError::InvalidPhpConfig {
-            field: "php.fpm.retry_statuses",
-            reason: "at most 100 statuses are allowed",
-        });
-    }
-    let mut seen = BTreeSet::new();
-    for status in statuses {
-        if !(500..=599).contains(status) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.retry_statuses",
-                reason: "statuses must be HTTP server error statuses from 500 through 599",
-            });
-        }
-        if !seen.insert(*status) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.fpm.retry_statuses",
-                reason: "duplicate statuses are not allowed",
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_php_intercept_error_statuses(statuses: &[u16]) -> Result<(), ConfigError> {
-    if statuses.len() > MAX_PHP_INTERCEPT_ERROR_STATUSES {
-        return Err(ConfigError::InvalidPhpConfig {
-            field: "php.intercept_error_statuses",
-            reason: "at most 200 statuses are allowed",
-        });
-    }
-    let mut seen = BTreeSet::new();
-    for status in statuses {
-        if !(400..=599).contains(status) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.intercept_error_statuses",
-                reason: "statuses must be HTTP error statuses from 400 through 599",
-            });
-        }
-        if !seen.insert(*status) {
-            return Err(ConfigError::InvalidPhpConfig {
-                field: "php.intercept_error_statuses",
-                reason: "duplicate statuses are not allowed",
             });
         }
     }
