@@ -66,6 +66,8 @@ behavior when the change improves security or project direction.
   client-certificate header, health, throttle, and self-healing validation.
 - Move server listener, downstream PROXY protocol, HTTPS redirect, host-routing,
   server limits, and process runtime path config into `config_server`.
+- Start the cache config split by moving cache purger config and validation
+  into `config_cache`.
 
 ## 1.4.2 - 2026-05-27
 

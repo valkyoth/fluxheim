@@ -15,6 +15,7 @@ pub use crate::config_admin::{
     AdminHealthResponseMode, AdminOpsSocketConfig, AdminRemoteTransportMode,
     AdminSelfHealingConfig, AdminTransportConfig,
 };
+pub use crate::config_cache::CachePurgerConfig;
 pub use crate::config_compression::CompressionConfig;
 #[cfg(test)]
 pub(crate) use crate::config_compression::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES;
@@ -663,60 +664,6 @@ impl ConfigFragment {
         for vhost in &mut self.vhosts {
             vhost.resolve_relative_paths(base_dir);
         }
-    }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct CachePurgerConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_cache_purger_interval_secs")]
-    pub interval_secs: u64,
-    #[serde(default = "default_cache_purger_limit")]
-    pub limit: usize,
-    #[serde(default = "default_cache_purger_batches")]
-    pub batches: usize,
-}
-
-impl Default for CachePurgerConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            interval_secs: default_cache_purger_interval_secs(),
-            limit: default_cache_purger_limit(),
-            batches: default_cache_purger_batches(),
-        }
-    }
-}
-
-impl CachePurgerConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
-        if self.enabled {
-            #[cfg(not(feature = "cache"))]
-            return Err(ConfigError::CachePurgerNotCompiled);
-        }
-
-        if self.interval_secs == 0 || self.interval_secs > 86_400 {
-            return Err(ConfigError::InvalidCachePurgerPolicy {
-                field: "cache_purger.interval_secs",
-                reason: "interval must be between 1 and 86400 seconds",
-            });
-        }
-        if self.limit == 0 || self.limit > 100_000 {
-            return Err(ConfigError::InvalidCachePurgerPolicy {
-                field: "cache_purger.limit",
-                reason: "limit must be between 1 and 100000 indexed entries",
-            });
-        }
-        if self.batches == 0 || self.batches > 100 {
-            return Err(ConfigError::InvalidCachePurgerPolicy {
-                field: "cache_purger.batches",
-                reason: "batches must be between 1 and 100",
-            });
-        }
-
-        Ok(())
     }
 }
 
@@ -8303,18 +8250,6 @@ impl Error for ConfigError {
             _ => None,
         }
     }
-}
-
-fn default_cache_purger_interval_secs() -> u64 {
-    300
-}
-
-fn default_cache_purger_limit() -> usize {
-    512
-}
-
-fn default_cache_purger_batches() -> usize {
-    1
 }
 
 fn default_acme_contact_email() -> Option<String> {
