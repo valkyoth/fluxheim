@@ -1,3 +1,4 @@
+#[cfg(feature = "cache")]
 pub(crate) fn safe_forward_path_and_query(path_and_query: &str) -> bool {
     let path = path_and_query
         .split_once('?')
@@ -5,7 +6,7 @@ pub(crate) fn safe_forward_path_and_query(path_and_query: &str) -> bool {
     safe_forward_path(path)
 }
 
-fn safe_forward_path(path: &str) -> bool {
+pub(crate) fn safe_forward_path(path: &str) -> bool {
     if !path.starts_with('/')
         || path.chars().any(char::is_control)
         || path.as_bytes().contains(&b'\\')

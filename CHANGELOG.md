@@ -59,9 +59,9 @@ behavior when the change improves security or project direction.
 - Extract outbound PROXY protocol v1/v2 frame construction and the L4 connector
   that writes those frames before upstream traffic into a focused
   `proxy_protocol` module.
-- Extract traversal-safe forwarded path validation into `forward_path`, giving
-  peer-fill and future forwarding code a shared security helper outside the
-  proxy orchestration layer.
+- Extract traversal-safe forwarded path validation into `path_safety`, giving
+  peer-fill, route rewrites, and future forwarding code one shared security
+  helper outside the proxy orchestration layer.
 - Extract upstream TLS trust-root and client-certificate material loading into
   `upstream_tls`, keeping O_NOFOLLOW, regular-file, and size-limit checks out
   of the proxy orchestration layer.
@@ -69,6 +69,11 @@ behavior when the change improves security or project direction.
   start in focused modules once they have their own validation, tests, metrics,
   dependencies, or security boundary. The same audit tracks future split
   candidates in `config.rs`, `cache.rs`, `admin.rs`, and `cli.rs`.
+
+### Fixed
+
+- Harden traffic-mirror sampling with a process-local random salt so request
+  paths cannot be precomputed into predictable mirror include/exclude buckets.
 
 ## 1.4.1 - 2026-05-26
 

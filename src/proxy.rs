@@ -6507,7 +6507,7 @@ fn fetch_peer_fill_response(
 #[cfg(feature = "cache")]
 fn peer_fill_url(base_url: &str, path_and_query: &str) -> std::io::Result<String> {
     let base_url = base_url.trim_end_matches('/');
-    if crate::forward_path::safe_forward_path_and_query(path_and_query) {
+    if crate::path_safety::safe_forward_path_and_query(path_and_query) {
         Ok(format!("{base_url}{path_and_query}"))
     } else {
         Err(std::io::Error::new(

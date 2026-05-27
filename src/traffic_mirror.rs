@@ -184,10 +184,39 @@ pub(crate) fn traffic_mirror_sample_selected(
     request: &RequestHeader,
     sample_per_mille: u16,
 ) -> bool {
+    traffic_mirror_sample_selected_with_salt(
+        request,
+        sample_per_mille,
+        traffic_mirror_sample_salt(),
+    )
+}
+
+fn traffic_mirror_sample_salt() -> &'static [u8; 16] {
+    static TRAFFIC_MIRROR_SAMPLE_SALT: OnceLock<[u8; 16]> = OnceLock::new();
+    TRAFFIC_MIRROR_SAMPLE_SALT.get_or_init(|| {
+        let mut salt = [0_u8; 16];
+        if let Err(error) = getrandom::fill(&mut salt) {
+            log::error!(
+                target: "fluxheim::security",
+                "traffic mirror sampling salt generation failed: {error}; aborting"
+            );
+            std::process::abort();
+        }
+        salt
+    })
+}
+
+fn traffic_mirror_sample_selected_with_salt(
+    request: &RequestHeader,
+    sample_per_mille: u16,
+    salt: &[u8; 16],
+) -> bool {
     if sample_per_mille >= 1000 {
         return true;
     }
     let mut hasher = Sha256::new();
+    hasher.update(salt);
+    hasher.update(b"\n");
     hasher.update(request.method.as_str().as_bytes());
     hasher.update(b"\n");
     hasher.update(

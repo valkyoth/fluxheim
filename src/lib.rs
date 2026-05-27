@@ -27,8 +27,6 @@ pub mod config;
 pub mod config_tester;
 #[cfg(feature = "proxy")]
 mod edge_policy;
-#[cfg(all(feature = "proxy", feature = "cache"))]
-mod forward_path;
 mod fs_trust;
 #[cfg(feature = "proxy")]
 pub mod headers;
@@ -43,6 +41,8 @@ pub mod metrics_otlp;
 pub mod otel_otlp;
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 mod otlp_http;
+#[cfg(feature = "proxy")]
+mod path_safety;
 #[cfg(feature = "php-fpm")]
 pub(crate) mod php_fpm;
 #[cfg(feature = "proxy")]
