@@ -14,6 +14,10 @@ behavior when the change improves security or project direction.
 - Harden path forwarding safety against triple-encoded traversal segments,
   zeroize copied auth-request forwarded header values, and rename the private
   admin empty-path validator to avoid confusion with full path-safety checks.
+- Harden admin auth throttling so a full per-source table evicts the stalest
+  tracked source instead of immediately promoting a new source to global
+  lockout, and route cache purge path validation through the shared path-safety
+  decoder.
 - Start the config module split and maintenance architecture release. This
   release is intentionally scoped to behavior-preserving extraction of the
   large `config.rs` surface into focused loading, validation, and domain slices

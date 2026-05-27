@@ -25,6 +25,11 @@ focused modules before the next `1.4.x` policy features.
   percent-decode pass, while still bounding decode work.
 - Auth-request copied forwarded header values now use zeroizing storage after
   the subrequest completes.
+- Admin auth throttling now evicts the stalest tracked source when the
+  per-source table is full instead of immediately escalating a new source to a
+  global lockout.
+- Cache purge path validation now uses the same shared multi-pass encoded path
+  safety check as proxy forwarding paths.
 - A private admin path helper was renamed so maintainers do not confuse the
   empty-path check with full traversal/symlink path validation.
 

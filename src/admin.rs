@@ -239,13 +239,16 @@ impl AdminAuthThrottle {
         if !state.ensure_source_capacity(&self.config, source) {
             log::warn!(
                 target: "fluxheim::security",
-                "admin auth throttle source table full; applying global lockout"
+                "admin auth throttle source table full; applying global failure accounting"
             );
-            state.global_lockouts = state.global_lockouts.saturating_add(1);
-            state.global_locked_until =
-                now.saturating_add(lockout_secs(&self.config, state.global_lockouts));
-            state.global_failures.clear();
-            return Some(AdminAuthThrottleScope::Global);
+            if state.global_failures.len() >= self.config.global_failures {
+                state.global_lockouts = state.global_lockouts.saturating_add(1);
+                state.global_locked_until =
+                    now.saturating_add(lockout_secs(&self.config, state.global_lockouts));
+                state.global_failures.clear();
+                return Some(AdminAuthThrottleScope::Global);
+            }
+            return None;
         }
 
         let source_locked = {
@@ -303,6 +306,26 @@ impl AdminAuthThrottleState {
         source: AuthSource,
     ) -> bool {
         if self.sources.contains_key(&source) || self.sources.len() < config.max_sources {
+            return true;
+        }
+        if let Some(stale_key) = self
+            .sources
+            .iter()
+            .filter(|(_, record)| record.locked_until == 0)
+            .min_by_key(|(_, record)| record.last_seen)
+            .map(|(source, _)| *source)
+            .or_else(|| {
+                self.sources
+                    .iter()
+                    .min_by_key(|(_, record)| record.last_seen)
+                    .map(|(source, _)| *source)
+            })
+        {
+            self.sources.remove(&stale_key);
+            log::warn!(
+                target: "fluxheim::security",
+                "admin auth throttle source table full; evicted stale source entry"
+            );
             return true;
         }
         false
@@ -3116,7 +3139,9 @@ fn validate_cache_purge_path_value(path: &str) -> Result<(), &'static str> {
     {
         return Err("cache purge path is invalid");
     }
-    if path_contains_traversal_segment(path) || path_contains_encoded_path_control(path) {
+    if path_contains_traversal_segment(path)
+        || !crate::path_safety::safe_forward_path_and_query(path)
+    {
         return Err("cache purge path must not contain traversal segments");
     }
     Ok(())
@@ -3174,12 +3199,6 @@ fn validated_cache_purge_tag(tag: Option<&str>) -> Result<&str, &'static str> {
 #[cfg(feature = "cache")]
 fn path_contains_traversal_segment(path: &str) -> bool {
     path.split('/').any(|segment| matches!(segment, "." | ".."))
-}
-
-#[cfg(feature = "cache")]
-fn path_contains_encoded_path_control(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c")
 }
 
 #[cfg(feature = "cache")]
@@ -3269,9 +3288,9 @@ mod tests {
     use http::{HeaderMap, HeaderValue, StatusCode, header};
 
     use super::{
-        AdminApp, AdminAuthThrottle, AdminAuthThrottleScope, AdminRuntimeState, AdminToken,
-        MAX_ADMIN_TOKEN_FILE_BYTES, admin_services_from_config, authorized, constant_time_eq,
-        error_response, json_response, read_bounded_secret_file, read_secret_file,
+        AdminApp, AdminAuthThrottle, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
+        admin_services_from_config, authorized, constant_time_eq, error_response, json_response,
+        read_bounded_secret_file, read_secret_file,
     };
     use crate::config::{
         AdminAuthThrottleConfig, AdminClientCertificateConfig, AdminConfig, AdminHealthConfig,
@@ -3529,7 +3548,7 @@ mod tests {
     }
 
     #[test]
-    fn admin_auth_throttle_locks_globally_when_source_table_is_full() {
+    fn admin_auth_throttle_evicts_stale_source_when_source_table_is_full() {
         let throttle = AdminAuthThrottle::new(AdminAuthThrottleConfig {
             enabled: true,
             window_secs: 60,
@@ -3546,11 +3565,15 @@ mod tests {
         );
         assert_eq!(
             throttle.record_failure(Some("192.0.2.31".parse().unwrap())),
-            Some(AdminAuthThrottleScope::Global)
+            None
         );
         assert_eq!(
             throttle.pre_auth_check(Some("192.0.2.30".parse().unwrap())),
-            Some(AdminAuthThrottleScope::Global)
+            None
+        );
+        assert_eq!(
+            throttle.record_failure(Some("192.0.2.31".parse().unwrap())),
+            None
         );
     }
 
@@ -4709,6 +4732,8 @@ mod tests {
         let cases = [
             Some("host=example.test&path=/../secret.png"),
             Some("host=example.test&path=/img/%2e%2e/secret.png"),
+            Some("host=example.test&path=/img/%252e%252e/secret.png"),
+            Some("host=example.test&path=/img/%25252e%25252e/secret.png"),
             Some("host=example.test&path=/img\\secret.png"),
             Some("host=example.test&method=GET POST&path=/img/logo.png"),
             Some("host=example.test/evil&path=/img/logo.png"),
