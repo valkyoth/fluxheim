@@ -71,6 +71,8 @@ behavior when the change improves security or project direction.
 - Move cache policy, range/slice, storage tier, peer fill, and disk encryption
   config into `config_cache`, keeping existing `crate::config::*` type paths
   stable.
+- Move the large config unit-test module into `config_tests.rs` so
+  `config.rs` contains only production orchestration and shared error types.
 - Move ACME issuer, renewal, automation, challenge, and external-account-binding
   config into `config_acme`.
 - Move listener TLS policy, TLS compliance mode, client-auth config, TLS cipher
