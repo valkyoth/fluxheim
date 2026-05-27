@@ -68,6 +68,9 @@ behavior when the change improves security or project direction.
   server limits, and process runtime path config into `config_server`.
 - Start the cache config split by moving cache purger config and validation
   into `config_cache`.
+- Move cache policy, range/slice, storage tier, peer fill, and disk encryption
+  config into `config_cache`, keeping existing `crate::config::*` type paths
+  stable.
 - Move ACME issuer, renewal, automation, challenge, and external-account-binding
   config into `config_acme`.
 - Move listener TLS policy, TLS compliance mode, client-auth config, TLS cipher
