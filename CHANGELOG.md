@@ -62,6 +62,8 @@ behavior when the change improves security or project direction.
   endpoint validation routed through the shared HTTP config helpers.
 - Move static web serving config into `config_web`, including index-file,
   cache-control, expires, root path, and directory-listing validation.
+- Move admin API config into `config_admin`, including auth source, ops socket,
+  client-certificate header, health, throttle, and self-healing validation.
 
 ## 1.4.2 - 2026-05-27
 

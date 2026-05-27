@@ -27,6 +27,7 @@ pub mod cli;
 mod compression;
 pub mod config;
 mod config_access;
+mod config_admin;
 mod config_compression;
 mod config_header;
 mod config_http;
