@@ -35,6 +35,8 @@ behavior when the change improves security or project direction.
   checks, and process path validation into `config_path`.
 - Extract header mutation, dynamic header-template, TLS identity append, and
   response/cookie rewrite validation helpers into `config_header`.
+- Extract access allow/deny and client-certificate SHA-256 list validation into
+  `config_access`.
 
 ## 1.4.2 - 2026-05-27
 

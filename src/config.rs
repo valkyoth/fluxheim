@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use toml::value::{Datetime, Offset};
 
+use crate::config_access::{validate_access_rule_list, validate_client_cert_sha256_list};
 use crate::config_header::{
     combined_header_set, combined_header_unset, merge_header_mutations, valid_http_header_name,
     valid_route_regex_capture_variable, validate_cookie_domain_rewrite_rules,
@@ -32,7 +33,7 @@ use crate::config_loader::{
 };
 use crate::config_net::{
     http_authority_is_loopback, http_authority_is_numeric_loopback, upstream_host, valid_authority,
-    valid_ip_matcher, valid_trusted_proxy, valid_upstream_alias,
+    valid_trusted_proxy, valid_upstream_alias,
 };
 pub use crate::config_net::{normalize_host, normalize_host_pattern};
 use crate::config_path::{
@@ -5321,8 +5322,6 @@ impl VhostConfig {
     }
 }
 
-const MAX_ACCESS_RULES: usize = 256;
-
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccessPolicyConfig {
@@ -5369,84 +5368,6 @@ impl AccessPolicyConfig {
         )?;
         Ok(())
     }
-}
-
-fn validate_access_rule_list(
-    scope: &'static str,
-    field: &'static str,
-    values: &[String],
-) -> Result<(), ConfigError> {
-    validate_config_list_len(format!("{scope}.{field}"), values.len(), MAX_ACCESS_RULES)?;
-
-    let mut seen = BTreeSet::new();
-    for value in values {
-        let trimmed = value.trim();
-        if trimmed != value || !valid_ip_matcher(trimmed) {
-            return Err(ConfigError::InvalidAccessRule {
-                field: access_rule_field(scope, field),
-                value: value.clone(),
-            });
-        }
-        if !seen.insert(trimmed.to_ascii_lowercase()) {
-            return Err(ConfigError::DuplicateAccessRule {
-                field: access_rule_field(scope, field),
-                value: value.clone(),
-            });
-        }
-    }
-
-    Ok(())
-}
-
-fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
-    match (scope, field) {
-        ("vhosts.access", "allow") => "vhosts.access.allow",
-        ("vhosts.access", "deny") => "vhosts.access.deny",
-        ("vhosts.access", "allow_client_cert_sha256") => "vhosts.access.allow_client_cert_sha256",
-        ("vhosts.access", "deny_client_cert_sha256") => "vhosts.access.deny_client_cert_sha256",
-        ("vhosts.routes.access", "allow") => "vhosts.routes.access.allow",
-        ("vhosts.routes.access", "deny") => "vhosts.routes.access.deny",
-        ("vhosts.routes.access", "allow_client_cert_sha256") => {
-            "vhosts.routes.access.allow_client_cert_sha256"
-        }
-        ("vhosts.routes.access", "deny_client_cert_sha256") => {
-            "vhosts.routes.access.deny_client_cert_sha256"
-        }
-        ("admin.client_certificate", "allow_sha256") => "admin.client_certificate.allow_sha256",
-        ("admin.client_certificate", "deny_sha256") => "admin.client_certificate.deny_sha256",
-        _ => "access",
-    }
-}
-
-fn validate_client_cert_sha256_list(
-    scope: &'static str,
-    field: &'static str,
-    values: &[String],
-) -> Result<(), ConfigError> {
-    validate_config_list_len(format!("{scope}.{field}"), values.len(), MAX_ACCESS_RULES)?;
-
-    let mut seen = BTreeSet::new();
-    for value in values {
-        let trimmed = value.trim();
-        if trimmed != value || !valid_sha256_hex(trimmed) {
-            return Err(ConfigError::InvalidAccessRule {
-                field: access_rule_field(scope, field),
-                value: value.clone(),
-            });
-        }
-        if !seen.insert(trimmed.to_ascii_lowercase()) {
-            return Err(ConfigError::DuplicateAccessRule {
-                field: access_rule_field(scope, field),
-                value: value.clone(),
-            });
-        }
-    }
-
-    Ok(())
-}
-
-fn valid_sha256_hex(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 const MAX_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 1_000_000;
@@ -11100,7 +11021,7 @@ fn valid_https_url(value: &str) -> bool {
         && !value.chars().any(char::is_whitespace)
 }
 
-fn validate_config_list_len(
+pub(crate) fn validate_config_list_len(
     field: impl Into<String>,
     len: usize,
     max: usize,
