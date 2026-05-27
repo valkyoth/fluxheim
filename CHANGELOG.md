@@ -68,6 +68,8 @@ behavior when the change improves security or project direction.
   server limits, and process runtime path config into `config_server`.
 - Start the cache config split by moving cache purger config and validation
   into `config_cache`.
+- Move ACME issuer, renewal, automation, challenge, and external-account-binding
+  config into `config_acme`.
 
 ## 1.4.2 - 2026-05-27
 

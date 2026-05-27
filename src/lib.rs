@@ -27,6 +27,7 @@ pub mod cli;
 mod compression;
 pub mod config;
 mod config_access;
+mod config_acme;
 mod config_admin;
 mod config_cache;
 mod config_compression;
