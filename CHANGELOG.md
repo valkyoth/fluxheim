@@ -44,6 +44,8 @@ behavior when the change improves security or project direction.
   PHP-FPM runtime code.
 - Move PHP-FPM retry method/status validation and PHP intercepted-error status
   validation into `config_php`.
+- Move PHP index, allowed-extension, denied-prefix, stderr failure-pattern, and
+  hidden-response-header validation into `config_php`.
 
 ## 1.4.2 - 2026-05-27
 

@@ -3,11 +3,17 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 
 use crate::config::ConfigError;
+use crate::config_header::validate_header_name;
 
+pub(crate) const MAX_PHP_ALLOWED_EXTENSIONS: usize = 16;
+pub(crate) const MAX_PHP_DENY_PATH_PREFIXES: usize = 128;
+pub(crate) const MAX_PHP_HIDE_RESPONSE_HEADERS: usize = 64;
+pub(crate) const MAX_PHP_STDERR_FAILURE_PATTERNS: usize = 32;
 pub(crate) const MAX_PHP_PARAMS: usize = 128;
 pub(crate) const MAX_PHP_FPM_RETRY_METHODS: usize = 16;
 pub(crate) const MAX_PHP_FPM_RETRY_STATUSES: usize = 100;
 pub(crate) const MAX_PHP_INTERCEPT_ERROR_STATUSES: usize = 200;
+const MAX_PHP_STDERR_FAILURE_PATTERN_BYTES: usize = 512;
 const MAX_PHP_PARAM_NAME_BYTES: usize = 128;
 const MAX_PHP_PARAM_VALUE_BYTES: usize = 16 * 1024;
 const PHP_FPM_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
@@ -23,6 +29,144 @@ pub(crate) fn validate_php_params(params: &BTreeMap<String, String>) -> Result<(
         validate_php_param_name(name)?;
         validate_php_param_value(value)?;
         warn_high_risk_php_param(name, value);
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_index(index: &str) -> Result<(), ConfigError> {
+    if index.trim().is_empty()
+        || index.contains('/')
+        || index.contains('\\')
+        || index == "."
+        || index == ".."
+        || !index.ends_with(".php")
+    {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.index",
+            reason: "index must be a plain .php file name",
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_extensions(extensions: &[String]) -> Result<(), ConfigError> {
+    if extensions.is_empty() {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.allowed_extensions",
+            reason: "at least one extension is required",
+        });
+    }
+    if extensions.len() > MAX_PHP_ALLOWED_EXTENSIONS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.allowed_extensions",
+            reason: "at most 16 extensions are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for extension in extensions {
+        if extension.trim().is_empty()
+            || extension.starts_with('.')
+            || extension.contains('/')
+            || extension.contains('\\')
+            || extension
+                .bytes()
+                .any(|byte| !(byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'))
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.allowed_extensions",
+                reason: "extensions must be plain extension names without dots or separators",
+            });
+        }
+        if !seen.insert(extension.to_ascii_lowercase()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.allowed_extensions",
+                reason: "duplicate extensions are not allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_deny_path_prefixes(prefixes: &[String]) -> Result<(), ConfigError> {
+    if prefixes.len() > MAX_PHP_DENY_PATH_PREFIXES {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.deny_path_prefixes",
+            reason: "at most 128 prefixes are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for prefix in prefixes {
+        if prefix.is_empty()
+            || !prefix.starts_with('/')
+            || prefix.contains('\0')
+            || prefix.contains('\\')
+            || prefix.contains('?')
+            || prefix.contains('#')
+            || prefix.chars().any(char::is_control)
+            || prefix
+                .split('/')
+                .any(|segment| segment == "." || segment == "..")
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.deny_path_prefixes",
+                reason: "prefixes must be absolute URI paths without dot segments, query, fragment, backslash, or control characters",
+            });
+        }
+        if !seen.insert(prefix.clone()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.deny_path_prefixes",
+                reason: "duplicate prefixes are not allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_stderr_failure_patterns(patterns: &[String]) -> Result<(), ConfigError> {
+    if patterns.len() > MAX_PHP_STDERR_FAILURE_PATTERNS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.stderr_failure_patterns",
+            reason: "at most 32 patterns are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for pattern in patterns {
+        if pattern.is_empty()
+            || pattern.len() > MAX_PHP_STDERR_FAILURE_PATTERN_BYTES
+            || pattern.bytes().any(|byte| matches!(byte, 0..=31 | 127))
+        {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.stderr_failure_patterns",
+                reason: "patterns must be 1 to 512 bytes and must not contain ASCII control characters",
+            });
+        }
+        if !seen.insert(pattern.clone()) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.stderr_failure_patterns",
+                reason: "duplicate patterns are not allowed",
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_php_hide_response_headers(headers: &[String]) -> Result<(), ConfigError> {
+    if headers.len() > MAX_PHP_HIDE_RESPONSE_HEADERS {
+        return Err(ConfigError::InvalidPhpConfig {
+            field: "php.hide_response_headers",
+            reason: "at most 64 headers are allowed",
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for header in headers {
+        validate_header_name("php.hide_response_headers", header)?;
+        let normalized = header.to_ascii_lowercase();
+        if !seen.insert(normalized) {
+            return Err(ConfigError::InvalidPhpConfig {
+                field: "php.hide_response_headers",
+                reason: "duplicate headers are not allowed",
+            });
+        }
     }
     Ok(())
 }
