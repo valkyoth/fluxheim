@@ -4,10 +4,215 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use toml::value::{Datetime, Offset};
 
-use crate::config::{ConfigError, valid_credential_name, validate_config_list_len};
+use crate::config::{
+    AccessPolicyConfig, ConcurrencyLimitConfig, ConfigError, GrpcRouteConfig, ProxyConfig,
+    RateLimitConfig, RouteConfig, VhostHeaderPolicyConfig, valid_credential_name,
+    validate_config_list_len, validate_optional_timeout_secs,
+};
+use crate::config_net::{normalize_host, valid_authority};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
+use crate::config_tls::TlsConfig;
 
 pub(crate) const MAX_ACME_ISSUERS: usize = 128;
+pub(crate) const MAX_VHOST_ACME_DOMAINS: usize = 64;
+pub(crate) const MAX_ACME_CHALLENGE_UPSTREAMS: usize = 64;
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VhostAcmeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub issuer: Option<String>,
+    #[serde(default)]
+    pub domains: Vec<String>,
+}
+
+impl VhostAcmeConfig {
+    pub(crate) fn validate(
+        &self,
+        scope: &'static str,
+        vhost_hosts: &[String],
+        global_tls: &TlsConfig,
+    ) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        if !global_tls.acme.enabled {
+            return Err(ConfigError::VhostAcmeWithoutGlobalAcme { scope });
+        }
+
+        let issuer = self
+            .issuer
+            .as_deref()
+            .unwrap_or(&global_tls.acme.default_issuer);
+        if issuer.trim().is_empty() {
+            return Err(ConfigError::EmptyAcmeIssuerName {
+                scope: "vhosts.tls.acme.issuer",
+            });
+        }
+        if !global_tls.acme_issuer_exists(issuer) {
+            return Err(ConfigError::UnknownAcmeIssuer {
+                name: issuer.to_owned(),
+            });
+        }
+
+        let domains: Vec<&str> = if self.domains.is_empty() {
+            vhost_hosts
+                .iter()
+                .map(String::as_str)
+                .filter(|host| !host.starts_with("*."))
+                .collect()
+        } else {
+            validate_config_list_len(
+                format!("{scope}.acme.domains"),
+                self.domains.len(),
+                MAX_VHOST_ACME_DOMAINS,
+            )?;
+            self.domains.iter().map(String::as_str).collect()
+        };
+
+        if domains.is_empty() {
+            return Err(ConfigError::EmptyVhostAcmeDomains { scope });
+        }
+
+        let mut seen_domains = std::collections::HashSet::new();
+        for domain in domains {
+            let Some(normalized_domain) = normalize_host(domain) else {
+                return Err(ConfigError::InvalidVhostAcmeDomain {
+                    scope,
+                    domain: domain.to_owned(),
+                });
+            };
+            if !seen_domains.insert(normalized_domain.clone()) {
+                return Err(ConfigError::DuplicateVhostAcmeDomain {
+                    scope,
+                    domain: normalized_domain,
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+const ACME_HTTP_CHALLENGE_PREFIX: &str = "/.well-known/acme-challenge/";
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VhostAcmeChallengeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub upstream: Option<String>,
+    #[serde(default)]
+    pub upstreams: Vec<String>,
+    #[serde(default)]
+    pub upstream_tls: bool,
+    #[serde(default)]
+    pub connect_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub read_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub send_timeout_secs: Option<u64>,
+}
+
+impl VhostAcmeChallengeConfig {
+    pub(crate) fn validate(&self, vhost: &str) -> Result<(), ConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        if self.upstream.is_some() && !self.upstreams.is_empty() {
+            return Err(ConfigError::ConflictingAcmeChallengeUpstreams {
+                vhost: vhost.to_owned(),
+            });
+        }
+        if self.upstream.is_none() && self.upstreams.is_empty() {
+            return Err(ConfigError::MissingAcmeChallengeUpstream {
+                vhost: vhost.to_owned(),
+            });
+        }
+        if self.upstreams.len() > MAX_ACME_CHALLENGE_UPSTREAMS {
+            return Err(ConfigError::TooManyAcmeChallengeUpstreams {
+                vhost: vhost.to_owned(),
+                max: MAX_ACME_CHALLENGE_UPSTREAMS,
+            });
+        }
+
+        if let Some(upstream) = &self.upstream
+            && !valid_authority(upstream)
+        {
+            return Err(ConfigError::InvalidUpstream {
+                address: upstream.clone(),
+            });
+        }
+        let mut seen_upstreams = std::collections::HashSet::new();
+        for upstream in &self.upstreams {
+            if !valid_authority(upstream) {
+                return Err(ConfigError::InvalidUpstream {
+                    address: upstream.clone(),
+                });
+            }
+            if !seen_upstreams.insert(upstream.to_ascii_lowercase()) {
+                return Err(ConfigError::DuplicateAcmeChallengeUpstream {
+                    vhost: vhost.to_owned(),
+                    upstream: upstream.clone(),
+                });
+            }
+        }
+
+        validate_optional_timeout_secs(
+            "vhosts.acme_challenge.connect_timeout_secs",
+            self.connect_timeout_secs,
+        )?;
+        validate_optional_timeout_secs(
+            "vhosts.acme_challenge.read_timeout_secs",
+            self.read_timeout_secs,
+        )?;
+        validate_optional_timeout_secs(
+            "vhosts.acme_challenge.send_timeout_secs",
+            self.send_timeout_secs,
+        )?;
+        Ok(())
+    }
+
+    pub fn route_config(&self) -> Option<RouteConfig> {
+        self.enabled.then(|| RouteConfig {
+            name: "acme-http-01".to_owned(),
+            path_exact: None,
+            path_prefix: Some(ACME_HTTP_CHALLENGE_PREFIX.to_owned()),
+            path_regex: None,
+            methods: Vec::new(),
+            fallback: false,
+            https_redirect_exempt: true,
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            access: AccessPolicyConfig::default(),
+            rate_limit: RateLimitConfig::default(),
+            concurrency: ConcurrencyLimitConfig::default(),
+            grpc: GrpcRouteConfig::default(),
+            redirect: None,
+            proxy: Some(ProxyConfig {
+                upstream: self.upstream.clone(),
+                upstreams: self.upstreams.clone(),
+                upstream_tls: self.upstream_tls,
+                connect_timeout_secs: self.connect_timeout_secs,
+                read_timeout_secs: self.read_timeout_secs,
+                send_timeout_secs: self.send_timeout_secs,
+                ..ProxyConfig::default()
+            }),
+            web: None,
+            php: None,
+            cache: None,
+            compression: None,
+            headers: VhostHeaderPolicyConfig::default(),
+        })
+    }
+}
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

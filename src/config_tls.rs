@@ -3,12 +3,53 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ConfigError, validate_config_list_len};
-use crate::config_acme::{AcmeConfig, AcmeConfigFragment};
+use crate::config_acme::{AcmeConfig, AcmeConfigFragment, VhostAcmeConfig};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
 pub(crate) const MAX_TLS_CURVE_PREFERENCES: usize = 16;
 pub(crate) const MAX_TLS_CIPHER_SUITES: usize = 32;
 pub(crate) const MAX_TLS_CERTIFICATES: usize = 1024;
+
+#[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VhostTlsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub certificate: Option<StaticCertificateConfig>,
+    #[serde(default)]
+    pub acme: VhostAcmeConfig,
+}
+
+impl VhostTlsConfig {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        if let Some(certificate) = &mut self.certificate {
+            certificate.resolve_relative_paths(base_dir);
+        }
+    }
+
+    pub(crate) fn validate(
+        &self,
+        scope: &'static str,
+        vhost_hosts: &[String],
+        global_tls: &TlsConfig,
+        has_shared_certificate_source: bool,
+    ) -> Result<(), ConfigError> {
+        if let Some(certificate) = &self.certificate {
+            certificate.validate(scope)?;
+        }
+
+        if self.enabled
+            && self.certificate.is_none()
+            && !self.acme.enabled
+            && !has_shared_certificate_source
+        {
+            return Err(ConfigError::TlsEnabledWithoutCertificateSource { scope });
+        }
+
+        self.acme.validate(scope, vhost_hosts, global_tls)
+    }
+}
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
