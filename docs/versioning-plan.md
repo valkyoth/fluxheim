@@ -1318,13 +1318,62 @@ Release shape:
     endpoints; `cli.rs` can separate cache inspection/warmup commands from
     top-level command dispatch. These are maintenance refactors, not release
     blockers unless touched by a feature;
-- `1.4.3` - advanced policy, Geo-Context, and HAProxy-style operations:
-  - stop line: ship advanced HTTP policy and backend operations only. Do not
-    add TCP stream listeners, TLS passthrough SNI routing, UDP proxying,
+- `1.4.3` - config module split and maintenance architecture:
+  - stop line: no new operator-facing config features, no config migration, and
+    no behavior changes unless required to preserve existing validation during
+    extraction. Keep `crate::config::*` public paths stable for callers;
+  - split the largest remaining source file into focused domains before adding
+    GeoIP or other policy features. Start with config source loading and safe
+    TOML file discovery, then move domain validation in conservative slices;
+  - target slices: `config_loader` for path-safe config source discovery and
+    bounded TOML reads; `config_admin`; `config_tls`; `config_proxy`;
+    `config_cache`; `config_php`; `config_acme`; and shared
+    `config_validation` helpers where cross-domain validators are genuinely
+    shared;
+  - keep `src/config.rs` as the serde-facing facade and re-export layer at
+    first. Do not force downstream modules to chase new paths during the split;
+  - move tests with their domain only when the moved code no longer needs large
+    private fixtures from `config.rs`. Otherwise keep behavior tests in place
+    until the domain boundary is stable;
+  - preserve feature-gated builds so optional domains compile in and out
+    exactly as they did in 1.4.2;
+  - document every intentionally deferred split candidate at release time so
+    the config split does not become an unbounded refactor.
+- `1.4.4` - Apple Silicon macOS developer support:
+  - stop line: Level 1 support only. Make Fluxheim build and run for local
+    development on `aarch64-apple-darwin` with documented dev configs and one
+    smoke gate. Do not claim macOS production support, FIPS evidence, launchd
+    packaging, Homebrew distribution, notarized binaries, or parity with the
+    Linux release gates in `1.4.4`;
+  - add a macOS CI or documented manual gate for the development profile:
+    `cargo check --locked --no-default-features --features web --lib`,
+    `profile-static-site`, `profile-reverse-proxy`, `profile-full`, and
+    `profile-development` for `fluxheim` and `fluxheim-acme`;
+  - add macOS developer examples that keep runtime state under project-local
+    or `/tmp` paths instead of Linux service paths: run sockets, pid files,
+    admin snapshots, ACME storage, disk cache, access/file logs, and PHP-FPM
+    socket directories must all be writable by an unprivileged Mac user;
+  - add one runtime smoke test on an Apple Silicon runner or local M-series
+    machine for static serving, reverse proxying, disk cache with a Mac-safe
+    path, structured logs, and managed PHP-FPM when Homebrew PHP is available;
+  - audit native dependency behavior on macOS, especially `ring`,
+    `aws-lc-sys`, `zstd-sys`, `libz-ng-sys`, OpenSSL/BoringSSL/S2N optional
+    TLS backends, and PHP-FPM process management. Prefer feature/profile fixes
+    that avoid compiling unused native dependencies for developer builds;
+  - document required local prerequisites such as Xcode Command Line Tools,
+    Rust target/toolchain, CMake when selected features need it, and optional
+    Homebrew PHP-FPM for managed PHP development tests;
+  - keep Linux as the production support baseline. macOS support is for
+    contributor development and local site testing until Pingora's macOS
+    support is no longer experimental and Fluxheim has regular macOS smoke
+    coverage.
+- `1.4.5` - bounded Geo-Context and advanced HTTP policy foundation:
+  - stop line: ship local GeoIP/Geo-Context and bounded HTTP policy only. Do
+    not add TCP stream listeners, TLS passthrough SNI routing, UDP proxying,
     HTTP/3, gRPC transcoding, xDS/Kubernetes/Consul control planes, global
     distributed rate-limit services, arbitrary Wasm/Lua execution, built-in
     GeoIP database downloading, remote GeoIP lookup fallbacks, or impossible
-    travel/anomaly engines in `1.4.3`;
+    travel/anomaly engines in `1.4.5`;
   - optional `geoip` Cargo feature as a bounded Geo-Context foundation, not a
     broad programmable geo engine. Implement a provider-agnostic MMDB layer:
     the hot-path should ask a typed `GeoProvider`/`GeoDatabase` abstraction for
@@ -1343,7 +1392,7 @@ Release shape:
   - load database files with the same safe path rules used for other
     operator-supplied files, and reload by atomically swapping an `Arc` on
     config reload. Do not make database downloading/updating part of the proxy
-    process in `1.4.3`; document a systemd timer/sidecar pattern that downloads
+    process in `1.4.5`; document a systemd timer/sidecar pattern that downloads
     MaxMind/CIRCL files, verifies checksums or signatures where the provider
     publishes them, writes atomically, and then triggers Fluxheim reload;
   - implement GeoIP as its own `geoip`/`geo_context` module from the start,
@@ -1368,37 +1417,15 @@ Release shape:
     weighting, programmable rhai/Wasm geo logic, and impossible-travel
     detection to `1.5` or `1.6` after the typed context and policy model are
     stable;
-  - implementation order: define the typed geo context and privacy behavior
-    before adding policy consumers; wire it into ACL/routing decisions before
-    any load-balancer weighting; keep enterprise load-balancer operations in
-    `1.5` unless they are required to make the `1.4.3` ACL surface correct;
-  - advanced ACL composition with a small typed boolean expression AST:
-    `and`, `or`, `not`, plus leaf conditions for source IP, client certificate
-    fingerprint, method, path prefix, path regex, host, safe header values, and
-    optional geo fields. Keep existing flat allow/deny lists for compatibility;
-  - stick-table-style local tracking for HTTP requests: configurable keys
-    such as IP, header, cookie, or query parameter; counters for request rate,
-    connection count, bytes, selected status/error rate, and last-seen time;
-    TTL-bounded eviction; and conditions that integrate with the advanced ACL
-    evaluator;
-  - runtime backend management through the authenticated admin API and/or local
-    operational socket: drain, disable, enable, and weight changes first; adding
-    brand-new backends at runtime only after atomic pool replacement is proven;
-  - drain semantics tied to existing load-balanced connection permits, so a
-    drained backend stops receiving new selections while in-flight requests are
-    allowed to complete;
-  - NGINX `map`-style variable mapping after regex routing exists: exact and
-    regex match rules, bounded output variables such as `{map.lang}`, and no
-    arbitrary scripting;
-  - response body substitution as an explicit bounded feature, not a default:
-    text content types only, input/output size caps, ETag stripping, correct
-    interaction order with compression, and identity pass-through for bodies
-    above the configured limit.
-- `1.4.4` - TCP stream proxy foundation:
+  - advanced ACL composition, stick-table-style local tracking, runtime backend
+    management, NGINX `map`-style variables, and bounded response body
+    substitution remain in this policy line only if the config split is already
+    complete and the stop line remains realistic. Otherwise move them to `1.5`.
+- `1.4.6` - TCP stream proxy foundation:
   - stop line: ship L4 TCP stream proxy basics only. Do not add UDP proxying,
     DNS-specific UDP load balancing, generic L7 policy on stream routes,
     HTTP cache/compression/auth/PHP behavior on stream routes, xDS/Kubernetes
-    service discovery, or Wasm/Lua stream filters in `1.4.4`;
+    service discovery, or Wasm/Lua stream filters in `1.4.6`;
   - compile-time feature separate from HTTP proxy if needed;
   - port/listener-based stream routing to one or more upstreams, reusing the
     load-balancer selection and health primitives where they are transport
@@ -1415,34 +1442,6 @@ Release shape:
     must forward the original bytes unmodified after peeking;
   - no HTTP headers, cache, auth subrequest, compression, or PHP behavior on
     stream routes.
-- `1.4.5` - Apple Silicon macOS developer support:
-  - stop line: Level 1 support only. Make Fluxheim build and run for local
-    development on `aarch64-apple-darwin` with documented dev configs and one
-    smoke gate. Do not claim macOS production support, FIPS evidence, launchd
-    packaging, Homebrew distribution, notarized binaries, or parity with the
-    Linux release gates in `1.4.5`;
-  - add a macOS CI or documented manual gate for the development profile:
-    `cargo check --locked --no-default-features --features web --lib`,
-    `profile-static-site`, `profile-reverse-proxy`, `profile-full`, and
-    `profile-development` for `fluxheim` and `fluxheim-acme`;
-  - add macOS developer examples that keep runtime state under project-local
-    or `/tmp` paths instead of Linux service paths: run sockets, pid files,
-    admin snapshots, ACME storage, disk cache, access/file logs, and PHP-FPM
-    socket directories must all be writable by an unprivileged Mac user;
-  - add one runtime smoke test on an Apple Silicon runner or local M-series
-    machine for static serving, reverse proxying, disk cache with a Mac-safe
-    path, structured logs, and managed PHP-FPM when Homebrew PHP is available;
-  - audit native dependency behavior on macOS, especially `ring`,
-    `aws-lc-sys`, `zstd-sys`, `libz-ng-sys`, OpenSSL/BoringSSL/S2N optional
-    TLS backends, and PHP-FPM process management. Prefer feature/profile fixes
-    that avoid compiling unused native dependencies for developer builds;
-  - document required local prerequisites such as Xcode Command Line Tools,
-    Rust target/toolchain, CMake when selected features need it, and optional
-    Homebrew PHP-FPM for managed PHP development tests;
-  - keep Linux as the production support baseline. macOS support is for
-    contributor development and local site testing until Pingora's macOS
-    support is no longer experimental and Fluxheim has regular macOS smoke
-    coverage.
 - Future macOS production support:
   - track as a later release line after `1.4.x`, not as spillover from the
     developer-support milestone. Production macOS requires regular macOS CI,
@@ -1579,7 +1578,7 @@ Stable scope:
   - strict validation before replacing an active pool;
   - later xDS/Kubernetes/Consul support only after the local discovery model is
     stable.
-- TCP stream proxy foundation is tracked as `1.4.4`, not as part of the HTTP
+- TCP stream proxy foundation is tracked as `1.4.6`, not as part of the HTTP
   proxy runtime. It should reuse listener/TLS/load-balancer building blocks
   where possible but remain a separate stream feature with no HTTP semantics.
 - UDP proxying is deliberately deferred. Pingora does not provide UDP support,
@@ -3036,22 +3035,24 @@ the exception while the cache server is being completed as a focused sequence:
   in `cache_api`; later cache slices can move stateful runtime/storage and
   slice object helpers without changing config. Preserve config compatibility
   and pass the existing 1.4.1 smoke/security matrix before moving on.
-- `v1.4.3`: optional bounded Geo-Context foundation, advanced ACL composition,
-  local stick-table-style tracking, runtime backend management, map-style
-  variables, and bounded response body substitution. GeoIP scope stops at local
-  provider-agnostic MMDB country/ASN context for MaxMind GeoIP2/GeoLite2 and
-  CIRCL Geo Open datasets, privacy controls, route/access decisions, ordered
-  local fallback, and bounded observability; built-in dynamic database
-  downloaders, remote lookup sidecars, programmable geo logic, and anomaly
-  engines are later work.
-- `v1.4.4`: TCP stream proxy foundation with separate stream semantics,
-  listener/upstream trust boundaries, metrics, and optional TLS passthrough SNI
-  routing only after a bounded ClientHello parser is proven.
-- `v1.4.5`: Apple Silicon macOS developer support. Scope stops at local
+- `v1.4.3`: config module split and maintenance architecture. Stop line: no new
+  operator-facing config features, no config migration, and no behavior changes
+  beyond preserving validation while extracting config loading and domain
+  validation into focused modules behind stable `crate::config::*` paths.
+- `v1.4.4`: Apple Silicon macOS developer support. Scope stops at local
   `aarch64-apple-darwin` build/check/smoke coverage for development profiles,
   Mac-safe dev configs for runtime paths/cache/logs/PHP-FPM, dependency/profile
   cleanup for unused native crates, and setup docs; it is not a production,
   FIPS, Homebrew, notarized-binary, or launchd packaging milestone.
+- `v1.4.5`: optional bounded Geo-Context foundation and advanced HTTP policy.
+  GeoIP scope stops at local provider-agnostic MMDB country/ASN context for
+  MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, privacy controls,
+  route/access decisions, ordered local fallback, and bounded observability;
+  built-in dynamic database downloaders, remote lookup sidecars, programmable
+  geo logic, and anomaly engines are later work.
+- `v1.4.6`: TCP stream proxy foundation with separate stream semantics,
+  listener/upstream trust boundaries, metrics, and optional TLS passthrough SNI
+  routing only after a bounded ClientHello parser is proven.
 - Later macOS production line: only after Level 1 developer support is stable.
   Requires regular macOS CI, runtime smoke coverage, launchd/Homebrew or other
   packaging decisions, signed/notarized binary policy, and a macOS-specific

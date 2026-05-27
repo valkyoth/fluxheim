@@ -7,6 +7,20 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.4.3-dev - Unreleased
+
+### Changed
+
+- Start the config module split and maintenance architecture release. This
+  release is intentionally scoped to behavior-preserving extraction of the
+  large `config.rs` surface into focused loading, validation, and domain slices
+  before adding GeoIP or other advanced policy features.
+- Move the remaining `1.4.x` plan so `1.4.3` is the config split, `1.4.4` is
+  Apple Silicon macOS Level 1 developer support, `1.4.5` is GeoIP/Geo-Context,
+  and `1.4.6` is TCP stream proxying.
+- Extract path-safe TOML source discovery and bounded config-file loading into
+  `config_loader`, preserving the existing `crate::config::*` public API.
+
 ## 1.4.2 - 2026-05-27
 
 ### Changed
@@ -146,11 +160,11 @@ behavior when the change improves security or project direction.
 - Reserve `1.4.2` for proxy runtime module extraction before the next large
   proxy feature. GeoIP/Geo-Context and TCP stream proxying move to later
   `1.4.x` stops.
-- Clarify the later GeoIP/Geo-Context plan: the `1.4.3` target should use a
+- Clarify the later GeoIP/Geo-Context plan: the target should use a
   provider-agnostic local MMDB layer for MaxMind GeoIP2/GeoLite2 and CIRCL Geo
   Open datasets, normalized typed country/ASN context, and ordered local
   fallback without built-in remote lookup or database downloading.
-- Add `1.4.5` as an Apple Silicon macOS developer-support stop for local
+- Add an Apple Silicon macOS developer-support stop for local
   `aarch64-apple-darwin` build/check/smoke coverage, Mac-safe dev runtime
   paths, and explicit deferral of production macOS packaging/security support
   while Pingora macOS support remains experimental.

@@ -35,7 +35,7 @@ compression, advanced upstream selection, passive health, retry budgets,
 PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
 origin controls, gRPC pass-through policy, proxy-operations migration blockers,
 and the `1.4.2` proxy module split. The active development target is `1.4.3`,
-focused on optional GeoIP/Geo-Context and advanced HTTP policy work.
+focused on the config module split before adding more policy surface.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -115,9 +115,10 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Capability | Status | Target |
 | --- | --- | --- |
 | Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
-| GeoIP/Geo-Context policy | ❌ | Planned for `1.4.3` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
-| TCP stream proxying | ❌ | Planned for `1.4.4`. |
-| Apple Silicon macOS dev builds | ❌ | Planned for `1.4.5` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
+| Config module split | 🟡 | `1.4.3` in progress; behavior-preserving extraction of config loading and domain validation while keeping `crate::config::*` stable. |
+| Apple Silicon macOS dev builds | ❌ | Planned for `1.4.4` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
+| GeoIP/Geo-Context policy | ❌ | Planned for `1.4.5` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
+| TCP stream proxying | ❌ | Planned for `1.4.6`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
 | WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
 

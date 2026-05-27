@@ -26,6 +26,7 @@ pub mod cli;
 ))]
 mod compression;
 pub mod config;
+mod config_loader;
 pub mod config_tester;
 #[cfg(feature = "proxy")]
 mod edge_policy;
