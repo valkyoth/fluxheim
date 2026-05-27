@@ -25,6 +25,9 @@ behavior when the change improves security or project direction.
   `crate::config::*` re-export paths stable.
 - Move file-refreshed proxy upstream pool loading into `config_loader`, keeping
   the existing `crate::config::read_proxy_upstreams_file` internal path stable.
+- Extract host normalization and upstream/trusted-proxy authority validation
+  helpers into `config_net`, preserving the public `crate::config::normalize_*`
+  API used by runtime modules.
 
 ## 1.4.2 - 2026-05-27
 

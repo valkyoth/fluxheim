@@ -27,6 +27,7 @@ pub mod cli;
 mod compression;
 pub mod config;
 mod config_loader;
+mod config_net;
 pub mod config_tester;
 mod config_types;
 #[cfg(feature = "proxy")]

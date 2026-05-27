@@ -9,7 +9,9 @@ use std::fmt::{Display, Formatter};
 
 use crate::config::ConfigError;
 #[cfg(feature = "load-balancer")]
-use crate::config::{MAX_PROXY_UPSTREAMS, valid_authority};
+use crate::config::MAX_PROXY_UPSTREAMS;
+#[cfg(feature = "load-balancer")]
+use crate::config_net::valid_authority;
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
