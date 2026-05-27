@@ -1,0 +1,61 @@
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+
+[server.process]
+daemon = false
+pid_file = ".fluxheim-dev/fluxheim.pid"
+upgrade_sock = ".fluxheim-dev/fluxheim-upgrade.sock"
+certificate_reload_sock = ".fluxheim-dev/fluxheim-cert-reload.sock"
+threads = 1
+listener_tasks_per_fd = 1
+work_stealing = true
+
+[admin]
+enabled = false
+listen = "127.0.0.1:9090"
+require_loopback = true
+snapshot_store = ".fluxheim-dev/admin-snapshots"
+
+[metrics]
+enabled = false
+listen = "127.0.0.1:9091"
+require_loopback = true
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[logging.file]
+enabled = true
+path = ".fluxheim-dev/logs/fluxheim.log"
+append = true
+
+[logging.access]
+enabled = true
+include_host = true
+include_path = true
+request_id = true
+
+[cache]
+enabled = false
+methods = ["GET", "HEAD"]
+
+[cache.disk]
+enabled = false
+path = ".fluxheim-dev/cache"
+
+[tls]
+enabled = false
+backend = "rustls"
+
+[tls.acme]
+enabled = false
+storage = ".fluxheim-dev/acme"
+
+[web]
+root = ".fluxheim-dev/site"
+index_files = ["index.html"]
+deny_dotfiles = true
+cache_control = "public, max-age=60"

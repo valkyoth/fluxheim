@@ -187,6 +187,27 @@ sha256sum "dist/${TESTER_DIST_NAME}.tar.gz"
 
 Record all runtime and config-tester binary checksums.
 
+For Level 1 macOS developer artifacts, build on the matching Mac host and use
+the host target triple in the artifact name. Apple Silicon Macs should produce
+`aarch64-apple-darwin`; Intel Macs should produce `x86_64-apple-darwin`.
+These artifacts are developer conveniences, not production packages:
+
+```bash
+TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+DIST_NAME="fluxheim-${RELEASE_VERSION}-dev-${TARGET}"
+cargo build --release --locked --no-default-features --features profile-development \
+  --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+rm -rf "dist/${DIST_NAME}"
+mkdir -p "dist/${DIST_NAME}"
+cp target/release/fluxheim "dist/${DIST_NAME}/"
+cp target/release/fluxheim-acme "dist/${DIST_NAME}/"
+cp target/release/fluxheim-config-tester "dist/${DIST_NAME}/"
+cp README.md LICENSE CHANGELOG.md "dist/${DIST_NAME}/"
+cp -r docs examples release-notes "dist/${DIST_NAME}/"
+tar -C dist -czf "dist/${DIST_NAME}.tar.gz" "${DIST_NAME}"
+shasum -a 256 "dist/${DIST_NAME}.tar.gz"
+```
+
 Generate SBOMs for the tagged source tree:
 
 ```bash
@@ -279,9 +300,12 @@ On GitHub:
    `dist/fluxheim-${RELEASE_VERSION}-{full,cache,proxy,php}-${TARGET}.tar.gz`.
 7. Upload the unified config-tester archive built in step 4:
    `dist/fluxheim-${RELEASE_VERSION}-config-tester-${TARGET}.tar.gz`.
-8. Upload `target/release-evidence/fluxheim.spdx.json`.
-9. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
-10. Publish the release.
+8. If the release includes Level 1 macOS developer artifacts, upload
+   `dist/fluxheim-${RELEASE_VERSION}-dev-{aarch64,x86_64}-apple-darwin.tar.gz`
+   for the Mac targets that were actually built.
+9. Upload `target/release-evidence/fluxheim.spdx.json`.
+10. Upload `target/release-evidence/fluxheim.cyclonedx.json`.
+11. Publish the release.
 
 It is normal to publish before every evidence field is filled. Source archives
 and container digests are available only after the tag/release and image

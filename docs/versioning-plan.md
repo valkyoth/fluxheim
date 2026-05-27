@@ -1363,6 +1363,12 @@ Release shape:
   - document required local prerequisites such as Xcode Command Line Tools,
     Rust target/toolchain, CMake when selected features need it, and optional
     Homebrew PHP-FPM for managed PHP development tests;
+  - document release artifacts by target triple: `aarch64-apple-darwin` for
+    Apple Silicon Macs, `x86_64-apple-darwin` for Intel Macs,
+    `aarch64-unknown-linux-gnu` for Linux ARM64, and
+    `x86_64-unknown-linux-gnu` for the main Linux x86_64 build. Do not publish
+    one ambiguous "ARM" artifact, and do not use machine-local
+    `target-cpu=native` tuning for public release binaries;
   - keep Linux as the production support baseline. macOS support is for
     contributor development and local site testing until Pingora's macOS
     support is no longer experimental and Fluxheim has regular macOS smoke

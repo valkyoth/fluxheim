@@ -166,6 +166,7 @@ jobs:
           cargo run --quiet -- --check-config --config examples/tls-modern.toml
           cargo run --quiet -- --check-config --config examples/tls-intermediate.toml
           cargo run --quiet -- --check-config --config examples/privacy.toml
+          cargo run --quiet -- --check-config --config examples/macos-dev.toml
           cargo run --quiet -- --check-config --config examples/container/fluxheim.toml
           cargo run --quiet -- --check-config --config packaging/container/fluxheim.toml
           cargo run --quiet --no-default-features --features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp -- --check-config --config packaging/container/fluxheim.toml
@@ -210,3 +211,26 @@ jobs:
 
       - name: Verify reproducible release build
         run: scripts/reproducible_build_check.sh
+
+  macos-arm64-dev:
+    name: Apple Silicon macOS developer gate
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Check macOS developer profiles
+        run: |
+          cargo check --locked --no-default-features --features web --lib
+          cargo check --locked --no-default-features --features profile-static-site --bin fluxheim
+          cargo check --locked --no-default-features --features profile-reverse-proxy --bin fluxheim
+          cargo check --locked --no-default-features --features profile-full --bin fluxheim
+          cargo check --locked --no-default-features --features profile-development --bin fluxheim --bin fluxheim-acme --bin fluxheim-config-tester
+
+      - name: Run macOS developer smoke
+        run: sh scripts/smoke_macos_dev.sh

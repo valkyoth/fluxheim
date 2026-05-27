@@ -12,7 +12,7 @@ my @files;
 
 find(
     sub {
-        if (-d $_ && ($_ eq '.git' || $_ eq 'dist' || $_ eq 'target')) {
+        if (-d $_ && ($_ eq '.git' || $_ eq '.cargo-deny-advisory-dbs' || $_ eq 'dist' || $_ eq 'target')) {
             $File::Find::prune = 1;
             return;
         }

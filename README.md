@@ -23,7 +23,7 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.4.2`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.4.3`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
@@ -117,14 +117,16 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
-| Apple Silicon macOS dev builds | ❌ | Planned for `1.4.4` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
+| Apple Silicon macOS dev builds | ❌ | In progress for `1.4.4` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.5` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
 | TCP stream proxying | ❌ | Planned for `1.4.6`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
 | WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
-stable-core promise and deployment checks.
+stable-core promise and deployment checks. See
+[macOS Development Support](docs/macos-development.md) for the Level 1
+Apple Silicon developer workflow.
 
 ## Why Fluxheim
 

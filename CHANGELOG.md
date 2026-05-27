@@ -7,6 +7,15 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.4.4-dev - Unreleased
+
+### Changed
+
+- Start the Apple Silicon macOS Level 1 developer-support release. Scope is
+  local build/check/smoke coverage and Mac-safe development runtime paths, not
+  production macOS packaging, FIPS evidence, notarized binaries, Homebrew
+  distribution, or launchd service support.
+
 ## 1.4.3 - 2026-05-27
 
 ### Changed
