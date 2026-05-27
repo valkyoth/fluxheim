@@ -18,11 +18,13 @@ use crate::config_header::{
 };
 #[cfg(test)]
 use crate::config_header::{valid_dynamic_header_variable, validate_dynamic_header_template};
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-use crate::config_http::valid_http_otlp_endpoint;
 use crate::config_http::{
     fips_allowed_local_auth_request_endpoint, fips_allowed_local_mirror_endpoint,
     fips_allowed_local_otlp_endpoint, valid_http_base_url, valid_http_endpoint_url,
+};
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+use crate::config_http::{
+    valid_http_otlp_endpoint, valid_service_name, validate_otlp_ca_cert_path,
 };
 pub use crate::config_loader::ConfigLoadError;
 #[cfg(feature = "load-balancer")]
@@ -10328,34 +10330,12 @@ fn default_cache_purger_batches() -> usize {
 }
 
 #[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-fn validate_otlp_ca_cert_path(field: &str, path: Option<&Path>) -> Result<(), &'static str> {
-    let Some(path) = path else {
-        return Ok(());
-    };
-    if path.as_os_str().is_empty() {
-        return Err("path cannot be empty");
-    }
-    validate_path(field.to_owned(), Some(path)).map_err(
-        |_| "path must be safe, without parent-directory traversal or symlinked components",
-    )
-}
-
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
 fn warn_plaintext_remote_otlp_endpoint(field: &str, endpoint: &str) {
     if crate::otlp_http::plaintext_non_loopback_endpoint(endpoint) {
         log::warn!(
             "{field} uses plaintext HTTP to a non-loopback host; use https:// or restrict OTLP export to a local collector"
         );
     }
-}
-
-#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
-fn valid_service_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 128
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_graphic() || byte == b' ')
 }
 
 fn default_access_logging_enabled() -> bool {

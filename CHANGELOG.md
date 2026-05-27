@@ -48,6 +48,8 @@ behavior when the change improves security or project direction.
   hidden-response-header validation into `config_php`.
 - Move managed PHP-FPM process-manager, identity, timeout, socket-directory,
   and generated pool-file safety validation into `config_php`.
+- Move OTLP CA certificate path and service-name validation into
+  `config_http`.
 
 ## 1.4.2 - 2026-05-27
 

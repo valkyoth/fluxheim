@@ -1,4 +1,9 @@
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+use std::path::Path;
+
 use crate::config_net::{http_authority_is_numeric_loopback, valid_http_authority};
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+use crate::config_path::validate_path;
 
 pub(crate) fn fips_allowed_local_otlp_endpoint(endpoint: &str) -> bool {
     let Some(rest) = endpoint.strip_prefix("http://") else {
@@ -85,6 +90,31 @@ pub(crate) fn valid_http_otlp_endpoint(endpoint: &str) -> bool {
         return false;
     }
     valid_http_authority(authority)
+}
+
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+pub(crate) fn validate_otlp_ca_cert_path(
+    field: &str,
+    path: Option<&Path>,
+) -> Result<(), &'static str> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if path.as_os_str().is_empty() {
+        return Err("path cannot be empty");
+    }
+    validate_path(field.to_owned(), Some(path)).map_err(
+        |_| "path must be safe, without parent-directory traversal or symlinked components",
+    )
+}
+
+#[cfg(any(feature = "metrics-otlp", feature = "otel-otlp"))]
+pub(crate) fn valid_service_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' ')
 }
 
 fn invalid_http_endpoint_rest(rest: &str) -> bool {
