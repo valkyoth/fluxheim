@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.4.2-dev - Unreleased
+## 1.4.2 - 2026-05-27
 
 ### Changed
 
@@ -56,6 +56,9 @@ behavior when the change improves security or project direction.
   response-header mutation policy into `proxy_cache`. Stateful min-use/pass
   counters remain in `proxy.rs` until their optional-cache dependencies are
   split behind a cleaner cache-runtime boundary.
+- Move cache admin/API request and result DTOs into `cache_api`, while
+  preserving the existing `crate::proxy::*` public re-export paths for current
+  callers.
 - Extract outbound PROXY protocol v1/v2 frame construction and the L4 connector
   that writes those frames before upstream traffic into a focused
   `proxy_protocol` module.
@@ -74,6 +77,9 @@ behavior when the change improves security or project direction.
 
 - Harden traffic-mirror sampling with a process-local random salt so request
   paths cannot be precomputed into predictable mirror include/exclude buckets.
+- Keep ACME certificate installation portable across Linux and macOS by using
+  platform-specific `rustix` file mode conversion without tripping Linux
+  Clippy's useless-conversion lint.
 
 ## 1.4.1 - 2026-05-26
 

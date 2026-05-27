@@ -23,7 +23,7 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.4.0`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.4.2`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
@@ -33,8 +33,9 @@ diagnostics, OpenSSL and rustls/AWS-LC FIPS/ISO-capable build paths, and the
 first production proxy-parity set: edge ACLs, rate/concurrency limits,
 compression, advanced upstream selection, passive health, retry budgets,
 PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
-origin controls, and gRPC pass-through policy. The active development target is
-`1.4.1`, focused on HTTP migration blockers and proxy operations.
+origin controls, gRPC pass-through policy, proxy-operations migration blockers,
+and the `1.4.2` proxy module split. The active development target is `1.4.3`,
+focused on optional GeoIP/Geo-Context and advanced HTTP policy work.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -113,7 +114,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 
 | Capability | Status | Target |
 | --- | --- | --- |
-| Proxy module split | 🟡 | `1.4.2` in progress; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, and PHP-FPM process/spool handling are split out first, with a new rule that future feature domains start in focused modules. |
+| Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.3` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
 | TCP stream proxying | ❌ | Planned for `1.4.4`. |
 | Apple Silicon macOS dev builds | ❌ | Planned for `1.4.5` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |

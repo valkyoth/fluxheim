@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.4.1
+Version:        1.4.2
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -153,6 +153,15 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Wed May 27 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.2-1
+- Release 1.4.2 maintenance architecture: split proxy runtime domains into
+  focused modules for access logs, compression, auth subrequests, traffic
+  mirroring, edge policy, route policy, cache API DTOs, proxy-cache helpers,
+  path safety, upstream TLS loading, outbound PROXY protocol framing, and
+  PHP-FPM process/FastCGI handling.
+- Harden traffic-mirror sampling with a process-local salt and keep ACME file
+  mode conversion portable across Linux and macOS.
+
 * Tue May 26 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.1-1
 - Release 1.4.1 proxy operations: regex/method routing, regex capture rewrite
   templates, WebSocket upgrades, auth subrequests, traffic mirroring,

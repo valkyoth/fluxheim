@@ -906,8 +906,8 @@ the unprivileged `fluxheim` user.
 For local binary RPM smoke builds, use the containerized helper:
 
 ```bash
-scripts/build_fluxheim_rpm.py 1.4.0 --target opensuse-tumbleweed
-scripts/build_fluxheim_rpm.py 1.4.0 native --target fedora-44
+scripts/build_fluxheim_rpm.py 1.4.2 --target opensuse-tumbleweed
+scripts/build_fluxheim_rpm.py 1.4.2 native --target fedora-44
 ```
 
 Untagged `latest` builds use the package name `fluxheim-unstable` and a date
