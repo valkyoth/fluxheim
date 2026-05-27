@@ -40,6 +40,7 @@ mod config_net;
 mod config_observability;
 mod config_path;
 mod config_php;
+mod config_proxy;
 mod config_route;
 mod config_server;
 pub mod config_tester;

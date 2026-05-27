@@ -82,6 +82,8 @@ behavior when the change improves security or project direction.
   `config_php`.
 - Move route, gRPC route, route redirect, and vhost redirect config into
   `config_route`.
+- Move proxy upstream, auth-request, traffic-mirror, and proxy error-page
+  config into `config_proxy`.
 
 ## 1.4.2 - 2026-05-27
 
