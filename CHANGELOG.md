@@ -46,6 +46,8 @@ behavior when the change improves security or project direction.
   validation into `config_php`.
 - Move PHP index, allowed-extension, denied-prefix, stderr failure-pattern, and
   hidden-response-header validation into `config_php`.
+- Move managed PHP-FPM process-manager, identity, timeout, socket-directory,
+  and generated pool-file safety validation into `config_php`.
 
 ## 1.4.2 - 2026-05-27
 
