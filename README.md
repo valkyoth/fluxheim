@@ -34,8 +34,9 @@ first production proxy-parity set: edge ACLs, rate/concurrency limits,
 compression, advanced upstream selection, passive health, retry budgets,
 PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
 origin controls, gRPC pass-through policy, proxy-operations migration blockers,
-and the `1.4.2` proxy module split. The active development target is `1.4.3`,
-focused on the config module split before adding more policy surface.
+the `1.4.2` proxy module split, and the `1.4.3` config module split. The next
+development target is `1.4.4`, focused on Apple Silicon macOS Level 1
+developer support.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -115,7 +116,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Capability | Status | Target |
 | --- | --- | --- |
 | Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
-| Config module split | 🟡 | `1.4.3` in progress; behavior-preserving extraction of config loading and domain validation while keeping `crate::config::*` stable. |
+| Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
 | Apple Silicon macOS dev builds | ❌ | Planned for `1.4.4` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.5` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
 | TCP stream proxying | ❌ | Planned for `1.4.6`. |
@@ -425,6 +426,10 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   policy; cache admin/API request and result DTOs live in `cache_api`;
   remaining target extractions are stateful cache runtime/storage, slice object
   assembly, and the proxy core.
+- `1.4.3` is the config maintenance architecture release. It splits config
+  source loading, shared parsers, domain validation, and the large config test
+  module into focused `config_*` files while preserving the existing
+  `crate::config::*` type paths and operator-facing configuration behavior.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
