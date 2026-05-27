@@ -64,6 +64,8 @@ behavior when the change improves security or project direction.
   cache-control, expires, root path, and directory-listing validation.
 - Move admin API config into `config_admin`, including auth source, ops socket,
   client-certificate header, health, throttle, and self-healing validation.
+- Move server listener, downstream PROXY protocol, HTTPS redirect, host-routing,
+  server limits, and process runtime path config into `config_server`.
 
 ## 1.4.2 - 2026-05-27
 

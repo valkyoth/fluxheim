@@ -39,6 +39,7 @@ mod config_observability;
 mod config_path;
 mod config_php;
 mod config_route;
+mod config_server;
 pub mod config_tester;
 mod config_types;
 mod config_web;
