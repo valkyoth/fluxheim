@@ -33,6 +33,8 @@ behavior when the change improves security or project direction.
   `config_net`.
 - Extract generic config path inspection, symlink checks, parent-permission
   checks, and process path validation into `config_path`.
+- Extract header mutation, dynamic header-template, TLS identity append, and
+  response/cookie rewrite validation helpers into `config_header`.
 
 ## 1.4.2 - 2026-05-27
 
