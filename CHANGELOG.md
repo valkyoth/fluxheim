@@ -72,6 +72,8 @@ behavior when the change improves security or project direction.
   config into `config_acme`.
 - Move listener TLS policy, TLS compliance mode, client-auth config, TLS cipher
   and curve policy, and static certificate path validation into `config_tls`.
+- Move header policy config structs, overlay merge logic, HSTS defaults, and
+  response rewrite policy types into `config_header`.
 
 ## 1.4.2 - 2026-05-27
 
