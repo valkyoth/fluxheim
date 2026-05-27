@@ -50,6 +50,9 @@ behavior when the change improves security or project direction.
   and generated pool-file safety validation into `config_php`.
 - Move OTLP CA certificate path and service-name validation into
   `config_http`.
+- Move `CompressionConfig`, compression defaults, and compression policy
+  validation into `config_compression` while re-exporting
+  `crate::config::CompressionConfig`.
 
 ## 1.4.2 - 2026-05-27
 
