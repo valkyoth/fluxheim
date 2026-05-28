@@ -1,8 +1,8 @@
 [package]
 name = "fluxheim"
-version = "1.4.4"
+version = "1.4.5-dev"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 license = "EUPL-1.2"
 publish = false
 description = "A modular Pingora-based reverse proxy and static web server."

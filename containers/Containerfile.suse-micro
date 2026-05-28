@@ -1,4 +1,4 @@
-ARG RUST_IMAGE=docker.io/library/rust:1.95.0-alpine3.23
+ARG RUST_IMAGE=docker.io/library/rust:1.96.0-alpine3.23
 ARG RUNTIME_IMAGE=registry.suse.com/suse/sl-micro/6.2/base-os-container:latest
 ARG FLUXHEIM_CONFIG=packaging/container/fluxheim.toml
 

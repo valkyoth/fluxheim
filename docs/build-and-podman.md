@@ -1,6 +1,6 @@
 # Build And Rootless Podman
 
-Fluxheim pins Rust 1.95.0 in `rust-toolchain.toml` and `Cargo.toml`. The local
+Fluxheim pins Rust 1.96.0 in `rust-toolchain.toml` and `Cargo.toml`. The local
 toolchain and the container builder should stay on the same stable release.
 
 ## Local Builds
@@ -140,13 +140,13 @@ scripts/validate-features.sh proxy,web,tls-rustls
 
 ## System Build Dependencies
 
-Fluxheim builds with Rust 1.95.0. The default feature set uses Pingora,
+Fluxheim builds with Rust 1.96.0. The default feature set uses Pingora,
 Rustls, cache support, and static file serving. Native builds need a normal C/C++
 toolchain plus a few build helpers for transitive native code.
 
 Required for the default build:
 
-- Rust 1.95.0, usually through `rustup` or the distro Rust packages when they
+- Rust 1.96.0, usually through `rustup` or the distro Rust packages when they
   are new enough;
 - C and C++ compiler toolchain;
 - `make`;
@@ -205,9 +205,9 @@ New packaging and publishing work should use the explicit variant files under
 `containers/`.
 
 The Alpine, Wolfi, and SUSE Micro variants build with the official Rust
-`1.95.0-alpine3.23` image to keep a musl-linked release binary portable across
+`1.96.0-alpine3.23` image to keep a musl-linked release binary portable across
 small runtime bases. The Debian variant builds with the official Rust
-`1.95.0-bookworm` image and runs on `debian:trixie-slim`.
+`1.96.0-bookworm` image and runs on `debian:trixie-slim`.
 
 The builder installs `cmake` because Pingora's compression and TLS transitives
 compile native C code. The runtime runs as UID/GID `65532` and owns only:

@@ -1,5 +1,5 @@
 %global fluxheim_features profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
-%global rust_min_version 1.95
+%global rust_min_version 1.96
 %bcond_without tests
 
 %{!?_tmpfilesdir:%global _tmpfilesdir %{_prefix}/lib/tmpfiles.d}
@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.4.4
+Version:        1.4.5
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -153,6 +153,10 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu May 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.5-0.dev
+- Start the 1.4.5 bounded GeoIP/Geo-Context development line.
+- Raise the pinned Rust toolchain and minimum supported Rust version to 1.96.
+
 * Thu May 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.4-1
 - Release 1.4.4 Apple Silicon macOS Level 1 developer support.
 - Add Mac-safe development config, macOS developer smoke coverage, normalized
