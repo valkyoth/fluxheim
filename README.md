@@ -23,7 +23,7 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.4.3`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.4.4`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
@@ -34,9 +34,9 @@ first production proxy-parity set: edge ACLs, rate/concurrency limits,
 compression, advanced upstream selection, passive health, retry budgets,
 PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
 origin controls, gRPC pass-through policy, proxy-operations migration blockers,
-the `1.4.2` proxy module split, and the `1.4.3` config module split. The next
-development target is `1.4.4`, focused on Apple Silicon macOS Level 1
-developer support.
+the `1.4.2` proxy module split, the `1.4.3` config module split, and Apple
+Silicon macOS Level 1 developer support. The next development target is
+`1.4.5`, focused on bounded GeoIP/Geo-Context policy.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -117,7 +117,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
-| Apple Silicon macOS dev builds | ❌ | In progress for `1.4.4` as Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
+| Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ❌ | Planned for `1.4.5` with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets. |
 | TCP stream proxying | ❌ | Planned for `1.4.6`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
@@ -432,6 +432,10 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   source loading, shared parsers, domain validation, and the large config test
   module into focused `config_*` files while preserving the existing
   `crate::config::*` type paths and operator-facing configuration behavior.
+- `1.4.4` is the Apple Silicon macOS Level 1 developer-support release. It
+  adds Mac-safe development paths, an Apple Silicon CI/smoke gate, developer
+  artifact naming for `aarch64-macos`, and Linux ARM64 release artifact naming
+  for `aarch64-linux`. Linux remains the production support baseline.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),

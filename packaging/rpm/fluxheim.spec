@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.4.3
+Version:        1.4.4
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -153,6 +153,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu May 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.4-1
+- Release 1.4.4 Apple Silicon macOS Level 1 developer support.
+- Add Mac-safe development config, macOS developer smoke coverage, normalized
+  release artifact labels for Linux ARM64 and macOS developer binaries, and
+  release helper script updates.
+
 * Wed May 27 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.3-1
 - Release 1.4.3 maintenance architecture: split config loading, shared
   parsers, domain validation, cache/proxy/PHP/TLS/ACME/admin/server/logging
