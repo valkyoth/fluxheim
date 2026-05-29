@@ -2210,6 +2210,16 @@ Crate naming and crates.io hygiene:
   project-owned packages with README text explaining the difference between the
   binary package and the SDK.
 
+Repository/layout rule:
+
+- place SDK code in a separate workspace directory such as
+  `crates/fluxheim-sdk/`, with its own `Cargo.toml`, README, tests, examples,
+  and public API boundary;
+- do not mix SDK code into the proxy binary's `src/` modules;
+- the initial workspace can live in the Fluxheim repository for shared CI, but
+  the directory and dependency boundary should let the SDK move to its own
+  GitHub project later without extracting proxy internals.
+
 ### 1.7 - Reserved
 
 Compression was pulled forward into the `1.4` production proxy parity line

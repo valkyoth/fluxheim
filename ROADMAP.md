@@ -150,6 +150,13 @@ placeholder crates; if names are claimed on crates.io, they should contain real
 project-owned packages with clear README text pointing to the correct binary
 and SDK roles.
 
+Keep the SDK code in a clearly split directory from the proxy implementation,
+for example `crates/fluxheim-sdk/`, with its own `Cargo.toml`, README, tests,
+and public API boundary. The initial workspace setup may live in this
+repository for shared CI and review, but the layout should make it possible to
+move `fluxheim-sdk` into its own GitHub project later without untangling proxy
+internals.
+
 Farther down the line, Fluxheim should also grow a dependency-reduction track:
 once the major web, cache, PHP, proxy, load-balancer, and extension surfaces are
 stable, move bounded Fluxheim-specific logic in-tree and keep large external
