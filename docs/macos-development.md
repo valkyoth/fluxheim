@@ -92,16 +92,16 @@ If macOS developer binaries are attached to a GitHub release, build them on
 macOS with the release helper:
 
 ```bash
-RELEASE_VERSION=1.4.4
+RELEASE_VERSION=1.4.5
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind macos-dev
 ```
 
 Preferred release naming examples:
 
-- `fluxheim-1.4.4-dev-aarch64-macos.tar.gz`
-- `fluxheim-1.4.4-dev-x86_64-macos.tar.gz`
-- `fluxheim-1.4.4-full-x86_64-linux.tar.gz`
-- `fluxheim-1.4.4-full-aarch64-linux.tar.gz`
+- `fluxheim-1.4.5-dev-aarch64-macos.tar.gz`
+- `fluxheim-1.4.5-dev-x86_64-macos.tar.gz`
+- `fluxheim-1.4.5-full-x86_64-linux.tar.gz`
+- `fluxheim-1.4.5-full-aarch64-linux.tar.gz`
 
 Universal macOS binaries are optional and can be produced with `lipo` from
 separate Intel and Apple Silicon builds, but per-target tarballs are simpler

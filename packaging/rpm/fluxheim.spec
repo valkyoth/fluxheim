@@ -153,9 +153,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Thu May 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.5-0.dev
-- Start the 1.4.5 bounded GeoIP/Geo-Context development line.
-- Raise the pinned Rust toolchain and minimum supported Rust version to 1.96.
+* Fri May 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.5-1
+- Release 1.4.5 bounded GeoIP/Geo-Context policy.
+- Add local MMDB MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open dataset support,
+  vhost/route country and ASN ACLs, structured access-log Geo fields, and
+  bounded GeoIP database loading on Rust 1.96.
 
 * Thu May 28 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.4-1
 - Release 1.4.4 Apple Silicon macOS Level 1 developer support.

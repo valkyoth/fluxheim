@@ -23,7 +23,7 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.4.4`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.4.5`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
@@ -35,8 +35,10 @@ compression, advanced upstream selection, passive health, retry budgets,
 PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
 origin controls, gRPC pass-through policy, proxy-operations migration blockers,
 the `1.4.2` proxy module split, the `1.4.3` config module split, and Apple
-Silicon macOS Level 1 developer support. The next development target is
-`1.4.5`, focused on bounded GeoIP/Geo-Context policy.
+Silicon macOS Level 1 developer support. `1.4.5` adds bounded GeoIP/Geo-Context
+policy with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open
+datasets. The next development target is `1.4.6`, focused on the TCP stream
+proxy foundation.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -436,6 +438,11 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   adds Mac-safe development paths, an Apple Silicon CI/smoke gate, developer
   artifact naming for `aarch64-macos`, and Linux ARM64 release artifact naming
   for `aarch64-linux`. Linux remains the production support baseline.
+- `1.4.5` is the bounded GeoIP/Geo-Context release. It adds the optional
+  `geoip` feature for local MMDB MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open
+  datasets, vhost/route country and ASN access-policy rules, structured access
+  log Geo-Context fields, bounded database loading, and documented SDK roadmap
+  boundaries for a future `fluxheim-sdk` crate.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
