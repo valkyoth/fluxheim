@@ -12,6 +12,12 @@ behavior when the change improves security or project direction.
 ### Changed
 
 - Start the bounded GeoIP/Geo-Context development release.
+- Add the optional `geoip` feature with provider-agnostic local MMDB loading for
+  MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets.
+- Add vhost and route access-policy Geo-Context rules:
+  `allow_countries`, `deny_countries`, `allow_asns`, and `deny_asns`.
+- Add optional `geo_country` and `geo_asn` fields to structured access logs
+  when `geoip` is compiled and a lookup succeeds.
 - Raise the pinned Rust toolchain and minimum supported Rust version from
   1.95 to 1.96.
 

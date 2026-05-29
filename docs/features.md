@@ -43,6 +43,7 @@ before Cargo starts compiling Pingora.
 | `compression-brotli` | No | Brotli response compression for eligible known-length responses. |
 | `compression-gzip` | No | gzip response compression for eligible known-length responses. |
 | `compression-zstd` | No | Zstandard response compression for eligible known-length responses. |
+| `geoip` | No | Local MMDB Geo-Context lookup for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, exposed to bounded access policy and structured logs. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 

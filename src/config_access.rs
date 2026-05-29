@@ -20,6 +20,14 @@ pub struct AccessPolicyConfig {
     pub allow_client_cert_sha256: Vec<String>,
     #[serde(default)]
     pub deny_client_cert_sha256: Vec<String>,
+    #[serde(default)]
+    pub allow_countries: Vec<String>,
+    #[serde(default)]
+    pub deny_countries: Vec<String>,
+    #[serde(default)]
+    pub allow_asns: Vec<u32>,
+    #[serde(default)]
+    pub deny_asns: Vec<u32>,
 }
 
 impl Default for AccessPolicyConfig {
@@ -31,6 +39,10 @@ impl Default for AccessPolicyConfig {
             require_client_cert: false,
             allow_client_cert_sha256: Vec::new(),
             deny_client_cert_sha256: Vec::new(),
+            allow_countries: Vec::new(),
+            deny_countries: Vec::new(),
+            allow_asns: Vec::new(),
+            deny_asns: Vec::new(),
         }
     }
 }
@@ -49,9 +61,23 @@ impl AccessPolicyConfig {
             "deny_client_cert_sha256",
             &self.deny_client_cert_sha256,
         )?;
+        validate_geo_country_list(scope, "allow_countries", &self.allow_countries)?;
+        validate_geo_country_list(scope, "deny_countries", &self.deny_countries)?;
+        validate_geo_asn_list(scope, "allow_asns", &self.allow_asns)?;
+        validate_geo_asn_list(scope, "deny_asns", &self.deny_asns)?;
         Ok(())
     }
+
+    pub(crate) fn requires_geoip(&self) -> bool {
+        !self.allow_countries.is_empty()
+            || !self.deny_countries.is_empty()
+            || !self.allow_asns.is_empty()
+            || !self.deny_asns.is_empty()
+    }
 }
+
+const MAX_GEO_COUNTRIES: usize = 512;
+const MAX_GEO_ASNS: usize = 2048;
 
 const MAX_RATE_LIMIT_REQUESTS_PER_SECOND: u32 = 1_000_000;
 const MAX_RATE_LIMIT_BURST: u32 = 1_000_000;
@@ -331,12 +357,69 @@ pub(crate) fn validate_client_cert_sha256_list(
     Ok(())
 }
 
+fn validate_geo_country_list(
+    scope: &'static str,
+    field: &'static str,
+    values: &[String],
+) -> Result<(), ConfigError> {
+    validate_config_list_len(format!("{scope}.{field}"), values.len(), MAX_GEO_COUNTRIES)?;
+
+    let mut seen = BTreeSet::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed != value || !valid_country_iso(trimmed) {
+            return Err(ConfigError::InvalidAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.clone(),
+            });
+        }
+        if !seen.insert(trimmed.to_ascii_uppercase()) {
+            return Err(ConfigError::DuplicateAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_geo_asn_list(
+    scope: &'static str,
+    field: &'static str,
+    values: &[u32],
+) -> Result<(), ConfigError> {
+    validate_config_list_len(format!("{scope}.{field}"), values.len(), MAX_GEO_ASNS)?;
+
+    let mut seen = BTreeSet::new();
+    for value in values {
+        if *value == 0 {
+            return Err(ConfigError::InvalidAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.to_string(),
+            });
+        }
+        if !seen.insert(*value) {
+            return Err(ConfigError::DuplicateAccessRule {
+                field: access_rule_field(scope, field),
+                value: value.to_string(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
     match (scope, field) {
         ("vhosts.access", "allow") => "vhosts.access.allow",
         ("vhosts.access", "deny") => "vhosts.access.deny",
         ("vhosts.access", "allow_client_cert_sha256") => "vhosts.access.allow_client_cert_sha256",
         ("vhosts.access", "deny_client_cert_sha256") => "vhosts.access.deny_client_cert_sha256",
+        ("vhosts.access", "allow_countries") => "vhosts.access.allow_countries",
+        ("vhosts.access", "deny_countries") => "vhosts.access.deny_countries",
+        ("vhosts.access", "allow_asns") => "vhosts.access.allow_asns",
+        ("vhosts.access", "deny_asns") => "vhosts.access.deny_asns",
         ("vhosts.routes.access", "allow") => "vhosts.routes.access.allow",
         ("vhosts.routes.access", "deny") => "vhosts.routes.access.deny",
         ("vhosts.routes.access", "allow_client_cert_sha256") => {
@@ -345,6 +428,10 @@ fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
         ("vhosts.routes.access", "deny_client_cert_sha256") => {
             "vhosts.routes.access.deny_client_cert_sha256"
         }
+        ("vhosts.routes.access", "allow_countries") => "vhosts.routes.access.allow_countries",
+        ("vhosts.routes.access", "deny_countries") => "vhosts.routes.access.deny_countries",
+        ("vhosts.routes.access", "allow_asns") => "vhosts.routes.access.allow_asns",
+        ("vhosts.routes.access", "deny_asns") => "vhosts.routes.access.deny_asns",
         ("admin.client_certificate", "allow_sha256") => "admin.client_certificate.allow_sha256",
         ("admin.client_certificate", "deny_sha256") => "admin.client_certificate.deny_sha256",
         _ => "access",
@@ -353,4 +440,8 @@ fn access_rule_field(scope: &'static str, field: &'static str) -> &'static str {
 
 fn valid_sha256_hex(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_country_iso(value: &str) -> bool {
+    value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_uppercase())
 }

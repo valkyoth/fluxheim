@@ -131,6 +131,74 @@ fn default_config_is_valid() {
     assert!(!Config::default().logging.access.enabled);
 }
 
+#[cfg(feature = "geoip")]
+#[test]
+fn geoip_config_accepts_local_mmdb_providers() {
+    let config: Config = toml::from_str(
+        r#"
+            [geoip]
+            enabled = true
+            fallback_enabled = true
+
+            [[geoip.databases]]
+            provider = "maxmind"
+            path = "/var/lib/fluxheim/geo/GeoLite2-Country.mmdb"
+
+            [[geoip.databases]]
+            provider = "circl-geo-open"
+            path = "/var/lib/fluxheim/geo/circl-country.mmdb"
+            "#,
+    )
+    .unwrap();
+
+    config.validate().unwrap();
+}
+
+#[cfg(not(feature = "geoip"))]
+#[test]
+fn geoip_enabled_requires_geoip_feature() {
+    let config: Config = toml::from_str(
+        r#"
+            [geoip]
+            enabled = true
+            fallback_enabled = true
+
+            [[geoip.databases]]
+            provider = "maxmind"
+            path = "/var/lib/fluxheim/geo/GeoLite2-Country.mmdb"
+            "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::GeoIpNotCompiled)
+    ));
+}
+
+#[test]
+fn geoip_access_rules_require_global_geoip() {
+    let config: Config = toml::from_str(
+        r#"
+            [[vhosts]]
+            name = "app"
+            hosts = ["example.test"]
+
+            [vhosts.access]
+            deny_countries = ["RU"]
+            "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidGeoIpPolicy {
+            field: "vhosts.access",
+            ..
+        })
+    ));
+}
+
 #[test]
 fn compression_config_validates_bounds() {
     let config: Config = toml::from_str(
@@ -7467,6 +7535,7 @@ fn rejects_empty_listeners() {
         cache: CacheConfig::default(),
         cache_purger: CachePurgerConfig::default(),
         web: WebConfig::default(),
+        geoip: super::GeoIpConfig::default(),
         vhosts: vec![],
     };
 
@@ -8524,6 +8593,7 @@ fn rejects_invalid_upstream() {
         cache: CacheConfig::default(),
         cache_purger: CachePurgerConfig::default(),
         web: WebConfig::default(),
+        geoip: super::GeoIpConfig::default(),
         vhosts: vec![],
     };
 
@@ -8623,6 +8693,7 @@ fn rejects_empty_index_files() {
             deny_dotfiles: true,
             ..WebConfig::default()
         },
+        geoip: super::GeoIpConfig::default(),
         vhosts: vec![],
     };
 
@@ -8652,6 +8723,7 @@ fn rejects_too_many_index_files() {
             deny_dotfiles: true,
             ..WebConfig::default()
         },
+        geoip: super::GeoIpConfig::default(),
         vhosts: vec![],
     };
 
@@ -8721,6 +8793,7 @@ fn rejects_nested_index_files() {
             deny_dotfiles: true,
             ..WebConfig::default()
         },
+        geoip: super::GeoIpConfig::default(),
         vhosts: vec![],
     };
 
@@ -9911,6 +9984,7 @@ fn rejects_duplicate_vhost_hosts() {
         cache: CacheConfig::default(),
         cache_purger: CachePurgerConfig::default(),
         web: WebConfig::default(),
+        geoip: super::GeoIpConfig::default(),
         vhosts: vec![
             VhostConfig {
                 name: "first.example".to_owned(),

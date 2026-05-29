@@ -193,6 +193,8 @@ struct ProxyRuntimeState {
     limits: ServerLimitsConfig,
     https_redirect: HttpsRedirectConfig,
     host_routing: HostRoutingConfig,
+    #[cfg(feature = "geoip")]
+    geoip: Option<Arc<crate::geoip::GeoIpRuntime>>,
     #[cfg(feature = "otel-tracing")]
     tracing: crate::config::TracingConfig,
     #[cfg(feature = "otel-otlp")]
@@ -334,6 +336,13 @@ impl FluxProxy {
                 } else {
                     None
                 },
+                #[cfg(feature = "geoip")]
+                geo_country: ctx
+                    .geo_context
+                    .as_ref()
+                    .and_then(|context| context.country_iso()),
+                #[cfg(feature = "geoip")]
+                geo_asn: ctx.geo_context.as_ref().and_then(|context| context.asn()),
                 #[cfg(feature = "cache")]
                 cache_phase: if state.access_log.include_cache_phase {
                     Some(effective_cache_phase(session, ctx).as_str())
@@ -1985,6 +1994,12 @@ impl ProxyRuntimeState {
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
+            #[cfg(feature = "geoip")]
+            geoip: crate::geoip::GeoIpRuntime::from_config(&config.geoip)
+                .map_err(|error| {
+                    io::Error::new(error.kind(), format!("geoip database runtime: {error}"))
+                })?
+                .map(Arc::new),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2055,6 +2070,12 @@ impl ProxyRuntimeState {
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
+            #[cfg(feature = "geoip")]
+            geoip: crate::geoip::GeoIpRuntime::from_config(&config.geoip)
+                .map_err(|error| {
+                    io::Error::new(error.kind(), format!("geoip database runtime: {error}"))
+                })?
+                .map(Arc::new),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2110,6 +2131,12 @@ impl ProxyRuntimeState {
         self.trusted_proxies
             .iter()
             .any(|trusted_proxy| trusted_proxy.contains(address))
+    }
+
+    #[cfg(feature = "geoip")]
+    fn geo_context(&self, client_ip: Option<IpAddr>) -> Option<crate::geo_context::GeoContext> {
+        let ip = client_ip?;
+        self.geoip.as_ref()?.lookup(ip)
     }
 
     #[cfg(feature = "cache")]
@@ -2271,10 +2298,18 @@ fn request_denied_by_access_policy(
     state: &ProxyRuntimeState,
     vhost: &RuntimeVhost,
     route_index: Option<usize>,
+    _ctx: &RequestContext,
 ) -> bool {
     let client_ip = effective_acl_client_ip(session, state);
     let tls_identity = downstream_tls_client_identity(session);
-    if !vhost.access.allows(client_ip, tls_identity.as_ref()) {
+    #[cfg(feature = "geoip")]
+    let geo_context = _ctx.geo_context.as_ref();
+    #[cfg(not(feature = "geoip"))]
+    let geo_context = None;
+    if !vhost
+        .access
+        .allows(client_ip, tls_identity.as_ref(), geo_context)
+    {
         return true;
     }
     route_index
@@ -2282,7 +2317,7 @@ fn request_denied_by_access_policy(
             !vhost
                 .route(route_index)
                 .access
-                .allows(client_ip, tls_identity.as_ref())
+                .allows(client_ip, tls_identity.as_ref(), geo_context)
         })
         .unwrap_or(false)
 }
@@ -3460,6 +3495,8 @@ pub struct RequestContext {
     upstream_load_balancer_retries: u8,
     #[cfg(feature = "load-balancer")]
     upstream_load_balancer_alias: Option<std::sync::Arc<str>>,
+    #[cfg(feature = "geoip")]
+    geo_context: Option<crate::geo_context::GeoContext>,
     request_body_bytes_seen: u64,
     response_body_bytes_seen: u64,
     health_signal_recorded: bool,
@@ -3576,12 +3613,16 @@ impl ProxyHttp for FluxProxy {
             session.req_header().method.as_str(),
             session.req_header().uri.path(),
         );
+        #[cfg(feature = "geoip")]
+        {
+            ctx.geo_context = state.geo_context(effective_acl_client_ip(session, &state));
+        }
         #[cfg(feature = "metrics")]
         let edge_policy_route = ctx
             .route_index
             .and_then(|route_index| vhost.routes.get(route_index))
             .map(|route| route.name.as_str());
-        if request_denied_by_access_policy(session, &state, vhost, ctx.route_index) {
+        if request_denied_by_access_policy(session, &state, vhost, ctx.route_index, ctx) {
             #[cfg(feature = "metrics")]
             crate::metrics::record_edge_policy_event(
                 vhost.name.as_str(),
@@ -9776,10 +9817,10 @@ mod tests {
         })
         .unwrap();
 
-        assert!(policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))), None));
-        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 9, 2, 3))), None));
-        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))), None));
-        assert!(!policy.allows(None, None));
+        assert!(policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))), None, None));
+        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(10, 9, 2, 3))), None, None));
+        assert!(!policy.allows(Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10))), None, None));
+        assert!(!policy.allows(None, None, None));
     }
 
     #[test]
@@ -9810,10 +9851,32 @@ mod tests {
             ..crate::headers::RequestTlsClientIdentity::default()
         };
 
-        assert!(policy.allows(client_ip, Some(&allowed_identity)));
-        assert!(!policy.allows(client_ip, Some(&denied_identity)));
-        assert!(!policy.allows(client_ip, Some(&unknown_identity)));
-        assert!(!policy.allows(client_ip, None));
+        assert!(policy.allows(client_ip, Some(&allowed_identity), None));
+        assert!(!policy.allows(client_ip, Some(&denied_identity), None));
+        assert!(!policy.allows(client_ip, Some(&unknown_identity), None));
+        assert!(!policy.allows(client_ip, None, None));
+    }
+
+    #[cfg(feature = "geoip")]
+    #[test]
+    fn access_policy_can_restrict_geo_context() {
+        let policy = RuntimeAccessPolicy::from_config(&crate::config::AccessPolicyConfig {
+            enabled: true,
+            allow_countries: vec!["SE".to_owned()],
+            deny_asns: vec![64512],
+            ..crate::config::AccessPolicyConfig::default()
+        })
+        .unwrap();
+        let client_ip = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
+        let allowed_geo = crate::geo_context::GeoContext::new(Some("SE".to_owned()), Some(12552));
+        let denied_country =
+            crate::geo_context::GeoContext::new(Some("NO".to_owned()), Some(12552));
+        let denied_asn = crate::geo_context::GeoContext::new(Some("SE".to_owned()), Some(64512));
+
+        assert!(policy.allows(client_ip, None, Some(&allowed_geo)));
+        assert!(!policy.allows(client_ip, None, Some(&denied_country)));
+        assert!(!policy.allows(client_ip, None, Some(&denied_asn)));
+        assert!(!policy.allows(client_ip, None, None));
     }
 
     #[test]

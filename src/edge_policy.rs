@@ -317,6 +317,10 @@ pub(crate) struct RuntimeAccessPolicy {
     require_client_cert: bool,
     allow_client_cert_sha256: Vec<String>,
     deny_client_cert_sha256: Vec<String>,
+    allow_countries: Vec<String>,
+    deny_countries: Vec<String>,
+    allow_asns: Vec<u32>,
+    deny_asns: Vec<u32>,
 }
 
 impl RuntimeAccessPolicy {
@@ -330,6 +334,10 @@ impl RuntimeAccessPolicy {
                 &config.allow_client_cert_sha256,
             ),
             deny_client_cert_sha256: normalized_cert_fingerprints(&config.deny_client_cert_sha256),
+            allow_countries: normalized_countries(&config.allow_countries),
+            deny_countries: normalized_countries(&config.deny_countries),
+            allow_asns: config.allow_asns.clone(),
+            deny_asns: config.deny_asns.clone(),
         })
     }
 
@@ -337,6 +345,7 @@ impl RuntimeAccessPolicy {
         &self,
         client_ip: Option<IpAddr>,
         tls_identity: Option<&crate::headers::RequestTlsClientIdentity>,
+        geo_context: Option<&crate::geo_context::GeoContext>,
     ) -> bool {
         if !self.enabled {
             return true;
@@ -363,12 +372,75 @@ impl RuntimeAccessPolicy {
             if cert_fingerprint_list_contains(&self.deny_client_cert_sha256, cert_sha256) {
                 return false;
             }
-            self.allow_client_cert_sha256.is_empty()
-                || cert_fingerprint_list_contains(&self.allow_client_cert_sha256, cert_sha256)
+            if !self.allow_client_cert_sha256.is_empty()
+                && !cert_fingerprint_list_contains(&self.allow_client_cert_sha256, cert_sha256)
+            {
+                return false;
+            }
         } else {
-            self.allow_client_cert_sha256.is_empty()
+            if !self.allow_client_cert_sha256.is_empty() {
+                return false;
+            }
         }
+        self.allows_geo(geo_context)
     }
+
+    fn allows_geo(&self, geo_context: Option<&crate::geo_context::GeoContext>) -> bool {
+        let geo_restrictive = !self.allow_countries.is_empty()
+            || !self.deny_countries.is_empty()
+            || !self.allow_asns.is_empty()
+            || !self.deny_asns.is_empty();
+        if !geo_restrictive {
+            return true;
+        }
+        let Some(geo_context) = geo_context else {
+            return false;
+        };
+
+        let country = geo_context.country_iso();
+        if let Some(country) = country
+            && self
+                .deny_countries
+                .iter()
+                .any(|denied| denied.eq_ignore_ascii_case(country))
+        {
+            return false;
+        }
+        if !self.allow_countries.is_empty()
+            && !country
+                .map(|country| {
+                    self.allow_countries
+                        .iter()
+                        .any(|allowed| allowed.eq_ignore_ascii_case(country))
+                })
+                .unwrap_or(false)
+        {
+            return false;
+        }
+
+        let asn = geo_context.asn();
+        if asn
+            .map(|asn| self.deny_asns.contains(&asn))
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        if !self.allow_asns.is_empty()
+            && !asn
+                .map(|asn| self.allow_asns.contains(&asn))
+                .unwrap_or(false)
+        {
+            return false;
+        }
+        true
+    }
+}
+
+fn normalized_countries(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_uppercase())
+        .collect()
 }
 
 pub(crate) fn parse_trusted_proxies(values: &[String]) -> io::Result<Vec<TrustedProxy>> {

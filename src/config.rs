@@ -39,6 +39,7 @@ pub(crate) use crate::config_cache::{
 pub use crate::config_compression::CompressionConfig;
 #[cfg(test)]
 pub(crate) use crate::config_compression::DEFAULT_COMPRESSION_MAX_OUTPUT_BYTES;
+pub use crate::config_geoip::{GeoIpConfig, GeoIpDatabaseConfig, GeoIpProvider};
 pub use crate::config_header::{
     ForwardedClientIpHeaderMode, HeaderOperationsConfig, HeaderPolicyConfig, HeaderValues,
     RequestHeaderPolicyConfig, RequestHeaderPolicyOverlayConfig, ResponseHeaderPolicyConfig,
@@ -157,6 +158,8 @@ pub struct Config {
     pub cache_purger: CachePurgerConfig,
     #[serde(default)]
     pub web: WebConfig,
+    #[serde(default)]
+    pub geoip: GeoIpConfig,
     #[serde(default)]
     pub vhosts: Vec<VhostConfig>,
 }
@@ -301,6 +304,9 @@ impl Config {
         if let Some(web) = fragment.web {
             self.web = web;
         }
+        if let Some(geoip) = fragment.geoip {
+            self.geoip = geoip;
+        }
         self.vhosts.extend(fragment.vhosts);
     }
 
@@ -327,7 +333,9 @@ impl Config {
         self.cache.validate("cache")?;
         self.cache_purger.validate()?;
         self.web.validate()?;
+        self.geoip.validate()?;
         self.validate_vhosts()?;
+        self.validate_geoip_policy()?;
         self.validate_compliance_internal_crypto()?;
         Ok(())
     }
@@ -555,6 +563,29 @@ impl Config {
         Ok(())
     }
 
+    fn validate_geoip_policy(&self) -> Result<(), ConfigError> {
+        if self.geoip.enabled {
+            return Ok(());
+        }
+        for vhost in &self.vhosts {
+            if vhost.access.requires_geoip() {
+                return Err(ConfigError::InvalidGeoIpPolicy {
+                    field: "vhosts.access",
+                    reason: "GeoIP access rules require geoip.enabled = true",
+                });
+            }
+            for route in &vhost.routes {
+                if route.access.requires_geoip() {
+                    return Err(ConfigError::InvalidGeoIpPolicy {
+                        field: "vhosts.routes.access",
+                        reason: "GeoIP access rules require geoip.enabled = true",
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
     #[cfg(feature = "acme")]
     fn vhost_has_shared_managed_acme_source(&self, vhost: &VhostConfig) -> bool {
         if !self.tls.acme.enabled || self.tls.acme.storage.is_none() {
@@ -635,6 +666,8 @@ struct ConfigFragment {
     #[serde(default)]
     web: Option<WebConfig>,
     #[serde(default)]
+    geoip: Option<GeoIpConfig>,
+    #[serde(default)]
     vhosts: Vec<VhostConfig>,
 }
 
@@ -679,6 +712,9 @@ impl ConfigFragment {
         }
         if let Some(web) = &mut self.web {
             web.resolve_relative_paths(base_dir);
+        }
+        if let Some(geoip) = &mut self.geoip {
+            geoip.resolve_relative_paths(base_dir);
         }
         for vhost in &mut self.vhosts {
             vhost.resolve_relative_paths(base_dir);
@@ -1023,6 +1059,11 @@ pub enum ConfigError {
     TracingNotCompiled,
     OtlpTraceExportNotCompiled,
     InvalidTracingPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
+    GeoIpNotCompiled,
+    InvalidGeoIpPolicy {
         field: &'static str,
         reason: &'static str,
     },
@@ -1632,6 +1673,13 @@ impl Display for ConfigError {
                 "tracing.otlp.enabled requires building Fluxheim with the otel-otlp feature"
             ),
             Self::InvalidTracingPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
+            Self::GeoIpNotCompiled => write!(
+                formatter,
+                "geoip.enabled requires building Fluxheim with the geoip feature"
+            ),
+            Self::InvalidGeoIpPolicy { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
             }
             Self::InvalidCompliancePolicy { field, reason } => {

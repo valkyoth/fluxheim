@@ -10,6 +10,10 @@ pub(crate) struct AccessLogEvent<'a> {
     pub(crate) method: &'a str,
     pub(crate) host: Option<&'a str>,
     pub(crate) client_ip: Option<String>,
+    #[cfg(feature = "geoip")]
+    pub(crate) geo_country: Option<&'a str>,
+    #[cfg(feature = "geoip")]
+    pub(crate) geo_asn: Option<u32>,
     #[cfg(feature = "cache")]
     pub(crate) cache_phase: Option<&'static str>,
     #[cfg(any(
@@ -49,6 +53,13 @@ pub(crate) fn access_log_json(event: AccessLogEvent<'_>) -> String {
     let status_class = event.status_class.unwrap_or("unknown");
     let host = event.host.unwrap_or("");
     let client_ip = event.client_ip.as_deref().unwrap_or("");
+    #[cfg(feature = "geoip")]
+    let geo_country = event.geo_country.unwrap_or("");
+    #[cfg(feature = "geoip")]
+    let geo_asn = event
+        .geo_asn
+        .map(|asn| asn.to_string())
+        .unwrap_or_else(|| "null".to_owned());
     #[cfg(feature = "cache")]
     let cache_phase = event.cache_phase.unwrap_or("");
     #[cfg(not(feature = "cache"))]
@@ -103,6 +114,18 @@ pub(crate) fn access_log_json(event: AccessLogEvent<'_>) -> String {
     #[cfg(feature = "otel-tracing")]
     {
         let mut body = body;
+        #[cfg(feature = "geoip")]
+        {
+            let insert_at = body.len().saturating_sub(1);
+            body.insert_str(
+                insert_at,
+                &format!(
+                    r#","geo_country":"{}","geo_asn":{}"#,
+                    json_escape(geo_country),
+                    geo_asn
+                ),
+            );
+        }
         if let Some(trace_id) = event.trace_id.as_deref() {
             let insert_at = body.len().saturating_sub(1);
             body.insert_str(
@@ -114,7 +137,24 @@ pub(crate) fn access_log_json(event: AccessLogEvent<'_>) -> String {
     }
     #[cfg(not(feature = "otel-tracing"))]
     {
-        body
+        #[cfg(feature = "geoip")]
+        {
+            let mut body = body;
+            let insert_at = body.len().saturating_sub(1);
+            body.insert_str(
+                insert_at,
+                &format!(
+                    r#","geo_country":"{}","geo_asn":{}"#,
+                    json_escape(geo_country),
+                    geo_asn
+                ),
+            );
+            body
+        }
+        #[cfg(not(feature = "geoip"))]
+        {
+            body
+        }
     }
 }
 
@@ -216,6 +256,10 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             client_ip: Some("203.0.113.10".to_owned()),
+            #[cfg(feature = "geoip")]
+            geo_country: Some("SE"),
+            #[cfg(feature = "geoip")]
+            geo_asn: Some(12552),
             #[cfg(feature = "cache")]
             cache_phase: Some("hit"),
             #[cfg(any(
@@ -249,6 +293,11 @@ mod tests {
         assert!(log.contains("\"event\":\"access\""));
         assert!(log.contains("\"host\":\"example.test\""));
         assert!(log.contains("\"client_ip\":\"203.0.113.10\""));
+        #[cfg(feature = "geoip")]
+        {
+            assert!(log.contains("\"geo_country\":\"SE\""));
+            assert!(log.contains("\"geo_asn\":12552"));
+        }
         #[cfg(feature = "cache")]
         assert!(log.contains("\"cache_phase\":\"hit\""));
         #[cfg(any(
@@ -281,6 +330,10 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             client_ip: None,
+            #[cfg(feature = "geoip")]
+            geo_country: None,
+            #[cfg(feature = "geoip")]
+            geo_asn: None,
             #[cfg(feature = "cache")]
             cache_phase: None,
             #[cfg(any(
@@ -327,6 +380,10 @@ mod tests {
             method: "GET",
             host: None,
             client_ip: None,
+            #[cfg(feature = "geoip")]
+            geo_country: None,
+            #[cfg(feature = "geoip")]
+            geo_asn: None,
             #[cfg(feature = "cache")]
             cache_phase: None,
             #[cfg(any(
@@ -368,6 +425,10 @@ mod tests {
             method: "GET",
             host: Some("example.test"),
             client_ip: None,
+            #[cfg(feature = "geoip")]
+            geo_country: None,
+            #[cfg(feature = "geoip")]
+            geo_asn: None,
             #[cfg(feature = "cache")]
             cache_phase: None,
             #[cfg(any(

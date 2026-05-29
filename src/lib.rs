@@ -31,6 +31,7 @@ mod config_acme;
 mod config_admin;
 mod config_cache;
 mod config_compression;
+mod config_geoip;
 mod config_header;
 mod config_http;
 mod config_load_balance;
@@ -50,6 +51,10 @@ mod config_web;
 #[cfg(feature = "proxy")]
 mod edge_policy;
 mod fs_trust;
+#[cfg(feature = "proxy")]
+mod geo_context;
+#[cfg(feature = "geoip")]
+pub mod geoip;
 #[cfg(feature = "proxy")]
 pub mod headers;
 pub mod internal_crypto;
@@ -113,6 +118,9 @@ pub(crate) mod test_support;
 compile_error!(
     "select only one Fluxheim TLS backend feature: tls-rustls, tls-rustls-fips, tls-openssl, tls-boringssl, or tls-s2n"
 );
+
+#[cfg(all(feature = "privacy-mode", feature = "geoip"))]
+compile_error!("privacy-mode builds do not include GeoIP lookup or Geo-Context metadata");
 
 #[cfg(all(
     feature = "tls-rustls-backend",

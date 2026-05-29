@@ -1385,9 +1385,8 @@ Release shape:
     `lookup(ip)` and receive Fluxheim's normalized `GeoContext`, not provider
     structs. Initial supported local providers are MaxMind GeoIP2/GeoLite2
     country/ASN databases and European CIRCL Geo Open datasets when supplied in
-    MMDB-compatible form. Use the same `maxminddb` reader path for both, but
-    validate database metadata/record shape at config load so an incompatible
-    MMDB fails closed with a clear error;
+    MMDB-compatible form. Use the same `maxminddb` reader path for both, and
+    fail closed with a clear runtime error if an incompatible MMDB is supplied;
   - GeoIP config should support an ordered local database list such as
     `[[geoip.databases]] provider = "maxmind"` and
     `provider = "circl-geo-open"` with `path = "..."`, plus an explicit
@@ -1401,17 +1400,18 @@ Release shape:
     MaxMind/CIRCL files, verifies checksums or signatures where the provider
     publishes them, writes atomically, and then triggers Fluxheim reload;
   - implement GeoIP as its own `geoip`/`geo_context` module from the start,
-    with only thin hooks in config, proxy policy, access logs, metrics, and
-    tracing. Do not add GeoIP lookup or policy logic directly to `proxy.rs` or
-    grow `config.rs` with large database-management helpers;
+    with only thin hooks in config, proxy policy, and access logs first.
+    Metrics and tracing are follow-up work only if they stay bounded. Do not
+    add GeoIP lookup or policy logic directly to `proxy.rs` or grow
+    `config.rs` with large database-management helpers;
   - expose GeoIP as typed request context, not spoofable inbound headers.
-    Initial normalized fields are country ISO code, ASN, and provider/source
-    identifier for diagnostics. City/latitude/longitude should stay out of the
-    first stable surface unless an operator explicitly enables them because
-    they are more privacy-sensitive;
-  - use the typed geo context in route/access policy, request-header templates,
-    structured access logs, and OTLP span attributes. Metric labels must be
-    bounded to low-cardinality values such as country and policy decision;
+    Initial normalized fields are country ISO code and ASN. Provider/source
+    diagnostics, city, latitude, and longitude stay out of the first stable
+    surface unless an operator explicitly enables them later because they are
+    more privacy-sensitive;
+  - use the typed geo context in vhost/route access policy and structured
+    access logs first. Request-header templates, OTLP span attributes, and
+    metric labels are follow-up work only if they remain bounded and useful;
     never emit city, IP, or raw organization strings as default metric labels;
   - privacy-mode behavior: either reject GeoIP entirely or restrict it to
     policy-only country/ASN evaluation with no logs, trace attributes, headers,
