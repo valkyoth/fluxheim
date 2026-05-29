@@ -45,7 +45,7 @@ impl GeoIpConfig {
         }
         #[cfg(not(feature = "geoip"))]
         {
-            return Err(ConfigError::GeoIpNotCompiled);
+            Err(ConfigError::GeoIpNotCompiled)
         }
         #[cfg(feature = "geoip")]
         {
