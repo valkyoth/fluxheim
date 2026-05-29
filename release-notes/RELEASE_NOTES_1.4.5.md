@@ -22,6 +22,8 @@ Fluxheim 1.4.5 is the bounded GeoIP/Geo-Context release.
 - Startup emits security warnings when country or ASN access policy is
   configured but the loaded MMDB database types do not appear to provide that
   record family.
+- Geo deny-only policies now match the documented semantics: clients without a
+  resolved Geo-Context are allowed unless an allow list is also configured.
 
 ## Scope
 

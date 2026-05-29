@@ -386,15 +386,13 @@ impl RuntimeAccessPolicy {
     }
 
     fn allows_geo(&self, geo_context: Option<&crate::geo_context::GeoContext>) -> bool {
-        let geo_restrictive = !self.allow_countries.is_empty()
-            || !self.deny_countries.is_empty()
-            || !self.allow_asns.is_empty()
-            || !self.deny_asns.is_empty();
-        if !geo_restrictive {
+        let has_allow = !self.allow_countries.is_empty() || !self.allow_asns.is_empty();
+        let has_deny = !self.deny_countries.is_empty() || !self.deny_asns.is_empty();
+        if !has_allow && !has_deny {
             return true;
         }
         let Some(geo_context) = geo_context else {
-            return false;
+            return !has_allow;
         };
 
         let country = geo_context.country_iso();

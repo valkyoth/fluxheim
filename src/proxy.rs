@@ -9906,6 +9906,42 @@ mod tests {
         assert!(!policy.allows(client_ip, None, None));
     }
 
+    #[cfg(feature = "geoip")]
+    #[test]
+    fn geo_deny_only_policy_allows_missing_geo_context() {
+        let policy = RuntimeAccessPolicy::from_config(&crate::config::AccessPolicyConfig {
+            enabled: true,
+            deny_countries: vec!["RU".to_owned()],
+            deny_asns: vec![64512],
+            ..crate::config::AccessPolicyConfig::default()
+        })
+        .unwrap();
+        let client_ip = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
+        let denied_country =
+            crate::geo_context::GeoContext::new(Some("RU".to_owned()), Some(12552));
+        let denied_asn = crate::geo_context::GeoContext::new(Some("SE".to_owned()), Some(64512));
+        let allowed_geo = crate::geo_context::GeoContext::new(Some("SE".to_owned()), Some(12552));
+
+        assert!(policy.allows(client_ip, None, None));
+        assert!(policy.allows(client_ip, None, Some(&allowed_geo)));
+        assert!(!policy.allows(client_ip, None, Some(&denied_country)));
+        assert!(!policy.allows(client_ip, None, Some(&denied_asn)));
+    }
+
+    #[cfg(feature = "geoip")]
+    #[test]
+    fn geo_allow_policy_denies_missing_geo_context() {
+        let policy = RuntimeAccessPolicy::from_config(&crate::config::AccessPolicyConfig {
+            enabled: true,
+            allow_asns: vec![12552],
+            ..crate::config::AccessPolicyConfig::default()
+        })
+        .unwrap();
+        let client_ip = Some(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)));
+
+        assert!(!policy.allows(client_ip, None, None));
+    }
+
     #[test]
     fn access_policy_restores_client_ip_from_trusted_forwarded_chain() {
         let direct = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 254));

@@ -23,6 +23,8 @@ behavior when the change improves security or project direction.
 - Track a future `fluxheim-sdk` Rust companion crate for application-side
   health/drain, trusted request context, tracing, cache-control, and purge
   helpers.
+- Align GeoIP deny-only access policy with the documented contract: unresolved
+  Geo-Context now defaults to allow unless an allow list is configured.
 
 ## 1.4.4 - 2026-05-28
 
