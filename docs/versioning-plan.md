@@ -2166,6 +2166,50 @@ Exit criteria:
   cache hook ABI with typed inputs, configured output limits, and explicit
   operator opt-in per vhost or route.
 
+### Future - Rust Application SDK
+
+Goal: add a small project-owned Rust companion crate for applications running
+behind Fluxheim. The working crate name is `fluxheim-sdk` so it is clearly an
+application integration SDK, not the proxy binary itself.
+
+Stable first scope:
+
+- health and readiness response schemas that Fluxheim can consume without each
+  app inventing a different JSON shape;
+- graceful drain state helpers so applications can mark themselves draining
+  before shutdown and let Fluxheim stop sending new traffic;
+- Tower/Axum middleware and extractors for trusted Fluxheim request context:
+  request ID, trace context, real client IP after Fluxheim's trusted-proxy
+  policy, TLS client-certificate identity when Fluxheim verified it, and
+  bounded Geo-Context where configured;
+- `tracing` helpers that bind Fluxheim request IDs to application spans;
+- cache-control response helpers matching Fluxheim's cache policy model;
+- authenticated admin/cache purge client utilities for internal app-triggered
+  invalidation.
+
+Out of first scope:
+
+- upstream self-registration into Fluxheim backend pools;
+- application-driven dynamic weight changes;
+- UDP heartbeats;
+- persistent h2/gRPC control streams;
+- general route or TLS policy mutation from application code.
+
+Those larger control-plane features must wait until the `1.5` runtime backend
+management model has stable authentication, authorization, replay protection,
+audit events, rate limits, persistence semantics, and documented failure modes.
+The SDK should not become a hidden distributed control plane before Fluxheim's
+own control plane is ready.
+
+Crate naming and crates.io hygiene:
+
+- keep the canonical `fluxheim` package name project-owned if the main proxy is
+  ever published as a crate;
+- publish application helpers as `fluxheim-sdk`;
+- avoid empty placeholder crates. If names are claimed, they should be real
+  project-owned packages with README text explaining the difference between the
+  binary package and the SDK.
+
 ### 1.7 - Reserved
 
 Compression was pulled forward into the `1.4` production proxy parity line

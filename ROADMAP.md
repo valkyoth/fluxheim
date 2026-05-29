@@ -131,6 +131,25 @@ inter-node transport. These are not `1.0` items. Each one needs an explicit
 compile-time feature, a documented threat model, redaction/privacy rules, and
 failure-mode tests before it can move from research to beta.
 
+Fluxheim should also grow a small Rust application-side companion crate after
+the proxy and load-balancer control surfaces are stable. The working name is
+`fluxheim-sdk`, not `fluxheim-app`, so its purpose is clear: typed integration
+helpers for applications running behind Fluxheim. The first stable surface
+should stay boring and low-risk: health/drain response schemas, Tower/Axum
+extractors for Fluxheim-trusted request context, request-id/tracing helpers,
+cache-control helpers, and an authenticated cache-purge/admin client. Do not
+start with app self-registration, dynamic weight changes, UDP heartbeats, or
+persistent control streams; those belong only after the `1.5` runtime backend
+management model has authentication, audit logs, replay protection, and failure
+semantics.
+
+Crate naming matters. The main project should keep control of the canonical
+`fluxheim` package name if Fluxheim is ever published as a crate, while the
+application integration crate should be `fluxheim-sdk`. Avoid publishing empty
+placeholder crates; if names are claimed on crates.io, they should contain real
+project-owned packages with clear README text pointing to the correct binary
+and SDK roles.
+
 Farther down the line, Fluxheim should also grow a dependency-reduction track:
 once the major web, cache, PHP, proxy, load-balancer, and extension surfaces are
 stable, move bounded Fluxheim-specific logic in-tree and keep large external

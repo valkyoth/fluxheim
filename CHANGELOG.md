@@ -20,6 +20,9 @@ behavior when the change improves security or project direction.
   when `geoip` is compiled and a lookup succeeds.
 - Raise the pinned Rust toolchain and minimum supported Rust version from
   1.95 to 1.96.
+- Track a future `fluxheim-sdk` Rust companion crate for application-side
+  health/drain, trusted request context, tracing, cache-control, and purge
+  helpers.
 
 ## 1.4.4 - 2026-05-28
 
