@@ -1995,11 +1995,14 @@ impl ProxyRuntimeState {
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
             #[cfg(feature = "geoip")]
-            geoip: crate::geoip::GeoIpRuntime::from_config(&config.geoip)
-                .map_err(|error| {
-                    io::Error::new(error.kind(), format!("geoip database runtime: {error}"))
-                })?
-                .map(Arc::new),
+            geoip: crate::geoip::GeoIpRuntime::from_config(
+                &config.geoip,
+                geoip_policy_usage(config),
+            )
+            .map_err(|error| {
+                io::Error::new(error.kind(), format!("geoip database runtime: {error}"))
+            })?
+            .map(Arc::new),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2071,11 +2074,14 @@ impl ProxyRuntimeState {
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
             #[cfg(feature = "geoip")]
-            geoip: crate::geoip::GeoIpRuntime::from_config(&config.geoip)
-                .map_err(|error| {
-                    io::Error::new(error.kind(), format!("geoip database runtime: {error}"))
-                })?
-                .map(Arc::new),
+            geoip: crate::geoip::GeoIpRuntime::from_config(
+                &config.geoip,
+                geoip_policy_usage(config),
+            )
+            .map_err(|error| {
+                io::Error::new(error.kind(), format!("geoip database runtime: {error}"))
+            })?
+            .map(Arc::new),
             #[cfg(feature = "otel-tracing")]
             tracing: config.tracing.clone(),
             #[cfg(feature = "otel-otlp")]
@@ -2275,6 +2281,27 @@ impl ProxyRuntimeState {
             user_tag,
         )
     }
+}
+
+#[cfg(feature = "geoip")]
+fn geoip_policy_usage(config: &Config) -> crate::geoip::GeoIpPolicyUsage {
+    let mut usage = crate::geoip::GeoIpPolicyUsage::default();
+    for vhost in &config.vhosts {
+        record_geoip_policy_usage(&vhost.access, &mut usage);
+        for route in &vhost.routes {
+            record_geoip_policy_usage(&route.access, &mut usage);
+        }
+    }
+    usage
+}
+
+#[cfg(feature = "geoip")]
+fn record_geoip_policy_usage(
+    access: &crate::config::AccessPolicyConfig,
+    usage: &mut crate::geoip::GeoIpPolicyUsage,
+) {
+    usage.country |= !access.allow_countries.is_empty() || !access.deny_countries.is_empty();
+    usage.asn |= !access.allow_asns.is_empty() || !access.deny_asns.is_empty();
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

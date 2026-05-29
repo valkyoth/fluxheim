@@ -36,6 +36,12 @@ systemd timer, package job, or sidecar to fetch and verify database files, then
 reload Fluxheim. Database files are opened as regular files and symlink leaf
 paths are rejected.
 
+Each MMDB file is capped at 512 MiB at both metadata and read time. A single
+loaded GeoIP runtime is capped at 1 GiB of MMDB data, so keep the ordered
+fallback set small. During hot reload, the old and new runtimes can briefly
+coexist while in-flight requests finish, so size host/container memory for that
+temporary overlap.
+
 ```toml
 [geoip]
 enabled = true
@@ -53,6 +59,11 @@ path = "/var/lib/fluxheim/geo/circl-country.mmdb"
 Databases are evaluated in order. When `fallback_enabled = true`, Fluxheim fills
 missing country or ASN fields from later databases when possible. When it is
 false, Fluxheim consults only the first configured database.
+
+When country or ASN access rules are configured, Fluxheim checks the loaded
+MMDB database type strings and emits a security warning if no loaded database
+appears to provide the required record family. This is a diagnostic guard, not
+a substitute for testing policy behavior with known source IPs.
 
 ## Access Policy
 

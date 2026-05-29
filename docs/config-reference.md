@@ -1991,7 +1991,10 @@ path = "/var/lib/fluxheim/geo/circl-country.mmdb"
 supplied in MMDB-compatible form. Databases are ordered local fallbacks when
 `fallback_enabled = true`; Fluxheim fills missing country or ASN fields from
 later databases when possible.
-Fluxheim does not download GeoIP databases in-process.
+Fluxheim does not download GeoIP databases in-process. Each MMDB file is capped
+at 512 MiB at read time and each loaded GeoIP runtime is capped at 1 GiB total.
+GeoIP update jobs should write and verify a replacement file, then atomically
+rename it into place before reloading Fluxheim.
 
 Vhost and route access policies can then use:
 
