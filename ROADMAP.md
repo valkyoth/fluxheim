@@ -80,17 +80,17 @@ controls, and low-cardinality observability. The larger geo-policy ideas -
 background MMDB downloading, remote lookup sidecars, adaptive rate-limit
 weighting, programmable Rhai/Wasm logic, and impossible-travel anomaly engines -
 are explicitly later work after the typed context is stable. The rest of
-`1.4.2` covers advanced AND/OR/NOT ACL composition, local stick-table-style
-tracking, runtime backend drain/disable/enable operations, map-style variables,
-and bounded response body substitution. A separate `1.4.3` stream feature can
-add TCP proxying for NGINX stream / HAProxy TCP-mode parity; UDP proxying and
-HTTP/2 server push are intentionally deferred/skipped until a concrete
-requirement makes them worth the extra attack surface.
-Each `1.4.x` release has a hard stop: `1.4.1` stops at HTTP migration blockers
-and read-only operational visibility, `1.4.2` stops at advanced HTTP policy and
-backend operations, and `1.4.3` stops at L4 TCP stream basics. New feature
-families should move to the next planned version unless they are required to
-make an already-in-scope item safe.
+`1.4.2` covered maintenance architecture, `1.4.3` split the config surface,
+`1.4.4` added Apple Silicon developer support, `1.4.5` added bounded
+Geo-Context, and `1.4.6` added the TCP stream proxy foundation. `1.4.7`, if
+scheduled, is a stream-hardening follow-up only: true per-read stream idle
+timeout, stream upstream TLS/mTLS, transport-neutral stream load-balancer
+policy, and stronger stream smoke/security coverage. UDP proxying and HTTP/2
+server push are intentionally deferred/skipped until a concrete requirement
+makes them worth the extra attack surface.
+Each `1.4.x` release has a hard stop. New feature families should move to the
+next planned version unless they are required to make an already-in-scope item
+safe.
 Palo Alto-style security asks are tracked as policy integrations around this
 proxy surface: reputation/Geo decisions, TLS fingerprint signals, and future
 WAF/App-ID-like classification hooks without turning Fluxheim into a full
@@ -98,11 +98,14 @@ firewall.
 `1.5` is planned as enterprise load-balancer stabilization after the `1.4`
 proxy primitives are present: multi-site state, cluster coordination, runtime
 pool mutation, richer admin operations, deeper active/adaptive health policy,
-and migration tooling for HAProxy/F5 estates.
+TLS passthrough SNI routing after a bounded ClientHello preread parser is
+proven, later xDS/Kubernetes/Consul discovery once local discovery and runtime
+backend mutation are stable, and migration tooling for HAProxy/F5 estates.
 `1.6` is planned as the shared Wasm
 extensibility release for
-nginx-Lua-style request/response hooks and VCL-like cache policy hooks through
-one sandboxed runtime. Sentinel Mesh/WireGuard, advanced certificate
+nginx-Lua-style request/response hooks, VCL-like cache policy hooks, and later
+bounded TCP stream filter hooks through one sandboxed runtime. Sentinel
+Mesh/WireGuard, advanced certificate
 automation, and larger application-server features remain later minor releases
 according to the versioning plan.
 In-process Linux seccomp/Landlock sandboxing is also post-`1.0` work: the

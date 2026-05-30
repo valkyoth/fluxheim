@@ -1448,6 +1448,23 @@ Release shape:
     must forward the original bytes unmodified after peeking;
   - no HTTP headers, cache, auth subrequest, compression, or PHP behavior on
     stream routes.
+- `1.4.7` - TCP stream hardening:
+  - stop line: harden the `1.4.6` TCP stream proxy foundation only. Do not add
+    UDP proxying, TLS passthrough SNI routing, xDS/Kubernetes/Consul discovery,
+    or Wasm/Lua stream filters in `1.4.7`;
+  - implement true per-read stream idle timeout on top of the manual copy loop,
+    while keeping `max_connection_secs` as a separate lifetime cap;
+  - add stream upstream TLS and upstream mTLS where it can reuse the existing
+    safe certificate/key loading and upstream TLS evidence model. If this
+    expands into a new trust-store or provider model, defer it to `1.5`;
+  - move only transport-neutral load-balancer policy to stream routes:
+    connection limits, upstream weights/backup/drain state, and health state are
+    candidates; HTTP request/response policy, cache, compression, auth
+    subrequests, PHP, header mutation, and body policy stay out of stream
+    routes;
+  - expand stream smoke/security tests for half-close behavior, byte caps,
+    idle timeout, upstream TLS/mTLS, PROXY receive/send combinations, and
+    metrics labels.
 - Future macOS production support:
   - track as a later release line after `1.4.x`, not as spillover from the
     developer-support milestone. Production macOS requires regular macOS CI,
@@ -1591,6 +1608,11 @@ Stable scope:
   and raw UDP forwarding needs a session/NAT table, affinity model, and
   protocol-specific health semantics. Do not build it until a concrete DNS,
   syslog, DTLS, gaming, or IoT requirement justifies the extra surface.
+  When scheduled, make it a separate future version with a concrete target:
+  generic UDP session forwarding, DNS UDP load balancing, syslog UDP
+  forwarding, QUIC passthrough, or game-server UDP proxying. Each target needs
+  explicit session TTLs, affinity, packet/byte/drop metrics, amplification
+  controls, and protocol-appropriate health checks.
 - Richer proxy variables for logging, headers, and future Wasm inputs:
   - upstream connect time, first-byte time, response time, selected target,
     retry count, queue time, TLS protocol/cipher, request ID, vhost, route,
@@ -1646,7 +1668,10 @@ Out of scope for `1.4`:
   bounded policy surfaces; the shared Wasm runtime remains a separate `1.6`
   line. NGINX rewrite-module-style `if` conditions should be evaluated there
   as sandboxed policy hooks rather than copied into TOML as a second ad-hoc
-  language.
+  language. TCP stream Wasm/Lua-style filters also belong to the shared Wasm
+  line, not `1.4.7`: they require a sandbox ABI, fuel/time/memory limits,
+  stream mutation limits, and a clear security model for long-lived L4
+  connections.
 - HTTP/2 server push should be skipped permanently unless the browser ecosystem
   reverses course; mainstream clients removed or never enabled it, so it is not
   a useful parity target.
@@ -1716,8 +1741,14 @@ Stable scope:
   - HTTP/1.1 and HTTP/2 request-aware pools;
   - gRPC-aware HTTP/2 pools where trailers/status handling is preserved;
   - TCP stream pools built on the `1.4` stream-proxy foundation;
+  - TLS passthrough SNI routing only after a bounded ClientHello parser,
+    preread buffer cap, malformed-handshake behavior, and unmodified byte replay
+    are proven;
   - UDP session pools only after a concrete post-`1.4` requirement proves raw
     UDP forwarding can be bounded and observable;
+  - xDS/Kubernetes/Consul discovery only after local DNS/file discovery and
+    runtime backend mutation are stable. Treat this as a control-plane feature,
+    not a quick stream-proxy add-on;
   - HTTP/3/QUIC remains a later protocol milestone unless the QUIC ingress
     stack is already stable before `1.5`.
 - Multiple upstreams per pool with safe address validation and per-upstream
@@ -2124,6 +2155,10 @@ Stable scope:
 - Wasmtime-based sandbox evaluation after license/advisory review.
 - Request header hook.
 - Response header hook.
+- TCP stream hook points after the stream foundation and load-balancer
+  semantics are stable. Stream filters must be opt-in, bounded by bytes/time,
+  safe for long-lived connections, and unable to become an unbounded arbitrary
+  bytecode path on raw TCP traffic.
 - Access-control hook returning allow, deny, or continue.
 - Conditional request-policy hooks that can cover nginx rewrite-module-style
   `if` use cases only inside the sandbox, with no URI rewrite loops by default
@@ -3111,8 +3146,15 @@ the exception while the cache server is being completed as a focused sequence:
   built-in dynamic database downloaders, remote lookup sidecars, programmable
   geo logic, and anomaly engines are later work.
 - `v1.4.6`: TCP stream proxy foundation with separate stream semantics,
-  listener/upstream trust boundaries, bounded copy controls, and optional TLS
-  passthrough SNI routing only after a bounded ClientHello parser is proven.
+  listener/upstream trust boundaries, and bounded copy controls.
+- `v1.4.7`: TCP stream hardening with true per-read idle timeout, stream
+  upstream TLS/mTLS where it reuses the existing safe TLS material model, and
+  transport-neutral stream load-balancer policy only.
+- `v1.5.0`: load-balancer/control-plane line. Include TLS passthrough SNI
+  routing only after a bounded ClientHello parser, preread buffer limit, and
+  byte replay model are proven. Dynamic xDS/Kubernetes/Consul discovery belongs
+  here or a later control-plane line after local DNS/file discovery and runtime
+  backend mutation are stable.
 - Later macOS production line: only after Level 1 developer support is stable.
   Requires regular macOS CI, runtime smoke coverage, launchd/Homebrew or other
   packaging decisions, signed/notarized binary policy, and a macOS-specific
