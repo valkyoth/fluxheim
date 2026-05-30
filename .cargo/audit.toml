@@ -8,6 +8,13 @@ ignore = [
     # moves to prometheus >=0.14 or otherwise drops vulnerable protobuf 2.x.
     # Next scheduled manual review before 2026-08-01.
     "RUSTSEC-2024-0437",
+    # Transitive through pingora-core and pingora-load-balancing via derivative
+    # 2.2.0. The crate is unmaintained and used as a compile-time derive macro
+    # dependency, not on Fluxheim's runtime request path.
+    # REVIEW: scripts/validate-release-metadata.sh fails if derivative leaves
+    # Cargo.lock while this suppression exists. Remove this when Pingora drops
+    # derivative. Next scheduled manual review before 2026-11-01.
+    "RUSTSEC-2024-0388",
 ]
 
 [database]

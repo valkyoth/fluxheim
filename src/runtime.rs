@@ -139,8 +139,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "stream-proxy")]
-    for mut stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
-        apply_downstream_proxy_protocol(&mut stream_service, &config)?;
+    for stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
         log::info!("stream proxy service enabled");
         server.add_service(stream_service);
     }
@@ -228,7 +227,8 @@ where
         .map(|source| parse_proxy_protocol_trusted_source(source))
         .collect::<Result<Vec<_>, _>>()?;
     log::info!(
-        "downstream PROXY protocol v1 receive enabled for {} trusted source(s)",
+        "downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
+        config.server.proxy_protocol,
         trusted_sources.len()
     );
     match config.server.proxy_protocol {

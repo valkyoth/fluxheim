@@ -1435,11 +1435,11 @@ Release shape:
   - port/listener-based stream routing to one or more upstreams, reusing the
     load-balancer selection and health primitives only where they are transport
     neutral and do not pull HTTP policy into stream routes;
-  - bidirectional Tokio byte copy with half-close handling, idle/connect
-    timeout controls, per-direction byte accounting, max connection limits, and
-    graceful drain behavior;
-  - upstream PROXY protocol send where configured, and listener-side PROXY
-    protocol receive only behind trusted peer rules;
+  - bidirectional Tokio byte copy with half-close handling, connect timeout,
+    max connection lifetime, per-direction byte caps/accounting, max connection
+    limits, and graceful drain behavior;
+  - upstream PROXY protocol send where configured, and route-local
+    listener-side PROXY protocol receive only behind trusted peer rules;
   - upstream TLS and upstream mTLS are allowed only if they reuse the same safe
     certificate/key loading model as HTTP upstream TLS without expanding the
     stop line; otherwise keep them for a later stream hardening release;

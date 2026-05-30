@@ -1,4 +1,5 @@
 use std::io;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -8,9 +9,9 @@ use async_trait::async_trait;
 use pingora::apps::ServerApp;
 use pingora::protocols::Stream;
 use pingora::server::ShutdownWatch;
-use tokio::io::{AsyncWriteExt as _, copy_bidirectional};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-use crate::config::{Config, StreamRouteConfig, UpstreamProxyProtocol};
+use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
 use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot};
 
 pub(crate) type StreamProxyService = pingora::services::listening::Service<StreamProxyApp>;
@@ -35,6 +36,7 @@ fn stream_service_from_route(route: &StreamRouteConfig) -> io::Result<StreamProx
     for listen in &route.listen {
         service.add_tcp(listen);
     }
+    apply_stream_downstream_proxy_protocol(&mut service, route)?;
     Ok(service)
 }
 
@@ -43,7 +45,8 @@ pub(crate) struct StreamProxyApp {
     name: Arc<str>,
     upstreams: Arc<[Arc<str>]>,
     connect_timeout: Duration,
-    idle_timeout: Duration,
+    max_connection_lifetime: Duration,
+    max_connection_bytes: Option<u64>,
     max_connections: usize,
     active_connections: Arc<AtomicUsize>,
     next_upstream: AtomicUsize,
@@ -64,7 +67,8 @@ impl StreamProxyApp {
             name: Arc::from(route.name.as_str()),
             upstreams: upstreams.into(),
             connect_timeout: Duration::from_secs(route.connect_timeout_secs),
-            idle_timeout: Duration::from_secs(route.idle_timeout_secs),
+            max_connection_lifetime: Duration::from_secs(route.max_connection_secs),
+            max_connection_bytes: route.max_connection_bytes,
             max_connections: route.max_connections,
             active_connections: Arc::new(AtomicUsize::new(0)),
             next_upstream: AtomicUsize::new(0),
@@ -110,9 +114,12 @@ impl ServerApp for StreamProxyApp {
         let result = proxy_stream_connection(
             &mut downstream,
             &upstream_authority,
-            self.connect_timeout,
-            self.idle_timeout,
-            self.upstream_proxy_protocol,
+            StreamProxyConnectionOptions {
+                connect_timeout: self.connect_timeout,
+                max_connection_lifetime: self.max_connection_lifetime,
+                max_connection_bytes: self.max_connection_bytes,
+                upstream_proxy_protocol: self.upstream_proxy_protocol,
+            },
             source,
             destination,
         )
@@ -193,23 +200,125 @@ fn stream_error_outcome(error: &io::Error) -> &'static str {
 async fn proxy_stream_connection(
     downstream: &mut Stream,
     upstream_authority: &str,
-    connect_timeout: Duration,
-    idle_timeout: Duration,
-    upstream_proxy_protocol: UpstreamProxyProtocol,
+    options: StreamProxyConnectionOptions,
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
 ) -> io::Result<(u64, u64)> {
-    let mut upstream = connect_upstream(upstream_authority, connect_timeout).await?;
-    write_upstream_proxy_protocol(&mut upstream, upstream_proxy_protocol, source, destination)
-        .await?;
+    let mut upstream = connect_upstream(upstream_authority, options.connect_timeout).await?;
+    write_upstream_proxy_protocol(
+        &mut upstream,
+        options.upstream_proxy_protocol,
+        source,
+        destination,
+    )
+    .await?;
 
-    match tokio::time::timeout(idle_timeout, copy_bidirectional(downstream, &mut upstream)).await {
+    match tokio::time::timeout(
+        options.max_connection_lifetime,
+        copy_bidirectional_with_limits(downstream, &mut upstream, options.max_connection_bytes),
+    )
+    .await
+    {
         Ok(result) => result,
         Err(_) => Err(io::Error::new(
             io::ErrorKind::TimedOut,
-            "stream idle timeout elapsed",
+            "stream max connection lifetime elapsed",
         )),
     }
+}
+
+#[derive(Clone, Copy)]
+struct StreamProxyConnectionOptions {
+    connect_timeout: Duration,
+    max_connection_lifetime: Duration,
+    max_connection_bytes: Option<u64>,
+    upstream_proxy_protocol: UpstreamProxyProtocol,
+}
+
+enum StreamCopyEvent {
+    DownstreamTotal(u64),
+    UpstreamTotal(u64),
+    DownstreamEof,
+    UpstreamEof,
+}
+
+async fn copy_bidirectional_with_limits(
+    downstream: &mut Stream,
+    upstream: &mut tokio::net::TcpStream,
+    max_connection_bytes: Option<u64>,
+) -> io::Result<(u64, u64)> {
+    let (mut downstream_reader, mut downstream_writer) = tokio::io::split(downstream);
+    let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
+    let mut downstream_buffer = [0u8; 16 * 1024];
+    let mut upstream_buffer = [0u8; 16 * 1024];
+    let mut downstream_to_upstream = 0u64;
+    let mut upstream_to_downstream = 0u64;
+    let mut downstream_eof = false;
+    let mut upstream_eof = false;
+
+    while !downstream_eof || !upstream_eof {
+        let event = tokio::select! {
+            result = async {
+                let bytes = downstream_reader.read(&mut downstream_buffer).await?;
+                if bytes == 0 {
+                    upstream_writer.shutdown().await?;
+                    Ok::<_, io::Error>(StreamCopyEvent::DownstreamEof)
+                } else {
+                    let next = checked_stream_byte_count(
+                        downstream_to_upstream,
+                        bytes as u64,
+                        max_connection_bytes,
+                    )?;
+                    upstream_writer.write_all(&downstream_buffer[..bytes]).await?;
+                    Ok::<_, io::Error>(StreamCopyEvent::DownstreamTotal(next))
+                }
+            }, if !downstream_eof => result,
+            result = async {
+                let bytes = upstream_reader.read(&mut upstream_buffer).await?;
+                if bytes == 0 {
+                    downstream_writer.shutdown().await?;
+                    Ok::<_, io::Error>(StreamCopyEvent::UpstreamEof)
+                } else {
+                    let next = checked_stream_byte_count(
+                        upstream_to_downstream,
+                        bytes as u64,
+                        max_connection_bytes,
+                    )?;
+                    downstream_writer.write_all(&upstream_buffer[..bytes]).await?;
+                    Ok::<_, io::Error>(StreamCopyEvent::UpstreamTotal(next))
+                }
+            }, if !upstream_eof => result,
+        }?;
+
+        match event {
+            StreamCopyEvent::DownstreamTotal(total) => downstream_to_upstream = total,
+            StreamCopyEvent::UpstreamTotal(total) => upstream_to_downstream = total,
+            StreamCopyEvent::DownstreamEof => downstream_eof = true,
+            StreamCopyEvent::UpstreamEof => upstream_eof = true,
+        }
+    }
+
+    Ok((downstream_to_upstream, upstream_to_downstream))
+}
+
+fn checked_stream_byte_count(
+    current: u64,
+    additional: u64,
+    max_connection_bytes: Option<u64>,
+) -> io::Result<u64> {
+    let next = current.checked_add(additional).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "stream copied byte counter overflowed",
+        )
+    })?;
+    if max_connection_bytes.is_some_and(|limit| next > limit) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "stream max connection bytes exceeded",
+        ));
+    }
+    Ok(next)
 }
 
 async fn connect_upstream(
@@ -277,11 +386,74 @@ fn downstream_local_addr(downstream: &Stream) -> Option<SocketAddr> {
         .and_then(|digest| digest.local_addr().and_then(|addr| addr.as_inet()).copied())
 }
 
+fn apply_stream_downstream_proxy_protocol(
+    service: &mut StreamProxyService,
+    route: &StreamRouteConfig,
+) -> io::Result<()> {
+    if route.downstream_proxy_protocol == DownstreamProxyProtocol::Off {
+        return Ok(());
+    }
+    let trusted_sources = route
+        .trusted_proxies
+        .iter()
+        .map(|source| parse_stream_proxy_protocol_trusted_source(source))
+        .collect::<io::Result<Vec<_>>>()?;
+    log::info!(
+        "stream route {} downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
+        route.name,
+        route.downstream_proxy_protocol,
+        trusted_sources.len()
+    );
+    match route.downstream_proxy_protocol {
+        DownstreamProxyProtocol::Off => {}
+        DownstreamProxyProtocol::V1 => {
+            service.set_proxy_protocol_v1(pingora::listeners::ProxyProtocolConfig::v1(
+                trusted_sources,
+            ));
+        }
+        DownstreamProxyProtocol::V2 => {
+            service.set_proxy_protocol_v2(pingora::listeners::ProxyProtocolConfig::v2(
+                trusted_sources,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn parse_stream_proxy_protocol_trusted_source(
+    value: &str,
+) -> io::Result<pingora::listeners::ProxyProtocolTrustedSource> {
+    if let Some((address, prefix)) = value.split_once('/') {
+        let network = address.parse::<IpAddr>().map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid stream trusted proxy network {value:?}: {error}"),
+            )
+        })?;
+        let prefix = prefix.parse::<u8>().map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid stream trusted proxy prefix {value:?}: {error}"),
+            )
+        })?;
+        return Ok(pingora::listeners::ProxyProtocolTrustedSource::Cidr { network, prefix });
+    }
+    Ok(pingora::listeners::ProxyProtocolTrustedSource::Ip(
+        value.parse::<IpAddr>().map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid stream trusted proxy address {value:?}: {error}"),
+            )
+        })?,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{StreamProxyApp, proxy_stream_connection};
-    use crate::config::{StreamRouteConfig, UpstreamProxyProtocol};
+    use crate::config::{DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
     use pingora::protocols::Stream as AnyStream;
+    use std::io;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
     #[test]
@@ -292,8 +464,11 @@ mod tests {
             upstream: None,
             upstreams: vec!["127.0.0.1:5432".to_owned(), "127.0.0.1:6432".to_owned()],
             connect_timeout_secs: 1,
-            idle_timeout_secs: 1,
+            max_connection_secs: 1,
+            max_connection_bytes: None,
             max_connections: 0,
+            downstream_proxy_protocol: DownstreamProxyProtocol::Off,
+            trusted_proxies: Vec::new(),
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
         })
         .unwrap();
@@ -331,9 +506,12 @@ mod tests {
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
-                    std::time::Duration::from_secs(1),
-                    std::time::Duration::from_secs(1),
-                    UpstreamProxyProtocol::Off,
+                    super::StreamProxyConnectionOptions {
+                        connect_timeout: std::time::Duration::from_secs(1),
+                        max_connection_lifetime: std::time::Duration::from_secs(1),
+                        max_connection_bytes: None,
+                        upstream_proxy_protocol: UpstreamProxyProtocol::Off,
+                    },
                     None,
                     None,
                 )
@@ -352,6 +530,56 @@ mod tests {
 
             let copied = proxy_task.await.unwrap();
             assert_eq!(copied, (4, 4));
+            upstream_task.await.unwrap();
+        });
+    }
+
+    #[test]
+    fn stream_proxy_rejects_connection_byte_overflow() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            let upstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let upstream_addr = upstream_listener.local_addr().unwrap();
+            let upstream_task = tokio::spawn(async move {
+                let (mut stream, _) = upstream_listener.accept().await.unwrap();
+                let mut input = Vec::new();
+                let _ = stream.read_to_end(&mut input).await;
+            });
+
+            let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let downstream_addr = downstream_listener.local_addr().unwrap();
+            let proxy_task = tokio::spawn(async move {
+                let (stream, _) = downstream_listener.accept().await.unwrap();
+                let mut downstream: AnyStream =
+                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                proxy_stream_connection(
+                    &mut downstream,
+                    &upstream_addr.to_string(),
+                    super::StreamProxyConnectionOptions {
+                        connect_timeout: std::time::Duration::from_secs(1),
+                        max_connection_lifetime: std::time::Duration::from_secs(1),
+                        max_connection_bytes: Some(3),
+                        upstream_proxy_protocol: UpstreamProxyProtocol::Off,
+                    },
+                    None,
+                    None,
+                )
+                .await
+            });
+
+            let mut client = tokio::net::TcpStream::connect(downstream_addr)
+                .await
+                .unwrap();
+            client.write_all(b"ping").await.unwrap();
+            let _ = client.shutdown().await;
+
+            let error = proxy_task.await.unwrap().unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
             upstream_task.await.unwrap();
         });
     }

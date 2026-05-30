@@ -40,7 +40,8 @@ supply-chain changes. Review them before merging dependency updates.
 
 Reviewed advisory exceptions are allowed only when there is no compatible
 upgrade and the affected API is not reachable in Fluxheim. Each exception must
-be listed in both `deny.toml` and `.cargo/audit.toml`, with a removal condition.
+be listed in the tool that reports it (`deny.toml` or `.cargo/audit.toml`), with
+a removal condition.
 
 Current reviewed dependency warnings:
 
@@ -51,8 +52,14 @@ Current reviewed dependency warnings:
   exception remains present.
 - `RUSTSEC-2025-0069` for `daemonize 0.5.0`: warning-only unmaintained
   transitive through Pingora. Recheck on every Pingora upgrade.
-- `RUSTSEC-2024-0388` for `derivative 2.2.0`: warning-only unmaintained
-  transitive through Pingora. Recheck on every Pingora upgrade.
+- `RUSTSEC-2024-0388` for `derivative 2.2.0`: transitive through Pingora's
+  dependency stack. It is an unmaintained compile-time derive macro dependency,
+  not a Fluxheim runtime request parser. Remove the exception when Pingora no
+  longer pulls `derivative`. The release metadata gate also fails after the
+  scheduled manual review date `2026-11-01` while the exception remains
+  present. This warning is tracked in `.cargo/audit.toml`; cargo-deny currently
+  rejects the ignore as unused because it does not classify the advisory for
+  this graph.
 - `RUSTSEC-2025-0134` for `rustls-pemfile 2.2.0`: warning-only unmaintained
   transitive through Pingora's Rustls stack and `rustls-native-certs`.
   Fluxheim no longer depends on it directly and uses

@@ -44,7 +44,7 @@ before Cargo starts compiling Pingora.
 | `compression-gzip` | No | gzip response compression for eligible known-length responses. |
 | `compression-zstd` | No | Zstandard response compression for eligible known-length responses. |
 | `geoip` | No | Local MMDB Geo-Context lookup for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, exposed to bounded access policy and structured logs. |
-| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream routes, bounded connection/timeouts, and optional upstream PROXY protocol send. Depends on the shared proxy runtime in `1.4.6-dev`. |
+| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream routes, bounded connection lifetime/byte caps, and route-local PROXY protocol receive/send. Depends on the shared proxy runtime in `1.4.6`. |
 | `privacy-mode` | No | Zero-retention static/proxy build profile. |
 | `tls` | No | Internal marker for TLS-aware code; select a concrete backend for serving. |
 

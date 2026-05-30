@@ -153,8 +153,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Sat May 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.6-0.dev
-- Start the 1.4.6 TCP stream proxy foundation development line.
+* Sat May 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.6-1
+- Release 1.4.6 TCP stream proxy foundation.
+- Add raw L4 TCP stream routes, round-robin stream upstream selection, bounded
+  connect/lifetime/byte/concurrency controls, route-local PROXY protocol
+  receive, upstream PROXY protocol send, stream metrics, and graceful drain.
 
 * Fri May 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.5-1
 - Release 1.4.5 bounded GeoIP/Geo-Context policy.

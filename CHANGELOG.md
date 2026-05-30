@@ -7,11 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.4.6-dev - Unreleased
+## 1.4.6 - 2026-05-30
 
 ### Changed
 
-- Start the TCP stream proxy foundation development release.
+- Release the TCP stream proxy foundation.
+- Add route-local downstream PROXY protocol receive for TCP stream routes with
+  mandatory route-local `trusted_proxies`; HTTP `server.proxy_protocol` no
+  longer applies to stream listeners.
+- Rename stream `idle_timeout_secs` to `max_connection_secs` to reflect the
+  wall-clock connection lifetime cap, and add optional
+  `max_connection_bytes` per-direction byte caps.
+- Track the transitive `RUSTSEC-2024-0388` `derivative` advisory with an
+  explicit review deadline while Pingora still pulls the unmaintained crate.
 
 ## 1.4.5 - 2026-05-29
 

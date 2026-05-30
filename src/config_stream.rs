@@ -5,9 +5,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{
-    ConfigError, UpstreamProxyProtocol, validate_config_list_len, validate_required_timeout_secs,
+    ConfigError, DownstreamProxyProtocol, UpstreamProxyProtocol, validate_config_list_len,
+    validate_required_timeout_secs,
 };
-use crate::config_net::valid_authority;
+use crate::config_net::{valid_authority, valid_trusted_proxy};
 
 pub(crate) const MAX_STREAM_ROUTES: usize = 128;
 pub(crate) const MAX_STREAM_ROUTE_NAME_BYTES: usize = 128;
@@ -77,10 +78,19 @@ pub struct StreamRouteConfig {
     pub upstreams: Vec<String>,
     #[serde(default = "default_stream_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
-    #[serde(default = "default_stream_idle_timeout_secs")]
-    pub idle_timeout_secs: u64,
+    #[serde(
+        default = "default_stream_max_connection_secs",
+        alias = "idle_timeout_secs"
+    )]
+    pub max_connection_secs: u64,
+    #[serde(default)]
+    pub max_connection_bytes: Option<u64>,
     #[serde(default)]
     pub max_connections: usize,
+    #[serde(default)]
+    pub downstream_proxy_protocol: DownstreamProxyProtocol,
+    #[serde(default)]
+    pub trusted_proxies: Vec<String>,
     #[serde(default)]
     pub upstream_proxy_protocol: UpstreamProxyProtocol,
 }
@@ -148,11 +158,36 @@ impl StreamRouteConfig {
             "stream.routes.connect_timeout_secs",
             self.connect_timeout_secs,
         )?;
-        validate_required_timeout_secs("stream.routes.idle_timeout_secs", self.idle_timeout_secs)?;
+        validate_required_timeout_secs(
+            "stream.routes.max_connection_secs",
+            self.max_connection_secs,
+        )?;
+        if self.max_connection_bytes == Some(0) {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.max_connection_bytes",
+                reason: "must be greater than zero when set",
+            });
+        }
         if self.max_connections > MAX_STREAM_MAX_CONNECTIONS {
             return Err(ConfigError::InvalidStreamProxyPolicy {
                 field: "stream.routes.max_connections",
                 reason: "must be at most 1000000; use 0 for unlimited",
+            });
+        }
+        for proxy in &self.trusted_proxies {
+            if !valid_trusted_proxy(proxy) {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field: "stream.routes.trusted_proxies",
+                    reason: "trusted_proxies entries must be IP addresses or CIDR ranges",
+                });
+            }
+        }
+        if self.downstream_proxy_protocol != DownstreamProxyProtocol::Off
+            && self.trusted_proxies.is_empty()
+        {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.downstream_proxy_protocol",
+                reason: "downstream_proxy_protocol requires stream route trusted_proxies so client identity cannot be spoofed by direct peers",
             });
         }
         Ok(())
@@ -174,8 +209,11 @@ impl Default for StreamRouteConfig {
             upstream: None,
             upstreams: Vec::new(),
             connect_timeout_secs: default_stream_connect_timeout_secs(),
-            idle_timeout_secs: default_stream_idle_timeout_secs(),
+            max_connection_secs: default_stream_max_connection_secs(),
+            max_connection_bytes: None,
             max_connections: 0,
+            downstream_proxy_protocol: DownstreamProxyProtocol::default(),
+            trusted_proxies: Vec::new(),
             upstream_proxy_protocol: UpstreamProxyProtocol::default(),
         }
     }
@@ -185,7 +223,7 @@ fn default_stream_connect_timeout_secs() -> u64 {
     5
 }
 
-fn default_stream_idle_timeout_secs() -> u64 {
+fn default_stream_max_connection_secs() -> u64 {
     300
 }
 
@@ -279,6 +317,61 @@ upstream = "127.0.0.1:5432"
 name = "two"
 listen = ["127.0.0.1:15432"]
 upstream = "127.0.0.1:6432"
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_accepts_route_local_downstream_proxy_protocol() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+downstream_proxy_protocol = "v2"
+trusted_proxies = ["127.0.0.1", "10.0.0.0/8"]
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn stream_config_rejects_downstream_proxy_protocol_without_trusted_proxies() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+downstream_proxy_protocol = "v1"
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_rejects_zero_max_connection_bytes() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+max_connection_bytes = 0
 "#,
         )
         .unwrap();

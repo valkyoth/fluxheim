@@ -37,7 +37,7 @@ origin controls, gRPC pass-through policy, proxy-operations migration blockers,
 the `1.4.2` proxy module split, the `1.4.3` config module split, and Apple
 Silicon macOS Level 1 developer support. `1.4.5` adds bounded GeoIP/Geo-Context
 policy with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open
-datasets. The current `1.4.6-dev` line starts the TCP stream proxy foundation.
+datasets. The current `1.4.6` line adds the TCP stream proxy foundation.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -97,7 +97,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
 | External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding. |
 | Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
-| TCP stream proxying | ✅ | `1.4.6-dev`; optional `stream-proxy` feature with raw L4 TCP listeners, round-robin upstream selection, bounded connection/idle/connect controls, and upstream PROXY protocol send. |
+| TCP stream proxying | ✅ | `1.4.6`; optional `stream-proxy` feature with raw L4 TCP listeners, round-robin upstream selection, bounded lifetime/byte/connect controls, and route-local PROXY protocol receive/send. |
 
 ### Operations And Packaging
 
@@ -234,7 +234,7 @@ Individual module features:
 | `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
 | `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
 | `load-balancer` | No | Pingora load-balancing module and health checks. |
-| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. Depends on the shared proxy runtime in `1.4.6-dev`. |
+| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. Depends on the shared proxy runtime in `1.4.6`. |
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |

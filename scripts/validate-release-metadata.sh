@@ -82,6 +82,35 @@ if grep -q 'RUSTSEC-2024-0437' deny.toml .cargo/audit.toml; then
     fi
 fi
 
+derivative_version="$(
+    awk '
+        /^\[\[package\]\]$/ { in_package = 1; name = ""; version = ""; next }
+        in_package && /^name = "derivative"$/ { name = "derivative"; next }
+        in_package && /^version = / { version = $3; gsub(/"/, "", version); next }
+        in_package && /^dependencies = \[/ {
+            if (name == "derivative") {
+                print version;
+                exit
+            }
+            in_package = 0
+        }
+    ' Cargo.lock
+)"
+
+if grep -q 'RUSTSEC-2024-0388' deny.toml .cargo/audit.toml \
+    && [ "$derivative_version" != "2.2.0" ]; then
+    echo "release metadata: RUSTSEC-2024-0388 suppression must be reviewed because derivative is ${derivative_version:-absent}, expected 2.2.0" >&2
+    exit 1
+fi
+
+if grep -q 'RUSTSEC-2024-0388' deny.toml .cargo/audit.toml; then
+    current_utc_date="$(date -u +%Y%m%d)"
+    if [ "$current_utc_date" -ge 20261101 ]; then
+        echo "release metadata: RUSTSEC-2024-0388 suppression passed its scheduled manual review date 2026-11-01" >&2
+        exit 1
+    fi
+fi
+
 if grep -q 'RUSTSEC-2025-0134' deny.toml .cargo/audit.toml \
     && ! grep -q '^name = "rustls-pemfile"$' Cargo.lock; then
     echo "release metadata: RUSTSEC-2025-0134 suppression must be removed because rustls-pemfile is no longer in Cargo.lock" >&2

@@ -161,21 +161,29 @@ name = "postgres"
 listen = ["127.0.0.1:15432"]
 upstreams = ["10.0.0.11:5432", "10.0.0.12:5432"]
 connect_timeout_secs = 5
-idle_timeout_secs = 300
+max_connection_secs = 300
+max_connection_bytes = 1073741824
 max_connections = 1024
+downstream_proxy_protocol = "off" # "off", "v1", or "v2"
+trusted_proxies = []
 upstream_proxy_protocol = "off" # "off", "v1", or "v2"
 ```
 
 - `listen` entries are `ip:port` TCP listeners. Each listener may appear on
   only one stream route.
 - Configure either `upstream = "host:port"` or `upstreams = ["host:port", ...]`.
-  Multiple upstreams use round-robin selection in the initial `1.4.6-dev`
+  Multiple upstreams use round-robin selection in the initial `1.4.6`
   foundation.
 - `connect_timeout_secs` bounds DNS/connect setup and defaults to `5`.
-- `idle_timeout_secs` bounds the bidirectional copy window and defaults to
-  `300`.
+- `max_connection_secs` bounds total accepted stream lifetime and defaults to
+  `300`. It is a wall-clock lifetime cap, not a per-read idle timer.
+- `max_connection_bytes` is optional and caps copied bytes per direction for a
+  single stream connection.
 - `max_connections = 0` means unlimited for that stream route. Non-zero values
   cap concurrent accepted connections before connecting upstream.
+- `downstream_proxy_protocol` enables PROXY protocol receive for this stream
+  route only. It defaults to `off` and requires route-local `trusted_proxies`.
+  The HTTP `server.proxy_protocol` setting does not apply to stream listeners.
 - `upstream_proxy_protocol` writes a HAProxy PROXY protocol header to the
   selected upstream before forwarding stream bytes. Use it only when the
   upstream explicitly expects PROXY protocol.
