@@ -12,6 +12,8 @@ Fluxheim 1.4.6 is the TCP stream proxy foundation release.
   per-route concurrent connection limits.
 - Per-connection debug logging with downstream/upstream byte counts and
   duration.
+- Optional Prometheus metrics for stream connection outcomes and per-direction
+  byte totals when `metrics` is compiled.
 - Upstream PROXY protocol v1/v2 send where configured.
 
 ## Out Of Scope

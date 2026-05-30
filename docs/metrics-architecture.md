@@ -112,6 +112,8 @@ Current cache baseline:
 - `fluxheim_edge_policy_events_total{scope,vhost,route,policy,outcome}`
 - `fluxheim_load_balancer_events_total{scope,vhost,route,upstream,event}`
 - `fluxheim_response_compressions_total{scope,vhost,route,encoding}`
+- `fluxheim_stream_connections_total{route,outcome}`
+- `fluxheim_stream_bytes_total{route,direction}`
 
 The configuration gauges are aggregate, label-free, and populated from
 validated configuration when the metrics listener starts. The local
@@ -128,6 +130,11 @@ configured vhost names plus bounded method, outcome, and status-class labels.
 `configuration_error`, `invalid_response`, `intercepted`, `offload`,
 `offload_error`, `response`, or `other`; these metrics avoid raw paths,
 queries, script filenames, usernames, cookies, and FastCGI params.
+`fluxheim_stream_connections_total` and `fluxheim_stream_bytes_total` use
+configured stream route names only. Stream connection `outcome` is bounded to
+`completed`, `rejected`, `connect_error`, `timeout`, `shutdown`, or `error`.
+Stream byte `direction` is bounded to `downstream_to_upstream`,
+`upstream_to_downstream`, or `other`.
 `fluxheim_php_stderr_events_total` uses configured vhost names plus bounded
 `state` labels of `emitted`, `truncated`, or `other`; it counts STDERR presence
 without exposing PHP error text.

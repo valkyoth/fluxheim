@@ -180,6 +180,11 @@ upstream_proxy_protocol = "off" # "off", "v1", or "v2"
   selected upstream before forwarding stream bytes. Use it only when the
   upstream explicitly expects PROXY protocol.
 
+When `metrics` is compiled and enabled,
+`fluxheim_stream_connections_total{route,outcome}` records bounded connection
+outcomes and `fluxheim_stream_bytes_total{route,direction}` records copied
+bytes in each direction.
+
 ## Admin
 
 `[admin]` is disabled by default. When enabled, it must be authenticated and

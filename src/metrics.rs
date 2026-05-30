@@ -8,6 +8,8 @@ static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static EDGE_POLICY_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static LOAD_BALANCER_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static RESPONSE_COMPRESSIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static STREAM_CONNECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static STREAM_BYTES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ADMIN_AUTH_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static ACME_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static PHP_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -64,6 +66,8 @@ pub fn init() -> Result<(), prometheus::Error> {
     edge_policy_events_total()?;
     load_balancer_events_total()?;
     response_compressions_total()?;
+    stream_connections_total()?;
+    stream_bytes_total()?;
     admin_auth_events_total()?;
     acme_events_total()?;
     php_requests_total()?;
@@ -251,6 +255,24 @@ pub fn record_response_compression(vhost: &str, route: Option<&str>, encoding: &
             ])
             .inc(),
         Err(error) => log::debug!("metrics response compression counter unavailable: {error}"),
+    }
+}
+
+pub fn record_stream_connection(route: &str, outcome: &str) {
+    match stream_connections_total() {
+        Ok(counter) => counter
+            .with_label_values(&[route, stream_outcome_label(outcome)])
+            .inc(),
+        Err(error) => log::debug!("metrics stream connection counter unavailable: {error}"),
+    }
+}
+
+pub fn record_stream_bytes(route: &str, direction: &str, bytes: u64) {
+    match stream_bytes_total() {
+        Ok(counter) => counter
+            .with_label_values(&[route, stream_direction_label(direction)])
+            .inc_by(bytes),
+        Err(error) => log::debug!("metrics stream bytes counter unavailable: {error}"),
     }
 }
 
@@ -662,6 +684,54 @@ fn response_compressions_total() -> Result<&'static IntCounterVec, prometheus::E
         prometheus::Error::Msg(
             "fluxheim_response_compressions_total failed to initialize".to_owned(),
         )
+    })
+}
+
+fn stream_connections_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = STREAM_CONNECTIONS_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_stream_connections_total",
+            "Total Fluxheim TCP stream proxy connections by configured stream route and bounded outcome.",
+        ),
+        &["route", "outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = STREAM_CONNECTIONS_TOTAL.set(counter);
+    STREAM_CONNECTIONS_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_stream_connections_total failed to initialize".to_owned())
+    })
+}
+
+fn stream_bytes_total() -> Result<&'static IntCounterVec, prometheus::Error> {
+    if let Some(counter) = STREAM_BYTES_TOTAL.get() {
+        return Ok(counter);
+    }
+
+    let counter = IntCounterVec::new(
+        Opts::new(
+            "fluxheim_stream_bytes_total",
+            "Total Fluxheim TCP stream proxy bytes by configured stream route and bounded direction.",
+        ),
+        &["route", "direction"],
+    )?;
+    match prometheus::default_registry().register(Box::new(counter.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = STREAM_BYTES_TOTAL.set(counter);
+    STREAM_BYTES_TOTAL.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_stream_bytes_total failed to initialize".to_owned())
     })
 }
 
@@ -1604,6 +1674,25 @@ fn metrics_otlp_export_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+fn stream_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "completed" => "completed",
+        "rejected" => "rejected",
+        "connect_error" => "connect_error",
+        "timeout" => "timeout",
+        "shutdown" => "shutdown",
+        _ => "error",
+    }
+}
+
+fn stream_direction_label(direction: &str) -> &'static str {
+    match direction {
+        "downstream_to_upstream" => "downstream_to_upstream",
+        "upstream_to_downstream" => "upstream_to_downstream",
+        _ => "other",
+    }
+}
+
 fn acme_event_label(event: &str) -> &'static str {
     match event {
         "pending" => "pending",
@@ -1640,7 +1729,7 @@ mod tests {
         record_host_routing_rejection, record_load_balancer_event, record_metrics_otlp_export,
         record_php_fpm_pool_event, record_php_fpm_pool_idle, record_php_fpm_retry,
         record_php_request, record_php_stderr, record_proxy_outcome, record_response_compression,
-        status_class,
+        record_stream_bytes, record_stream_connection, status_class,
     };
 
     #[test]
@@ -1688,6 +1777,37 @@ mod tests {
         assert!(output.contains(r#"encoding="br""#));
         assert!(output.contains(r#"encoding="other""#));
         assert!(!output.contains("attacker-encoding"));
+    }
+
+    #[test]
+    fn records_stream_metrics_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_stream_connection("postgres", "completed");
+        record_stream_connection("postgres", "timeout");
+        record_stream_connection("postgres", "attacker-outcome");
+        record_stream_bytes("postgres", "downstream_to_upstream", 128);
+        record_stream_bytes("postgres", "upstream_to_downstream", 256);
+        record_stream_bytes("postgres", "attacker-direction", 512);
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_stream_connections_total"));
+        assert!(output.contains("fluxheim_stream_bytes_total"));
+        assert!(output.contains(r#"route="postgres""#));
+        assert!(output.contains(r#"outcome="completed""#));
+        assert!(output.contains(r#"outcome="timeout""#));
+        assert!(output.contains(r#"outcome="error""#));
+        assert!(output.contains(r#"direction="downstream_to_upstream""#));
+        assert!(output.contains(r#"direction="upstream_to_downstream""#));
+        assert!(output.contains(r#"direction="other""#));
+        assert!(!output.contains("attacker-outcome"));
+        assert!(!output.contains("attacker-direction"));
     }
 
     #[test]

@@ -95,6 +95,7 @@ impl ServerApp for StreamProxyApp {
                 "stream route {} rejected connection: max_connections reached",
                 self.name
             );
+            record_stream_connection(self.name.as_ref(), "rejected");
             return None;
         };
 
@@ -134,6 +135,17 @@ impl ServerApp for StreamProxyApp {
 
         match result {
             Ok((downstream_to_upstream, upstream_to_downstream)) => {
+                record_stream_connection(self.name.as_ref(), "completed");
+                record_stream_bytes(
+                    self.name.as_ref(),
+                    "downstream_to_upstream",
+                    downstream_to_upstream,
+                );
+                record_stream_bytes(
+                    self.name.as_ref(),
+                    "upstream_to_downstream",
+                    upstream_to_downstream,
+                );
                 log::debug!(
                     target: "fluxheim::stream",
                     "stream route {} completed via {}; downstream_to_upstream={} upstream_to_downstream={} duration_ms={}",
@@ -145,6 +157,7 @@ impl ServerApp for StreamProxyApp {
                 );
             }
             Err(error) => {
+                record_stream_connection(self.name.as_ref(), stream_error_outcome(&error));
                 log::warn!(
                     target: "fluxheim::stream",
                     "stream route {} failed via {} after {}ms: {}",
@@ -157,6 +170,38 @@ impl ServerApp for StreamProxyApp {
         }
 
         None
+    }
+}
+
+#[cfg(feature = "metrics")]
+fn record_stream_connection(route: &str, outcome: &str) {
+    crate::metrics::record_stream_connection(route, outcome);
+}
+
+#[cfg(not(feature = "metrics"))]
+fn record_stream_connection(_route: &str, _outcome: &str) {}
+
+#[cfg(feature = "metrics")]
+fn record_stream_bytes(route: &str, direction: &str, bytes: u64) {
+    crate::metrics::record_stream_bytes(route, direction, bytes);
+}
+
+#[cfg(not(feature = "metrics"))]
+fn record_stream_bytes(_route: &str, _direction: &str, _bytes: u64) {}
+
+fn stream_error_outcome(error: &io::Error) -> &'static str {
+    match error.kind() {
+        io::ErrorKind::Interrupted => "shutdown",
+        io::ErrorKind::TimedOut => "timeout",
+        io::ErrorKind::ConnectionRefused
+        | io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::AddrNotAvailable
+        | io::ErrorKind::AddrInUse
+        | io::ErrorKind::HostUnreachable
+        | io::ErrorKind::NetworkUnreachable
+        | io::ErrorKind::NotConnected => "connect_error",
+        _ => "error",
     }
 }
 
