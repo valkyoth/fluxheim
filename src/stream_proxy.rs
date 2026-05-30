@@ -89,6 +89,9 @@ impl ServerApp for StreamProxyApp {
         mut downstream: Stream,
         shutdown: &ShutdownWatch,
     ) -> Option<Stream> {
+        if *shutdown.borrow() {
+            return None;
+        }
         let Some(_slot) = self.acquire_slot() else {
             log::warn!(
                 target: "fluxheim::stream",
@@ -103,35 +106,17 @@ impl ServerApp for StreamProxyApp {
         let destination = downstream_local_addr(&downstream);
         let upstream_authority = self.select_upstream().to_owned();
         let started = Instant::now();
-        let mut shutdown = shutdown.clone();
 
-        let result = tokio::select! {
-            biased;
-            changed = shutdown.changed() => {
-                if changed.is_ok() && *shutdown.borrow() {
-                    Err(io::Error::new(io::ErrorKind::Interrupted, "server shutdown requested"))
-                } else {
-                    proxy_stream_connection(
-                        &mut downstream,
-                        &upstream_authority,
-                        self.connect_timeout,
-                        self.idle_timeout,
-                        self.upstream_proxy_protocol,
-                        source,
-                        destination,
-                    ).await
-                }
-            }
-            result = proxy_stream_connection(
-                &mut downstream,
-                &upstream_authority,
-                self.connect_timeout,
-                self.idle_timeout,
-                self.upstream_proxy_protocol,
-                source,
-                destination,
-            ) => result,
-        };
+        let result = proxy_stream_connection(
+            &mut downstream,
+            &upstream_authority,
+            self.connect_timeout,
+            self.idle_timeout,
+            self.upstream_proxy_protocol,
+            source,
+            destination,
+        )
+        .await;
 
         match result {
             Ok((downstream_to_upstream, upstream_to_downstream)) => {
