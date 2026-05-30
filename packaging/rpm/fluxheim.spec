@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.4.5
+Version:        1.4.6
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -153,6 +153,9 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat May 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.6-0.dev
+- Start the 1.4.6 TCP stream proxy foundation development line.
+
 * Fri May 29 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.5-1
 - Release 1.4.5 bounded GeoIP/Geo-Context policy.
 - Add local MMDB MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open dataset support,
