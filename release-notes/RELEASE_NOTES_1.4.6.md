@@ -15,6 +15,8 @@ Fluxheim 1.4.6 is the TCP stream proxy foundation release.
 - Optional Prometheus metrics for stream connection outcomes and per-direction
   byte totals when `metrics` is compiled.
 - Upstream PROXY protocol v1/v2 send where configured.
+- Trusted listener-side PROXY protocol v1/v2 receive on stream services through
+  the existing `server.proxy_protocol` and `server.trusted_proxies` policy.
 
 ## Out Of Scope
 

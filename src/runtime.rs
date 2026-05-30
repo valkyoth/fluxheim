@@ -139,7 +139,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     }
 
     #[cfg(feature = "stream-proxy")]
-    for stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
+    for mut stream_service in crate::stream_proxy::stream_services_from_config(&config)? {
+        apply_downstream_proxy_protocol(&mut stream_service, &config)?;
         log::info!("stream proxy service enabled");
         server.add_service(stream_service);
     }

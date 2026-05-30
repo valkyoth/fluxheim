@@ -119,10 +119,10 @@ Notes:
   `real_ip_recursive on`. The list is capped at 512 entries.
 - `proxy_protocol` defaults to `off`. Set it to `v1` or `v2` only on listeners reached
   exclusively through trusted load balancers or edge proxies that send HAProxy
-  PROXY protocol before TLS/HTTP bytes. Fluxheim requires
+  PROXY protocol before TLS/HTTP/stream bytes. Fluxheim requires
   `server.trusted_proxies` when this is enabled, rejects direct peers outside
   that trust list before parsing the header, and restores the PROXY source
-  address before TLS and HTTP handling. The v2 parser supports TCP4/TCP6 and
+  address before TLS, HTTP, and stream handling. The v2 parser supports TCP4/TCP6 and
   LOCAL/UNSPEC frames, skips bounded TLV payloads, and rejects unsupported
   address families or oversized v2 payloads.
 - `[server.process]` maps safe process settings into Pingora's `ServerConf`.
