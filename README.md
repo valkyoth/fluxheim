@@ -37,8 +37,7 @@ origin controls, gRPC pass-through policy, proxy-operations migration blockers,
 the `1.4.2` proxy module split, the `1.4.3` config module split, and Apple
 Silicon macOS Level 1 developer support. `1.4.5` adds bounded GeoIP/Geo-Context
 policy with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open
-datasets. The next development target is `1.4.6`, focused on the TCP stream
-proxy foundation.
+datasets. The current `1.4.6-dev` line starts the TCP stream proxy foundation.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -98,6 +97,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
 | External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding. |
 | Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
+| TCP stream proxying | ✅ | `1.4.6-dev`; optional `stream-proxy` feature with raw L4 TCP listeners, round-robin upstream selection, bounded connection/idle/connect controls, and upstream PROXY protocol send. |
 
 ### Operations And Packaging
 
@@ -121,7 +121,6 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
 | Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
-| TCP stream proxying | ❌ | Planned for `1.4.6`. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
 | WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
 
@@ -235,6 +234,7 @@ Individual module features:
 | `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
 | `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
 | `load-balancer` | No | Pingora load-balancing module and health checks. |
+| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. Depends on the shared proxy runtime in `1.4.6-dev`. |
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |
@@ -272,7 +272,7 @@ Recommended profile features:
 | `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing and all 1.4 compression codecs compiled in. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
-| `profile-full` | `profile-load-balancer` | All stable production modules, including the 1.4 compression codecs. |
+| `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, and the 1.4 stream foundation. |
 | `profile-development` | `profile-full`, `php-fpm`, `acme-client`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Broad development build with all compatible production modules. |
 | `profile-web-server` | `proxy`, `web`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Static webserver profile while serving still uses the shared proxy runtime. |
 | `profile-cache-edge` | `proxy`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `tls-rustls`, `security` | Cache edge without local static web serving. |

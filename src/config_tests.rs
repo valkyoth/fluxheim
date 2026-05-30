@@ -7536,6 +7536,7 @@ fn rejects_empty_listeners() {
         cache_purger: CachePurgerConfig::default(),
         web: WebConfig::default(),
         geoip: super::GeoIpConfig::default(),
+        stream: super::StreamConfig::default(),
         vhosts: vec![],
     };
 
@@ -8594,6 +8595,7 @@ fn rejects_invalid_upstream() {
         cache_purger: CachePurgerConfig::default(),
         web: WebConfig::default(),
         geoip: super::GeoIpConfig::default(),
+        stream: super::StreamConfig::default(),
         vhosts: vec![],
     };
 
@@ -8694,6 +8696,7 @@ fn rejects_empty_index_files() {
             ..WebConfig::default()
         },
         geoip: super::GeoIpConfig::default(),
+        stream: super::StreamConfig::default(),
         vhosts: vec![],
     };
 
@@ -8724,6 +8727,7 @@ fn rejects_too_many_index_files() {
             ..WebConfig::default()
         },
         geoip: super::GeoIpConfig::default(),
+        stream: super::StreamConfig::default(),
         vhosts: vec![],
     };
 
@@ -8794,6 +8798,7 @@ fn rejects_nested_index_files() {
             ..WebConfig::default()
         },
         geoip: super::GeoIpConfig::default(),
+        stream: super::StreamConfig::default(),
         vhosts: vec![],
     };
 
@@ -9985,6 +9990,7 @@ fn rejects_duplicate_vhost_hosts() {
         cache_purger: CachePurgerConfig::default(),
         web: WebConfig::default(),
         geoip: super::GeoIpConfig::default(),
+        stream: super::StreamConfig::default(),
         vhosts: vec![
             VhostConfig {
                 name: "first.example".to_owned(),

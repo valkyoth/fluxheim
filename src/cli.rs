@@ -631,6 +631,8 @@ pub fn validate_runtime_config(config: &Config) -> Result<(), Box<dyn Error + Se
     validate_compiled_module_config(config)?;
     validate_fips_runtime_config(config)?;
     crate::proxy::FluxProxy::from_config(config)?;
+    #[cfg(feature = "stream-proxy")]
+    crate::stream_proxy::stream_services_from_config(config)?;
     Ok(())
 }
 

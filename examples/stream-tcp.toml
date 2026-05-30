@@ -1,0 +1,14 @@
+[server]
+listen = []
+
+[stream]
+enabled = true
+
+[[stream.routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstreams = ["10.0.0.11:5432", "10.0.0.12:5432"]
+connect_timeout_secs = 5
+idle_timeout_secs = 300
+max_connections = 1024
+upstream_proxy_protocol = "off"

@@ -44,6 +44,7 @@ mod config_php;
 mod config_proxy;
 mod config_route;
 mod config_server;
+mod config_stream;
 pub mod config_tester;
 mod config_tls;
 mod config_types;
@@ -76,7 +77,7 @@ pub(crate) mod php_fpm;
 pub mod proxy;
 #[cfg(all(feature = "proxy", feature = "cache"))]
 mod proxy_cache;
-#[cfg(feature = "proxy")]
+#[cfg(any(feature = "proxy", feature = "stream-proxy"))]
 mod proxy_protocol;
 pub mod reload;
 #[cfg(feature = "proxy")]
@@ -84,6 +85,8 @@ mod route_policy;
 #[cfg(feature = "security")]
 pub mod security;
 pub mod snapshot;
+#[cfg(feature = "stream-proxy")]
+mod stream_proxy;
 #[cfg(any(
     feature = "tls",
     feature = "tls-rustls-backend",

@@ -26,10 +26,10 @@ expand_fluxheim_feature() {
             echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,tls-rustls,security"
             ;;
         profile-full)
-            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,tls-rustls,security"
+            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,stream-proxy,tls-rustls,security"
             ;;
         profile-development)
-            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,tls-rustls,security,php-fpm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"
+            echo "proxy,web,cache,compression-gzip,compression-zstd,compression-brotli,load-balancer,stream-proxy,tls-rustls,security,php-fpm,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp"
             ;;
         profile-web-server)
             echo "proxy,web,compression-gzip,compression-zstd,compression-brotli,tls-rustls,security"
@@ -60,6 +60,9 @@ expand_fluxheim_feature() {
             ;;
         profile-privacy)
             echo "proxy,web,tls-rustls,privacy-mode,security"
+            ;;
+        stream-proxy)
+            echo "proxy,stream-proxy"
             ;;
         tls-openssl-fips)
             echo "tls-openssl,tls-openssl-fips"

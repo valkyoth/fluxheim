@@ -103,6 +103,7 @@ pub use crate::config_server::{
 };
 #[cfg(test)]
 pub(crate) use crate::config_server::{MAX_SERVER_LISTENERS, MAX_TRUSTED_PROXIES};
+pub use crate::config_stream::{StreamConfig, StreamRouteConfig};
 use crate::config_tls::TlsConfigFragment;
 #[cfg(test)]
 pub(crate) use crate::config_tls::{
@@ -160,6 +161,8 @@ pub struct Config {
     pub web: WebConfig,
     #[serde(default)]
     pub geoip: GeoIpConfig,
+    #[serde(default)]
+    pub stream: StreamConfig,
     #[serde(default)]
     pub vhosts: Vec<VhostConfig>,
 }
@@ -307,6 +310,9 @@ impl Config {
         if let Some(geoip) = fragment.geoip {
             self.geoip = geoip;
         }
+        if let Some(stream) = fragment.stream {
+            self.stream = stream;
+        }
         self.vhosts.extend(fragment.vhosts);
     }
 
@@ -319,7 +325,7 @@ impl Config {
         validate_runtime_paths: bool,
     ) -> Result<(), ConfigError> {
         self.server
-            .validate_with_runtime_path_validation(validate_runtime_paths)?;
+            .validate_with_runtime_path_validation(validate_runtime_paths, self.stream.enabled)?;
         self.admin.validate()?;
         self.metrics.validate()?;
         self.tracing.validate()?;
@@ -334,6 +340,7 @@ impl Config {
         self.cache_purger.validate()?;
         self.web.validate()?;
         self.geoip.validate()?;
+        self.stream.validate()?;
         self.validate_vhosts()?;
         self.validate_geoip_policy()?;
         self.validate_compliance_internal_crypto()?;
@@ -667,6 +674,8 @@ struct ConfigFragment {
     web: Option<WebConfig>,
     #[serde(default)]
     geoip: Option<GeoIpConfig>,
+    #[serde(default)]
+    stream: Option<StreamConfig>,
     #[serde(default)]
     vhosts: Vec<VhostConfig>,
 }
@@ -1066,6 +1075,26 @@ pub enum ConfigError {
     InvalidGeoIpPolicy {
         field: &'static str,
         reason: &'static str,
+    },
+    StreamProxyNotCompiled,
+    InvalidStreamListenAddress {
+        address: String,
+    },
+    InvalidStreamUpstream {
+        address: String,
+    },
+    InvalidStreamProxyPolicy {
+        field: &'static str,
+        reason: &'static str,
+    },
+    DuplicateStreamRouteName {
+        name: String,
+    },
+    DuplicateStreamListener {
+        listen: String,
+    },
+    DuplicateStreamUpstream {
+        upstream: String,
     },
     InvalidCompliancePolicy {
         field: &'static str,
@@ -1682,6 +1711,35 @@ impl Display for ConfigError {
             Self::InvalidGeoIpPolicy { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
             }
+            Self::StreamProxyNotCompiled => write!(
+                formatter,
+                "stream.enabled requires building Fluxheim with the stream-proxy feature"
+            ),
+            Self::InvalidStreamListenAddress { address } => write!(
+                formatter,
+                "stream.routes.listen entries must be ip:port listener addresses, got {address:?}"
+            ),
+            Self::InvalidStreamUpstream { address } => write!(
+                formatter,
+                "stream upstreams must be host:port or ip:port, got {address:?}"
+            ),
+            Self::InvalidStreamProxyPolicy { field, reason } => {
+                write!(formatter, "{field} is invalid: {reason}")
+            }
+            Self::DuplicateStreamRouteName { name } => {
+                write!(
+                    formatter,
+                    "stream.routes contains duplicate route name {name:?}"
+                )
+            }
+            Self::DuplicateStreamListener { listen } => write!(
+                formatter,
+                "stream.routes contains duplicate listener {listen:?}"
+            ),
+            Self::DuplicateStreamUpstream { upstream } => write!(
+                formatter,
+                "stream.routes.upstreams contains duplicate upstream {upstream:?}"
+            ),
             Self::InvalidCompliancePolicy { field, reason } => {
                 write!(formatter, "{field} is invalid: {reason}")
             }

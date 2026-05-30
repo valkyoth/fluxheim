@@ -1433,15 +1433,16 @@ Release shape:
     service discovery, or Wasm/Lua stream filters in `1.4.6`;
   - compile-time feature separate from HTTP proxy if needed;
   - port/listener-based stream routing to one or more upstreams, reusing the
-    load-balancer selection and health primitives where they are transport
-    neutral;
+    load-balancer selection and health primitives only where they are transport
+    neutral and do not pull HTTP policy into stream routes;
   - bidirectional Tokio byte copy with half-close handling, idle/connect
-    timeout controls, per-direction byte counters, max connection limits, and
+    timeout controls, per-direction byte accounting, max connection limits, and
     graceful drain behavior;
   - upstream PROXY protocol send where configured, and listener-side PROXY
     protocol receive only behind trusted peer rules;
-  - optional upstream TLS and upstream mTLS using the same safe certificate/key
-    loading model as HTTP upstream TLS;
+  - upstream TLS and upstream mTLS are allowed only if they reuse the same safe
+    certificate/key loading model as HTTP upstream TLS without expanding the
+    stop line; otherwise keep them for a later stream hardening release;
   - TLS passthrough SNI routing only as a later subfeature after a bounded
     ClientHello parser and preread buffer limits are tested. SNI passthrough
     must forward the original bytes unmodified after peeking;
@@ -3110,8 +3111,8 @@ the exception while the cache server is being completed as a focused sequence:
   built-in dynamic database downloaders, remote lookup sidecars, programmable
   geo logic, and anomaly engines are later work.
 - `v1.4.6`: TCP stream proxy foundation with separate stream semantics,
-  listener/upstream trust boundaries, metrics, and optional TLS passthrough SNI
-  routing only after a bounded ClientHello parser is proven.
+  listener/upstream trust boundaries, bounded copy controls, and optional TLS
+  passthrough SNI routing only after a bounded ClientHello parser is proven.
 - Later macOS production line: only after Level 1 developer support is stable.
   Requires regular macOS CI, runtime smoke coverage, launchd/Homebrew or other
   packaging decisions, signed/notarized binary policy, and a macOS-specific

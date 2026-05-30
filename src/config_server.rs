@@ -89,8 +89,9 @@ impl ServerConfig {
     pub(crate) fn validate_with_runtime_path_validation(
         &self,
         validate_runtime_paths: bool,
+        allow_empty_http_listeners: bool,
     ) -> Result<(), ConfigError> {
-        if self.listen.is_empty() {
+        if self.listen.is_empty() && self.tls_listen.is_empty() && !allow_empty_http_listeners {
             return Err(ConfigError::EmptyListeners);
         }
         validate_config_list_len("server.listen", self.listen.len(), MAX_SERVER_LISTENERS)?;

@@ -1,16 +1,18 @@
 # Fluxheim 1.4.6 Release Notes
 
-Fluxheim 1.4.6 is planned as the TCP stream proxy foundation release.
+Fluxheim 1.4.6 is the TCP stream proxy foundation release.
 
-## Planned Scope
+## Added
 
-- L4 TCP stream proxy basics with separate stream semantics.
-- Port/listener-based stream routing to one or more upstreams.
-- Bounded bidirectional byte copy with timeout and connection limits.
-- Stream metrics for connection outcomes and byte counters.
-- Upstream PROXY protocol send where configured.
-- Optional upstream TLS and upstream mTLS only if the implementation can reuse
-  the existing safe certificate/key loading model.
+- New optional `stream-proxy` Cargo feature.
+- New `[stream]` config domain with `[[stream.routes]]` raw TCP services.
+- Port/listener-based stream routing to one or more `host:port` upstreams.
+- Round-robin upstream selection for multi-upstream stream routes.
+- Bounded bidirectional Tokio byte copy with connect timeout, idle timeout, and
+  per-route concurrent connection limits.
+- Per-connection debug logging with downstream/upstream byte counts and
+  duration.
+- Upstream PROXY protocol v1/v2 send where configured.
 
 ## Out Of Scope
 
@@ -18,6 +20,8 @@ Fluxheim 1.4.6 is planned as the TCP stream proxy foundation release.
 - DNS-specific UDP load balancing.
 - HTTP cache, compression, auth subrequest, PHP, or header policy on stream
   routes.
+- Generic HTTP load-balancer policy on stream routes.
+- Stream upstream TLS/mTLS.
 - TLS passthrough SNI routing.
 - xDS/Kubernetes/Consul service discovery.
 - Wasm/Lua stream filters.
