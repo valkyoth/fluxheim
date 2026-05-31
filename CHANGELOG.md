@@ -17,6 +17,8 @@ behavior when the change improves security or project direction.
 - Add stream upstream TLS controls and upstream mTLS material loading for
   rustls, OpenSSL, and BoringSSL builds. s2n remains fail-closed for custom
   stream upstream trust/client files.
+- Add stream-local transport-neutral upstream policy: weighted selection,
+  aliases, drained upstream exclusion, and backup upstream connect fallback.
 
 ## 1.4.6 - 2026-05-30
 

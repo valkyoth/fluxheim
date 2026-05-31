@@ -13,11 +13,11 @@ stream proxy foundation.
   verification policy, one alternative certificate name, route-local CA bundles,
   and upstream mTLS client certificate/key material for rustls, OpenSSL, and
   BoringSSL builds.
+- Stream-local upstream selection policy for weighted TCP selection, safe
+  aliases, drained upstream exclusion, and backup upstream connect fallback.
 
 ## Planned Scope
 
-- Transport-neutral stream load-balancer policy only, such as upstream
-  weights, backup/drain state, and health state.
 - Expanded stream smoke/security tests for half-close behavior, byte caps, idle
   timeout, upstream TLS/mTLS, PROXY receive/send combinations, and metrics
   labels.

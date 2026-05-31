@@ -160,6 +160,10 @@ enabled = true
 name = "postgres"
 listen = ["127.0.0.1:15432"]
 upstreams = ["10.0.0.11:5432", "10.0.0.12:5432"]
+# upstream_weights = [1, 2]
+# upstream_aliases = ["pg-a", "pg-b"]
+# backup_upstreams = []
+# drain_upstreams = []
 connect_timeout_secs = 5
 idle_timeout_secs = 300
 # max_connection_secs = 3600
@@ -181,8 +185,14 @@ upstream_tls = false
 - `listen` entries are `ip:port` TCP listeners. Each listener may appear on
   only one stream route.
 - Configure either `upstream = "host:port"` or `upstreams = ["host:port", ...]`.
-  Multiple upstreams use round-robin selection in the initial `1.4.6`
-  foundation.
+  Multiple upstreams use stream-local round-robin selection by default.
+- `upstream_weights` optionally enables weighted stream selection and must have
+  one positive value for each `upstreams` entry. `upstream_aliases` optionally
+  assigns safe low-cardinality names for stream logs and future metrics.
+- `backup_upstreams` and `drain_upstreams` are optional subsets of
+  `upstreams`. Drained stream upstreams do not receive new connections. Backup
+  stream upstreams are not selected while a primary is available, but are tried
+  as connect-fallback candidates before the downstream stream starts copying.
 - `connect_timeout_secs` bounds DNS/connect setup and defaults to `5`.
 - `idle_timeout_secs` is a true stream idle timer and defaults to `300`. The
   timer resets whenever either direction transfers bytes.

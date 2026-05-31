@@ -9,7 +9,9 @@ use crate::config::{
     ConfigError, DownstreamProxyProtocol, UpstreamProxyProtocol, validate_config_list_len,
     validate_required_timeout_secs,
 };
-use crate::config_net::{normalize_host, valid_authority, valid_trusted_proxy};
+use crate::config_net::{
+    normalize_host, valid_authority, valid_trusted_proxy, valid_upstream_alias,
+};
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
 pub(crate) const MAX_STREAM_ROUTES: usize = 128;
@@ -17,6 +19,8 @@ pub(crate) const MAX_STREAM_ROUTE_NAME_BYTES: usize = 128;
 pub(crate) const MAX_STREAM_LISTENERS: usize = 64;
 pub(crate) const MAX_STREAM_UPSTREAMS: usize = 64;
 pub(crate) const MAX_STREAM_MAX_CONNECTIONS: usize = 1_000_000;
+const MAX_STREAM_UPSTREAM_WEIGHT: usize = 1000;
+const MAX_STREAM_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -84,6 +88,14 @@ pub struct StreamRouteConfig {
     pub upstream: Option<String>,
     #[serde(default)]
     pub upstreams: Vec<String>,
+    #[serde(default)]
+    pub upstream_weights: Vec<usize>,
+    #[serde(default)]
+    pub upstream_aliases: Vec<String>,
+    #[serde(default)]
+    pub backup_upstreams: Vec<String>,
+    #[serde(default)]
+    pub drain_upstreams: Vec<String>,
     #[serde(default = "default_stream_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
     #[serde(default = "default_stream_idle_timeout_secs")]
@@ -191,6 +203,7 @@ impl StreamRouteConfig {
                 });
             }
         }
+        self.validate_upstream_selection_policy()?;
 
         validate_required_timeout_secs(
             "stream.routes.connect_timeout_secs",
@@ -239,6 +252,118 @@ impl StreamRouteConfig {
             .map(String::as_str)
             .chain(self.upstreams.iter().map(String::as_str))
     }
+
+    fn validate_upstream_selection_policy(&self) -> Result<(), ConfigError> {
+        if !self.upstream_weights.is_empty() {
+            if self.upstream.is_some() || self.upstream_weights.len() != self.upstreams.len() {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field: "stream.routes.upstream_weights",
+                    reason: "upstream_weights must match stream route upstreams and cannot be used with upstream",
+                });
+            }
+            let mut total_weight = 0usize;
+            for weight in &self.upstream_weights {
+                if *weight == 0 || *weight > MAX_STREAM_UPSTREAM_WEIGHT {
+                    return Err(ConfigError::InvalidStreamProxyPolicy {
+                        field: "stream.routes.upstream_weights",
+                        reason: "weights must be between 1 and 1000",
+                    });
+                }
+                total_weight = total_weight.saturating_add(*weight);
+            }
+            if total_weight > MAX_STREAM_UPSTREAM_TOTAL_WEIGHT {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field: "stream.routes.upstream_weights",
+                    reason: "total upstream weight is too large",
+                });
+            }
+        }
+        if !self.upstream_aliases.is_empty() {
+            if self.upstream.is_some() || self.upstream_aliases.len() != self.upstreams.len() {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field: "stream.routes.upstream_aliases",
+                    reason: "upstream_aliases must match stream route upstreams and cannot be used with upstream",
+                });
+            }
+            let mut seen_aliases = HashSet::new();
+            for alias in &self.upstream_aliases {
+                if !valid_upstream_alias(alias) {
+                    return Err(ConfigError::InvalidStreamProxyPolicy {
+                        field: "stream.routes.upstream_aliases",
+                        reason: "aliases must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
+                    });
+                }
+                if !seen_aliases.insert(alias.to_ascii_lowercase()) {
+                    return Err(ConfigError::InvalidStreamProxyPolicy {
+                        field: "stream.routes.upstream_aliases",
+                        reason: "aliases must be unique case-insensitively",
+                    });
+                }
+            }
+        }
+        if self.backup_upstreams.is_empty() && self.drain_upstreams.is_empty() {
+            return Ok(());
+        }
+        if self.upstream.is_some() || self.upstreams.len() < 2 {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstreams",
+                reason: "backup_upstreams and drain_upstreams require upstreams with at least two entries",
+            });
+        }
+        let configured = self
+            .upstreams
+            .iter()
+            .map(|upstream| upstream.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let backup = validate_stream_upstream_subset(
+            "stream.routes.backup_upstreams",
+            &self.backup_upstreams,
+            &configured,
+        )?;
+        let drain = validate_stream_upstream_subset(
+            "stream.routes.drain_upstreams",
+            &self.drain_upstreams,
+            &configured,
+        )?;
+        if !backup.is_disjoint(&drain) {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.backup_upstreams",
+                reason: "backup_upstreams and drain_upstreams must not overlap",
+            });
+        }
+        let primary_count = configured.len().saturating_sub(backup.len() + drain.len());
+        if primary_count == 0 {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstreams",
+                reason: "at least one upstream must remain primary and not drained",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn validate_stream_upstream_subset(
+    field: &'static str,
+    subset: &[String],
+    configured: &HashSet<String>,
+) -> Result<HashSet<String>, ConfigError> {
+    let mut seen = HashSet::new();
+    for upstream in subset {
+        let normalized = upstream.to_ascii_lowercase();
+        if !configured.contains(&normalized) {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field,
+                reason: "entries must exactly match configured upstreams",
+            });
+        }
+        if !seen.insert(normalized) {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field,
+                reason: "entries must be unique",
+            });
+        }
+    }
+    Ok(seen)
 }
 
 impl StreamRouteConfig {
@@ -362,6 +487,10 @@ impl Default for StreamRouteConfig {
             listen: Vec::new(),
             upstream: None,
             upstreams: Vec::new(),
+            upstream_weights: Vec::new(),
+            upstream_aliases: Vec::new(),
+            backup_upstreams: Vec::new(),
+            drain_upstreams: Vec::new(),
             connect_timeout_secs: default_stream_connect_timeout_secs(),
             idle_timeout_secs: default_stream_idle_timeout_secs(),
             max_connection_secs: None,
@@ -606,6 +735,43 @@ listen = ["127.0.0.1:15432"]
 upstream = "127.0.0.1:5432"
 upstream_tls = true
 upstream_proxy_protocol = "v1"
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_rejects_invalid_upstream_weights() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+upstream_weights = [1]
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_rejects_invalid_backup_and_drain_policy() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstreams = ["127.0.0.1:5432", "127.0.0.1:6432"]
+backup_upstreams = ["127.0.0.1:5432"]
+drain_upstreams = ["127.0.0.1:5432"]
 "#,
         )
         .unwrap();
