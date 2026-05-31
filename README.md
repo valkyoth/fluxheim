@@ -98,7 +98,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
 | External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding. |
 | Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
-| TCP stream proxying | ✅ | `1.4.6`; optional `stream-proxy` feature with raw L4 TCP listeners, round-robin upstream selection, bounded lifetime/byte/connect controls, and route-local PROXY protocol receive/send. |
+| TCP stream proxying | ✅ | `1.4.6`; optional `stream-proxy` feature with raw L4 TCP listeners, round-robin upstream selection, bounded idle/lifetime/byte/connect controls, and route-local PROXY protocol receive/send. |
 
 ### Operations And Packaging
 

@@ -78,11 +78,10 @@ pub struct StreamRouteConfig {
     pub upstreams: Vec<String>,
     #[serde(default = "default_stream_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
-    #[serde(
-        default = "default_stream_max_connection_secs",
-        alias = "idle_timeout_secs"
-    )]
-    pub max_connection_secs: u64,
+    #[serde(default = "default_stream_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+    #[serde(default)]
+    pub max_connection_secs: Option<u64>,
     #[serde(default)]
     pub max_connection_bytes: Option<u64>,
     #[serde(default)]
@@ -158,7 +157,8 @@ impl StreamRouteConfig {
             "stream.routes.connect_timeout_secs",
             self.connect_timeout_secs,
         )?;
-        validate_required_timeout_secs(
+        validate_required_timeout_secs("stream.routes.idle_timeout_secs", self.idle_timeout_secs)?;
+        validate_optional_timeout_secs(
             "stream.routes.max_connection_secs",
             self.max_connection_secs,
         )?;
@@ -209,7 +209,8 @@ impl Default for StreamRouteConfig {
             upstream: None,
             upstreams: Vec::new(),
             connect_timeout_secs: default_stream_connect_timeout_secs(),
-            max_connection_secs: default_stream_max_connection_secs(),
+            idle_timeout_secs: default_stream_idle_timeout_secs(),
+            max_connection_secs: None,
             max_connection_bytes: None,
             max_connections: 0,
             downstream_proxy_protocol: DownstreamProxyProtocol::default(),
@@ -223,8 +224,18 @@ fn default_stream_connect_timeout_secs() -> u64 {
     5
 }
 
-fn default_stream_max_connection_secs() -> u64 {
+fn default_stream_idle_timeout_secs() -> u64 {
     300
+}
+
+fn validate_optional_timeout_secs(
+    field: &'static str,
+    value: Option<u64>,
+) -> Result<(), ConfigError> {
+    if let Some(value) = value {
+        validate_required_timeout_secs(field, value)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug)]

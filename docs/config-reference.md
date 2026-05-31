@@ -161,7 +161,8 @@ name = "postgres"
 listen = ["127.0.0.1:15432"]
 upstreams = ["10.0.0.11:5432", "10.0.0.12:5432"]
 connect_timeout_secs = 5
-max_connection_secs = 300
+idle_timeout_secs = 300
+# max_connection_secs = 3600
 max_connection_bytes = 1073741824
 max_connections = 1024
 downstream_proxy_protocol = "off" # "off", "v1", or "v2"
@@ -175,8 +176,10 @@ upstream_proxy_protocol = "off" # "off", "v1", or "v2"
   Multiple upstreams use round-robin selection in the initial `1.4.6`
   foundation.
 - `connect_timeout_secs` bounds DNS/connect setup and defaults to `5`.
-- `max_connection_secs` bounds total accepted stream lifetime and defaults to
-  `300`. It is a wall-clock lifetime cap, not a per-read idle timer.
+- `idle_timeout_secs` is a true stream idle timer and defaults to `300`. The
+  timer resets whenever either direction transfers bytes.
+- `max_connection_secs` is optional and bounds total accepted stream lifetime
+  when set. Leave it unset for no wall-clock lifetime cap.
 - `max_connection_bytes` is optional and caps copied bytes per direction for a
   single stream connection.
 - `max_connections = 0` means unlimited for that stream route. Non-zero values

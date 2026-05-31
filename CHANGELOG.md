@@ -12,6 +12,8 @@ behavior when the change improves security or project direction.
 ### Changed
 
 - Start the TCP stream hardening development release.
+- Add true per-read stream idle timeout and make `max_connection_secs` an
+  optional lifetime cap instead of the default stream timeout.
 
 ## 1.4.6 - 2026-05-30
 

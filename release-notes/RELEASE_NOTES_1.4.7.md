@@ -3,10 +3,15 @@
 Fluxheim 1.4.7 is planned as a TCP stream hardening follow-up to the 1.4.6
 stream proxy foundation.
 
+## Added
+
+- True per-read stream idle timeout. `idle_timeout_secs` now resets whenever
+  either direction transfers bytes.
+- Optional `max_connection_secs` remains available as a separate wall-clock
+  lifetime cap.
+
 ## Planned Scope
 
-- True per-read stream idle timeout while keeping `max_connection_secs` as a
-  separate wall-clock lifetime cap.
 - Stream upstream TLS and upstream mTLS when they can reuse the existing safe
   certificate/key loading and upstream TLS evidence model.
 - Transport-neutral stream load-balancer policy only, such as upstream
