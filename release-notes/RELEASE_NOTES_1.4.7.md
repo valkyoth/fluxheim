@@ -20,6 +20,9 @@ stream proxy foundation.
   from trusted sources.
 - Stream unit coverage for wall-clock lifetime caps and upstream PROXY
   protocol v2 framing.
+- Stream hardening for TLS DNS timeout coverage, stalled write/shutdown
+  deadlines, RFC 6066-safe SNI derivation, and temporary upstream mTLS
+  private-key zeroization after parsing.
 
 ## Planned Scope
 

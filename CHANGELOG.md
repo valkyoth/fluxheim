@@ -24,6 +24,9 @@ behavior when the change improves security or project direction.
   PROXY protocol v1 receive from trusted sources.
 - Add stream unit coverage for wall-clock lifetime caps and upstream PROXY
   protocol v2 framing.
+- Bound stream upstream TLS DNS resolution under `connect_timeout_secs`, add
+  stream write/shutdown deadlines, avoid derived IP-literal SNI, and zeroize
+  temporary upstream mTLS private-key buffers after parsing.
 
 ## 1.4.6 - 2026-05-30
 

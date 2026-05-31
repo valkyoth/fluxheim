@@ -555,6 +555,7 @@ async fn proxy_connected_stream_connection(
         options.upstream_proxy_protocol,
         source,
         destination,
+        options.idle_timeout,
     )
     .await?;
 
@@ -658,7 +659,7 @@ async fn copy_bidirectional_with_limits(
                     idle_timeout,
                 ).await?;
                 if bytes == 0 {
-                    upstream_writer.shutdown().await?;
+                    shutdown_with_idle_timeout(&mut upstream_writer, idle_timeout).await?;
                     Ok::<_, io::Error>(StreamCopyEvent::DownstreamEof)
                 } else {
                     let next = checked_stream_byte_count(
@@ -666,7 +667,11 @@ async fn copy_bidirectional_with_limits(
                         bytes as u64,
                         max_connection_bytes,
                     )?;
-                    upstream_writer.write_all(&downstream_buffer[..bytes]).await?;
+                    write_with_idle_timeout(
+                        &mut upstream_writer,
+                        &downstream_buffer[..bytes],
+                        idle_timeout,
+                    ).await?;
                     Ok::<_, io::Error>(StreamCopyEvent::DownstreamTotal(next))
                 }
             }, if !downstream_eof => result,
@@ -677,7 +682,7 @@ async fn copy_bidirectional_with_limits(
                     idle_timeout,
                 ).await?;
                 if bytes == 0 {
-                    downstream_writer.shutdown().await?;
+                    shutdown_with_idle_timeout(&mut downstream_writer, idle_timeout).await?;
                     Ok::<_, io::Error>(StreamCopyEvent::UpstreamEof)
                 } else {
                     let next = checked_stream_byte_count(
@@ -685,7 +690,11 @@ async fn copy_bidirectional_with_limits(
                         bytes as u64,
                         max_connection_bytes,
                     )?;
-                    downstream_writer.write_all(&upstream_buffer[..bytes]).await?;
+                    write_with_idle_timeout(
+                        &mut downstream_writer,
+                        &upstream_buffer[..bytes],
+                        idle_timeout,
+                    ).await?;
                     Ok::<_, io::Error>(StreamCopyEvent::UpstreamTotal(next))
                 }
             }, if !upstream_eof => result,
@@ -715,6 +724,36 @@ where
         Err(_) => Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "stream idle timeout elapsed",
+        )),
+    }
+}
+
+async fn write_with_idle_timeout<W>(
+    writer: &mut W,
+    buffer: &[u8],
+    idle_timeout: Duration,
+) -> io::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    match tokio::time::timeout(idle_timeout, writer.write_all(buffer)).await {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "stream write timeout elapsed",
+        )),
+    }
+}
+
+async fn shutdown_with_idle_timeout<W>(writer: &mut W, idle_timeout: Duration) -> io::Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    match tokio::time::timeout(idle_timeout, writer.shutdown()).await {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "stream shutdown timeout elapsed",
         )),
     }
 }
@@ -793,42 +832,44 @@ async fn connect_tls_upstream(
         feature = "tls-s2n"
     ))]
     {
-        let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
-        let sni = options
-            .upstream_sni
-            .as_deref()
-            .map(str::to_owned)
-            .or_else(|| upstream_host(upstream_authority))
-            .unwrap_or_default();
-        let mut peer = HttpPeer::new(socket_addr, true, sni);
-        peer.options.connection_timeout = Some(options.connect_timeout);
-        peer.options.total_connection_timeout = Some(options.connect_timeout);
-        peer.options.verify_cert = options.upstream_verify_cert;
-        peer.options.verify_hostname = options.upstream_verify_hostname;
-        peer.options.alternative_cn = options
-            .upstream_alternative_cn
-            .as_deref()
-            .map(str::to_owned);
-        #[cfg(any(
-            feature = "tls-rustls-backend",
-            feature = "tls-openssl",
-            feature = "tls-boringssl"
-        ))]
-        {
-            peer.options.ca = options.upstream_tls_material.ca.clone();
-            peer.client_cert_key = options.upstream_tls_material.client_cert_key.clone();
-        }
-        let Some(connector) = &options.connector else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "stream upstream TLS connector is not initialized",
-            ));
+        let connect = async {
+            let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
+            let sni = stream_upstream_tls_sni(options.upstream_sni.as_deref(), upstream_authority);
+            let mut peer = HttpPeer::new(socket_addr, true, sni);
+            peer.options.connection_timeout = Some(options.connect_timeout);
+            peer.options.total_connection_timeout = Some(options.connect_timeout);
+            peer.options.verify_cert = options.upstream_verify_cert;
+            peer.options.verify_hostname = options.upstream_verify_hostname;
+            peer.options.alternative_cn = options
+                .upstream_alternative_cn
+                .as_deref()
+                .map(str::to_owned);
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl"
+            ))]
+            {
+                peer.options.ca = options.upstream_tls_material.ca.clone();
+                peer.client_cert_key = options.upstream_tls_material.client_cert_key.clone();
+            }
+            let Some(connector) = &options.connector else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "stream upstream TLS connector is not initialized",
+                ));
+            };
+            connector
+                .get_stream(&peer)
+                .await
+                .map(|(stream, _reused)| stream)
+                .map_err(|error| {
+                    io::Error::other(format!("stream upstream TLS connect failed: {error}"))
+                })
         };
-        match tokio::time::timeout(options.connect_timeout, connector.get_stream(&peer)).await {
-            Ok(Ok((stream, _reused))) => Ok(stream),
-            Ok(Err(error)) => Err(io::Error::other(format!(
-                "stream upstream TLS connect failed: {error}"
-            ))),
+
+        match tokio::time::timeout(options.connect_timeout, connect).await {
+            Ok(result) => result,
             Err(_) => Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "stream upstream TLS connect timeout elapsed",
@@ -847,6 +888,22 @@ async fn connect_tls_upstream(
             "stream upstream TLS requires a TLS backend feature",
         ))
     }
+}
+
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl",
+    feature = "tls-s2n"
+))]
+fn stream_upstream_tls_sni(configured: Option<&str>, upstream_authority: &str) -> String {
+    configured
+        .map(str::to_owned)
+        .or_else(|| {
+            let host = upstream_host(upstream_authority)?;
+            host.parse::<IpAddr>().is_err().then_some(host)
+        })
+        .unwrap_or_default()
 }
 
 async fn connect_upstream_inner(upstream_authority: &str) -> io::Result<tokio::net::TcpStream> {
@@ -873,6 +930,7 @@ async fn write_upstream_proxy_protocol(
     protocol: UpstreamProxyProtocol,
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
+    idle_timeout: Duration,
 ) -> io::Result<()> {
     let header = match protocol {
         UpstreamProxyProtocol::Off => return Ok(()),
@@ -883,7 +941,7 @@ async fn write_upstream_proxy_protocol(
             crate::proxy_protocol::proxy_protocol_v2_header(source, destination)
         }
     };
-    upstream.write_all(&header).await
+    write_with_idle_timeout(upstream, &header, idle_timeout).await
 }
 
 fn downstream_peer_addr(downstream: &Stream) -> Option<SocketAddr> {

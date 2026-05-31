@@ -17,6 +17,12 @@ use std::sync::Arc;
     feature = "tls-boringssl"
 ))]
 use crate::config::ProxyConfig;
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+))]
+use zeroize::Zeroizing;
 
 #[cfg(any(
     feature = "tls-rustls-backend",
@@ -267,7 +273,7 @@ fn load_upstream_client_cert_key(
     key_path: &std::path::Path,
 ) -> io::Result<Arc<pingora::utils::tls::CertKey>> {
     let cert_contents = read_upstream_tls_file(cert_path)?;
-    let key_contents = read_upstream_tls_file(key_path)?;
+    let key_contents = Zeroizing::new(read_upstream_tls_file(key_path)?);
 
     use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 
@@ -302,12 +308,13 @@ fn load_upstream_client_cert_key(
         )
     })?;
 
+    let key_der = Zeroizing::new(key.secret_der().to_vec());
     let cert_key = pingora::utils::tls::CertKey::try_new(
         certs
             .into_iter()
             .map(|cert| cert.as_ref().to_vec())
             .collect(),
-        key.secret_der().to_vec(),
+        key_der.to_vec(),
     )
     .map_err(|error| {
         io::Error::new(
@@ -330,7 +337,7 @@ fn load_upstream_client_cert_key(
     key_path: &std::path::Path,
 ) -> io::Result<Arc<pingora::utils::tls::CertKey>> {
     let cert_contents = read_upstream_tls_file(cert_path)?;
-    let key_contents = read_upstream_tls_file(key_path)?;
+    let key_contents = Zeroizing::new(read_upstream_tls_file(key_path)?);
     let certs = pingora::tls::x509::X509::stack_from_pem(&cert_contents).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
