@@ -21,6 +21,8 @@ behavior when the change improves security or project direction.
   aliases, drained upstream exclusion, and backup upstream connect fallback.
 - Add a localhost stream smoke script covering raw TCP forwarding,
   drained/backup fallback, and upstream PROXY protocol v1 send.
+- Add stream unit coverage for wall-clock lifetime caps and upstream PROXY
+  protocol v2 framing.
 
 ## 1.4.6 - 2026-05-30
 

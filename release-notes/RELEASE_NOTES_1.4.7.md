@@ -17,6 +17,8 @@ stream proxy foundation.
   aliases, drained upstream exclusion, and backup upstream connect fallback.
 - Local stream smoke coverage for raw TCP forwarding, drained/backup fallback,
   and upstream PROXY protocol v1 send.
+- Stream unit coverage for wall-clock lifetime caps and upstream PROXY
+  protocol v2 framing.
 
 ## Planned Scope
 

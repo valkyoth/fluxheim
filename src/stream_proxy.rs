@@ -972,10 +972,18 @@ mod tests {
         idle_timeout: std::time::Duration,
         max_connection_bytes: Option<u64>,
     ) -> super::StreamProxyConnectionOptions {
+        plain_options_with_lifetime(idle_timeout, None, max_connection_bytes)
+    }
+
+    fn plain_options_with_lifetime(
+        idle_timeout: std::time::Duration,
+        max_connection_lifetime: Option<std::time::Duration>,
+        max_connection_bytes: Option<u64>,
+    ) -> super::StreamProxyConnectionOptions {
         super::StreamProxyConnectionOptions {
             connect_timeout: std::time::Duration::from_secs(1),
             idle_timeout,
-            max_connection_lifetime: None,
+            max_connection_lifetime,
             max_connection_bytes,
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_tls: false,
@@ -1236,6 +1244,110 @@ mod tests {
             let error = proxy_task.await.unwrap().unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::TimedOut);
             upstream_task.abort();
+        });
+    }
+
+    #[test]
+    fn stream_proxy_enforces_connection_lifetime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            let upstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let upstream_addr = upstream_listener.local_addr().unwrap();
+            let upstream_task = tokio::spawn(async move {
+                let (_stream, _) = upstream_listener.accept().await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            });
+
+            let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let downstream_addr = downstream_listener.local_addr().unwrap();
+            let proxy_task = tokio::spawn(async move {
+                let (stream, _) = downstream_listener.accept().await.unwrap();
+                let mut downstream: AnyStream =
+                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                proxy_stream_connection(
+                    &mut downstream,
+                    &upstream_addr.to_string(),
+                    plain_options_with_lifetime(
+                        std::time::Duration::from_secs(1),
+                        Some(std::time::Duration::from_millis(50)),
+                        None,
+                    ),
+                    None,
+                    None,
+                )
+                .await
+            });
+
+            let _client = tokio::net::TcpStream::connect(downstream_addr)
+                .await
+                .unwrap();
+
+            let error = proxy_task.await.unwrap().unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+            upstream_task.abort();
+        });
+    }
+
+    #[test]
+    fn stream_proxy_writes_upstream_proxy_protocol_v2() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async {
+            let upstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let upstream_addr = upstream_listener.local_addr().unwrap();
+            let upstream_task = tokio::spawn(async move {
+                let (mut stream, _) = upstream_listener.accept().await.unwrap();
+                let mut header = [0u8; 28];
+                stream.read_exact(&mut header).await.unwrap();
+                assert_eq!(&header[..12], b"\r\n\r\n\0\r\nQUIT\n");
+                assert_eq!(&header[12..16], &[0x21, 0x11, 0x00, 0x0c]);
+
+                let mut input = [0u8; 4];
+                stream.read_exact(&mut input).await.unwrap();
+                assert_eq!(&input, b"ping");
+                stream.write_all(b"pong").await.unwrap();
+            });
+
+            let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let downstream_addr = downstream_listener.local_addr().unwrap();
+            let proxy_task = tokio::spawn(async move {
+                let (stream, _) = downstream_listener.accept().await.unwrap();
+                let mut downstream: AnyStream =
+                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                let mut options = plain_options(std::time::Duration::from_secs(1), None);
+                options.upstream_proxy_protocol = UpstreamProxyProtocol::V2;
+                proxy_stream_connection(
+                    &mut downstream,
+                    &upstream_addr.to_string(),
+                    options,
+                    Some("127.0.0.1:50000".parse().unwrap()),
+                    Some("127.0.0.1:50001".parse().unwrap()),
+                )
+                .await
+                .unwrap()
+            });
+
+            let mut client = tokio::net::TcpStream::connect(downstream_addr)
+                .await
+                .unwrap();
+            client.write_all(b"ping").await.unwrap();
+            client.shutdown().await.unwrap();
+            let mut output = Vec::new();
+            client.read_to_end(&mut output).await.unwrap();
+            assert_eq!(output, b"pong");
+
+            let copied = proxy_task.await.unwrap();
+            assert_eq!(copied, (4, 4));
+            upstream_task.await.unwrap();
         });
     }
 }
