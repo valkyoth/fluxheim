@@ -168,6 +168,14 @@ max_connections = 1024
 downstream_proxy_protocol = "off" # "off", "v1", or "v2"
 trusted_proxies = []
 upstream_proxy_protocol = "off" # "off", "v1", or "v2"
+upstream_tls = false
+# upstream_sni = "db.internal.example"
+# upstream_verify_cert = true
+# upstream_verify_hostname = true
+# upstream_alternative_cn = "db-alt.internal.example"
+# upstream_ca_path = "/etc/fluxheim/upstreams/db-ca.pem"
+# upstream_client_cert_path = "/etc/fluxheim/upstreams/client-chain.pem"
+# upstream_client_key_path = "/etc/fluxheim/upstreams/client-key.pem"
 ```
 
 - `listen` entries are `ip:port` TCP listeners. Each listener may appear on
@@ -189,7 +197,22 @@ upstream_proxy_protocol = "off" # "off", "v1", or "v2"
   The HTTP `server.proxy_protocol` setting does not apply to stream listeners.
 - `upstream_proxy_protocol` writes a HAProxy PROXY protocol header to the
   selected upstream before forwarding stream bytes. Use it only when the
-  upstream explicitly expects PROXY protocol.
+  upstream explicitly expects PROXY protocol. It cannot be combined with
+  `upstream_tls` in `1.4.7-dev`; stream TLS handshakes need a dedicated
+  pre-TLS PROXY connector before that combination can be enabled safely.
+- `upstream_tls = true` sends TLS to the selected stream upstream.
+  `upstream_sni` is optional; when unset Fluxheim derives SNI from the selected
+  upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default
+  to `true`; disabling certificate verification also requires hostname
+  verification to be disabled so the policy cannot imply a hostname check that
+  is not happening.
+- `upstream_alternative_cn` allows one additional non-wildcard hostname for
+  upstream certificate matching. `upstream_ca_path` loads a route-local PEM CA
+  bundle. `upstream_client_cert_path` and `upstream_client_key_path` configure
+  upstream mTLS client material and must be set together. Custom trust roots
+  and upstream client certificates are supported for rustls, OpenSSL, and
+  BoringSSL builds; s2n remains fail-closed for these files until Fluxheim can
+  load them without backend panics.
 
 When `metrics` is compiled and enabled,
 `fluxheim_stream_connections_total{route,outcome}` records bounded connection

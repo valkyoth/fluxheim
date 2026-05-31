@@ -9,11 +9,13 @@ stream proxy foundation.
   either direction transfers bytes.
 - Optional `max_connection_secs` remains available as a separate wall-clock
   lifetime cap.
+- Stream upstream TLS controls, including SNI, certificate/hostname
+  verification policy, one alternative certificate name, route-local CA bundles,
+  and upstream mTLS client certificate/key material for rustls, OpenSSL, and
+  BoringSSL builds.
 
 ## Planned Scope
 
-- Stream upstream TLS and upstream mTLS when they can reuse the existing safe
-  certificate/key loading and upstream TLS evidence model.
 - Transport-neutral stream load-balancer policy only, such as upstream
   weights, backup/drain state, and health state.
 - Expanded stream smoke/security tests for half-close behavior, byte caps, idle
@@ -27,5 +29,7 @@ stream proxy foundation.
 - HTTP cache, compression, auth subrequest, PHP, header mutation, or body
   policy on stream routes.
 - TLS passthrough SNI routing.
+- Combining stream `upstream_tls` with `upstream_proxy_protocol`; PROXY must be
+  written before the TLS handshake and needs a dedicated pre-TLS connector.
 - xDS/Kubernetes/Consul discovery.
 - Wasm/Lua stream filters.

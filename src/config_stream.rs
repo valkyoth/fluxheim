@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "stream-proxy")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -8,7 +9,8 @@ use crate::config::{
     ConfigError, DownstreamProxyProtocol, UpstreamProxyProtocol, validate_config_list_len,
     validate_required_timeout_secs,
 };
-use crate::config_net::{valid_authority, valid_trusted_proxy};
+use crate::config_net::{normalize_host, valid_authority, valid_trusted_proxy};
+use crate::config_path::{validate_non_world_writable_parent, validate_path};
 
 pub(crate) const MAX_STREAM_ROUTES: usize = 128;
 pub(crate) const MAX_STREAM_ROUTE_NAME_BYTES: usize = 128;
@@ -26,6 +28,12 @@ pub struct StreamConfig {
 }
 
 impl StreamConfig {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        for route in &mut self.routes {
+            route.resolve_relative_paths(base_dir);
+        }
+    }
+
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.enabled {
             #[cfg(not(feature = "stream-proxy"))]
@@ -92,9 +100,40 @@ pub struct StreamRouteConfig {
     pub trusted_proxies: Vec<String>,
     #[serde(default)]
     pub upstream_proxy_protocol: UpstreamProxyProtocol,
+    #[serde(default)]
+    pub upstream_tls: bool,
+    #[serde(default)]
+    pub upstream_sni: Option<String>,
+    #[serde(default = "default_true")]
+    pub upstream_verify_cert: bool,
+    #[serde(default = "default_true")]
+    pub upstream_verify_hostname: bool,
+    #[serde(default)]
+    pub upstream_alternative_cn: Option<String>,
+    #[serde(default)]
+    pub upstream_ca_path: Option<PathBuf>,
+    #[serde(default)]
+    pub upstream_client_cert_path: Option<PathBuf>,
+    #[serde(default)]
+    pub upstream_client_key_path: Option<PathBuf>,
 }
 
 impl StreamRouteConfig {
+    pub(crate) fn resolve_relative_paths(&mut self, base_dir: &Path) {
+        for path in [
+            &mut self.upstream_ca_path,
+            &mut self.upstream_client_cert_path,
+            &mut self.upstream_client_key_path,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if path.is_relative() {
+                *path = base_dir.join(&path);
+            }
+        }
+    }
+
     pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.name.is_empty() || self.name.len() > MAX_STREAM_ROUTE_NAME_BYTES {
             return Err(ConfigError::InvalidStreamProxyPolicy {
@@ -190,6 +229,7 @@ impl StreamRouteConfig {
                 reason: "downstream_proxy_protocol requires stream route trusted_proxies so client identity cannot be spoofed by direct peers",
             });
         }
+        self.validate_upstream_tls_policy()?;
         Ok(())
     }
 
@@ -198,6 +238,120 @@ impl StreamRouteConfig {
             .iter()
             .map(String::as_str)
             .chain(self.upstreams.iter().map(String::as_str))
+    }
+}
+
+impl StreamRouteConfig {
+    fn validate_upstream_tls_policy(&self) -> Result<(), ConfigError> {
+        if let Some(sni) = &self.upstream_sni
+            && sni.trim().is_empty()
+        {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_sni",
+                reason: "must not be empty",
+            });
+        }
+        if !self.upstream_verify_cert && self.upstream_verify_hostname {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_verify_hostname",
+                reason: "must be false when upstream_verify_cert = false",
+            });
+        }
+        if !self.upstream_tls
+            && (self.upstream_ca_path.is_some()
+                || self.upstream_client_cert_path.is_some()
+                || self.upstream_client_key_path.is_some())
+        {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_tls",
+                reason: "upstream TLS trust roots or client certificates require upstream_tls = true",
+            });
+        }
+        if self.upstream_tls && self.upstream_proxy_protocol != UpstreamProxyProtocol::Off {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_proxy_protocol",
+                reason: "stream upstream PROXY protocol cannot be combined with upstream_tls yet because PROXY must be written before the TLS handshake",
+            });
+        }
+        if !self.upstream_verify_cert && self.upstream_ca_path.is_some() {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_ca_path",
+                reason: "requires upstream_verify_cert = true",
+            });
+        }
+        match (
+            &self.upstream_client_cert_path,
+            &self.upstream_client_key_path,
+        ) {
+            (Some(_), Some(_)) | (None, None) => {}
+            _ => {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field: "stream.routes.upstream_client_cert_path",
+                    reason: "upstream_client_cert_path and upstream_client_key_path must be configured together",
+                });
+            }
+        }
+        for (field, path) in [
+            (
+                "stream.routes.upstream_ca_path",
+                self.upstream_ca_path.as_deref(),
+            ),
+            (
+                "stream.routes.upstream_client_cert_path",
+                self.upstream_client_cert_path.as_deref(),
+            ),
+            (
+                "stream.routes.upstream_client_key_path",
+                self.upstream_client_key_path.as_deref(),
+            ),
+        ] {
+            validate_path(field, path)?;
+            validate_non_world_writable_parent(field, path)?;
+        }
+        if let Some(alternative_cn) = &self.upstream_alternative_cn {
+            if alternative_cn.contains('*') {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field: "stream.routes.upstream_alternative_cn",
+                    reason: "must not contain wildcards",
+                });
+            }
+            if normalize_host(alternative_cn).is_none() {
+                return Err(ConfigError::InvalidStreamProxyPolicy {
+                    field: "stream.routes.upstream_alternative_cn",
+                    reason: "must be a valid hostname",
+                });
+            }
+        }
+        #[cfg(not(any(
+            feature = "tls-rustls-backend",
+            feature = "tls-openssl",
+            feature = "tls-boringssl",
+            feature = "tls-s2n"
+        )))]
+        if self.upstream_tls {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_tls",
+                reason: "requires a TLS backend feature",
+            });
+        }
+        #[cfg(all(
+            feature = "tls-s2n",
+            not(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl"
+            ))
+        ))]
+        if self.upstream_ca_path.is_some()
+            || self.upstream_client_cert_path.is_some()
+            || self.upstream_client_key_path.is_some()
+        {
+            return Err(ConfigError::InvalidStreamProxyPolicy {
+                field: "stream.routes.upstream_ca_path",
+                reason: "the s2n backend does not yet expose panic-free upstream CA and client certificate loading in Fluxheim; use rustls, OpenSSL, or BoringSSL for upstream mTLS and custom trust roots",
+            });
+        }
+        Ok(())
     }
 }
 
@@ -216,8 +370,20 @@ impl Default for StreamRouteConfig {
             downstream_proxy_protocol: DownstreamProxyProtocol::default(),
             trusted_proxies: Vec::new(),
             upstream_proxy_protocol: UpstreamProxyProtocol::default(),
+            upstream_tls: false,
+            upstream_sni: None,
+            upstream_verify_cert: true,
+            upstream_verify_hostname: true,
+            upstream_alternative_cn: None,
+            upstream_ca_path: None,
+            upstream_client_cert_path: None,
+            upstream_client_key_path: None,
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_stream_connect_timeout_secs() -> u64 {
@@ -383,6 +549,63 @@ name = "postgres"
 listen = ["127.0.0.1:15432"]
 upstream = "127.0.0.1:5432"
 max_connection_bytes = 0
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_rejects_upstream_tls_material_without_tls() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+upstream_ca_path = "/etc/fluxheim/upstreams/ca.pem"
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_rejects_inconsistent_upstream_tls_verification() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+upstream_tls = true
+upstream_verify_cert = false
+upstream_verify_hostname = true
+"#,
+        )
+        .unwrap();
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn stream_config_rejects_upstream_proxy_protocol_with_tls() {
+        let config: StreamConfig = toml::from_str(
+            r#"
+enabled = true
+
+[[routes]]
+name = "postgres"
+listen = ["127.0.0.1:15432"]
+upstream = "127.0.0.1:5432"
+upstream_tls = true
+upstream_proxy_protocol = "v1"
 "#,
         )
         .unwrap();

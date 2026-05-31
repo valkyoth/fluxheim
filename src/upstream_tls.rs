@@ -43,16 +43,21 @@ pub(crate) struct RuntimeUpstreamTls;
 ))]
 impl RuntimeUpstreamTls {
     pub(crate) fn from_config(config: &ProxyConfig) -> io::Result<Self> {
+        Self::from_paths(
+            config.upstream_ca_path.as_deref(),
+            config.upstream_client_cert_path.as_deref(),
+            config.upstream_client_key_path.as_deref(),
+        )
+    }
+
+    pub(crate) fn from_paths(
+        ca_path: Option<&std::path::Path>,
+        client_cert_path: Option<&std::path::Path>,
+        client_key_path: Option<&std::path::Path>,
+    ) -> io::Result<Self> {
         Ok(Self {
-            ca: config
-                .upstream_ca_path
-                .as_deref()
-                .map(load_upstream_ca_bundle)
-                .transpose()?,
-            client_cert_key: match (
-                config.upstream_client_cert_path.as_deref(),
-                config.upstream_client_key_path.as_deref(),
-            ) {
+            ca: ca_path.map(load_upstream_ca_bundle).transpose()?,
+            client_cert_key: match (client_cert_path, client_key_path) {
                 (Some(cert), Some(key)) => Some(load_upstream_client_cert_key(cert, key)?),
                 _ => None,
             },

@@ -725,6 +725,9 @@ impl ConfigFragment {
         if let Some(geoip) = &mut self.geoip {
             geoip.resolve_relative_paths(base_dir);
         }
+        if let Some(stream) = &mut self.stream {
+            stream.resolve_relative_paths(base_dir);
+        }
         for vhost in &mut self.vhosts {
             vhost.resolve_relative_paths(base_dir);
         }

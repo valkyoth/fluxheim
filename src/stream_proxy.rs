@@ -7,12 +7,39 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use pingora::apps::ServerApp;
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl",
+    feature = "tls-s2n"
+))]
+use pingora::connectors::TransportConnector;
 use pingora::protocols::Stream;
 use pingora::server::ShutdownWatch;
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl",
+    feature = "tls-s2n"
+))]
+use pingora::upstreams::peer::HttpPeer;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl",
+    feature = "tls-s2n"
+))]
+use crate::config_net::upstream_host;
 use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot};
+#[cfg(any(
+    feature = "tls-rustls-backend",
+    feature = "tls-openssl",
+    feature = "tls-boringssl"
+))]
+use crate::upstream_tls::RuntimeUpstreamTls;
 
 pub(crate) type StreamProxyService = pingora::services::listening::Service<StreamProxyApp>;
 
@@ -40,7 +67,6 @@ fn stream_service_from_route(route: &StreamRouteConfig) -> io::Result<StreamProx
     Ok(service)
 }
 
-#[derive(Debug)]
 pub(crate) struct StreamProxyApp {
     name: Arc<str>,
     upstreams: Arc<[Arc<str>]>,
@@ -52,6 +78,48 @@ pub(crate) struct StreamProxyApp {
     active_connections: Arc<AtomicUsize>,
     next_upstream: AtomicUsize,
     upstream_proxy_protocol: UpstreamProxyProtocol,
+    upstream_tls: bool,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_sni: Option<Arc<str>>,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_verify_cert: bool,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_verify_hostname: bool,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_alternative_cn: Option<Arc<str>>,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ))]
+    upstream_tls_material: RuntimeUpstreamTls,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    connector: Option<Arc<TransportConnector>>,
 }
 
 impl StreamProxyApp {
@@ -64,6 +132,26 @@ impl StreamProxyApp {
             ));
         }
 
+        #[cfg(any(
+            feature = "tls-rustls-backend",
+            feature = "tls-openssl",
+            feature = "tls-boringssl"
+        ))]
+        let upstream_tls_material = RuntimeUpstreamTls::from_paths(
+            route.upstream_ca_path.as_deref(),
+            route.upstream_client_cert_path.as_deref(),
+            route.upstream_client_key_path.as_deref(),
+        )
+        .map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "failed to load stream upstream TLS material for route {}: {error}",
+                    route.name
+                ),
+            )
+        })?;
+
         Ok(Self {
             name: Arc::from(route.name.as_str()),
             upstreams: upstreams.into(),
@@ -75,6 +163,50 @@ impl StreamProxyApp {
             active_connections: Arc::new(AtomicUsize::new(0)),
             next_upstream: AtomicUsize::new(0),
             upstream_proxy_protocol: route.upstream_proxy_protocol,
+            upstream_tls: route.upstream_tls,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_sni: route.upstream_sni.as_deref().map(Arc::from),
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_verify_cert: route.upstream_verify_cert,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_verify_hostname: route.upstream_verify_hostname,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_alternative_cn: route.upstream_alternative_cn.as_deref().map(Arc::from),
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl"
+            ))]
+            upstream_tls_material,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            connector: route
+                .upstream_tls
+                .then(|| Arc::new(TransportConnector::new(None))),
         })
     }
 
@@ -122,6 +254,48 @@ impl ServerApp for StreamProxyApp {
                 max_connection_lifetime: self.max_connection_lifetime,
                 max_connection_bytes: self.max_connection_bytes,
                 upstream_proxy_protocol: self.upstream_proxy_protocol,
+                upstream_tls: self.upstream_tls,
+                #[cfg(any(
+                    feature = "tls-rustls-backend",
+                    feature = "tls-openssl",
+                    feature = "tls-boringssl",
+                    feature = "tls-s2n"
+                ))]
+                upstream_sni: self.upstream_sni.clone(),
+                #[cfg(any(
+                    feature = "tls-rustls-backend",
+                    feature = "tls-openssl",
+                    feature = "tls-boringssl",
+                    feature = "tls-s2n"
+                ))]
+                upstream_verify_cert: self.upstream_verify_cert,
+                #[cfg(any(
+                    feature = "tls-rustls-backend",
+                    feature = "tls-openssl",
+                    feature = "tls-boringssl",
+                    feature = "tls-s2n"
+                ))]
+                upstream_verify_hostname: self.upstream_verify_hostname,
+                #[cfg(any(
+                    feature = "tls-rustls-backend",
+                    feature = "tls-openssl",
+                    feature = "tls-boringssl",
+                    feature = "tls-s2n"
+                ))]
+                upstream_alternative_cn: self.upstream_alternative_cn.clone(),
+                #[cfg(any(
+                    feature = "tls-rustls-backend",
+                    feature = "tls-openssl",
+                    feature = "tls-boringssl"
+                ))]
+                upstream_tls_material: self.upstream_tls_material.clone(),
+                #[cfg(any(
+                    feature = "tls-rustls-backend",
+                    feature = "tls-openssl",
+                    feature = "tls-boringssl",
+                    feature = "tls-s2n"
+                ))]
+                connector: self.connector.clone(),
             },
             source,
             destination,
@@ -207,7 +381,7 @@ async fn proxy_stream_connection(
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
 ) -> io::Result<(u64, u64)> {
-    let mut upstream = connect_upstream(upstream_authority, options.connect_timeout).await?;
+    let mut upstream = connect_upstream(upstream_authority, &options).await?;
     write_upstream_proxy_protocol(
         &mut upstream,
         options.upstream_proxy_protocol,
@@ -235,13 +409,54 @@ async fn proxy_stream_connection(
     }
 }
 
-#[derive(Clone, Copy)]
 struct StreamProxyConnectionOptions {
     connect_timeout: Duration,
     idle_timeout: Duration,
     max_connection_lifetime: Option<Duration>,
     max_connection_bytes: Option<u64>,
     upstream_proxy_protocol: UpstreamProxyProtocol,
+    upstream_tls: bool,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_sni: Option<Arc<str>>,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_verify_cert: bool,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_verify_hostname: bool,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    upstream_alternative_cn: Option<Arc<str>>,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl"
+    ))]
+    upstream_tls_material: RuntimeUpstreamTls,
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    connector: Option<Arc<TransportConnector>>,
 }
 
 enum StreamCopyEvent {
@@ -253,7 +468,7 @@ enum StreamCopyEvent {
 
 async fn copy_bidirectional_with_limits(
     downstream: &mut Stream,
-    upstream: &mut tokio::net::TcpStream,
+    upstream: &mut Stream,
     idle_timeout: Duration,
     max_connection_bytes: Option<u64>,
 ) -> io::Result<(u64, u64)> {
@@ -358,10 +573,22 @@ fn checked_stream_byte_count(
 
 async fn connect_upstream(
     upstream_authority: &str,
-    connect_timeout: Duration,
-) -> io::Result<tokio::net::TcpStream> {
-    match tokio::time::timeout(connect_timeout, connect_upstream_inner(upstream_authority)).await {
-        Ok(result) => result,
+    options: &StreamProxyConnectionOptions,
+) -> io::Result<Stream> {
+    if options.upstream_tls {
+        return connect_tls_upstream(upstream_authority, options).await;
+    }
+
+    match tokio::time::timeout(
+        options.connect_timeout,
+        connect_upstream_inner(upstream_authority),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => Ok(Box::new(pingora::protocols::l4::stream::Stream::from(
+            stream,
+        ))),
+        Ok(Err(error)) => Err(error),
         Err(_) => Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "stream upstream connect timeout elapsed",
@@ -369,30 +596,112 @@ async fn connect_upstream(
     }
 }
 
-async fn connect_upstream_inner(upstream_authority: &str) -> io::Result<tokio::net::TcpStream> {
-    if let Ok(socket_addr) = upstream_authority.parse::<SocketAddr>() {
-        return tokio::net::TcpStream::connect(socket_addr).await;
-    }
-
-    let mut last_error = None;
-    let resolved = tokio::net::lookup_host(upstream_authority).await?;
-    for socket_addr in resolved {
-        match tokio::net::TcpStream::connect(socket_addr).await {
-            Ok(stream) => return Ok(stream),
-            Err(error) => last_error = Some(error),
+async fn connect_tls_upstream(
+    #[cfg_attr(
+        not(any(
+            feature = "tls-rustls-backend",
+            feature = "tls-openssl",
+            feature = "tls-boringssl",
+            feature = "tls-s2n"
+        )),
+        allow(unused_variables)
+    )]
+    upstream_authority: &str,
+    #[cfg_attr(
+        not(any(
+            feature = "tls-rustls-backend",
+            feature = "tls-openssl",
+            feature = "tls-boringssl",
+            feature = "tls-s2n"
+        )),
+        allow(unused_variables)
+    )]
+    options: &StreamProxyConnectionOptions,
+) -> io::Result<Stream> {
+    #[cfg(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    ))]
+    {
+        let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
+        let sni = options
+            .upstream_sni
+            .as_deref()
+            .map(str::to_owned)
+            .or_else(|| upstream_host(upstream_authority))
+            .unwrap_or_default();
+        let mut peer = HttpPeer::new(socket_addr, true, sni);
+        peer.options.connection_timeout = Some(options.connect_timeout);
+        peer.options.total_connection_timeout = Some(options.connect_timeout);
+        peer.options.verify_cert = options.upstream_verify_cert;
+        peer.options.verify_hostname = options.upstream_verify_hostname;
+        peer.options.alternative_cn = options
+            .upstream_alternative_cn
+            .as_deref()
+            .map(str::to_owned);
+        #[cfg(any(
+            feature = "tls-rustls-backend",
+            feature = "tls-openssl",
+            feature = "tls-boringssl"
+        ))]
+        {
+            peer.options.ca = options.upstream_tls_material.ca.clone();
+            peer.client_cert_key = options.upstream_tls_material.client_cert_key.clone();
+        }
+        let Some(connector) = &options.connector else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "stream upstream TLS connector is not initialized",
+            ));
+        };
+        match tokio::time::timeout(options.connect_timeout, connector.get_stream(&peer)).await {
+            Ok(Ok((stream, _reused))) => Ok(stream),
+            Ok(Err(error)) => Err(io::Error::other(format!(
+                "stream upstream TLS connect failed: {error}"
+            ))),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "stream upstream TLS connect timeout elapsed",
+            )),
         }
     }
+    #[cfg(not(any(
+        feature = "tls-rustls-backend",
+        feature = "tls-openssl",
+        feature = "tls-boringssl",
+        feature = "tls-s2n"
+    )))]
+    {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "stream upstream TLS requires a TLS backend feature",
+        ))
+    }
+}
 
-    Err(last_error.unwrap_or_else(|| {
+async fn connect_upstream_inner(upstream_authority: &str) -> io::Result<tokio::net::TcpStream> {
+    let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
+    tokio::net::TcpStream::connect(socket_addr).await
+}
+
+async fn resolve_upstream_socket_addr(upstream_authority: &str) -> io::Result<SocketAddr> {
+    if let Ok(socket_addr) = upstream_authority.parse::<SocketAddr>() {
+        return Ok(socket_addr);
+    }
+
+    let resolved = tokio::net::lookup_host(upstream_authority).await?;
+    resolved.into_iter().next().ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::AddrNotAvailable,
             "stream upstream resolved to no socket addresses",
         )
-    }))
+    })
 }
 
 async fn write_upstream_proxy_protocol(
-    upstream: &mut tokio::net::TcpStream,
+    upstream: &mut Stream,
     protocol: UpstreamProxyProtocol,
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
@@ -491,6 +800,61 @@ mod tests {
     use std::io;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
+    fn plain_options(
+        idle_timeout: std::time::Duration,
+        max_connection_bytes: Option<u64>,
+    ) -> super::StreamProxyConnectionOptions {
+        super::StreamProxyConnectionOptions {
+            connect_timeout: std::time::Duration::from_secs(1),
+            idle_timeout,
+            max_connection_lifetime: None,
+            max_connection_bytes,
+            upstream_proxy_protocol: UpstreamProxyProtocol::Off,
+            upstream_tls: false,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_sni: None,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_verify_cert: true,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_verify_hostname: true,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            upstream_alternative_cn: None,
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl"
+            ))]
+            upstream_tls_material: crate::upstream_tls::RuntimeUpstreamTls::default(),
+            #[cfg(any(
+                feature = "tls-rustls-backend",
+                feature = "tls-openssl",
+                feature = "tls-boringssl",
+                feature = "tls-s2n"
+            ))]
+            connector: None,
+        }
+    }
+
     #[test]
     fn stream_app_selects_upstreams_round_robin() {
         let app = StreamProxyApp::from_config(&StreamRouteConfig {
@@ -506,6 +870,14 @@ mod tests {
             downstream_proxy_protocol: DownstreamProxyProtocol::Off,
             trusted_proxies: Vec::new(),
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
+            upstream_tls: false,
+            upstream_sni: None,
+            upstream_verify_cert: true,
+            upstream_verify_hostname: true,
+            upstream_alternative_cn: None,
+            upstream_ca_path: None,
+            upstream_client_cert_path: None,
+            upstream_client_key_path: None,
         })
         .unwrap();
 
@@ -542,13 +914,7 @@ mod tests {
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
-                    super::StreamProxyConnectionOptions {
-                        connect_timeout: std::time::Duration::from_secs(1),
-                        idle_timeout: std::time::Duration::from_secs(1),
-                        max_connection_lifetime: None,
-                        max_connection_bytes: None,
-                        upstream_proxy_protocol: UpstreamProxyProtocol::Off,
-                    },
+                    plain_options(std::time::Duration::from_secs(1), None),
                     None,
                     None,
                 )
@@ -597,13 +963,7 @@ mod tests {
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
-                    super::StreamProxyConnectionOptions {
-                        connect_timeout: std::time::Duration::from_secs(1),
-                        idle_timeout: std::time::Duration::from_secs(1),
-                        max_connection_lifetime: None,
-                        max_connection_bytes: Some(3),
-                        upstream_proxy_protocol: UpstreamProxyProtocol::Off,
-                    },
+                    plain_options(std::time::Duration::from_secs(1), Some(3)),
                     None,
                     None,
                 )
@@ -647,13 +1007,7 @@ mod tests {
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
-                    super::StreamProxyConnectionOptions {
-                        connect_timeout: std::time::Duration::from_secs(1),
-                        idle_timeout: std::time::Duration::from_millis(50),
-                        max_connection_lifetime: None,
-                        max_connection_bytes: None,
-                        upstream_proxy_protocol: UpstreamProxyProtocol::Off,
-                    },
+                    plain_options(std::time::Duration::from_millis(50), None),
                     None,
                     None,
                 )
