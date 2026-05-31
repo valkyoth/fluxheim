@@ -23,7 +23,7 @@
 
 Fluxheim is a modular Rust edge server built on
 [Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.4.6`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
+`1.4.7`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
 managed ACME issuance and renewal, secure headers, container/native systemd
 operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
 support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
@@ -37,8 +37,9 @@ origin controls, gRPC pass-through policy, proxy-operations migration blockers,
 the `1.4.2` proxy module split, the `1.4.3` config module split, Apple Silicon
 macOS Level 1 developer support, bounded GeoIP/Geo-Context policy with local
 MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, and the
-TCP stream proxy foundation. The current `1.4.7-dev` line hardens TCP stream
-proxying.
+TCP stream proxy foundation hardened with true idle timeouts, stream upstream
+TLS/mTLS controls, weighted/drain/backup stream upstream policy, PROXY protocol
+coverage, and bounded stream write/connect behavior.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -235,7 +236,7 @@ Individual module features:
 | `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
 | `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
 | `load-balancer` | No | Pingora load-balancing module and health checks. |
-| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. Depends on the shared proxy runtime in `1.4.6`; hardening continues in `1.4.7-dev`. |
+| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. Depends on the shared proxy runtime in `1.4.6`; hardened in `1.4.7` with true idle timeouts, stream upstream TLS/mTLS controls, weighted/drain/backup policy, and expanded smoke coverage. |
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |

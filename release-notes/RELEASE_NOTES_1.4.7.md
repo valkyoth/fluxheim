@@ -1,7 +1,7 @@
 # Fluxheim 1.4.7 Release Notes
 
-Fluxheim 1.4.7 is planned as a TCP stream hardening follow-up to the 1.4.6
-stream proxy foundation.
+Fluxheim 1.4.7 is a TCP stream hardening follow-up to the 1.4.6 stream proxy
+foundation.
 
 ## Added
 
@@ -23,10 +23,6 @@ stream proxy foundation.
 - Stream hardening for TLS DNS timeout coverage, stalled write/shutdown
   deadlines, RFC 6066-safe SNI derivation, and temporary upstream mTLS
   private-key zeroization after parsing.
-
-## Planned Scope
-
-- Additional release hardening from CI, CodeQL, and pentest feedback.
 
 ## Out Of Scope
 

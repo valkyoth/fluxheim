@@ -8,7 +8,7 @@
 
 Name:           fluxheim
 Version:        1.4.7
-Release:        0.dev%{?dist}
+Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
 URL:            https://github.com/valkyoth/fluxheim
@@ -153,8 +153,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Sat May 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.7-0.dev
-- Start the 1.4.7 TCP stream hardening development line.
+* Sun May 31 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.7-1
+- Release 1.4.7 TCP stream hardening.
+- Add true stream idle timeouts, stream upstream TLS/mTLS controls,
+  weighted/drain/backup stream upstream policy, and expanded stream smoke
+  coverage.
 
 * Sat May 30 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.6-1
 - Release 1.4.6 TCP stream proxy foundation.
