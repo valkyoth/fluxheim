@@ -10,7 +10,7 @@ import socket
 
 sockets = []
 try:
-    for _ in range(5):
+    for _ in range(7):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -27,16 +27,19 @@ PRIMARY_PORT=$2
 BACKUP_PORT=$3
 PROXY_STREAM_PORT=$4
 PROXY_UPSTREAM_PORT=$5
+PROXY_RECV_STREAM_PORT=$6
+PROXY_RECV_UPSTREAM_PORT=$7
 
 FLUXHEIM_PID=
 PRIMARY_PID=
 BACKUP_PID=
 PROXY_UPSTREAM_PID=
+PROXY_RECV_UPSTREAM_PID=
 
 cleanup() {
     status=$?
 
-    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID"; do
+    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID"; do
         if [ -n "$pid" ]; then
             kill "$pid" 2>/dev/null || true
         fi
@@ -44,13 +47,13 @@ cleanup() {
 
     sleep 0.2
 
-    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID"; do
+    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -9 "$pid" 2>/dev/null || true
         fi
     done
 
-    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID"; do
+    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID"; do
         if [ -n "$pid" ]; then
             wait "$pid" 2>/dev/null || true
         fi
@@ -133,6 +136,28 @@ if received != expected:
     sys.exit(1)
 PY
 
+cat > "$TMP_DIR/proxy_protocol_client.py" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+payload = sys.argv[3].encode("ascii")
+expected = sys.argv[4].encode("ascii")
+
+with socket.create_connection((host, port), timeout=3.0) as sock:
+    sock.settimeout(3.0)
+    sock.sendall(
+        b"PROXY TCP4 198.51.100.10 203.0.113.20 50000 443\r\n" + payload
+    )
+    sock.shutdown(socket.SHUT_WR)
+    received = sock.recv(4096)
+
+if received != expected:
+    print(f"expected {expected!r}, got {received!r}", file=sys.stderr)
+    sys.exit(1)
+PY
+
 cat > "$TMP_DIR/fluxheim.toml" <<EOF
 [server]
 listen = []
@@ -164,6 +189,15 @@ upstream = "127.0.0.1:$PROXY_UPSTREAM_PORT"
 connect_timeout_secs = 1
 idle_timeout_secs = 5
 upstream_proxy_protocol = "v1"
+
+[[stream.routes]]
+name = "stream-proxy-receive"
+listen = ["127.0.0.1:$PROXY_RECV_STREAM_PORT"]
+upstream = "127.0.0.1:$PROXY_RECV_UPSTREAM_PORT"
+connect_timeout_secs = 1
+idle_timeout_secs = 5
+downstream_proxy_protocol = "v1"
+trusted_proxies = ["127.0.0.1/32"]
 EOF
 
 wait_tcp() {
@@ -193,10 +227,13 @@ python3 "$TMP_DIR/tcp_server.py" 127.0.0.1 "$BACKUP_PORT" backup >"$TMP_DIR/back
 BACKUP_PID=$!
 python3 "$TMP_DIR/proxy_protocol_server.py" 127.0.0.1 "$PROXY_UPSTREAM_PORT" >"$TMP_DIR/proxy-upstream.log" 2>&1 &
 PROXY_UPSTREAM_PID=$!
+python3 "$TMP_DIR/tcp_server.py" 127.0.0.1 "$PROXY_RECV_UPSTREAM_PORT" pp-recv >"$TMP_DIR/proxy-recv-upstream.log" 2>&1 &
+PROXY_RECV_UPSTREAM_PID=$!
 
 wait_tcp "$PRIMARY_PORT"
 wait_tcp "$BACKUP_PORT"
 wait_tcp "$PROXY_UPSTREAM_PORT"
+wait_tcp "$PROXY_RECV_UPSTREAM_PORT"
 
 "$ROOT_DIR/scripts/validate-features.sh" stream-proxy
 (
@@ -209,6 +246,7 @@ FLUXHEIM_PID=$!
 
 wait_tcp "$STREAM_PORT"
 wait_tcp "$PROXY_STREAM_PORT"
+wait_tcp "$PROXY_RECV_STREAM_PORT"
 
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$STREAM_PORT" probe primary:probe
 
@@ -219,5 +257,6 @@ sleep 0.3
 
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$STREAM_PORT" probe backup:probe
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$PROXY_STREAM_PORT" probe proxy-v1-ok
+python3 "$TMP_DIR/proxy_protocol_client.py" 127.0.0.1 "$PROXY_RECV_STREAM_PORT" probe pp-recv:probe
 
 echo "stream proxy smoke passed"

@@ -20,7 +20,8 @@ behavior when the change improves security or project direction.
 - Add stream-local transport-neutral upstream policy: weighted selection,
   aliases, drained upstream exclusion, and backup upstream connect fallback.
 - Add a localhost stream smoke script covering raw TCP forwarding,
-  drained/backup fallback, and upstream PROXY protocol v1 send.
+  drained/backup fallback, upstream PROXY protocol v1 send, and downstream
+  PROXY protocol v1 receive from trusted sources.
 - Add stream unit coverage for wall-clock lifetime caps and upstream PROXY
   protocol v2 framing.
 

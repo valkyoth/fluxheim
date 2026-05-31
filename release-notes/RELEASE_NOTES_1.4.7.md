@@ -16,7 +16,8 @@ stream proxy foundation.
 - Stream-local upstream selection policy for weighted TCP selection, safe
   aliases, drained upstream exclusion, and backup upstream connect fallback.
 - Local stream smoke coverage for raw TCP forwarding, drained/backup fallback,
-  and upstream PROXY protocol v1 send.
+  upstream PROXY protocol v1 send, and downstream PROXY protocol v1 receive
+  from trusted sources.
 - Stream unit coverage for wall-clock lifetime caps and upstream PROXY
   protocol v2 framing.
 
