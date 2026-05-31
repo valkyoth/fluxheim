@@ -15,12 +15,12 @@ stream proxy foundation.
   BoringSSL builds.
 - Stream-local upstream selection policy for weighted TCP selection, safe
   aliases, drained upstream exclusion, and backup upstream connect fallback.
+- Local stream smoke coverage for raw TCP forwarding, drained/backup fallback,
+  and upstream PROXY protocol v1 send.
 
 ## Planned Scope
 
-- Expanded stream smoke/security tests for half-close behavior, byte caps, idle
-  timeout, upstream TLS/mTLS, PROXY receive/send combinations, and metrics
-  labels.
+- Additional release hardening from CI, CodeQL, and pentest feedback.
 
 ## Out Of Scope
 

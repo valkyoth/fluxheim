@@ -19,6 +19,8 @@ behavior when the change improves security or project direction.
   stream upstream trust/client files.
 - Add stream-local transport-neutral upstream policy: weighted selection,
   aliases, drained upstream exclusion, and backup upstream connect fallback.
+- Add a localhost stream smoke script covering raw TCP forwarding,
+  drained/backup fallback, and upstream PROXY protocol v1 send.
 
 ## 1.4.6 - 2026-05-30
 
