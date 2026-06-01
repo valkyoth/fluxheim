@@ -899,9 +899,9 @@ subsets of `upstreams`. Backups stay out of normal rotation and are selected
 only when no non-backup backend is currently selectable. Drained upstreams
 remain configured for health and operator visibility but receive no new
 selections. Disabled upstreams are the explicit administrative off state for a
-configured member and are reported separately in load-balancer status. Backup,
-drain, and disabled sets must not overlap, and at least one upstream must
-remain a normal primary.
+configured member, are reported separately in load-balancer status, and show as
+not ready in that status. Backup, drain, and disabled sets must not overlap,
+and at least one upstream must remain a normal primary.
 `proxy.load_balance.selection` defaults to `round-robin`. It also accepts
 `least-connections`, `weighted-least-connections`,
 `ratio-least-connections`, `least-time`, `power-of-two`, `source-hash`,

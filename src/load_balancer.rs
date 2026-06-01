@@ -1648,6 +1648,7 @@ where
         .now_or_never()
         .ok_or_else(|| io::Error::other("static load balancer update blocked unexpectedly"))?
         .map_err(|error| io::Error::other(error.to_string()))?;
+    apply_disabled_backend_enablement(&load_balancer, config);
     if config.load_balance.health_check.enabled {
         let health_check = configured_health_check(config)?;
         load_balancer.set_health_check(health_check);
@@ -1658,6 +1659,18 @@ where
     }
 
     Ok(Some(load_balancer))
+}
+
+fn apply_disabled_backend_enablement<S>(load_balancer: &LoadBalancer<S>, config: &ProxyConfig)
+where
+    S: BackendSelection + 'static,
+    S::Iter: BackendIter,
+{
+    for upstream in &config.disabled_upstreams {
+        if let Ok(backend) = Backend::new(upstream) {
+            load_balancer.backends().set_enable(&backend, false);
+        }
+    }
 }
 
 struct FileUpstreamDiscovery {
@@ -2643,7 +2656,12 @@ mod tests {
             assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
         }
         let stats = balancer.runtime_stats();
-        assert!(stats.backends.iter().any(|backend| backend.disabled));
+        let disabled = stats
+            .backends
+            .iter()
+            .find(|backend| backend.disabled)
+            .expect("disabled backend status");
+        assert!(!disabled.ready);
     }
 
     #[test]
