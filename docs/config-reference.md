@@ -332,7 +332,9 @@ Use `vhost` for the vhost name, optional `route` for a route-local pool,
 `state` as `normal`, `drain`, or `disable`. `normal` clears only runtime
 overrides; static `drain_upstreams` and `disabled_upstreams` remain enforced
 until the config changes. Runtime member state is intentionally in-memory in
-`1.5.0` and is reset by process restart or runtime rebuild.
+`1.5.0`, is reset by process restart or runtime rebuild, and is returned with
+`"persistent": false` in the mutation response. The response also includes
+`scope = "vhost"` or `"route"` so operators can audit which pool was changed.
 
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the

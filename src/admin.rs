@@ -915,10 +915,12 @@ impl AdminApp {
                     "status": "ok",
                     "vhost": result.vhost,
                     "route": result.route,
+                    "scope": if result.route.is_some() { "route" } else { "vhost" },
                     "member": result.member,
                     "state": result.state,
                     "address": result.address,
                     "alias": result.alias,
+                    "persistent": false,
                 }),
             ),
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
@@ -3461,6 +3463,35 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_admin_config() -> Config {
+        Config {
+            vhosts: vec![VhostConfig {
+                name: "one".to_owned(),
+                hosts: vec!["one.example".to_owned()],
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig {
+                    upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+                    upstream_aliases: vec!["app-a".to_owned(), "app-b".to_owned()],
+                    ..ProxyConfig::default()
+                },
+                cache: CacheConfig::default(),
+                compression: None,
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        }
+    }
+
     fn set_test_runtime_state(
         app: &AdminApp,
         runtime_snapshot: Option<String>,
@@ -3546,32 +3577,7 @@ mod tests {
         #[cfg(feature = "tls-rustls-backend")]
         let _ = crate::tls::install_rustls_crypto_provider();
 
-        let config = Config {
-            vhosts: vec![VhostConfig {
-                name: "one".to_owned(),
-                hosts: vec!["one.example".to_owned()],
-                max_request_body_bytes: None,
-                access: Default::default(),
-                rate_limit: Default::default(),
-                concurrency: Default::default(),
-                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
-                redirect: crate::config::VhostRedirectConfig::default(),
-                tls: crate::config::VhostTlsConfig::default(),
-                proxy: ProxyConfig {
-                    upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
-                    upstream_aliases: vec!["app-a".to_owned(), "app-b".to_owned()],
-                    ..ProxyConfig::default()
-                },
-                cache: CacheConfig::default(),
-                compression: None,
-                headers: crate::config::VhostHeaderPolicyConfig::default(),
-                php: crate::config::PhpConfig::default(),
-                web: WebConfig::default(),
-                routes: Vec::new(),
-            }],
-            ..Config::default()
-        };
-        let app = app_with_config(config);
+        let app = app_with_config(load_balancer_admin_config());
         let response = app.handle(
             "POST",
             "/_fluxheim/load-balancer/member-state",
@@ -3585,8 +3591,10 @@ mod tests {
         assert_eq!(body["vhost"], "one");
         assert_eq!(body["member"], "app-a");
         assert_eq!(body["state"], "drained");
+        assert_eq!(body["scope"], "vhost");
         assert_eq!(body["address"], "127.0.0.1:3001");
         assert_eq!(body["alias"], "app-a");
+        assert_eq!(body["persistent"], false);
 
         let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
         assert_eq!(response.status, StatusCode::OK);
@@ -3607,6 +3615,38 @@ mod tests {
             app_a["runtime_state_override"],
             Value::String("drained".to_owned())
         );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_member_state_endpoint_reports_bad_requests() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_admin_config());
+        let invalid_state = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-state",
+            Some("vhost=one&member=app-a&state=evacuate"),
+            &auth_headers(),
+        );
+        assert_eq!(invalid_state.status, StatusCode::BAD_REQUEST);
+
+        let unknown_member = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-state",
+            Some("vhost=one&member=missing&state=disable"),
+            &auth_headers(),
+        );
+        assert_eq!(unknown_member.status, StatusCode::NOT_FOUND);
+
+        let missing_member = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-state",
+            Some("vhost=one&state=disable"),
+            &auth_headers(),
+        );
+        assert_eq!(missing_member.status, StatusCode::BAD_REQUEST);
     }
 
     #[test]

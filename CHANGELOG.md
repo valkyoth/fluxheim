@@ -59,6 +59,8 @@ behavior when the change improves security or project direction.
 - Add authenticated in-memory load-balancer member-state operations through
   `POST /_fluxheim/load-balancer/member-state` for existing configured
   members: normal, drain, and disable by configured address or alias.
+- Return explicit `scope` and `persistent = false` metadata from load-balancer
+  runtime member-state operations.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in
