@@ -749,9 +749,11 @@ interval_secs = 1
 consecutive_success = 1
 consecutive_failure = 1
 parallel = false
+method = "GET"
 path = "/"
 host = "origin.example.test"
 expected_statuses = []
+expected_headers = []
 reuse_connection = false
 
 [proxy.load_balance.slow_start]
@@ -905,8 +907,11 @@ labels. The metric does not label raw upstream addresses; it uses
 `upstream_aliases` when present and otherwise leaves the upstream label empty.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
-`protocol = "http"` to send a `GET` request to `path`; by default only `200`
-passes, or `expected_statuses = [200, 204]` can define an explicit allow-list.
+`protocol = "http"` to send `method` to `path`; `method` defaults to `GET` and
+must be an uppercase HTTP token. By default only `200` passes, or
+`expected_statuses = [200, 204]` can define an explicit allow-list.
+`expected_headers` can require exact response header values:
+`expected_headers = [{ name = "x-fluxheim-health", value = "ready" }]`.
 `host` overrides the health-check `Host` header and TLS SNI fallback,
 `reuse_connection = true` allows Pingora to reuse check connections, and
 `port_override` sends checks to a different port on the same backend address.

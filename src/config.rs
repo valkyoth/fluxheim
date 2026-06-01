@@ -55,9 +55,9 @@ use crate::config_http::{
     fips_allowed_local_otlp_endpoint,
 };
 pub use crate::config_load_balance::{
-    LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckProtocol,
-    LoadBalancePassiveHealthConfig, LoadBalanceRetryConfig, LoadBalanceSelection,
-    LoadBalanceSlowStartConfig,
+    LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
+    LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalanceRetryConfig,
+    LoadBalanceSelection, LoadBalanceSlowStartConfig,
 };
 pub use crate::config_loader::ConfigLoadError;
 #[cfg(feature = "load-balancer")]

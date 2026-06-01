@@ -528,11 +528,16 @@ fn parses_proxy_upstream_pool() {
             consecutive_success = 2
             consecutive_failure = 3
             parallel = true
+            method = "HEAD"
             path = "/healthz"
             host = "app.internal"
             expected_statuses = [200, 204]
             reuse_connection = true
             port_override = 8081
+
+            [[proxy.load_balance.health_check.expected_headers]]
+            name = "x-fluxheim-health"
+            value = "ready"
 
             [proxy.load_balance.slow_start]
             enabled = true
@@ -630,6 +635,7 @@ fn parses_proxy_upstream_pool() {
         3
     );
     assert!(config.proxy.load_balance.health_check.parallel);
+    assert_eq!(config.proxy.load_balance.health_check.method, "HEAD");
     assert_eq!(config.proxy.load_balance.health_check.path, "/healthz");
     assert_eq!(
         config.proxy.load_balance.health_check.host.as_deref(),
@@ -638,6 +644,14 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(
         config.proxy.load_balance.health_check.expected_statuses,
         vec![200, 204]
+    );
+    assert_eq!(
+        config.proxy.load_balance.health_check.expected_headers[0].name,
+        "x-fluxheim-health"
+    );
+    assert_eq!(
+        config.proxy.load_balance.health_check.expected_headers[0].value,
+        "ready"
     );
     assert!(config.proxy.load_balance.health_check.reuse_connection);
     assert_eq!(
@@ -2378,6 +2392,61 @@ fn rejects_invalid_http_load_balance_health_check() {
         config.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.path"
+        })
+    );
+
+    let lowercase_method: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+            method = "get"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        lowercase_method.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.method"
+        })
+    );
+
+    let invalid_expected_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+
+            [[proxy.load_balance.health_check.expected_headers]]
+            name = "bad header"
+            value = "ready"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_expected_header.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.expected_headers"
+        })
+    );
+
+    let duplicate_expected_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+
+            [[proxy.load_balance.health_check.expected_headers]]
+            name = "x-health"
+            value = "ready"
+
+            [[proxy.load_balance.health_check.expected_headers]]
+            name = "X-Health"
+            value = "still-ready"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        duplicate_expected_header.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.expected_headers"
         })
     );
 }

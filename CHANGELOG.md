@@ -28,6 +28,8 @@ behavior when the change improves security or project direction.
   selection across configured static upstream pools.
 - Add static per-upstream `upstream_max_in_flight` caps so saturated members
   are skipped consistently across load-balancing selectors.
+- Extend HTTP active health checks with configurable request methods and exact
+  expected response header validation.
 
 ## 1.4.7 - 2026-05-31
 

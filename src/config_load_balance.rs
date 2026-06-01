@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::ConfigError;
+use crate::config::{ConfigError, valid_http_token};
 use crate::config_header::valid_http_header_name;
 use crate::config_net::normalize_host;
 
@@ -146,6 +146,8 @@ pub struct LoadBalanceHealthCheckConfig {
     pub consecutive_failure: usize,
     #[serde(default)]
     pub parallel: bool,
+    #[serde(default = "default_lb_health_check_method")]
+    pub method: String,
     #[serde(default = "default_lb_health_check_path")]
     pub path: String,
     #[serde(default)]
@@ -153,9 +155,18 @@ pub struct LoadBalanceHealthCheckConfig {
     #[serde(default)]
     pub expected_statuses: Vec<u16>,
     #[serde(default)]
+    pub expected_headers: Vec<LoadBalanceHealthCheckExpectedHeader>,
+    #[serde(default)]
     pub reuse_connection: bool,
     #[serde(default)]
     pub port_override: Option<u16>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceHealthCheckExpectedHeader {
+    pub name: String,
+    pub value: String,
 }
 
 impl Default for LoadBalanceHealthCheckConfig {
@@ -167,9 +178,11 @@ impl Default for LoadBalanceHealthCheckConfig {
             consecutive_success: default_lb_health_check_threshold(),
             consecutive_failure: default_lb_health_check_threshold(),
             parallel: false,
+            method: default_lb_health_check_method(),
             path: default_lb_health_check_path(),
             host: None,
             expected_statuses: Vec::new(),
+            expected_headers: Vec::new(),
             reuse_connection: false,
             port_override: None,
         }
@@ -198,6 +211,11 @@ impl LoadBalanceHealthCheckConfig {
                 field: "proxy.load_balance.health_check.path",
             });
         }
+        if !valid_health_check_method(&self.method) {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.method",
+            });
+        }
         if let Some(host) = &self.host
             && !valid_health_check_host(host)
         {
@@ -215,6 +233,28 @@ impl LoadBalanceHealthCheckConfig {
             if !(100..=599).contains(status) || !seen_statuses.insert(*status) {
                 return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                     field: "proxy.load_balance.health_check.expected_statuses",
+                });
+            }
+        }
+        if self.expected_headers.len() > 32 {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.expected_headers",
+            });
+        }
+        let mut seen_headers = HashSet::new();
+        for header in &self.expected_headers {
+            if !valid_http_header_name(&header.name)
+                || header.value.is_empty()
+                || header.value.len() > 1024
+                || header.value.chars().any(char::is_control)
+            {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.expected_headers",
+                });
+            }
+            if !seen_headers.insert(header.name.to_ascii_lowercase()) {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.expected_headers",
                 });
             }
         }
@@ -434,8 +474,19 @@ fn default_lb_health_check_threshold() -> usize {
     1
 }
 
+fn default_lb_health_check_method() -> String {
+    "GET".to_owned()
+}
+
 fn default_lb_health_check_path() -> String {
     "/".to_owned()
+}
+
+fn valid_health_check_method(method: &str) -> bool {
+    !method.is_empty()
+        && method.len() <= 32
+        && valid_http_token(method)
+        && !method.chars().any(char::is_lowercase)
 }
 
 fn valid_health_check_path(path: &str) -> bool {
