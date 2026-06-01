@@ -307,7 +307,8 @@ operator group.
 When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
 `load_balancer` object for configured vhost and route pools. The status is
 read-only and reports backend readiness, aliases, weights, backup/drain/disabled
-state, ready and policy-available backend counts, selection policy,
+state, ready and policy-available backend counts, primary/backup availability
+counts, drain/disabled/ejected/saturated summary counts, selection policy,
 max-iteration and all-down settings, health-check frequency and parallel mode,
 retry policy, passive-health thresholds, slow-start duration, priority group,
 max in-flight cap, current in-flight count, passive failure count, passive

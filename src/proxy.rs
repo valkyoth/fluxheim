@@ -15246,6 +15246,50 @@ mod tests {
                 .available_backend_count,
             2
         );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .primary_available_backend_count,
+            2
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .backup_available_backend_count,
+            0
+        );
+        assert_eq!(
+            stats.vhosts[0].pool.as_ref().unwrap().drained_backend_count,
+            0
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .disabled_backend_count,
+            0
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .passive_ejected_backend_count,
+            0
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .saturated_backend_count,
+            0
+        );
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().all_down_status, 502);
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().max_iterations, 256);
         assert!(stats.vhosts[0].pool.as_ref().unwrap().health_check_enabled);

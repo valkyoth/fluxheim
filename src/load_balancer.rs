@@ -70,6 +70,12 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub backend_count: usize,
     pub ready_backend_count: usize,
     pub available_backend_count: usize,
+    pub primary_available_backend_count: usize,
+    pub backup_available_backend_count: usize,
+    pub drained_backend_count: usize,
+    pub disabled_backend_count: usize,
+    pub passive_ejected_backend_count: usize,
+    pub saturated_backend_count: usize,
     pub max_iterations: usize,
     pub all_down_status: u16,
     pub health_check_enabled: bool,
@@ -334,24 +340,43 @@ impl UpstreamLoadBalancer {
             &self.backend_policy,
         );
         let ready_backend_count = backends.iter().filter(|backend| backend.ready).count();
-        let available_backend_count = backends
+        let eligible_backend_count = backends
+            .iter()
+            .filter(|backend| backend_runtime_status_eligible(backend))
+            .count();
+        let primary_available_backend_count = backends
+            .iter()
+            .filter(|backend| !backend.backup && backend_runtime_status_eligible(backend))
+            .count();
+        let backup_available_backend_count = backends
+            .iter()
+            .filter(|backend| backend.backup && backend_runtime_status_eligible(backend))
+            .count();
+        let drained_backend_count = backends.iter().filter(|backend| backend.drained).count();
+        let disabled_backend_count = backends.iter().filter(|backend| backend.disabled).count();
+        let passive_ejected_backend_count = backends
+            .iter()
+            .filter(|backend| backend.passive_ejected)
+            .count();
+        let saturated_backend_count = backends
             .iter()
             .filter(|backend| {
-                backend.ready
-                    && !backend.disabled
-                    && !backend.drained
-                    && !backend.passive_ejected
-                    && backend.slow_start_permitting
-                    && backend
-                        .max_in_flight
-                        .is_none_or(|limit| backend.in_flight < limit)
+                backend
+                    .max_in_flight
+                    .is_some_and(|limit| backend.in_flight >= limit)
             })
             .count();
         LoadBalancerPoolRuntimeStats {
             selection: self.selection,
             backend_count: self.inner.backend_count(),
             ready_backend_count,
-            available_backend_count,
+            available_backend_count: eligible_backend_count,
+            primary_available_backend_count,
+            backup_available_backend_count,
+            drained_backend_count,
+            disabled_backend_count,
+            passive_ejected_backend_count,
+            saturated_backend_count,
             max_iterations: self.max_iterations,
             all_down_status: self.all_down_status,
             health_check_enabled: health_check_frequency.is_some(),
@@ -386,6 +411,17 @@ impl UpstreamLoadBalancer {
     fn parallel_health_check(&self) -> bool {
         self.inner.parallel_health_check()
     }
+}
+
+fn backend_runtime_status_eligible(backend: &LoadBalancerBackendRuntimeStats) -> bool {
+    backend.ready
+        && !backend.disabled
+        && !backend.drained
+        && !backend.passive_ejected
+        && backend.slow_start_permitting
+        && backend
+            .max_in_flight
+            .is_none_or(|limit| backend.in_flight < limit)
 }
 
 impl LoadBalancerRetryRuntimeStats {
@@ -2729,6 +2765,10 @@ mod tests {
         let primary = balancer.select(&request(), None).unwrap();
         assert_eq!(primary.backend.addr.to_string(), "127.0.0.1:3000");
         primary.reporter.unwrap().record_failure();
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.primary_available_backend_count, 0);
+        assert_eq!(stats.backup_available_backend_count, 1);
+        assert_eq!(stats.passive_ejected_backend_count, 1);
         let backup = balancer.select(&request(), None).unwrap();
         assert_eq!(backup.backend.addr.to_string(), "127.0.0.1:3001");
     }
@@ -2752,6 +2792,9 @@ mod tests {
             let selected = balancer.select(&request(), None).unwrap();
             assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
         }
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.drained_backend_count, 1);
+        assert_eq!(stats.primary_available_backend_count, 1);
     }
 
     #[test]
@@ -2774,6 +2817,8 @@ mod tests {
             assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
         }
         let stats = balancer.runtime_stats();
+        assert_eq!(stats.disabled_backend_count, 1);
+        assert_eq!(stats.primary_available_backend_count, 1);
         let disabled = stats
             .backends
             .iter()
