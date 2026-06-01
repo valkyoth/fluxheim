@@ -80,7 +80,8 @@ use crate::edge_policy::{
 };
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{
-    LoadBalancedUpstreamOutcome, UpstreamLoadBalancer, UpstreamLoadBalancerService,
+    LoadBalancedUpstreamOutcome, LoadBalancerPoolRuntimeStats, UpstreamLoadBalancer,
+    UpstreamLoadBalancerService,
 };
 #[cfg(feature = "php-fpm")]
 use crate::php_fpm::{
@@ -585,6 +586,11 @@ impl FluxProxy {
         self.snapshot().cache_runtime_stats()
     }
 
+    #[cfg(feature = "load-balancer")]
+    pub fn load_balancer_runtime_stats(&self) -> LoadBalancerRuntimeStats {
+        self.snapshot().load_balancer_runtime_stats()
+    }
+
     #[cfg(feature = "cache")]
     pub fn reset_cache_activity(&self) -> CacheActivityResetResult {
         self.snapshot().reset_cache_activity()
@@ -661,6 +667,27 @@ impl FluxProxy {
 #[derive(Debug, Clone)]
 pub struct ProxySnapshot {
     state: Arc<ProxyRuntimeState>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct LoadBalancerRuntimeStats {
+    pub vhosts: Vec<LoadBalancerVhostRuntimeStats>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct LoadBalancerVhostRuntimeStats {
+    pub name: String,
+    pub pool: Option<LoadBalancerPoolRuntimeStats>,
+    pub routes: Vec<LoadBalancerRouteRuntimeStats>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct LoadBalancerRouteRuntimeStats {
+    pub name: String,
+    pub pool: LoadBalancerPoolRuntimeStats,
 }
 
 impl ProxySnapshot {
@@ -857,6 +884,41 @@ impl ProxySnapshot {
         let cache_request = cache_request_from_header(request);
         crate::cache::image_cache_key(&vhost.cache, &cache_request)?;
         Some(storage.stats())
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn load_balancer_runtime_stats(&self) -> LoadBalancerRuntimeStats {
+        let vhosts = self
+            .state
+            .vhosts
+            .iter()
+            .filter_map(|vhost| {
+                let pool = vhost
+                    .load_balancer
+                    .as_ref()
+                    .map(UpstreamLoadBalancer::runtime_stats);
+                let routes = vhost
+                    .routes
+                    .iter()
+                    .filter_map(|route| {
+                        route
+                            .load_balancer
+                            .as_ref()
+                            .map(UpstreamLoadBalancer::runtime_stats)
+                            .map(|pool| LoadBalancerRouteRuntimeStats {
+                                name: route.name.clone(),
+                                pool,
+                            })
+                    })
+                    .collect::<Vec<_>>();
+                (pool.is_some() || !routes.is_empty()).then(|| LoadBalancerVhostRuntimeStats {
+                    name: vhost.name.clone(),
+                    pool,
+                    routes,
+                })
+            })
+            .collect();
+        LoadBalancerRuntimeStats { vhosts }
     }
 
     #[cfg(feature = "cache")]
@@ -15056,6 +15118,15 @@ mod tests {
 
         assert_eq!(proxy.route_host(Some("one.example")), "one");
         assert_eq!(services.len(), 3);
+        let stats = proxy.load_balancer_runtime_stats();
+        assert_eq!(stats.vhosts.len(), 2);
+        assert_eq!(stats.vhosts[0].name, "one");
+        assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().backend_count, 2);
+        assert_eq!(stats.vhosts[0].routes.len(), 1);
+        assert_eq!(stats.vhosts[0].routes[0].name, "api");
+        assert_eq!(stats.vhosts[0].routes[0].pool.backend_count, 2);
+        assert_eq!(stats.vhosts[1].name, "two");
+        assert_eq!(stats.vhosts[1].pool.as_ref().unwrap().backend_count, 2);
     }
 
     #[cfg(feature = "load-balancer")]

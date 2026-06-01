@@ -207,6 +207,8 @@ pending validation state. `GET /_fluxheim/status` reports:
 - `runtime_snapshot`
 - `known_good_snapshot`
 - `pending_validation`
+- `load_balancer` when compiled with the load-balancer feature, including
+  read-only vhost/route pool and backend runtime state
 
 Confirm the candidate after local health checks succeed:
 

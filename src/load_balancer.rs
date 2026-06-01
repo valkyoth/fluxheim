@@ -24,6 +24,7 @@ use pingora::lb::selection::{
 use pingora::services::ServiceWithDependents;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::{Error, ErrorType};
+use serde::Serialize;
 
 use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
@@ -36,6 +37,7 @@ pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 #[derive(Clone)]
 pub struct UpstreamLoadBalancer {
     inner: UpstreamLoadBalancerInner,
+    selection: LoadBalanceSelection,
     key_source: LoadBalanceKeySource,
     backend_aliases: Arc<std::collections::HashMap<u64, Arc<str>>>,
     passive_health: Option<Arc<PassiveHealthState>>,
@@ -56,6 +58,29 @@ pub struct SelectedUpstream {
 pub struct LoadBalancedUpstreamOutcome {
     pub failed: bool,
     pub ejected: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LoadBalancerPoolRuntimeStats {
+    pub selection: LoadBalanceSelection,
+    pub backend_count: usize,
+    pub backends: Vec<LoadBalancerBackendRuntimeStats>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LoadBalancerBackendRuntimeStats {
+    pub address: Option<String>,
+    pub alias: Option<String>,
+    pub weight: usize,
+    pub ready: bool,
+    pub backup: bool,
+    pub drained: bool,
+    pub priority_group: Option<u16>,
+    pub max_in_flight: Option<usize>,
+    pub in_flight: usize,
+    pub passive_ejected: bool,
+    pub slow_start_permitting: bool,
+    pub latency_micros: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -246,6 +271,7 @@ impl UpstreamLoadBalancer {
     fn from_inner(inner: UpstreamLoadBalancerInner, config: &ProxyConfig) -> Self {
         Self {
             inner,
+            selection: config.load_balance.selection,
             key_source: LoadBalanceKeySource::from_config(config),
             backend_aliases: Arc::new(backend_aliases(config)),
             passive_health: config.load_balance.passive_health.enabled.then(|| {
@@ -261,6 +287,20 @@ impl UpstreamLoadBalancer {
             counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
+        }
+    }
+
+    pub fn runtime_stats(&self) -> LoadBalancerPoolRuntimeStats {
+        LoadBalancerPoolRuntimeStats {
+            selection: self.selection,
+            backend_count: self.inner.backend_count(),
+            backends: self.inner.backend_stats(
+                &self.backend_aliases,
+                self.passive_health.as_deref(),
+                self.slow_start.as_deref(),
+                &self.counters,
+                &self.backend_policy,
+            ),
         }
     }
 
@@ -365,7 +405,6 @@ impl UpstreamLoadBalancerInner {
         }
     }
 
-    #[cfg(test)]
     fn backend_count(&self) -> usize {
         match self {
             Self::RoundRobin(inner) => inner.backends().get_backend().len(),
@@ -374,6 +413,72 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => inner.backends().get_backend().len(),
             Self::FnvHash(inner) => inner.backends().get_backend().len(),
             Self::ConsistentHash(inner) => inner.backends().get_backend().len(),
+        }
+    }
+
+    fn backend_stats(
+        &self,
+        aliases: &std::collections::HashMap<u64, Arc<str>>,
+        passive_health: Option<&PassiveHealthState>,
+        slow_start: Option<&SlowStartState>,
+        counters: &BackendConnectionCounters,
+        backend_policy: &BackendSelectionPolicy,
+    ) -> Vec<LoadBalancerBackendRuntimeStats> {
+        match self {
+            Self::RoundRobin(inner) => load_balancer_backend_stats(
+                inner,
+                aliases,
+                passive_health,
+                slow_start,
+                counters,
+                backend_policy,
+                None,
+            ),
+            Self::LeastConnections(inner) => load_balancer_backend_stats(
+                inner,
+                aliases,
+                passive_health,
+                slow_start,
+                counters,
+                backend_policy,
+                None,
+            ),
+            Self::LeastTime { inner, latency } => load_balancer_backend_stats(
+                inner,
+                aliases,
+                passive_health,
+                slow_start,
+                counters,
+                backend_policy,
+                Some(latency),
+            ),
+            Self::PowerOfTwo(inner) => load_balancer_backend_stats(
+                inner,
+                aliases,
+                passive_health,
+                slow_start,
+                counters,
+                backend_policy,
+                None,
+            ),
+            Self::FnvHash(inner) => load_balancer_backend_stats(
+                inner,
+                aliases,
+                passive_health,
+                slow_start,
+                counters,
+                backend_policy,
+                None,
+            ),
+            Self::ConsistentHash(inner) => load_balancer_backend_stats(
+                inner,
+                aliases,
+                passive_health,
+                slow_start,
+                counters,
+                backend_policy,
+                None,
+            ),
         }
     }
 
@@ -514,6 +619,10 @@ impl PassiveHealthState {
 
     fn is_ejected(&self, backend: &Backend) -> bool {
         let key = backend_connection_key(backend);
+        self.key_is_ejected(key)
+    }
+
+    fn key_is_ejected(&self, key: u64) -> bool {
         let mut backends = self
             .backends
             .lock()
@@ -529,6 +638,15 @@ impl PassiveHealthState {
         }
         state.ejected_until = None;
         false
+    }
+
+    fn key_is_currently_ejected(&self, key: u64) -> bool {
+        self.backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .and_then(|state| state.ejected_until)
+            .is_some_and(|until| Instant::now() < until)
     }
 
     fn record_status(&self, key: u64, status: u16, latency: Option<Duration>) -> Option<Instant> {
@@ -621,6 +739,28 @@ impl SlowStartState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(key, restart_at);
     }
+
+    fn permits_read_only(&self, backend: &Backend) -> bool {
+        let now = Instant::now();
+        let key = backend_connection_key(backend);
+        let Some(started_at) = self
+            .backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .copied()
+        else {
+            return true;
+        };
+        let elapsed = now.saturating_duration_since(started_at);
+        if elapsed >= self.duration {
+            return true;
+        }
+
+        let progress_per_mille =
+            ((elapsed.as_millis() * 1000) / self.duration.as_millis()).clamp(1, 1000) as u64;
+        (key % 1000) < progress_per_mille
+    }
 }
 
 #[derive(Default)]
@@ -631,6 +771,15 @@ struct BackendConnectionCounters {
 impl BackendConnectionCounters {
     fn count(&self, backend: &Backend) -> usize {
         self.counter(backend).load(Ordering::Acquire)
+    }
+
+    fn count_existing(&self, backend: &Backend) -> usize {
+        self.counters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&backend_connection_key(backend))
+            .map(|counter| counter.load(Ordering::Acquire))
+            .unwrap_or(0)
     }
 
     fn permit(
@@ -686,10 +835,14 @@ impl BackendLatencyState {
     }
 
     fn score(&self, backend: &Backend) -> Option<u64> {
+        self.score_key(backend_connection_key(backend))
+    }
+
+    fn score_key(&self, key: u64) -> Option<u64> {
         self.latency_micros
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&backend_connection_key(backend))
+            .get(&key)
             .copied()
     }
 }
@@ -761,6 +914,22 @@ impl BackendSelectionPolicy {
             .get(&backend_policy_key(backend))
             .copied()
     }
+
+    fn backup(&self, key: u64) -> bool {
+        self.backup.contains(&key)
+    }
+
+    fn drained(&self, key: u64) -> bool {
+        self.drain.contains(&key)
+    }
+
+    fn priority_group(&self, key: u64) -> Option<u16> {
+        self.priority.get(&key).copied()
+    }
+
+    fn max_in_flight_key(&self, key: u64) -> Option<usize> {
+        self.max_in_flight.get(&key).copied()
+    }
 }
 
 fn backend_policy_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
@@ -823,6 +992,49 @@ fn backend_aliases(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<s
                 backend_policy_key(&backend),
                 Arc::<str>::from(alias.as_str()),
             ))
+        })
+        .collect()
+}
+
+fn load_balancer_backend_stats<S>(
+    inner: &LoadBalancer<S>,
+    aliases: &std::collections::HashMap<u64, Arc<str>>,
+    passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
+    counters: &BackendConnectionCounters,
+    backend_policy: &BackendSelectionPolicy,
+    latency: Option<&Arc<BackendLatencyState>>,
+) -> Vec<LoadBalancerBackendRuntimeStats>
+where
+    S: BackendSelection + 'static,
+    S::Iter: BackendIter,
+{
+    inner
+        .backends()
+        .get_backend()
+        .iter()
+        .map(|backend| {
+            let policy_key = backend_policy_key(backend);
+            let connection_key = backend_connection_key(backend);
+            LoadBalancerBackendRuntimeStats {
+                #[cfg(not(feature = "privacy-mode"))]
+                address: Some(backend.addr.to_string()),
+                #[cfg(feature = "privacy-mode")]
+                address: None,
+                alias: aliases.get(&policy_key).map(|alias| alias.to_string()),
+                weight: backend.weight,
+                ready: inner.backends().ready(backend),
+                backup: backend_policy.backup(policy_key),
+                drained: backend_policy.drained(policy_key),
+                priority_group: backend_policy.priority_group(policy_key),
+                max_in_flight: backend_policy.max_in_flight_key(policy_key),
+                in_flight: counters.count_existing(backend),
+                passive_ejected: passive_health
+                    .is_some_and(|health| health.key_is_currently_ejected(connection_key)),
+                slow_start_permitting: slow_start
+                    .is_none_or(|state| state.permits_read_only(backend)),
+                latency_micros: latency.and_then(|state| state.score_key(connection_key)),
+            }
         })
         .collect()
 }

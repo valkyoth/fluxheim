@@ -822,21 +822,27 @@ impl AdminApp {
         let current_config = self.current_config.load();
         let tls = &current_config.tls;
         let tls_compliance_mode = tls.compliance_mode();
-        json_response_value(
-            StatusCode::OK,
-            &json!({
-                "status": "ok",
-                "snapshot_current": current,
-                "snapshots": snapshots,
-                "self_healing_enabled": self.self_healing_enabled,
-                "tls_compliance_mode": tls_compliance_mode.label(),
-                "tls_fips_required": tls.fips.required,
-                "tls_iso19790_required": tls.iso19790.required,
-                "runtime_snapshot": runtime_state.runtime_snapshot.as_deref(),
-                "known_good_snapshot": runtime_state.known_good_snapshot.as_deref(),
-                "pending_validation": pending_validation_json(runtime_state.pending_validation.as_ref()),
-            }),
-        )
+        let mut body = json!({
+            "status": "ok",
+            "snapshot_current": current,
+            "snapshots": snapshots,
+            "self_healing_enabled": self.self_healing_enabled,
+            "tls_compliance_mode": tls_compliance_mode.label(),
+            "tls_fips_required": tls.fips.required,
+            "tls_iso19790_required": tls.iso19790.required,
+            "runtime_snapshot": runtime_state.runtime_snapshot.as_deref(),
+            "known_good_snapshot": runtime_state.known_good_snapshot.as_deref(),
+            "pending_validation": pending_validation_json(runtime_state.pending_validation.as_ref()),
+        });
+        #[cfg(feature = "load-balancer")]
+        if let Some(object) = body.as_object_mut() {
+            object.insert(
+                "load_balancer".to_owned(),
+                serde_json::to_value(self.proxy.load_balancer_runtime_stats())
+                    .unwrap_or(Value::Null),
+            );
+        }
+        json_response_value(StatusCode::OK, &body)
     }
 
     fn snapshots_response(&self) -> AdminResponse {

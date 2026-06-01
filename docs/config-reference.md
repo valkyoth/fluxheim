@@ -304,6 +304,13 @@ read/write access, may grant group read/write access, and must not grant world
 access; use `0600` for service-owner-only status or `0660` for a dedicated
 operator group.
 
+When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
+`load_balancer` object for configured vhost and route pools. The status is
+read-only and reports backend readiness, aliases, weights, backup/drain state,
+priority group, max in-flight cap, current in-flight count, passive ejection,
+slow-start allowance, and least-time latency state where available. In
+`privacy-mode`, backend addresses are omitted from this status object.
+
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the
 trusted local sidecar, but Fluxheim can require a validated downstream client

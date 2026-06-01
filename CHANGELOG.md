@@ -38,6 +38,9 @@ behavior when the change improves security or project direction.
   overrides so probes can be tuned independently from normal upstream traffic.
 - Add `proxy.load_balance.all_down_status` for explicit 5xx responses when a
   configured load-balanced pool has no selectable backend.
+- Add read-only load-balancer runtime status to `GET /_fluxheim/status`,
+  including pool/backend readiness, configured policy metadata, in-flight
+  counts, passive ejection, slow-start, and least-time latency state.
 
 ## 1.4.7 - 2026-05-31
 
