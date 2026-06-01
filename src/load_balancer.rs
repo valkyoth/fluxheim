@@ -64,6 +64,22 @@ pub struct LoadBalancedUpstreamOutcome {
     pub ejected: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadBalancerRuntimeBackendState {
+    Normal,
+    Drained,
+    Disabled,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct LoadBalancerRuntimeBackendMutation {
+    pub member: String,
+    pub state: LoadBalancerRuntimeBackendState,
+    pub address: String,
+    pub alias: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LoadBalancerPoolRuntimeStats {
     pub selection: LoadBalanceSelection,
@@ -411,6 +427,28 @@ impl UpstreamLoadBalancer {
     fn parallel_health_check(&self) -> bool {
         self.inner.parallel_health_check()
     }
+
+    pub fn set_runtime_backend_state(
+        &self,
+        member: &str,
+        state: LoadBalancerRuntimeBackendState,
+    ) -> io::Result<LoadBalancerRuntimeBackendMutation> {
+        let backend = self
+            .inner
+            .backend_by_member(member, &self.backend_aliases)?;
+        let policy_key = backend_policy_key(&backend);
+        self.backend_policy
+            .set_runtime_backend_state(policy_key, state);
+        Ok(LoadBalancerRuntimeBackendMutation {
+            member: member.to_owned(),
+            state,
+            address: backend.addr.to_string(),
+            alias: self
+                .backend_aliases
+                .get(&policy_key)
+                .map(|alias| alias.to_string()),
+        })
+    }
 }
 
 fn backend_runtime_status_eligible(backend: &LoadBalancerBackendRuntimeStats) -> bool {
@@ -637,6 +675,57 @@ impl UpstreamLoadBalancerInner {
             | Self::PowerOfTwo(_)
             | Self::FnvHash(_)
             | Self::ConsistentHash(_) => None,
+        }
+    }
+
+    fn backend_by_member(
+        &self,
+        member: &str,
+        aliases: &std::collections::HashMap<u64, Arc<str>>,
+    ) -> io::Result<Backend> {
+        let member = member.trim();
+        if member.is_empty() || member.len() > 256 || member.chars().any(char::is_whitespace) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member must be a configured address or alias",
+            ));
+        }
+        let mut matched = None;
+        for backend in self.backends() {
+            let policy_key = backend_policy_key(&backend);
+            let alias_matches = aliases
+                .get(&policy_key)
+                .is_some_and(|alias| alias.eq_ignore_ascii_case(member));
+            if backend.addr.to_string() == member || alias_matches {
+                if matched.is_some() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "load balancer member reference is ambiguous",
+                    ));
+                }
+                matched = Some(backend);
+            }
+        }
+        matched.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "load balancer member is not configured in this pool",
+            )
+        })
+    }
+
+    fn backends(&self) -> Vec<Backend> {
+        match self {
+            Self::RoundRobin(inner) => inner.backends().get_backend().iter().cloned().collect(),
+            Self::LeastConnections(inner) => {
+                inner.backends().get_backend().iter().cloned().collect()
+            }
+            Self::LeastTime { inner, .. } => {
+                inner.backends().get_backend().iter().cloned().collect()
+            }
+            Self::PowerOfTwo(inner) => inner.backends().get_backend().iter().cloned().collect(),
+            Self::FnvHash(inner) => inner.backends().get_backend().iter().cloned().collect(),
+            Self::ConsistentHash(inner) => inner.backends().get_backend().iter().cloned().collect(),
         }
     }
 }
@@ -996,10 +1085,17 @@ struct BackendSelectionPolicy {
     backup: Arc<std::collections::HashSet<u64>>,
     drain: Arc<std::collections::HashSet<u64>>,
     disabled: Arc<std::collections::HashSet<u64>>,
+    runtime: Arc<RuntimeBackendPolicyOverrides>,
     priority: Arc<std::collections::HashMap<u64, u16>>,
     max_in_flight: Arc<std::collections::HashMap<u64, usize>>,
     priority_groups: Arc<[u16]>,
     priority_group_min_active: usize,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeBackendPolicyOverrides {
+    drain: Mutex<std::collections::HashSet<u64>>,
+    disabled: Mutex<std::collections::HashSet<u64>>,
 }
 
 impl BackendSelectionPolicy {
@@ -1010,6 +1106,7 @@ impl BackendSelectionPolicy {
             backup: backend_policy_keys(&config.backup_upstreams).into(),
             drain: backend_policy_keys(&config.drain_upstreams).into(),
             disabled: backend_policy_keys(&config.disabled_upstreams).into(),
+            runtime: Arc::new(RuntimeBackendPolicyOverrides::default()),
             priority: priority.into(),
             max_in_flight: backend_max_in_flight(config).into(),
             priority_groups: priority_groups.into(),
@@ -1024,8 +1121,8 @@ impl BackendSelectionPolicy {
         counters: &BackendConnectionCounters,
     ) -> bool {
         let key = backend_policy_key(backend);
-        !self.disabled.contains(&key)
-            && !self.drain.contains(&key)
+        !self.disabled(key)
+            && !self.drained(key)
             && (pass.allow_backup || !self.backup.contains(&key))
             && pass
                 .minimum_priority_group
@@ -1061,11 +1158,11 @@ impl BackendSelectionPolicy {
     }
 
     fn drained(&self, key: u64) -> bool {
-        self.drain.contains(&key)
+        self.drain.contains(&key) || self.runtime.drained(key)
     }
 
     fn disabled(&self, key: u64) -> bool {
-        self.disabled.contains(&key)
+        self.disabled.contains(&key) || self.runtime.disabled(key)
     }
 
     fn priority_group(&self, key: u64) -> Option<u16> {
@@ -1074,6 +1171,48 @@ impl BackendSelectionPolicy {
 
     fn max_in_flight_key(&self, key: u64) -> Option<usize> {
         self.max_in_flight.get(&key).copied()
+    }
+
+    fn set_runtime_backend_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
+        self.runtime.set_state(key, state);
+    }
+}
+
+impl RuntimeBackendPolicyOverrides {
+    fn drained(&self, key: u64) -> bool {
+        self.drain
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&key)
+    }
+
+    fn disabled(&self, key: u64) -> bool {
+        self.disabled
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&key)
+    }
+
+    fn set_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
+        let mut drain = self
+            .drain
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut disabled = self
+            .disabled
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        drain.remove(&key);
+        disabled.remove(&key);
+        match state {
+            LoadBalancerRuntimeBackendState::Normal => {}
+            LoadBalancerRuntimeBackendState::Drained => {
+                drain.insert(key);
+            }
+            LoadBalancerRuntimeBackendState::Disabled => {
+                disabled.insert(key);
+            }
+        }
     }
 }
 
@@ -2144,8 +2283,9 @@ mod tests {
     };
 
     use super::{
-        LoadBalancedUpstreamReporter, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
-        backend_connection_key, configured_http_health_check, validate_http_health_response,
+        LoadBalancedUpstreamReporter, LoadBalancerRuntimeBackendState, PassiveHealthState,
+        SlowStartState, UpstreamLoadBalancer, backend_connection_key, configured_http_health_check,
+        validate_http_health_response,
     };
     use crate::test_support::unique_temp_path;
 
@@ -2825,6 +2965,50 @@ mod tests {
             .find(|backend| backend.disabled)
             .expect("disabled backend status");
         assert!(!disabled.ready);
+    }
+
+    #[test]
+    fn runtime_backend_state_overrides_selection_by_alias() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_aliases: vec!["primary-a".to_owned(), "primary-b".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let mutation = balancer
+            .set_runtime_backend_state("primary-a", LoadBalancerRuntimeBackendState::Drained)
+            .unwrap();
+        assert_eq!(mutation.address, "127.0.0.1:3000");
+        assert_eq!(mutation.alias.as_deref(), Some("primary-a"));
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.drained_backend_count, 1);
+        assert_eq!(stats.primary_available_backend_count, 1);
+        for _ in 0..4 {
+            let selected = balancer.select(&request(), None).unwrap();
+            assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+        }
+
+        balancer
+            .set_runtime_backend_state("primary-b", LoadBalancerRuntimeBackendState::Disabled)
+            .unwrap();
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.drained_backend_count, 1);
+        assert_eq!(stats.disabled_backend_count, 1);
+        assert_eq!(stats.primary_available_backend_count, 0);
+        assert!(balancer.select(&request(), None).is_none());
+
+        balancer
+            .set_runtime_backend_state("primary-a", LoadBalancerRuntimeBackendState::Normal)
+            .unwrap();
+        let selected = balancer.select(&request(), None).unwrap();
+        assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3000");
     }
 
     #[test]

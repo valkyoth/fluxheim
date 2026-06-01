@@ -54,6 +54,9 @@ behavior when the change improves security or project direction.
   status so pool capacity is visible without client-side backend inference.
 - Include primary/backup availability counts plus drain, disabled, passive
   ejection, and saturation summary counts in load-balancer runtime status.
+- Add the in-memory runtime member-state primitive for upcoming
+  load-balancer control-plane operations: normal, drain, and disable by
+  configured address or alias.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in
