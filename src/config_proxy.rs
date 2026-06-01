@@ -44,6 +44,8 @@ pub struct ProxyConfig {
     pub upstream_weights: Vec<usize>,
     #[serde(default)]
     pub upstream_priority_groups: Vec<u16>,
+    #[serde(default = "default_upstream_priority_group_min_active")]
+    pub upstream_priority_group_min_active: usize,
     #[serde(default)]
     pub upstream_max_in_flight: Vec<usize>,
     #[serde(default)]
@@ -161,6 +163,7 @@ impl Default for ProxyConfig {
             upstream_dns_refresh_secs: None,
             upstream_weights: Vec::new(),
             upstream_priority_groups: Vec::new(),
+            upstream_priority_group_min_active: default_upstream_priority_group_min_active(),
             upstream_max_in_flight: Vec::new(),
             upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
@@ -289,6 +292,8 @@ impl ProxyConfig {
                 }
                 if !self.upstream_weights.is_empty()
                     || !self.upstream_priority_groups.is_empty()
+                    || self.upstream_priority_group_min_active
+                        != default_upstream_priority_group_min_active()
                     || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
@@ -296,7 +301,7 @@ impl ProxyConfig {
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstreams_file",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
                     });
                 }
                 if self.upstream_tls && self.upstream_sni.is_none() {
@@ -345,6 +350,8 @@ impl ProxyConfig {
                 }
                 if !self.upstream_weights.is_empty()
                     || !self.upstream_priority_groups.is_empty()
+                    || self.upstream_priority_group_min_active
+                        != default_upstream_priority_group_min_active()
                     || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
@@ -352,7 +359,7 @@ impl ProxyConfig {
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_dns_refresh_secs",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
                     });
                 }
             }
@@ -397,6 +404,14 @@ impl ProxyConfig {
                     reason: "upstream_priority_groups must match proxy.upstreams and cannot be used with proxy.upstream",
                 });
             }
+            if self.upstream_priority_group_min_active == 0
+                || self.upstream_priority_group_min_active > self.upstreams.len()
+            {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_priority_group_min_active",
+                    reason: "priority group activation threshold must be between 1 and the number of upstreams",
+                });
+            }
             for priority in &self.upstream_priority_groups {
                 if *priority > MAX_PROXY_UPSTREAM_PRIORITY_GROUP {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
@@ -405,6 +420,15 @@ impl ProxyConfig {
                     });
                 }
             }
+        }
+        if self.upstream_priority_groups.is_empty()
+            && self.upstream_priority_group_min_active
+                != default_upstream_priority_group_min_active()
+        {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstream_priority_group_min_active",
+                reason: "requires proxy.upstream_priority_groups",
+            });
         }
         if !self.upstream_max_in_flight.is_empty() {
             if self.upstream.is_some() || self.upstream_max_in_flight.len() != self.upstreams.len()
@@ -1079,4 +1103,8 @@ impl ProxyErrorPageConfig {
 }
 fn default_proxy_upstreams_file_refresh_secs() -> u64 {
     5
+}
+
+fn default_upstream_priority_group_min_active() -> usize {
+    1
 }

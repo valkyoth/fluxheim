@@ -686,6 +686,7 @@ rules and can append additional rules.
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_weights = [1, 2]
 upstream_priority_groups = [100, 50]
+upstream_priority_group_min_active = 1
 upstream_max_in_flight = [256, 512]
 upstream_aliases = ["app-a", "app-b"]
 backup_upstreams = ["127.0.0.1:3001"]
@@ -862,9 +863,11 @@ builds. Each weight must be at most 1000 and the total configured weight must
 fit in Pingora's weighted selector.
 `upstream_priority_groups` is optional and, when set, must contain one priority
 value for each `upstreams` entry. Higher values are preferred first, then lower
-values are used only when the preferred priority group has no selectable
-backend. Each priority group must be at most 1000. This is the static
-F5-style preferred/fallback group foundation for the `1.5` load-balancer line.
+values are activated when higher priority groups have fewer than
+`upstream_priority_group_min_active` selectable members. The activation
+threshold defaults to `1`, matching strict preferred/fallback behavior. Each
+priority group must be at most 1000. This is the static F5-style
+preferred/fallback group foundation for the `1.5` load-balancer line.
 `upstream_max_in_flight` is optional and, when set, must contain one positive
 concurrency cap for each `upstreams` entry. A capped backend is skipped when it
 already has that many in-flight requests, regardless of the selected

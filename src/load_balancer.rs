@@ -706,6 +706,7 @@ struct BackendSelectionPolicy {
     priority: Arc<std::collections::HashMap<u64, u16>>,
     max_in_flight: Arc<std::collections::HashMap<u64, usize>>,
     priority_groups: Arc<[u16]>,
+    priority_group_min_active: usize,
 }
 
 impl BackendSelectionPolicy {
@@ -718,6 +719,7 @@ impl BackendSelectionPolicy {
             priority: priority.into(),
             max_in_flight: backend_max_in_flight(config).into(),
             priority_groups: priority_groups.into(),
+            priority_group_min_active: config.upstream_priority_group_min_active,
         }
     }
 
@@ -731,8 +733,8 @@ impl BackendSelectionPolicy {
         !self.drain.contains(&key)
             && (pass.allow_backup || !self.backup.contains(&key))
             && pass
-                .priority_group
-                .is_none_or(|group| self.priority.get(&key).copied().unwrap_or(0) == group)
+                .minimum_priority_group
+                .is_none_or(|group| self.priority.get(&key).copied().unwrap_or(0) >= group)
             && self
                 .max_in_flight
                 .get(&key)
@@ -741,6 +743,16 @@ impl BackendSelectionPolicy {
 
     fn priority_groups(&self) -> &[u16] {
         &self.priority_groups
+    }
+
+    fn priority_group_min_active(&self) -> usize {
+        self.priority_group_min_active
+    }
+
+    fn is_lowest_priority_group(&self, group: u16) -> bool {
+        self.priority_groups
+            .last()
+            .is_some_and(|lowest| *lowest == group)
     }
 
     fn max_in_flight(&self, backend: &Backend) -> Option<usize> {
@@ -834,47 +846,47 @@ where
         backend_policy,
     };
     for priority_group in selection_priority_groups(backend_policy) {
-        if let Some(backend) = select_pingora_with_backup_policy(
-            inner,
-            key,
-            max_iterations,
-            context,
-            SelectionPass {
-                priority_group,
-                allow_backup: false,
-                ignore_slow_start: false,
-            },
-        ) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: false,
+            ignore_slow_start: false,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(backend) =
+            select_pingora_with_backup_policy(inner, key, max_iterations, context, pass)
+        {
             return Some(backend);
         }
     }
     for priority_group in selection_priority_groups(backend_policy) {
-        if let Some(backend) = select_pingora_with_backup_policy(
-            inner,
-            key,
-            max_iterations,
-            context,
-            SelectionPass {
-                priority_group,
-                allow_backup: true,
-                ignore_slow_start: false,
-            },
-        ) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: true,
+            ignore_slow_start: false,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(backend) =
+            select_pingora_with_backup_policy(inner, key, max_iterations, context, pass)
+        {
             return Some(backend);
         }
     }
     for priority_group in selection_priority_groups(backend_policy) {
-        if let Some(backend) = select_pingora_with_backup_policy(
-            inner,
-            key,
-            max_iterations,
-            context,
-            SelectionPass {
-                priority_group,
-                allow_backup: false,
-                ignore_slow_start: true,
-            },
-        ) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: false,
+            ignore_slow_start: true,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(backend) =
+            select_pingora_with_backup_policy(inner, key, max_iterations, context, pass)
+        {
             return Some(backend);
         }
     }
@@ -883,7 +895,7 @@ where
 
 #[derive(Clone, Copy)]
 struct SelectionPass {
-    priority_group: Option<u16>,
+    minimum_priority_group: Option<u16>,
     allow_backup: bool,
     ignore_slow_start: bool,
 }
@@ -906,6 +918,46 @@ fn selection_priority_groups(backend_policy: &BackendSelectionPolicy) -> Vec<Opt
         .copied()
         .map(Some)
         .collect()
+}
+
+fn priority_activation_satisfied<S>(
+    inner: &LoadBalancer<S>,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+) -> bool
+where
+    S: BackendSelection + 'static,
+    S::Iter: BackendIter,
+{
+    if pass.minimum_priority_group.is_none()
+        || context.backend_policy.priority_group_min_active() <= 1
+        || pass
+            .minimum_priority_group
+            .is_some_and(|group| context.backend_policy.is_lowest_priority_group(group))
+    {
+        return true;
+    }
+
+    inner
+        .backends()
+        .get_backend()
+        .iter()
+        .filter(|backend| {
+            inner.backends().ready(backend)
+                && context
+                    .backend_policy
+                    .permits(backend, pass, context.counters)
+                && context
+                    .passive_health
+                    .is_none_or(|health| !health.is_ejected(backend))
+                && (pass.ignore_slow_start
+                    || context
+                        .slow_start
+                        .is_none_or(|state| state.permits(backend)))
+        })
+        .take(context.backend_policy.priority_group_min_active())
+        .count()
+        >= context.backend_policy.priority_group_min_active()
 }
 
 fn select_pingora_with_backup_policy<S>(
@@ -941,50 +993,68 @@ fn select_least_connections(
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
+    let context = SelectionContext {
+        passive_health,
+        slow_start,
+        counters,
+        backend_policy,
+    };
     for priority_group in selection_priority_groups(backend_policy) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: false,
+            ignore_slow_start: false,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
         if let Some(selected) = select_least_connections_with_backup_policy(
             inner,
             counters,
             passive_health,
             slow_start,
             backend_policy,
-            SelectionPass {
-                priority_group,
-                allow_backup: false,
-                ignore_slow_start: false,
-            },
+            pass,
         ) {
             return Some(selected);
         }
     }
     for priority_group in selection_priority_groups(backend_policy) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: true,
+            ignore_slow_start: false,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
         if let Some(selected) = select_least_connections_with_backup_policy(
             inner,
             counters,
             passive_health,
             slow_start,
             backend_policy,
-            SelectionPass {
-                priority_group,
-                allow_backup: true,
-                ignore_slow_start: false,
-            },
+            pass,
         ) {
             return Some(selected);
         }
     }
     for priority_group in selection_priority_groups(backend_policy) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: false,
+            ignore_slow_start: true,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
         if let Some(selected) = select_least_connections_with_backup_policy(
             inner,
             counters,
             passive_health,
             slow_start,
             backend_policy,
-            SelectionPass {
-                priority_group,
-                allow_backup: false,
-                ignore_slow_start: true,
-            },
+            pass,
         ) {
             return Some(selected);
         }
@@ -1051,7 +1121,21 @@ fn select_least_time(
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
+    let context = SelectionContext {
+        passive_health,
+        slow_start,
+        counters,
+        backend_policy,
+    };
     for priority_group in selection_priority_groups(backend_policy) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: false,
+            ignore_slow_start: false,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
         if let Some(selected) = select_least_time_with_backup_policy(
             inner,
             counters,
@@ -1059,16 +1143,20 @@ fn select_least_time(
             passive_health,
             slow_start,
             backend_policy,
-            SelectionPass {
-                priority_group,
-                allow_backup: false,
-                ignore_slow_start: false,
-            },
+            pass,
         ) {
             return Some(selected);
         }
     }
     for priority_group in selection_priority_groups(backend_policy) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: true,
+            ignore_slow_start: false,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
         if let Some(selected) = select_least_time_with_backup_policy(
             inner,
             counters,
@@ -1076,16 +1164,20 @@ fn select_least_time(
             passive_health,
             slow_start,
             backend_policy,
-            SelectionPass {
-                priority_group,
-                allow_backup: true,
-                ignore_slow_start: false,
-            },
+            pass,
         ) {
             return Some(selected);
         }
     }
     for priority_group in selection_priority_groups(backend_policy) {
+        let pass = SelectionPass {
+            minimum_priority_group: priority_group,
+            allow_backup: false,
+            ignore_slow_start: true,
+        };
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
         if let Some(selected) = select_least_time_with_backup_policy(
             inner,
             counters,
@@ -1093,11 +1185,7 @@ fn select_least_time(
             passive_health,
             slow_start,
             backend_policy,
-            SelectionPass {
-                priority_group,
-                allow_backup: false,
-                ignore_slow_start: true,
-            },
+            pass,
         ) {
             return Some(selected);
         }
@@ -1903,6 +1991,44 @@ mod tests {
 
         let selected = balancer.select(&request(), None).unwrap();
         assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+    }
+
+    #[test]
+    fn priority_group_min_active_activates_lower_group() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec![
+                "127.0.0.1:3000".to_owned(),
+                "127.0.0.1:3001".to_owned(),
+                "127.0.0.1:3002".to_owned(),
+            ],
+            upstream_priority_groups: vec![100, 100, 50],
+            upstream_priority_group_min_active: 2,
+            upstream_max_in_flight: vec![1, 1, 1],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let failed = balancer.select(&request(), None).unwrap();
+        assert_eq!(failed.backend.addr.to_string(), "127.0.0.1:3000");
+        failed.reporter.unwrap().record_failure();
+
+        let preferred = balancer.select(&request(), None).unwrap();
+        assert_eq!(preferred.backend.addr.to_string(), "127.0.0.1:3001");
+
+        let activated = balancer.select(&request(), None).unwrap();
+        assert_eq!(activated.backend.addr.to_string(), "127.0.0.1:3002");
     }
 
     #[test]

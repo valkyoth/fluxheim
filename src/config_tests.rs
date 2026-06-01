@@ -490,6 +490,7 @@ fn parses_proxy_upstream_pool() {
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
             upstream_weights = [1, 3]
             upstream_priority_groups = [100, 50]
+            upstream_priority_group_min_active = 2
             upstream_max_in_flight = [10, 30]
             upstream_aliases = ["app-a", "app-b"]
             backup_upstreams = ["127.0.0.1:3002"]
@@ -559,6 +560,7 @@ fn parses_proxy_upstream_pool() {
     );
     assert_eq!(config.proxy.upstream_weights, [1, 3]);
     assert_eq!(config.proxy.upstream_priority_groups, [100, 50]);
+    assert_eq!(config.proxy.upstream_priority_group_min_active, 2);
     assert_eq!(config.proxy.upstream_max_in_flight, [10, 30]);
     assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b"]);
     assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
@@ -802,6 +804,39 @@ fn rejects_invalid_proxy_upstream_priority_groups() {
         too_large.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
             field: "proxy.upstream_priority_groups",
+            ..
+        })
+    ));
+
+    let min_active_without_groups: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_priority_group_min_active = 2
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        min_active_without_groups.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_priority_group_min_active",
+            ..
+        })
+    ));
+
+    let min_active_too_large: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_priority_groups = [100, 50]
+            upstream_priority_group_min_active = 3
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        min_active_too_large.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_priority_group_min_active",
             ..
         })
     ));
