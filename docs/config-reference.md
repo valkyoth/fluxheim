@@ -779,6 +779,7 @@ enabled = false
 consecutive_failure = 3
 ejection_secs = 30
 failure_statuses = []
+failure_status_ranges = []
 max_latency_ms = 0
 
 [proxy.load_balance.retry]
@@ -952,10 +953,12 @@ Pingora's health-check defaults.
 detection. Fluxheim records selected upstream outcomes, treats 5xx responses as
 failures by default, and temporarily ejects a backend after
 `consecutive_failure` failures for `ejection_secs`. `failure_statuses` may
-narrow the failure set to specific 5xx status codes. `max_latency_ms = 0`
-disables latency ejection; a positive value treats responses at or above that
-latency as passive failures. Active health checks and passive ejection are
-combined; if no backend is currently selectable,
+narrow the failure set to specific 5xx status codes, and
+`failure_status_ranges` accepts inclusive 5xx ranges such as
+`[{ start = 520, end = 529 }]`. `max_latency_ms = 0` disables latency ejection;
+a positive value treats responses at or above that latency as passive failures.
+Active health checks and passive ejection are combined; if no backend is
+currently selectable,
 Fluxheim returns a proxy error instead of falling back to a configured primary
 upstream.
 `proxy.load_balance.slow_start.enabled = true` warms newly seen and passively

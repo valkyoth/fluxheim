@@ -333,6 +333,8 @@ pub struct LoadBalancePassiveHealthConfig {
     #[serde(default)]
     pub failure_statuses: Vec<u16>,
     #[serde(default)]
+    pub failure_status_ranges: Vec<LoadBalanceHealthCheckExpectedStatusRange>,
+    #[serde(default)]
     pub max_latency_ms: u64,
 }
 
@@ -343,6 +345,7 @@ impl Default for LoadBalancePassiveHealthConfig {
             consecutive_failure: default_lb_passive_consecutive_failure(),
             ejection_secs: default_lb_passive_ejection_secs(),
             failure_statuses: Vec::new(),
+            failure_status_ranges: Vec::new(),
             max_latency_ms: 0,
         }
     }
@@ -365,15 +368,33 @@ impl LoadBalancePassiveHealthConfig {
                 field: "proxy.load_balance.passive_health.max_latency_ms",
             });
         }
-        if self.failure_statuses.len() > 64
-            || self
-                .failure_statuses
-                .iter()
-                .any(|status| !(500..=599).contains(status))
-        {
+        if self.failure_statuses.len() > 64 {
             return Err(ConfigError::InvalidLoadBalancePassiveHealth {
                 field: "proxy.load_balance.passive_health.failure_statuses",
             });
+        }
+        let mut seen_statuses = HashSet::new();
+        for status in &self.failure_statuses {
+            if !(500..=599).contains(status) || !seen_statuses.insert(*status) {
+                return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                    field: "proxy.load_balance.passive_health.failure_statuses",
+                });
+            }
+        }
+        if self.failure_status_ranges.len() > 64 {
+            return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                field: "proxy.load_balance.passive_health.failure_status_ranges",
+            });
+        }
+        for range in &self.failure_status_ranges {
+            if !(500..=599).contains(&range.start)
+                || !(500..=599).contains(&range.end)
+                || range.start > range.end
+            {
+                return Err(ConfigError::InvalidLoadBalancePassiveHealth {
+                    field: "proxy.load_balance.passive_health.failure_status_ranges",
+                });
+            }
         }
         Ok(())
     }

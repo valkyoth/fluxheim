@@ -598,6 +598,7 @@ struct PassiveHealthState {
     ejection: Duration,
     max_latency: Option<Duration>,
     failure_statuses: Arc<[u16]>,
+    failure_status_ranges: Arc<[LoadBalanceHealthCheckExpectedStatusRange]>,
     backends: Arc<Mutex<std::collections::HashMap<u64, PassiveBackendHealth>>>,
 }
 
@@ -615,6 +616,7 @@ impl PassiveHealthState {
             max_latency: (config.max_latency_ms > 0)
                 .then(|| Duration::from_millis(config.max_latency_ms)),
             failure_statuses: config.failure_statuses.clone().into(),
+            failure_status_ranges: config.failure_status_ranges.clone().into(),
             backends: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
@@ -701,10 +703,14 @@ impl PassiveHealthState {
     }
 
     fn failure_status(&self, status: u16) -> bool {
-        if self.failure_statuses.is_empty() {
+        if self.failure_statuses.is_empty() && self.failure_status_ranges.is_empty() {
             return (500..=599).contains(&status);
         }
         self.failure_statuses.contains(&status)
+            || self
+                .failure_status_ranges
+                .iter()
+                .any(|range| (range.start..=range.end).contains(&status))
     }
 
     fn status_is_failure(&self, status: u16, latency: Option<Duration>) -> bool {
@@ -2517,6 +2523,22 @@ mod tests {
         assert!(failed_stats.passive_ejection_remaining_secs.is_some());
         let next = balancer.select(&request(), None).unwrap();
         assert_ne!(failed_addr, next.backend.addr);
+    }
+
+    #[test]
+    fn passive_health_accepts_failure_status_ranges() {
+        let health = PassiveHealthState::from_config(&LoadBalancePassiveHealthConfig {
+            enabled: true,
+            failure_status_ranges: vec![LoadBalanceHealthCheckExpectedStatusRange {
+                start: 520,
+                end: 529,
+            }],
+            ..LoadBalancePassiveHealthConfig::default()
+        });
+
+        assert!(health.failure_status(520));
+        assert!(health.failure_status(529));
+        assert!(!health.failure_status(503));
     }
 
     #[test]
