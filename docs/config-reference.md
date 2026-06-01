@@ -918,8 +918,9 @@ share of a backend with weight `1`. `least-time` uses the same request permits
 plus an EWMA of observed upstream latency from completed requests, weighted by
 `upstream_weights`; unsampled healthy backends are allowed to receive traffic so
 new or recovered pool members can establish a latency baseline. `power-of-two`
-samples two healthy backends through Pingora's random weighted selector and
-chooses the lower in-flight count.
+also accepts `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
+`weighted-random-two-choice`; all names sample two healthy backends through
+Pingora's random weighted selector and choose the lower in-flight count.
 With metrics enabled, load-balanced selections, unavailable pools, retries, and
 success/failure/ejection outcomes are counted by
 `fluxheim_load_balancer_events_total` with bounded configured vhost/route

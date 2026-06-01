@@ -7,12 +7,13 @@ use super::{
     AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
     CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig, CacheStaleErrorKind,
     CompressionConfig, Config, ConfigError, ConfigLoadError, DownstreamProxyProtocol,
-    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoggingConfig, MetricsConfig, ProxyConfig,
-    RateLimitMode, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
-    TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion,
-    TracingConfig, UpstreamHttpVersion, UpstreamProxyProtocol, VhostConfig,
-    VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
-    valid_dynamic_header_variable, validate_dynamic_header_template,
+    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoadBalanceSelection, LoggingConfig,
+    MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig,
+    StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference,
+    TlsPolicyProfile, TlsProtocolVersion, TracingConfig, UpstreamHttpVersion,
+    UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
+    normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+    validate_dynamic_header_template,
 };
 #[cfg(feature = "cache")]
 use super::{CachePeerConfig, CachePeerFillConfig};
@@ -2399,6 +2400,19 @@ fn validates_load_balance_hash_selection() {
     )
     .unwrap();
     power_of_two.validate().unwrap();
+
+    let power_of_two_alias: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "power-of-two-choices"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        power_of_two_alias.proxy.load_balance.selection,
+        LoadBalanceSelection::PowerOfTwo
+    );
+    power_of_two_alias.validate().unwrap();
 
     let weighted_least_connections: Config = toml::from_str(
         r#"

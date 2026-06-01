@@ -110,6 +110,12 @@ pub enum LoadBalanceSelection {
     )]
     LeastConnections,
     LeastTime,
+    #[serde(
+        alias = "power-of-two-choices",
+        alias = "two-choice",
+        alias = "weighted-two-choice",
+        alias = "weighted-random-two-choice"
+    )]
     PowerOfTwo,
     SourceHash,
     UriHash,
