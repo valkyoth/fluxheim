@@ -69,6 +69,7 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub all_down_status: u16,
     pub health_check_enabled: bool,
     pub health_check_frequency_secs: Option<u64>,
+    pub parallel_health_check: bool,
     pub passive_health_enabled: bool,
     pub slow_start_enabled: bool,
     pub backends: Vec<LoadBalancerBackendRuntimeStats>,
@@ -311,6 +312,7 @@ impl UpstreamLoadBalancer {
             health_check_enabled: health_check_frequency.is_some(),
             health_check_frequency_secs: health_check_frequency
                 .map(|frequency| frequency.as_secs()),
+            parallel_health_check: self.inner.parallel_health_check(),
             passive_health_enabled: self.passive_health.is_some(),
             slow_start_enabled: self.slow_start.is_some(),
             backends: self.inner.backend_stats(
@@ -524,7 +526,6 @@ impl UpstreamLoadBalancerInner {
         }
     }
 
-    #[cfg(test)]
     fn parallel_health_check(&self) -> bool {
         match self {
             Self::RoundRobin(inner) => inner.parallel_health_check,

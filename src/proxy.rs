@@ -15213,6 +15213,7 @@ mod tests {
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().all_down_status, 502);
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().max_iterations, 256);
         assert!(stats.vhosts[0].pool.as_ref().unwrap().health_check_enabled);
+        assert!(!stats.vhosts[0].pool.as_ref().unwrap().parallel_health_check);
         assert_eq!(stats.vhosts[0].routes.len(), 1);
         assert_eq!(stats.vhosts[0].routes[0].name, "api");
         assert_eq!(stats.vhosts[0].routes[0].pool.backend_count, 2);
