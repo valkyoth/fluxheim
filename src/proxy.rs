@@ -15234,6 +15234,18 @@ mod tests {
         assert_eq!(stats.vhosts.len(), 2);
         assert_eq!(stats.vhosts[0].name, "one");
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().backend_count, 2);
+        assert_eq!(
+            stats.vhosts[0].pool.as_ref().unwrap().ready_backend_count,
+            2
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .available_backend_count,
+            2
+        );
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().all_down_status, 502);
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().max_iterations, 256);
         assert!(stats.vhosts[0].pool.as_ref().unwrap().health_check_enabled);

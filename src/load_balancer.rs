@@ -68,6 +68,8 @@ pub struct LoadBalancedUpstreamOutcome {
 pub struct LoadBalancerPoolRuntimeStats {
     pub selection: LoadBalanceSelection,
     pub backend_count: usize,
+    pub ready_backend_count: usize,
+    pub available_backend_count: usize,
     pub max_iterations: usize,
     pub all_down_status: u16,
     pub health_check_enabled: bool,
@@ -324,9 +326,32 @@ impl UpstreamLoadBalancer {
 
     pub fn runtime_stats(&self) -> LoadBalancerPoolRuntimeStats {
         let health_check_frequency = self.inner.health_check_frequency();
+        let backends = self.inner.backend_stats(
+            &self.backend_aliases,
+            self.passive_health.as_deref(),
+            self.slow_start.as_deref(),
+            &self.counters,
+            &self.backend_policy,
+        );
+        let ready_backend_count = backends.iter().filter(|backend| backend.ready).count();
+        let available_backend_count = backends
+            .iter()
+            .filter(|backend| {
+                backend.ready
+                    && !backend.disabled
+                    && !backend.drained
+                    && !backend.passive_ejected
+                    && backend.slow_start_permitting
+                    && backend
+                        .max_in_flight
+                        .is_none_or(|limit| backend.in_flight < limit)
+            })
+            .count();
         LoadBalancerPoolRuntimeStats {
             selection: self.selection,
             backend_count: self.inner.backend_count(),
+            ready_backend_count,
+            available_backend_count,
             max_iterations: self.max_iterations,
             all_down_status: self.all_down_status,
             health_check_enabled: health_check_frequency.is_some(),
@@ -338,13 +363,7 @@ impl UpstreamLoadBalancer {
             passive_health: self.passive_health_policy.clone(),
             slow_start: self.slow_start_policy.clone(),
             retry: self.retry.clone(),
-            backends: self.inner.backend_stats(
-                &self.backend_aliases,
-                self.passive_health.as_deref(),
-                self.slow_start.as_deref(),
-                &self.counters,
-                &self.backend_policy,
-            ),
+            backends,
         }
     }
 

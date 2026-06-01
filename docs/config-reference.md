@@ -307,11 +307,12 @@ operator group.
 When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
 `load_balancer` object for configured vhost and route pools. The status is
 read-only and reports backend readiness, aliases, weights, backup/drain/disabled
-state, selection policy, max-iteration and all-down settings, health-check
-frequency and parallel mode, retry policy, passive-health thresholds, slow-start
-duration, priority group, max in-flight cap, current in-flight count, passive
-failure count, passive ejection, passive ejection remaining seconds, slow-start
-allowance, and least-time latency state where available. In
+state, ready and policy-available backend counts, selection policy,
+max-iteration and all-down settings, health-check frequency and parallel mode,
+retry policy, passive-health thresholds, slow-start duration, priority group,
+max in-flight cap, current in-flight count, passive failure count, passive
+ejection, passive ejection remaining seconds, slow-start allowance, and
+least-time latency state where available. In
 `privacy-mode`, backend addresses are omitted from this status object.
 
 `admin.client_certificate` is an extra hardening gate for that trusted

@@ -50,6 +50,8 @@ behavior when the change improves security or project direction.
   slow-start policy metadata.
 - Include load-balancer retry policy metadata in runtime status, including
   safe methods, status/status-range retry rules, and retry budget settings.
+- Include ready and policy-available backend counts in load-balancer runtime
+  status so pool capacity is visible without client-side backend inference.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in
