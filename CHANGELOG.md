@@ -30,6 +30,9 @@ behavior when the change improves security or project direction.
   when preferred groups fall below a selectable-member threshold.
 - Add static per-upstream `upstream_max_in_flight` caps so saturated members
   are skipped consistently across load-balancing selectors.
+- Add static `disabled_upstreams` so configured members can be kept in the pool
+  definition while being administratively removed from selection and reported
+  distinctly from drained members.
 - Extend HTTP active health checks with configurable request methods and exact
   expected response header validation.
 - Add HTTP active health-check `expected_status_ranges` for inclusive status

@@ -488,13 +488,14 @@ fn parses_proxy_upstream_pool() {
     let config: Config = toml::from_str(
         r#"
             [proxy]
-            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
-            upstream_weights = [1, 3]
-            upstream_priority_groups = [100, 50]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002", "127.0.0.1:3003"]
+            upstream_weights = [1, 3, 1]
+            upstream_priority_groups = [100, 50, 10]
             upstream_priority_group_min_active = 2
-            upstream_max_in_flight = [10, 30]
-            upstream_aliases = ["app-a", "app-b"]
+            upstream_max_in_flight = [10, 30, 5]
+            upstream_aliases = ["app-a", "app-b", "app-c"]
             backup_upstreams = ["127.0.0.1:3002"]
+            disabled_upstreams = ["127.0.0.1:3003"]
             connect_timeout_secs = 5
             upstream_total_connection_timeout_secs = 10
             upstream_idle_timeout_secs = 120
@@ -564,14 +565,19 @@ fn parses_proxy_upstream_pool() {
 
     assert_eq!(
         config.proxy.upstreams,
-        ["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()]
+        [
+            "127.0.0.1:3001".to_owned(),
+            "127.0.0.1:3002".to_owned(),
+            "127.0.0.1:3003".to_owned()
+        ]
     );
-    assert_eq!(config.proxy.upstream_weights, [1, 3]);
-    assert_eq!(config.proxy.upstream_priority_groups, [100, 50]);
+    assert_eq!(config.proxy.upstream_weights, [1, 3, 1]);
+    assert_eq!(config.proxy.upstream_priority_groups, [100, 50, 10]);
     assert_eq!(config.proxy.upstream_priority_group_min_active, 2);
-    assert_eq!(config.proxy.upstream_max_in_flight, [10, 30]);
-    assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b"]);
+    assert_eq!(config.proxy.upstream_max_in_flight, [10, 30, 5]);
+    assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b", "app-c"]);
     assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
+    assert_eq!(config.proxy.disabled_upstreams, ["127.0.0.1:3003"]);
     assert_eq!(config.proxy.connect_timeout_secs, Some(5));
     assert_eq!(
         config.proxy.upstream_total_connection_timeout_secs,
@@ -1153,11 +1159,27 @@ fn rejects_invalid_proxy_upstream_policy() {
         Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
     ));
 
-    let no_primary: Config = toml::from_str(
+    let disabled_overlap: Config = toml::from_str(
         r#"
             [proxy]
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
-            backup_upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            drain_upstreams = ["127.0.0.1:3002"]
+            disabled_upstreams = ["127.0.0.1:3002"]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        disabled_overlap.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy { .. })
+    ));
+
+    let no_primary: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002", "127.0.0.1:3003"]
+            backup_upstreams = ["127.0.0.1:3001"]
+            drain_upstreams = ["127.0.0.1:3002"]
+            disabled_upstreams = ["127.0.0.1:3003"]
             "#,
     )
     .unwrap();

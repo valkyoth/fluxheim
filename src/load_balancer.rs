@@ -75,6 +75,7 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub ready: bool,
     pub backup: bool,
     pub drained: bool,
+    pub disabled: bool,
     pub priority_group: Option<u16>,
     pub max_in_flight: Option<usize>,
     pub in_flight: usize,
@@ -857,6 +858,7 @@ fn backend_connection_key(backend: &Backend) -> u64 {
 struct BackendSelectionPolicy {
     backup: Arc<std::collections::HashSet<u64>>,
     drain: Arc<std::collections::HashSet<u64>>,
+    disabled: Arc<std::collections::HashSet<u64>>,
     priority: Arc<std::collections::HashMap<u64, u16>>,
     max_in_flight: Arc<std::collections::HashMap<u64, usize>>,
     priority_groups: Arc<[u16]>,
@@ -870,6 +872,7 @@ impl BackendSelectionPolicy {
         Self {
             backup: backend_policy_keys(&config.backup_upstreams).into(),
             drain: backend_policy_keys(&config.drain_upstreams).into(),
+            disabled: backend_policy_keys(&config.disabled_upstreams).into(),
             priority: priority.into(),
             max_in_flight: backend_max_in_flight(config).into(),
             priority_groups: priority_groups.into(),
@@ -884,7 +887,8 @@ impl BackendSelectionPolicy {
         counters: &BackendConnectionCounters,
     ) -> bool {
         let key = backend_policy_key(backend);
-        !self.drain.contains(&key)
+        !self.disabled.contains(&key)
+            && !self.drain.contains(&key)
             && (pass.allow_backup || !self.backup.contains(&key))
             && pass
                 .minimum_priority_group
@@ -921,6 +925,10 @@ impl BackendSelectionPolicy {
 
     fn drained(&self, key: u64) -> bool {
         self.drain.contains(&key)
+    }
+
+    fn disabled(&self, key: u64) -> bool {
+        self.disabled.contains(&key)
     }
 
     fn priority_group(&self, key: u64) -> Option<u16> {
@@ -1026,6 +1034,7 @@ where
                 ready: inner.backends().ready(backend),
                 backup: backend_policy.backup(policy_key),
                 drained: backend_policy.drained(policy_key),
+                disabled: backend_policy.disabled(policy_key),
                 priority_group: backend_policy.priority_group(policy_key),
                 max_in_flight: backend_policy.max_in_flight_key(policy_key),
                 in_flight: counters.count_existing(backend),
@@ -2565,6 +2574,29 @@ mod tests {
             let selected = balancer.select(&request(), None).unwrap();
             assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
         }
+    }
+
+    #[test]
+    fn disabled_upstreams_do_not_receive_new_selections() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            disabled_upstreams: vec!["127.0.0.1:3000".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        for _ in 0..4 {
+            let selected = balancer.select(&request(), None).unwrap();
+            assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+        }
+        let stats = balancer.runtime_stats();
+        assert!(stats.backends.iter().any(|backend| backend.disabled));
     }
 
     #[test]

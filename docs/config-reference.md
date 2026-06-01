@@ -698,6 +698,7 @@ upstream_max_in_flight = [256, 512]
 upstream_aliases = ["app-a", "app-b"]
 backup_upstreams = ["127.0.0.1:3001"]
 drain_upstreams = []
+disabled_upstreams = []
 upstream_tls = false
 upstream_sni = "origin.example.test"
 upstream_verify_cert = true
@@ -809,16 +810,17 @@ and full-line `#` comments ignored, 2 through 64 unique entries required.
 Fluxheim reads the file with the same symlink and parent-permission hardening
 used for other operator-controlled files. In this release, file-refreshed pools
 cannot be combined with `upstream_weights`, `upstream_priority_groups`,
-`upstream_max_in_flight`, `upstream_aliases`, `backup_upstreams`, or
-`drain_upstreams`; use static `upstreams` for those policies.
+`upstream_max_in_flight`, `upstream_aliases`, `backup_upstreams`,
+`drain_upstreams`, or `disabled_upstreams`; use static `upstreams` for those
+policies.
 For DNS-based service names, load-balancer builds can set
 `upstream_dns_refresh_secs = 5` together with `upstreams = ["app.service:8080"]`.
 Fluxheim resolves those authorities at startup and then refreshes them on the
 configured 1 through 300 second interval. This first DNS-refresh slice is
 mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
 `upstream_priority_groups`, `upstream_max_in_flight`, `upstream_aliases`,
-`backup_upstreams`, and `drain_upstreams`; use the static pool form when those
-richer backend policies are required.
+`backup_upstreams`, `drain_upstreams`, and `disabled_upstreams`; use the
+static pool form when those richer backend policies are required.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
@@ -890,11 +892,14 @@ letters, digits, dots, dashes, and underscores, are capped at 64 bytes, and
 must be unique case-insensitively. Fluxheim uses them only for operator-facing
 metrics and status surfaces; they are not sent upstream and do not affect
 selection.
-`backup_upstreams` and `drain_upstreams` are optional subsets of `upstreams`.
-Backups stay out of normal rotation and are selected only when no non-backup
-backend is currently selectable. Drained upstreams remain configured for
-health and operator visibility but receive no new selections. Backup and drain
-sets must not overlap, and at least one upstream must remain a normal primary.
+`backup_upstreams`, `drain_upstreams`, and `disabled_upstreams` are optional
+subsets of `upstreams`. Backups stay out of normal rotation and are selected
+only when no non-backup backend is currently selectable. Drained upstreams
+remain configured for health and operator visibility but receive no new
+selections. Disabled upstreams are the explicit administrative off state for a
+configured member and are reported separately in load-balancer status. Backup,
+drain, and disabled sets must not overlap, and at least one upstream must
+remain a normal primary.
 `proxy.load_balance.selection` defaults to `round-robin`. It also accepts
 `least-connections`, `weighted-least-connections`,
 `ratio-least-connections`, `least-time`, `power-of-two`, `source-hash`,

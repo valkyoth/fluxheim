@@ -55,6 +55,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub drain_upstreams: Vec<String>,
     #[serde(default)]
+    pub disabled_upstreams: Vec<String>,
+    #[serde(default)]
     pub upstream_tls: bool,
     #[serde(default)]
     pub upstream_sni: Option<String>,
@@ -168,6 +170,7 @@ impl Default for ProxyConfig {
             upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
             drain_upstreams: Vec::new(),
+            disabled_upstreams: Vec::new(),
             upstream_tls: false,
             upstream_sni: None,
             upstream_verify_cert: true,
@@ -298,10 +301,11 @@ impl ProxyConfig {
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
+                    || !self.disabled_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstreams_file",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
                     });
                 }
                 if self.upstream_tls && self.upstream_sni.is_none() {
@@ -356,10 +360,11 @@ impl ProxyConfig {
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
+                    || !self.disabled_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_dns_refresh_secs",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
                     });
                 }
             }
@@ -721,13 +726,16 @@ impl ProxyConfig {
     }
 
     fn validate_upstream_policy(&self) -> Result<(), ConfigError> {
-        if self.backup_upstreams.is_empty() && self.drain_upstreams.is_empty() {
+        if self.backup_upstreams.is_empty()
+            && self.drain_upstreams.is_empty()
+            && self.disabled_upstreams.is_empty()
+        {
             return Ok(());
         }
         if self.upstreams.len() < 2 || self.upstream.is_some() {
             return Err(ConfigError::InvalidProxyUpstreamPolicy {
                 field: "proxy.upstreams",
-                reason: "backup_upstreams and drain_upstreams require proxy.upstreams with at least two entries",
+                reason: "backup_upstreams, drain_upstreams, and disabled_upstreams require proxy.upstreams with at least two entries",
             });
         }
         let configured = self
@@ -745,17 +753,27 @@ impl ProxyConfig {
             &self.drain_upstreams,
             &configured,
         )?;
-        if !backup.is_disjoint(&drain) {
+        let disabled = validate_proxy_upstream_subset(
+            "proxy.disabled_upstreams",
+            &self.disabled_upstreams,
+            &configured,
+        )?;
+        if !backup.is_disjoint(&drain)
+            || !backup.is_disjoint(&disabled)
+            || !drain.is_disjoint(&disabled)
+        {
             return Err(ConfigError::InvalidProxyUpstreamPolicy {
                 field: "proxy.backup_upstreams",
-                reason: "backup_upstreams and drain_upstreams must not overlap",
+                reason: "backup_upstreams, drain_upstreams, and disabled_upstreams must not overlap",
             });
         }
-        let primary_count = configured.len().saturating_sub(backup.len() + drain.len());
+        let primary_count = configured
+            .len()
+            .saturating_sub(backup.len() + drain.len() + disabled.len());
         if primary_count == 0 {
             return Err(ConfigError::InvalidProxyUpstreamPolicy {
                 field: "proxy.upstreams",
-                reason: "at least one upstream must remain primary and not drained",
+                reason: "at least one upstream must remain primary and selectable",
             });
         }
         Ok(())

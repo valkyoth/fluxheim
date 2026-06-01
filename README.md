@@ -81,12 +81,12 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
 | Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
-| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-time EWMA, priority groups, per-upstream in-flight caps, power-of-two, hash, consistent-hash, backup, drain, slow start, retry budgets/statuses, and configurable all-down status. |
+| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-time EWMA, priority groups, per-upstream in-flight caps, power-of-two, hash, consistent-hash, backup, drain, disabled members, slow start, retry budgets/statuses, and configurable all-down status. |
 | DNS-refreshed upstream pools | ✅ | `1.4.1`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |
-| Load-balancer status | ✅ | Admin status includes configured pools, backend readiness, policy metadata, in-flight counts, passive ejection, slow-start, and least-time latency state. |
+| Load-balancer status | ✅ | Admin status includes configured pools, backend readiness, policy metadata, disabled/drained state, in-flight counts, passive ejection, slow-start, and least-time latency state. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
