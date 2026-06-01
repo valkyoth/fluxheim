@@ -96,7 +96,12 @@ impl LoadBalanceConfig {
 pub enum LoadBalanceSelection {
     #[default]
     RoundRobin,
+    #[serde(
+        alias = "weighted-least-connections",
+        alias = "ratio-least-connections"
+    )]
     LeastConnections,
+    LeastTime,
     PowerOfTwo,
     SourceHash,
     UriHash,

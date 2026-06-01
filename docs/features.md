@@ -230,8 +230,8 @@ Focused image profile status:
 - The `cache` and `proxy` focused profiles compile without local static web
   serving.
 - Compatibility aliases may keep the older broad behavior, but published
-  focused images are `full`, `cache`, and `proxy`. The `load-balancer` profile
-  is prepared for the `1.5` line and can be included manually before then.
+  focused images are `full`, `cache`, `proxy`, `php`, and, starting with the
+  `1.5` line, `load-balancer`.
 
 ## Incompatible Combinations
 

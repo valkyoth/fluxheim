@@ -1121,7 +1121,7 @@ Reference parity map:
 | Rate and connection limiting | NGINX `limit_req`/`limit_conn`, HAProxy stick-table counters, Envoy local/global rate limit filters | Local per-vhost/per-route token bucket and concurrency limits first; external/global service later only if needed |
 | IP ACLs | NGINX `allow`/`deny`, HAProxy ACL rules, Envoy RBAC | Ordered CIDR allow/deny at listener, vhost, and route scopes with trusted-proxy-aware client IP |
 | Compression | NGINX/HAProxy compression, Envoy compressor, Caddy `encode` | Opt-in gzip/zstd/brotli negotiation with MIME/size rules, resource caps, and cache-safe `Vary: Accept-Encoding` |
-| Load balancing | NGINX RR/least_conn/ip_hash/hash, HAProxy algorithms/stick tables, Envoy policies | Weighted round-robin, least-connections, power-of-two, source/header/cookie hash, bounded sticky sessions |
+| Load balancing | NGINX RR/least_conn/ip_hash/hash, HAProxy algorithms/stick tables, Envoy policies | Weighted round-robin, weighted least-connections, power-of-two, source/header/cookie hash, bounded sticky sessions |
 | Passive health/outlier detection | Envoy outlier ejection, HAProxy observed errors, Caddy passive health | Per-upstream failure, timeout, 5xx, and latency counters with temporary ejection and circuit-open state |
 | mTLS/client auth | NGINX `ssl_verify_client`, HAProxy `verify required`, Envoy TLS validation context | Listener-level required/optional client cert verification, CA bundle validation, identity variables, and route/admin policy use |
 | PROXY protocol | NGINX/HAProxy/Envoy listener and upstream support | Accept v1/v2 only from trusted peers; optionally send v1/v2 upstream |
@@ -1157,7 +1157,7 @@ Release shape:
     1.4 work.
   - upstream selection and resilience:
   - named upstream pools and per-route pool selection;
-  - weighted round-robin, least-connections, power-of-two choices, source hash,
+  - weighted round-robin, weighted least-connections, power-of-two choices, source hash,
     URI hash, header hash, and cookie stickiness;
   - retry/redispatch controls, retry budgets, idempotency-aware defaults, backup
     servers, drain, and slow-start;
@@ -1711,6 +1711,11 @@ Feature-graph prerequisite:
   selected. The load balancer may reuse shared proxy transport abstractions
   internally, but the public feature name and image profile must not pull in
   unrelated webserver behavior.
+- `1.5.0` promotes the `profile-load-balancer-edge` image profile from
+  pre-1.5 manual testing to the normal load-balancer release artifact line.
+  The official focused load-balancer image should remain TLS/ACME/metrics
+  capable and omit static web, local static cache, PHP-FPM, and generic
+  webserver behavior unless the operator selects a broader profile.
 
 Goal: stabilize the `1.4` proxy/load-balancing primitives for larger
 enterprise estates. Since `1.4` now owns the common single-node parity features,
@@ -1719,6 +1724,20 @@ state, deeper active/adaptive health policy, admin workflows, migration tooling,
 and F5-style estate management. Palo Alto-style security expectations should be
 represented as clear policy integration points around the load balancer, not as
 a claim that Fluxheim is a full next-generation firewall in `1.5`.
+
+`1.5.0` stop line:
+
+- Build an F5 LTM / HAProxy / Envoy-class HTTP/TCP load-balancer control plane,
+  not a complete BIG-IP replacement. UDP proxying and GSLB/DNS traffic
+  steering are later `1.5.x` tracks after the HTTP/TCP control plane is stable.
+  WAF/ASM, SSL VPN, NAT appliance behavior, firewalling, and
+  iRules-compatible scripting are separate future module families.
+- Prefer bounded, observable policy over magic automation. Every adaptive or
+  dynamic decision must have admin status, metrics, audit logs, and clear
+  fallback behavior.
+- Do not spill into the `1.6` Wasm runtime. `1.5` may define typed hook points
+  and migration language for iRules-style behavior, but actual sandboxed
+  policy execution belongs to the shared Wasm line.
 
 Stable scope:
 
@@ -1745,7 +1764,8 @@ Stable scope:
     preread buffer cap, malformed-handshake behavior, and unmodified byte replay
     are proven;
   - UDP session pools only after a concrete post-`1.4` requirement proves raw
-    UDP forwarding can be bounded and observable;
+    UDP forwarding can be bounded and observable. Treat this as a `1.5.x`
+    follow-up transport track, not part of the `1.5.0` stop line;
   - xDS/Kubernetes/Consul discovery only after local DNS/file discovery and
     runtime backend mutation are stable. Treat this as a control-plane feature,
     not a quick stream-proxy add-on;
@@ -1754,17 +1774,26 @@ Stable scope:
 - Multiple upstreams per pool with safe address validation and per-upstream
   metadata: name, address, weight, backup, disabled/down, drain/maintenance,
   max in-flight requests or connections, max queue, priority group, manual
-  resume, warm-up/slow-start after recovery, administrative tags, and optional
+  resume, warm-up/slow-start after recovery, locality/failure-domain tags,
+  administrative tags, optional external load-score metadata, and optional
   per-upstream TLS/SNI settings.
 - `1.4` selection algorithms remain the single-node default. `1.5` adds
   operational controls around them: priority groups, maintenance mode,
   runtime-safe weight changes, pool-level policy templates, and migration tools
   that translate common HAProxy/nginx pool definitions into Fluxheim config.
-  - least-time / EWMA latency-aware selection when metrics are trustworthy;
+  - weighted least-connections / ratio least-connections for heterogeneous
+    backends;
+  - least-time / EWMA latency-aware selection from observed upstream request
+    latency;
   - consistent hash / Ketama for cache-stateful upstreams;
+  - Maglev hashing for stable large-pool distribution where table size and
+    memory cost are bounded;
   - bounded-load consistent hashing so overloaded nodes can be skipped without
     remapping the whole ring;
-  - priority-group selection for F5-style preferred/fallback groups.
+  - least-sessions selection where a bounded persistence/session table exists;
+  - priority-group selection for F5-style preferred/fallback groups;
+  - locality-aware preferred selection so same-zone or same-site backends can
+    be tried before remote failure domains.
 - Session persistence:
   - cookie persistence with signed/opaque cookies;
   - source-address persistence with TTL and table-size limits;
@@ -1779,13 +1808,17 @@ Stable scope:
   - HTTP checks with method, path, expected status range, expected response
     header/body substring, Host header, and upstream TLS/SNI where configured;
   - HTTP/2 and gRPC health checks where protocol support is stable;
-  - UDP checks only with explicit send/expect patterns and timeout limits;
+  - UDP checks only in the later UDP follow-up, with explicit send/expect
+    patterns and timeout limits;
   - interval, timeout, consecutive success/failure thresholds, initial state,
     jitter, parallel check controls, manual resume, and per-pool/per-member
     overrides.
 - Adaptive health/performance monitors:
   - track latency, error rate, queue time, and in-flight load;
   - support optional adaptive thresholds for least-time and circuit breakers;
+  - support trusted external load-score inputs only through authenticated,
+    audited, bounded control-plane paths or explicitly configured health-check
+    response fields;
   - make every automatic ejection explainable through admin status and logs.
 - Passive health observation from real proxy traffic: connection failures,
   upstream timeout/error classes, selected HTTP status classes, bounded
@@ -1869,10 +1902,22 @@ Beta scope:
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Pingora's service-discovery interface when it can be tested reliably.
 - Weighted random two-choice as a distributed-load-balancer policy.
+- Dynamic ratio / external load-score selection when the score source, trust
+  boundary, expiration, replay behavior, and audit trail are proven.
+- UDP proxying as a separate `1.5.x` transport follow-up, with each target
+  scoped separately: DNS UDP load balancing, syslog UDP forwarding, QUIC
+  pass-through, or game-server UDP proxying. Do not build a generic UDP catchall
+  without session table, affinity, timeout, health-check, metrics, and
+  rootless/container-network semantics.
 - Direct Server Return / transparent proxying after Linux routing, source
   address, NAT/SNAT, and observability constraints are documented and tested.
 - Cross-node persistence-table replication.
-- Global server load balancing (GSLB) / DNS-based traffic steering.
+- Global server load balancing (GSLB) / DNS-based traffic steering as a
+  separate `1.5.x` control-plane follow-up after local pool health and runtime
+  backend mutation are stable. Scope must include DNS answer policy, regional
+  failover, TTL behavior, health propagation delay, DNSSEC/evidence
+  requirements where relevant, and clear non-goals for authoritative DNS
+  features Fluxheim does not own.
 - Deep packet inspection and App-ID-like classification. This is a security
   platform feature, not a basic load-balancer feature; treat it as WAF/security
   policy integration unless a separate design exists.
@@ -2147,6 +2192,15 @@ Goal: add one shared sandboxed extension runtime for nginx-Lua-style operator
 logic and VCL-like cache policy decisions, instead of creating separate
 partial extension systems for cache, proxy, WAF, or media features.
 
+The practical target is to cover the operational jobs commonly solved with F5
+iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-style cache logic:
+conditional routing, pool selection, persistence-key choice, access decisions,
+synthetic responses, header mutation, mirror/shadow target choice,
+logging/redaction, and bounded cache policy. This is not syntax compatibility
+with iRules or Lua. Fluxheim should expose typed, versioned host calls with
+strict resource limits instead of embedding a general scripting language into
+the proxy or load-balancer hot path.
+
 Stable scope:
 
 - Compile-time `wasm` module.
@@ -2201,6 +2255,26 @@ Exit criteria:
   verification. Cache-key influence is allowed only through the constrained
   cache hook ABI with typed inputs, configured output limits, and explicit
   operator opt-in per vhost or route.
+
+### Future Edge Firewall And VPN Modes
+
+Goal: evaluate whether Fluxheim should grow separate edge-firewall and TLS/VPN
+gateway product modes after the proxy, load-balancer, WAF, and Wasm surfaces
+are stable.
+
+This is realistic only as separate compile profiles and runtime modes, not as
+hidden behavior inside the proxy or load balancer. A future
+`profile-edge-firewall` would need packet/routing ownership, stateful firewall
+tables, NAT/SNAT/DNAT policy, kernel capability policy, nftables/eBPF or other
+OS integration decisions, audit logs, and platform-specific tests. A future
+`profile-tls-vpn-gateway` would need identity, key management, tunnel protocol
+selection, replay protection, route push policy, client lifecycle management,
+revocation, logging/privacy rules, and separate security evidence.
+
+Do not schedule either mode until Fluxheim has a stable extension/runtime
+boundary and a clear threat model. These modes may still be valuable because
+they are edge functions, but they should be treated like new products with
+dedicated release gates rather than as load-balancer features.
 
 ### Future - Rust Application SDK
 
@@ -3150,11 +3224,16 @@ the exception while the cache server is being completed as a focused sequence:
 - `v1.4.7`: TCP stream hardening with true per-read idle timeout, stream
   upstream TLS/mTLS where it reuses the existing safe TLS material model, and
   transport-neutral stream load-balancer policy only.
-- `v1.5.0`: load-balancer/control-plane line. Include TLS passthrough SNI
-  routing only after a bounded ClientHello parser, preread buffer limit, and
-  byte replay model are proven. Dynamic xDS/Kubernetes/Consul discovery belongs
-  here or a later control-plane line after local DNS/file discovery and runtime
-  backend mutation are stable.
+- `v1.5.0`: load-balancer/control-plane line. Promote the focused
+  load-balancer image profile and stop at F5 LTM / HAProxy / Envoy-class
+  HTTP/TCP load-balancer operations: runtime pool/member mutation, priority
+  groups, persistence, slow-start, adaptive health, circuit breaking,
+  queue/overflow policy, locality/failure-domain policy, richer selection
+  algorithms, admin/audit visibility, and migration fixtures. Include TLS
+  passthrough SNI routing only after a bounded ClientHello parser, preread
+  buffer limit, and byte replay model are proven. Dynamic
+  xDS/Kubernetes/Consul discovery belongs here or a later control-plane line
+  after local DNS/file discovery and runtime backend mutation are stable.
 - Later macOS production line: only after Level 1 developer support is stable.
   Requires regular macOS CI, runtime smoke coverage, launchd/Homebrew or other
   packaging decisions, signed/notarized binary policy, and a macOS-specific

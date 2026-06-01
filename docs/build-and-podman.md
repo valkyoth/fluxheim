@@ -126,7 +126,7 @@ See [Feature Matrix](features.md) for the complete feature/profile list.
 
 Fluxheim's production RPM intentionally compiles
 `profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp` for the
-`1.4.x` line. That keeps the normal packaged binary broad while the container
+`1.5.x` line. That keeps the normal packaged binary broad while the container
 and tarball release assets also provide focused cache/proxy builds. Custom
 source builds can still omit `acme-client`, load-balancer, cache, web, or
 observability features when they are not needed.
@@ -268,8 +268,9 @@ also installs `php-8.5-fpm` and uses
 so `mode = "managed"` works out of the box for content mounted under
 `/srv/fluxheim`. The non-Wolfi PHP image variants keep the external php-fpm
 container config unless their runtime packages are customized. The
-`load-balancer` image is TLS-capable and omits cache and static web serving,
-but is only published automatically for the `1.5` load-balancer line. The
+`load-balancer` image is TLS-capable and omits cache and static web serving.
+Starting with the `1.5` load-balancer line, it is part of the normal focused
+release image set. The
 focused images still reuse the shared proxy runtime internally until lower-level
 serving internals are split further. Override `FLUXHEIM_FEATURES` only when you
 intentionally want a custom image.
@@ -353,7 +354,7 @@ podman build \
   -f containers/Containerfile.wolfi .
 ```
 
-Build the future load-balancer profile locally:
+Build the load-balancer profile locally:
 
 ```bash
 podman build \
@@ -494,10 +495,10 @@ The cache and proxy image profiles publish tags with a profile segment:
 - Wolfi short aliases: `v1.4.0-cache`, `v1.4.0-proxy`, `v1.4.0-php`,
   `latest-cache`, `latest-proxy`, and `latest-php`
 
-The load-balancer image profile is prepared for the `1.5` line. It is skipped
-on normal pre-`1.5` tag pushes, but can be included in manual workflow runs by
-setting `include_load_balancer=true`. Its tags follow the same shape, for
-example `v1.5.0-load-balancer-wolfi` and the Wolfi alias
+Starting with `v1.5.0`, the load-balancer image profile is part of normal tag
+publishing. For older tags or development branches, it can still be included in
+manual workflow runs by setting `include_load_balancer=true`. Its tags follow
+the same shape, for example `v1.5.0-load-balancer-wolfi` and the Wolfi alias
 `v1.5.0-load-balancer`.
 
 The workflow defaults to `linux/amd64`. Use manual dispatch to test additional

@@ -17,8 +17,12 @@ Latest crate candidates checked on 2026-05-05:
 WASM extensibility gives Fluxheim a sandboxed way to run operator-provided
 logic without compiling that logic into the Fluxheim binary. It should be
 treated as a major extension boundary, not as a small scripting feature. The
-same runtime should cover nginx-Lua-style request/response hooks and VCL-like
-cache policy hooks, instead of creating separate partial extension systems.
+same runtime should cover the operational jobs commonly solved with F5 iRules,
+nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache policy hooks, instead
+of creating separate partial extension systems. This is capability parity, not
+syntax compatibility: Fluxheim should expose typed, versioned host calls and
+bounded decisions rather than embedding Tcl, Lua, or an unrestricted scripting
+language.
 
 ## Design Goals
 
@@ -26,6 +30,10 @@ cache policy hooks, instead of creating separate partial extension systems.
 - Use a reviewed standard ABI where practical.
 - Start with request/response header hooks, access-control hooks, and bounded
   cache-policy hooks.
+- Cover the safe subset of iRules/Lua-style jobs over time: conditional
+  routing, pool selection, persistence-key choice, synthetic deny/error
+  responses, header mutation, logging/redaction, mirror/shadow selection, and
+  cache policy.
 - Make all host calls explicit, small, and auditable.
 - Keep plugin execution bounded by memory, fuel, wall-time, and output limits.
 - Prevent plugins from seeing secrets, bodies, filesystem, network, or admin

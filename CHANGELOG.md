@@ -7,6 +7,26 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.0 - 2026-06-01
+
+### Changed
+
+- Start the enterprise load-balancer/control-plane development release.
+- Promote the `profile-load-balancer-edge` image line from prepared/manual
+  testing to the planned `1.5` release artifact set.
+- Expand the `1.5` roadmap around F5/HAProxy/Envoy-class load-balancer
+  operations: runtime pool/member mutation, persistence, priority groups,
+  slow-start, adaptive health, circuit breaking, locality/failure-domain
+  policy, richer selection algorithms, and migration fixtures.
+- Make `least-connections` weight-aware so heterogeneous pools respect
+  configured `upstream_weights` while still using in-flight request permits.
+- Accept `weighted-least-connections` and `ratio-least-connections` as
+  migration-friendly aliases for the weighted least-connections selector.
+- Add `least-time` selection using weighted EWMA upstream latency plus
+  in-flight request counts for latency-sensitive application pools.
+- Add static `upstream_priority_groups` for F5-style preferred/fallback
+  selection across configured static upstream pools.
+
 ## 1.4.7 - 2026-05-31
 
 ### Changed

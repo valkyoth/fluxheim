@@ -63,8 +63,9 @@ pub struct LoadBalancedConnectionPermit {
 #[derive(Clone)]
 pub struct LoadBalancedUpstreamReporter {
     backend_key: u64,
-    passive_health: Arc<PassiveHealthState>,
+    passive_health: Option<Arc<PassiveHealthState>>,
     slow_start: Option<Arc<SlowStartState>>,
+    latency: Option<Arc<BackendLatencyState>>,
 }
 
 impl Debug for LoadBalancedUpstreamReporter {
@@ -111,6 +112,19 @@ impl UpstreamLoadBalancer {
                     UpstreamLoadBalancerInner::LeastConnections {
                         inner: Arc::new(inner),
                         counters: Arc::new(BackendConnectionCounters::default()),
+                    },
+                    config,
+                )))
+            }
+            LoadBalanceSelection::LeastTime => {
+                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                    return Ok(None);
+                };
+                Ok(Some(Self::from_inner(
+                    UpstreamLoadBalancerInner::LeastTime {
+                        inner: Arc::new(inner),
+                        counters: Arc::new(BackendConnectionCounters::default()),
+                        latency: Arc::new(BackendLatencyState::default()),
                     },
                     config,
                 )))
@@ -172,6 +186,15 @@ impl UpstreamLoadBalancer {
                     }
                 })
             }
+            LoadBalanceSelection::LeastTime => {
+                background_service_for::<RoundRobin>(name, config, |inner| {
+                    UpstreamLoadBalancerInner::LeastTime {
+                        inner,
+                        counters: Arc::new(BackendConnectionCounters::default()),
+                        latency: Arc::new(BackendLatencyState::default()),
+                    }
+                })
+            }
             LoadBalanceSelection::PowerOfTwo => {
                 background_service_for::<Random>(name, config, |inner| {
                     UpstreamLoadBalancerInner::PowerOfTwo {
@@ -214,14 +237,15 @@ impl UpstreamLoadBalancer {
             .backend_aliases
             .get(&backend_policy_key(&selected.backend))
             .cloned();
-        selected.reporter =
-            self.passive_health
-                .as_ref()
-                .map(|passive_health| LoadBalancedUpstreamReporter {
-                    backend_key: backend_connection_key(&selected.backend),
-                    passive_health: passive_health.clone(),
-                    slow_start: self.slow_start.clone(),
-                });
+        let latency = self.inner.latency_state();
+        selected.reporter = (self.passive_health.is_some() || latency.is_some()).then(|| {
+            LoadBalancedUpstreamReporter {
+                backend_key: backend_connection_key(&selected.backend),
+                passive_health: self.passive_health.clone(),
+                slow_start: self.slow_start.clone(),
+                latency,
+            }
+        });
         Some(selected)
     }
 
@@ -273,6 +297,11 @@ enum UpstreamLoadBalancerInner {
         inner: Arc<LoadBalancer<RoundRobin>>,
         counters: Arc<BackendConnectionCounters>,
     },
+    LeastTime {
+        inner: Arc<LoadBalancer<RoundRobin>>,
+        counters: Arc<BackendConnectionCounters>,
+        latency: Arc<BackendLatencyState>,
+    },
     PowerOfTwo {
         inner: Arc<LoadBalancer<Random>>,
         counters: Arc<BackendConnectionCounters>,
@@ -303,6 +332,18 @@ impl UpstreamLoadBalancerInner {
             Self::LeastConnections { inner, counters } => select_least_connections(
                 inner,
                 counters,
+                passive_health,
+                slow_start,
+                backend_policy,
+            ),
+            Self::LeastTime {
+                inner,
+                counters,
+                latency,
+            } => select_least_time(
+                inner,
+                counters,
+                latency,
                 passive_health,
                 slow_start,
                 backend_policy,
@@ -341,6 +382,7 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => inner.backends().get_backend().len(),
             Self::LeastConnections { inner, .. } => inner.backends().get_backend().len(),
+            Self::LeastTime { inner, .. } => inner.backends().get_backend().len(),
             Self::PowerOfTwo { inner, .. } => inner.backends().get_backend().len(),
             Self::FnvHash(inner) => inner.backends().get_backend().len(),
             Self::ConsistentHash(inner) => inner.backends().get_backend().len(),
@@ -352,6 +394,7 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => backend_weights(inner),
             Self::LeastConnections { inner, .. } => backend_weights(inner),
+            Self::LeastTime { inner, .. } => backend_weights(inner),
             Self::PowerOfTwo { inner, .. } => backend_weights(inner),
             Self::FnvHash(inner) => backend_weights(inner),
             Self::ConsistentHash(inner) => backend_weights(inner),
@@ -363,6 +406,7 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => inner.health_check_frequency,
             Self::LeastConnections { inner, .. } => inner.health_check_frequency,
+            Self::LeastTime { inner, .. } => inner.health_check_frequency,
             Self::PowerOfTwo { inner, .. } => inner.health_check_frequency,
             Self::FnvHash(inner) => inner.health_check_frequency,
             Self::ConsistentHash(inner) => inner.health_check_frequency,
@@ -374,9 +418,21 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::RoundRobin(inner) => inner.parallel_health_check,
             Self::LeastConnections { inner, .. } => inner.parallel_health_check,
+            Self::LeastTime { inner, .. } => inner.parallel_health_check,
             Self::PowerOfTwo { inner, .. } => inner.parallel_health_check,
             Self::FnvHash(inner) => inner.parallel_health_check,
             Self::ConsistentHash(inner) => inner.parallel_health_check,
+        }
+    }
+
+    fn latency_state(&self) -> Option<Arc<BackendLatencyState>> {
+        match self {
+            Self::LeastTime { latency, .. } => Some(latency.clone()),
+            Self::RoundRobin(_)
+            | Self::LeastConnections { .. }
+            | Self::PowerOfTwo { .. }
+            | Self::FnvHash(_)
+            | Self::ConsistentHash(_) => None,
         }
     }
 }
@@ -398,10 +454,17 @@ impl LoadBalancedUpstreamReporter {
         status: u16,
         latency: Option<Duration>,
     ) -> LoadBalancedUpstreamOutcome {
-        let failed = self.passive_health.status_is_failure(status, latency);
-        let ejected_at = self
-            .passive_health
-            .record_status(self.backend_key, status, latency);
+        if let (Some(latency_state), Some(latency)) = (&self.latency, latency) {
+            latency_state.record_latency(self.backend_key, latency);
+        }
+        let Some(passive_health) = &self.passive_health else {
+            return LoadBalancedUpstreamOutcome {
+                failed: false,
+                ejected: false,
+            };
+        };
+        let failed = passive_health.status_is_failure(status, latency);
+        let ejected_at = passive_health.record_status(self.backend_key, status, latency);
         if let Some(restart_at) = ejected_at {
             self.reset_slow_start(restart_at);
         }
@@ -412,7 +475,13 @@ impl LoadBalancedUpstreamReporter {
     }
 
     pub fn record_failure(&self) -> LoadBalancedUpstreamOutcome {
-        let ejected_at = self.passive_health.record_failure(self.backend_key);
+        let Some(passive_health) = &self.passive_health else {
+            return LoadBalancedUpstreamOutcome {
+                failed: true,
+                ejected: false,
+            };
+        };
+        let ejected_at = passive_health.record_failure(self.backend_key);
         if let Some(restart_at) = ejected_at {
             self.reset_slow_start(restart_at);
         }
@@ -601,6 +670,35 @@ impl BackendConnectionCounters {
     }
 }
 
+#[derive(Default)]
+struct BackendLatencyState {
+    latency_micros: Mutex<std::collections::HashMap<u64, u64>>,
+}
+
+impl BackendLatencyState {
+    fn record_latency(&self, key: u64, latency: Duration) {
+        let sample = latency.as_micros().clamp(1, u128::from(u64::MAX)) as u64;
+        let mut latency_micros = self
+            .latency_micros
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        latency_micros
+            .entry(key)
+            .and_modify(|stored| {
+                *stored = stored.saturating_mul(3).saturating_add(sample) / 4;
+            })
+            .or_insert(sample);
+    }
+
+    fn score(&self, backend: &Backend) -> Option<u64> {
+        self.latency_micros
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&backend_connection_key(backend))
+            .copied()
+    }
+}
+
 fn backend_connection_key(backend: &Backend) -> u64 {
     let mut hasher = DefaultHasher::new();
     backend.hash(&mut hasher);
@@ -611,19 +709,33 @@ fn backend_connection_key(backend: &Backend) -> u64 {
 struct BackendSelectionPolicy {
     backup: Arc<std::collections::HashSet<u64>>,
     drain: Arc<std::collections::HashSet<u64>>,
+    priority: Arc<std::collections::HashMap<u64, u16>>,
+    priority_groups: Arc<[u16]>,
 }
 
 impl BackendSelectionPolicy {
     fn from_config(config: &ProxyConfig) -> Self {
+        let priority = backend_priority_groups(config);
+        let priority_groups = sorted_priority_groups(&priority);
         Self {
             backup: backend_policy_keys(&config.backup_upstreams).into(),
             drain: backend_policy_keys(&config.drain_upstreams).into(),
+            priority: priority.into(),
+            priority_groups: priority_groups.into(),
         }
     }
 
-    fn permits(&self, backend: &Backend, allow_backup: bool) -> bool {
+    fn permits(&self, backend: &Backend, pass: SelectionPass) -> bool {
         let key = backend_policy_key(backend);
-        !self.drain.contains(&key) && (allow_backup || !self.backup.contains(&key))
+        !self.drain.contains(&key)
+            && (pass.allow_backup || !self.backup.contains(&key))
+            && pass
+                .priority_group
+                .is_none_or(|group| self.priority.get(&key).copied().unwrap_or(0) == group)
+    }
+
+    fn priority_groups(&self) -> &[u16] {
+        &self.priority_groups
     }
 }
 
@@ -639,6 +751,29 @@ fn backend_policy_key(backend: &Backend) -> u64 {
     let mut hasher = DefaultHasher::new();
     backend.addr.hash(&mut hasher);
     hasher.finish()
+}
+
+fn backend_priority_groups(config: &ProxyConfig) -> std::collections::HashMap<u64, u16> {
+    config
+        .upstreams
+        .iter()
+        .zip(&config.upstream_priority_groups)
+        .filter_map(|(upstream, priority)| {
+            let backend = Backend::new(upstream).ok()?;
+            Some((backend_policy_key(&backend), *priority))
+        })
+        .collect()
+}
+
+fn sorted_priority_groups(priority: &std::collections::HashMap<u64, u16>) -> Vec<u16> {
+    let mut groups = priority
+        .values()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    groups.reverse();
+    groups
 }
 
 fn backend_aliases(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<str>> {
@@ -668,20 +803,8 @@ where
     S: BackendSelection + 'static,
     S::Iter: BackendIter,
 {
-    select_pingora_with_backup_policy(
-        inner,
-        key,
-        max_iterations,
-        passive_health,
-        slow_start,
-        backend_policy,
-        SelectionPass {
-            allow_backup: false,
-            ignore_slow_start: false,
-        },
-    )
-    .or_else(|| {
-        select_pingora_with_backup_policy(
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(backend) = select_pingora_with_backup_policy(
             inner,
             key,
             max_iterations,
@@ -689,13 +812,33 @@ where
             slow_start,
             backend_policy,
             SelectionPass {
+                priority_group,
+                allow_backup: false,
+                ignore_slow_start: false,
+            },
+        ) {
+            return Some(backend);
+        }
+    }
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(backend) = select_pingora_with_backup_policy(
+            inner,
+            key,
+            max_iterations,
+            passive_health,
+            slow_start,
+            backend_policy,
+            SelectionPass {
+                priority_group,
                 allow_backup: true,
                 ignore_slow_start: false,
             },
-        )
-    })
-    .or_else(|| {
-        select_pingora_with_backup_policy(
+        ) {
+            return Some(backend);
+        }
+    }
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(backend) = select_pingora_with_backup_policy(
             inner,
             key,
             max_iterations,
@@ -703,17 +846,34 @@ where
             slow_start,
             backend_policy,
             SelectionPass {
+                priority_group,
                 allow_backup: false,
                 ignore_slow_start: true,
             },
-        )
-    })
+        ) {
+            return Some(backend);
+        }
+    }
+    None
 }
 
 #[derive(Clone, Copy)]
 struct SelectionPass {
+    priority_group: Option<u16>,
     allow_backup: bool,
     ignore_slow_start: bool,
+}
+
+fn selection_priority_groups(backend_policy: &BackendSelectionPolicy) -> Vec<Option<u16>> {
+    if backend_policy.priority_groups().is_empty() {
+        return vec![None];
+    }
+    backend_policy
+        .priority_groups()
+        .iter()
+        .copied()
+        .map(Some)
+        .collect()
 }
 
 fn select_pingora_with_backup_policy<S>(
@@ -731,7 +891,7 @@ where
 {
     inner.select_with(key, max_iterations, |backend, ready| {
         ready
-            && backend_policy.permits(backend, pass.allow_backup)
+            && backend_policy.permits(backend, pass)
             && passive_health.is_none_or(|health| !health.is_ejected(backend))
             && (pass.ignore_slow_start || slow_start.is_none_or(|state| state.permits(backend)))
     })
@@ -744,37 +904,55 @@ fn select_least_connections(
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
-    select_least_connections_with_backup_policy(
-        inner,
-        counters,
-        passive_health,
-        slow_start,
-        backend_policy,
-        false,
-        false,
-    )
-    .or_else(|| {
-        select_least_connections_with_backup_policy(
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(selected) = select_least_connections_with_backup_policy(
             inner,
             counters,
             passive_health,
             slow_start,
             backend_policy,
-            true,
-            false,
-        )
-    })
-    .or_else(|| {
-        select_least_connections_with_backup_policy(
+            SelectionPass {
+                priority_group,
+                allow_backup: false,
+                ignore_slow_start: false,
+            },
+        ) {
+            return Some(selected);
+        }
+    }
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(selected) = select_least_connections_with_backup_policy(
             inner,
             counters,
             passive_health,
             slow_start,
             backend_policy,
-            false,
-            true,
-        )
-    })
+            SelectionPass {
+                priority_group,
+                allow_backup: true,
+                ignore_slow_start: false,
+            },
+        ) {
+            return Some(selected);
+        }
+    }
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(selected) = select_least_connections_with_backup_policy(
+            inner,
+            counters,
+            passive_health,
+            slow_start,
+            backend_policy,
+            SelectionPass {
+                priority_group,
+                allow_backup: false,
+                ignore_slow_start: true,
+            },
+        ) {
+            return Some(selected);
+        }
+    }
+    None
 }
 
 fn select_least_connections_with_backup_policy(
@@ -783,27 +961,33 @@ fn select_least_connections_with_backup_policy(
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
-    allow_backup: bool,
-    ignore_slow_start: bool,
+    pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
     for backend in inner.backends().get_backend().iter() {
         if !inner.backends().ready(backend)
-            || !backend_policy.permits(backend, allow_backup)
+            || !backend_policy.permits(backend, pass)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
-            || (!ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
+            || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
         {
             continue;
         }
         let connections = counters.count(backend);
-        if selected
-            .as_ref()
-            .is_none_or(|(_, selected_connections)| connections < *selected_connections)
-        {
-            selected = Some((backend.clone(), connections));
+        let weight = backend.weight.max(1);
+        if selected.as_ref().is_none_or(
+            |(_, selected_connections, selected_weight): &(Backend, usize, usize)| {
+                least_connections_score_is_lower(
+                    connections,
+                    weight,
+                    *selected_connections,
+                    *selected_weight,
+                )
+            },
+        ) {
+            selected = Some((backend.clone(), connections, weight));
         }
     }
-    let backend = selected.map(|(backend, _)| backend)?;
+    let backend = selected.map(|(backend, _, _)| backend)?;
     let permit = counters.permit(&backend)?;
     Some(SelectedUpstream {
         permit: Some(permit),
@@ -811,6 +995,149 @@ fn select_least_connections_with_backup_policy(
         backend,
         reporter: None,
     })
+}
+
+fn least_connections_score_is_lower(
+    candidate_connections: usize,
+    candidate_weight: usize,
+    selected_connections: usize,
+    selected_weight: usize,
+) -> bool {
+    candidate_connections.saturating_mul(selected_weight)
+        < selected_connections.saturating_mul(candidate_weight)
+}
+
+fn select_least_time(
+    inner: &LoadBalancer<RoundRobin>,
+    counters: &BackendConnectionCounters,
+    latency: &BackendLatencyState,
+    passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
+    backend_policy: &BackendSelectionPolicy,
+) -> Option<SelectedUpstream> {
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(selected) = select_least_time_with_backup_policy(
+            inner,
+            counters,
+            latency,
+            passive_health,
+            slow_start,
+            backend_policy,
+            SelectionPass {
+                priority_group,
+                allow_backup: false,
+                ignore_slow_start: false,
+            },
+        ) {
+            return Some(selected);
+        }
+    }
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(selected) = select_least_time_with_backup_policy(
+            inner,
+            counters,
+            latency,
+            passive_health,
+            slow_start,
+            backend_policy,
+            SelectionPass {
+                priority_group,
+                allow_backup: true,
+                ignore_slow_start: false,
+            },
+        ) {
+            return Some(selected);
+        }
+    }
+    for priority_group in selection_priority_groups(backend_policy) {
+        if let Some(selected) = select_least_time_with_backup_policy(
+            inner,
+            counters,
+            latency,
+            passive_health,
+            slow_start,
+            backend_policy,
+            SelectionPass {
+                priority_group,
+                allow_backup: false,
+                ignore_slow_start: true,
+            },
+        ) {
+            return Some(selected);
+        }
+    }
+    None
+}
+
+fn select_least_time_with_backup_policy(
+    inner: &LoadBalancer<RoundRobin>,
+    counters: &BackendConnectionCounters,
+    latency: &BackendLatencyState,
+    passive_health: Option<&PassiveHealthState>,
+    slow_start: Option<&SlowStartState>,
+    backend_policy: &BackendSelectionPolicy,
+    pass: SelectionPass,
+) -> Option<SelectedUpstream> {
+    let mut selected = None;
+    for backend in inner.backends().get_backend().iter() {
+        if !inner.backends().ready(backend)
+            || !backend_policy.permits(backend, pass)
+            || passive_health.is_some_and(|health| health.is_ejected(backend))
+            || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
+        {
+            continue;
+        }
+        let latency_score = latency.score(backend).unwrap_or(0);
+        let connections = counters.count(backend);
+        let weight = backend.weight.max(1);
+        if selected.as_ref().is_none_or(
+            |(_, selected_latency, selected_connections, selected_weight): &(
+                Backend,
+                u64,
+                usize,
+                usize,
+            )| {
+                least_time_score_is_lower(
+                    latency_score,
+                    connections,
+                    weight,
+                    *selected_latency,
+                    *selected_connections,
+                    *selected_weight,
+                )
+            },
+        ) {
+            selected = Some((backend.clone(), latency_score, connections, weight));
+        }
+    }
+    let backend = selected.map(|(backend, _, _, _)| backend)?;
+    let permit = counters.permit(&backend)?;
+    Some(SelectedUpstream {
+        permit: Some(permit),
+        alias: None,
+        backend,
+        reporter: None,
+    })
+}
+
+fn least_time_score_is_lower(
+    candidate_latency: u64,
+    candidate_connections: usize,
+    candidate_weight: usize,
+    selected_latency: u64,
+    selected_connections: usize,
+    selected_weight: usize,
+) -> bool {
+    let candidate = candidate_latency.saturating_mul(selected_weight as u64);
+    let selected = selected_latency.saturating_mul(candidate_weight as u64);
+    candidate < selected
+        || (candidate == selected
+            && least_connections_score_is_lower(
+                candidate_connections,
+                candidate_weight,
+                selected_connections,
+                selected_weight,
+            ))
 }
 
 fn select_power_of_two(
@@ -871,6 +1198,7 @@ impl LoadBalanceKeySource {
         match config.load_balance.selection {
             LoadBalanceSelection::RoundRobin => Self::None,
             LoadBalanceSelection::LeastConnections => Self::None,
+            LoadBalanceSelection::LeastTime => Self::None,
             LoadBalanceSelection::PowerOfTwo => Self::None,
             LoadBalanceSelection::SourceHash | LoadBalanceSelection::ConsistentSourceHash => {
                 Self::SourceIp
@@ -1429,6 +1757,115 @@ mod tests {
     }
 
     #[test]
+    fn least_connections_respects_backend_weights() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_weights: vec![1, 4],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::LeastConnections,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        assert_eq!(first.backend.addr.to_string(), "127.0.0.1:3000");
+
+        let second = balancer.select(&request(), None).unwrap();
+        assert_eq!(second.backend.addr.to_string(), "127.0.0.1:3001");
+
+        let third = balancer.select(&request(), None).unwrap();
+        assert_eq!(third.backend.addr.to_string(), "127.0.0.1:3001");
+    }
+
+    #[test]
+    fn priority_groups_prefer_highest_available_group() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_priority_groups: vec![10, 100],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let preferred = balancer.select(&request(), None).unwrap();
+        assert_eq!(preferred.backend.addr.to_string(), "127.0.0.1:3001");
+        preferred.reporter.unwrap().record_failure();
+
+        let fallback = balancer.select(&request(), None).unwrap();
+        assert_eq!(fallback.backend.addr.to_string(), "127.0.0.1:3000");
+    }
+
+    #[test]
+    fn priority_groups_apply_to_least_connections() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_priority_groups: vec![10, 100],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::LeastConnections,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let selected = balancer.select(&request(), None).unwrap();
+        assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+    }
+
+    #[test]
+    fn least_time_learns_from_recorded_latency() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::LeastTime,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        let first_addr = first.backend.addr.to_string();
+        first
+            .reporter
+            .unwrap()
+            .record_status(200, Some(Duration::from_millis(200)));
+
+        let second = balancer.select(&request(), None).unwrap();
+        let second_addr = second.backend.addr.to_string();
+        assert_ne!(first_addr, second_addr);
+        second
+            .reporter
+            .unwrap()
+            .record_status(200, Some(Duration::from_millis(50)));
+
+        let selected = balancer.select(&request(), None).unwrap();
+        assert_eq!(selected.backend.addr.to_string(), second_addr);
+    }
+
+    #[test]
     fn builds_power_of_two_selection_from_proxy_upstreams() {
         install_test_crypto_provider();
         let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
@@ -1507,15 +1944,16 @@ mod tests {
 
         let reporter = LoadBalancedUpstreamReporter {
             backend_key: key,
-            passive_health: Arc::new(PassiveHealthState::from_config(
+            passive_health: Some(Arc::new(PassiveHealthState::from_config(
                 &LoadBalancePassiveHealthConfig {
                     enabled: true,
                     consecutive_failure: 1,
                     ejection_secs: 1,
                     ..LoadBalancePassiveHealthConfig::default()
                 },
-            )),
+            ))),
             slow_start: Some(slow_start.clone()),
+            latency: None,
         };
         let outcome = reporter.record_failure();
         assert!(outcome.failed);

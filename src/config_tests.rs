@@ -489,6 +489,7 @@ fn parses_proxy_upstream_pool() {
             [proxy]
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
             upstream_weights = [1, 3]
+            upstream_priority_groups = [100, 50]
             upstream_aliases = ["app-a", "app-b"]
             backup_upstreams = ["127.0.0.1:3002"]
             connect_timeout_secs = 5
@@ -551,6 +552,7 @@ fn parses_proxy_upstream_pool() {
         ["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()]
     );
     assert_eq!(config.proxy.upstream_weights, [1, 3]);
+    assert_eq!(config.proxy.upstream_priority_groups, [100, 50]);
     assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b"]);
     assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
     assert_eq!(config.proxy.connect_timeout_secs, Some(5));
@@ -751,6 +753,41 @@ fn rejects_invalid_proxy_upstream_weights() {
     assert!(matches!(
         zero.validate(),
         Err(ConfigError::InvalidProxyUpstreamWeights { .. })
+    ));
+}
+
+#[test]
+fn rejects_invalid_proxy_upstream_priority_groups() {
+    let mismatch: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_priority_groups = [100]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        mismatch.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_priority_groups",
+            ..
+        })
+    ));
+
+    let too_large: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_priority_groups = [100, 1001]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        too_large.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_priority_groups",
+            ..
+        })
     ));
 }
 
@@ -2226,6 +2263,33 @@ fn validates_load_balance_hash_selection() {
     )
     .unwrap();
     power_of_two.validate().unwrap();
+
+    let weighted_least_connections: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "weighted-least-connections"
+            "#,
+    )
+    .unwrap();
+    weighted_least_connections.validate().unwrap();
+
+    let ratio_least_connections: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "ratio-least-connections"
+            "#,
+    )
+    .unwrap();
+    ratio_least_connections.validate().unwrap();
+
+    let least_time: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "least-time"
+            "#,
+    )
+    .unwrap();
+    least_time.validate().unwrap();
 }
 
 #[test]

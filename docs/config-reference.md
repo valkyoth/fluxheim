@@ -685,6 +685,7 @@ rules and can append additional rules.
 [proxy]
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_weights = [1, 2]
+upstream_priority_groups = [100, 50]
 upstream_aliases = ["app-a", "app-b"]
 backup_upstreams = ["127.0.0.1:3001"]
 drain_upstreams = []
@@ -791,16 +792,17 @@ deliberately small: one `host:port` or `ip:port` authority per line, blank lines
 and full-line `#` comments ignored, 2 through 64 unique entries required.
 Fluxheim reads the file with the same symlink and parent-permission hardening
 used for other operator-controlled files. In this release, file-refreshed pools
-cannot be combined with `upstream_weights`, `upstream_aliases`,
-`backup_upstreams`, or `drain_upstreams`; use static `upstreams` for those
-policies.
+cannot be combined with `upstream_weights`, `upstream_priority_groups`,
+`upstream_aliases`, `backup_upstreams`, or `drain_upstreams`; use static
+`upstreams` for those policies.
 For DNS-based service names, load-balancer builds can set
 `upstream_dns_refresh_secs = 5` together with `upstreams = ["app.service:8080"]`.
 Fluxheim resolves those authorities at startup and then refreshes them on the
 configured 1 through 300 second interval. This first DNS-refresh slice is
 mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
-`upstream_aliases`, `backup_upstreams`, and `drain_upstreams`; use the static
-pool form when those richer backend policies are required.
+`upstream_priority_groups`, `upstream_aliases`, `backup_upstreams`, and
+`drain_upstreams`; use the static pool form when those richer backend policies
+are required.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
@@ -855,6 +857,11 @@ where the platform and kernel allow it.
 for each `upstreams` entry. It enables weighted selection in `load-balancer`
 builds. Each weight must be at most 1000 and the total configured weight must
 fit in Pingora's weighted selector.
+`upstream_priority_groups` is optional and, when set, must contain one priority
+value for each `upstreams` entry. Higher values are preferred first, then lower
+values are used only when the preferred priority group has no selectable
+backend. Each priority group must be at most 1000. This is the static
+F5-style preferred/fallback group foundation for the `1.5` load-balancer line.
 `upstream_aliases` is optional and, when set, must contain one safe
 low-cardinality alias for each `upstreams` entry. Aliases may contain ASCII
 letters, digits, dots, dashes, and underscores, are capped at 64 bytes, and
@@ -867,17 +874,25 @@ backend is currently selectable. Drained upstreams remain configured for
 health and operator visibility but receive no new selections. Backup and drain
 sets must not overlap, and at least one upstream must remain a normal primary.
 `proxy.load_balance.selection` defaults to `round-robin`. It also accepts
-`least-connections`, `power-of-two`, `source-hash`, `uri-hash`, `header-hash`,
-`cookie-hash`, `consistent-source-hash`, `consistent-uri-hash`,
-`consistent-header-hash`, and `consistent-cookie-hash`. Header-hash modes require
+`least-connections`, `weighted-least-connections`,
+`ratio-least-connections`, `least-time`, `power-of-two`, `source-hash`,
+`uri-hash`, `header-hash`, `cookie-hash`, `consistent-source-hash`,
+`consistent-uri-hash`, `consistent-header-hash`, and
+`consistent-cookie-hash`. Header-hash modes require
 `proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
 name. Cookie-hash modes require `proxy.load_balance.hash_cookie = "session"` or
 another valid cookie name. Hash modes use weighted FNV selection; consistent
 modes use Pingora's weighted Ketama ring for lower remapping when upstream
-membership changes. `least-connections` uses Fluxheim-held in-flight request
-permits and Pingora's current backend health state. `power-of-two` samples two
-healthy backends through Pingora's random weighted selector and chooses the
-lower in-flight count.
+membership changes. `least-connections`, `weighted-least-connections`, and
+`ratio-least-connections` all use the same Fluxheim-held in-flight request
+permits, `upstream_weights`, and Pingora's current backend health state, so a
+backend with weight `4` can carry roughly four times the in-flight request
+share of a backend with weight `1`. `least-time` uses the same request permits
+plus an EWMA of observed upstream latency from completed requests, weighted by
+`upstream_weights`; unsampled healthy backends are allowed to receive traffic so
+new or recovered pool members can establish a latency baseline. `power-of-two`
+samples two healthy backends through Pingora's random weighted selector and
+chooses the lower in-flight count.
 With metrics enabled, load-balanced selections, unavailable pools, retries, and
 success/failure/ejection outcomes are counted by
 `fluxheim_load_balancer_events_total` with bounded configured vhost/route

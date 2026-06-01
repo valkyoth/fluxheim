@@ -82,12 +82,12 @@ weighting, programmable Rhai/Wasm logic, and impossible-travel anomaly engines -
 are explicitly later work after the typed context is stable. The rest of
 `1.4.2` covered maintenance architecture, `1.4.3` split the config surface,
 `1.4.4` added Apple Silicon developer support, `1.4.5` added bounded
-Geo-Context, and `1.4.6` added the TCP stream proxy foundation. `1.4.7`, if
-scheduled, is a stream-hardening follow-up only: true per-read stream idle
-timeout, stream upstream TLS/mTLS, transport-neutral stream load-balancer
-policy, and stronger stream smoke/security coverage. UDP proxying and HTTP/2
-server push are intentionally deferred/skipped until a concrete requirement
-makes them worth the extra attack surface.
+Geo-Context, `1.4.6` added the TCP stream proxy foundation, and `1.4.7`
+hardened streams with true per-read stream idle timeout, stream upstream
+TLS/mTLS, transport-neutral stream load-balancer policy, and stronger stream
+smoke/security coverage. UDP proxying and HTTP/2 server push are intentionally
+deferred/skipped until a concrete requirement makes them worth the extra attack
+surface.
 Each `1.4.x` release has a hard stop. New feature families should move to the
 next planned version unless they are required to make an already-in-scope item
 safe.
@@ -95,19 +95,48 @@ Palo Alto-style security asks are tracked as policy integrations around this
 proxy surface: reputation/Geo decisions, TLS fingerprint signals, and future
 WAF/App-ID-like classification hooks without turning Fluxheim into a full
 firewall.
-`1.5` is planned as enterprise load-balancer stabilization after the `1.4`
-proxy primitives are present: multi-site state, cluster coordination, runtime
-pool mutation, richer admin operations, deeper active/adaptive health policy,
-TLS passthrough SNI routing after a bounded ClientHello preread parser is
-proven, later xDS/Kubernetes/Consul discovery once local discovery and runtime
-backend mutation are stable, and migration tooling for HAProxy/F5 estates.
-`1.6` is planned as the shared Wasm
-extensibility release for
-nginx-Lua-style request/response hooks, VCL-like cache policy hooks, and later
-bounded TCP stream filter hooks through one sandboxed runtime. Sentinel
-Mesh/WireGuard, advanced certificate
-automation, and larger application-server features remain later minor releases
-according to the versioning plan.
+`1.5.0` is now the active enterprise load-balancer/control-plane line after the
+`1.4` proxy and stream primitives. Its stop line is F5 LTM / HAProxy / Envoy
+class HTTP/TCP load-balancer operations, not a full BIG-IP platform. It should
+promote the load-balancer image profile, add runtime pool/member mutation,
+priority groups, slow-start, persistence, richer active/adaptive health,
+circuit breaking, queue and overflow behavior, locality/failure-domain policy,
+admin/audit visibility, and migration fixtures. Selection work should cover
+weighted least-connections, ratio/weighted least-connections, least-time/EWMA,
+consistent hash/Ketama, Maglev, bounded-load consistent hashing, least
+sessions where persistence tables exist, and dynamic-ratio/external load score
+only after trusted input, audit, and failure semantics are defined. TLS
+passthrough SNI routing belongs in this line only after a bounded ClientHello
+preread parser and byte-replay model are proven. xDS/Kubernetes/Consul
+discovery is a later control-plane slice after local DNS/file discovery and
+runtime backend mutation are stable. UDP proxying and DNS/GSLB are not `1.5.0`
+goals, but they are valid `1.5.x` follow-up tracks once the HTTP/TCP
+load-balancer control plane is stable. WAF/ASM, VPN, firewall, NAT appliance,
+and iRules-compatible scripting are separate future module families, not
+load-balancer spillover.
+`1.5.x` follow-up candidates after `1.5.0`:
+UDP proxying as a separately bounded transport track with explicit targets
+such as DNS UDP load balancing, syslog UDP forwarding, QUIC pass-through, or
+game-server UDP proxying; DNS/GSLB traffic steering as a separate control-plane
+track for health-aware DNS answers, regional policy, TTL behavior, failover,
+and DNSSEC/evidence requirements; and xDS/Kubernetes/Consul discovery after
+runtime backend mutation has proven safe locally.
+`1.6` is planned as the shared Wasm extensibility release for the kinds of
+operator policy normally solved with F5 iRules, nginx Lua/OpenResty, HAProxy
+Lua/SPOE, and VCL-style cache logic. It should support conditional routing,
+pool selection, persistence-key decisions, request denial/synthetic responses,
+header mutation, logging/redaction, and cache policy through one sandboxed
+runtime. It is not meant to be syntax-compatible with iRules or Lua, but it
+should cover the same operational jobs with typed Fluxheim context and strict
+resource limits. Sentinel Mesh/WireGuard, advanced certificate automation, and
+larger application-server features remain later minor releases according to the
+versioning plan.
+Future "edge firewall" and "TLS VPN gateway" modes are realistic only as
+separate product modes, not as accidental load-balancer options. They would
+need dedicated compile profiles, threat models, packet/routing ownership,
+kernel capability policy, audit logging, key management, and platform-specific
+test matrices. Track them as research until the proxy/load-balancer/Wasm
+surfaces are stable.
 In-process Linux seccomp/Landlock sandboxing is also post-`1.0` work: the
 stable `1.0` boundary is hardened systemd/container deployment, while
 kernel-enforced in-process sandboxing should remain an optional compile-time
@@ -1024,6 +1053,12 @@ without parsing text fixtures for every module.
    - Architecture and security plan documented in
      [WAF Architecture](docs/waf-architecture.md).
    - WAF support must be optional, compile-time gated, and disabled by default.
+   - Long-term target: cover the web-application security jobs operators
+     associate with F5 BIG-IP ASM/Advanced WAF, but as Fluxheim optional
+     modules rather than as part of the `1.5` load balancer. That means
+     signature/anomaly scoring, OWASP CRS compatibility where practical,
+     positive-security policy over time, bot/reputation inputs, per-vhost
+     blocking/dry-run modes, and audit evidence.
      Planned features:
      - `waf`: shared WAF config, decision model, audit logging, and native
        lightweight rule engine.
@@ -1057,7 +1092,24 @@ without parsing text fixtures for every module.
      rules through snapshots, and default builds proving WAF is absent unless
      explicitly compiled.
 
-10. **Future Optional Cloudflare Origin Support**
+10. **Future Edge Firewall And TLS VPN Gateway Modes**
+   - These are realistic future edge functions, but only as separate product
+     modes with dedicated compile profiles and release gates. They must not
+     creep into `1.5.0` load-balancer work.
+   - A future `profile-edge-firewall` would need its own threat model and OS
+     integration plan: packet/routing ownership, stateful firewall tables,
+     NAT/SNAT/DNAT policy, kernel capability policy, nftables/eBPF or equivalent
+     integration, rootless/container limits, audit logs, and platform-specific
+     tests.
+   - A future `profile-tls-vpn-gateway` would need its own identity and tunnel
+     model: TLS or WireGuard-style protocol choice, key lifecycle, replay
+     protection, route push policy, client onboarding/revocation, logging and
+     privacy rules, and separate security evidence.
+   - Treat both as research until the proxy, load-balancer, WAF, and Wasm
+     boundaries are stable enough that Fluxheim can add them without weakening
+     the existing edge server threat model.
+
+11. **Future Optional Cloudflare Origin Support**
    - Architecture and security plan documented in
      [Cloudflare Origin Support](docs/cloudflare-origin-support.md).
    - Cloudflare support must be optional, compile-time gated, and disabled by

@@ -43,6 +43,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_weights: Vec<usize>,
     #[serde(default)]
+    pub upstream_priority_groups: Vec<u16>,
+    #[serde(default)]
     pub upstream_aliases: Vec<String>,
     #[serde(default)]
     pub backup_upstreams: Vec<String>,
@@ -139,6 +141,7 @@ const MIN_PROXY_UPSTREAM_DNS_REFRESH_SECS: u64 = 1;
 const MAX_PROXY_UPSTREAM_DNS_REFRESH_SECS: u64 = 300;
 const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
+const MAX_PROXY_UPSTREAM_PRIORITY_GROUP: u16 = 1000;
 pub(crate) const MAX_PROXY_ERROR_PAGES: usize = 64;
 const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
@@ -154,6 +157,7 @@ impl Default for ProxyConfig {
             upstreams_file_refresh_secs: default_proxy_upstreams_file_refresh_secs(),
             upstream_dns_refresh_secs: None,
             upstream_weights: Vec::new(),
+            upstream_priority_groups: Vec::new(),
             upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
             drain_upstreams: Vec::new(),
@@ -280,13 +284,14 @@ impl ProxyConfig {
                     });
                 }
                 if !self.upstream_weights.is_empty()
+                    || !self.upstream_priority_groups.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstreams_file",
-                        reason: "cannot be combined with upstream_weights, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
                     });
                 }
                 if self.upstream_tls && self.upstream_sni.is_none() {
@@ -334,13 +339,14 @@ impl ProxyConfig {
                     });
                 }
                 if !self.upstream_weights.is_empty()
+                    || !self.upstream_priority_groups.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_dns_refresh_secs",
-                        reason: "cannot be combined with upstream_weights, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
                     });
                 }
             }
@@ -374,6 +380,24 @@ impl ProxyConfig {
                 return Err(ConfigError::InvalidProxyUpstreamWeights {
                     reason: "total upstream weight is too large",
                 });
+            }
+        }
+        if !self.upstream_priority_groups.is_empty() {
+            if self.upstream.is_some()
+                || self.upstream_priority_groups.len() != self.upstreams.len()
+            {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_priority_groups",
+                    reason: "upstream_priority_groups must match proxy.upstreams and cannot be used with proxy.upstream",
+                });
+            }
+            for priority in &self.upstream_priority_groups {
+                if *priority > MAX_PROXY_UPSTREAM_PRIORITY_GROUP {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_priority_groups",
+                        reason: "priority groups must be at most 1000",
+                    });
+                }
             }
         }
         if !self.upstream_aliases.is_empty() {

@@ -9,6 +9,14 @@ The WAF goal is to provide a per-vhost request inspection layer that can block,
 score, or audit suspicious traffic without turning request workers into a slow
 or unbounded parsing path.
 
+Long-term scope should cover the web-application security jobs operators expect
+from F5 BIG-IP ASM/Advanced WAF-class deployments, but through Fluxheim's
+optional modules and release gates. That includes signature/anomaly scoring,
+OWASP CRS-compatible rule paths where practical, positive-security policy over
+time, bot/reputation inputs, per-vhost dry-run/blocking modes, audit evidence,
+and integration points for load-balancer routing decisions. It is not part of
+the `1.5` load-balancer release.
+
 ## Goals
 
 - Keep WAF support compile-time optional and disabled by default.

@@ -81,7 +81,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
 | Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
-| Load balancing | ✅ | Weighted round-robin, least connections, power-of-two, hash, consistent-hash, backup, drain, slow start, and retry budgets. |
+| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-time EWMA, priority groups, power-of-two, hash, consistent-hash, backup, drain, slow start, and retry budgets. |
 | DNS-refreshed upstream pools | ✅ | `1.4.1`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection. |
@@ -385,10 +385,11 @@ scripts/validate-features.sh proxy,web,tls-rustls,load-balancer
 
 </details>
 
-## Current Release: 1.4 Proxy Parity
+## Current Release: 1.5 Load Balancer
 
 Fluxheim does not treat every planned idea as stable. The current release line
-is `1.4.x`, starting with the `1.4.0` production proxy parity release.
+is `1.5.x`, starting with the `1.5.0` enterprise load-balancer/control-plane
+release.
 
 - `1.0` is the gateway foundation: vhosts, routes, redirects, static serving,
   proxying, SNI/TLS, safe ACME challenge exceptions, systemd/RPM packaging, and
@@ -445,6 +446,19 @@ is `1.4.x`, starting with the `1.4.0` production proxy parity release.
   datasets, vhost/route country and ASN access-policy rules, structured access
   log Geo-Context fields, bounded database loading, and documented SDK roadmap
   boundaries for a future `fluxheim-sdk` crate.
+- `1.4.6` added the TCP stream proxy foundation with route-local stream
+  trust boundaries, bounded copy controls, PROXY protocol support, and
+  separate stream semantics.
+- `1.4.7` hardened TCP stream proxying with true per-read idle timeouts,
+  stream upstream TLS/mTLS controls, weighted/drain/backup upstream policy, and
+  expanded stream smoke/security coverage.
+- `1.5.0` is the enterprise load-balancer/control-plane line. It promotes the
+  load-balancer image profile and focuses on F5/HAProxy/Envoy-class pool
+  operations: runtime pool/member mutation, priority groups, persistence,
+  slow-start, richer active/adaptive health checks, circuit breaking, queue and
+  overflow behavior, locality/failure-domain policy, richer selection
+  algorithms, admin/audit visibility, and migration fixtures. It is not a WAF,
+  GSLB/DNS appliance, UDP proxy, or iRules-compatible scripting release.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -452,8 +466,7 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Config Reference](docs/config-reference.md), and
 [Production Readiness](docs/production-readiness.md).
 
-Next lines are planned separately after `1.4`: `1.5` for enterprise
-load-balancer operations at larger estate scale, and `1.6` for shared Wasm
+Next lines are planned separately after `1.5`: `1.6` for shared Wasm
 extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
