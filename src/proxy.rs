@@ -80,8 +80,8 @@ use crate::edge_policy::{
 };
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{
-    LoadBalancedUpstreamOutcome, LoadBalancerPoolRuntimeStats, UpstreamLoadBalancer,
-    UpstreamLoadBalancerService,
+    LoadBalancedUpstreamOutcome, LoadBalancerPoolRuntimeStats, LoadBalancerRuntimeBackendState,
+    UpstreamLoadBalancer, UpstreamLoadBalancerService,
 };
 #[cfg(feature = "php-fpm")]
 use crate::php_fpm::{
@@ -591,6 +591,14 @@ impl FluxProxy {
         self.snapshot().load_balancer_runtime_stats()
     }
 
+    #[cfg(feature = "load-balancer")]
+    pub fn set_load_balancer_member_state(
+        &self,
+        request: LoadBalancerMemberStateRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberStateResult> {
+        self.snapshot().set_load_balancer_member_state(request)
+    }
+
     #[cfg(feature = "cache")]
     pub fn reset_cache_activity(&self) -> CacheActivityResetResult {
         self.snapshot().reset_cache_activity()
@@ -688,6 +696,26 @@ pub struct LoadBalancerVhostRuntimeStats {
 pub struct LoadBalancerRouteRuntimeStats {
     pub name: String,
     pub pool: LoadBalancerPoolRuntimeStats,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadBalancerMemberStateRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub member: &'a str,
+    pub state: LoadBalancerRuntimeBackendState,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct LoadBalancerMemberStateResult {
+    pub vhost: String,
+    pub route: Option<String>,
+    pub member: String,
+    pub state: LoadBalancerRuntimeBackendState,
+    pub address: String,
+    pub alias: Option<String>,
 }
 
 impl ProxySnapshot {
@@ -919,6 +947,78 @@ impl ProxySnapshot {
             })
             .collect();
         LoadBalancerRuntimeStats { vhosts }
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn set_load_balancer_member_state(
+        &self,
+        request: LoadBalancerMemberStateRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberStateResult> {
+        let vhost_name = request.vhost.trim();
+        if vhost_name.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer vhost is required",
+            ));
+        }
+        let member = request.member.trim();
+        if member.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member is required",
+            ));
+        }
+        let vhost = self
+            .state
+            .vhosts
+            .iter()
+            .find(|vhost| vhost.name == vhost_name)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost is not configured",
+                )
+            })?;
+        let route = request
+            .route
+            .map(str::trim)
+            .filter(|route| !route.is_empty());
+        let (route_name, pool) = if let Some(route_name) = route {
+            let route = vhost
+                .routes
+                .iter()
+                .find(|route| route.name == route_name)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "load balancer route is not configured",
+                    )
+                })?;
+            let pool = route.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer route has no configured pool",
+                )
+            })?;
+            (Some(route.name.clone()), pool)
+        } else {
+            let pool = vhost.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost has no configured pool",
+                )
+            })?;
+            (None, pool)
+        };
+        let mutation = pool.set_runtime_backend_state(member, request.state)?;
+        Ok(LoadBalancerMemberStateResult {
+            vhost: vhost.name.clone(),
+            route: route_name,
+            member: mutation.member,
+            state: mutation.state,
+            address: mutation.address,
+            alias: mutation.alias,
+        })
     }
 
     #[cfg(feature = "cache")]
@@ -9531,6 +9631,8 @@ mod tests {
         proxy_upgrade_request_allowed, redirect_authority, request_body_chunk_limit_status,
         request_limit_status, route_redirect_location, route_rewritten_path_and_query,
     };
+    #[cfg(feature = "load-balancer")]
+    use super::{LoadBalancerMemberStateRequest, LoadBalancerRuntimeBackendState};
     #[cfg(feature = "php-fpm")]
     use super::{
         MAX_PHP_PARAM_VALUE_BYTES, PhpResolveOutcome, RuntimePhp, add_php_custom_params,
@@ -15432,6 +15534,89 @@ mod tests {
 
         assert!(vhost.load_balancer.is_some());
         assert!(super::selected_upstream_load_balancer(vhost, &ctx).is_none());
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_member_state_can_target_route_pool() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "one".to_owned(),
+                hosts: vec!["one.example".to_owned()],
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig {
+                    upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+                    upstream_aliases: vec!["vhost-a".to_owned(), "vhost-b".to_owned()],
+                    ..ProxyConfig::default()
+                },
+                cache: CacheConfig::default(),
+                compression: None,
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![RouteConfig {
+                    name: "api".to_owned(),
+                    path_exact: None,
+                    path_prefix: Some("/api/".to_owned()),
+                    path_regex: None,
+                    methods: Vec::new(),
+                    fallback: false,
+                    https_redirect_exempt: false,
+                    strip_prefix: None,
+                    rewrite_prefix: None,
+                    rewrite_template: None,
+                    max_request_body_bytes: None,
+                    access: Default::default(),
+                    rate_limit: Default::default(),
+                    concurrency: Default::default(),
+                    grpc: Default::default(),
+                    redirect: None,
+                    proxy: Some(ProxyConfig {
+                        upstreams: vec!["127.0.0.1:3011".to_owned(), "127.0.0.1:3012".to_owned()],
+                        upstream_aliases: vec!["api-a".to_owned(), "api-b".to_owned()],
+                        ..ProxyConfig::default()
+                    }),
+                    web: None,
+                    php: None,
+                    cache: None,
+                    compression: None,
+                    headers: crate::config::VhostHeaderPolicyConfig::default(),
+                }],
+            }],
+            ..Config::default()
+        };
+
+        let proxy = FluxProxy::from_config(&config).unwrap();
+        let result = proxy
+            .set_load_balancer_member_state(LoadBalancerMemberStateRequest {
+                vhost: "one",
+                route: Some("api"),
+                member: "api-a",
+                state: LoadBalancerRuntimeBackendState::Disabled,
+            })
+            .unwrap();
+
+        assert_eq!(result.route.as_deref(), Some("api"));
+        assert_eq!(result.address, "127.0.0.1:3011");
+        let stats = proxy.load_balancer_runtime_stats();
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .disabled_backend_count,
+            0
+        );
+        assert_eq!(stats.vhosts[0].routes[0].pool.disabled_backend_count, 1);
     }
 
     #[test]

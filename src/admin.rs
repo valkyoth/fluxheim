@@ -23,6 +23,10 @@ use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
+#[cfg(feature = "load-balancer")]
+use crate::load_balancer::LoadBalancerRuntimeBackendState;
+#[cfg(feature = "load-balancer")]
+use crate::proxy::LoadBalancerMemberStateRequest;
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
 use crate::reload::{ReloadReason, classify_reload};
 use crate::snapshot::{ConfigSnapshot, SnapshotError, SnapshotStore};
@@ -626,6 +630,17 @@ impl AdminApp {
                     .or_else(|| query_param(query, "ok"))
                     .or_else(|| query_param(query, "success")),
             ),
+            ("POST", "/_fluxheim/load-balancer/member-state") => self
+                .load_balancer_member_state_response(
+                    header_value(headers, "x-fluxheim-lb-vhost")
+                        .or_else(|| query_param(query, "vhost")),
+                    header_value(headers, "x-fluxheim-lb-route")
+                        .or_else(|| query_param(query, "route")),
+                    header_value(headers, "x-fluxheim-lb-member")
+                        .or_else(|| query_param(query, "member")),
+                    header_value(headers, "x-fluxheim-lb-state")
+                        .or_else(|| query_param(query, "state")),
+                ),
             ("POST", "/_fluxheim/cache/purge") => self.cache_purge_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
                     .or_else(|| query_param(query, "vhost")),
@@ -746,6 +761,7 @@ impl AdminApp {
                 | "/_fluxheim/self-heal/confirm"
                 | "/_fluxheim/self-heal/fail"
                 | "/_fluxheim/self-heal/report"
+                | "/_fluxheim/load-balancer/member-state"
                 | "/_fluxheim/cache/purge"
                 | "/_fluxheim/cache/purge-bulk"
                 | "/_fluxheim/cache/purge-index"
@@ -860,6 +876,73 @@ impl AdminApp {
             }
             Err(error) => internal_error_response(&error),
         }
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_member_state_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        member: Option<&str>,
+        state: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer vhost is required");
+        };
+        let Some(member) = member else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer member is required");
+        };
+        let Some(state) = state else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer state is required");
+        };
+        let Some(state) = LoadBalancerRuntimeBackendState::parse(state) else {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "load balancer state must be normal, drain, or disable",
+            );
+        };
+        match self
+            .proxy
+            .set_load_balancer_member_state(LoadBalancerMemberStateRequest {
+                vhost,
+                route,
+                member,
+                state,
+            }) {
+            Ok(result) => json_response_value(
+                StatusCode::OK,
+                &json!({
+                    "status": "ok",
+                    "vhost": result.vhost,
+                    "route": result.route,
+                    "member": result.member,
+                    "state": result.state,
+                    "address": result.address,
+                    "alias": result.alias,
+                }),
+            ),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                error_response(StatusCode::NOT_FOUND, &error.to_string())
+            }
+            Err(error) => internal_error_response(&error),
+        }
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    fn load_balancer_member_state_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _member: Option<&str>,
+        _state: Option<&str>,
+    ) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "load balancer support is not compiled in",
+        )
     }
 
     #[cfg(feature = "cache")]
@@ -3292,19 +3375,22 @@ mod tests {
 
     use arc_swap::ArcSwap;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
+    use serde_json::Value;
 
     use super::{
         AdminApp, AdminAuthThrottle, AdminRuntimeState, AdminToken, MAX_ADMIN_TOKEN_FILE_BYTES,
         admin_services_from_config, authorized, constant_time_eq, error_response, json_response,
         read_bounded_secret_file, read_secret_file,
     };
+    #[cfg(feature = "cache")]
+    use crate::config::ByteSize;
+    #[cfg(any(feature = "cache", feature = "load-balancer"))]
+    use crate::config::CacheConfig;
     use crate::config::{
         AdminAuthThrottleConfig, AdminClientCertificateConfig, AdminConfig, AdminHealthConfig,
         AdminHealthResponseMode, AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig,
         VhostConfig, WebConfig,
     };
-    #[cfg(feature = "cache")]
-    use crate::config::{ByteSize, CacheConfig, RouteConfig};
     use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
     use crate::snapshot::SnapshotStore;
     use crate::test_support::unique_temp_path;
@@ -3452,6 +3538,62 @@ mod tests {
                 .unwrap()
                 .contains(r#""pending_validation":null"#)
         );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_member_state_endpoint_updates_runtime_status() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let config = Config {
+            vhosts: vec![VhostConfig {
+                name: "one".to_owned(),
+                hosts: vec!["one.example".to_owned()],
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                acme_challenge: crate::config::VhostAcmeChallengeConfig::default(),
+                redirect: crate::config::VhostRedirectConfig::default(),
+                tls: crate::config::VhostTlsConfig::default(),
+                proxy: ProxyConfig {
+                    upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+                    upstream_aliases: vec!["app-a".to_owned(), "app-b".to_owned()],
+                    ..ProxyConfig::default()
+                },
+                cache: CacheConfig::default(),
+                compression: None,
+                headers: crate::config::VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: WebConfig::default(),
+                routes: Vec::new(),
+            }],
+            ..Config::default()
+        };
+        let app = app_with_config(config);
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-state",
+            Some("vhost=one&member=app-a&state=drain"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["vhost"], "one");
+        assert_eq!(body["member"], "app-a");
+        assert_eq!(body["state"], "drained");
+        assert_eq!(body["address"], "127.0.0.1:3001");
+        assert_eq!(body["alias"], "app-a");
+
+        let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        let pool = &body["load_balancer"]["vhosts"][0]["pool"];
+        assert_eq!(pool["drained_backend_count"], 1);
+        assert_eq!(pool["primary_available_backend_count"], 1);
     }
 
     #[test]

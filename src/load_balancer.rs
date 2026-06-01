@@ -72,6 +72,17 @@ pub enum LoadBalancerRuntimeBackendState {
     Disabled,
 }
 
+impl LoadBalancerRuntimeBackendState {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "normal" | "enable" | "enabled" | "resume" | "resumed" => Some(Self::Normal),
+            "drain" | "drained" => Some(Self::Drained),
+            "disable" | "disabled" => Some(Self::Disabled),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct LoadBalancerRuntimeBackendMutation {
     pub member: String,

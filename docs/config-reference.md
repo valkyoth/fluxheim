@@ -316,6 +316,22 @@ ejection, passive ejection remaining seconds, slow-start allowance, and
 least-time latency state where available. In
 `privacy-mode`, backend addresses are omitted from this status object.
 
+When compiled with `load-balancer`, authenticated admins can update the
+in-memory state of an existing configured pool member without reloading:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/member-state?vhost=app&member=app-a&state=drain"
+```
+
+Use `vhost` for the vhost name, optional `route` for a route-local pool,
+`member` for the configured upstream address or `upstream_aliases` value, and
+`state` as `normal`, `drain`, or `disable`. `normal` clears only runtime
+overrides; static `drain_upstreams` and `disabled_upstreams` remain enforced
+until the config changes. Runtime member state is intentionally in-memory in
+`1.5.0` and is reset by process restart or runtime rebuild.
+
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the
 trusted local sidecar, but Fluxheim can require a validated downstream client
