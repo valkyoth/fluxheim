@@ -15139,6 +15139,18 @@ mod tests {
                     tls: crate::config::VhostTlsConfig::default(),
                     proxy: ProxyConfig {
                         upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+                        load_balance: crate::config::LoadBalanceConfig {
+                            retry: LoadBalanceRetryConfig {
+                                enabled: true,
+                                max_retries: 2,
+                                methods: vec!["GET".to_owned(), "HEAD".to_owned()],
+                                statuses: vec![503],
+                                status_ranges: Vec::new(),
+                                budget_per_window: 100,
+                                budget_window_secs: 10,
+                            },
+                            ..crate::config::LoadBalanceConfig::default()
+                        },
                         ..ProxyConfig::default()
                     },
                     cache: CacheConfig::default(),
@@ -15214,6 +15226,18 @@ mod tests {
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().max_iterations, 256);
         assert!(stats.vhosts[0].pool.as_ref().unwrap().health_check_enabled);
         assert!(!stats.vhosts[0].pool.as_ref().unwrap().parallel_health_check);
+        assert!(stats.vhosts[0].pool.as_ref().unwrap().retry.enabled);
+        assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().retry.max_retries, 2);
+        assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().retry.statuses, [503]);
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .retry
+                .budget_per_window,
+            100
+        );
         assert_eq!(stats.vhosts[0].routes.len(), 1);
         assert_eq!(stats.vhosts[0].routes[0].name, "api");
         assert_eq!(stats.vhosts[0].routes[0].pool.backend_count, 2);

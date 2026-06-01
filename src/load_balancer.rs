@@ -28,8 +28,8 @@ use serde::Serialize;
 
 use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
-    LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalanceSelection,
-    LoadBalanceSlowStartConfig, ProxyConfig,
+    LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalanceRetryConfig,
+    LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
 };
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
@@ -46,6 +46,7 @@ pub struct UpstreamLoadBalancer {
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
     all_down_status: u16,
+    retry: LoadBalancerRetryRuntimeStats,
 }
 
 pub struct SelectedUpstream {
@@ -72,7 +73,19 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub parallel_health_check: bool,
     pub passive_health_enabled: bool,
     pub slow_start_enabled: bool,
+    pub retry: LoadBalancerRetryRuntimeStats,
     pub backends: Vec<LoadBalancerBackendRuntimeStats>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LoadBalancerRetryRuntimeStats {
+    pub enabled: bool,
+    pub max_retries: u8,
+    pub methods: Vec<String>,
+    pub statuses: Vec<u16>,
+    pub status_ranges: Vec<LoadBalanceHealthCheckExpectedStatusRange>,
+    pub budget_per_window: u32,
+    pub budget_window_secs: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -299,6 +312,7 @@ impl UpstreamLoadBalancer {
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
             all_down_status: config.load_balance.all_down_status,
+            retry: LoadBalancerRetryRuntimeStats::from_config(&config.load_balance.retry),
         }
     }
 
@@ -315,6 +329,7 @@ impl UpstreamLoadBalancer {
             parallel_health_check: self.inner.parallel_health_check(),
             passive_health_enabled: self.passive_health.is_some(),
             slow_start_enabled: self.slow_start.is_some(),
+            retry: self.retry.clone(),
             backends: self.inner.backend_stats(
                 &self.backend_aliases,
                 self.passive_health.as_deref(),
@@ -343,6 +358,20 @@ impl UpstreamLoadBalancer {
     #[cfg(test)]
     fn parallel_health_check(&self) -> bool {
         self.inner.parallel_health_check()
+    }
+}
+
+impl LoadBalancerRetryRuntimeStats {
+    fn from_config(config: &LoadBalanceRetryConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            max_retries: config.max_retries,
+            methods: config.methods.clone(),
+            statuses: config.statuses.clone(),
+            status_ranges: config.status_ranges.clone(),
+            budget_per_window: config.budget_per_window,
+            budget_window_secs: config.budget_window_secs,
+        }
     }
 }
 
