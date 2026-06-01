@@ -742,6 +742,7 @@ downstream_min_send_rate_bytes_per_sec = 8192
 [proxy.load_balance]
 selection = "round-robin"
 max_iterations = 256
+all_down_status = 502
 
 [proxy.load_balance.health_check]
 enabled = true
@@ -895,7 +896,12 @@ sets must not overlap, and at least one upstream must remain a normal primary.
 name. Cookie-hash modes require `proxy.load_balance.hash_cookie = "session"` or
 another valid cookie name. Hash modes use weighted FNV selection; consistent
 modes use Pingora's weighted Ketama ring for lower remapping when upstream
-membership changes. `least-connections`, `weighted-least-connections`, and
+membership changes. `max_iterations` bounds how many ready candidates Pingora
+may inspect while applying Fluxheim health, drain, slow-start, backup, priority,
+and in-flight policies. `all_down_status` defaults to `502` and may be set to
+another HTTP 5xx status, commonly `503`, for requests where a configured
+load-balanced pool has no selectable backend. `least-connections`,
+`weighted-least-connections`, and
 `ratio-least-connections` all use the same Fluxheim-held in-flight request
 permits, `upstream_weights`, and Pingora's current backend health state, so a
 backend with weight `4` can carry roughly four times the in-flight request

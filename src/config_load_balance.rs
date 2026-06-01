@@ -19,6 +19,8 @@ pub struct LoadBalanceConfig {
     pub hash_cookie: Option<String>,
     #[serde(default = "default_lb_max_iterations")]
     pub max_iterations: usize,
+    #[serde(default = "default_lb_all_down_status")]
+    pub all_down_status: u16,
     #[serde(default)]
     pub health_check: LoadBalanceHealthCheckConfig,
     #[serde(default)]
@@ -36,6 +38,7 @@ impl Default for LoadBalanceConfig {
             hash_header: None,
             hash_cookie: None,
             max_iterations: default_lb_max_iterations(),
+            all_down_status: default_lb_all_down_status(),
             health_check: LoadBalanceHealthCheckConfig::default(),
             passive_health: LoadBalancePassiveHealthConfig::default(),
             slow_start: LoadBalanceSlowStartConfig::default(),
@@ -81,6 +84,11 @@ impl LoadBalanceConfig {
         }
         if self.max_iterations == 0 {
             return Err(ConfigError::InvalidLoadBalanceMaxIterations);
+        }
+        if !(500..=599).contains(&self.all_down_status) {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.all_down_status must be an HTTP 5xx status",
+            });
         }
 
         self.health_check.validate()?;
@@ -478,6 +486,10 @@ fn default_true() -> bool {
 
 fn default_lb_max_iterations() -> usize {
     256
+}
+
+fn default_lb_all_down_status() -> u16 {
+    502
 }
 
 fn default_lb_health_check_interval_secs() -> u64 {

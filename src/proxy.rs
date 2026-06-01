@@ -4014,8 +4014,12 @@ impl ProxyHttp for FluxProxy {
         if selected_upstream_load_balancer(vhost, ctx).is_some() {
             #[cfg(feature = "metrics")]
             record_load_balancer_metric(vhost, ctx, "unavailable");
+            let status = selected_runtime_proxy(vhost, ctx)
+                .config
+                .load_balance
+                .all_down_status;
             return Error::e_explain(
-                ErrorType::ConnectError,
+                ErrorType::HTTPStatus(status),
                 "no healthy load-balanced upstream is available",
             );
         }

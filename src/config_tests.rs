@@ -521,6 +521,7 @@ fn parses_proxy_upstream_pool() {
 
             [proxy.load_balance]
             max_iterations = 16
+            all_down_status = 503
 
             [proxy.load_balance.health_check]
             enabled = true
@@ -624,6 +625,7 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(config.proxy.error_pages[0].status, 502);
     assert_eq!(config.proxy.error_pages[0].path, "/502.html");
     assert_eq!(config.proxy.load_balance.max_iterations, 16);
+    assert_eq!(config.proxy.load_balance.all_down_status, 503);
     assert!(config.proxy.load_balance.health_check.enabled);
     assert_eq!(
         config.proxy.load_balance.health_check.protocol,
@@ -2402,6 +2404,22 @@ fn validates_load_balance_hash_selection() {
     )
     .unwrap();
     least_time.validate().unwrap();
+}
+
+#[test]
+fn rejects_invalid_load_balance_all_down_status() {
+    let config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            all_down_status = 404
+            "#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        config.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
 }
 
 #[test]
