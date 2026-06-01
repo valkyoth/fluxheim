@@ -45,6 +45,7 @@ pub struct UpstreamLoadBalancer {
     counters: Arc<BackendConnectionCounters>,
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
+    all_down_status: u16,
 }
 
 pub struct SelectedUpstream {
@@ -64,6 +65,12 @@ pub struct LoadBalancedUpstreamOutcome {
 pub struct LoadBalancerPoolRuntimeStats {
     pub selection: LoadBalanceSelection,
     pub backend_count: usize,
+    pub max_iterations: usize,
+    pub all_down_status: u16,
+    pub health_check_enabled: bool,
+    pub health_check_frequency_secs: Option<u64>,
+    pub passive_health_enabled: bool,
+    pub slow_start_enabled: bool,
     pub backends: Vec<LoadBalancerBackendRuntimeStats>,
 }
 
@@ -290,13 +297,22 @@ impl UpstreamLoadBalancer {
             counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
+            all_down_status: config.load_balance.all_down_status,
         }
     }
 
     pub fn runtime_stats(&self) -> LoadBalancerPoolRuntimeStats {
+        let health_check_frequency = self.inner.health_check_frequency();
         LoadBalancerPoolRuntimeStats {
             selection: self.selection,
             backend_count: self.inner.backend_count(),
+            max_iterations: self.max_iterations,
+            all_down_status: self.all_down_status,
+            health_check_enabled: health_check_frequency.is_some(),
+            health_check_frequency_secs: health_check_frequency
+                .map(|frequency| frequency.as_secs()),
+            passive_health_enabled: self.passive_health.is_some(),
+            slow_start_enabled: self.slow_start.is_some(),
             backends: self.inner.backend_stats(
                 &self.backend_aliases,
                 self.passive_health.as_deref(),
@@ -497,7 +513,6 @@ impl UpstreamLoadBalancerInner {
         }
     }
 
-    #[cfg(test)]
     fn health_check_frequency(&self) -> Option<Duration> {
         match self {
             Self::RoundRobin(inner) => inner.health_check_frequency,

@@ -45,6 +45,8 @@ behavior when the change improves security or project direction.
 - Add read-only load-balancer runtime status to `GET /_fluxheim/status`,
   including pool/backend readiness, configured policy metadata, in-flight
   counts, passive ejection, slow-start, and least-time latency state.
+- Expand load-balancer runtime status with pool-level selection, iteration,
+  all-down, health-check, passive-health, and slow-start policy metadata.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in

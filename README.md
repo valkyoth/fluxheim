@@ -86,7 +86,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |
-| Load-balancer status | ✅ | Admin status includes configured pools, backend readiness, policy metadata, disabled/drained state, in-flight counts, passive failure/ejection state, slow-start, and least-time latency state. |
+| Load-balancer status | ✅ | Admin status includes configured pools, selection/health policy metadata, backend readiness, disabled/drained state, in-flight counts, passive failure/ejection state, slow-start, and least-time latency state. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
