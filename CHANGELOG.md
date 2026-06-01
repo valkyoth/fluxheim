@@ -47,6 +47,8 @@ behavior when the change improves security or project direction.
   counts, passive ejection, slow-start, and least-time latency state.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
+- Include per-backend passive-health consecutive failure counts in
+  load-balancer runtime status.
 - Add `proxy.load_balance.passive_health.failure_status_ranges` for bounded
   passive outlier detection on inclusive 5xx status ranges.
 - Add `proxy.load_balance.retry.statuses` for bounded safe-method redispatch
