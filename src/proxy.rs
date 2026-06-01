@@ -15140,6 +15140,14 @@ mod tests {
                     proxy: ProxyConfig {
                         upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
                         load_balance: crate::config::LoadBalanceConfig {
+                            passive_health: crate::config::LoadBalancePassiveHealthConfig {
+                                enabled: true,
+                                consecutive_failure: 2,
+                                ejection_secs: 15,
+                                failure_statuses: vec![503],
+                                failure_status_ranges: Vec::new(),
+                                max_latency_ms: 250,
+                            },
                             retry: LoadBalanceRetryConfig {
                                 enabled: true,
                                 max_retries: 2,
@@ -15148,6 +15156,10 @@ mod tests {
                                 status_ranges: Vec::new(),
                                 budget_per_window: 100,
                                 budget_window_secs: 10,
+                            },
+                            slow_start: crate::config::LoadBalanceSlowStartConfig {
+                                enabled: true,
+                                duration_secs: 20,
                             },
                             ..crate::config::LoadBalanceConfig::default()
                         },
@@ -15226,6 +15238,59 @@ mod tests {
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().max_iterations, 256);
         assert!(stats.vhosts[0].pool.as_ref().unwrap().health_check_enabled);
         assert!(!stats.vhosts[0].pool.as_ref().unwrap().parallel_health_check);
+        assert!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .passive_health_enabled
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .passive_health
+                .consecutive_failure,
+            2
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .passive_health
+                .ejection_secs,
+            15
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .passive_health
+                .failure_statuses,
+            [503]
+        );
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .passive_health
+                .max_latency_ms,
+            250
+        );
+        assert!(stats.vhosts[0].pool.as_ref().unwrap().slow_start_enabled);
+        assert_eq!(
+            stats.vhosts[0]
+                .pool
+                .as_ref()
+                .unwrap()
+                .slow_start
+                .duration_secs,
+            20
+        );
         assert!(stats.vhosts[0].pool.as_ref().unwrap().retry.enabled);
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().retry.max_retries, 2);
         assert_eq!(stats.vhosts[0].pool.as_ref().unwrap().retry.statuses, [503]);

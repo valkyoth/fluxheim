@@ -42,6 +42,8 @@ pub struct UpstreamLoadBalancer {
     backend_aliases: Arc<std::collections::HashMap<u64, Arc<str>>>,
     passive_health: Option<Arc<PassiveHealthState>>,
     slow_start: Option<Arc<SlowStartState>>,
+    passive_health_policy: LoadBalancePassiveHealthConfig,
+    slow_start_policy: LoadBalanceSlowStartConfig,
     counters: Arc<BackendConnectionCounters>,
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
@@ -73,6 +75,8 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub parallel_health_check: bool,
     pub passive_health_enabled: bool,
     pub slow_start_enabled: bool,
+    pub passive_health: LoadBalancePassiveHealthConfig,
+    pub slow_start: LoadBalanceSlowStartConfig,
     pub retry: LoadBalancerRetryRuntimeStats,
     pub backends: Vec<LoadBalancerBackendRuntimeStats>,
 }
@@ -308,6 +312,8 @@ impl UpstreamLoadBalancer {
                 .slow_start
                 .enabled
                 .then(|| Arc::new(SlowStartState::from_config(&config.load_balance.slow_start))),
+            passive_health_policy: config.load_balance.passive_health.clone(),
+            slow_start_policy: config.load_balance.slow_start.clone(),
             counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
@@ -329,6 +335,8 @@ impl UpstreamLoadBalancer {
             parallel_health_check: self.inner.parallel_health_check(),
             passive_health_enabled: self.passive_health.is_some(),
             slow_start_enabled: self.slow_start.is_some(),
+            passive_health: self.passive_health_policy.clone(),
+            slow_start: self.slow_start_policy.clone(),
             retry: self.retry.clone(),
             backends: self.inner.backend_stats(
                 &self.backend_aliases,
