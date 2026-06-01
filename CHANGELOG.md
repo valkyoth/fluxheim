@@ -54,6 +54,8 @@ behavior when the change improves security or project direction.
   status so pool capacity is visible without client-side backend inference.
 - Include primary/backup availability counts plus drain, disabled, passive
   ejection, and saturation summary counts in load-balancer runtime status.
+- Include explicit runtime member override state and runtime override summary
+  counts in load-balancer runtime status.
 - Add authenticated in-memory load-balancer member-state operations through
   `POST /_fluxheim/load-balancer/member-state` for existing configured
   members: normal, drain, and disable by configured address or alias.

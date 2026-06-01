@@ -101,6 +101,9 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub backup_available_backend_count: usize,
     pub drained_backend_count: usize,
     pub disabled_backend_count: usize,
+    pub runtime_overridden_backend_count: usize,
+    pub runtime_drained_backend_count: usize,
+    pub runtime_disabled_backend_count: usize,
     pub passive_ejected_backend_count: usize,
     pub saturated_backend_count: usize,
     pub max_iterations: usize,
@@ -136,6 +139,7 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub backup: bool,
     pub drained: bool,
     pub disabled: bool,
+    pub runtime_state_override: Option<LoadBalancerRuntimeBackendState>,
     pub priority_group: Option<u16>,
     pub max_in_flight: Option<usize>,
     pub in_flight: usize,
@@ -381,6 +385,22 @@ impl UpstreamLoadBalancer {
             .count();
         let drained_backend_count = backends.iter().filter(|backend| backend.drained).count();
         let disabled_backend_count = backends.iter().filter(|backend| backend.disabled).count();
+        let runtime_overridden_backend_count = backends
+            .iter()
+            .filter(|backend| backend.runtime_state_override.is_some())
+            .count();
+        let runtime_drained_backend_count = backends
+            .iter()
+            .filter(|backend| {
+                backend.runtime_state_override == Some(LoadBalancerRuntimeBackendState::Drained)
+            })
+            .count();
+        let runtime_disabled_backend_count = backends
+            .iter()
+            .filter(|backend| {
+                backend.runtime_state_override == Some(LoadBalancerRuntimeBackendState::Disabled)
+            })
+            .count();
         let passive_ejected_backend_count = backends
             .iter()
             .filter(|backend| backend.passive_ejected)
@@ -402,6 +422,9 @@ impl UpstreamLoadBalancer {
             backup_available_backend_count,
             drained_backend_count,
             disabled_backend_count,
+            runtime_overridden_backend_count,
+            runtime_drained_backend_count,
+            runtime_disabled_backend_count,
             passive_ejected_backend_count,
             saturated_backend_count,
             max_iterations: self.max_iterations,
@@ -1187,6 +1210,10 @@ impl BackendSelectionPolicy {
     fn set_runtime_backend_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
         self.runtime.set_state(key, state);
     }
+
+    fn runtime_backend_state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
+        self.runtime.state(key)
+    }
 }
 
 impl RuntimeBackendPolicyOverrides {
@@ -1224,6 +1251,24 @@ impl RuntimeBackendPolicyOverrides {
                 disabled.insert(key);
             }
         }
+    }
+
+    fn state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
+        let drain = self
+            .drain
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let disabled = self
+            .disabled
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if disabled.contains(&key) {
+            return Some(LoadBalancerRuntimeBackendState::Disabled);
+        }
+        if drain.contains(&key) {
+            return Some(LoadBalancerRuntimeBackendState::Drained);
+        }
+        None
     }
 }
 
@@ -1322,6 +1367,7 @@ where
                 backup: backend_policy.backup(policy_key),
                 drained: backend_policy.drained(policy_key),
                 disabled: backend_policy.disabled(policy_key),
+                runtime_state_override: backend_policy.runtime_backend_state(policy_key),
                 priority_group: backend_policy.priority_group(policy_key),
                 max_in_flight: backend_policy.max_in_flight_key(policy_key),
                 in_flight: counters.count_existing(backend),
@@ -3000,7 +3046,19 @@ mod tests {
         assert_eq!(mutation.alias.as_deref(), Some("primary-a"));
         let stats = balancer.runtime_stats();
         assert_eq!(stats.drained_backend_count, 1);
+        assert_eq!(stats.runtime_overridden_backend_count, 1);
+        assert_eq!(stats.runtime_drained_backend_count, 1);
+        assert_eq!(stats.runtime_disabled_backend_count, 0);
         assert_eq!(stats.primary_available_backend_count, 1);
+        let runtime_drained = stats
+            .backends
+            .iter()
+            .find(|backend| backend.alias.as_deref() == Some("primary-a"))
+            .expect("runtime drained backend status");
+        assert_eq!(
+            runtime_drained.runtime_state_override,
+            Some(LoadBalancerRuntimeBackendState::Drained)
+        );
         for _ in 0..4 {
             let selected = balancer.select(&request(), None).unwrap();
             assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
@@ -3012,12 +3070,19 @@ mod tests {
         let stats = balancer.runtime_stats();
         assert_eq!(stats.drained_backend_count, 1);
         assert_eq!(stats.disabled_backend_count, 1);
+        assert_eq!(stats.runtime_overridden_backend_count, 2);
+        assert_eq!(stats.runtime_drained_backend_count, 1);
+        assert_eq!(stats.runtime_disabled_backend_count, 1);
         assert_eq!(stats.primary_available_backend_count, 0);
         assert!(balancer.select(&request(), None).is_none());
 
         balancer
             .set_runtime_backend_state("primary-a", LoadBalancerRuntimeBackendState::Normal)
             .unwrap();
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.runtime_overridden_backend_count, 1);
+        assert_eq!(stats.runtime_drained_backend_count, 0);
+        assert_eq!(stats.runtime_disabled_backend_count, 1);
         let selected = balancer.select(&request(), None).unwrap();
         assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3000");
     }

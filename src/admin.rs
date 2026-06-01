@@ -3593,7 +3593,20 @@ mod tests {
         let body: Value = serde_json::from_slice(&response.body).unwrap();
         let pool = &body["load_balancer"]["vhosts"][0]["pool"];
         assert_eq!(pool["drained_backend_count"], 1);
+        assert_eq!(pool["runtime_overridden_backend_count"], 1);
+        assert_eq!(pool["runtime_drained_backend_count"], 1);
+        assert_eq!(pool["runtime_disabled_backend_count"], 0);
         assert_eq!(pool["primary_available_backend_count"], 1);
+        let app_a = pool["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|backend| backend["alias"] == "app-a")
+            .expect("app-a backend status");
+        assert_eq!(
+            app_a["runtime_state_override"],
+            Value::String("drained".to_owned())
+        );
     }
 
     #[test]
