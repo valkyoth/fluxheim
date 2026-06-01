@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
   in-flight request counts for latency-sensitive application pools.
 - Add static `upstream_priority_groups` for F5-style preferred/fallback
   selection across configured static upstream pools.
+- Add static per-upstream `upstream_max_in_flight` caps so saturated members
+  are skipped consistently across load-balancing selectors.
 
 ## 1.4.7 - 2026-05-31
 

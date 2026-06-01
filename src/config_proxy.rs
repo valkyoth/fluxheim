@@ -45,6 +45,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_priority_groups: Vec<u16>,
     #[serde(default)]
+    pub upstream_max_in_flight: Vec<usize>,
+    #[serde(default)]
     pub upstream_aliases: Vec<String>,
     #[serde(default)]
     pub backup_upstreams: Vec<String>,
@@ -142,6 +144,7 @@ const MAX_PROXY_UPSTREAM_DNS_REFRESH_SECS: u64 = 300;
 const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_UPSTREAM_PRIORITY_GROUP: u16 = 1000;
+const MAX_PROXY_UPSTREAM_MAX_IN_FLIGHT: usize = 1_000_000;
 pub(crate) const MAX_PROXY_ERROR_PAGES: usize = 64;
 const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
@@ -158,6 +161,7 @@ impl Default for ProxyConfig {
             upstream_dns_refresh_secs: None,
             upstream_weights: Vec::new(),
             upstream_priority_groups: Vec::new(),
+            upstream_max_in_flight: Vec::new(),
             upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
             drain_upstreams: Vec::new(),
@@ -285,13 +289,14 @@ impl ProxyConfig {
                 }
                 if !self.upstream_weights.is_empty()
                     || !self.upstream_priority_groups.is_empty()
+                    || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstreams_file",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
                     });
                 }
                 if self.upstream_tls && self.upstream_sni.is_none() {
@@ -340,13 +345,14 @@ impl ProxyConfig {
                 }
                 if !self.upstream_weights.is_empty()
                     || !self.upstream_priority_groups.is_empty()
+                    || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_dns_refresh_secs",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_max_in_flight, upstream_aliases, backup_upstreams, or drain_upstreams in this release",
                     });
                 }
             }
@@ -396,6 +402,23 @@ impl ProxyConfig {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_priority_groups",
                         reason: "priority groups must be at most 1000",
+                    });
+                }
+            }
+        }
+        if !self.upstream_max_in_flight.is_empty() {
+            if self.upstream.is_some() || self.upstream_max_in_flight.len() != self.upstreams.len()
+            {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_max_in_flight",
+                    reason: "upstream_max_in_flight must match proxy.upstreams and cannot be used with proxy.upstream",
+                });
+            }
+            for max_in_flight in &self.upstream_max_in_flight {
+                if *max_in_flight == 0 || *max_in_flight > MAX_PROXY_UPSTREAM_MAX_IN_FLIGHT {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_max_in_flight",
+                        reason: "max in-flight values must be between 1 and 1000000",
                     });
                 }
             }

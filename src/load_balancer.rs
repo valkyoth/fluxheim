@@ -38,6 +38,7 @@ pub struct UpstreamLoadBalancer {
     backend_aliases: Arc<std::collections::HashMap<u64, Arc<str>>>,
     passive_health: Option<Arc<PassiveHealthState>>,
     slow_start: Option<Arc<SlowStartState>>,
+    counters: Arc<BackendConnectionCounters>,
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
 }
@@ -109,10 +110,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::LeastConnections {
-                        inner: Arc::new(inner),
-                        counters: Arc::new(BackendConnectionCounters::default()),
-                    },
+                    UpstreamLoadBalancerInner::LeastConnections(Arc::new(inner)),
                     config,
                 )))
             }
@@ -123,7 +121,6 @@ impl UpstreamLoadBalancer {
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::LeastTime {
                         inner: Arc::new(inner),
-                        counters: Arc::new(BackendConnectionCounters::default()),
                         latency: Arc::new(BackendLatencyState::default()),
                     },
                     config,
@@ -134,10 +131,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::PowerOfTwo {
-                        inner: Arc::new(inner),
-                        counters: Arc::new(BackendConnectionCounters::default()),
-                    },
+                    UpstreamLoadBalancerInner::PowerOfTwo(Arc::new(inner)),
                     config,
                 )))
             }
@@ -180,27 +174,20 @@ impl UpstreamLoadBalancer {
             ),
             LoadBalanceSelection::LeastConnections => {
                 background_service_for::<RoundRobin>(name, config, |inner| {
-                    UpstreamLoadBalancerInner::LeastConnections {
-                        inner,
-                        counters: Arc::new(BackendConnectionCounters::default()),
-                    }
+                    UpstreamLoadBalancerInner::LeastConnections(inner)
                 })
             }
             LoadBalanceSelection::LeastTime => {
                 background_service_for::<RoundRobin>(name, config, |inner| {
                     UpstreamLoadBalancerInner::LeastTime {
                         inner,
-                        counters: Arc::new(BackendConnectionCounters::default()),
                         latency: Arc::new(BackendLatencyState::default()),
                     }
                 })
             }
             LoadBalanceSelection::PowerOfTwo => {
                 background_service_for::<Random>(name, config, |inner| {
-                    UpstreamLoadBalancerInner::PowerOfTwo {
-                        inner,
-                        counters: Arc::new(BackendConnectionCounters::default()),
-                    }
+                    UpstreamLoadBalancerInner::PowerOfTwo(inner)
                 })
             }
             LoadBalanceSelection::SourceHash
@@ -231,8 +218,13 @@ impl UpstreamLoadBalancer {
             self.max_iterations,
             self.passive_health.as_deref(),
             self.slow_start.as_deref(),
+            &self.counters,
             &self.backend_policy,
         )?;
+        selected.permit = Some(self.counters.permit(
+            &selected.backend,
+            self.backend_policy.max_in_flight(&selected.backend),
+        )?);
         selected.alias = self
             .backend_aliases
             .get(&backend_policy_key(&selected.backend))
@@ -264,6 +256,7 @@ impl UpstreamLoadBalancer {
                 .slow_start
                 .enabled
                 .then(|| Arc::new(SlowStartState::from_config(&config.load_balance.slow_start))),
+            counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
         }
@@ -293,19 +286,12 @@ impl UpstreamLoadBalancer {
 #[derive(Clone)]
 enum UpstreamLoadBalancerInner {
     RoundRobin(Arc<LoadBalancer<RoundRobin>>),
-    LeastConnections {
-        inner: Arc<LoadBalancer<RoundRobin>>,
-        counters: Arc<BackendConnectionCounters>,
-    },
+    LeastConnections(Arc<LoadBalancer<RoundRobin>>),
     LeastTime {
         inner: Arc<LoadBalancer<RoundRobin>>,
-        counters: Arc<BackendConnectionCounters>,
         latency: Arc<BackendLatencyState>,
     },
-    PowerOfTwo {
-        inner: Arc<LoadBalancer<Random>>,
-        counters: Arc<BackendConnectionCounters>,
-    },
+    PowerOfTwo(Arc<LoadBalancer<Random>>),
     FnvHash(Arc<LoadBalancer<FNVHash>>),
     ConsistentHash(Arc<LoadBalancer<Consistent>>),
 }
@@ -317,6 +303,7 @@ impl UpstreamLoadBalancerInner {
         max_iterations: usize,
         passive_health: Option<&PassiveHealthState>,
         slow_start: Option<&SlowStartState>,
+        counters: &BackendConnectionCounters,
         backend_policy: &BackendSelectionPolicy,
     ) -> Option<SelectedUpstream> {
         match self {
@@ -326,21 +313,18 @@ impl UpstreamLoadBalancerInner {
                 max_iterations,
                 passive_health,
                 slow_start,
+                counters,
                 backend_policy,
             )
             .map(SelectedUpstream::new),
-            Self::LeastConnections { inner, counters } => select_least_connections(
+            Self::LeastConnections(inner) => select_least_connections(
                 inner,
                 counters,
                 passive_health,
                 slow_start,
                 backend_policy,
             ),
-            Self::LeastTime {
-                inner,
-                counters,
-                latency,
-            } => select_least_time(
+            Self::LeastTime { inner, latency } => select_least_time(
                 inner,
                 counters,
                 latency,
@@ -348,7 +332,7 @@ impl UpstreamLoadBalancerInner {
                 slow_start,
                 backend_policy,
             ),
-            Self::PowerOfTwo { inner, counters } => select_power_of_two(
+            Self::PowerOfTwo(inner) => select_power_of_two(
                 inner,
                 counters,
                 max_iterations,
@@ -362,6 +346,7 @@ impl UpstreamLoadBalancerInner {
                 max_iterations,
                 passive_health,
                 slow_start,
+                counters,
                 backend_policy,
             )
             .map(SelectedUpstream::new),
@@ -371,6 +356,7 @@ impl UpstreamLoadBalancerInner {
                 max_iterations,
                 passive_health,
                 slow_start,
+                counters,
                 backend_policy,
             )
             .map(SelectedUpstream::new),
@@ -381,9 +367,9 @@ impl UpstreamLoadBalancerInner {
     fn backend_count(&self) -> usize {
         match self {
             Self::RoundRobin(inner) => inner.backends().get_backend().len(),
-            Self::LeastConnections { inner, .. } => inner.backends().get_backend().len(),
+            Self::LeastConnections(inner) => inner.backends().get_backend().len(),
             Self::LeastTime { inner, .. } => inner.backends().get_backend().len(),
-            Self::PowerOfTwo { inner, .. } => inner.backends().get_backend().len(),
+            Self::PowerOfTwo(inner) => inner.backends().get_backend().len(),
             Self::FnvHash(inner) => inner.backends().get_backend().len(),
             Self::ConsistentHash(inner) => inner.backends().get_backend().len(),
         }
@@ -393,9 +379,9 @@ impl UpstreamLoadBalancerInner {
     fn backend_weights(&self) -> Vec<usize> {
         match self {
             Self::RoundRobin(inner) => backend_weights(inner),
-            Self::LeastConnections { inner, .. } => backend_weights(inner),
+            Self::LeastConnections(inner) => backend_weights(inner),
             Self::LeastTime { inner, .. } => backend_weights(inner),
-            Self::PowerOfTwo { inner, .. } => backend_weights(inner),
+            Self::PowerOfTwo(inner) => backend_weights(inner),
             Self::FnvHash(inner) => backend_weights(inner),
             Self::ConsistentHash(inner) => backend_weights(inner),
         }
@@ -405,9 +391,9 @@ impl UpstreamLoadBalancerInner {
     fn health_check_frequency(&self) -> Option<Duration> {
         match self {
             Self::RoundRobin(inner) => inner.health_check_frequency,
-            Self::LeastConnections { inner, .. } => inner.health_check_frequency,
+            Self::LeastConnections(inner) => inner.health_check_frequency,
             Self::LeastTime { inner, .. } => inner.health_check_frequency,
-            Self::PowerOfTwo { inner, .. } => inner.health_check_frequency,
+            Self::PowerOfTwo(inner) => inner.health_check_frequency,
             Self::FnvHash(inner) => inner.health_check_frequency,
             Self::ConsistentHash(inner) => inner.health_check_frequency,
         }
@@ -417,9 +403,9 @@ impl UpstreamLoadBalancerInner {
     fn parallel_health_check(&self) -> bool {
         match self {
             Self::RoundRobin(inner) => inner.parallel_health_check,
-            Self::LeastConnections { inner, .. } => inner.parallel_health_check,
+            Self::LeastConnections(inner) => inner.parallel_health_check,
             Self::LeastTime { inner, .. } => inner.parallel_health_check,
-            Self::PowerOfTwo { inner, .. } => inner.parallel_health_check,
+            Self::PowerOfTwo(inner) => inner.parallel_health_check,
             Self::FnvHash(inner) => inner.parallel_health_check,
             Self::ConsistentHash(inner) => inner.parallel_health_check,
         }
@@ -429,8 +415,8 @@ impl UpstreamLoadBalancerInner {
         match self {
             Self::LeastTime { latency, .. } => Some(latency.clone()),
             Self::RoundRobin(_)
-            | Self::LeastConnections { .. }
-            | Self::PowerOfTwo { .. }
+            | Self::LeastConnections(_)
+            | Self::PowerOfTwo(_)
             | Self::FnvHash(_)
             | Self::ConsistentHash(_) => None,
         }
@@ -645,10 +631,17 @@ impl BackendConnectionCounters {
         self.counter(backend).load(Ordering::Acquire)
     }
 
-    fn permit(&self, backend: &Backend) -> Option<LoadBalancedConnectionPermit> {
+    fn permit(
+        &self,
+        backend: &Backend,
+        max_in_flight: Option<usize>,
+    ) -> Option<LoadBalancedConnectionPermit> {
         let counter = self.counter(backend);
         let mut current = counter.load(Ordering::Acquire);
         loop {
+            if max_in_flight.is_some_and(|limit| current >= limit) {
+                return None;
+            }
             let next = current.checked_add(1)?;
             match counter.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire)
             {
@@ -710,6 +703,7 @@ struct BackendSelectionPolicy {
     backup: Arc<std::collections::HashSet<u64>>,
     drain: Arc<std::collections::HashSet<u64>>,
     priority: Arc<std::collections::HashMap<u64, u16>>,
+    max_in_flight: Arc<std::collections::HashMap<u64, usize>>,
     priority_groups: Arc<[u16]>,
 }
 
@@ -721,21 +715,37 @@ impl BackendSelectionPolicy {
             backup: backend_policy_keys(&config.backup_upstreams).into(),
             drain: backend_policy_keys(&config.drain_upstreams).into(),
             priority: priority.into(),
+            max_in_flight: backend_max_in_flight(config).into(),
             priority_groups: priority_groups.into(),
         }
     }
 
-    fn permits(&self, backend: &Backend, pass: SelectionPass) -> bool {
+    fn permits(
+        &self,
+        backend: &Backend,
+        pass: SelectionPass,
+        counters: &BackendConnectionCounters,
+    ) -> bool {
         let key = backend_policy_key(backend);
         !self.drain.contains(&key)
             && (pass.allow_backup || !self.backup.contains(&key))
             && pass
                 .priority_group
                 .is_none_or(|group| self.priority.get(&key).copied().unwrap_or(0) == group)
+            && self
+                .max_in_flight
+                .get(&key)
+                .is_none_or(|limit| counters.count(backend) < *limit)
     }
 
     fn priority_groups(&self) -> &[u16] {
         &self.priority_groups
+    }
+
+    fn max_in_flight(&self, backend: &Backend) -> Option<usize> {
+        self.max_in_flight
+            .get(&backend_policy_key(backend))
+            .copied()
     }
 }
 
@@ -761,6 +771,18 @@ fn backend_priority_groups(config: &ProxyConfig) -> std::collections::HashMap<u6
         .filter_map(|(upstream, priority)| {
             let backend = Backend::new(upstream).ok()?;
             Some((backend_policy_key(&backend), *priority))
+        })
+        .collect()
+}
+
+fn backend_max_in_flight(config: &ProxyConfig) -> std::collections::HashMap<u64, usize> {
+    config
+        .upstreams
+        .iter()
+        .zip(&config.upstream_max_in_flight)
+        .filter_map(|(upstream, max_in_flight)| {
+            let backend = Backend::new(upstream).ok()?;
+            Some((backend_policy_key(&backend), *max_in_flight))
         })
         .collect()
 }
@@ -797,20 +819,25 @@ fn select_pingora<S>(
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
+    counters: &BackendConnectionCounters,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<Backend>
 where
     S: BackendSelection + 'static,
     S::Iter: BackendIter,
 {
+    let context = SelectionContext {
+        passive_health,
+        slow_start,
+        counters,
+        backend_policy,
+    };
     for priority_group in selection_priority_groups(backend_policy) {
         if let Some(backend) = select_pingora_with_backup_policy(
             inner,
             key,
             max_iterations,
-            passive_health,
-            slow_start,
-            backend_policy,
+            context,
             SelectionPass {
                 priority_group,
                 allow_backup: false,
@@ -825,9 +852,7 @@ where
             inner,
             key,
             max_iterations,
-            passive_health,
-            slow_start,
-            backend_policy,
+            context,
             SelectionPass {
                 priority_group,
                 allow_backup: true,
@@ -842,9 +867,7 @@ where
             inner,
             key,
             max_iterations,
-            passive_health,
-            slow_start,
-            backend_policy,
+            context,
             SelectionPass {
                 priority_group,
                 allow_backup: false,
@@ -864,6 +887,14 @@ struct SelectionPass {
     ignore_slow_start: bool,
 }
 
+#[derive(Clone, Copy)]
+struct SelectionContext<'a> {
+    passive_health: Option<&'a PassiveHealthState>,
+    slow_start: Option<&'a SlowStartState>,
+    counters: &'a BackendConnectionCounters,
+    backend_policy: &'a BackendSelectionPolicy,
+}
+
 fn selection_priority_groups(backend_policy: &BackendSelectionPolicy) -> Vec<Option<u16>> {
     if backend_policy.priority_groups().is_empty() {
         return vec![None];
@@ -880,9 +911,7 @@ fn select_pingora_with_backup_policy<S>(
     inner: &LoadBalancer<S>,
     key: &[u8],
     max_iterations: usize,
-    passive_health: Option<&PassiveHealthState>,
-    slow_start: Option<&SlowStartState>,
-    backend_policy: &BackendSelectionPolicy,
+    context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> Option<Backend>
 where
@@ -891,9 +920,16 @@ where
 {
     inner.select_with(key, max_iterations, |backend, ready| {
         ready
-            && backend_policy.permits(backend, pass)
-            && passive_health.is_none_or(|health| !health.is_ejected(backend))
-            && (pass.ignore_slow_start || slow_start.is_none_or(|state| state.permits(backend)))
+            && context
+                .backend_policy
+                .permits(backend, pass, context.counters)
+            && context
+                .passive_health
+                .is_none_or(|health| !health.is_ejected(backend))
+            && (pass.ignore_slow_start
+                || context
+                    .slow_start
+                    .is_none_or(|state| state.permits(backend)))
     })
 }
 
@@ -966,7 +1002,7 @@ fn select_least_connections_with_backup_policy(
     let mut selected = None;
     for backend in inner.backends().get_backend().iter() {
         if !inner.backends().ready(backend)
-            || !backend_policy.permits(backend, pass)
+            || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
         {
@@ -988,9 +1024,8 @@ fn select_least_connections_with_backup_policy(
         }
     }
     let backend = selected.map(|(backend, _, _)| backend)?;
-    let permit = counters.permit(&backend)?;
     Some(SelectedUpstream {
-        permit: Some(permit),
+        permit: None,
         alias: None,
         backend,
         reporter: None,
@@ -1081,7 +1116,7 @@ fn select_least_time_with_backup_policy(
     let mut selected = None;
     for backend in inner.backends().get_backend().iter() {
         if !inner.backends().ready(backend)
-            || !backend_policy.permits(backend, pass)
+            || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
         {
@@ -1111,9 +1146,8 @@ fn select_least_time_with_backup_policy(
         }
     }
     let backend = selected.map(|(backend, _, _, _)| backend)?;
-    let permit = counters.permit(&backend)?;
     Some(SelectedUpstream {
-        permit: Some(permit),
+        permit: None,
         alias: None,
         backend,
         reporter: None,
@@ -1154,6 +1188,7 @@ fn select_power_of_two(
         max_iterations,
         passive_health,
         slow_start,
+        counters,
         backend_policy,
     )?;
     let first_key = backend_connection_key(&first);
@@ -1165,6 +1200,7 @@ fn select_power_of_two(
                 max_iterations,
                 passive_health,
                 slow_start,
+                counters,
                 backend_policy,
             )
         })
@@ -1175,9 +1211,8 @@ fn select_power_of_two(
     } else {
         first
     };
-    let permit = counters.permit(&selected)?;
     Some(SelectedUpstream {
-        permit: Some(permit),
+        permit: None,
         alias: None,
         backend: selected,
         reporter: None,
@@ -1829,6 +1864,37 @@ mod tests {
 
         let selected = balancer.select(&request(), None).unwrap();
         assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+    }
+
+    #[test]
+    fn upstream_max_in_flight_skips_capped_backend() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_max_in_flight: vec![1, 2],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        assert_eq!(first.backend.addr.to_string(), "127.0.0.1:3000");
+
+        let second = balancer.select(&request(), None).unwrap();
+        assert_eq!(second.backend.addr.to_string(), "127.0.0.1:3001");
+
+        let third = balancer.select(&request(), None).unwrap();
+        assert_eq!(third.backend.addr.to_string(), "127.0.0.1:3001");
+
+        assert!(balancer.select(&request(), None).is_none());
+        drop(first);
+
+        let fourth = balancer.select(&request(), None).unwrap();
+        assert_eq!(fourth.backend.addr.to_string(), "127.0.0.1:3000");
     }
 
     #[test]

@@ -686,6 +686,7 @@ rules and can append additional rules.
 upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_weights = [1, 2]
 upstream_priority_groups = [100, 50]
+upstream_max_in_flight = [256, 512]
 upstream_aliases = ["app-a", "app-b"]
 backup_upstreams = ["127.0.0.1:3001"]
 drain_upstreams = []
@@ -793,16 +794,16 @@ and full-line `#` comments ignored, 2 through 64 unique entries required.
 Fluxheim reads the file with the same symlink and parent-permission hardening
 used for other operator-controlled files. In this release, file-refreshed pools
 cannot be combined with `upstream_weights`, `upstream_priority_groups`,
-`upstream_aliases`, `backup_upstreams`, or `drain_upstreams`; use static
-`upstreams` for those policies.
+`upstream_max_in_flight`, `upstream_aliases`, `backup_upstreams`, or
+`drain_upstreams`; use static `upstreams` for those policies.
 For DNS-based service names, load-balancer builds can set
 `upstream_dns_refresh_secs = 5` together with `upstreams = ["app.service:8080"]`.
 Fluxheim resolves those authorities at startup and then refreshes them on the
 configured 1 through 300 second interval. This first DNS-refresh slice is
 mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
-`upstream_priority_groups`, `upstream_aliases`, `backup_upstreams`, and
-`drain_upstreams`; use the static pool form when those richer backend policies
-are required.
+`upstream_priority_groups`, `upstream_max_in_flight`, `upstream_aliases`,
+`backup_upstreams`, and `drain_upstreams`; use the static pool form when those
+richer backend policies are required.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
 upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default to
@@ -862,6 +863,10 @@ value for each `upstreams` entry. Higher values are preferred first, then lower
 values are used only when the preferred priority group has no selectable
 backend. Each priority group must be at most 1000. This is the static
 F5-style preferred/fallback group foundation for the `1.5` load-balancer line.
+`upstream_max_in_flight` is optional and, when set, must contain one positive
+concurrency cap for each `upstreams` entry. A capped backend is skipped when it
+already has that many in-flight requests, regardless of the selected
+load-balancing algorithm. Each cap must be at most 1000000.
 `upstream_aliases` is optional and, when set, must contain one safe
 low-cardinality alias for each `upstreams` entry. Aliases may contain ASCII
 letters, digits, dots, dashes, and underscores, are capped at 64 bytes, and

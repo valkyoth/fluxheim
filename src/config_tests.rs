@@ -490,6 +490,7 @@ fn parses_proxy_upstream_pool() {
             upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
             upstream_weights = [1, 3]
             upstream_priority_groups = [100, 50]
+            upstream_max_in_flight = [10, 30]
             upstream_aliases = ["app-a", "app-b"]
             backup_upstreams = ["127.0.0.1:3002"]
             connect_timeout_secs = 5
@@ -553,6 +554,7 @@ fn parses_proxy_upstream_pool() {
     );
     assert_eq!(config.proxy.upstream_weights, [1, 3]);
     assert_eq!(config.proxy.upstream_priority_groups, [100, 50]);
+    assert_eq!(config.proxy.upstream_max_in_flight, [10, 30]);
     assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b"]);
     assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
     assert_eq!(config.proxy.connect_timeout_secs, Some(5));
@@ -786,6 +788,57 @@ fn rejects_invalid_proxy_upstream_priority_groups() {
         too_large.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
             field: "proxy.upstream_priority_groups",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn rejects_invalid_proxy_upstream_max_in_flight() {
+    let mismatch: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_max_in_flight = [100]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        mismatch.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_max_in_flight",
+            ..
+        })
+    ));
+
+    let zero: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_max_in_flight = [100, 0]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        zero.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_max_in_flight",
+            ..
+        })
+    ));
+
+    let too_large: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_max_in_flight = [100, 1000001]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        too_large.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_max_in_flight",
             ..
         })
     ));
