@@ -80,6 +80,7 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub max_in_flight: Option<usize>,
     pub in_flight: usize,
     pub passive_ejected: bool,
+    pub passive_ejection_remaining_secs: Option<u64>,
     pub slow_start_permitting: bool,
     pub latency_micros: Option<u64>,
 }
@@ -650,6 +651,19 @@ impl PassiveHealthState {
             .is_some_and(|until| Instant::now() < until)
     }
 
+    fn key_ejection_remaining_secs(&self, key: u64) -> Option<u64> {
+        self.backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .and_then(|state| state.ejected_until)
+            .and_then(|until| {
+                until
+                    .checked_duration_since(Instant::now())
+                    .map(|remaining| remaining.as_secs().saturating_add(1))
+            })
+    }
+
     fn record_status(&self, key: u64, status: u16, latency: Option<Duration>) -> Option<Instant> {
         if self.status_is_failure(status, latency) {
             self.record_failure(key)
@@ -1040,6 +1054,8 @@ where
                 in_flight: counters.count_existing(backend),
                 passive_ejected: passive_health
                     .is_some_and(|health| health.key_is_currently_ejected(connection_key)),
+                passive_ejection_remaining_secs: passive_health
+                    .and_then(|health| health.key_ejection_remaining_secs(connection_key)),
                 slow_start_permitting: slow_start
                     .is_none_or(|state| state.permits_read_only(backend)),
                 latency_micros: latency.and_then(|state| state.score_key(connection_key)),
@@ -2490,6 +2506,15 @@ mod tests {
         let outcome = failed.reporter.unwrap().record_status(503, None);
         assert!(outcome.failed);
         assert!(outcome.ejected);
+        let stats = balancer.runtime_stats();
+        let failed_addr_text = failed_addr.to_string();
+        let failed_stats = stats
+            .backends
+            .iter()
+            .find(|backend| backend.address.as_deref() == Some(failed_addr_text.as_str()))
+            .expect("failed backend stats");
+        assert!(failed_stats.passive_ejected);
+        assert!(failed_stats.passive_ejection_remaining_secs.is_some());
         let next = balancer.select(&request(), None).unwrap();
         assert_ne!(failed_addr, next.backend.addr);
     }
