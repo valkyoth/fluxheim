@@ -32,6 +32,8 @@ behavior when the change improves security or project direction.
   are skipped consistently across load-balancing selectors.
 - Extend HTTP active health checks with configurable request methods and exact
   expected response header validation.
+- Add active health-check `connect_timeout_secs` and `read_timeout_secs`
+  overrides so probes can be tuned independently from normal upstream traffic.
 
 ## 1.4.7 - 2026-05-31
 

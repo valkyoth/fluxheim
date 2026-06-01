@@ -1542,6 +1542,11 @@ fn configured_health_check(
             };
             health_check.consecutive_success = config.load_balance.health_check.consecutive_success;
             health_check.consecutive_failure = config.load_balance.health_check.consecutive_failure;
+            apply_health_check_peer_timeouts(
+                &mut health_check.peer_template.options.connection_timeout,
+                None,
+                config,
+            );
             Ok(health_check)
         }
         LoadBalanceHealthCheckProtocol::Http => configured_http_health_check(config).map(|check| {
@@ -1573,12 +1578,11 @@ fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<HttpHeal
     health_check.consecutive_failure = config.load_balance.health_check.consecutive_failure;
     health_check.reuse_connection = config.load_balance.health_check.reuse_connection;
     health_check.port_override = config.load_balance.health_check.port_override;
-    if let Some(timeout) = config.connect_timeout_secs {
-        health_check.peer_template.options.connection_timeout = Some(Duration::from_secs(timeout));
-    }
-    if let Some(timeout) = config.read_timeout_secs {
-        health_check.peer_template.options.read_timeout = Some(Duration::from_secs(timeout));
-    }
+    apply_health_check_peer_timeouts(
+        &mut health_check.peer_template.options.connection_timeout,
+        Some(&mut health_check.peer_template.options.read_timeout),
+        config,
+    );
     if !config
         .load_balance
         .health_check
@@ -1603,6 +1607,30 @@ fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<HttpHeal
         }));
     }
     Ok(Box::new(health_check))
+}
+
+fn apply_health_check_peer_timeouts(
+    connection_timeout: &mut Option<Duration>,
+    read_timeout: Option<&mut Option<Duration>>,
+    config: &ProxyConfig,
+) {
+    if let Some(timeout) = config
+        .load_balance
+        .health_check
+        .connect_timeout_secs
+        .or(config.connect_timeout_secs)
+    {
+        *connection_timeout = Some(Duration::from_secs(timeout));
+    }
+    if let Some(read_timeout) = read_timeout
+        && let Some(timeout) = config
+            .load_balance
+            .health_check
+            .read_timeout_secs
+            .or(config.read_timeout_secs)
+    {
+        *read_timeout = Some(Duration::from_secs(timeout));
+    }
 }
 
 fn validate_http_health_response(
@@ -2354,6 +2382,8 @@ mod tests {
                     }],
                     reuse_connection: true,
                     port_override: Some(8081),
+                    connect_timeout_secs: Some(5),
+                    read_timeout_secs: Some(6),
                     ..LoadBalanceHealthCheckConfig::default()
                 },
                 ..LoadBalanceConfig::default()
@@ -2369,11 +2399,11 @@ mod tests {
         assert_eq!(health_check.port_override, Some(8081));
         assert_eq!(
             health_check.peer_template.options.connection_timeout,
-            Some(Duration::from_secs(2))
+            Some(Duration::from_secs(5))
         );
         assert_eq!(
             health_check.peer_template.options.read_timeout,
-            Some(Duration::from_secs(4))
+            Some(Duration::from_secs(6))
         );
         assert!(health_check.validator.is_some());
     }

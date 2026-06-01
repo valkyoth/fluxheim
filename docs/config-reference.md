@@ -756,6 +756,8 @@ host = "origin.example.test"
 expected_statuses = []
 expected_headers = []
 reuse_connection = false
+connect_timeout_secs = 1
+read_timeout_secs = 1
 
 [proxy.load_balance.slow_start]
 enabled = false
@@ -918,7 +920,10 @@ must be an uppercase HTTP token. By default only `200` passes, or
 `host` overrides the health-check `Host` header and TLS SNI fallback,
 `reuse_connection = true` allows Pingora to reuse check connections, and
 `port_override` sends checks to a different port on the same backend address.
-Omit `port_override` to check the backend's normal port.
+Omit `port_override` to check the backend's normal port. `connect_timeout_secs`
+and `read_timeout_secs` are optional active-check overrides; when omitted,
+checks inherit the proxy upstream timeout where applicable and otherwise use
+Pingora's health-check defaults.
 `proxy.load_balance.passive_health.enabled = true` adds opt-in passive outlier
 detection. Fluxheim records selected upstream outcomes, treats 5xx responses as
 failures by default, and temporarily ejects a backend after

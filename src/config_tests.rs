@@ -535,6 +535,8 @@ fn parses_proxy_upstream_pool() {
             expected_statuses = [200, 204]
             reuse_connection = true
             port_override = 8081
+            connect_timeout_secs = 1
+            read_timeout_secs = 2
 
             [[proxy.load_balance.health_check.expected_headers]]
             name = "x-fluxheim-health"
@@ -659,6 +661,14 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(
         config.proxy.load_balance.health_check.port_override,
         Some(8081)
+    );
+    assert_eq!(
+        config.proxy.load_balance.health_check.connect_timeout_secs,
+        Some(1)
+    );
+    assert_eq!(
+        config.proxy.load_balance.health_check.read_timeout_secs,
+        Some(2)
     );
     assert!(config.proxy.load_balance.slow_start.enabled);
     assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
@@ -2408,6 +2418,21 @@ fn rejects_invalid_load_balance_health_check() {
         config.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.interval_secs"
+        })
+    );
+
+    let invalid_timeout: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            connect_timeout_secs = 0
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        invalid_timeout.validate(),
+        Err(ConfigError::InvalidProxyTimeout {
+            field: "proxy.load_balance.health_check.connect_timeout_secs"
         })
     );
 }

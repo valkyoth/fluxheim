@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ConfigError, valid_http_token};
+use crate::config::{ConfigError, valid_http_token, validate_optional_timeout_secs};
 use crate::config_header::valid_http_header_name;
 use crate::config_net::normalize_host;
 
@@ -160,6 +160,10 @@ pub struct LoadBalanceHealthCheckConfig {
     pub reuse_connection: bool,
     #[serde(default)]
     pub port_override: Option<u16>,
+    #[serde(default)]
+    pub connect_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub read_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -185,6 +189,8 @@ impl Default for LoadBalanceHealthCheckConfig {
             expected_headers: Vec::new(),
             reuse_connection: false,
             port_override: None,
+            connect_timeout_secs: None,
+            read_timeout_secs: None,
         }
     }
 }
@@ -263,6 +269,14 @@ impl LoadBalanceHealthCheckConfig {
                 field: "proxy.load_balance.health_check.port_override",
             });
         }
+        validate_optional_timeout_secs(
+            "proxy.load_balance.health_check.connect_timeout_secs",
+            self.connect_timeout_secs,
+        )?;
+        validate_optional_timeout_secs(
+            "proxy.load_balance.health_check.read_timeout_secs",
+            self.read_timeout_secs,
+        )?;
 
         Ok(())
     }
