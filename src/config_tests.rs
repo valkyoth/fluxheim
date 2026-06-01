@@ -543,6 +543,10 @@ fn parses_proxy_upstream_pool() {
             name = "x-fluxheim-health"
             value = "ready"
 
+            [[proxy.load_balance.health_check.expected_status_ranges]]
+            start = 300
+            end = 399
+
             [proxy.load_balance.slow_start]
             enabled = true
             duration_secs = 45
@@ -658,6 +662,24 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(
         config.proxy.load_balance.health_check.expected_headers[0].value,
         "ready"
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .health_check
+            .expected_status_ranges[0]
+            .start,
+        300
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .health_check
+            .expected_status_ranges[0]
+            .end,
+        399
     );
     assert!(config.proxy.load_balance.health_check.reuse_connection);
     assert_eq!(
@@ -2525,6 +2547,24 @@ fn rejects_invalid_http_load_balance_health_check() {
         duplicate_expected_header.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.expected_headers"
+        })
+    );
+
+    let invalid_status_range: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+
+            [[proxy.load_balance.health_check.expected_status_ranges]]
+            start = 399
+            end = 200
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_status_range.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.expected_status_ranges"
         })
     );
 }

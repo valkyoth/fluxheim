@@ -755,6 +755,7 @@ method = "GET"
 path = "/"
 host = "origin.example.test"
 expected_statuses = []
+expected_status_ranges = []
 expected_headers = []
 reuse_connection = false
 connect_timeout_secs = 1
@@ -921,6 +922,8 @@ TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send `method` to `path`; `method` defaults to `GET` and
 must be an uppercase HTTP token. By default only `200` passes, or
 `expected_statuses = [200, 204]` can define an explicit allow-list.
+`expected_status_ranges = [{ start = 200, end = 399 }]` accepts inclusive
+HTTP status ranges and can be combined with exact statuses.
 `expected_headers` can require exact response header values:
 `expected_headers = [{ name = "x-fluxheim-health", value = "ready" }]`.
 `host` overrides the health-check `Host` header and TLS SNI fallback,

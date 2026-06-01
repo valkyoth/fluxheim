@@ -32,6 +32,8 @@ behavior when the change improves security or project direction.
   are skipped consistently across load-balancing selectors.
 - Extend HTTP active health checks with configurable request methods and exact
   expected response header validation.
+- Add HTTP active health-check `expected_status_ranges` for inclusive status
+  range monitors such as `200..=399`.
 - Add active health-check `connect_timeout_secs` and `read_timeout_secs`
   overrides so probes can be tuned independently from normal upstream traffic.
 - Add `proxy.load_balance.all_down_status` for explicit 5xx responses when a

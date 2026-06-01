@@ -163,6 +163,8 @@ pub struct LoadBalanceHealthCheckConfig {
     #[serde(default)]
     pub expected_statuses: Vec<u16>,
     #[serde(default)]
+    pub expected_status_ranges: Vec<LoadBalanceHealthCheckExpectedStatusRange>,
+    #[serde(default)]
     pub expected_headers: Vec<LoadBalanceHealthCheckExpectedHeader>,
     #[serde(default)]
     pub reuse_connection: bool,
@@ -181,6 +183,13 @@ pub struct LoadBalanceHealthCheckExpectedHeader {
     pub value: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalanceHealthCheckExpectedStatusRange {
+    pub start: u16,
+    pub end: u16,
+}
+
 impl Default for LoadBalanceHealthCheckConfig {
     fn default() -> Self {
         Self {
@@ -194,6 +203,7 @@ impl Default for LoadBalanceHealthCheckConfig {
             path: default_lb_health_check_path(),
             host: None,
             expected_statuses: Vec::new(),
+            expected_status_ranges: Vec::new(),
             expected_headers: Vec::new(),
             reuse_connection: false,
             port_override: None,
@@ -247,6 +257,21 @@ impl LoadBalanceHealthCheckConfig {
             if !(100..=599).contains(status) || !seen_statuses.insert(*status) {
                 return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                     field: "proxy.load_balance.health_check.expected_statuses",
+                });
+            }
+        }
+        if self.expected_status_ranges.len() > 32 {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.expected_status_ranges",
+            });
+        }
+        for range in &self.expected_status_ranges {
+            if !(100..=599).contains(&range.start)
+                || !(100..=599).contains(&range.end)
+                || range.start > range.end
+            {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.expected_status_ranges",
                 });
             }
         }

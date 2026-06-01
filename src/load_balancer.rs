@@ -26,8 +26,9 @@ use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::{Error, ErrorType};
 
 use crate::config::{
-    LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckProtocol,
-    LoadBalancePassiveHealthConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+    LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
+    LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalanceSelection,
+    LoadBalanceSlowStartConfig, ProxyConfig,
 };
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
@@ -1588,12 +1589,23 @@ fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<HttpHeal
         .health_check
         .expected_statuses
         .is_empty()
+        || !config
+            .load_balance
+            .health_check
+            .expected_status_ranges
+            .is_empty()
         || !config.load_balance.health_check.expected_headers.is_empty()
     {
         let expected_statuses: Arc<[u16]> = config
             .load_balance
             .health_check
             .expected_statuses
+            .clone()
+            .into();
+        let expected_status_ranges: Arc<[LoadBalanceHealthCheckExpectedStatusRange]> = config
+            .load_balance
+            .health_check
+            .expected_status_ranges
             .clone()
             .into();
         let expected_headers: Arc<[LoadBalanceHealthCheckExpectedHeader]> = config
@@ -1603,7 +1615,12 @@ fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<HttpHeal
             .clone()
             .into();
         health_check.validator = Some(Box::new(move |response| {
-            validate_http_health_response(response, &expected_statuses, &expected_headers)
+            validate_http_health_response(
+                response,
+                &expected_statuses,
+                &expected_status_ranges,
+                &expected_headers,
+            )
         }));
     }
     Ok(Box::new(health_check))
@@ -1636,17 +1653,22 @@ fn apply_health_check_peer_timeouts(
 fn validate_http_health_response(
     response: &ResponseHeader,
     expected_statuses: &[u16],
+    expected_status_ranges: &[LoadBalanceHealthCheckExpectedStatusRange],
     expected_headers: &[LoadBalanceHealthCheckExpectedHeader],
 ) -> pingora::Result<()> {
     let status = response.status.as_u16();
-    if expected_statuses.is_empty() {
+    if expected_statuses.is_empty() && expected_status_ranges.is_empty() {
         if status != 200 {
             return Error::e_explain(
                 ErrorType::HTTPStatus(status),
                 "unexpected HTTP health check status",
             );
         }
-    } else if !expected_statuses.contains(&status) {
+    } else if !expected_statuses.contains(&status)
+        && !expected_status_ranges
+            .iter()
+            .any(|range| (range.start..=range.end).contains(&status))
+    {
         return Error::e_explain(
             ErrorType::HTTPStatus(status),
             "unexpected HTTP health check status",
@@ -1741,8 +1763,9 @@ mod tests {
 
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
-        LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalanceSelection,
-        LoadBalanceSlowStartConfig, ProxyConfig,
+        LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol,
+        LoadBalancePassiveHealthConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig,
+        ProxyConfig,
     };
 
     use super::{
@@ -2376,6 +2399,10 @@ mod tests {
                     path: "/healthz".to_owned(),
                     host: Some("origin.example.test".to_owned()),
                     expected_statuses: vec![200, 204],
+                    expected_status_ranges: vec![LoadBalanceHealthCheckExpectedStatusRange {
+                        start: 300,
+                        end: 399,
+                    }],
                     expected_headers: vec![LoadBalanceHealthCheckExpectedHeader {
                         name: "x-fluxheim-health".to_owned(),
                         value: "ready".to_owned(),
@@ -2411,6 +2438,10 @@ mod tests {
     #[test]
     fn validates_http_health_check_expected_headers() {
         let expected_statuses = [204];
+        let expected_status_ranges = [LoadBalanceHealthCheckExpectedStatusRange {
+            start: 300,
+            end: 399,
+        }];
         let expected_headers = [LoadBalanceHealthCheckExpectedHeader {
             name: "x-fluxheim-health".to_owned(),
             value: "ready".to_owned(),
@@ -2420,13 +2451,28 @@ mod tests {
             .append_header("x-fluxheim-health", "ready")
             .unwrap();
         assert!(
-            validate_http_health_response(&response, &expected_statuses, &expected_headers).is_ok()
+            validate_http_health_response(
+                &response,
+                &expected_statuses,
+                &expected_status_ranges,
+                &expected_headers
+            )
+            .is_ok()
         );
 
         let missing = ResponseHeader::build(204, None).unwrap();
         assert!(
-            validate_http_health_response(&missing, &expected_statuses, &expected_headers).is_err()
+            validate_http_health_response(
+                &missing,
+                &expected_statuses,
+                &expected_status_ranges,
+                &expected_headers
+            )
+            .is_err()
         );
+
+        let ranged = ResponseHeader::build(302, None).unwrap();
+        assert!(validate_http_health_response(&ranged, &[], &expected_status_ranges, &[]).is_ok());
     }
 
     #[test]
