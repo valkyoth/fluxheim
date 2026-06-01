@@ -41,6 +41,9 @@ behavior when the change improves security or project direction.
 - Add read-only load-balancer runtime status to `GET /_fluxheim/status`,
   including pool/backend readiness, configured policy metadata, in-flight
   counts, passive ejection, slow-start, and least-time latency state.
+- Add `proxy.load_balance.retry.statuses` for bounded safe-method redispatch
+  on explicitly configured upstream HTTP 5xx responses before response
+  streaming starts.
 
 ## 1.4.7 - 2026-05-31
 

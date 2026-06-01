@@ -783,6 +783,7 @@ max_latency_ms = 0
 enabled = false
 max_retries = 1
 methods = ["GET", "HEAD", "OPTIONS"]
+statuses = []
 budget_per_window = 0
 budget_window_secs = 1
 
@@ -959,11 +960,13 @@ slow-start is a traffic-shaping guard rather than an availability blocker.
 connection failures that happen before the request is sent upstream. It is
 limited by `max_retries`, by Pingora's process-wide retry cap, and by
 `methods`, which accepts only safe method tokens such as `GET`, `HEAD`,
-`OPTIONS`, and `TRACE`. `budget_per_window = 0` disables the shared retry
-budget; set it to a positive value with `budget_window_secs` to cap total
-redispatch attempts for this vhost or route over a moving window. Fluxheim does
-not retry after response streaming has started; status-code retries remain a
-later buffering-aware feature.
+`OPTIONS`, and `TRACE`. `statuses = [500, 502, 503]` can additionally
+redispatch selected HTTP 5xx responses before response streaming starts. Empty
+`statuses` keeps response-status retries disabled. `budget_per_window = 0`
+disables the shared retry budget; set it to a positive value with
+`budget_window_secs` to cap total redispatch attempts for this vhost or route
+over a moving window. Fluxheim does not retry after response streaming has
+started.
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

@@ -4516,6 +4516,12 @@ impl ProxyHttp for FluxProxy {
         ctx.vhost_index = Some(vhost_index);
         let vhost = state.vhost(vhost_index);
         apply_downstream_flow_control(session, &selected_runtime_proxy(vhost, ctx).config);
+        #[cfg(feature = "load-balancer")]
+        if let Some(error) =
+            load_balance_retry_response_status(session, response.status.as_u16(), vhost, ctx)
+        {
+            return Err(error);
+        }
         #[cfg(feature = "cache")]
         insert_cache_status_headers(
             response,
@@ -8844,6 +8850,58 @@ fn load_balance_retry_method_allowed(
         .methods
         .iter()
         .any(|configured| configured.eq_ignore_ascii_case(method))
+}
+
+#[cfg(feature = "load-balancer")]
+fn load_balance_retry_status_allowed(
+    retry: &crate::config::LoadBalanceRetryConfig,
+    status: u16,
+) -> bool {
+    retry.statuses.contains(&status)
+}
+
+#[cfg(feature = "load-balancer")]
+fn load_balance_retry_response_status(
+    session: &Session,
+    status: u16,
+    vhost: &RuntimeVhost,
+    ctx: &mut RequestContext,
+) -> Option<Box<Error>> {
+    selected_upstream_load_balancer(vhost, ctx)?;
+    let proxy = selected_runtime_proxy(vhost, ctx);
+    let retry = &proxy.config.load_balance.retry;
+    if !retry.enabled
+        || ctx.upstream_load_balancer_retries >= retry.max_retries
+        || !load_balance_retry_method_allowed(retry, session.req_header().method.as_str())
+        || !load_balance_retry_status_allowed(retry, status)
+        || !proxy
+            .retry_budget
+            .as_ref()
+            .is_none_or(RuntimeRetryBudget::try_acquire)
+    {
+        return None;
+    }
+
+    if let Some(outcome) = record_load_balanced_upstream_status(ctx, status) {
+        #[cfg(feature = "metrics")]
+        {
+            record_load_balancer_metric(vhost, ctx, "failure");
+            if outcome.ejected {
+                record_load_balancer_metric(vhost, ctx, "ejected");
+            }
+        }
+        #[cfg(not(feature = "metrics"))]
+        let _ = outcome;
+    }
+    ctx.upstream_load_balancer_retries = ctx.upstream_load_balancer_retries.saturating_add(1);
+    #[cfg(feature = "metrics")]
+    record_load_balancer_metric(vhost, ctx, "retry");
+    let mut error = Error::explain(
+        ErrorType::HTTPStatus(status),
+        "retryable load-balanced upstream response status",
+    );
+    error.set_retry(true);
+    Some(error)
 }
 
 fn proxy_error_status(error: &Error) -> u16 {
@@ -15021,6 +15079,7 @@ mod tests {
             enabled: true,
             max_retries: 3,
             methods: vec!["GET".to_owned()],
+            statuses: Vec::new(),
             budget_per_window: 2,
             budget_window_secs: 60,
         })
@@ -15029,6 +15088,23 @@ mod tests {
         assert!(budget.try_acquire());
         assert!(budget.try_acquire());
         assert!(!budget.try_acquire());
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balance_retry_statuses_are_explicit() {
+        let retry = LoadBalanceRetryConfig {
+            enabled: true,
+            max_retries: 1,
+            methods: vec!["GET".to_owned()],
+            statuses: vec![500, 503],
+            budget_per_window: 0,
+            budget_window_secs: 1,
+        };
+
+        assert!(super::load_balance_retry_status_allowed(&retry, 500));
+        assert!(super::load_balance_retry_status_allowed(&retry, 503));
+        assert!(!super::load_balance_retry_status_allowed(&retry, 502));
     }
 
     #[cfg(feature = "load-balancer")]
