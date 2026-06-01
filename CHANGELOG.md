@@ -54,6 +54,8 @@ behavior when the change improves security or project direction.
 - Add `proxy.load_balance.retry.statuses` for bounded safe-method redispatch
   on explicitly configured upstream HTTP 5xx responses before response
   streaming starts.
+- Add `proxy.load_balance.retry.status_ranges` for bounded safe-method
+  redispatch on inclusive upstream HTTP 5xx status ranges.
 - Accept `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
   `weighted-random-two-choice` as aliases for `power-of-two` selection.
 

@@ -444,6 +444,7 @@ fn default_lb_slow_start_duration_secs() -> u64 {
 const MAX_LB_RETRIES: u8 = 10;
 const MAX_LB_RETRY_METHODS: usize = 16;
 const MAX_LB_RETRY_STATUSES: usize = 32;
+const MAX_LB_RETRY_STATUS_RANGES: usize = 32;
 const MAX_LB_RETRY_BUDGET_PER_WINDOW: u32 = 1_000_000;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -458,6 +459,8 @@ pub struct LoadBalanceRetryConfig {
     #[serde(default)]
     pub statuses: Vec<u16>,
     #[serde(default)]
+    pub status_ranges: Vec<LoadBalanceHealthCheckExpectedStatusRange>,
+    #[serde(default)]
     pub budget_per_window: u32,
     #[serde(default = "default_lb_retry_budget_window_secs")]
     pub budget_window_secs: u64,
@@ -470,6 +473,7 @@ impl Default for LoadBalanceRetryConfig {
             max_retries: default_lb_retry_max_retries(),
             methods: default_lb_retry_methods(),
             statuses: Vec::new(),
+            status_ranges: Vec::new(),
             budget_per_window: 0,
             budget_window_secs: default_lb_retry_budget_window_secs(),
         }
@@ -491,6 +495,11 @@ impl LoadBalanceRetryConfig {
         if self.statuses.len() > MAX_LB_RETRY_STATUSES {
             return Err(ConfigError::InvalidLoadBalanceRetry {
                 field: "proxy.load_balance.retry.statuses",
+            });
+        }
+        if self.status_ranges.len() > MAX_LB_RETRY_STATUS_RANGES {
+            return Err(ConfigError::InvalidLoadBalanceRetry {
+                field: "proxy.load_balance.retry.status_ranges",
             });
         }
         if self.budget_per_window > MAX_LB_RETRY_BUDGET_PER_WINDOW {
@@ -530,6 +539,16 @@ impl LoadBalanceRetryConfig {
             if !(500..=599).contains(status) || !seen_statuses.insert(*status) {
                 return Err(ConfigError::InvalidLoadBalanceRetry {
                     field: "proxy.load_balance.retry.statuses",
+                });
+            }
+        }
+        for range in &self.status_ranges {
+            if !(500..=599).contains(&range.start)
+                || !(500..=599).contains(&range.end)
+                || range.start > range.end
+            {
+                return Err(ConfigError::InvalidLoadBalanceRetry {
+                    field: "proxy.load_balance.retry.status_ranges",
                 });
             }
         }

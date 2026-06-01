@@ -2704,6 +2704,7 @@ fn validates_load_balance_retry_policy() {
             max_retries = 2
             methods = ["GET", "HEAD"]
             statuses = [500, 502, 503]
+            status_ranges = [{ start = 520, end = 529 }]
             budget_per_window = 100
             budget_window_secs = 10
             "#,
@@ -2713,6 +2714,7 @@ fn validates_load_balance_retry_policy() {
     assert_eq!(config.proxy.load_balance.retry.budget_per_window, 100);
     assert_eq!(config.proxy.load_balance.retry.budget_window_secs, 10);
     assert_eq!(config.proxy.load_balance.retry.statuses, [500, 502, 503]);
+    assert_eq!(config.proxy.load_balance.retry.status_ranges[0].start, 520);
 
     let unsafe_method: Config = toml::from_str(
         r#"
@@ -2768,6 +2770,20 @@ fn validates_load_balance_retry_policy() {
         duplicate_status.validate(),
         Err(ConfigError::InvalidLoadBalanceRetry {
             field: "proxy.load_balance.retry.statuses"
+        })
+    );
+
+    let invalid_status_range: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.retry]
+            status_ranges = [{ start = 499, end = 503 }]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_status_range.validate(),
+        Err(ConfigError::InvalidLoadBalanceRetry {
+            field: "proxy.load_balance.retry.status_ranges"
         })
     );
 }

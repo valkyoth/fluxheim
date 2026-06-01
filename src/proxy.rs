@@ -8858,6 +8858,10 @@ fn load_balance_retry_status_allowed(
     status: u16,
 ) -> bool {
     retry.statuses.contains(&status)
+        || retry
+            .status_ranges
+            .iter()
+            .any(|range| (range.start..=range.end).contains(&status))
 }
 
 #[cfg(feature = "load-balancer")]
@@ -15080,6 +15084,7 @@ mod tests {
             max_retries: 3,
             methods: vec!["GET".to_owned()],
             statuses: Vec::new(),
+            status_ranges: Vec::new(),
             budget_per_window: 2,
             budget_window_secs: 60,
         })
@@ -15098,13 +15103,20 @@ mod tests {
             max_retries: 1,
             methods: vec!["GET".to_owned()],
             statuses: vec![500, 503],
+            status_ranges: vec![crate::config::LoadBalanceHealthCheckExpectedStatusRange {
+                start: 520,
+                end: 529,
+            }],
             budget_per_window: 0,
             budget_window_secs: 1,
         };
 
         assert!(super::load_balance_retry_status_allowed(&retry, 500));
         assert!(super::load_balance_retry_status_allowed(&retry, 503));
+        assert!(super::load_balance_retry_status_allowed(&retry, 520));
+        assert!(super::load_balance_retry_status_allowed(&retry, 529));
         assert!(!super::load_balance_retry_status_allowed(&retry, 502));
+        assert!(!super::load_balance_retry_status_allowed(&retry, 530));
     }
 
     #[cfg(feature = "load-balancer")]

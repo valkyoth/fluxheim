@@ -787,6 +787,7 @@ enabled = false
 max_retries = 1
 methods = ["GET", "HEAD", "OPTIONS"]
 statuses = []
+status_ranges = []
 budget_per_window = 0
 budget_window_secs = 1
 
@@ -971,9 +972,10 @@ connection failures that happen before the request is sent upstream. It is
 limited by `max_retries`, by Pingora's process-wide retry cap, and by
 `methods`, which accepts only safe method tokens such as `GET`, `HEAD`,
 `OPTIONS`, and `TRACE`. `statuses = [500, 502, 503]` can additionally
-redispatch selected HTTP 5xx responses before response streaming starts. Empty
-`statuses` keeps response-status retries disabled. `budget_per_window = 0`
-disables the shared retry budget; set it to a positive value with
+redispatch selected HTTP 5xx responses before response streaming starts, and
+`status_ranges = [{ start = 520, end = 529 }]` accepts inclusive 5xx ranges.
+Empty `statuses` and `status_ranges` keep response-status retries disabled.
+`budget_per_window = 0` disables the shared retry budget; set it to a positive value with
 `budget_window_secs` to cap total redispatch attempts for this vhost or route
 over a moving window. Fluxheim does not retry after response streaming has
 started.
