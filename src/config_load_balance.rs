@@ -7,6 +7,8 @@ use crate::config_header::valid_http_header_name;
 use crate::config_net::normalize_host;
 
 pub(crate) const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
+const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRINGS: usize = 8;
+const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRING_BYTES: usize = 1024;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +186,8 @@ pub struct LoadBalanceHealthCheckConfig {
     #[serde(default)]
     pub expected_headers: Vec<LoadBalanceHealthCheckExpectedHeader>,
     #[serde(default)]
+    pub expected_body_contains: Vec<String>,
+    #[serde(default)]
     pub reuse_connection: bool,
     #[serde(default)]
     pub port_override: Option<u16>,
@@ -222,6 +226,7 @@ impl Default for LoadBalanceHealthCheckConfig {
             expected_statuses: Vec::new(),
             expected_status_ranges: Vec::new(),
             expected_headers: Vec::new(),
+            expected_body_contains: Vec::new(),
             reuse_connection: false,
             port_override: None,
             connect_timeout_secs: None,
@@ -311,6 +316,23 @@ impl LoadBalanceHealthCheckConfig {
             if !seen_headers.insert(header.name.to_ascii_lowercase()) {
                 return Err(ConfigError::InvalidLoadBalanceHealthCheck {
                     field: "proxy.load_balance.health_check.expected_headers",
+                });
+            }
+        }
+        if self.expected_body_contains.len() > LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRINGS {
+            return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                field: "proxy.load_balance.health_check.expected_body_contains",
+            });
+        }
+        let mut seen_body_substrings = HashSet::new();
+        for expected in &self.expected_body_contains {
+            if expected.is_empty()
+                || expected.len() > LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRING_BYTES
+                || expected.chars().any(char::is_control)
+                || !seen_body_substrings.insert(expected)
+            {
+                return Err(ConfigError::InvalidLoadBalanceHealthCheck {
+                    field: "proxy.load_balance.health_check.expected_body_contains",
                 });
             }
         }

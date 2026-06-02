@@ -821,6 +821,7 @@ host = "origin.example.test"
 expected_statuses = []
 expected_status_ranges = []
 expected_headers = []
+expected_body_contains = []
 reuse_connection = false
 connect_timeout_secs = 1
 read_timeout_secs = 1
@@ -1013,6 +1014,9 @@ must be an uppercase HTTP token. By default only `200` passes, or
 HTTP status ranges and can be combined with exact statuses.
 `expected_headers` can require exact response header values:
 `expected_headers = [{ name = "x-fluxheim-health", value = "ready" }]`.
+`expected_body_contains = ["ready"]` requires each configured byte substring
+to appear in the HTTP health response body. Fluxheim reads at most 64 KiB of a
+health-check body for this validation.
 `host` overrides the health-check `Host` header and TLS SNI fallback,
 `reuse_connection = true` allows Pingora to reuse check connections, and
 `port_override` sends checks to a different port on the same backend address.

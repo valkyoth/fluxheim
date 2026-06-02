@@ -11,18 +11,22 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures::FutureExt;
+use pingora::connectors::http::Connector as HttpConnector;
 use pingora::http::RequestHeader;
 use pingora::http::ResponseHeader;
 use pingora::lb::Backend;
 use pingora::lb::Backends;
 use pingora::lb::discovery::{ServiceDiscovery, Static};
-use pingora::lb::health_check::{HttpHealthCheck, TcpHealthCheck};
+use pingora::lb::health_check::{HealthCheck, TcpHealthCheck};
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{
     BackendIter, BackendSelection, Consistent, FNVHash, Random, RoundRobin,
 };
+use pingora::protocols::http::client::HttpSession;
 use pingora::services::ServiceWithDependents;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
+use pingora::upstreams::peer::HttpPeer;
+use pingora::upstreams::peer::Peer;
 use pingora::{Error, ErrorType};
 use serde::Serialize;
 
@@ -34,6 +38,7 @@ use crate::config::{
 };
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
+const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
 pub struct UpstreamLoadBalancer {
@@ -2699,13 +2704,85 @@ fn configured_health_check(
             );
             Ok(health_check)
         }
-        LoadBalanceHealthCheckProtocol::Http => configured_http_health_check(config).map(|check| {
-            check as Box<dyn pingora::lb::health_check::HealthCheck + Send + Sync + 'static>
-        }),
+        LoadBalanceHealthCheckProtocol::Http => configured_http_health_check(config)
+            .map(|check| check as Box<dyn HealthCheck + Send + Sync + 'static>),
     }
 }
 
-fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<HttpHealthCheck>> {
+struct FluxHttpHealthCheck {
+    consecutive_success: usize,
+    consecutive_failure: usize,
+    peer_template: HttpPeer,
+    reuse_connection: bool,
+    req: RequestHeader,
+    connector: HttpConnector,
+    port_override: Option<u16>,
+    expected_statuses: Arc<[u16]>,
+    expected_status_ranges: Arc<[LoadBalanceHealthCheckExpectedStatusRange]>,
+    expected_headers: Arc<[LoadBalanceHealthCheckExpectedHeader]>,
+    expected_body_contains: Arc<[String]>,
+}
+
+#[async_trait]
+impl HealthCheck for FluxHttpHealthCheck {
+    fn health_threshold(&self, success: bool) -> usize {
+        if success {
+            self.consecutive_success
+        } else {
+            self.consecutive_failure
+        }
+    }
+
+    async fn check(&self, target: &Backend) -> pingora::Result<()> {
+        let mut peer = self.peer_template.clone();
+        peer._address = target.addr.clone();
+        if let Some(port) = self.port_override {
+            peer._address.set_port(port);
+        }
+
+        let (mut session, _) = self.connector.get_http_session(&peer).await?;
+        session
+            .write_request_header(Box::new(self.req.clone()))
+            .await?;
+        session.finish_request_body().await?;
+
+        if let Some(read_timeout) = peer.options.read_timeout {
+            session.set_read_timeout(Some(read_timeout));
+        }
+
+        session.read_response_header().await?;
+        let Some(response) = session.response_header() else {
+            return Error::e_explain(
+                ErrorType::ReadError,
+                "missing HTTP health check response header",
+            );
+        };
+        validate_http_health_response(
+            response,
+            &self.expected_statuses,
+            &self.expected_status_ranges,
+            &self.expected_headers,
+        )?;
+
+        if self.expected_body_contains.is_empty() {
+            drain_http_health_response_body(&mut session).await?;
+        } else {
+            let body = read_http_health_response_body(&mut session).await?;
+            validate_http_health_response_body(&body, &self.expected_body_contains)?;
+        }
+
+        if self.reuse_connection {
+            let idle_timeout = peer.idle_timeout();
+            self.connector
+                .release_http_session(session, &peer, idle_timeout)
+                .await;
+        }
+
+        Ok(())
+    }
+}
+
+fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<FluxHttpHealthCheck>> {
     let host = config
         .load_balance
         .health_check
@@ -2722,57 +2799,53 @@ fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<HttpHeal
         .append_header("Host", &host)
         .map_err(|error| io::Error::other(error.to_string()))?;
 
-    let mut health_check = HttpHealthCheck::new(&host, config.upstream_tls);
-    health_check.req = request;
-    health_check.consecutive_success = config.load_balance.health_check.consecutive_success;
-    health_check.consecutive_failure = config.load_balance.health_check.consecutive_failure;
-    health_check.reuse_connection = config.load_balance.health_check.reuse_connection;
-    health_check.port_override = config.load_balance.health_check.port_override;
+    let sni = if config.upstream_tls {
+        host.clone()
+    } else {
+        String::new()
+    };
+    let mut peer_template = HttpPeer::new("0.0.0.0:1", config.upstream_tls, sni);
+    peer_template.options.connection_timeout = Some(Duration::from_secs(1));
+    peer_template.options.read_timeout = Some(Duration::from_secs(1));
     apply_health_check_peer_timeouts(
-        &mut health_check.peer_template.options.connection_timeout,
-        Some(&mut health_check.peer_template.options.read_timeout),
+        &mut peer_template.options.connection_timeout,
+        Some(&mut peer_template.options.read_timeout),
         config,
     );
-    if !config
-        .load_balance
-        .health_check
-        .expected_statuses
-        .is_empty()
-        || !config
-            .load_balance
-            .health_check
-            .expected_status_ranges
-            .is_empty()
-        || !config.load_balance.health_check.expected_headers.is_empty()
-    {
-        let expected_statuses: Arc<[u16]> = config
+
+    Ok(Box::new(FluxHttpHealthCheck {
+        consecutive_success: config.load_balance.health_check.consecutive_success,
+        consecutive_failure: config.load_balance.health_check.consecutive_failure,
+        peer_template,
+        reuse_connection: config.load_balance.health_check.reuse_connection,
+        req: request,
+        connector: HttpConnector::new(None),
+        port_override: config.load_balance.health_check.port_override,
+        expected_statuses: config
             .load_balance
             .health_check
             .expected_statuses
             .clone()
-            .into();
-        let expected_status_ranges: Arc<[LoadBalanceHealthCheckExpectedStatusRange]> = config
+            .into(),
+        expected_status_ranges: config
             .load_balance
             .health_check
             .expected_status_ranges
             .clone()
-            .into();
-        let expected_headers: Arc<[LoadBalanceHealthCheckExpectedHeader]> = config
+            .into(),
+        expected_headers: config
             .load_balance
             .health_check
             .expected_headers
             .clone()
-            .into();
-        health_check.validator = Some(Box::new(move |response| {
-            validate_http_health_response(
-                response,
-                &expected_statuses,
-                &expected_status_ranges,
-                &expected_headers,
-            )
-        }));
-    }
-    Ok(Box::new(health_check))
+            .into(),
+        expected_body_contains: config
+            .load_balance
+            .health_check
+            .expected_body_contains
+            .clone()
+            .into(),
+    }))
 }
 
 fn apply_health_check_peer_timeouts(
@@ -2836,6 +2909,43 @@ fn validate_http_health_response(
             return Error::e_explain(
                 ErrorType::InvalidHTTPHeader,
                 "missing expected HTTP health check header",
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn drain_http_health_response_body(session: &mut HttpSession) -> pingora::Result<()> {
+    while session.read_response_body().await?.is_some() {}
+    Ok(())
+}
+
+async fn read_http_health_response_body(session: &mut HttpSession) -> pingora::Result<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = session.read_response_body().await? {
+        if body.len().saturating_add(chunk.len()) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+            return Error::e_explain(
+                ErrorType::ReadError,
+                "HTTP health check response body exceeded maximum size",
+            );
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+fn validate_http_health_response_body(
+    body: &[u8],
+    expected_body_contains: &[String],
+) -> pingora::Result<()> {
+    for expected in expected_body_contains {
+        if !body
+            .windows(expected.len())
+            .any(|window| window == expected.as_bytes())
+        {
+            return Error::e_explain(
+                ErrorType::ReadError,
+                "missing expected HTTP health check response body substring",
             );
         }
     }
@@ -2921,6 +3031,7 @@ mod tests {
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
         LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
         backend_connection_key, configured_http_health_check, validate_http_health_response,
+        validate_http_health_response_body,
     };
     use crate::test_support::unique_temp_path;
 
@@ -4162,6 +4273,7 @@ mod tests {
 
     #[test]
     fn configures_pingora_http_health_check() {
+        install_test_crypto_provider();
         let health_check = configured_http_health_check(&ProxyConfig {
             upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
             connect_timeout_secs: Some(2),
@@ -4184,6 +4296,7 @@ mod tests {
                         name: "x-fluxheim-health".to_owned(),
                         value: "ready".to_owned(),
                     }],
+                    expected_body_contains: vec!["ready".to_owned()],
                     reuse_connection: true,
                     port_override: Some(8081),
                     connect_timeout_secs: Some(5),
@@ -4209,7 +4322,12 @@ mod tests {
             health_check.peer_template.options.read_timeout,
             Some(Duration::from_secs(6))
         );
-        assert!(health_check.validator.is_some());
+        assert!(!health_check.expected_statuses.is_empty());
+        assert!(!health_check.expected_headers.is_empty());
+        assert_eq!(
+            health_check.expected_body_contains.as_ref(),
+            ["ready".to_owned()]
+        );
     }
 
     #[test]
@@ -4250,6 +4368,13 @@ mod tests {
 
         let ranged = ResponseHeader::build(302, None).unwrap();
         assert!(validate_http_health_response(&ranged, &[], &expected_status_ranges, &[]).is_ok());
+    }
+
+    #[test]
+    fn validates_http_health_check_expected_body_contains() {
+        let expected = ["ready".to_owned(), "database=up".to_owned()];
+        assert!(validate_http_health_response_body(b"ready database=up", &expected).is_ok());
+        assert!(validate_http_health_response_body(b"ready database=down", &expected).is_err());
     }
 
     #[test]

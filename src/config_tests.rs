@@ -536,6 +536,7 @@ fn parses_proxy_upstream_pool() {
             path = "/healthz"
             host = "app.internal"
             expected_statuses = [200, 204]
+            expected_body_contains = ["ready"]
             reuse_connection = true
             port_override = 8081
             connect_timeout_secs = 1
@@ -675,6 +676,14 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(
         config.proxy.load_balance.health_check.expected_headers[0].value,
         "ready"
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .health_check
+            .expected_body_contains,
+        vec!["ready".to_owned()]
     );
     assert_eq!(
         config
@@ -2641,6 +2650,21 @@ fn rejects_invalid_http_load_balance_health_check() {
         invalid_status_range.validate(),
         Err(ConfigError::InvalidLoadBalanceHealthCheck {
             field: "proxy.load_balance.health_check.expected_status_ranges"
+        })
+    );
+
+    let invalid_body_substring: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.health_check]
+            protocol = "http"
+            expected_body_contains = [""]
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_body_substring.validate(),
+        Err(ConfigError::InvalidLoadBalanceHealthCheck {
+            field: "proxy.load_balance.health_check.expected_body_contains"
         })
     );
 }

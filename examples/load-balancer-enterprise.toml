@@ -71,6 +71,7 @@ path = "/healthz"
 expected_statuses = [200, 204]
 expected_status_ranges = [{ start = 200, end = 299 }]
 expected_headers = [{ name = "x-fluxheim-health", value = "ready" }]
+expected_body_contains = ["ready"]
 reuse_connection = true
 connect_timeout_secs = 1
 read_timeout_secs = 2
