@@ -58,6 +58,8 @@ behavior when the change improves security or project direction.
   ejection, and saturation summary counts in load-balancer runtime status.
 - Include explicit runtime member override state and runtime override summary
   counts in load-balancer runtime status.
+- Include per-backend runtime member-state transition timestamps in
+  load-balancer runtime status while a manual override remains active.
 - Add authenticated in-memory load-balancer member-state operations through
   `POST /_fluxheim/load-balancer/member-state` for existing configured
   members: normal, drain, disable, forced-down, and manual-resume by configured

@@ -318,8 +318,10 @@ state, slow-start allowance, and least-time latency state where available. In
 `1.5.0`, `circuit_state = "open"` is the runtime status view for a backend
 currently ejected by passive health; `"closed"` means the backend is not
 passively ejected. Per-backend rows include `runtime_state_override` when an
-authenticated runtime member operation is active. In `privacy-mode`, backend
-addresses are omitted from this status object.
+authenticated runtime member operation is active and
+`runtime_state_changed_at_unix_secs` when that override currently has a recorded
+manual transition time. In `privacy-mode`, backend addresses are omitted from
+this status object.
 
 When compiled with `load-balancer`, authenticated admins can update the
 in-memory state of an existing configured pool member without reloading:

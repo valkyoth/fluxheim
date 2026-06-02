@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use futures::FutureExt;
@@ -199,6 +199,7 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub drained: bool,
     pub disabled: bool,
     pub runtime_state_override: Option<LoadBalancerRuntimeBackendState>,
+    pub runtime_state_changed_at_unix_secs: Option<u64>,
     pub priority_group: Option<u16>,
     pub max_in_flight: Option<usize>,
     pub in_flight: usize,
@@ -1453,6 +1454,12 @@ fn backend_connection_key(backend: &Backend) -> u64 {
     hasher.finish()
 }
 
+fn unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+}
+
 #[derive(Clone, Debug, Default)]
 struct BackendSelectionPolicy {
     backup: Arc<std::collections::HashSet<u64>>,
@@ -1470,6 +1477,7 @@ struct RuntimeBackendPolicyOverrides {
     drain: Mutex<std::collections::HashSet<u64>>,
     disabled: Mutex<std::collections::HashSet<u64>>,
     forced_down: Mutex<std::collections::HashSet<u64>>,
+    changed_at_unix_secs: Mutex<std::collections::HashMap<u64, u64>>,
 }
 
 impl BackendSelectionPolicy {
@@ -1554,6 +1562,10 @@ impl BackendSelectionPolicy {
     fn runtime_backend_state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
         self.runtime.state(key)
     }
+
+    fn runtime_backend_state_changed_at_unix_secs(&self, key: u64) -> Option<u64> {
+        self.runtime.changed_at_unix_secs(key)
+    }
 }
 
 impl RuntimeBackendPolicyOverrides {
@@ -1592,20 +1604,29 @@ impl RuntimeBackendPolicyOverrides {
             .forced_down
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut changed_at = self
+            .changed_at_unix_secs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         drain.remove(&key);
         disabled.remove(&key);
         forced_down.remove(&key);
         match state {
             LoadBalancerRuntimeBackendState::Normal
-            | LoadBalancerRuntimeBackendState::ManualResume => {}
+            | LoadBalancerRuntimeBackendState::ManualResume => {
+                changed_at.remove(&key);
+            }
             LoadBalancerRuntimeBackendState::Drained => {
                 drain.insert(key);
+                changed_at.insert(key, unix_secs());
             }
             LoadBalancerRuntimeBackendState::Disabled => {
                 disabled.insert(key);
+                changed_at.insert(key, unix_secs());
             }
             LoadBalancerRuntimeBackendState::ForcedDown => {
                 forced_down.insert(key);
+                changed_at.insert(key, unix_secs());
             }
         }
     }
@@ -1633,6 +1654,14 @@ impl RuntimeBackendPolicyOverrides {
             return Some(LoadBalancerRuntimeBackendState::Drained);
         }
         None
+    }
+
+    fn changed_at_unix_secs(&self, key: u64) -> Option<u64> {
+        self.changed_at_unix_secs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .copied()
     }
 }
 
@@ -1734,6 +1763,8 @@ where
                 drained: backend_policy.drained(policy_key),
                 disabled: backend_policy.disabled(policy_key),
                 runtime_state_override: backend_policy.runtime_backend_state(policy_key),
+                runtime_state_changed_at_unix_secs: backend_policy
+                    .runtime_backend_state_changed_at_unix_secs(policy_key),
                 priority_group: backend_policy.priority_group(policy_key),
                 max_in_flight: backend_policy.max_in_flight_key(policy_key),
                 in_flight: counters.count_existing(backend),
@@ -3649,6 +3680,7 @@ mod tests {
             runtime_drained.runtime_state_override,
             Some(LoadBalancerRuntimeBackendState::Drained)
         );
+        assert!(runtime_drained.runtime_state_changed_at_unix_secs.is_some());
         for _ in 0..4 {
             let selected = balancer.select(&request(), None).unwrap();
             assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
@@ -3665,6 +3697,16 @@ mod tests {
         assert_eq!(stats.runtime_disabled_backend_count, 1);
         assert_eq!(stats.runtime_forced_down_backend_count, 0);
         assert_eq!(stats.primary_available_backend_count, 0);
+        let runtime_disabled = stats
+            .backends
+            .iter()
+            .find(|backend| backend.alias.as_deref() == Some("primary-b"))
+            .expect("runtime disabled backend status");
+        assert!(
+            runtime_disabled
+                .runtime_state_changed_at_unix_secs
+                .is_some()
+        );
         assert!(balancer.select(&request(), None).is_none());
 
         balancer
@@ -3675,6 +3717,12 @@ mod tests {
         assert_eq!(stats.runtime_drained_backend_count, 0);
         assert_eq!(stats.runtime_disabled_backend_count, 1);
         assert_eq!(stats.runtime_forced_down_backend_count, 0);
+        let normal = stats
+            .backends
+            .iter()
+            .find(|backend| backend.alias.as_deref() == Some("primary-a"))
+            .expect("normal backend status");
+        assert_eq!(normal.runtime_state_changed_at_unix_secs, None);
         let selected = balancer.select(&request(), None).unwrap();
         assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3000");
     }
