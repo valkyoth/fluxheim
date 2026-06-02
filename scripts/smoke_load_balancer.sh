@@ -10,7 +10,7 @@ import socket
 
 sockets = []
 try:
-    for _ in range(4):
+    for _ in range(5):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -26,6 +26,7 @@ FLUXHEIM_PORT=$1
 ADMIN_PORT=$2
 ORIGIN_ONE_PORT=$3
 ORIGIN_TWO_PORT=$4
+METRICS_PORT=$5
 
 ORIGIN_ONE_PID=
 ORIGIN_TWO_PID=
@@ -110,6 +111,11 @@ snapshot_store = "$TMP_DIR/admin-snapshots"
 [admin.health]
 unauthenticated = true
 
+[metrics]
+enabled = true
+listen = "127.0.0.1:$METRICS_PORT"
+require_loopback = true
+
 [[vhosts]]
 name = "smoke"
 hosts = ["127.0.0.1"]
@@ -154,10 +160,10 @@ ORIGIN_TWO_PID=$!
 wait_http "http://127.0.0.1:$ORIGIN_ONE_PORT/"
 wait_http "http://127.0.0.1:$ORIGIN_TWO_PORT/"
 
-"$ROOT_DIR/scripts/validate-features.sh" proxy,load-balancer
+"$ROOT_DIR/scripts/validate-features.sh" proxy,load-balancer,metrics
 (
     cd "$ROOT_DIR"
-    cargo build --quiet --no-default-features --features proxy,load-balancer
+    cargo build --quiet --no-default-features --features proxy,load-balancer,metrics
 )
 export FLUXHEIM_ADMIN_TOKEN="smoke-token"
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
@@ -165,6 +171,7 @@ FLUXHEIM_PID=$!
 
 wait_http "http://127.0.0.1:$FLUXHEIM_PORT/smoke"
 wait_http "http://127.0.0.1:$ADMIN_PORT/_fluxheim/health"
+wait_http "http://127.0.0.1:$METRICS_PORT/metrics"
 
 RESPONSES="$TMP_DIR/responses.txt"
 : > "$RESPONSES"
@@ -184,10 +191,43 @@ if ! grep -q '^origin-two$' "$RESPONSES"; then
     exit 1
 fi
 
+curl -fsS \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/status" \
+    > "$TMP_DIR/load-balancer-status.json"
+
+if ! grep -q '"load_balancer"' "$TMP_DIR/load-balancer-status.json" \
+    || ! grep -q '"alias":"origin-one"' "$TMP_DIR/load-balancer-status.json" \
+    || ! grep -q '"alias":"origin-two"' "$TMP_DIR/load-balancer-status.json"; then
+    echo "load balancer status endpoint did not report configured pool aliases" >&2
+    cat "$TMP_DIR/load-balancer-status.json" >&2
+    exit 1
+fi
+
+curl -fsS "http://127.0.0.1:$METRICS_PORT/metrics" > "$TMP_DIR/metrics-before-disable.txt"
+if ! grep -q 'fluxheim_load_balancer_pools{scope="vhost",selection="round_robin"} 1' "$TMP_DIR/metrics-before-disable.txt"; then
+    echo "load balancer metrics did not report configured round-robin vhost pool" >&2
+    cat "$TMP_DIR/metrics-before-disable.txt" >&2
+    exit 1
+fi
+
 curl -fsS -X POST \
     -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
     "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/member-state?vhost=smoke&member=origin-two&state=disable" \
     > "$TMP_DIR/member-disable.json"
+
+curl -fsS \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/status" \
+    > "$TMP_DIR/load-balancer-status-disabled.json"
+
+if ! grep -q '"alias":"origin-two"' "$TMP_DIR/load-balancer-status-disabled.json" \
+    || ! grep -q '"runtime_state_override":"disabled"' "$TMP_DIR/load-balancer-status-disabled.json"; then
+    echo "load balancer status endpoint did not report disabled runtime override" >&2
+    cat "$TMP_DIR/load-balancer-status-disabled.json" >&2
+    cat "$TMP_DIR/member-disable.json" >&2
+    exit 1
+fi
 
 DISABLED_RESPONSES="$TMP_DIR/disabled-responses.txt"
 : > "$DISABLED_RESPONSES"
