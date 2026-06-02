@@ -210,6 +210,7 @@ pub struct LoadBalancerQueueRuntimeStats {
 pub struct LoadBalancerBackendRuntimeStats {
     pub address: Option<String>,
     pub alias: Option<String>,
+    pub tags: Vec<String>,
     pub weight: usize,
     pub locality: Option<String>,
     pub locality_preferred: bool,
@@ -1575,6 +1576,7 @@ struct BackendSelectionPolicy {
     priority: Arc<std::collections::HashMap<u64, u16>>,
     localities: Arc<std::collections::HashMap<u64, Arc<str>>>,
     preferred_localities: Arc<std::collections::HashSet<Arc<str>>>,
+    tags: Arc<std::collections::HashMap<u64, Arc<[String]>>>,
     max_in_flight: Arc<std::collections::HashMap<u64, usize>>,
     priority_groups: Arc<[u16]>,
     priority_group_min_active: usize,
@@ -1605,6 +1607,7 @@ impl BackendSelectionPolicy {
                 .map(|locality| Arc::<str>::from(locality.to_ascii_lowercase()))
                 .collect::<std::collections::HashSet<_>>()
                 .into(),
+            tags: backend_tags(config).into(),
             max_in_flight: backend_max_in_flight(config).into(),
             priority_groups: priority_groups.into(),
             priority_group_min_active: config.upstream_priority_group_min_active,
@@ -1686,6 +1689,13 @@ impl BackendSelectionPolicy {
 
     fn locality_key(&self, key: u64) -> Option<Arc<str>> {
         self.localities.get(&key).cloned()
+    }
+
+    fn tags(&self, key: u64) -> Vec<String> {
+        self.tags
+            .get(&key)
+            .map(|tags| tags.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     fn set_runtime_backend_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
@@ -1851,6 +1861,21 @@ fn backend_localities(config: &ProxyConfig) -> std::collections::HashMap<u64, Ar
         .collect()
 }
 
+fn backend_tags(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<[String]>> {
+    config
+        .upstreams
+        .iter()
+        .zip(&config.upstream_tags)
+        .filter_map(|(upstream, tags)| {
+            let backend = Backend::new(upstream).ok()?;
+            Some((
+                backend_policy_key(&backend),
+                Arc::<[String]>::from(tags.clone()),
+            ))
+        })
+        .collect()
+}
+
 fn sorted_priority_groups(priority: &std::collections::HashMap<u64, u16>) -> Vec<u16> {
     let mut groups = priority
         .values()
@@ -1924,6 +1949,7 @@ where
                     .aliases
                     .get(&policy_key)
                     .map(|alias| alias.to_string()),
+                tags: inputs.backend_policy.tags(policy_key),
                 weight: backend.weight,
                 locality: inputs
                     .backend_policy
@@ -3643,6 +3669,10 @@ mod tests {
             upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
             upstream_localities: vec!["remote".to_owned(), "local".to_owned()],
             preferred_upstream_localities: vec!["local".to_owned()],
+            upstream_tags: vec![
+                vec!["remote".to_owned()],
+                vec!["local".to_owned(), "blue".to_owned()],
+            ],
             load_balance: LoadBalanceConfig {
                 max_iterations: 8,
                 ..LoadBalanceConfig::default()
@@ -3671,6 +3701,7 @@ mod tests {
             .find(|backend| backend.locality.as_deref() == Some("local"))
             .expect("local backend status");
         assert!(local.locality_preferred);
+        assert_eq!(local.tags, ["local".to_owned(), "blue".to_owned()]);
     }
 
     #[test]

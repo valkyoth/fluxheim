@@ -41,6 +41,7 @@ upstreams = [
     "127.0.0.1:3004",
 ]
 upstream_aliases = ["app-a", "app-b", "app-c", "app-dr"]
+upstream_tags = [["blue", "primary"], ["blue", "primary"], ["green", "canary"], ["dr"]]
 upstream_weights = [4, 4, 2, 1]
 upstream_priority_groups = [100, 100, 50, 10]
 upstream_priority_group_min_active = 2

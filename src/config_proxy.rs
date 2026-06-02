@@ -55,6 +55,8 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub upstream_aliases: Vec<String>,
     #[serde(default)]
+    pub upstream_tags: Vec<Vec<String>>,
+    #[serde(default)]
     pub backup_upstreams: Vec<String>,
     #[serde(default)]
     pub drain_upstreams: Vec<String>,
@@ -153,6 +155,7 @@ const MAX_PROXY_UPSTREAM_WEIGHT: usize = 1000;
 const MAX_PROXY_UPSTREAM_TOTAL_WEIGHT: usize = u16::MAX as usize;
 const MAX_PROXY_UPSTREAM_PRIORITY_GROUP: u16 = 1000;
 const MAX_PROXY_UPSTREAM_MAX_IN_FLIGHT: usize = 1_000_000;
+const MAX_PROXY_UPSTREAM_TAGS_PER_BACKEND: usize = 16;
 pub(crate) const MAX_PROXY_ERROR_PAGES: usize = 64;
 const MAX_PROXY_UPSTREAM_H2_STREAMS: usize = 1024;
 const MAX_PROXY_UPSTREAM_TCP_KEEPALIVE_COUNT: usize = 128;
@@ -174,6 +177,7 @@ impl Default for ProxyConfig {
             preferred_upstream_localities: Vec::new(),
             upstream_max_in_flight: Vec::new(),
             upstream_aliases: Vec::new(),
+            upstream_tags: Vec::new(),
             backup_upstreams: Vec::new(),
             drain_upstreams: Vec::new(),
             disabled_upstreams: Vec::new(),
@@ -307,13 +311,14 @@ impl ProxyConfig {
                     || !self.preferred_upstream_localities.is_empty()
                     || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
+                    || !self.upstream_tags.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
                     || !self.disabled_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstreams_file",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_localities, preferred_upstream_localities, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_localities, preferred_upstream_localities, upstream_max_in_flight, upstream_aliases, upstream_tags, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
                     });
                 }
                 if self.upstream_tls && self.upstream_sni.is_none() {
@@ -368,13 +373,14 @@ impl ProxyConfig {
                     || !self.preferred_upstream_localities.is_empty()
                     || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
+                    || !self.upstream_tags.is_empty()
                     || !self.backup_upstreams.is_empty()
                     || !self.drain_upstreams.is_empty()
                     || !self.disabled_upstreams.is_empty()
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_dns_refresh_secs",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_localities, preferred_upstream_localities, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_localities, preferred_upstream_localities, upstream_max_in_flight, upstream_aliases, upstream_tags, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
                     });
                 }
             }
@@ -527,6 +533,37 @@ impl ProxyConfig {
                         field: "proxy.upstream_aliases",
                         reason: "aliases must be unique case-insensitively",
                     });
+                }
+            }
+        }
+        if !self.upstream_tags.is_empty() {
+            if self.upstream.is_some() || self.upstream_tags.len() != self.upstreams.len() {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_tags",
+                    reason: "upstream_tags must match proxy.upstreams and cannot be used with proxy.upstream",
+                });
+            }
+            for tags in &self.upstream_tags {
+                if tags.len() > MAX_PROXY_UPSTREAM_TAGS_PER_BACKEND {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_tags",
+                        reason: "each upstream may have at most 16 tags",
+                    });
+                }
+                let mut seen_tags = std::collections::HashSet::new();
+                for tag in tags {
+                    if !valid_upstream_alias(tag) {
+                        return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                            field: "proxy.upstream_tags",
+                            reason: "tags must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
+                        });
+                    }
+                    if !seen_tags.insert(tag.to_ascii_lowercase()) {
+                        return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                            field: "proxy.upstream_tags",
+                            reason: "tags must be unique per upstream case-insensitively",
+                        });
+                    }
                 }
             }
         }

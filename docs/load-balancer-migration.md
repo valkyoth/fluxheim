@@ -86,6 +86,7 @@ Fluxheim maps those pieces as follows:
 | --- | --- |
 | Pool members | `proxy.upstreams` |
 | Member names | `proxy.upstream_aliases` |
+| Member metadata / labels | `proxy.upstream_tags` |
 | Ratio / weight | `proxy.upstream_weights` |
 | Priority group activation | `proxy.upstream_priority_groups` plus `upstream_priority_group_min_active` |
 | Member connection limit | `proxy.upstream_max_in_flight` |
@@ -103,6 +104,7 @@ Example priority and locality policy:
 [proxy]
 upstreams = ["10.0.0.10:8080", "10.0.0.11:8080", "10.0.1.10:8080"]
 upstream_aliases = ["app-a", "app-b", "app-dr"]
+upstream_tags = [["blue", "primary"], ["blue", "primary"], ["dr"]]
 upstream_priority_groups = [100, 100, 10]
 upstream_priority_group_min_active = 1
 upstream_localities = ["site-a", "site-a", "site-b"]

@@ -37,6 +37,8 @@ behavior when the change improves security or project direction.
 - Add static `upstream_localities` and `preferred_upstream_localities` for
   locality/failure-domain preferred selection with automatic fallback when no
   preferred backend is selectable.
+- Add static per-upstream `upstream_tags` metadata for load-balancer runtime
+  status grouping and migration notes without affecting selection.
 - Add static per-upstream `upstream_max_in_flight` caps so saturated members
   are skipped consistently across load-balancing selectors.
 - Add opt-in bounded load-balancer queue policy so saturated pools can wait

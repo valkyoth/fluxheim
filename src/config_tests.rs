@@ -496,6 +496,7 @@ fn parses_proxy_upstream_pool() {
             preferred_upstream_localities = ["site-a"]
             upstream_max_in_flight = [10, 30, 5]
             upstream_aliases = ["app-a", "app-b", "app-c"]
+            upstream_tags = [["blue", "primary"], ["blue"], ["canary"]]
             backup_upstreams = ["127.0.0.1:3002"]
             disabled_upstreams = ["127.0.0.1:3003"]
             connect_timeout_secs = 5
@@ -595,6 +596,14 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(config.proxy.preferred_upstream_localities, ["site-a"]);
     assert_eq!(config.proxy.upstream_max_in_flight, [10, 30, 5]);
     assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b", "app-c"]);
+    assert_eq!(
+        config.proxy.upstream_tags,
+        [
+            vec!["blue".to_owned(), "primary".to_owned()],
+            vec!["blue".to_owned()],
+            vec!["canary".to_owned()]
+        ]
+    );
     assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
     assert_eq!(config.proxy.disabled_upstreams, ["127.0.0.1:3003"]);
     assert_eq!(config.proxy.connect_timeout_secs, Some(5));
@@ -1003,6 +1012,57 @@ fn rejects_invalid_proxy_upstream_localities() {
         duplicate_preferred.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
             field: "proxy.preferred_upstream_localities",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn rejects_invalid_proxy_upstream_tags() {
+    let mismatch: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_tags = [["blue"]]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        mismatch.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_tags",
+            ..
+        })
+    ));
+
+    let invalid_label: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_tags = [["blue"], ["bad/tag"]]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        invalid_label.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_tags",
+            ..
+        })
+    ));
+
+    let duplicate_tag: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_tags = [["blue", "BLUE"], ["green"]]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        duplicate_tag.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_tags",
             ..
         })
     ));

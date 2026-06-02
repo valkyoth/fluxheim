@@ -312,7 +312,7 @@ counts, drain/disabled/forced-down/ejected/saturated summary counts, runtime
 override counts, circuit-open counts, selection policy, max-iteration and
 all-down settings, health-check frequency and parallel mode, retry policy,
 passive-health thresholds, slow-start duration, persistence policy and table
-size, queue policy and current waiting count, priority group, locality, max
+size, queue policy and current waiting count, priority group, locality, tags, max
 in-flight cap, current in-flight count, passive failure count, passive ejection,
 passive ejection remaining seconds, circuit state, slow-start allowance,
 persistence entries currently pinned to each backend, and least-time latency
@@ -755,6 +755,7 @@ upstream_localities = ["site-a", "site-b"]
 preferred_upstream_localities = ["site-a"]
 upstream_max_in_flight = [256, 512]
 upstream_aliases = ["app-a", "app-b"]
+upstream_tags = [["blue", "primary"], ["green"]]
 backup_upstreams = ["127.0.0.1:3001"]
 drain_upstreams = []
 disabled_upstreams = []
@@ -884,7 +885,7 @@ Fluxheim reads the file with the same symlink and parent-permission hardening
 used for other operator-controlled files. In this release, file-refreshed pools
 cannot be combined with `upstream_weights`, `upstream_priority_groups`,
 `upstream_localities`, `preferred_upstream_localities`,
-`upstream_max_in_flight`, `upstream_aliases`, `backup_upstreams`,
+`upstream_max_in_flight`, `upstream_aliases`, `upstream_tags`, `backup_upstreams`,
 `drain_upstreams`, or `disabled_upstreams`; use static `upstreams` for those
 policies.
 For DNS-based service names, load-balancer builds can set
@@ -894,7 +895,8 @@ configured 1 through 300 second interval. This first DNS-refresh slice is
 mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
 `upstream_priority_groups`, `upstream_localities`,
 `preferred_upstream_localities`, `upstream_max_in_flight`, `upstream_aliases`,
-`backup_upstreams`, `drain_upstreams`, and `disabled_upstreams`; use the
+`upstream_tags`, `backup_upstreams`, `drain_upstreams`, and
+`disabled_upstreams`; use the
 static pool form when those richer backend policies are required.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
 overrides the SNI name; if it is omitted, Fluxheim derives SNI from the primary
@@ -976,6 +978,12 @@ letters, digits, dots, dashes, and underscores, are capped at 64 bytes, and
 must be unique case-insensitively. Fluxheim uses them only for operator-facing
 metrics and status surfaces; they are not sent upstream and do not affect
 selection.
+`upstream_tags` is optional and, when set, must contain one tag list for each
+`upstreams` entry. Tags use the same safe low-cardinality label syntax as
+aliases, are capped at 16 tags per backend, must be unique per backend
+case-insensitively, and are exposed only in load-balancer runtime status for
+operator grouping and migration metadata. They are not sent upstream and do not
+affect selection.
 `backup_upstreams`, `drain_upstreams`, and `disabled_upstreams` are optional
 subsets of `upstreams`. Backups stay out of normal rotation and are selected
 only when no non-backup backend is currently selectable. Drained upstreams
