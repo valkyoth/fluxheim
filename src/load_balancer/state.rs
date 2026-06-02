@@ -322,14 +322,14 @@ impl SlowStartState {
         else {
             return true;
         };
+        if self.duration.is_zero() {
+            return true;
+        }
         let elapsed = now.saturating_duration_since(started_at);
         if elapsed >= self.duration {
             return true;
         }
 
-        if self.duration.is_zero() {
-            return true;
-        }
         let progress_per_mille =
             ((elapsed.as_millis() * 1000) / self.duration.as_millis()).clamp(1, 1000) as u64;
         progress_per_mille >= 500
