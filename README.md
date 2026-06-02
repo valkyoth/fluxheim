@@ -1,6 +1,6 @@
 <p align="center">
-  <b>Memory-safe edge server, reverse proxy and caching server built on Pingora.</b><br>
-  Modular by design. Secure by default. Ready for rootless containers.
+  <b>Rust edge gateway for websites, applications, caching, and load balancing.</b><br>
+  Modular by design. Secure by default. Ready for rootless containers and regulated estates.
 </p>
 
 <div align="center">
@@ -21,14 +21,13 @@
 
 # Fluxheim
 
-Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current release line is
-`1.5`: static sites, reverse proxying, edge caching, PHP-FPM application
-serving, ACME automation, observability, FIPS/ISO-capable TLS build paths,
-GeoIP policy, TCP stream proxying, and the enterprise HTTP/TCP load-balancer
-control-plane work. Focused release profiles are available for full, cache,
-proxy, load-balancer, and PHP deployments, with matching container images and
-Linux runtime archives.
+Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
+edge caching, PHP-FPM application serving, ACME automation, observability,
+FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
+enterprise HTTP/TCP load balancing. It uses Pingora internally for core proxy
+and load-balancing primitives, but the operator-facing product is Fluxheim:
+focused release profiles are available for full, cache, proxy, load-balancer,
+and PHP deployments, with matching container images and Linux runtime archives.
 
 The `1.5.0` load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style
 HTTP/TCP pool operations: weighted and adaptive selection, health and circuit
@@ -136,7 +135,9 @@ Apple Silicon developer workflow.
 ## Why Fluxheim
 
 - **Rust first**: memory-safe implementation with a pinned stable toolchain.
-- **Pingora based**: uses Cloudflare's proxy framework for the core HTTP path.
+- **Production proxy core**: uses Pingora internally for HTTP proxying and
+  load-balancing primitives while keeping Fluxheim's config, security, and
+  operations model as the public interface.
 - **Modular builds**: compile only the modules needed for a deployment.
 - **Secure defaults**: strict config validation, request limits, safe filesystem
   handling, dependency policy, and no hidden legacy protocol fallback.
@@ -234,10 +235,10 @@ Individual module features:
 
 | Feature | Default | Notes |
 | --- | --- | --- |
-| `proxy` | Yes | Pingora reverse proxy runtime and admin plumbing. |
+| `proxy` | Yes | Fluxheim reverse-proxy runtime backed by Pingora's HTTP path. |
 | `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
 | `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
-| `load-balancer` | No | Pingora load-balancing module and health checks. |
+| `load-balancer` | No | Fluxheim load-balancing module, health checks, and runtime pool policy. |
 | `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. Depends on the shared proxy runtime in `1.4.6`; hardened in `1.4.7` with true idle timeouts, stream upstream TLS/mTLS controls, weighted/drain/backup policy, and expanded smoke coverage. |
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
@@ -273,7 +274,7 @@ Recommended profile features:
 | `profile-static-site` | `proxy`, `web`, `tls-rustls`, `security` | Static sites without Fluxheim cache. |
 | `profile-reverse-proxy` | `proxy`, `tls-rustls`, `security` | Reverse proxy without static hosting/cache. |
 | `profile-cache-server` | `proxy`, `web`, `cache`, `tls-rustls`, `security` | Static/proxy server with cache enabled. |
-| `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Pingora load balancing and all 1.4 compression codecs compiled in. |
+| `profile-load-balancer` | `proxy`, `web`, `cache`, `compression-gzip`, `compression-zstd`, `compression-brotli`, `load-balancer`, `tls-rustls`, `security` | Edge server with Fluxheim load balancing and all compression codecs compiled in. |
 | `profile-observability` | `profile-core`, `metrics`, `metrics-otlp`, `otel-tracing`, `otel-otlp` | Core server with Prometheus metrics, optional local OTLP metrics export, trace context propagation, and optional local OTLP trace export. |
 | `profile-privacy` | `proxy`, `web`, `tls-rustls`, `privacy-mode`, `security` | Zero-retention static/proxy profile. |
 | `profile-full` | `profile-load-balancer`, `geoip`, `stream-proxy`, `traffic-mirror` | All stable production modules, including GeoIP, traffic mirroring, and the 1.4 stream foundation. |
@@ -412,49 +413,15 @@ release.
   Fluxheim-managed php-fpm supervision, OpenSSL and rustls/AWS-LC FIPS/ISO
   build paths, internal-crypto compliance guards, and the repeatable compliance
   evidence package template.
-- `1.4.0` is the production proxy parity baseline: edge ACLs, rate and
-  concurrency limits, gzip/zstd/brotli compression, response and URI rewrites,
-  advanced load balancing, passive health, retry budgets, active HTTP health
-  checks, bounded metrics, upstream connection/socket tuning, mTLS/client cert
-  policy, PROXY protocol v1/v2, upstream TLS controls, HTTP/2 origin controls,
-  and gRPC pass-through policy.
-- `1.4.1` completes the remaining proxy-operations work: dynamic upstream
-  discovery, file-watched upstream lists, richer structured logs,
-  regex/template rewrite policy, route method matching, explicit WebSocket
-  upgrade proxying, bounded auth subrequests, safe bodyless traffic mirroring,
-  and a read-only Unix ops socket.
-- `1.4.2` is the maintenance architecture release that splits the large proxy
-  runtime into focused modules before adding more large proxy features. Access
-  logs, compression, auth subrequests, traffic mirroring, edge policy, and
-  route policy are extracted domains. Outbound PROXY protocol framing lives in
-  `proxy_protocol`. PHP-FPM process supervision, request-body spooling, FastCGI
-  transport, retry/timeout handling, and response parsing now live in
-  `php_fpm`; the remaining PHP code in `proxy.rs` is the Pingora
-  request/session integration layer. The first `proxy_cache` slice holds
-  request-side cache policy, response admission, `Vary` helpers, and bounded
-  range/slice request, key, admission, freshness, status-header, and stale
-  policy; cache admin/API request and result DTOs live in `cache_api`;
-  remaining target extractions are stateful cache runtime/storage, slice object
-  assembly, and the proxy core.
-- `1.4.3` is the config maintenance architecture release. It splits config
-  source loading, shared parsers, domain validation, and the large config test
-  module into focused `config_*` files while preserving the existing
-  `crate::config::*` type paths and operator-facing configuration behavior.
-- `1.4.4` is the Apple Silicon macOS Level 1 developer-support release. It
-  adds Mac-safe development paths, an Apple Silicon CI/smoke gate, developer
-  artifact naming for `aarch64-macos`, and Linux ARM64 release artifact naming
-  for `aarch64-linux`. Linux remains the production support baseline.
-- `1.4.5` is the bounded GeoIP/Geo-Context release. It adds the optional
-  `geoip` feature for local MMDB MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open
-  datasets, vhost/route country and ASN access-policy rules, structured access
-  log Geo-Context fields, bounded database loading, and documented SDK roadmap
-  boundaries for a future `fluxheim-sdk` crate.
-- `1.4.6` added the TCP stream proxy foundation with route-local stream
-  trust boundaries, bounded copy controls, PROXY protocol support, and
-  separate stream semantics.
-- `1.4.7` hardened TCP stream proxying with true per-read idle timeouts,
-  stream upstream TLS/mTLS controls, weighted/drain/backup upstream policy, and
-  expanded stream smoke/security coverage.
+- `1.4.x` completed the production proxy parity and platform-hardening line:
+  edge ACLs, rate/concurrency limits, gzip/zstd/brotli compression,
+  regex/template rewrites, method routing, WebSocket upgrades, auth
+  subrequests, traffic mirroring, read-only ops socket, passive and active
+  health checks, retry budgets, PROXY protocol v1/v2, upstream TLS controls,
+  mTLS/client certificate policy, HTTP/2 origin controls, gRPC pass-through,
+  Apple Silicon Level 1 development support, bounded GeoIP/Geo-Context policy,
+  TCP stream proxying with idle timeouts and stream upstream TLS/mTLS, and the
+  proxy/config module splits that keep future feature domains in focused files.
 - `1.5.0` is the enterprise load-balancer/control-plane line. It promotes the
   load-balancer image profile and focuses on F5/HAProxy/Envoy-class pool
   operations: runtime pool/member mutation, priority groups, persistence,
