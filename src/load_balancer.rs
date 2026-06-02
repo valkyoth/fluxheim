@@ -125,6 +125,13 @@ pub struct LoadBalancerRuntimeBackendMutation {
     pub alias: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadBalancerCircuitState {
+    Closed,
+    Open,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct LoadBalancerPoolRuntimeStats {
     pub selection: LoadBalanceSelection,
@@ -140,6 +147,7 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub runtime_disabled_backend_count: usize,
     pub runtime_forced_down_backend_count: usize,
     pub passive_ejected_backend_count: usize,
+    pub circuit_open_backend_count: usize,
     pub saturated_backend_count: usize,
     pub max_iterations: usize,
     pub all_down_status: u16,
@@ -190,6 +198,7 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub max_in_flight: Option<usize>,
     pub in_flight: usize,
     pub passive_ejected: bool,
+    pub circuit_state: LoadBalancerCircuitState,
     pub passive_consecutive_failures: Option<usize>,
     pub passive_ejection_remaining_secs: Option<u64>,
     pub slow_start_permitting: bool,
@@ -549,6 +558,10 @@ impl UpstreamLoadBalancer {
             .iter()
             .filter(|backend| backend.passive_ejected)
             .count();
+        let circuit_open_backend_count = backends
+            .iter()
+            .filter(|backend| backend.circuit_state == LoadBalancerCircuitState::Open)
+            .count();
         let saturated_backend_count = backends
             .iter()
             .filter(|backend| {
@@ -571,6 +584,7 @@ impl UpstreamLoadBalancer {
             runtime_disabled_backend_count,
             runtime_forced_down_backend_count,
             passive_ejected_backend_count,
+            circuit_open_backend_count,
             saturated_backend_count,
             max_iterations: self.max_iterations,
             all_down_status: self.all_down_status,
@@ -1654,6 +1668,8 @@ where
         .map(|backend| {
             let policy_key = backend_policy_key(backend);
             let connection_key = backend_connection_key(backend);
+            let passive_ejected = passive_health
+                .is_some_and(|health| health.key_is_currently_ejected(connection_key));
             LoadBalancerBackendRuntimeStats {
                 #[cfg(not(feature = "privacy-mode"))]
                 address: Some(backend.addr.to_string()),
@@ -1669,8 +1685,12 @@ where
                 priority_group: backend_policy.priority_group(policy_key),
                 max_in_flight: backend_policy.max_in_flight_key(policy_key),
                 in_flight: counters.count_existing(backend),
-                passive_ejected: passive_health
-                    .is_some_and(|health| health.key_is_currently_ejected(connection_key)),
+                passive_ejected,
+                circuit_state: if passive_ejected {
+                    LoadBalancerCircuitState::Open
+                } else {
+                    LoadBalancerCircuitState::Closed
+                },
                 passive_consecutive_failures: passive_health
                     .and_then(|health| health.key_consecutive_failures(connection_key)),
                 passive_ejection_remaining_secs: passive_health
@@ -2641,7 +2661,7 @@ mod tests {
     };
 
     use super::{
-        LoadBalancedUpstreamReporter, LoadBalancerPersistenceOutcome,
+        LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
         LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
         backend_connection_key, configured_http_health_check, validate_http_health_response,
     };
@@ -3249,7 +3269,9 @@ mod tests {
             .find(|backend| backend.address.as_deref() == Some(failed_addr_text.as_str()))
             .expect("failed backend stats");
         assert!(failed_stats.passive_ejected);
+        assert_eq!(failed_stats.circuit_state, LoadBalancerCircuitState::Open);
         assert!(failed_stats.passive_ejection_remaining_secs.is_some());
+        assert_eq!(stats.circuit_open_backend_count, 1);
         let next = balancer.select(&request(), None).unwrap();
         assert_ne!(failed_addr, next.backend.addr);
     }
@@ -3287,6 +3309,8 @@ mod tests {
             .expect("failed backend stats");
         assert_eq!(failed_stats.passive_consecutive_failures, Some(1));
         assert!(!failed_stats.passive_ejected);
+        assert_eq!(failed_stats.circuit_state, LoadBalancerCircuitState::Closed);
+        assert_eq!(stats.circuit_open_backend_count, 0);
     }
 
     #[test]

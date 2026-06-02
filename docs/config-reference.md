@@ -309,14 +309,17 @@ When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
 read-only and reports backend readiness, aliases, weights, backup/drain/disabled
 state, ready and policy-available backend counts, primary/backup availability
 counts, drain/disabled/forced-down/ejected/saturated summary counts, runtime
-override counts, selection policy, max-iteration and all-down settings, health-check
-frequency and parallel mode, retry policy, passive-health thresholds,
-slow-start duration, persistence policy and table size, priority group, max
-in-flight cap, current in-flight count, passive failure count, passive ejection,
-passive ejection remaining seconds, slow-start allowance, and least-time latency
-state where available. Per-backend rows include `runtime_state_override` when
-an authenticated runtime member operation is active. In
-`privacy-mode`, backend addresses are omitted from this status object.
+override counts, circuit-open counts, selection policy, max-iteration and
+all-down settings, health-check frequency and parallel mode, retry policy,
+passive-health thresholds, slow-start duration, persistence policy and table
+size, priority group, max in-flight cap, current in-flight count, passive
+failure count, passive ejection, passive ejection remaining seconds, circuit
+state, slow-start allowance, and least-time latency state where available. In
+`1.5.0`, `circuit_state = "open"` is the runtime status view for a backend
+currently ejected by passive health; `"closed"` means the backend is not
+passively ejected. Per-backend rows include `runtime_state_override` when an
+authenticated runtime member operation is active. In `privacy-mode`, backend
+addresses are omitted from this status object.
 
 When compiled with `load-balancer`, authenticated admins can update the
 in-memory state of an existing configured pool member without reloading:
@@ -1001,6 +1004,9 @@ narrow the failure set to specific 5xx status codes, and
 `failure_status_ranges` accepts inclusive 5xx ranges such as
 `[{ start = 520, end = 529 }]`. `max_latency_ms = 0` disables latency ejection;
 a positive value treats responses at or above that latency as passive failures.
+Passive ejection is also exposed in load-balancer runtime status as
+`circuit_state = "open"` with a pool-level `circuit_open_backend_count` so
+temporary outlier removal is explainable through the admin plane.
 Active health checks and passive ejection are combined; if no backend is
 currently selectable,
 Fluxheim returns a proxy error instead of falling back to a configured primary
