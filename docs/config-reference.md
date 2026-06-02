@@ -308,8 +308,8 @@ When compiled with `load-balancer`, `GET /_fluxheim/status` includes a
 `load_balancer` object for configured vhost and route pools. The status is
 read-only and reports backend readiness, aliases, weights, backup/drain/disabled
 state, ready and policy-available backend counts, primary/backup availability
-counts, drain/disabled/ejected/saturated summary counts, runtime override
-counts, selection policy, max-iteration and all-down settings, health-check
+counts, drain/disabled/forced-down/ejected/saturated summary counts, runtime
+override counts, selection policy, max-iteration and all-down settings, health-check
 frequency and parallel mode, retry policy, passive-health thresholds,
 slow-start duration, priority group, max in-flight cap, current in-flight count,
 passive failure count, passive ejection, passive ejection remaining seconds,
@@ -329,7 +329,10 @@ curl -X POST \
 
 Use `vhost` for the vhost name, optional `route` for a route-local pool,
 `member` for the configured upstream address or `upstream_aliases` value, and
-`state` as `normal`, `drain`, or `disable`. `normal` clears only runtime
+`state` as `normal`, `drain`, `disable`, or `forced_down`. `forced_down`
+removes the member from selection like `disable` but remains distinct in admin
+status so operators can separate forced health actions from maintenance
+disables. `normal` clears only runtime
 overrides; static `drain_upstreams` and `disabled_upstreams` remain enforced
 until the config changes. Runtime member state is intentionally in-memory in
 `1.5.0`, is reset by process restart or runtime rebuild, and is returned with

@@ -70,6 +70,7 @@ pub enum LoadBalancerRuntimeBackendState {
     Normal,
     Drained,
     Disabled,
+    ForcedDown,
 }
 
 impl LoadBalancerRuntimeBackendState {
@@ -78,6 +79,9 @@ impl LoadBalancerRuntimeBackendState {
             "normal" | "enable" | "enabled" | "resume" | "resumed" => Some(Self::Normal),
             "drain" | "drained" => Some(Self::Drained),
             "disable" | "disabled" => Some(Self::Disabled),
+            "down" | "force-down" | "force_down" | "forced-down" | "forced_down" => {
+                Some(Self::ForcedDown)
+            }
             _ => None,
         }
     }
@@ -87,6 +91,7 @@ impl LoadBalancerRuntimeBackendState {
             Self::Normal => "normal",
             Self::Drained => "drained",
             Self::Disabled => "disabled",
+            Self::ForcedDown => "forced_down",
         }
     }
 }
@@ -112,6 +117,7 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub runtime_overridden_backend_count: usize,
     pub runtime_drained_backend_count: usize,
     pub runtime_disabled_backend_count: usize,
+    pub runtime_forced_down_backend_count: usize,
     pub passive_ejected_backend_count: usize,
     pub saturated_backend_count: usize,
     pub max_iterations: usize,
@@ -409,6 +415,12 @@ impl UpstreamLoadBalancer {
                 backend.runtime_state_override == Some(LoadBalancerRuntimeBackendState::Disabled)
             })
             .count();
+        let runtime_forced_down_backend_count = backends
+            .iter()
+            .filter(|backend| {
+                backend.runtime_state_override == Some(LoadBalancerRuntimeBackendState::ForcedDown)
+            })
+            .count();
         let passive_ejected_backend_count = backends
             .iter()
             .filter(|backend| backend.passive_ejected)
@@ -433,6 +445,7 @@ impl UpstreamLoadBalancer {
             runtime_overridden_backend_count,
             runtime_drained_backend_count,
             runtime_disabled_backend_count,
+            runtime_forced_down_backend_count,
             passive_ejected_backend_count,
             saturated_backend_count,
             max_iterations: self.max_iterations,
@@ -1138,6 +1151,7 @@ struct BackendSelectionPolicy {
 struct RuntimeBackendPolicyOverrides {
     drain: Mutex<std::collections::HashSet<u64>>,
     disabled: Mutex<std::collections::HashSet<u64>>,
+    forced_down: Mutex<std::collections::HashSet<u64>>,
 }
 
 impl BackendSelectionPolicy {
@@ -1237,6 +1251,14 @@ impl RuntimeBackendPolicyOverrides {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .contains(&key)
+            || self.forced_down(key)
+    }
+
+    fn forced_down(&self, key: u64) -> bool {
+        self.forced_down
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(&key)
     }
 
     fn set_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
@@ -1248,8 +1270,13 @@ impl RuntimeBackendPolicyOverrides {
             .disabled
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut forced_down = self
+            .forced_down
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         drain.remove(&key);
         disabled.remove(&key);
+        forced_down.remove(&key);
         match state {
             LoadBalancerRuntimeBackendState::Normal => {}
             LoadBalancerRuntimeBackendState::Drained => {
@@ -1257,6 +1284,9 @@ impl RuntimeBackendPolicyOverrides {
             }
             LoadBalancerRuntimeBackendState::Disabled => {
                 disabled.insert(key);
+            }
+            LoadBalancerRuntimeBackendState::ForcedDown => {
+                forced_down.insert(key);
             }
         }
     }
@@ -1270,6 +1300,13 @@ impl RuntimeBackendPolicyOverrides {
             .disabled
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let forced_down = self
+            .forced_down
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if forced_down.contains(&key) {
+            return Some(LoadBalancerRuntimeBackendState::ForcedDown);
+        }
         if disabled.contains(&key) {
             return Some(LoadBalancerRuntimeBackendState::Disabled);
         }
@@ -3057,6 +3094,7 @@ mod tests {
         assert_eq!(stats.runtime_overridden_backend_count, 1);
         assert_eq!(stats.runtime_drained_backend_count, 1);
         assert_eq!(stats.runtime_disabled_backend_count, 0);
+        assert_eq!(stats.runtime_forced_down_backend_count, 0);
         assert_eq!(stats.primary_available_backend_count, 1);
         let runtime_drained = stats
             .backends
@@ -3081,6 +3119,7 @@ mod tests {
         assert_eq!(stats.runtime_overridden_backend_count, 2);
         assert_eq!(stats.runtime_drained_backend_count, 1);
         assert_eq!(stats.runtime_disabled_backend_count, 1);
+        assert_eq!(stats.runtime_forced_down_backend_count, 0);
         assert_eq!(stats.primary_available_backend_count, 0);
         assert!(balancer.select(&request(), None).is_none());
 
@@ -3091,8 +3130,61 @@ mod tests {
         assert_eq!(stats.runtime_overridden_backend_count, 1);
         assert_eq!(stats.runtime_drained_backend_count, 0);
         assert_eq!(stats.runtime_disabled_backend_count, 1);
+        assert_eq!(stats.runtime_forced_down_backend_count, 0);
         let selected = balancer.select(&request(), None).unwrap();
         assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3000");
+    }
+
+    #[test]
+    fn runtime_backend_state_supports_forced_down() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_aliases: vec!["primary-a".to_owned(), "primary-b".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let mutation = balancer
+            .set_runtime_backend_state("primary-a", LoadBalancerRuntimeBackendState::ForcedDown)
+            .unwrap();
+        assert_eq!(mutation.state, LoadBalancerRuntimeBackendState::ForcedDown);
+        assert_eq!(mutation.state.as_str(), "forced_down");
+
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.disabled_backend_count, 1);
+        assert_eq!(stats.runtime_overridden_backend_count, 1);
+        assert_eq!(stats.runtime_disabled_backend_count, 0);
+        assert_eq!(stats.runtime_forced_down_backend_count, 1);
+        assert_eq!(stats.primary_available_backend_count, 1);
+        let forced_down = stats
+            .backends
+            .iter()
+            .find(|backend| backend.alias.as_deref() == Some("primary-a"))
+            .expect("forced down backend status");
+        assert!(forced_down.disabled);
+        assert_eq!(
+            forced_down.runtime_state_override,
+            Some(LoadBalancerRuntimeBackendState::ForcedDown)
+        );
+
+        for _ in 0..4 {
+            let selected = balancer.select(&request(), None).unwrap();
+            assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+        }
+
+        balancer
+            .set_runtime_backend_state("primary-a", LoadBalancerRuntimeBackendState::Normal)
+            .unwrap();
+        let stats = balancer.runtime_stats();
+        assert_eq!(stats.disabled_backend_count, 0);
+        assert_eq!(stats.runtime_overridden_backend_count, 0);
+        assert_eq!(stats.runtime_forced_down_backend_count, 0);
     }
 
     #[test]

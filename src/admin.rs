@@ -898,7 +898,7 @@ impl AdminApp {
         let Some(state) = LoadBalancerRuntimeBackendState::parse(state) else {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                "load balancer state must be normal, drain, or disable",
+                "load balancer state must be normal, drain, disable, or forced_down",
             );
         };
         match self
@@ -3677,6 +3677,7 @@ mod tests {
         assert_eq!(pool["runtime_overridden_backend_count"], 1);
         assert_eq!(pool["runtime_drained_backend_count"], 1);
         assert_eq!(pool["runtime_disabled_backend_count"], 0);
+        assert_eq!(pool["runtime_forced_down_backend_count"], 0);
         assert_eq!(pool["primary_available_backend_count"], 1);
         let app_a = pool["backends"]
             .as_array()
@@ -3687,6 +3688,33 @@ mod tests {
         assert_eq!(
             app_a["runtime_state_override"],
             Value::String("drained".to_owned())
+        );
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-state",
+            Some("vhost=one&member=app-b&state=forced_down"),
+            &auth_headers(),
+        );
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["state"], "forced_down");
+
+        let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        let pool = &body["load_balancer"]["vhosts"][0]["pool"];
+        assert_eq!(pool["runtime_forced_down_backend_count"], 1);
+        assert_eq!(pool["primary_available_backend_count"], 0);
+        let app_b = pool["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|backend| backend["alias"] == "app-b")
+            .expect("app-b backend status");
+        assert_eq!(
+            app_b["runtime_state_override"],
+            Value::String("forced_down".to_owned())
         );
     }
 
