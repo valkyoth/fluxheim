@@ -72,6 +72,8 @@ behavior when the change improves security or project direction.
 - Add bounded local source-IP load-balancer persistence with TTL, table-size
   limits, admin status entry counts, and automatic fallback when the stored
   backend is no longer selectable.
+- Count load-balancer persistence hits, misses, and fallbacks in
+  `fluxheim_load_balancer_events_total` when metrics are compiled.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in

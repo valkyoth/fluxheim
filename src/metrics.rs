@@ -1515,6 +1515,9 @@ fn load_balancer_event_label(event: &str) -> &'static str {
         "member_state" => "member_state",
         "member_state_invalid" => "member_state_invalid",
         "member_state_not_found" => "member_state_not_found",
+        "persistence_hit" => "persistence_hit",
+        "persistence_miss" => "persistence_miss",
+        "persistence_fallback" => "persistence_fallback",
         _ => "other",
     }
 }
@@ -1885,6 +1888,14 @@ mod tests {
             Some("origin-a"),
             "member_state_not_found",
         );
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "persistence_hit");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "persistence_miss");
+        record_load_balancer_event(
+            "lb-test",
+            Some("api"),
+            Some("origin-a"),
+            "persistence_fallback",
+        );
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "attacker-event");
         record_load_balancer_event("lb-test", Some("api"), Some("http://raw:3000"), "selected");
 
@@ -1910,6 +1921,9 @@ mod tests {
         assert!(output.contains(r#"event="member_state""#));
         assert!(output.contains(r#"event="member_state_invalid""#));
         assert!(output.contains(r#"event="member_state_not_found""#));
+        assert!(output.contains(r#"event="persistence_hit""#));
+        assert!(output.contains(r#"event="persistence_miss""#));
+        assert!(output.contains(r#"event="persistence_fallback""#));
         assert!(output.contains(r#"event="other""#));
         assert!(!output.contains("attacker-event"));
         assert!(!output.contains("http://raw:3000"));

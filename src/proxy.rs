@@ -4161,6 +4161,10 @@ impl ProxyHttp for FluxProxy {
             ctx.upstream_load_balancer_alias = selected.alias.clone();
             #[cfg(feature = "metrics")]
             record_load_balancer_metric(vhost, ctx, "selected");
+            #[cfg(feature = "metrics")]
+            if let Some(outcome) = selected.persistence_outcome {
+                record_load_balancer_persistence_metric(vhost, ctx, outcome);
+            }
             #[cfg(not(feature = "privacy-mode"))]
             {
                 ctx.upstream = Some(selected.backend.addr.to_string());
@@ -8939,6 +8943,15 @@ fn record_load_balancer_metric(vhost: &RuntimeVhost, ctx: &RequestContext, event
         ctx.upstream_load_balancer_alias.as_deref(),
         event,
     );
+}
+
+#[cfg(all(feature = "load-balancer", feature = "metrics"))]
+fn record_load_balancer_persistence_metric(
+    vhost: &RuntimeVhost,
+    ctx: &RequestContext,
+    outcome: crate::load_balancer::LoadBalancerPersistenceOutcome,
+) {
+    record_load_balancer_metric(vhost, ctx, outcome.event());
 }
 
 #[cfg(feature = "load-balancer")]

@@ -59,6 +59,24 @@ pub struct SelectedUpstream {
     pub alias: Option<Arc<str>>,
     pub permit: Option<LoadBalancedConnectionPermit>,
     pub reporter: Option<LoadBalancedUpstreamReporter>,
+    pub persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LoadBalancerPersistenceOutcome {
+    Hit,
+    Miss,
+    Fallback,
+}
+
+impl LoadBalancerPersistenceOutcome {
+    pub fn event(self) -> &'static str {
+        match self {
+            Self::Hit => "persistence_hit",
+            Self::Miss => "persistence_miss",
+            Self::Fallback => "persistence_fallback",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -340,13 +358,48 @@ impl UpstreamLoadBalancer {
             .and_then(|persistence| persistence.key(request, client_ip));
         if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key.as_deref())
             && let Some(backend_key) = persistence.lookup(key)
-            && let Some(backend) = self.inner.backend_by_policy_key(backend_key)
-            && self.backend_available_for_persistence(&backend)
-            && let Some(selected) = self.prepare_selected(SelectedUpstream::new(backend))
         {
-            return Some(selected);
+            let persisted = self
+                .inner
+                .backend_by_policy_key(backend_key)
+                .and_then(|backend| {
+                    self.backend_available_for_persistence(&backend)
+                        .then_some(backend)
+                })
+                .and_then(|backend| {
+                    self.prepare_selected(
+                        SelectedUpstream::new(backend),
+                        Some(LoadBalancerPersistenceOutcome::Hit),
+                    )
+                });
+            if let Some(selected) = persisted {
+                return Some(selected);
+            }
+            return self.select_fresh(
+                request,
+                client_ip,
+                persistence_key.as_deref(),
+                Some(LoadBalancerPersistenceOutcome::Fallback),
+            );
         }
 
+        self.select_fresh(
+            request,
+            client_ip,
+            persistence_key.as_deref(),
+            persistence_key
+                .as_ref()
+                .map(|_| LoadBalancerPersistenceOutcome::Miss),
+        )
+    }
+
+    fn select_fresh(
+        &self,
+        request: &RequestHeader,
+        client_ip: Option<IpAddr>,
+        persistence_key: Option<&[u8]>,
+        persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
+    ) -> Option<SelectedUpstream> {
         let key = self.key_source.request_key(request, client_ip);
         let selected = self.inner.select(
             key.as_deref(),
@@ -356,14 +409,18 @@ impl UpstreamLoadBalancer {
             &self.counters,
             &self.backend_policy,
         )?;
-        let selected = self.prepare_selected(selected)?;
-        if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key.as_deref()) {
+        let selected = self.prepare_selected(selected, persistence_outcome)?;
+        if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key) {
             persistence.record(key, backend_policy_key(&selected.backend));
         }
         Some(selected)
     }
 
-    fn prepare_selected(&self, mut selected: SelectedUpstream) -> Option<SelectedUpstream> {
+    fn prepare_selected(
+        &self,
+        mut selected: SelectedUpstream,
+        persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
+    ) -> Option<SelectedUpstream> {
         selected.permit = Some(self.counters.permit(
             &selected.backend,
             self.backend_policy.max_in_flight(&selected.backend),
@@ -381,6 +438,7 @@ impl UpstreamLoadBalancer {
                 latency,
             }
         });
+        selected.persistence_outcome = persistence_outcome;
         Some(selected)
     }
 
@@ -903,6 +961,7 @@ impl SelectedUpstream {
             alias: None,
             permit: None,
             reporter: None,
+            persistence_outcome: None,
         }
     }
 }
@@ -1898,6 +1957,7 @@ fn select_least_connections_with_backup_policy(
         alias: None,
         backend,
         reporter: None,
+        persistence_outcome: None,
     })
 }
 
@@ -2038,6 +2098,7 @@ fn select_least_time_with_backup_policy(
         alias: None,
         backend,
         reporter: None,
+        persistence_outcome: None,
     })
 }
 
@@ -2103,6 +2164,7 @@ fn select_power_of_two(
         alias: None,
         backend: selected,
         reporter: None,
+        persistence_outcome: None,
     })
 }
 
@@ -2579,9 +2641,9 @@ mod tests {
     };
 
     use super::{
-        LoadBalancedUpstreamReporter, LoadBalancerRuntimeBackendState, PassiveHealthState,
-        SlowStartState, UpstreamLoadBalancer, backend_connection_key, configured_http_health_check,
-        validate_http_health_response,
+        LoadBalancedUpstreamReporter, LoadBalancerPersistenceOutcome,
+        LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
+        backend_connection_key, configured_http_health_check, validate_http_health_response,
     };
     use crate::test_support::unique_temp_path;
 
@@ -2664,18 +2726,30 @@ mod tests {
             .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))))
             .unwrap();
         assert_eq!(first.backend.addr.to_string(), "127.0.0.1:3000");
+        assert_eq!(
+            first.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Miss)
+        );
         drop(first);
 
         let second = balancer
             .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))))
             .unwrap();
         assert_eq!(second.backend.addr.to_string(), "127.0.0.1:3000");
+        assert_eq!(
+            second.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Hit)
+        );
         drop(second);
 
         let different_client = balancer
             .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11))))
             .unwrap();
         assert_eq!(different_client.backend.addr.to_string(), "127.0.0.1:3001");
+        assert_eq!(
+            different_client.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Miss)
+        );
 
         let stats = balancer.runtime_stats();
         assert!(stats.persistence_enabled);
@@ -2721,6 +2795,10 @@ mod tests {
             .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20))))
             .unwrap();
         assert_eq!(fallback.backend.addr.to_string(), "127.0.0.1:3001");
+        assert_eq!(
+            fallback.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Fallback)
+        );
     }
 
     #[test]

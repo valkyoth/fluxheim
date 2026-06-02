@@ -971,6 +971,8 @@ success/failure/ejection outcomes are counted by
 `fluxheim_load_balancer_events_total` with bounded configured vhost/route
 labels. The metric does not label raw upstream addresses; it uses
 `upstream_aliases` when present and otherwise leaves the upstream label empty.
+When persistence is enabled, the same counter records bounded
+`persistence_hit`, `persistence_miss`, and `persistence_fallback` events.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send `method` to `path`; `method` defaults to `GET` and
