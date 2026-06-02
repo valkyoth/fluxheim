@@ -14,6 +14,8 @@ behavior when the change improves security or project direction.
 - Start the enterprise load-balancer/control-plane development release.
 - Promote the `profile-load-balancer-edge` image line from prepared/manual
   testing to the planned `1.5` release artifact set.
+- Add the focused Linux `load-balancer` runtime archive to the release asset
+  builder and release documentation.
 - Expand the `1.5` roadmap around F5/HAProxy/Envoy-class load-balancer
   operations: runtime pool/member mutation, persistence, priority groups,
   slow-start, adaptive health, circuit breaking, locality/failure-domain

@@ -130,18 +130,20 @@ rustup target add aarch64-unknown-linux-gnu
 scripts/build_release_assets.sh "${RELEASE_VERSION}" --kind linux --target aarch64-unknown-linux-gnu
 ```
 
-This produces, for each Linux target, the full/cache/proxy/php runtime archives
-and the config-tester archive:
+This produces, for each Linux target, the full/cache/proxy/load-balancer/php
+runtime archives and the config-tester archive:
 
 ```text
 fluxheim-${RELEASE_VERSION}-full-x86_64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-cache-x86_64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-proxy-x86_64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-load-balancer-x86_64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-php-x86_64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-config-tester-x86_64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-full-aarch64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-cache-aarch64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-proxy-aarch64-linux.tar.gz
+fluxheim-${RELEASE_VERSION}-load-balancer-aarch64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-php-aarch64-linux.tar.gz
 fluxheim-${RELEASE_VERSION}-config-tester-aarch64-linux.tar.gz
 ```
@@ -247,7 +249,7 @@ On GitHub:
 4. Use `$TITLE` as the release title.
 5. Paste the contents of `$RELEASE_NOTES`.
 6. Upload every runtime profile archive built in step 4:
-   `dist/fluxheim-${RELEASE_VERSION}-{full,cache,proxy,php}-{x86_64,aarch64}-linux.tar.gz`.
+   `dist/fluxheim-${RELEASE_VERSION}-{full,cache,proxy,load-balancer,php}-{x86_64,aarch64}-linux.tar.gz`.
 7. Upload the unified config-tester archive built in step 4:
    `dist/fluxheim-${RELEASE_VERSION}-config-tester-{x86_64,aarch64}-linux.tar.gz`.
 8. If the release includes Level 1 macOS developer artifacts, upload

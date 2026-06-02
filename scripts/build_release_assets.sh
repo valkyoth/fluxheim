@@ -135,6 +135,7 @@ case "$kind" in
         bundle_runtime_profile full profile-full,acme-client,metrics,metrics-otlp,otel-tracing,otel-otlp
         bundle_runtime_profile cache profile-cache-edge,acme-client
         bundle_runtime_profile proxy profile-proxy-edge,acme-client
+        bundle_runtime_profile load-balancer profile-load-balancer-edge,acme-client
         bundle_runtime_profile php profile-web-server,php-fpm,acme-client
         bundle_config_tester
         ;;

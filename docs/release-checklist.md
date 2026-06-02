@@ -406,6 +406,7 @@ cargo build --release --no-default-features --features proxy,tls-rustls,acme
 cargo build --release --no-default-features --features profile-full
 cargo build --release --no-default-features --features profile-cache-edge
 cargo build --release --no-default-features --features profile-proxy-edge
+cargo build --release --no-default-features --features profile-load-balancer-edge
 cargo build --release --no-default-features --features profile-observability
 scripts/validate-fips-openssl.sh check
 scripts/validate-fips-rustls.sh check
