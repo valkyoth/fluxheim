@@ -332,12 +332,14 @@ curl -X POST \
 
 Use `vhost` for the vhost name, optional `route` for a route-local pool,
 `member` for the configured upstream address or `upstream_aliases` value, and
-`state` as `normal`, `drain`, `disable`, or `forced_down`. `forced_down`
-removes the member from selection like `disable` but remains distinct in admin
-status so operators can separate forced health actions from maintenance
-disables. `normal` clears only runtime
-overrides; static `drain_upstreams` and `disabled_upstreams` remain enforced
-until the config changes. Runtime member state is intentionally in-memory in
+`state` as `normal`, `drain`, `disable`, `forced_down`, or `manual_resume`.
+`forced_down` removes the member from selection like `disable` but remains
+distinct in admin status so operators can separate forced health actions from
+maintenance disables. `manual_resume` clears any runtime override, clears the
+member's passive-health failure/ejection state, and restarts slow-start ramp
+when slow-start is configured. `normal` clears only runtime overrides; static
+`drain_upstreams` and `disabled_upstreams` remain enforced until the config
+changes. Runtime member state is intentionally in-memory in
 `1.5.0`, is reset by process restart or runtime rebuild, and is returned with
 `"persistent": false` in the mutation response. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.

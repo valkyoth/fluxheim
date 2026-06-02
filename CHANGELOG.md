@@ -58,8 +58,10 @@ behavior when the change improves security or project direction.
   counts in load-balancer runtime status.
 - Add authenticated in-memory load-balancer member-state operations through
   `POST /_fluxheim/load-balancer/member-state` for existing configured
-  members: normal, drain, disable, and forced-down by configured address or
-  alias.
+  members: normal, drain, disable, forced-down, and manual-resume by configured
+  address or alias.
+- Add runtime `manual_resume` for load-balancer members to clear passive-health
+  failure/ejection state and restart slow-start ramp without a config reload.
 - Return explicit `scope` and `persistent = false` metadata from load-balancer
   runtime member-state operations.
 - Emit load-balancer audit logs for successful and rejected runtime

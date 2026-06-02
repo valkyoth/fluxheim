@@ -92,17 +92,19 @@ pub enum LoadBalancerRuntimeBackendState {
     Drained,
     Disabled,
     ForcedDown,
+    ManualResume,
 }
 
 impl LoadBalancerRuntimeBackendState {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "normal" | "enable" | "enabled" | "resume" | "resumed" => Some(Self::Normal),
+            "normal" | "enable" | "enabled" => Some(Self::Normal),
             "drain" | "drained" => Some(Self::Drained),
             "disable" | "disabled" => Some(Self::Disabled),
             "down" | "force-down" | "force_down" | "forced-down" | "forced_down" => {
                 Some(Self::ForcedDown)
             }
+            "resume" | "resumed" | "manual-resume" | "manual_resume" => Some(Self::ManualResume),
             _ => None,
         }
     }
@@ -113,6 +115,7 @@ impl LoadBalancerRuntimeBackendState {
             Self::Drained => "drained",
             Self::Disabled => "disabled",
             Self::ForcedDown => "forced_down",
+            Self::ManualResume => "manual_resume",
         }
     }
 }
@@ -646,8 +649,17 @@ impl UpstreamLoadBalancer {
             .inner
             .backend_by_member(member, &self.backend_aliases)?;
         let policy_key = backend_policy_key(&backend);
+        let connection_key = backend_connection_key(&backend);
         self.backend_policy
             .set_runtime_backend_state(policy_key, state);
+        if state == LoadBalancerRuntimeBackendState::ManualResume {
+            if let Some(passive_health) = &self.passive_health {
+                passive_health.clear_key(connection_key);
+            }
+            if let Some(slow_start) = &self.slow_start {
+                slow_start.reset_at(connection_key, Instant::now());
+            }
+        }
         Ok(LoadBalancerRuntimeBackendMutation {
             member: member.to_owned(),
             state,
@@ -1147,6 +1159,13 @@ impl PassiveHealthState {
         }
     }
 
+    fn clear_key(&self, key: u64) {
+        self.backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&key);
+    }
+
     fn failure_status(&self, status: u16) -> bool {
         if self.failure_statuses.is_empty() && self.failure_status_ranges.is_empty() {
             return (500..=599).contains(&status);
@@ -1545,7 +1564,8 @@ impl RuntimeBackendPolicyOverrides {
         disabled.remove(&key);
         forced_down.remove(&key);
         match state {
-            LoadBalancerRuntimeBackendState::Normal => {}
+            LoadBalancerRuntimeBackendState::Normal
+            | LoadBalancerRuntimeBackendState::ManualResume => {}
             LoadBalancerRuntimeBackendState::Drained => {
                 drain.insert(key);
             }
@@ -3564,6 +3584,60 @@ mod tests {
         assert_eq!(stats.disabled_backend_count, 0);
         assert_eq!(stats.runtime_overridden_backend_count, 0);
         assert_eq!(stats.runtime_forced_down_backend_count, 0);
+    }
+
+    #[test]
+    fn manual_resume_clears_passive_ejection() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_aliases: vec!["primary-a".to_owned(), "primary-b".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+                slow_start: LoadBalanceSlowStartConfig {
+                    enabled: true,
+                    duration_secs: 30,
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let failed = balancer.select(&request(), None).unwrap();
+        let failed_addr = failed.backend.addr.to_string();
+        failed.reporter.unwrap().record_failure();
+        let stats = balancer.runtime_stats();
+        let ejected = stats
+            .backends
+            .iter()
+            .find(|backend| backend.address.as_deref() == Some(failed_addr.as_str()))
+            .expect("ejected backend status");
+        assert!(ejected.passive_ejected);
+        assert_eq!(ejected.circuit_state, LoadBalancerCircuitState::Open);
+
+        let mutation = balancer
+            .set_runtime_backend_state(&failed_addr, LoadBalancerRuntimeBackendState::ManualResume)
+            .unwrap();
+        assert_eq!(mutation.state.as_str(), "manual_resume");
+
+        let stats = balancer.runtime_stats();
+        let resumed = stats
+            .backends
+            .iter()
+            .find(|backend| backend.address.as_deref() == Some(failed_addr.as_str()))
+            .expect("resumed backend status");
+        assert!(!resumed.passive_ejected);
+        assert_eq!(resumed.circuit_state, LoadBalancerCircuitState::Closed);
+        assert_eq!(resumed.passive_consecutive_failures, None);
+        assert_eq!(stats.circuit_open_backend_count, 0);
     }
 
     #[test]

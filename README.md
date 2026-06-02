@@ -81,7 +81,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
 | Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
-| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-time EWMA, priority groups, per-upstream in-flight caps, source-IP persistence, power-of-two, hash, consistent-hash, backup, drain, disabled/forced-down members, runtime drain/disable/force-down/enable, slow start, retry budgets/statuses, configurable all-down status, and a validated enterprise fixture in `examples/load-balancer-enterprise.toml`. |
+| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-time EWMA, priority groups, per-upstream in-flight caps, source-IP persistence, power-of-two, hash, consistent-hash, backup, drain, disabled/forced-down members, runtime drain/disable/force-down/enable/manual-resume, slow start, retry budgets/statuses, configurable all-down status, and a validated enterprise fixture in `examples/load-balancer-enterprise.toml`. |
 | DNS-refreshed upstream pools | ✅ | `1.4.1`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |

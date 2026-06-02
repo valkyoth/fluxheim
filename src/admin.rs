@@ -898,7 +898,7 @@ impl AdminApp {
         let Some(state) = LoadBalancerRuntimeBackendState::parse(state) else {
             return error_response(
                 StatusCode::BAD_REQUEST,
-                "load balancer state must be normal, drain, disable, or forced_down",
+                "load balancer state must be normal, drain, disable, forced_down, or manual_resume",
             );
         };
         match self
