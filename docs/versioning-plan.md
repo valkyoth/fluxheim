@@ -1743,11 +1743,14 @@ Stable scope:
 
 - Compile-time `load-balancer` module remains the place for estate-scale
   features that go beyond one Fluxheim instance's normal proxy routing.
-- Runtime pool and member mutation through a local authenticated control plane:
-  add, remove, drain, disable, resume, weight change, slow-start, and metadata
-  update without full process restart.
-- Persisted pool state for operator actions and reload survival, with safe
-  snapshot/write semantics and audit events.
+- Runtime pool and member state through a local authenticated control plane:
+  drain, disable, force-down, enable/normal, manual resume, persistence-table
+  clear, and load-balancer-only runtime status without full process restart.
+  True runtime add/remove, runtime weight change, and runtime metadata updates
+  are later `1.5.x` control-plane work because they need either an atomic
+  backend-set swap or a selector weight overlay across every algorithm.
+- Persisted pool state for operator actions and reload survival remains later
+  `1.5.x` work, with safe snapshot/write semantics and audit events.
 - Cluster-aware state sharing for selected tables where single-node behavior is
   insufficient:
   - sticky-session tables;
@@ -1779,8 +1782,9 @@ Stable scope:
   per-upstream TLS/SNI settings.
 - `1.4` selection algorithms remain the single-node default. `1.5` adds
   operational controls around them: priority groups, maintenance mode,
-  runtime-safe weight changes, pool-level policy templates, and migration tools
-  that translate common HAProxy/nginx pool definitions into Fluxheim config.
+  runtime member-state changes, pool-level policy templates, and migration
+  tools that translate common HAProxy/nginx pool definitions into Fluxheim
+  config. Runtime-safe weight changes are a later control-plane slice.
   - weighted least-connections / ratio least-connections for heterogeneous
     backends;
   - least-time / EWMA latency-aware selection from observed upstream request
@@ -1901,6 +1905,10 @@ Beta scope:
 
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Pingora's service-discovery interface when it can be tested reliably.
+- Runtime add/remove-member, runtime weight-change, and runtime metadata-update
+  operations after the backend-set swap or selector-overlay design is proven
+  across round-robin, weighted, hash, consistent-hash, least-connections,
+  least-time, priority-group, locality, persistence, health, and queue policy.
 - Weighted random two-choice as a distributed-load-balancer policy.
 - Dynamic ratio / external load-score selection when the score source, trust
   boundary, expiration, replay behavior, and audit trail are proven.
@@ -3226,12 +3234,13 @@ the exception while the cache server is being completed as a focused sequence:
   transport-neutral stream load-balancer policy only.
 - `v1.5.0`: load-balancer/control-plane line. Promote the focused
   load-balancer image profile and stop at F5 LTM / HAProxy / Envoy-class
-  HTTP/TCP load-balancer operations: runtime pool/member mutation, priority
+  HTTP/TCP load-balancer operations: runtime member-state controls, priority
   groups, persistence, slow-start, adaptive health, circuit breaking,
   queue/overflow policy, locality/failure-domain policy, richer selection
-  algorithms, admin/audit visibility, and migration fixtures. Include TLS
-  passthrough SNI routing only after a bounded ClientHello parser, preread
-  buffer limit, and byte replay model are proven. Dynamic
+  algorithms, load-balancer-only admin status, audit visibility, and migration
+  fixtures. True runtime add/remove/weight changes remain later `1.5.x`
+  control-plane work. Include TLS passthrough SNI routing only after a bounded
+  ClientHello parser, preread buffer limit, and byte replay model are proven. Dynamic
   xDS/Kubernetes/Consul discovery belongs here or a later control-plane line
   after local DNS/file discovery and runtime backend mutation are stable.
 - Later macOS production line: only after Level 1 developer support is stable.
