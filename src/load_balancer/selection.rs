@@ -6,12 +6,27 @@ use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, Random, RoundRobin};
 
+use super::SelectedUpstream;
 use super::policy::{BackendSelectionPolicy, backend_policy_key};
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
     backend_connection_key,
 };
-use super::{MAGLEV_TABLE_SIZE, SelectedUpstream, fnv1a64_with_seed};
+
+const MAGLEV_TABLE_SIZE: usize = 65_537;
+
+pub(super) fn fnv1a64(bytes: &[u8]) -> u64 {
+    fnv1a64_with_seed(bytes, 0xcbf2_9ce4_8422_2325)
+}
+
+pub(super) fn fnv1a64_with_seed(bytes: &[u8], seed: u64) -> u64 {
+    let mut hash = seed;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct LoadBalancerSelectInputs<'a> {
@@ -137,7 +152,7 @@ where
                 && (pass.ignore_slow_start
                     || context
                         .slow_start
-                        .is_none_or(|state| state.permits(backend)))
+                        .is_none_or(|state| state.permits_read_only(backend)))
         })
         .take(context.backend_policy.priority_group_min_active())
         .count()
@@ -570,7 +585,7 @@ fn bounded_load_snapshot(
             || (!pass.ignore_slow_start
                 && context
                     .slow_start
-                    .is_some_and(|state| !state.permits(backend)))
+                    .is_some_and(|state| !state.permits_read_only(backend)))
         {
             continue;
         }

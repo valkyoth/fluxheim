@@ -18,7 +18,7 @@ use crate::config::{
 
 const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
 
-pub(crate) fn configured_health_check(
+pub(super) fn configured_health_check(
     config: &ProxyConfig,
 ) -> io::Result<Box<dyn HealthCheck + Send + Sync + 'static>> {
     match config.load_balance.health_check.protocol {

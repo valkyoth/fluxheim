@@ -11,7 +11,8 @@ use crate::config::{
     LoadBalanceSlowStartConfig,
 };
 
-use super::{LoadBalancedUpstreamOutcome, fnv1a64, fnv1a64_with_seed};
+use super::LoadBalancedUpstreamOutcome;
+use super::selection::{fnv1a64, fnv1a64_with_seed};
 
 #[derive(Debug)]
 pub struct LoadBalancedConnectionPermit {
@@ -326,11 +327,12 @@ impl SlowStartState {
             return true;
         }
 
+        if self.duration.is_zero() {
+            return true;
+        }
         let progress_per_mille =
             ((elapsed.as_millis() * 1000) / self.duration.as_millis()).clamp(1, 1000) as u64;
-        let sample = self.sample_counter.load(Ordering::Relaxed);
-        let bucket = fnv1a64_with_seed(&sample.to_le_bytes(), key) % 1000;
-        bucket < progress_per_mille
+        progress_per_mille >= 500
     }
 }
 

@@ -9,13 +9,13 @@ use pingora::lb::selection::{BackendIter, BackendSelection};
 use crate::config::ProxyConfig;
 
 use super::selection::SelectionPass;
+use super::selection::fnv1a64;
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
     backend_connection_key,
 };
 use super::{
     LoadBalancerBackendRuntimeStats, LoadBalancerCircuitState, LoadBalancerRuntimeBackendState,
-    fnv1a64,
 };
 
 fn unix_secs() -> u64 {

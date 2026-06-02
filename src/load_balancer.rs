@@ -46,7 +46,6 @@ use self::state::{
 pub use self::state::{LoadBalancedConnectionPermit, LoadBalancedUpstreamReporter};
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
-const MAGLEV_TABLE_SIZE: usize = 65_537;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 
 #[derive(Clone)]
@@ -662,7 +661,7 @@ impl UpstreamLoadBalancer {
             && self
                 .slow_start
                 .as_ref()
-                .is_none_or(|state| state.permits(backend))
+                .is_none_or(|state| state.permits_read_only(backend))
             && self.backend_policy.permits(
                 backend,
                 SelectionPass {
@@ -1248,19 +1247,6 @@ impl SelectedUpstream {
     }
 }
 
-fn fnv1a64(bytes: &[u8]) -> u64 {
-    fnv1a64_with_seed(bytes, 0xcbf2_9ce4_8422_2325)
-}
-
-fn fnv1a64_with_seed(bytes: &[u8], seed: u64) -> u64 {
-    let mut hash = seed;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
-
 #[cfg(test)]
 fn backend_weights<S>(inner: &LoadBalancer<S>) -> Vec<usize>
 where
@@ -1293,12 +1279,12 @@ mod tests {
     };
 
     use super::persistence::{MAX_PERSISTENCE_KEY_BYTES, cookie_key, request_header_key};
-    use super::selection::least_connections_score_is_lower;
+    use super::selection::{fnv1a64_with_seed, least_connections_score_is_lower};
     use super::state::PassiveBackendHealth;
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
         LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, PassiveHealthState,
-        SlowStartState, UpstreamLoadBalancer, backend_connection_key, fnv1a64_with_seed,
+        SlowStartState, UpstreamLoadBalancer, backend_connection_key,
     };
     use crate::test_support::unique_temp_path;
 
@@ -1316,13 +1302,6 @@ mod tests {
         (0u64..10_000)
             .find(|sample| fnv1a64_with_seed(&sample.to_le_bytes(), key) % 1000 >= 1)
             .expect("blocking slow-start sample")
-    }
-
-    fn slow_start_permitting_sample(backend: &Backend) -> u64 {
-        let key = backend_connection_key(backend);
-        (0u64..1_000_000)
-            .find(|sample| fnv1a64_with_seed(&sample.to_le_bytes(), key) % 1000 < 1)
-            .expect("permitting slow-start sample")
     }
 
     #[test]
@@ -2284,7 +2263,7 @@ mod tests {
     }
 
     #[test]
-    fn slow_start_read_only_uses_sampled_gate() {
+    fn slow_start_read_only_reports_majority_warm() {
         let state = SlowStartState::from_config(&LoadBalanceSlowStartConfig {
             enabled: true,
             duration_secs: 60,
@@ -2295,15 +2274,12 @@ mod tests {
             .lock()
             .unwrap()
             .insert(backend_connection_key(&backend), Instant::now());
-
-        state
-            .sample_counter
-            .store(slow_start_blocking_sample(&backend), Ordering::Relaxed);
         assert!(!state.permits_read_only(&backend));
 
-        state
-            .sample_counter
-            .store(slow_start_permitting_sample(&backend), Ordering::Relaxed);
+        state.backends.lock().unwrap().insert(
+            backend_connection_key(&backend),
+            Instant::now() - Duration::from_secs(31),
+        );
         assert!(state.permits_read_only(&backend));
     }
 
