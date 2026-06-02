@@ -483,6 +483,11 @@ impl UpstreamLoadBalancer {
         self.inner.parallel_health_check()
     }
 
+    #[cfg(test)]
+    async fn run_health_check(&self, parallel: bool) {
+        self.inner.run_health_check(parallel).await;
+    }
+
     pub fn set_runtime_backend_state(
         &self,
         member: &str,
@@ -730,6 +735,18 @@ impl UpstreamLoadBalancerInner {
             | Self::PowerOfTwo(_)
             | Self::FnvHash(_)
             | Self::ConsistentHash(_) => None,
+        }
+    }
+
+    #[cfg(test)]
+    async fn run_health_check(&self, parallel: bool) {
+        match self {
+            Self::RoundRobin(inner) => inner.backends().run_health_check(parallel).await,
+            Self::LeastConnections(inner) => inner.backends().run_health_check(parallel).await,
+            Self::LeastTime { inner, .. } => inner.backends().run_health_check(parallel).await,
+            Self::PowerOfTwo(inner) => inner.backends().run_health_check(parallel).await,
+            Self::FnvHash(inner) => inner.backends().run_health_check(parallel).await,
+            Self::ConsistentHash(inner) => inner.backends().run_health_check(parallel).await,
         }
     }
 
@@ -3213,6 +3230,48 @@ mod tests {
             Some(Duration::from_secs(3))
         );
         assert!(balancer.parallel_health_check());
+    }
+
+    #[tokio::test]
+    async fn tcp_health_check_transitions_backend_readiness() {
+        install_test_crypto_provider();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let upstream = listener.local_addr().unwrap().to_string();
+        drop(listener);
+
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec![upstream.clone(), "127.0.0.1:1".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                health_check: LoadBalanceHealthCheckConfig {
+                    enabled: true,
+                    protocol: LoadBalanceHealthCheckProtocol::Tcp,
+                    consecutive_success: 2,
+                    consecutive_failure: 2,
+                    interval_secs: 1,
+                    connect_timeout_secs: Some(1),
+                    ..LoadBalanceHealthCheckConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(balancer.runtime_stats().ready_backend_count, 2);
+
+        balancer.run_health_check(false).await;
+        assert_eq!(balancer.runtime_stats().ready_backend_count, 2);
+        balancer.run_health_check(false).await;
+        assert_eq!(balancer.runtime_stats().ready_backend_count, 0);
+
+        let listener = std::net::TcpListener::bind(&upstream).unwrap();
+        balancer.run_health_check(false).await;
+        assert_eq!(balancer.runtime_stats().ready_backend_count, 0);
+        balancer.run_health_check(false).await;
+        assert_eq!(balancer.runtime_stats().ready_backend_count, 1);
+        drop(listener);
     }
 
     #[test]

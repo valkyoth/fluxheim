@@ -67,6 +67,8 @@ behavior when the change improves security or project direction.
 - Count successful, invalid, and not-found load-balancer member-state
   operations in `fluxheim_load_balancer_events_total` when metrics are
   compiled.
+- Add active TCP health-check transition coverage proving configured failure
+  and recovery thresholds flip backend readiness.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in
