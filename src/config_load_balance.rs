@@ -142,15 +142,36 @@ pub enum LoadBalanceSelection {
     ConsistentUriHash,
     ConsistentHeaderHash,
     ConsistentCookieHash,
+    #[serde(alias = "maglev", alias = "maglev-hash")]
+    MaglevSourceHash,
+    MaglevUriHash,
+    MaglevHeaderHash,
+    MaglevCookieHash,
 }
 
 impl LoadBalanceSelection {
-    fn requires_hash_header(self) -> bool {
-        matches!(self, Self::HeaderHash | Self::ConsistentHeaderHash)
+    pub(crate) fn requires_hash_header(self) -> bool {
+        matches!(
+            self,
+            Self::HeaderHash | Self::ConsistentHeaderHash | Self::MaglevHeaderHash
+        )
     }
 
-    fn requires_hash_cookie(self) -> bool {
-        matches!(self, Self::CookieHash | Self::ConsistentCookieHash)
+    pub(crate) fn requires_hash_cookie(self) -> bool {
+        matches!(
+            self,
+            Self::CookieHash | Self::ConsistentCookieHash | Self::MaglevCookieHash
+        )
+    }
+
+    pub(crate) fn uses_maglev(self) -> bool {
+        matches!(
+            self,
+            Self::MaglevSourceHash
+                | Self::MaglevUriHash
+                | Self::MaglevHeaderHash
+                | Self::MaglevCookieHash
+        )
     }
 }
 

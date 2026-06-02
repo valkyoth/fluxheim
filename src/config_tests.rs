@@ -2648,6 +2648,42 @@ fn validates_load_balance_hash_selection() {
     .unwrap();
     least_time.validate().unwrap();
 
+    let maglev_alias: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "maglev"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        maglev_alias.proxy.load_balance.selection,
+        LoadBalanceSelection::MaglevSourceHash
+    );
+    maglev_alias.validate().unwrap();
+
+    let maglev_uri: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "maglev-uri-hash"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        maglev_uri.proxy.load_balance.selection,
+        LoadBalanceSelection::MaglevUriHash
+    );
+    maglev_uri.validate().unwrap();
+
+    let maglev_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "maglev-header-hash"
+            hash_header = "x-session"
+            "#,
+    )
+    .unwrap();
+    maglev_header.validate().unwrap();
+
     let least_sessions: Config = toml::from_str(
         r#"
             [proxy.load_balance]
@@ -2669,6 +2705,46 @@ fn validates_load_balance_hash_selection() {
     .unwrap();
     assert!(matches!(
         least_sessions_without_persistence.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
+}
+
+#[test]
+fn rejects_maglev_for_dynamic_upstream_discovery() {
+    let root = crate::test_support::unique_temp_path("maglev-dynamic");
+    fs::create_dir_all(&root).unwrap();
+    let upstreams_file = root.join("upstreams.txt");
+    fs::write(&upstreams_file, "127.0.0.1:3001\n127.0.0.1:3002\n").unwrap();
+
+    let file_config: Config = toml::from_str(&format!(
+        r#"
+            [proxy]
+            upstreams_file = "{}"
+
+            [proxy.load_balance]
+            selection = "maglev-uri-hash"
+            "#,
+        upstreams_file.display()
+    ))
+    .unwrap();
+    assert!(matches!(
+        file_config.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
+
+    let dns_config: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["localhost:3001", "localhost:3002"]
+            upstream_dns_refresh_secs = 5
+
+            [proxy.load_balance]
+            selection = "maglev-uri-hash"
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        dns_config.validate(),
         Err(ConfigError::InvalidLoadBalanceSelection { .. })
     ));
 }

@@ -1017,14 +1017,19 @@ and at least one upstream must remain a normal primary.
 `ratio-least-connections`, `least-sessions`, `least-time`, `power-of-two`,
 `source-hash`, `uri-hash`, `header-hash`, `cookie-hash`, `consistent-source-hash`,
 `consistent-uri-hash`, `consistent-header-hash`, and
-`consistent-cookie-hash`. Header-hash modes require
+`consistent-cookie-hash`, plus static-pool Maglev modes `maglev` /
+`maglev-source-hash`, `maglev-uri-hash`, `maglev-header-hash`, and
+`maglev-cookie-hash`. Header-hash modes require
 `proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
 name. Cookie-hash modes require `proxy.load_balance.hash_cookie = "session"` or
 another valid cookie name. Hash modes use weighted FNV selection; consistent
 modes use Pingora's weighted Ketama ring for lower remapping when upstream
-membership changes. `max_iterations` bounds how many ready candidates Pingora
-may inspect while applying Fluxheim health, drain, slow-start, backup, priority,
-and in-flight policies. `all_down_status` defaults to `502` and may be set to
+membership changes. Maglev modes use a fixed 65,537-slot bounded lookup table
+for static `proxy.upstreams` pools only; file-refreshed and DNS-refreshed pools
+reject Maglev until dynamic table rebuild semantics are promoted later.
+`max_iterations` bounds how many ready candidates Pingora or Fluxheim may
+inspect while applying health, drain, slow-start, backup, priority, and
+in-flight policies. `all_down_status` defaults to `502` and may be set to
 another HTTP 5xx status, commonly `503`, for requests where a configured
 load-balanced pool has no selectable backend. `least-connections`,
 `weighted-least-connections`, and

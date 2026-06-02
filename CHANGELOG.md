@@ -140,6 +140,11 @@ behavior when the change improves security or project direction.
   redispatch on inclusive upstream HTTP 5xx status ranges.
 - Accept `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
   `weighted-random-two-choice` as aliases for `power-of-two` selection.
+- Add bounded static-pool Maglev hashing selections (`maglev`,
+  `maglev-uri-hash`, `maglev-header-hash`, and `maglev-cookie-hash`) with a
+  fixed 65,537-slot lookup table and policy-aware fallback probing. Dynamic
+  file/DNS-refreshed pools reject Maglev until table rebuild semantics are
+  promoted in a later control-plane slice.
 
 ## 1.4.7 - 2026-05-31
 

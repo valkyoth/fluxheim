@@ -88,6 +88,7 @@ Fluxheim maps those pieces as follows:
 | Member names | `proxy.upstream_aliases` |
 | Member metadata / labels | `proxy.upstream_tags` |
 | Ratio / weight | `proxy.upstream_weights` |
+| Maglev hash persistence | `proxy.load_balance.selection = "maglev"` for static pools |
 | Priority group activation | `proxy.upstream_priority_groups` plus `upstream_priority_group_min_active` |
 | Member connection limit | `proxy.upstream_max_in_flight` |
 | Monitors | `proxy.load_balance.health_check` |
@@ -149,6 +150,9 @@ curl -X POST \
 
 - Dynamic weight changes and add/remove-member operations are future control
   plane work.
+- Maglev hashing is available for static `proxy.upstreams` pools. File-refreshed
+  and DNS-refreshed pools reject Maglev in `1.5.0` until dynamic table rebuild
+  behavior is specified and observable.
 - Runtime state is local and in-memory in `1.5.0`.
 - UDP, GSLB/DNS steering, WAF, VPN/firewall appliance behavior, and scripted
   iRules/Lua/Wasm behavior are intentionally separate roadmap lines.

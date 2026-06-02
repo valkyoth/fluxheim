@@ -1684,6 +1684,10 @@ fn load_balancer_selection_label(selection: crate::config::LoadBalanceSelection)
         crate::config::LoadBalanceSelection::ConsistentUriHash => "consistent_uri_hash",
         crate::config::LoadBalanceSelection::ConsistentHeaderHash => "consistent_header_hash",
         crate::config::LoadBalanceSelection::ConsistentCookieHash => "consistent_cookie_hash",
+        crate::config::LoadBalanceSelection::MaglevSourceHash => "maglev_source_hash",
+        crate::config::LoadBalanceSelection::MaglevUriHash => "maglev_uri_hash",
+        crate::config::LoadBalanceSelection::MaglevHeaderHash => "maglev_header_hash",
+        crate::config::LoadBalanceSelection::MaglevCookieHash => "maglev_cookie_hash",
     }
 }
 
@@ -1893,15 +1897,15 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        cache_config_stats, init, load_balancer_config_stats, method_bucket, record_acme_event,
-        record_admin_auth_event, record_cache_activity, record_cache_activity_scope,
-        record_cache_operation_duration, record_cache_purge, record_cache_purger_duration,
-        record_cache_purger_entries, record_cache_purger_run, record_config,
-        record_edge_policy_event, record_host_routing_rejection, record_load_balancer_event,
-        record_load_balancer_queue_wait, record_metrics_otlp_export, record_php_fpm_pool_event,
-        record_php_fpm_pool_idle, record_php_fpm_retry, record_php_request, record_php_stderr,
-        record_proxy_outcome, record_response_compression, record_stream_bytes,
-        record_stream_connection, status_class,
+        cache_config_stats, init, load_balancer_config_stats, load_balancer_selection_label,
+        method_bucket, record_acme_event, record_admin_auth_event, record_cache_activity,
+        record_cache_activity_scope, record_cache_operation_duration, record_cache_purge,
+        record_cache_purger_duration, record_cache_purger_entries, record_cache_purger_run,
+        record_config, record_edge_policy_event, record_host_routing_rejection,
+        record_load_balancer_event, record_load_balancer_queue_wait, record_metrics_otlp_export,
+        record_php_fpm_pool_event, record_php_fpm_pool_idle, record_php_fpm_retry,
+        record_php_request, record_php_stderr, record_proxy_outcome, record_response_compression,
+        record_stream_bytes, record_stream_connection, status_class,
     };
 
     #[test]
@@ -2387,6 +2391,26 @@ mod tests {
         assert!(!output.contains("single-upstream"));
         assert!(!output.contains("app-a.example"));
         assert!(!output.contains("path="));
+    }
+
+    #[test]
+    fn load_balancer_selection_labels_include_maglev_variants() {
+        assert_eq!(
+            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevSourceHash),
+            "maglev_source_hash"
+        );
+        assert_eq!(
+            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevUriHash),
+            "maglev_uri_hash"
+        );
+        assert_eq!(
+            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevHeaderHash),
+            "maglev_header_hash"
+        );
+        assert_eq!(
+            load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevCookieHash),
+            "maglev_cookie_hash"
+        );
     }
 
     #[cfg(all(feature = "proxy", feature = "cache"))]
