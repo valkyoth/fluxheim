@@ -97,6 +97,8 @@ behavior when the change improves security or project direction.
   persistence, retry budgets, and all-down behavior.
 - Extend the local load-balancer smoke to use temporary process paths and verify
   configured all-down status after all checked origins are unavailable.
+- Extend the local load-balancer smoke to exercise authenticated runtime
+  member disable/normal operations through the 1.5 admin control plane.
 - Expose passive-health ejection as per-backend `circuit_state` plus a
   pool-level `circuit_open_backend_count` in load-balancer runtime status.
 - Include passive-health ejection remaining time in load-balancer runtime

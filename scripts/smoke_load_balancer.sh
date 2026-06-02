@@ -10,7 +10,7 @@ import socket
 
 sockets = []
 try:
-    for _ in range(3):
+    for _ in range(4):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -23,8 +23,9 @@ PY
 
 set -- $ports
 FLUXHEIM_PORT=$1
-ORIGIN_ONE_PORT=$2
-ORIGIN_TWO_PORT=$3
+ADMIN_PORT=$2
+ORIGIN_ONE_PORT=$3
+ORIGIN_TWO_PORT=$4
 
 ORIGIN_ONE_PID=
 ORIGIN_TWO_PID=
@@ -92,6 +93,7 @@ PY
 cat > "$TMP_DIR/fluxheim.toml" <<EOF
 [server]
 listen = ["127.0.0.1:$FLUXHEIM_PORT"]
+default_vhost = "smoke"
 
 [server.process]
 daemon = false
@@ -99,15 +101,29 @@ pid_file = "$TMP_DIR/fluxheim.pid"
 upgrade_sock = "$TMP_DIR/fluxheim-upgrade.sock"
 certificate_reload_sock = "$TMP_DIR/fluxheim-cert-reload.sock"
 
-[proxy]
+[admin]
+enabled = true
+listen = "127.0.0.1:$ADMIN_PORT"
+token_env = "FLUXHEIM_ADMIN_TOKEN"
+snapshot_store = "$TMP_DIR/admin-snapshots"
+
+[admin.health]
+unauthenticated = true
+
+[[vhosts]]
+name = "smoke"
+hosts = ["127.0.0.1"]
+
+[vhosts.proxy]
 upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
+upstream_aliases = ["origin-one", "origin-two"]
 upstream_tls = false
 
-[proxy.load_balance]
+[vhosts.proxy.load_balance]
 max_iterations = 256
 all_down_status = 503
 
-[proxy.load_balance.health_check]
+[vhosts.proxy.load_balance.health_check]
 enabled = true
 interval_secs = 1
 consecutive_success = 1
@@ -143,10 +159,12 @@ wait_http "http://127.0.0.1:$ORIGIN_TWO_PORT/"
     cd "$ROOT_DIR"
     cargo build --quiet --no-default-features --features proxy,load-balancer
 )
+export FLUXHEIM_ADMIN_TOKEN="smoke-token"
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
 FLUXHEIM_PID=$!
 
 wait_http "http://127.0.0.1:$FLUXHEIM_PORT/smoke"
+wait_http "http://127.0.0.1:$ADMIN_PORT/_fluxheim/health"
 
 RESPONSES="$TMP_DIR/responses.txt"
 : > "$RESPONSES"
@@ -165,6 +183,29 @@ if ! grep -q '^origin-two$' "$RESPONSES"; then
     cat "$RESPONSES" >&2
     exit 1
 fi
+
+curl -fsS -X POST \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/member-state?vhost=smoke&member=origin-two&state=disable" \
+    > "$TMP_DIR/member-disable.json"
+
+DISABLED_RESPONSES="$TMP_DIR/disabled-responses.txt"
+: > "$DISABLED_RESPONSES"
+for _ in 1 2 3 4; do
+    curl -fsS "http://127.0.0.1:$FLUXHEIM_PORT/control-plane" >> "$DISABLED_RESPONSES"
+done
+
+if [ "$(grep -c '^origin-one$' "$DISABLED_RESPONSES")" -ne 4 ]; then
+    echo "load balancer member-state disable did not remove origin-two from selection" >&2
+    cat "$DISABLED_RESPONSES" >&2
+    cat "$TMP_DIR/member-disable.json" >&2
+    exit 1
+fi
+
+curl -fsS -X POST \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/member-state?vhost=smoke&member=origin-two&state=normal" \
+    > "$TMP_DIR/member-normal.json"
 
 kill "$ORIGIN_TWO_PID" 2>/dev/null || true
 sleep 2
