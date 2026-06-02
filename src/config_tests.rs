@@ -7,10 +7,10 @@ use super::{
     AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
     CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig, CacheStaleErrorKind,
     CompressionConfig, Config, ConfigError, ConfigLoadError, DownstreamProxyProtocol,
-    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoadBalanceSelection, LoggingConfig,
-    MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig, ServerLimitsConfig,
-    StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference,
-    TlsPolicyProfile, TlsProtocolVersion, TracingConfig, UpstreamHttpVersion,
+    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoadBalancePersistenceMode,
+    LoadBalanceSelection, LoggingConfig, MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig,
+    ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode,
+    TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, UpstreamHttpVersion,
     UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
     normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
     validate_dynamic_header_template,
@@ -553,6 +553,12 @@ fn parses_proxy_upstream_pool() {
             enabled = true
             duration_secs = 45
 
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "source-ip"
+            ttl_secs = 600
+            table_max_entries = 4096
+
             [[proxy.error_pages]]
             status = 502
             path = "/502.html"
@@ -703,6 +709,16 @@ fn parses_proxy_upstream_pool() {
     );
     assert!(config.proxy.load_balance.slow_start.enabled);
     assert_eq!(config.proxy.load_balance.slow_start.duration_secs, 45);
+    assert!(config.proxy.load_balance.persistence.enabled);
+    assert_eq!(
+        config.proxy.load_balance.persistence.mode,
+        LoadBalancePersistenceMode::SourceIp
+    );
+    assert_eq!(config.proxy.load_balance.persistence.ttl_secs, 600);
+    assert_eq!(
+        config.proxy.load_balance.persistence.table_max_entries,
+        4096
+    );
     config.validate().unwrap();
 }
 
@@ -2691,6 +2707,39 @@ fn rejects_invalid_load_balance_slow_start() {
         config.validate(),
         Err(ConfigError::InvalidLoadBalanceSlowStart {
             field: "proxy.load_balance.slow_start.duration_secs"
+        })
+    );
+}
+
+#[test]
+fn rejects_invalid_load_balance_persistence() {
+    let invalid_ttl: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            ttl_secs = 0
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_ttl.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.ttl_secs must be between 1 and 86400"
+        })
+    );
+
+    let invalid_table: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            table_max_entries = 0
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_table.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.table_max_entries must be between 1 and 1000000"
         })
     );
 }

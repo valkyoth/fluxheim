@@ -69,6 +69,9 @@ behavior when the change improves security or project direction.
   compiled.
 - Add active TCP health-check transition coverage proving configured failure
   and recovery thresholds flip backend readiness.
+- Add bounded local source-IP load-balancer persistence with TTL, table-size
+  limits, admin status entry counts, and automatic fallback when the stored
+  backend is no longer selectable.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in

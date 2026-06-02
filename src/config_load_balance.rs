@@ -29,6 +29,8 @@ pub struct LoadBalanceConfig {
     pub slow_start: LoadBalanceSlowStartConfig,
     #[serde(default)]
     pub retry: LoadBalanceRetryConfig,
+    #[serde(default)]
+    pub persistence: LoadBalancePersistenceConfig,
 }
 
 impl Default for LoadBalanceConfig {
@@ -43,6 +45,7 @@ impl Default for LoadBalanceConfig {
             passive_health: LoadBalancePassiveHealthConfig::default(),
             slow_start: LoadBalanceSlowStartConfig::default(),
             retry: LoadBalanceRetryConfig::default(),
+            persistence: LoadBalancePersistenceConfig::default(),
         }
     }
 }
@@ -95,6 +98,7 @@ impl LoadBalanceConfig {
         self.passive_health.validate()?;
         self.slow_start.validate()?;
         self.retry.validate()?;
+        self.persistence.validate()?;
         Ok(())
     }
 }
@@ -554,6 +558,72 @@ impl LoadBalanceRetryConfig {
         }
         Ok(())
     }
+}
+
+const MAX_LB_PERSISTENCE_TTL_SECS: u64 = 86_400;
+const MAX_LB_PERSISTENCE_TABLE_ENTRIES: usize = 1_000_000;
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LoadBalancePersistenceMode {
+    #[default]
+    SourceIp,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoadBalancePersistenceConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: LoadBalancePersistenceMode,
+    #[serde(default = "default_lb_persistence_ttl_secs")]
+    pub ttl_secs: u64,
+    #[serde(default = "default_lb_persistence_table_max_entries")]
+    pub table_max_entries: usize,
+}
+
+impl Default for LoadBalancePersistenceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: LoadBalancePersistenceMode::default(),
+            ttl_secs: default_lb_persistence_ttl_secs(),
+            table_max_entries: default_lb_persistence_table_max_entries(),
+        }
+    }
+}
+
+impl LoadBalancePersistenceConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        #[cfg(feature = "privacy-mode")]
+        if self.enabled {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.persistence is not available in privacy-mode builds",
+            });
+        }
+
+        if self.ttl_secs == 0 || self.ttl_secs > MAX_LB_PERSISTENCE_TTL_SECS {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.persistence.ttl_secs must be between 1 and 86400",
+            });
+        }
+        if self.table_max_entries == 0 || self.table_max_entries > MAX_LB_PERSISTENCE_TABLE_ENTRIES
+        {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.persistence.table_max_entries must be between 1 and 1000000",
+            });
+        }
+        Ok(())
+    }
+}
+
+fn default_lb_persistence_ttl_secs() -> u64 {
+    300
+}
+
+fn default_lb_persistence_table_max_entries() -> usize {
+    65_536
 }
 
 fn default_lb_retry_max_retries() -> u8 {

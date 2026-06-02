@@ -57,8 +57,8 @@ use crate::config_http::{
 pub use crate::config_load_balance::{
     LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
     LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol,
-    LoadBalancePassiveHealthConfig, LoadBalanceRetryConfig, LoadBalanceSelection,
-    LoadBalanceSlowStartConfig,
+    LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
+    LoadBalanceRetryConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig,
 };
 pub use crate::config_loader::ConfigLoadError;
 #[cfg(feature = "load-balancer")]

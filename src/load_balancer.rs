@@ -28,8 +28,9 @@ use serde::Serialize;
 
 use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
-    LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalanceRetryConfig,
-    LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+    LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig,
+    LoadBalancePersistenceMode, LoadBalanceRetryConfig, LoadBalanceSelection,
+    LoadBalanceSlowStartConfig, ProxyConfig,
 };
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
@@ -42,8 +43,10 @@ pub struct UpstreamLoadBalancer {
     backend_aliases: Arc<std::collections::HashMap<u64, Arc<str>>>,
     passive_health: Option<Arc<PassiveHealthState>>,
     slow_start: Option<Arc<SlowStartState>>,
+    persistence: Option<Arc<LoadBalancerPersistenceState>>,
     passive_health_policy: LoadBalancePassiveHealthConfig,
     slow_start_policy: LoadBalanceSlowStartConfig,
+    persistence_policy: LoadBalancePersistenceConfig,
     counters: Arc<BackendConnectionCounters>,
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
@@ -127,8 +130,10 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub parallel_health_check: bool,
     pub passive_health_enabled: bool,
     pub slow_start_enabled: bool,
+    pub persistence_enabled: bool,
     pub passive_health: LoadBalancePassiveHealthConfig,
     pub slow_start: LoadBalanceSlowStartConfig,
+    pub persistence: LoadBalancerPersistenceRuntimeStats,
     pub retry: LoadBalancerRetryRuntimeStats,
     pub backends: Vec<LoadBalancerBackendRuntimeStats>,
 }
@@ -142,6 +147,15 @@ pub struct LoadBalancerRetryRuntimeStats {
     pub status_ranges: Vec<LoadBalanceHealthCheckExpectedStatusRange>,
     pub budget_per_window: u32,
     pub budget_window_secs: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LoadBalancerPersistenceRuntimeStats {
+    pub enabled: bool,
+    pub mode: LoadBalancePersistenceMode,
+    pub ttl_secs: u64,
+    pub table_max_entries: usize,
+    pub entry_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -320,8 +334,21 @@ impl UpstreamLoadBalancer {
         request: &RequestHeader,
         client_ip: Option<IpAddr>,
     ) -> Option<SelectedUpstream> {
+        let persistence_key = self
+            .persistence
+            .as_ref()
+            .and_then(|persistence| persistence.key(request, client_ip));
+        if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key.as_deref())
+            && let Some(backend_key) = persistence.lookup(key)
+            && let Some(backend) = self.inner.backend_by_policy_key(backend_key)
+            && self.backend_available_for_persistence(&backend)
+            && let Some(selected) = self.prepare_selected(SelectedUpstream::new(backend))
+        {
+            return Some(selected);
+        }
+
         let key = self.key_source.request_key(request, client_ip);
-        let mut selected = self.inner.select(
+        let selected = self.inner.select(
             key.as_deref(),
             self.max_iterations,
             self.passive_health.as_deref(),
@@ -329,6 +356,14 @@ impl UpstreamLoadBalancer {
             &self.counters,
             &self.backend_policy,
         )?;
+        let selected = self.prepare_selected(selected)?;
+        if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key.as_deref()) {
+            persistence.record(key, backend_policy_key(&selected.backend));
+        }
+        Some(selected)
+    }
+
+    fn prepare_selected(&self, mut selected: SelectedUpstream) -> Option<SelectedUpstream> {
         selected.permit = Some(self.counters.permit(
             &selected.backend,
             self.backend_policy.max_in_flight(&selected.backend),
@@ -349,6 +384,31 @@ impl UpstreamLoadBalancer {
         Some(selected)
     }
 
+    fn backend_available_for_persistence(&self, backend: &Backend) -> bool {
+        let policy_key = backend_policy_key(backend);
+        let connection_key = backend_connection_key(backend);
+        self.inner.backend_ready(backend)
+            && !self
+                .passive_health
+                .as_ref()
+                .is_some_and(|health| health.key_is_currently_ejected(connection_key))
+            && self
+                .slow_start
+                .as_ref()
+                .is_none_or(|state| state.permits(backend))
+            && self.backend_policy.permits(
+                backend,
+                SelectionPass {
+                    allow_backup: true,
+                    minimum_priority_group: None,
+                    ignore_slow_start: false,
+                },
+                &self.counters,
+            )
+            && !self.backend_policy.disabled(policy_key)
+            && !self.backend_policy.drained(policy_key)
+    }
+
     fn from_inner(inner: UpstreamLoadBalancerInner, config: &ProxyConfig) -> Self {
         Self {
             inner,
@@ -365,8 +425,14 @@ impl UpstreamLoadBalancer {
                 .slow_start
                 .enabled
                 .then(|| Arc::new(SlowStartState::from_config(&config.load_balance.slow_start))),
+            persistence: config.load_balance.persistence.enabled.then(|| {
+                Arc::new(LoadBalancerPersistenceState::from_config(
+                    &config.load_balance.persistence,
+                ))
+            }),
             passive_health_policy: config.load_balance.passive_health.clone(),
             slow_start_policy: config.load_balance.slow_start.clone(),
+            persistence_policy: config.load_balance.persistence.clone(),
             counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
@@ -456,8 +522,19 @@ impl UpstreamLoadBalancer {
             parallel_health_check: self.inner.parallel_health_check(),
             passive_health_enabled: self.passive_health.is_some(),
             slow_start_enabled: self.slow_start.is_some(),
+            persistence_enabled: self.persistence.is_some(),
             passive_health: self.passive_health_policy.clone(),
             slow_start: self.slow_start_policy.clone(),
+            persistence: LoadBalancerPersistenceRuntimeStats {
+                enabled: self.persistence.is_some(),
+                mode: self.persistence_policy.mode,
+                ttl_secs: self.persistence_policy.ttl_secs,
+                table_max_entries: self.persistence_policy.table_max_entries,
+                entry_count: self
+                    .persistence
+                    .as_ref()
+                    .map_or(0, |persistence| persistence.entry_count()),
+            },
             retry: self.retry.clone(),
             backends,
         }
@@ -784,6 +861,23 @@ impl UpstreamLoadBalancerInner {
                 "load balancer member is not configured in this pool",
             )
         })
+    }
+
+    fn backend_by_policy_key(&self, key: u64) -> Option<Backend> {
+        self.backends()
+            .into_iter()
+            .find(|backend| backend_policy_key(backend) == key)
+    }
+
+    fn backend_ready(&self, backend: &Backend) -> bool {
+        match self {
+            Self::RoundRobin(inner) => inner.backends().ready(backend),
+            Self::LeastConnections(inner) => inner.backends().ready(backend),
+            Self::LeastTime { inner, .. } => inner.backends().ready(backend),
+            Self::PowerOfTwo(inner) => inner.backends().ready(backend),
+            Self::FnvHash(inner) => inner.backends().ready(backend),
+            Self::ConsistentHash(inner) => inner.backends().ready(backend),
+        }
     }
 
     fn backends(&self) -> Vec<Backend> {
@@ -1143,6 +1237,89 @@ impl BackendLatencyState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&key)
             .copied()
+    }
+}
+
+#[derive(Debug)]
+struct LoadBalancerPersistenceState {
+    mode: LoadBalancePersistenceMode,
+    ttl: Duration,
+    table_max_entries: usize,
+    table: Mutex<std::collections::HashMap<Vec<u8>, LoadBalancerPersistenceEntry>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LoadBalancerPersistenceEntry {
+    backend_key: u64,
+    expires_at: Instant,
+}
+
+impl LoadBalancerPersistenceState {
+    fn from_config(config: &LoadBalancePersistenceConfig) -> Self {
+        Self {
+            mode: config.mode,
+            ttl: Duration::from_secs(config.ttl_secs),
+            table_max_entries: config.table_max_entries,
+            table: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn key(&self, _request: &RequestHeader, client_ip: Option<IpAddr>) -> Option<Vec<u8>> {
+        match self.mode {
+            LoadBalancePersistenceMode::SourceIp => client_ip.map(|ip| ip.to_string().into_bytes()),
+        }
+    }
+
+    fn lookup(&self, key: &[u8]) -> Option<u64> {
+        let now = Instant::now();
+        let mut table = self
+            .table
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entry = table.get(key).copied()?;
+        if entry.expires_at <= now {
+            table.remove(key);
+            return None;
+        }
+        Some(entry.backend_key)
+    }
+
+    fn record(&self, key: &[u8], backend_key: u64) {
+        let now = Instant::now();
+        let mut table = self
+            .table
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if table.len() >= self.table_max_entries && !table.contains_key(key) {
+            table.retain(|_, entry| entry.expires_at > now);
+            if table.len() >= self.table_max_entries
+                && let Some(stale_key) = table
+                    .iter()
+                    .min_by_key(|(_, entry)| entry.expires_at)
+                    .map(|(key, _)| key.clone())
+            {
+                table.remove(&stale_key);
+            }
+        }
+        if table.len() < self.table_max_entries || table.contains_key(key) {
+            table.insert(
+                key.to_vec(),
+                LoadBalancerPersistenceEntry {
+                    backend_key,
+                    expires_at: now + self.ttl,
+                },
+            );
+        }
+    }
+
+    fn entry_count(&self) -> usize {
+        let now = Instant::now();
+        let mut table = self
+            .table
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        table.retain(|_, entry| entry.expires_at > now);
+        table.len()
     }
 }
 
@@ -2397,8 +2574,8 @@ mod tests {
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
         LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol,
-        LoadBalancePassiveHealthConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig,
-        ProxyConfig,
+        LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalanceSelection,
+        LoadBalanceSlowStartConfig, ProxyConfig,
     };
 
     use super::{
@@ -2461,6 +2638,89 @@ mod tests {
             ),
             "selected alias should come from configured upstream_aliases"
         );
+    }
+
+    #[test]
+    fn source_ip_persistence_reuses_selected_backend() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))))
+            .unwrap();
+        assert_eq!(first.backend.addr.to_string(), "127.0.0.1:3000");
+        drop(first);
+
+        let second = balancer
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))))
+            .unwrap();
+        assert_eq!(second.backend.addr.to_string(), "127.0.0.1:3000");
+        drop(second);
+
+        let different_client = balancer
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11))))
+            .unwrap();
+        assert_eq!(different_client.backend.addr.to_string(), "127.0.0.1:3001");
+
+        let stats = balancer.runtime_stats();
+        assert!(stats.persistence_enabled);
+        assert_eq!(stats.persistence.entry_count, 2);
+        assert_eq!(stats.persistence.table_max_entries, 16);
+        assert_eq!(stats.persistence.ttl_secs, 60);
+    }
+
+    #[test]
+    fn source_ip_persistence_falls_back_when_stored_backend_is_unavailable() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                passive_health: LoadBalancePassiveHealthConfig {
+                    enabled: true,
+                    consecutive_failure: 1,
+                    ejection_secs: 60,
+                    ..LoadBalancePassiveHealthConfig::default()
+                },
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20))))
+            .unwrap();
+        assert_eq!(first.backend.addr.to_string(), "127.0.0.1:3000");
+        first.reporter.as_ref().unwrap().record_failure();
+        drop(first);
+
+        let fallback = balancer
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 20))))
+            .unwrap();
+        assert_eq!(fallback.backend.addr.to_string(), "127.0.0.1:3001");
     }
 
     #[test]

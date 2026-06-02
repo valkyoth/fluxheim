@@ -311,11 +311,11 @@ state, ready and policy-available backend counts, primary/backup availability
 counts, drain/disabled/forced-down/ejected/saturated summary counts, runtime
 override counts, selection policy, max-iteration and all-down settings, health-check
 frequency and parallel mode, retry policy, passive-health thresholds,
-slow-start duration, priority group, max in-flight cap, current in-flight count,
-passive failure count, passive ejection, passive ejection remaining seconds,
-slow-start allowance, and least-time latency state where available. Per-backend
-rows include `runtime_state_override` when an authenticated runtime member
-operation is active. In
+slow-start duration, persistence policy and table size, priority group, max
+in-flight cap, current in-flight count, passive failure count, passive ejection,
+passive ejection remaining seconds, slow-start allowance, and least-time latency
+state where available. Per-backend rows include `runtime_state_override` when
+an authenticated runtime member operation is active. In
 `privacy-mode`, backend addresses are omitted from this status object.
 
 When compiled with `load-balancer`, authenticated admins can update the
@@ -822,6 +822,12 @@ status_ranges = []
 budget_per_window = 0
 budget_window_secs = 1
 
+[proxy.load_balance.persistence]
+enabled = false
+mode = "source-ip"
+ttl_secs = 300
+table_max_entries = 65536
+
 [[proxy.error_pages]]
 status = 502
 path = "/502.html"
@@ -1010,6 +1016,17 @@ Empty `statuses` and `status_ranges` keep response-status retries disabled.
 `budget_window_secs` to cap total redispatch attempts for this vhost or route
 over a moving window. Fluxheim does not retry after response streaming has
 started.
+`proxy.load_balance.persistence.enabled = true` enables a bounded local
+persistence table. The first mode is `source-ip`: a client IP is mapped to the
+selected backend for `ttl_secs`, then reused while the backend remains ready,
+not drained/disabled/forced-down, not passively ejected, and below its
+in-flight cap. If the stored backend is no longer selectable, Fluxheim falls
+back to the normal load-balancing algorithm and refreshes the table with the
+new backend. `table_max_entries` bounds memory use; expired entries are pruned
+and the oldest expiry is evicted when the table is full. Persistence is local
+to one Fluxheim process in `1.5.0` and is reset by process restart or runtime
+rebuild. It is rejected in `privacy-mode` builds because source-IP persistence
+retains client-derived identifiers.
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple
