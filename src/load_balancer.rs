@@ -81,6 +81,14 @@ impl LoadBalancerRuntimeBackendState {
             _ => None,
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Drained => "drained",
+            Self::Disabled => "disabled",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]

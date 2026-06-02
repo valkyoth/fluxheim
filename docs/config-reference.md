@@ -335,6 +335,8 @@ until the config changes. Runtime member state is intentionally in-memory in
 `1.5.0`, is reset by process restart or runtime rebuild, and is returned with
 `"persistent": false` in the mutation response. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.
+Successful and rejected member-state operations are logged under the
+`fluxheim::load_balancer` target.
 
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the

@@ -909,24 +909,60 @@ impl AdminApp {
                 member,
                 state,
             }) {
-            Ok(result) => json_response_value(
-                StatusCode::OK,
-                &json!({
-                    "status": "ok",
-                    "vhost": result.vhost,
-                    "route": result.route,
-                    "scope": if result.route.is_some() { "route" } else { "vhost" },
-                    "member": result.member,
-                    "state": result.state,
-                    "address": result.address,
-                    "alias": result.alias,
-                    "persistent": false,
-                }),
-            ),
+            Ok(result) => {
+                let scope = if result.route.is_some() {
+                    "route"
+                } else {
+                    "vhost"
+                };
+                log::info!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member state updated vhost={} route={} scope={} member={} state={} address={} alias={} persistent=false",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.state.as_str(),
+                    result.address,
+                    result.alias.as_deref().unwrap_or("")
+                );
+                json_response_value(
+                    StatusCode::OK,
+                    &json!({
+                        "status": "ok",
+                        "vhost": result.vhost,
+                        "route": result.route,
+                        "scope": scope,
+                        "member": result.member,
+                        "state": result.state,
+                        "address": result.address,
+                        "alias": result.alias,
+                        "persistent": false,
+                    }),
+                )
+            }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member state rejected invalid input vhost={} route={} member={} state={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    state.as_str(),
+                    error
+                );
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member state target not found vhost={} route={} member={} state={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    state.as_str(),
+                    error
+                );
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
             }
             Err(error) => internal_error_response(&error),
