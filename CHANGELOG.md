@@ -81,6 +81,8 @@ behavior when the change improves security or project direction.
 - Add a validated `examples/load-balancer-enterprise.toml` migration fixture
   for HAProxy/F5-style weighted pools, priority groups, health policy,
   persistence, retry budgets, and all-down behavior.
+- Extend the local load-balancer smoke to use temporary process paths and verify
+  configured all-down status after all checked origins are unavailable.
 - Expose passive-health ejection as per-backend `circuit_state` plus a
   pool-level `circuit_open_backend_count` in load-balancer runtime status.
 - Include passive-health ejection remaining time in load-balancer runtime

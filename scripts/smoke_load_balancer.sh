@@ -93,12 +93,19 @@ cat > "$TMP_DIR/fluxheim.toml" <<EOF
 [server]
 listen = ["127.0.0.1:$FLUXHEIM_PORT"]
 
+[server.process]
+daemon = false
+pid_file = "$TMP_DIR/fluxheim.pid"
+upgrade_sock = "$TMP_DIR/fluxheim-upgrade.sock"
+certificate_reload_sock = "$TMP_DIR/fluxheim-cert-reload.sock"
+
 [proxy]
 upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
 upstream_tls = false
 
 [proxy.load_balance]
 max_iterations = 256
+all_down_status = 503
 
 [proxy.load_balance.health_check]
 enabled = true
@@ -165,6 +172,7 @@ sleep 2
 FAILOVER_RESPONSES="$TMP_DIR/failover-responses.txt"
 : > "$FAILOVER_RESPONSES"
 tries=0
+failover_ok=0
 while [ "$tries" -lt 20 ]; do
     : > "$FAILOVER_RESPONSES"
     failed=0
@@ -176,6 +184,27 @@ while [ "$tries" -lt 20 ]; do
     done
 
     if [ "$failed" -eq 0 ] && [ "$(grep -c '^origin-one$' "$FAILOVER_RESPONSES")" -eq 6 ]; then
+        failover_ok=1
+        break
+    fi
+
+    tries=$((tries + 1))
+    sleep 0.2
+done
+
+if [ "$failover_ok" -ne 1 ]; then
+    echo "load balancer did not fail over to origin-one after origin-two stopped" >&2
+    cat "$FAILOVER_RESPONSES" >&2
+    exit 1
+fi
+
+kill "$ORIGIN_ONE_PID" 2>/dev/null || true
+sleep 2
+
+tries=0
+while [ "$tries" -lt 20 ]; do
+    status=$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:$FLUXHEIM_PORT/all-down" || true)
+    if [ "$status" = "503" ]; then
         echo "load-balancer smoke passed"
         exit 0
     fi
@@ -184,6 +213,5 @@ while [ "$tries" -lt 20 ]; do
     sleep 0.2
 done
 
-echo "load balancer did not fail over to origin-one after origin-two stopped" >&2
-cat "$FAILOVER_RESPONSES" >&2
+echo "load balancer did not return configured all-down status 503, got $status" >&2
 exit 1
