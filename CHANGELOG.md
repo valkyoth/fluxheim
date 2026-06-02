@@ -138,6 +138,11 @@ behavior when the change improves security or project direction.
   sample rather than a fixed backend-key class during the ramp window.
 - Prune stale passive-health backend state during periodic load-balancer state
   cleanup while preserving active ejections until their deadline.
+- Extract HTTP/TCP load-balancer health-check construction, validation, and
+  response-body handling into `src/load_balancer/health.rs` so monitor logic is
+  reviewable without navigating the full load-balancer orchestration module.
+- Align read-only slow-start status with the sampled admission mechanism instead
+  of the old backend-key-only gate.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in
