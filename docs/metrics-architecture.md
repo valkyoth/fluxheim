@@ -198,6 +198,9 @@ Cache:
 
 Load balancer:
 
+- `fluxheim_load_balancer_pools` reports configured load-balancer pool counts
+  by bounded `scope` (`vhost` or `route`) and bounded selection algorithm. It
+  does not label configured vhost names, route names, or upstream addresses.
 - `fluxheim_load_balancer_events_total` counts selected upstreams, retries,
   all-nodes-down/unavailable pools, queue wait/full/timeout outcomes,
   success/failure outcomes, and passive-health ejections with bounded

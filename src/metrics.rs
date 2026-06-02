@@ -8,6 +8,7 @@ static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static EDGE_POLICY_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static LOAD_BALANCER_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static LOAD_BALANCER_QUEUE_WAIT_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
+static LOAD_BALANCER_POOLS: OnceLock<IntGaugeVec> = OnceLock::new();
 static RESPONSE_COMPRESSIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static STREAM_CONNECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static STREAM_BYTES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -67,6 +68,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     edge_policy_events_total()?;
     load_balancer_events_total()?;
     load_balancer_queue_wait_seconds()?;
+    load_balancer_pools()?;
     response_compressions_total()?;
     stream_connections_total()?;
     stream_bytes_total()?;
@@ -143,6 +145,7 @@ pub fn record_config(config: &crate::config::Config) {
         cache_peer_fill_max_concurrent_requests(),
         stats.peer_fill_max_concurrent_requests,
     );
+    record_load_balancer_config_stats(&load_balancer_config_stats(config));
 }
 
 #[cfg(all(feature = "proxy", feature = "cache"))]
@@ -497,6 +500,11 @@ struct CacheConfigStats {
     peer_fill_max_concurrent_requests: u64,
 }
 
+#[derive(Debug, Default, Eq, PartialEq)]
+struct LoadBalancerConfigStats {
+    pools_by_scope_selection: std::collections::BTreeMap<(&'static str, &'static str), u64>,
+}
+
 fn cache_config_stats(config: &crate::config::Config) -> CacheConfigStats {
     let mut stats = CacheConfigStats {
         vhosts: config.vhosts.len() as u64,
@@ -516,6 +524,58 @@ fn cache_config_stats(config: &crate::config::Config) -> CacheConfigStats {
         }
     }
     stats
+}
+
+fn load_balancer_config_stats(config: &crate::config::Config) -> LoadBalancerConfigStats {
+    let mut stats = LoadBalancerConfigStats::default();
+    if config.vhosts.is_empty() {
+        accumulate_load_balancer_pool(&config.proxy, "vhost", &mut stats);
+        return stats;
+    }
+    for vhost in &config.vhosts {
+        accumulate_load_balancer_pool(&vhost.proxy, "vhost", &mut stats);
+        for route in &vhost.routes {
+            if let Some(proxy) = &route.proxy {
+                accumulate_load_balancer_pool(proxy, "route", &mut stats);
+            }
+        }
+    }
+    stats
+}
+
+fn accumulate_load_balancer_pool(
+    proxy: &crate::config::ProxyConfig,
+    scope: &'static str,
+    stats: &mut LoadBalancerConfigStats,
+) {
+    if !load_balancer_pool_configured(proxy) {
+        return;
+    }
+    let selection = load_balancer_selection_label(proxy.load_balance.selection);
+    *stats
+        .pools_by_scope_selection
+        .entry((scope, selection))
+        .or_insert(0) += 1;
+}
+
+fn load_balancer_pool_configured(proxy: &crate::config::ProxyConfig) -> bool {
+    proxy.upstreams.len() >= 2
+        || proxy.upstreams_file.is_some()
+        || proxy.upstream_dns_refresh_secs.is_some()
+}
+
+fn record_load_balancer_config_stats(stats: &LoadBalancerConfigStats) {
+    match load_balancer_pools() {
+        Ok(gauge) => {
+            gauge.reset();
+            for ((scope, selection), count) in &stats.pools_by_scope_selection {
+                gauge
+                    .with_label_values(&[scope, selection])
+                    .set(u64_to_i64_saturating(*count));
+            }
+        }
+        Err(error) => log::debug!("metrics load balancer pool gauge unavailable: {error}"),
+    }
 }
 
 fn accumulate_cache_policy(
@@ -709,6 +769,30 @@ fn load_balancer_queue_wait_seconds() -> Result<&'static HistogramVec, prometheu
         prometheus::Error::Msg(
             "fluxheim_load_balancer_queue_wait_seconds failed to initialize".to_owned(),
         )
+    })
+}
+
+fn load_balancer_pools() -> Result<&'static IntGaugeVec, prometheus::Error> {
+    if let Some(gauge) = LOAD_BALANCER_POOLS.get() {
+        return Ok(gauge);
+    }
+
+    let gauge = IntGaugeVec::new(
+        Opts::new(
+            "fluxheim_load_balancer_pools",
+            "Configured Fluxheim load-balancer pools by scope and bounded selection algorithm.",
+        ),
+        &["scope", "selection"],
+    )?;
+    match prometheus::default_registry().register(Box::new(gauge.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = LOAD_BALANCER_POOLS.set(gauge);
+    LOAD_BALANCER_POOLS.get().ok_or_else(|| {
+        prometheus::Error::Msg("fluxheim_load_balancer_pools failed to initialize".to_owned())
     })
 }
 
@@ -1585,6 +1669,24 @@ fn load_balancer_queue_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+fn load_balancer_selection_label(selection: crate::config::LoadBalanceSelection) -> &'static str {
+    match selection {
+        crate::config::LoadBalanceSelection::RoundRobin => "round_robin",
+        crate::config::LoadBalanceSelection::LeastConnections => "least_connections",
+        crate::config::LoadBalanceSelection::LeastSessions => "least_sessions",
+        crate::config::LoadBalanceSelection::LeastTime => "least_time",
+        crate::config::LoadBalanceSelection::PowerOfTwo => "power_of_two",
+        crate::config::LoadBalanceSelection::SourceHash => "source_hash",
+        crate::config::LoadBalanceSelection::UriHash => "uri_hash",
+        crate::config::LoadBalanceSelection::HeaderHash => "header_hash",
+        crate::config::LoadBalanceSelection::CookieHash => "cookie_hash",
+        crate::config::LoadBalanceSelection::ConsistentSourceHash => "consistent_source_hash",
+        crate::config::LoadBalanceSelection::ConsistentUriHash => "consistent_uri_hash",
+        crate::config::LoadBalanceSelection::ConsistentHeaderHash => "consistent_header_hash",
+        crate::config::LoadBalanceSelection::ConsistentCookieHash => "consistent_cookie_hash",
+    }
+}
+
 fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {
     let Some(upstream) = upstream else {
         return "";
@@ -1791,14 +1893,15 @@ mod tests {
     #[cfg(all(feature = "proxy", feature = "cache"))]
     use super::record_cache_runtime_totals;
     use super::{
-        cache_config_stats, init, method_bucket, record_acme_event, record_admin_auth_event,
-        record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
-        record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
-        record_cache_purger_run, record_config, record_edge_policy_event,
-        record_host_routing_rejection, record_load_balancer_event, record_load_balancer_queue_wait,
-        record_metrics_otlp_export, record_php_fpm_pool_event, record_php_fpm_pool_idle,
-        record_php_fpm_retry, record_php_request, record_php_stderr, record_proxy_outcome,
-        record_response_compression, record_stream_bytes, record_stream_connection, status_class,
+        cache_config_stats, init, load_balancer_config_stats, method_bucket, record_acme_event,
+        record_admin_auth_event, record_cache_activity, record_cache_activity_scope,
+        record_cache_operation_duration, record_cache_purge, record_cache_purger_duration,
+        record_cache_purger_entries, record_cache_purger_run, record_config,
+        record_edge_policy_event, record_host_routing_rejection, record_load_balancer_event,
+        record_load_balancer_queue_wait, record_metrics_otlp_export, record_php_fpm_pool_event,
+        record_php_fpm_pool_idle, record_php_fpm_retry, record_php_request, record_php_stderr,
+        record_proxy_outcome, record_response_compression, record_stream_bytes,
+        record_stream_connection, status_class,
     };
 
     #[test]
@@ -2259,6 +2362,33 @@ mod tests {
         assert!(!output.contains("path="));
     }
 
+    #[test]
+    fn records_load_balancer_pool_configuration_gauge() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        let config = load_balancer_metrics_config();
+        record_config(&config);
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(
+            output.contains(
+                r#"fluxheim_load_balancer_pools{scope="vhost",selection="least_time"} 1"#
+            )
+        );
+        assert!(output.contains(
+            r#"fluxheim_load_balancer_pools{scope="route",selection="consistent_uri_hash"} 1"#
+        ));
+        assert!(!output.contains("single-upstream"));
+        assert!(!output.contains("app-a.example"));
+        assert!(!output.contains("path="));
+    }
+
     #[cfg(all(feature = "proxy", feature = "cache"))]
     #[test]
     fn records_cache_runtime_storage_pressure_gauges() {
@@ -2535,6 +2665,27 @@ mod tests {
     }
 
     #[test]
+    fn load_balancer_configuration_stats_are_cardinality_safe_aggregates() {
+        let stats = load_balancer_config_stats(&load_balancer_metrics_config());
+
+        assert_eq!(
+            stats
+                .pools_by_scope_selection
+                .get(&("vhost", "least_time"))
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(
+            stats
+                .pools_by_scope_selection
+                .get(&("route", "consistent_uri_hash"))
+                .copied(),
+            Some(1)
+        );
+        assert_eq!(stats.pools_by_scope_selection.values().sum::<u64>(), 2);
+    }
+
+    #[test]
     fn status_class_is_bounded() {
         assert_eq!(status_class(Some(101)), "1xx");
         assert_eq!(status_class(Some(204)), "2xx");
@@ -2600,6 +2751,101 @@ mod tests {
                 routes: vec![cached_route(), uncached_route()],
             }],
             ..Config::default()
+        }
+    }
+
+    fn load_balancer_metrics_config() -> Config {
+        Config {
+            vhosts: vec![VhostConfig {
+                name: "lb".to_owned(),
+                hosts: vec!["lb.example".to_owned()],
+                max_request_body_bytes: None,
+                access: Default::default(),
+                rate_limit: Default::default(),
+                concurrency: Default::default(),
+                tls: VhostTlsConfig::default(),
+                acme_challenge: VhostAcmeChallengeConfig::default(),
+                redirect: VhostRedirectConfig::default(),
+                proxy: ProxyConfig {
+                    upstreams: vec!["127.0.0.1:3001".to_owned(), "127.0.0.1:3002".to_owned()],
+                    load_balance: crate::config::LoadBalanceConfig {
+                        selection: crate::config::LoadBalanceSelection::LeastTime,
+                        ..crate::config::LoadBalanceConfig::default()
+                    },
+                    ..ProxyConfig::default()
+                },
+                cache: CacheConfig::default(),
+                compression: None,
+                headers: VhostHeaderPolicyConfig::default(),
+                php: crate::config::PhpConfig::default(),
+                web: WebConfig::default(),
+                routes: vec![load_balancer_route(), single_upstream_route()],
+            }],
+            ..Config::default()
+        }
+    }
+
+    fn load_balancer_route() -> RouteConfig {
+        RouteConfig {
+            name: "route-lb".to_owned(),
+            path_exact: None,
+            path_prefix: Some("/route-lb/".to_owned()),
+            path_regex: None,
+            methods: Vec::new(),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            grpc: Default::default(),
+            redirect: None,
+            proxy: Some(ProxyConfig {
+                upstreams: vec!["127.0.0.1:4001".to_owned(), "127.0.0.1:4002".to_owned()],
+                load_balance: crate::config::LoadBalanceConfig {
+                    selection: crate::config::LoadBalanceSelection::ConsistentUriHash,
+                    ..crate::config::LoadBalanceConfig::default()
+                },
+                ..ProxyConfig::default()
+            }),
+            web: None,
+            php: None,
+            cache: None,
+            compression: None,
+            headers: VhostHeaderPolicyConfig::default(),
+        }
+    }
+
+    fn single_upstream_route() -> RouteConfig {
+        RouteConfig {
+            name: "single-upstream".to_owned(),
+            path_exact: None,
+            path_prefix: Some("/single/".to_owned()),
+            path_regex: None,
+            methods: Vec::new(),
+            fallback: false,
+            https_redirect_exempt: false,
+            strip_prefix: None,
+            rewrite_prefix: None,
+            rewrite_template: None,
+            max_request_body_bytes: None,
+            access: Default::default(),
+            rate_limit: Default::default(),
+            concurrency: Default::default(),
+            grpc: Default::default(),
+            redirect: None,
+            proxy: Some(ProxyConfig {
+                upstreams: vec!["127.0.0.1:5001".to_owned()],
+                ..ProxyConfig::default()
+            }),
+            web: None,
+            php: None,
+            cache: None,
+            compression: None,
+            headers: VhostHeaderPolicyConfig::default(),
         }
     }
 

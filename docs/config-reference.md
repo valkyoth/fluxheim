@@ -1043,6 +1043,9 @@ queue wait/full/timeout outcomes, and success/failure/ejection outcomes are coun
 `fluxheim_load_balancer_events_total` with bounded configured vhost/route
 labels. The metric does not label raw upstream addresses; it uses
 `upstream_aliases` when present and otherwise leaves the upstream label empty.
+`fluxheim_load_balancer_pools` reports configured pool counts by bounded scope
+(`vhost` or `route`) and bounded selection algorithm so dashboards can see which
+load-balancing modes are active without labeling raw upstreams or route names.
 Queued requests that actually wait also record
 `fluxheim_load_balancer_queue_wait_seconds` by configured vhost/route and
 bounded outcome (`waited` or `timeout`).

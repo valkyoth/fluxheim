@@ -50,6 +50,8 @@ behavior when the change improves security or project direction.
 - Add `GET /_fluxheim/load-balancer/status` so operators can retrieve
   load-balancer runtime pool state without parsing the full admin status body;
   the same read-only view is available on the local ops socket.
+- Add `fluxheim_load_balancer_pools` to report configured load-balancer pool
+  counts by scope and bounded selection algorithm.
 - Add static `disabled_upstreams` so configured members can be kept in the pool
   definition while being administratively removed from selection and reported
   distinctly from drained members; disabled members also show as not ready in
