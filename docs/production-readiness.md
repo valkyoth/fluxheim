@@ -261,12 +261,10 @@ root:
 scripts/stable_release_gate.sh check
 ```
 
-For `1.3` candidates, this gate also runs the proxy cache and local
+For current candidates, this gate also runs the proxy cache and local
 observability smoke suites, and verifies the published full, cache-edge,
-proxy-edge, and PHP-FPM container feature profiles against their packaged
-container configs.
-The load-balancer edge profile is compile/config validated only until the `1.5`
-load-balancer milestone promotes runtime load-balancing behavior.
+proxy-edge, load-balancer-edge, and PHP-FPM container feature profiles against
+their packaged container configs.
 
 For a release candidate, also run the deeper optional checks that fit the
 deployment:

@@ -316,6 +316,7 @@ cargo build --no-default-features --features profile-full,acme-client,metrics,me
 cargo build --no-default-features --features profile-development
 cargo build --no-default-features --features profile-cache-edge,acme-client
 cargo build --no-default-features --features profile-proxy-edge,acme-client
+cargo build --no-default-features --features profile-load-balancer-edge,acme-client
 cargo build --no-default-features --features profile-web-server,php-fpm,acme-client
 ```
 
@@ -325,8 +326,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.4.0-wolfi`, `v1.4.0-cache-wolfi`, `v1.4.0-proxy-wolfi`, and
-`v1.4.0-php-wolfi`.
+`v1.5.0-wolfi`, `v1.5.0-cache-wolfi`, `v1.5.0-proxy-wolfi`,
+`v1.5.0-load-balancer-wolfi`, and `v1.5.0-php-wolfi`.
 
 Manual feature selection also works:
 

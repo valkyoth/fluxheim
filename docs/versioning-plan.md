@@ -3087,7 +3087,7 @@ ingress = ["dep:pingora", "dep:tokio", "dep:bytes", "dep:http"]
 proxy = ["ingress", ...]
 web = [...]
 cache = [...]
-load-balancer = ["proxy", ...] # transitional until the 1.5 load-balancer line
+load-balancer = ["proxy", ...] # promoted in the 1.5 load-balancer line
 tls = ["ingress", "dep:rustix"]
 tls-rustls-backend = ["tls", "pingora/rustls", "dep:rustls"]
 tls-rustls = ["tls-rustls-backend", "rustls/ring"]
@@ -3128,8 +3128,8 @@ them:
 - `cache`: focused cache edge, TLS-capable, no local webserver by default.
 - `proxy`: focused reverse proxy, TLS-capable.
 - `load-balancer`: focused load balancer, TLS-capable; prepared and manually
-  dispatchable in `1.3.0`, normally published once the `1.5` line promotes the
-  runtime behavior.
+  dispatchable before `1.5`, normally published once the `1.5` line promotes
+  the runtime behavior.
 
 The `profile-web-server` feature alias exists for native/custom builds. A
 separate official web-only image can be added with the PHP line if it becomes
