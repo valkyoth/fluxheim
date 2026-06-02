@@ -723,6 +723,7 @@ impl Default for LoadBalanceQueueConfig {
 }
 
 impl LoadBalanceQueueConfig {
+    #[cfg(feature = "load-balancer")]
     pub(crate) fn enabled(&self) -> bool {
         self.max_waiting > 0 && self.timeout_ms > 0
     }
