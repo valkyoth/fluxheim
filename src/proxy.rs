@@ -447,6 +447,20 @@ impl FluxProxy {
             .response_written()
             .map(|response| response.status.as_u16());
         let method = session.req_header().method.as_str().to_owned();
+        #[cfg(feature = "load-balancer")]
+        let load_balancer_upstream_alias = ctx
+            .upstream_load_balancer_alias
+            .as_ref()
+            .map(|alias| alias.to_string());
+        #[cfg(not(feature = "load-balancer"))]
+        let load_balancer_upstream_alias = None;
+        #[cfg(feature = "load-balancer")]
+        let load_balancer_retries = (ctx.upstream_load_balancer_selected_at.is_some()
+            || ctx.upstream_load_balancer_alias.is_some()
+            || ctx.upstream_load_balancer_retries > 0)
+            .then_some(ctx.upstream_load_balancer_retries);
+        #[cfg(not(feature = "load-balancer"))]
+        let load_balancer_retries = None;
         #[cfg(feature = "cache")]
         let cache_phase = Some(effective_cache_phase(session, ctx).as_str().to_owned());
         #[cfg(not(feature = "cache"))]
@@ -494,6 +508,8 @@ impl FluxProxy {
             end_time_unix_nanos: unix_time_nanos(),
             request_body_bytes: ctx.request_body_bytes_seen,
             response_body_bytes: ctx.response_body_bytes_seen,
+            load_balancer_upstream_alias,
+            load_balancer_retries,
             cache_phase,
             cache_lookup_duration_ms,
             cache_lock_wait_duration_ms,

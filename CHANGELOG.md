@@ -52,6 +52,9 @@ behavior when the change improves security or project direction.
   the same read-only view is available on the local ops socket.
 - Add `fluxheim_load_balancer_pools` to report configured load-balancer pool
   counts by scope and bounded selection algorithm.
+- Add low-cardinality OTLP trace attributes for load-balanced requests:
+  configured upstream alias and retry count only, with raw upstream URLs
+  rejected from trace payloads.
 - Add static `disabled_upstreams` so configured members can be kept in the pool
   definition while being administratively removed from selection and reported
   distinctly from drained members; disabled members also show as not ready in

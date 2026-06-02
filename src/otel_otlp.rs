@@ -77,6 +77,8 @@ pub struct TraceSpan {
     pub end_time_unix_nanos: u128,
     pub request_body_bytes: u64,
     pub response_body_bytes: u64,
+    pub load_balancer_upstream_alias: Option<String>,
+    pub load_balancer_retries: Option<u8>,
     pub cache_phase: Option<String>,
     pub cache_lookup_duration_ms: Option<f64>,
     pub cache_lock_wait_duration_ms: Option<f64>,
@@ -182,6 +184,27 @@ fn build_trace_payload(span: TraceSpan, service_name: &str) -> String {
             .and_then(|attributes| attributes.as_array_mut())
     {
         attributes.push(string_attr("fluxheim.route", route));
+    }
+    if let Some(upstream_alias) = span
+        .load_balancer_upstream_alias
+        .filter(|value| safe_low_cardinality_name(value))
+        && let Some(attributes) = span_json
+            .as_object_mut()
+            .and_then(|object| object.get_mut("attributes"))
+            .and_then(|attributes| attributes.as_array_mut())
+    {
+        attributes.push(string_attr(
+            "fluxheim.load_balancer.upstream",
+            upstream_alias,
+        ));
+    }
+    if let Some(retries) = span.load_balancer_retries
+        && let Some(attributes) = span_json
+            .as_object_mut()
+            .and_then(|object| object.get_mut("attributes"))
+            .and_then(|attributes| attributes.as_array_mut())
+    {
+        attributes.push(int_attr("fluxheim.load_balancer.retries", retries as u64));
     }
     if let Some(cache_phase) = span.cache_phase
         && let Some(attributes) = span_json
@@ -297,6 +320,14 @@ fn double_attr(key: &str, value: f64) -> serde_json::Value {
     })
 }
 
+fn safe_low_cardinality_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
 fn post_otlp_trace(
     agent: &ureq::Agent,
     endpoint: &HttpEndpoint,
@@ -360,6 +391,8 @@ mod tests {
                 end_time_unix_nanos: 2,
                 request_body_bytes: 0,
                 response_body_bytes: 42,
+                load_balancer_upstream_alias: Some("origin-a".to_owned()),
+                load_balancer_retries: Some(2),
                 cache_phase: Some("hit".to_owned()),
                 cache_lookup_duration_ms: Some(1.5),
                 cache_lock_wait_duration_ms: Some(0.25),
@@ -374,6 +407,9 @@ mod tests {
         assert!(payload.contains(r#""traceId":"4bf92f3577b34da6a3ce929d0e0e4736""#));
         assert!(payload.contains(r#""name":"HTTP GET""#));
         assert!(payload.contains(r#""key":"fluxheim.vhost""#));
+        assert!(payload.contains(r#""key":"fluxheim.load_balancer.upstream""#));
+        assert!(payload.contains(r#""stringValue":"origin-a""#));
+        assert!(payload.contains(r#""key":"fluxheim.load_balancer.retries""#));
         assert!(payload.contains(r#""key":"fluxheim.cache.phase""#));
         assert!(payload.contains(r#""key":"fluxheim.cache.lookup.duration_ms""#));
         assert!(payload.contains(r#""key":"fluxheim.compression.encoding""#));
@@ -381,5 +417,39 @@ mod tests {
         assert!(payload.contains(r#""key":"fluxheim.php.runtime""#));
         assert!(payload.contains(r#""key":"fluxheim.php.outcome""#));
         assert!(payload.contains(r#""intValue":"200""#));
+    }
+
+    #[test]
+    fn trace_payload_rejects_raw_load_balancer_upstream_attribute() {
+        let payload = build_trace_payload(
+            TraceSpan {
+                trace_id: "4bf92f3577b34da6a3ce929d0e0e4736".to_owned(),
+                span_id: "00f067aa0ba902b7".to_owned(),
+                parent_span_id: None,
+                name: "HTTP GET".to_owned(),
+                method: "GET".to_owned(),
+                vhost: "example.test".to_owned(),
+                route: Some("root".to_owned()),
+                status_code: Some(200),
+                error: false,
+                start_time_unix_nanos: 1,
+                end_time_unix_nanos: 2,
+                request_body_bytes: 0,
+                response_body_bytes: 42,
+                load_balancer_upstream_alias: Some("http://10.0.0.5:8080".to_owned()),
+                load_balancer_retries: Some(0),
+                cache_phase: None,
+                cache_lookup_duration_ms: None,
+                cache_lock_wait_duration_ms: None,
+                compression_encoding: None,
+                php_runtime: None,
+                php_outcome: None,
+            },
+            "fluxheim",
+        );
+
+        assert!(!payload.contains("http://10.0.0.5:8080"));
+        assert!(!payload.contains(r#""key":"fluxheim.load_balancer.upstream""#));
+        assert!(payload.contains(r#""key":"fluxheim.load_balancer.retries""#));
     }
 }

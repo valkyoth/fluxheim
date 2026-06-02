@@ -515,6 +515,10 @@ phase plus cache lookup and request-collapsing wait durations. They do not
 include cache keys, paths beyond the normal HTTP span name, query strings,
 cookies, or request header values. `otel-tracing` and `otel-otlp` are
 incompatible with `privacy-mode`.
+Load-balanced spans may include `fluxheim.load_balancer.upstream` from the
+configured `proxy.upstream_aliases` value and
+`fluxheim.load_balancer.retries`; raw upstream URLs are not exported as trace
+attributes.
 
 ## Logging
 

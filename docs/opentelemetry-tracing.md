@@ -84,6 +84,7 @@ Span attributes must use bounded, low-cardinality values:
 - status class;
 - cache tier and hit/miss;
 - upstream pool name, not arbitrary upstream URL;
+- load-balancer upstream alias and retry count, never raw upstream URLs;
 - configured policy names;
 - error class, not raw error strings when they may contain paths or secrets.
 
