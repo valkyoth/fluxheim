@@ -966,8 +966,8 @@ not ready in that status. Backup, drain, and disabled sets must not overlap,
 and at least one upstream must remain a normal primary.
 `proxy.load_balance.selection` defaults to `round-robin`. It also accepts
 `least-connections`, `weighted-least-connections`,
-`ratio-least-connections`, `least-time`, `power-of-two`, `source-hash`,
-`uri-hash`, `header-hash`, `cookie-hash`, `consistent-source-hash`,
+`ratio-least-connections`, `least-sessions`, `least-time`, `power-of-two`,
+`source-hash`, `uri-hash`, `header-hash`, `cookie-hash`, `consistent-source-hash`,
 `consistent-uri-hash`, `consistent-header-hash`, and
 `consistent-cookie-hash`. Header-hash modes require
 `proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
@@ -983,10 +983,13 @@ load-balanced pool has no selectable backend. `least-connections`,
 `ratio-least-connections` all use the same Fluxheim-held in-flight request
 permits, `upstream_weights`, and Pingora's current backend health state, so a
 backend with weight `4` can carry roughly four times the in-flight request
-share of a backend with weight `1`. `least-time` uses the same request permits
-plus an EWMA of observed upstream latency from completed requests, weighted by
-`upstream_weights`; unsampled healthy backends are allowed to receive traffic so
-new or recovered pool members can establish a latency baseline. `power-of-two`
+share of a backend with weight `1`. `least-sessions` requires
+`proxy.load_balance.persistence.enabled = true` and selects by the lowest
+bounded persistence-entry share per backend, weighted by `upstream_weights`.
+`least-time` uses the same request permits plus an EWMA of observed upstream
+latency from completed requests, weighted by `upstream_weights`; unsampled
+healthy backends are allowed to receive traffic so new or recovered pool
+members can establish a latency baseline. `power-of-two`
 also accepts `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
 `weighted-random-two-choice`; all names sample two healthy backends through
 Pingora's random weighted selector and choose the lower in-flight count.

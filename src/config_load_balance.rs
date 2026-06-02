@@ -88,6 +88,11 @@ impl LoadBalanceConfig {
         if self.max_iterations == 0 {
             return Err(ConfigError::InvalidLoadBalanceMaxIterations);
         }
+        if self.selection == LoadBalanceSelection::LeastSessions && !self.persistence.enabled {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "least-sessions selection requires proxy.load_balance.persistence.enabled = true",
+            });
+        }
         if !(500..=599).contains(&self.all_down_status) {
             return Err(ConfigError::InvalidLoadBalanceSelection {
                 reason: "proxy.load_balance.all_down_status must be an HTTP 5xx status",
@@ -113,6 +118,8 @@ pub enum LoadBalanceSelection {
         alias = "ratio-least-connections"
     )]
     LeastConnections,
+    #[serde(alias = "least-session")]
+    LeastSessions,
     LeastTime,
     #[serde(
         alias = "power-of-two-choices",

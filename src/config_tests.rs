@@ -2478,6 +2478,30 @@ fn validates_load_balance_hash_selection() {
     )
     .unwrap();
     least_time.validate().unwrap();
+
+    let least_sessions: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "least-sessions"
+
+            [proxy.load_balance.persistence]
+            enabled = true
+            "#,
+    )
+    .unwrap();
+    least_sessions.validate().unwrap();
+
+    let least_sessions_without_persistence: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "least-sessions"
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        least_sessions_without_persistence.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
 }
 
 #[test]

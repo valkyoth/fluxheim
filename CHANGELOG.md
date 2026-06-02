@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
   configured `upstream_weights` while still using in-flight request permits.
 - Accept `weighted-least-connections` and `ratio-least-connections` as
   migration-friendly aliases for the weighted least-connections selector.
+- Add `least-sessions` load-balancer selection backed by the bounded
+  persistence table for sticky-session-aware distribution.
 - Add `least-time` selection using weighted EWMA upstream latency plus
   in-flight request counts for latency-sensitive application pools.
 - Add static `upstream_priority_groups` for F5-style preferred/fallback
