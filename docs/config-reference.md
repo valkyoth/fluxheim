@@ -973,6 +973,10 @@ labels. The metric does not label raw upstream addresses; it uses
 `upstream_aliases` when present and otherwise leaves the upstream label empty.
 When persistence is enabled, the same counter records bounded
 `persistence_hit`, `persistence_miss`, and `persistence_fallback` events.
+`examples/load-balancer-enterprise.toml` is the validated 1.5 migration
+fixture for a richer HAProxy/F5-style pool: weighted members, aliases, priority
+groups, backup/drain policy, active and passive health, slow start,
+source-IP persistence, retry budgets, metrics, and explicit all-down behavior.
 `proxy.load_balance.health_check.protocol` defaults to `tcp`, which verifies
 TCP reachability and, when `upstream_tls = true`, a TLS handshake. Set
 `protocol = "http"` to send `method` to `path`; `method` defaults to `GET` and

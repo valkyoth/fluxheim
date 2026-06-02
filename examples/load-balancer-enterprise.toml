@@ -1,0 +1,103 @@
+[server]
+listen = ["127.0.0.1:8080"]
+trusted_proxies = []
+
+[server.process]
+daemon = false
+pid_file = "/run/fluxheim/fluxheim.pid"
+upgrade_sock = "/run/fluxheim/fluxheim-upgrade.sock"
+threads = 2
+listener_tasks_per_fd = 1
+work_stealing = true
+upstream_keepalive_pool_size = 256
+max_retries = 16
+
+[admin]
+enabled = false
+listen = "127.0.0.1:9090"
+require_loopback = true
+
+[metrics]
+enabled = true
+listen = "127.0.0.1:9091"
+require_loopback = true
+
+[logging]
+level = "info"
+format = "json"
+target = "stderr"
+
+[logging.access]
+enabled = true
+include_host = true
+include_path = true
+request_id = true
+
+[proxy]
+upstreams = [
+    "127.0.0.1:3001",
+    "127.0.0.1:3002",
+    "127.0.0.1:3003",
+    "127.0.0.1:3004",
+]
+upstream_aliases = ["app-a", "app-b", "app-c", "app-dr"]
+upstream_weights = [4, 4, 2, 1]
+upstream_priority_groups = [100, 100, 50, 10]
+upstream_priority_group_min_active = 2
+upstream_max_in_flight = [500, 500, 250, 100]
+backup_upstreams = ["127.0.0.1:3004"]
+drain_upstreams = ["127.0.0.1:3003"]
+disabled_upstreams = []
+upstream_tls = false
+connect_timeout_secs = 3
+read_timeout_secs = 30
+send_timeout_secs = 30
+downstream_write_timeout_secs = 30
+
+[proxy.load_balance]
+selection = "least-time"
+max_iterations = 256
+all_down_status = 503
+
+[proxy.load_balance.health_check]
+enabled = true
+protocol = "http"
+interval_secs = 2
+consecutive_success = 2
+consecutive_failure = 3
+parallel = true
+method = "GET"
+path = "/healthz"
+expected_statuses = [200, 204]
+expected_status_ranges = [{ start = 200, end = 299 }]
+expected_headers = [{ name = "x-fluxheim-health", value = "ready" }]
+reuse_connection = true
+connect_timeout_secs = 1
+read_timeout_secs = 2
+
+[proxy.load_balance.passive_health]
+enabled = true
+consecutive_failure = 3
+ejection_secs = 30
+failure_statuses = [500, 502, 503]
+failure_status_ranges = [{ start = 520, end = 529 }]
+max_latency_ms = 2000
+
+[proxy.load_balance.slow_start]
+enabled = true
+duration_secs = 30
+
+[proxy.load_balance.persistence]
+enabled = true
+mode = "source-ip"
+ttl_secs = 600
+table_max_entries = 65536
+
+[proxy.load_balance.retry]
+enabled = true
+max_retries = 2
+methods = ["GET", "HEAD", "OPTIONS"]
+statuses = [500, 502, 503]
+status_ranges = [{ start = 520, end = 529 }]
+budget_per_window = 1000
+budget_window_secs = 1
