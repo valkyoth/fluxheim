@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.4.7
+Version:        1.5.0
 Release:        1%{?dist}
 Summary:        Modular Pingora-based reverse proxy and static web server
 License:        EUPL-1.2
@@ -47,11 +47,12 @@ Requires(pre):   shadow-utils
 Requires:       ca-certificates
 
 %description
-Fluxheim is a modular Rust edge server built on Pingora. The 1.4 line provides
-the production proxy parity baseline while keeping the packaged native build on
-the full production feature set: proxy, static web serving, cache, load
-balancing, managed ACME, Prometheus metrics, OpenTelemetry export support, and
-the 1.4 proxy-operations feature set.
+Fluxheim is a modular Rust edge server built on Pingora. The 1.5 line adds the
+enterprise HTTP/TCP load-balancer control-plane track while keeping the
+packaged native build on the full production feature set: proxy, static web
+serving, cache, load balancing, managed ACME, Prometheus metrics,
+OpenTelemetry export support, GeoIP policy, stream proxying, and PHP-FPM
+support.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.
@@ -153,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Tue Jun 02 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.0-1
+- Release 1.5.0 enterprise HTTP/TCP load-balancer control-plane line.
+- Add focused load-balancer release profile support, runtime member controls,
+  local persistence, advanced selection, health/circuit status, and 1.5
+  documentation boundaries.
+
 * Sun May 31 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.4.7-1
 - Release 1.4.7 TCP stream hardening.
 - Add true stream idle timeouts, stream upstream TLS/mTLS controls,

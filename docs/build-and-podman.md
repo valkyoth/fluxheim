@@ -465,15 +465,15 @@ Optional Quay repository secrets and variables:
 
 The workflow publishes OS-variant tags for the full/default image profile:
 
-- `v1.4.0-wolfi`, `v1.4.0-alpine`, `v1.4.0-suse-micro`, `v1.4.0-debian`
+- `v1.5.0-wolfi`, `v1.5.0-alpine`, `v1.5.0-suse-micro`, `v1.5.0-debian`
 - `sha-<short-sha>-wolfi`, `sha-<short-sha>-alpine`, etc.
 - `latest-wolfi`, `latest-alpine`, etc. when run from the default branch
 
 For the recommended Wolfi runtime, the full/default profile also gets short
 aliases:
 
-- `v1.4.0`
-- `v1.4.0-base`
+- `v1.5.0`
+- `v1.5.0-base`
 - `latest`
 - `latest-base`
 
@@ -482,24 +482,26 @@ automation. They point at the full/default image profile.
 
 The cache and proxy image profiles publish tags with a profile segment:
 
-- `v1.4.0-cache-wolfi`, `v1.4.0-cache-alpine`,
-  `v1.4.0-cache-suse-micro`, `v1.4.0-cache-debian`
-- `v1.4.0-proxy-wolfi`, `v1.4.0-proxy-alpine`,
-  `v1.4.0-proxy-suse-micro`, `v1.4.0-proxy-debian`
-- `v1.4.0-php-wolfi`, `v1.4.0-php-alpine`,
-  `v1.4.0-php-suse-micro`, `v1.4.0-php-debian`
+- `v1.5.0-cache-wolfi`, `v1.5.0-cache-alpine`,
+  `v1.5.0-cache-suse-micro`, `v1.5.0-cache-debian`
+- `v1.5.0-proxy-wolfi`, `v1.5.0-proxy-alpine`,
+  `v1.5.0-proxy-suse-micro`, `v1.5.0-proxy-debian`
+- `v1.5.0-load-balancer-wolfi`, `v1.5.0-load-balancer-alpine`,
+  `v1.5.0-load-balancer-suse-micro`, `v1.5.0-load-balancer-debian`
+- `v1.5.0-php-wolfi`, `v1.5.0-php-alpine`,
+  `v1.5.0-php-suse-micro`, `v1.5.0-php-debian`
 - `sha-<short-sha>-cache-wolfi`, `sha-<short-sha>-proxy-wolfi`,
-  `sha-<short-sha>-php-wolfi`, etc.
-- `latest-cache-wolfi`, `latest-proxy-wolfi`, `latest-php-wolfi`, etc. when
-  run from the default branch
-- Wolfi short aliases: `v1.4.0-cache`, `v1.4.0-proxy`, `v1.4.0-php`,
-  `latest-cache`, `latest-proxy`, and `latest-php`
+  `sha-<short-sha>-load-balancer-wolfi`, `sha-<short-sha>-php-wolfi`, etc.
+- `latest-cache-wolfi`, `latest-proxy-wolfi`,
+  `latest-load-balancer-wolfi`, `latest-php-wolfi`, etc. when run from the
+  default branch
+- Wolfi short aliases: `v1.5.0-cache`, `v1.5.0-proxy`,
+  `v1.5.0-load-balancer`, `v1.5.0-php`, `latest-cache`, `latest-proxy`,
+  `latest-load-balancer`, and `latest-php`
 
 Starting with `v1.5.0`, the load-balancer image profile is part of normal tag
 publishing. For older tags or development branches, it can still be included in
-manual workflow runs by setting `include_load_balancer=true`. Its tags follow
-the same shape, for example `v1.5.0-load-balancer-wolfi` and the Wolfi alias
-`v1.5.0-load-balancer`.
+manual workflow runs by setting `include_load_balancer=true`.
 
 The workflow defaults to `linux/amd64`. Use manual dispatch to test additional
 platforms, for example `linux/amd64,linux/arm64`, once every selected runtime

@@ -12,7 +12,7 @@ on:
         required: false
         default: ""
       include_load_balancer:
-        description: Build the load-balancer image profile during pre-1.5 manual dispatch.
+        description: Build the load-balancer image profile for non-v1.5 manual dispatches.
         required: true
         default: false
         type: boolean
@@ -115,7 +115,7 @@ jobs:
           fi
           echo "build=${build}" >> "${GITHUB_OUTPUT}"
           if [[ "${build}" == "false" ]]; then
-            echo "Skipping ${PROFILE} image profile until a v1.5 tag or manual include_load_balancer=true run."
+            echo "Skipping ${PROFILE} image profile for non-v1.5 ref without include_load_balancer=true."
           fi
 
       - name: Checkout repository

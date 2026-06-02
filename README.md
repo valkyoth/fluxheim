@@ -22,24 +22,23 @@
 # Fluxheim
 
 Fluxheim is a modular Rust edge server built on
-[Pingora](https://github.com/cloudflare/pingora). The current stable release is
-`1.4.7`: static sites, vhosts, route-level proxying, redirects, rustls SNI,
-managed ACME issuance and renewal, secure headers, container/native systemd
-operation, production proxy-cache controls, Prometheus/OpenTelemetry operations
-support, focused full/cache-edge/proxy-edge/PHP image profiles, opt-in PHP-FPM
-application serving for WordPress-style deployments, managed php-fpm process
-supervision, the `fluxheim-acme` companion, release-page config tester
-diagnostics, OpenSSL and rustls/AWS-LC FIPS/ISO-capable build paths, and the
-first production proxy-parity set: edge ACLs, rate/concurrency limits,
-compression, advanced upstream selection, passive health, retry budgets,
-PROXY protocol, upstream TLS controls, mTLS/client certificate policy, HTTP/2
-origin controls, gRPC pass-through policy, proxy-operations migration blockers,
-the `1.4.2` proxy module split, the `1.4.3` config module split, Apple Silicon
-macOS Level 1 developer support, bounded GeoIP/Geo-Context policy with local
-MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, and the
-TCP stream proxy foundation hardened with true idle timeouts, stream upstream
-TLS/mTLS controls, weighted/drain/backup stream upstream policy, PROXY protocol
-coverage, and bounded stream write/connect behavior.
+[Pingora](https://github.com/cloudflare/pingora). The current release line is
+`1.5`: static sites, reverse proxying, edge caching, PHP-FPM application
+serving, ACME automation, observability, FIPS/ISO-capable TLS build paths,
+GeoIP policy, TCP stream proxying, and the enterprise HTTP/TCP load-balancer
+control-plane work. Focused release profiles are available for full, cache,
+proxy, load-balancer, and PHP deployments, with matching container images and
+Linux runtime archives.
+
+The `1.5.0` load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style
+HTTP/TCP pool operations: weighted and adaptive selection, health and circuit
+state, slow start, retry budgets, bounded queueing, local persistence, runtime
+member-state controls, status/metrics/audit visibility, and a validated
+enterprise migration fixture. It is not a complete BIG-IP platform clone:
+managed cookie insertion, restart-persistent load-balancer state, runtime
+weight changes, runtime add/remove-member, cross-instance state sync, UDP, GSLB,
+WAF, VPN/firewall appliance behavior, and iRules/Lua/Wasm scripting are
+documented future tracks rather than hidden or implied behavior.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -87,6 +86,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |
 | Load-balancer status | ✅ | Admin status includes configured pools, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state. |
+| Load-balancer 1.5.0 boundaries | Limited | Local persistence and runtime overrides are in-memory only; Fluxheim does not yet insert managed affinity cookies, persist LB state across restarts, change weights/add members at runtime, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
@@ -112,7 +112,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | OpenTelemetry | ✅ | OTLP metrics and tracing export profiles. |
 | Structured access logs | ✅ | Trusted client IP, cache phase, route, selected upstream/alias/retries, TLS identity, compression, and optional Geo-Context fields. |
 | Config tester | ✅ | Release-page config diagnostics through `fluxheim-config-tester`. |
-| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/cache/proxy/PHP images. |
+| Rootless containers | ✅ | Wolfi, Alpine, SUSE Micro, Debian, focused full/cache/proxy/load-balancer/PHP images. |
 | Native services | ✅ | systemd units and RPM packaging files. |
 | Default page | ✅ | Packaged `/srv/fluxheim/index.html` with no external assets. |
 
@@ -343,7 +343,7 @@ and explicit `.php` scripts to php-fpm. See
 [`docs/php-fpm-app-recipes.md`](docs/php-fpm-app-recipes.md), and
 [`examples/php-fpm.toml`](examples/php-fpm.toml).
 Fluxheim `1.3.7` completed the production PHP-FPM line with managed php-fpm
-supervision as an opt-in runtime mode. The current Wolfi `v1.4.0-php` image is
+supervision as an opt-in runtime mode. The current Wolfi `v1.5.0-php` image is
 self-contained for managed PHP-FPM and includes the Wolfi `php-8.5-fpm`
 runtime; non-Wolfi PHP image variants keep the external php-fpm container
 config unless customized. Pure-Rust PHP/phprs support is not planned; managed

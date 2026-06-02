@@ -1711,15 +1711,15 @@ Feature-graph prerequisite:
   selected. The load balancer may reuse shared proxy transport abstractions
   internally, but the public feature name and image profile must not pull in
   unrelated webserver behavior.
-- `1.5.0` promotes the `profile-load-balancer-edge` image profile from
-  pre-1.5 manual testing to the normal load-balancer release artifact line.
+- `1.5.0` promotes the `profile-load-balancer-edge` image profile to the normal
+  load-balancer release artifact line.
   The official focused load-balancer image should remain TLS/ACME/metrics
   capable and omit static web, local static cache, PHP-FPM, and generic
   webserver behavior unless the operator selects a broader profile.
 
-Goal: stabilize the `1.4` proxy/load-balancing primitives for larger
-enterprise estates. Since `1.4` now owns the common single-node parity features,
-`1.5` should focus on operational scale: runtime pool mutation, multi-instance
+Goal: stabilize the `1.4` proxy, stream, and edge-policy primitives for larger
+enterprise estates. Since `1.4` owns the common single-node parity features,
+`1.5` focuses on operational scale: runtime pool mutation, multi-instance
 state, deeper active/adaptive health policy, admin workflows, migration tooling,
 and F5-style estate management. Palo Alto-style security expectations should be
 represented as clear policy integration points around the load balancer, not as

@@ -1150,6 +1150,13 @@ by process restart, runtime rebuild, or the authenticated persistence-clear
 admin operation. It is rejected in `privacy-mode` builds because persistence
 retains client-derived identifiers.
 
+`1.5.0` does not insert or sign managed load-balancer affinity cookies, persist
+load-balancer persistence/runtime override state across restarts, change
+upstream weights or add/remove pool members at runtime, or synchronize
+load-balancer state across active-active Fluxheim nodes. Those are explicit
+future control-plane and HA tracks, not implied behavior of the local
+persistence table.
+
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple
 configs, but do not set both fields in the same proxy block. Fluxheim rejects

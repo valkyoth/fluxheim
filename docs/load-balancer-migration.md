@@ -149,6 +149,10 @@ curl -X POST \
 
 ## Known Migration Boundaries
 
+The following are intentional `1.5.0` boundaries. They are not defects in the
+shipped load-balancer behavior; they are architectural gaps tracked for later
+`1.5.x` or future module lines.
+
 - Dynamic weight changes and add/remove-member operations are future control
   plane work.
 - Load-balancer-managed cookie insertion is future persistence work. In

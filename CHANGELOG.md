@@ -127,6 +127,9 @@ behavior when the change improves security or project direction.
 - Add `docs/load-balancer-migration.md` with nginx, HAProxy, and F5 LTM pool
   mappings plus explicit boundaries for UDP, GSLB, WAF, VPN, and scripting
   roadmap items.
+- Document the `1.5.0` load-balancer boundaries clearly: no managed affinity
+  cookie insertion, no restart-persistent LB runtime state, no runtime weight
+  changes or add/remove-member operations, and no cross-instance state sync yet.
 - Extend the local load-balancer smoke to use temporary process paths and verify
   configured all-down status after all checked origins are unavailable.
 - Extend the local load-balancer smoke to exercise authenticated runtime
