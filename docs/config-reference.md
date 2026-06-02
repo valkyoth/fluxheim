@@ -1031,16 +1031,17 @@ Empty `statuses` and `status_ranges` keep response-status retries disabled.
 over a moving window. Fluxheim does not retry after response streaming has
 started.
 `proxy.load_balance.persistence.enabled = true` enables a bounded local
-persistence table. The first mode is `source-ip`: a client IP is mapped to the
-selected backend for `ttl_secs`, then reused while the backend remains ready,
-not drained/disabled/forced-down, not passively ejected, and below its
-in-flight cap. If the stored backend is no longer selectable, Fluxheim falls
-back to the normal load-balancing algorithm and refreshes the table with the
-new backend. `table_max_entries` bounds memory use; expired entries are pruned
-and the oldest expiry is evicted when the table is full. Persistence is local
-to one Fluxheim process in `1.5.0` and is reset by process restart or runtime
-rebuild. It is rejected in `privacy-mode` builds because source-IP persistence
-retains client-derived identifiers.
+persistence table. `mode = "source-ip"` maps a client IP to the selected
+backend for `ttl_secs`; `mode = "header"` maps the configured request `header`
+value, for example an operator-trusted session header. Stored backends are
+reused while they remain ready, not drained/disabled/forced-down, not passively
+ejected, and below their in-flight cap. If the stored backend is no longer
+selectable, Fluxheim falls back to the normal load-balancing algorithm and
+refreshes the table with the new backend. `table_max_entries` bounds memory
+use; expired entries are pruned and the oldest expiry is evicted when the table
+is full. Persistence is local to one Fluxheim process in `1.5.0` and is reset
+by process restart or runtime rebuild. It is rejected in `privacy-mode` builds
+because persistence retains client-derived identifiers.
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

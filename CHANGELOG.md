@@ -76,6 +76,9 @@ behavior when the change improves security or project direction.
 - Add bounded local source-IP load-balancer persistence with TTL, table-size
   limits, admin status entry counts, and automatic fallback when the stored
   backend is no longer selectable.
+- Add bounded local request-header load-balancer persistence with explicit
+  header-name validation and the same TTL/table limits as source-IP
+  persistence.
 - Count load-balancer persistence hits, misses, and fallbacks in
   `fluxheim_load_balancer_events_total` when metrics are compiled.
 - Add a validated `examples/load-balancer-enterprise.toml` migration fixture

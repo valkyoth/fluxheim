@@ -568,6 +568,7 @@ const MAX_LB_PERSISTENCE_TABLE_ENTRIES: usize = 1_000_000;
 pub enum LoadBalancePersistenceMode {
     #[default]
     SourceIp,
+    Header,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -577,6 +578,8 @@ pub struct LoadBalancePersistenceConfig {
     pub enabled: bool,
     #[serde(default)]
     pub mode: LoadBalancePersistenceMode,
+    #[serde(default)]
+    pub header: Option<String>,
     #[serde(default = "default_lb_persistence_ttl_secs")]
     pub ttl_secs: u64,
     #[serde(default = "default_lb_persistence_table_max_entries")]
@@ -588,6 +591,7 @@ impl Default for LoadBalancePersistenceConfig {
         Self {
             enabled: false,
             mode: LoadBalancePersistenceMode::default(),
+            header: None,
             ttl_secs: default_lb_persistence_ttl_secs(),
             table_max_entries: default_lb_persistence_table_max_entries(),
         }
@@ -613,6 +617,28 @@ impl LoadBalancePersistenceConfig {
             return Err(ConfigError::InvalidLoadBalanceSelection {
                 reason: "proxy.load_balance.persistence.table_max_entries must be between 1 and 1000000",
             });
+        }
+        match self.mode {
+            LoadBalancePersistenceMode::SourceIp => {
+                if self.header.is_some() {
+                    return Err(ConfigError::InvalidLoadBalanceSelection {
+                        reason: "proxy.load_balance.persistence.header can only be used with mode = \"header\"",
+                    });
+                }
+            }
+            LoadBalancePersistenceMode::Header => {
+                let Some(header) = self.header.as_deref() else {
+                    return Err(ConfigError::InvalidLoadBalanceSelection {
+                        reason: "proxy.load_balance.persistence.header is required when mode = \"header\"",
+                    });
+                };
+                if !valid_http_header_name(header) {
+                    return Err(ConfigError::InvalidHeaderName {
+                        field: "proxy.load_balance.persistence.header",
+                        name: header.to_owned(),
+                    });
+                }
+            }
         }
         Ok(())
     }

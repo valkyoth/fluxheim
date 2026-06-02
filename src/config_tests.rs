@@ -2742,6 +2742,54 @@ fn rejects_invalid_load_balance_persistence() {
             reason: "proxy.load_balance.persistence.table_max_entries must be between 1 and 1000000"
         })
     );
+
+    let missing_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "header"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        missing_header.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.header is required when mode = \"header\""
+        })
+    );
+
+    let header_with_source_ip: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "source-ip"
+            header = "x-session"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        header_with_source_ip.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.header can only be used with mode = \"header\""
+        })
+    );
+
+    let invalid_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "header"
+            header = "bad header"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_header.validate(),
+        Err(ConfigError::InvalidHeaderName {
+            field: "proxy.load_balance.persistence.header",
+            name: "bad header".to_owned()
+        })
+    );
 }
 
 #[test]

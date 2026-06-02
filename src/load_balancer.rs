@@ -182,6 +182,7 @@ pub struct LoadBalancerRetryRuntimeStats {
 pub struct LoadBalancerPersistenceRuntimeStats {
     pub enabled: bool,
     pub mode: LoadBalancePersistenceMode,
+    pub header: Option<String>,
     pub ttl_secs: u64,
     pub table_max_entries: usize,
     pub entry_count: usize,
@@ -603,6 +604,7 @@ impl UpstreamLoadBalancer {
             persistence: LoadBalancerPersistenceRuntimeStats {
                 enabled: self.persistence.is_some(),
                 mode: self.persistence_policy.mode,
+                header: self.persistence_policy.header.clone(),
                 ttl_secs: self.persistence_policy.ttl_secs,
                 table_max_entries: self.persistence_policy.table_max_entries,
                 entry_count: self
@@ -1335,6 +1337,7 @@ impl BackendLatencyState {
 #[derive(Debug)]
 struct LoadBalancerPersistenceState {
     mode: LoadBalancePersistenceMode,
+    header: Option<String>,
     ttl: Duration,
     table_max_entries: usize,
     table: Mutex<std::collections::HashMap<Vec<u8>, LoadBalancerPersistenceEntry>>,
@@ -1350,15 +1353,20 @@ impl LoadBalancerPersistenceState {
     fn from_config(config: &LoadBalancePersistenceConfig) -> Self {
         Self {
             mode: config.mode,
+            header: config.header.clone(),
             ttl: Duration::from_secs(config.ttl_secs),
             table_max_entries: config.table_max_entries,
             table: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
-    fn key(&self, _request: &RequestHeader, client_ip: Option<IpAddr>) -> Option<Vec<u8>> {
+    fn key(&self, request: &RequestHeader, client_ip: Option<IpAddr>) -> Option<Vec<u8>> {
         match self.mode {
             LoadBalancePersistenceMode::SourceIp => client_ip.map(|ip| ip.to_string().into_bytes()),
+            LoadBalancePersistenceMode::Header => self
+                .header
+                .as_deref()
+                .and_then(|header| request_header_key(request, header)),
         }
     }
 
@@ -2248,18 +2256,20 @@ impl LoadBalanceKeySource {
             Self::None => None,
             Self::SourceIp => client_ip.map(|ip| ip.to_string().into_bytes()),
             Self::Uri => Some(request.uri.to_string().into_bytes()),
-            Self::Header(name) => {
-                let mut key = Vec::new();
-                for value in request.headers.get_all(name.as_str()) {
-                    let bytes = value.as_bytes();
-                    key.extend_from_slice(&bytes.len().to_le_bytes());
-                    key.extend_from_slice(bytes);
-                }
-                (!key.is_empty()).then_some(key)
-            }
+            Self::Header(name) => request_header_key(request, name),
             Self::Cookie(name) => cookie_key(request, name),
         }
     }
+}
+
+fn request_header_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
+    let mut key = Vec::new();
+    for value in request.headers.get_all(name) {
+        let bytes = value.as_bytes();
+        key.extend_from_slice(&bytes.len().to_le_bytes());
+        key.extend_from_slice(bytes);
+    }
+    (!key.is_empty()).then_some(key)
 }
 
 fn cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
@@ -2676,8 +2686,8 @@ mod tests {
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
         LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol,
-        LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalanceSelection,
-        LoadBalanceSlowStartConfig, ProxyConfig,
+        LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
+        LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
 
     use super::{
@@ -2796,6 +2806,58 @@ mod tests {
         assert_eq!(stats.persistence.entry_count, 2);
         assert_eq!(stats.persistence.table_max_entries, 16);
         assert_eq!(stats.persistence.ttl_secs, 60);
+    }
+
+    #[test]
+    fn header_persistence_reuses_selected_backend() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec![
+                "127.0.0.1:3000".to_owned(),
+                "127.0.0.1:3001".to_owned(),
+                "127.0.0.1:3002".to_owned(),
+            ],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    mode: LoadBalancePersistenceMode::Header,
+                    header: Some("x-session".to_owned()),
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let mut first_request = request();
+        first_request.insert_header("x-session", "abc").unwrap();
+        let first = balancer.select(&first_request, None).unwrap();
+        assert_eq!(
+            first.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Miss)
+        );
+
+        let mut second_request = request();
+        second_request.insert_header("x-session", "abc").unwrap();
+        let second = balancer.select(&second_request, None).unwrap();
+        assert_eq!(first.backend.addr, second.backend.addr);
+        assert_eq!(
+            second.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Hit)
+        );
+
+        let missing_header = balancer.select(&request(), None).unwrap();
+        assert_eq!(missing_header.persistence_outcome, None);
+
+        let stats = balancer.runtime_stats();
+        assert!(stats.persistence_enabled);
+        assert_eq!(stats.persistence.mode, LoadBalancePersistenceMode::Header);
+        assert_eq!(stats.persistence.header.as_deref(), Some("x-session"));
+        assert_eq!(stats.persistence.entry_count, 1);
     }
 
     #[test]
