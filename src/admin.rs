@@ -845,7 +845,7 @@ impl AdminApp {
         let current_config = self.current_config.load();
         let tls = &current_config.tls;
         let tls_compliance_mode = tls.compliance_mode();
-        let mut body = json!({
+        let body = json!({
             "status": "ok",
             "snapshot_current": current,
             "snapshots": snapshots,
@@ -858,13 +858,17 @@ impl AdminApp {
             "pending_validation": pending_validation_json(runtime_state.pending_validation.as_ref()),
         });
         #[cfg(feature = "load-balancer")]
-        if let Some(object) = body.as_object_mut() {
-            object.insert(
-                "load_balancer".to_owned(),
-                serde_json::to_value(self.proxy.load_balancer_runtime_stats())
-                    .unwrap_or(Value::Null),
-            );
-        }
+        let body = {
+            let mut body = body;
+            if let Some(object) = body.as_object_mut() {
+                object.insert(
+                    "load_balancer".to_owned(),
+                    serde_json::to_value(self.proxy.load_balancer_runtime_stats())
+                        .unwrap_or(Value::Null),
+                );
+            }
+            body
+        };
         json_response_value(StatusCode::OK, &body)
     }
 
@@ -2690,7 +2694,7 @@ fn record_load_balancer_member_state_event(
     crate::metrics::record_load_balancer_event(vhost, route, member, event);
 }
 
-#[cfg(not(all(feature = "metrics", feature = "load-balancer")))]
+#[cfg(all(not(feature = "metrics"), feature = "load-balancer"))]
 fn record_load_balancer_member_state_event(
     _vhost: &str,
     _route: Option<&str>,
@@ -3545,6 +3549,7 @@ mod tests {
 
     use arc_swap::ArcSwap;
     use http::{HeaderMap, HeaderValue, StatusCode, header};
+    #[cfg(feature = "load-balancer")]
     use serde_json::Value;
 
     use super::{
@@ -3561,6 +3566,8 @@ mod tests {
         AdminHealthResponseMode, AdminSelfHealingConfig, Config, ProxyConfig, ServerConfig,
         VhostConfig, WebConfig,
     };
+    #[cfg(feature = "cache")]
+    use crate::config_route::RouteConfig;
     use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
     use crate::snapshot::SnapshotStore;
     use crate::test_support::unique_temp_path;
