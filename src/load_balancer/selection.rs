@@ -6,14 +6,12 @@ use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, Random, RoundRobin};
 
+use super::policy::{BackendSelectionPolicy, backend_policy_key};
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
     backend_connection_key,
 };
-use super::{
-    BackendSelectionPolicy, MAGLEV_TABLE_SIZE, SelectedUpstream, backend_policy_key,
-    fnv1a64_with_seed,
-};
+use super::{MAGLEV_TABLE_SIZE, SelectedUpstream, fnv1a64_with_seed};
 
 #[derive(Clone, Copy)]
 pub(super) struct LoadBalancerSelectInputs<'a> {
