@@ -199,6 +199,8 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub address: Option<String>,
     pub alias: Option<String>,
     pub weight: usize,
+    pub locality: Option<String>,
+    pub locality_preferred: bool,
     pub ready: bool,
     pub backup: bool,
     pub drained: bool,
@@ -502,6 +504,7 @@ impl UpstreamLoadBalancer {
                     allow_backup: true,
                     minimum_priority_group: None,
                     ignore_slow_start: false,
+                    ignore_locality: false,
                 },
                 &self.counters,
             )
@@ -1487,6 +1490,8 @@ struct BackendSelectionPolicy {
     disabled: Arc<std::collections::HashSet<u64>>,
     runtime: Arc<RuntimeBackendPolicyOverrides>,
     priority: Arc<std::collections::HashMap<u64, u16>>,
+    localities: Arc<std::collections::HashMap<u64, Arc<str>>>,
+    preferred_localities: Arc<std::collections::HashSet<Arc<str>>>,
     max_in_flight: Arc<std::collections::HashMap<u64, usize>>,
     priority_groups: Arc<[u16]>,
     priority_group_min_active: usize,
@@ -1510,6 +1515,13 @@ impl BackendSelectionPolicy {
             disabled: backend_policy_keys(&config.disabled_upstreams).into(),
             runtime: Arc::new(RuntimeBackendPolicyOverrides::default()),
             priority: priority.into(),
+            localities: backend_localities(config).into(),
+            preferred_localities: config
+                .preferred_upstream_localities
+                .iter()
+                .map(|locality| Arc::<str>::from(locality.to_ascii_lowercase()))
+                .collect::<std::collections::HashSet<_>>()
+                .into(),
             max_in_flight: backend_max_in_flight(config).into(),
             priority_groups: priority_groups.into(),
             priority_group_min_active: config.upstream_priority_group_min_active,
@@ -1529,6 +1541,7 @@ impl BackendSelectionPolicy {
             && pass
                 .minimum_priority_group
                 .is_none_or(|group| self.priority.get(&key).copied().unwrap_or(0) >= group)
+            && self.locality_permits(key, pass)
             && self
                 .max_in_flight
                 .get(&key)
@@ -1555,6 +1568,19 @@ impl BackendSelectionPolicy {
             .copied()
     }
 
+    fn preferred_localities(&self) -> &std::collections::HashSet<Arc<str>> {
+        &self.preferred_localities
+    }
+
+    fn locality_permits(&self, key: u64, pass: SelectionPass) -> bool {
+        if pass.ignore_locality || self.preferred_localities.is_empty() {
+            return true;
+        }
+        self.localities
+            .get(&key)
+            .is_some_and(|locality| self.preferred_localities.contains(locality))
+    }
+
     fn backup(&self, key: u64) -> bool {
         self.backup.contains(&key)
     }
@@ -1573,6 +1599,10 @@ impl BackendSelectionPolicy {
 
     fn max_in_flight_key(&self, key: u64) -> Option<usize> {
         self.max_in_flight.get(&key).copied()
+    }
+
+    fn locality_key(&self, key: u64) -> Option<Arc<str>> {
+        self.localities.get(&key).cloned()
     }
 
     fn set_runtime_backend_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
@@ -1723,6 +1753,21 @@ fn backend_max_in_flight(config: &ProxyConfig) -> std::collections::HashMap<u64,
         .collect()
 }
 
+fn backend_localities(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<str>> {
+    config
+        .upstreams
+        .iter()
+        .zip(&config.upstream_localities)
+        .filter_map(|(upstream, locality)| {
+            let backend = Backend::new(upstream).ok()?;
+            Some((
+                backend_policy_key(&backend),
+                Arc::<str>::from(locality.to_ascii_lowercase()),
+            ))
+        })
+        .collect()
+}
+
 fn sorted_priority_groups(priority: &std::collections::HashMap<u64, u16>) -> Vec<u16> {
     let mut groups = priority
         .values()
@@ -1797,6 +1842,18 @@ where
                     .get(&policy_key)
                     .map(|alias| alias.to_string()),
                 weight: backend.weight,
+                locality: inputs
+                    .backend_policy
+                    .locality_key(policy_key)
+                    .map(|locality| locality.to_string()),
+                locality_preferred: inputs.backend_policy.locality_key(policy_key).is_some_and(
+                    |locality| {
+                        inputs
+                            .backend_policy
+                            .preferred_localities()
+                            .contains(&locality)
+                    },
+                ),
                 ready: inner.backends().ready(backend),
                 backup: inputs.backend_policy.backup(policy_key),
                 drained: inputs.backend_policy.drained(policy_key),
@@ -1855,42 +1912,7 @@ where
         counters,
         backend_policy,
     };
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(backend) =
-            select_pingora_with_backup_policy(inner, key, max_iterations, context, pass)
-        {
-            return Some(backend);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: true,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(backend) =
-            select_pingora_with_backup_policy(inner, key, max_iterations, context, pass)
-        {
-            return Some(backend);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: true,
-        };
+    for pass in selection_passes(backend_policy) {
         if !priority_activation_satisfied(inner, context, pass) {
             continue;
         }
@@ -1908,6 +1930,7 @@ struct SelectionPass {
     minimum_priority_group: Option<u16>,
     allow_backup: bool,
     ignore_slow_start: bool,
+    ignore_locality: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1928,6 +1951,26 @@ fn selection_priority_groups(backend_policy: &BackendSelectionPolicy) -> Vec<Opt
         .copied()
         .map(Some)
         .collect()
+}
+
+fn selection_passes(backend_policy: &BackendSelectionPolicy) -> Vec<SelectionPass> {
+    let mut passes = Vec::new();
+    for ignore_locality in [false, true] {
+        if ignore_locality && backend_policy.preferred_localities().is_empty() {
+            continue;
+        }
+        for (allow_backup, ignore_slow_start) in [(false, false), (true, false), (false, true)] {
+            for priority_group in selection_priority_groups(backend_policy) {
+                passes.push(SelectionPass {
+                    minimum_priority_group: priority_group,
+                    allow_backup,
+                    ignore_slow_start,
+                    ignore_locality,
+                });
+            }
+        }
+    }
+    passes
 }
 
 fn priority_activation_satisfied<S>(
@@ -2009,52 +2052,7 @@ fn select_least_connections(
         counters,
         backend_policy,
     };
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(selected) = select_least_connections_with_backup_policy(
-            inner,
-            counters,
-            passive_health,
-            slow_start,
-            backend_policy,
-            pass,
-        ) {
-            return Some(selected);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: true,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(selected) = select_least_connections_with_backup_policy(
-            inner,
-            counters,
-            passive_health,
-            slow_start,
-            backend_policy,
-            pass,
-        ) {
-            return Some(selected);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: true,
-        };
+    for pass in selection_passes(backend_policy) {
         if !priority_activation_satisfied(inner, context, pass) {
             continue;
         }
@@ -2128,54 +2126,7 @@ fn select_least_sessions(
         counters,
         backend_policy,
     };
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(selected) = select_least_sessions_with_backup_policy(
-            inner,
-            counters,
-            passive_health,
-            slow_start,
-            backend_policy,
-            persistence_entry_counts,
-            pass,
-        ) {
-            return Some(selected);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: true,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(selected) = select_least_sessions_with_backup_policy(
-            inner,
-            counters,
-            passive_health,
-            slow_start,
-            backend_policy,
-            persistence_entry_counts,
-            pass,
-        ) {
-            return Some(selected);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: true,
-        };
+    for pass in selection_passes(backend_policy) {
         if !priority_activation_satisfied(inner, context, pass) {
             continue;
         }
@@ -2264,54 +2215,7 @@ fn select_least_time(
         counters,
         backend_policy,
     };
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(selected) = select_least_time_with_backup_policy(
-            inner,
-            counters,
-            latency,
-            passive_health,
-            slow_start,
-            backend_policy,
-            pass,
-        ) {
-            return Some(selected);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: true,
-            ignore_slow_start: false,
-        };
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(selected) = select_least_time_with_backup_policy(
-            inner,
-            counters,
-            latency,
-            passive_health,
-            slow_start,
-            backend_policy,
-            pass,
-        ) {
-            return Some(selected);
-        }
-    }
-    for priority_group in selection_priority_groups(backend_policy) {
-        let pass = SelectionPass {
-            minimum_priority_group: priority_group,
-            allow_backup: false,
-            ignore_slow_start: true,
-        };
+    for pass in selection_passes(backend_policy) {
         if !priority_activation_satisfied(inner, context, pass) {
             continue;
         }
@@ -3647,6 +3551,43 @@ mod tests {
 
         let activated = balancer.select(&request(), None).unwrap();
         assert_eq!(activated.backend.addr.to_string(), "127.0.0.1:3002");
+    }
+
+    #[test]
+    fn preferred_locality_selects_local_backend_with_fallback() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_localities: vec!["remote".to_owned(), "local".to_owned()],
+            preferred_upstream_localities: vec!["local".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let selected = balancer.select(&request(), None).unwrap();
+        assert_eq!(selected.backend.addr.to_string(), "127.0.0.1:3001");
+
+        balancer
+            .set_runtime_backend_state(
+                "127.0.0.1:3001",
+                LoadBalancerRuntimeBackendState::ForcedDown,
+            )
+            .unwrap();
+        let fallback = balancer.select(&request(), None).unwrap();
+        assert_eq!(fallback.backend.addr.to_string(), "127.0.0.1:3000");
+
+        let stats = balancer.runtime_stats();
+        let local = stats
+            .backends
+            .iter()
+            .find(|backend| backend.locality.as_deref() == Some("local"))
+            .expect("local backend status");
+        assert!(local.locality_preferred);
     }
 
     #[test]

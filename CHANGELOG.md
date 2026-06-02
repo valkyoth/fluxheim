@@ -34,6 +34,9 @@ behavior when the change improves security or project direction.
   selection across configured static upstream pools.
 - Add `upstream_priority_group_min_active` so lower priority groups activate
   when preferred groups fall below a selectable-member threshold.
+- Add static `upstream_localities` and `preferred_upstream_localities` for
+  locality/failure-domain preferred selection with automatic fallback when no
+  preferred backend is selectable.
 - Add static per-upstream `upstream_max_in_flight` caps so saturated members
   are skipped consistently across load-balancing selectors.
 - Add static `disabled_upstreams` so configured members can be kept in the pool

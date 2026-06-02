@@ -47,6 +47,10 @@ pub struct ProxyConfig {
     #[serde(default = "default_upstream_priority_group_min_active")]
     pub upstream_priority_group_min_active: usize,
     #[serde(default)]
+    pub upstream_localities: Vec<String>,
+    #[serde(default)]
+    pub preferred_upstream_localities: Vec<String>,
+    #[serde(default)]
     pub upstream_max_in_flight: Vec<usize>,
     #[serde(default)]
     pub upstream_aliases: Vec<String>,
@@ -166,6 +170,8 @@ impl Default for ProxyConfig {
             upstream_weights: Vec::new(),
             upstream_priority_groups: Vec::new(),
             upstream_priority_group_min_active: default_upstream_priority_group_min_active(),
+            upstream_localities: Vec::new(),
+            preferred_upstream_localities: Vec::new(),
             upstream_max_in_flight: Vec::new(),
             upstream_aliases: Vec::new(),
             backup_upstreams: Vec::new(),
@@ -297,6 +303,8 @@ impl ProxyConfig {
                     || !self.upstream_priority_groups.is_empty()
                     || self.upstream_priority_group_min_active
                         != default_upstream_priority_group_min_active()
+                    || !self.upstream_localities.is_empty()
+                    || !self.preferred_upstream_localities.is_empty()
                     || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
@@ -305,7 +313,7 @@ impl ProxyConfig {
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstreams_file",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_localities, preferred_upstream_localities, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
                     });
                 }
                 if self.upstream_tls && self.upstream_sni.is_none() {
@@ -356,6 +364,8 @@ impl ProxyConfig {
                     || !self.upstream_priority_groups.is_empty()
                     || self.upstream_priority_group_min_active
                         != default_upstream_priority_group_min_active()
+                    || !self.upstream_localities.is_empty()
+                    || !self.preferred_upstream_localities.is_empty()
                     || !self.upstream_max_in_flight.is_empty()
                     || !self.upstream_aliases.is_empty()
                     || !self.backup_upstreams.is_empty()
@@ -364,7 +374,7 @@ impl ProxyConfig {
                 {
                     return Err(ConfigError::InvalidProxyUpstreamPolicy {
                         field: "proxy.upstream_dns_refresh_secs",
-                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
+                        reason: "cannot be combined with upstream_weights, upstream_priority_groups, upstream_priority_group_min_active, upstream_localities, preferred_upstream_localities, upstream_max_in_flight, upstream_aliases, backup_upstreams, drain_upstreams, or disabled_upstreams in this release",
                     });
                 }
             }
@@ -433,6 +443,51 @@ impl ProxyConfig {
             return Err(ConfigError::InvalidProxyUpstreamPolicy {
                 field: "proxy.upstream_priority_group_min_active",
                 reason: "requires proxy.upstream_priority_groups",
+            });
+        }
+        if !self.upstream_localities.is_empty() {
+            if self.upstream.is_some() || self.upstream_localities.len() != self.upstreams.len() {
+                return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                    field: "proxy.upstream_localities",
+                    reason: "upstream_localities must match proxy.upstreams and cannot be used with proxy.upstream",
+                });
+            }
+            let mut configured_localities = std::collections::HashSet::new();
+            for locality in &self.upstream_localities {
+                if !valid_upstream_alias(locality) {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.upstream_localities",
+                        reason: "localities must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
+                    });
+                }
+                configured_localities.insert(locality.to_ascii_lowercase());
+            }
+            let mut seen_preferred = std::collections::HashSet::new();
+            for locality in &self.preferred_upstream_localities {
+                if !valid_upstream_alias(locality) {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.preferred_upstream_localities",
+                        reason: "preferred localities must be 1-64 ASCII letters, digits, dots, dashes, or underscores",
+                    });
+                }
+                let normalized = locality.to_ascii_lowercase();
+                if !configured_localities.contains(&normalized) {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.preferred_upstream_localities",
+                        reason: "preferred localities must be present in proxy.upstream_localities",
+                    });
+                }
+                if !seen_preferred.insert(normalized) {
+                    return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                        field: "proxy.preferred_upstream_localities",
+                        reason: "preferred localities must be unique case-insensitively",
+                    });
+                }
+            }
+        } else if !self.preferred_upstream_localities.is_empty() {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.preferred_upstream_localities",
+                reason: "requires proxy.upstream_localities",
             });
         }
         if !self.upstream_max_in_flight.is_empty() {

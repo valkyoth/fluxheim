@@ -750,6 +750,8 @@ upstreams = ["127.0.0.1:3000", "127.0.0.1:3001"]
 upstream_weights = [1, 2]
 upstream_priority_groups = [100, 50]
 upstream_priority_group_min_active = 1
+upstream_localities = ["site-a", "site-b"]
+preferred_upstream_localities = ["site-a"]
 upstream_max_in_flight = [256, 512]
 upstream_aliases = ["app-a", "app-b"]
 backup_upstreams = ["127.0.0.1:3001"]
@@ -875,6 +877,7 @@ and full-line `#` comments ignored, 2 through 64 unique entries required.
 Fluxheim reads the file with the same symlink and parent-permission hardening
 used for other operator-controlled files. In this release, file-refreshed pools
 cannot be combined with `upstream_weights`, `upstream_priority_groups`,
+`upstream_localities`, `preferred_upstream_localities`,
 `upstream_max_in_flight`, `upstream_aliases`, `backup_upstreams`,
 `drain_upstreams`, or `disabled_upstreams`; use static `upstreams` for those
 policies.
@@ -883,7 +886,8 @@ For DNS-based service names, load-balancer builds can set
 Fluxheim resolves those authorities at startup and then refreshes them on the
 configured 1 through 300 second interval. This first DNS-refresh slice is
 mutually exclusive with `upstream`, `upstreams_file`, `upstream_weights`,
-`upstream_priority_groups`, `upstream_max_in_flight`, `upstream_aliases`,
+`upstream_priority_groups`, `upstream_localities`,
+`preferred_upstream_localities`, `upstream_max_in_flight`, `upstream_aliases`,
 `backup_upstreams`, `drain_upstreams`, and `disabled_upstreams`; use the
 static pool form when those richer backend policies are required.
 When `upstream_tls = true`, Fluxheim sends TLS to the origin. `upstream_sni`
@@ -947,6 +951,15 @@ values are activated when higher priority groups have fewer than
 threshold defaults to `1`, matching strict preferred/fallback behavior. Each
 priority group must be at most 1000. This is the static F5-style
 preferred/fallback group foundation for the `1.5` load-balancer line.
+`upstream_localities` is optional and, when set, must contain one safe
+low-cardinality locality or failure-domain label for each `upstreams` entry.
+`preferred_upstream_localities` is optional and must refer only to labels from
+`upstream_localities`. When preferred localities are configured, selection tries
+matching backends first and then falls back to all localities if no preferred
+backend is selectable. This keeps same-site traffic preferred without turning a
+site outage into a route outage. Locality labels are normalized
+case-insensitively, capped at 64 bytes, and exposed in load-balancer runtime
+status.
 `upstream_max_in_flight` is optional and, when set, must contain one positive
 concurrency cap for each `upstreams` entry. A capped backend is skipped when it
 already has that many in-flight requests, regardless of the selected

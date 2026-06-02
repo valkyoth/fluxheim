@@ -492,6 +492,8 @@ fn parses_proxy_upstream_pool() {
             upstream_weights = [1, 3, 1]
             upstream_priority_groups = [100, 50, 10]
             upstream_priority_group_min_active = 2
+            upstream_localities = ["site-a", "site-b", "site-a"]
+            preferred_upstream_localities = ["site-a"]
             upstream_max_in_flight = [10, 30, 5]
             upstream_aliases = ["app-a", "app-b", "app-c"]
             backup_upstreams = ["127.0.0.1:3002"]
@@ -581,6 +583,11 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(config.proxy.upstream_weights, [1, 3, 1]);
     assert_eq!(config.proxy.upstream_priority_groups, [100, 50, 10]);
     assert_eq!(config.proxy.upstream_priority_group_min_active, 2);
+    assert_eq!(
+        config.proxy.upstream_localities,
+        ["site-a", "site-b", "site-a"]
+    );
+    assert_eq!(config.proxy.preferred_upstream_localities, ["site-a"]);
     assert_eq!(config.proxy.upstream_max_in_flight, [10, 30, 5]);
     assert_eq!(config.proxy.upstream_aliases, ["app-a", "app-b", "app-c"]);
     assert_eq!(config.proxy.backup_upstreams, ["127.0.0.1:3002"]);
@@ -903,6 +910,91 @@ fn rejects_invalid_proxy_upstream_priority_groups() {
         min_active_too_large.validate(),
         Err(ConfigError::InvalidProxyUpstreamPolicy {
             field: "proxy.upstream_priority_group_min_active",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn rejects_invalid_proxy_upstream_localities() {
+    let mismatch: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_localities = ["site-a"]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        mismatch.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_localities",
+            ..
+        })
+    ));
+
+    let invalid_label: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_localities = ["site/a", "site-b"]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        invalid_label.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_localities",
+            ..
+        })
+    ));
+
+    let preferred_without_localities: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            preferred_upstream_localities = ["site-a"]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        preferred_without_localities.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.preferred_upstream_localities",
+            ..
+        })
+    ));
+
+    let unknown_preferred: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_localities = ["site-a", "site-b"]
+            preferred_upstream_localities = ["site-c"]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        unknown_preferred.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.preferred_upstream_localities",
+            ..
+        })
+    ));
+
+    let duplicate_preferred: Config = toml::from_str(
+        r#"
+            [proxy]
+            upstreams = ["127.0.0.1:3001", "127.0.0.1:3002"]
+            upstream_localities = ["site-a", "site-b"]
+            preferred_upstream_localities = ["site-a", "SITE-A"]
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        duplicate_preferred.validate(),
+        Err(ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.preferred_upstream_localities",
             ..
         })
     ));
