@@ -86,6 +86,8 @@ behavior when the change improves security or project direction.
 - Add authenticated runtime clearing for vhost or route load-balancer
   persistence tables through
   `POST /_fluxheim/load-balancer/persistence/clear`.
+- Report per-backend persistence-entry counts in load-balancer runtime status
+  so operators can spot sticky-session skew.
 - Count load-balancer persistence hits, misses, and fallbacks in
   `fluxheim_load_balancer_events_total` when metrics are compiled.
 - Add a validated `examples/load-balancer-enterprise.toml` migration fixture

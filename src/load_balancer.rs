@@ -200,6 +200,7 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub disabled: bool,
     pub runtime_state_override: Option<LoadBalancerRuntimeBackendState>,
     pub runtime_state_changed_at_unix_secs: Option<u64>,
+    pub persistence_entry_count: usize,
     pub priority_group: Option<u16>,
     pub max_in_flight: Option<usize>,
     pub in_flight: usize,
@@ -516,12 +517,19 @@ impl UpstreamLoadBalancer {
 
     pub fn runtime_stats(&self) -> LoadBalancerPoolRuntimeStats {
         let health_check_frequency = self.inner.health_check_frequency();
+        let (persistence_entry_count, persistence_backend_entry_counts) = self
+            .persistence
+            .as_ref()
+            .map_or((0, std::collections::HashMap::new()), |persistence| {
+                persistence.runtime_counts()
+            });
         let backends = self.inner.backend_stats(
             &self.backend_aliases,
             self.passive_health.as_deref(),
             self.slow_start.as_deref(),
             &self.counters,
             &self.backend_policy,
+            &persistence_backend_entry_counts,
         );
         let ready_backend_count = backends.iter().filter(|backend| backend.ready).count();
         let eligible_backend_count = backends
@@ -610,10 +618,7 @@ impl UpstreamLoadBalancer {
                 cookie: self.persistence_policy.cookie.clone(),
                 ttl_secs: self.persistence_policy.ttl_secs,
                 table_max_entries: self.persistence_policy.table_max_entries,
-                entry_count: self
-                    .persistence
-                    .as_ref()
-                    .map_or(0, |persistence| persistence.entry_count()),
+                entry_count: persistence_entry_count,
             },
             retry: self.retry.clone(),
             backends,
@@ -806,62 +811,26 @@ impl UpstreamLoadBalancerInner {
         slow_start: Option<&SlowStartState>,
         counters: &BackendConnectionCounters,
         backend_policy: &BackendSelectionPolicy,
+        persistence_entry_counts: &std::collections::HashMap<u64, usize>,
     ) -> Vec<LoadBalancerBackendRuntimeStats> {
+        let inputs = BackendStatsInputs {
+            aliases,
+            passive_health,
+            slow_start,
+            counters,
+            backend_policy,
+            persistence_entry_counts,
+            latency: None,
+        };
         match self {
-            Self::RoundRobin(inner) => load_balancer_backend_stats(
-                inner,
-                aliases,
-                passive_health,
-                slow_start,
-                counters,
-                backend_policy,
-                None,
-            ),
-            Self::LeastConnections(inner) => load_balancer_backend_stats(
-                inner,
-                aliases,
-                passive_health,
-                slow_start,
-                counters,
-                backend_policy,
-                None,
-            ),
-            Self::LeastTime { inner, latency } => load_balancer_backend_stats(
-                inner,
-                aliases,
-                passive_health,
-                slow_start,
-                counters,
-                backend_policy,
-                Some(latency),
-            ),
-            Self::PowerOfTwo(inner) => load_balancer_backend_stats(
-                inner,
-                aliases,
-                passive_health,
-                slow_start,
-                counters,
-                backend_policy,
-                None,
-            ),
-            Self::FnvHash(inner) => load_balancer_backend_stats(
-                inner,
-                aliases,
-                passive_health,
-                slow_start,
-                counters,
-                backend_policy,
-                None,
-            ),
-            Self::ConsistentHash(inner) => load_balancer_backend_stats(
-                inner,
-                aliases,
-                passive_health,
-                slow_start,
-                counters,
-                backend_policy,
-                None,
-            ),
+            Self::RoundRobin(inner) => load_balancer_backend_stats(inner, inputs),
+            Self::LeastConnections(inner) => load_balancer_backend_stats(inner, inputs),
+            Self::LeastTime { inner, latency } => {
+                load_balancer_backend_stats(inner, inputs.with_latency(latency))
+            }
+            Self::PowerOfTwo(inner) => load_balancer_backend_stats(inner, inputs),
+            Self::FnvHash(inner) => load_balancer_backend_stats(inner, inputs),
+            Self::ConsistentHash(inner) => load_balancer_backend_stats(inner, inputs),
         }
     }
 
@@ -1437,14 +1406,18 @@ impl LoadBalancerPersistenceState {
         removed
     }
 
-    fn entry_count(&self) -> usize {
+    fn runtime_counts(&self) -> (usize, std::collections::HashMap<u64, usize>) {
         let now = Instant::now();
         let mut table = self
             .table
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         table.retain(|_, entry| entry.expires_at > now);
-        table.len()
+        let mut backend_counts = std::collections::HashMap::new();
+        for entry in table.values() {
+            *backend_counts.entry(entry.backend_key).or_insert(0) += 1;
+        }
+        (table.len(), backend_counts)
     }
 }
 
@@ -1729,14 +1702,29 @@ fn backend_aliases(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<s
         .collect()
 }
 
+#[derive(Clone, Copy)]
+struct BackendStatsInputs<'a> {
+    aliases: &'a std::collections::HashMap<u64, Arc<str>>,
+    passive_health: Option<&'a PassiveHealthState>,
+    slow_start: Option<&'a SlowStartState>,
+    counters: &'a BackendConnectionCounters,
+    backend_policy: &'a BackendSelectionPolicy,
+    persistence_entry_counts: &'a std::collections::HashMap<u64, usize>,
+    latency: Option<&'a Arc<BackendLatencyState>>,
+}
+
+impl<'a> BackendStatsInputs<'a> {
+    fn with_latency(self, latency: &'a Arc<BackendLatencyState>) -> Self {
+        Self {
+            latency: Some(latency),
+            ..self
+        }
+    }
+}
+
 fn load_balancer_backend_stats<S>(
     inner: &LoadBalancer<S>,
-    aliases: &std::collections::HashMap<u64, Arc<str>>,
-    passive_health: Option<&PassiveHealthState>,
-    slow_start: Option<&SlowStartState>,
-    counters: &BackendConnectionCounters,
-    backend_policy: &BackendSelectionPolicy,
-    latency: Option<&Arc<BackendLatencyState>>,
+    inputs: BackendStatsInputs<'_>,
 ) -> Vec<LoadBalancerBackendRuntimeStats>
 where
     S: BackendSelection + 'static,
@@ -1749,38 +1737,53 @@ where
         .map(|backend| {
             let policy_key = backend_policy_key(backend);
             let connection_key = backend_connection_key(backend);
-            let passive_ejected = passive_health
+            let passive_ejected = inputs
+                .passive_health
                 .is_some_and(|health| health.key_is_currently_ejected(connection_key));
             LoadBalancerBackendRuntimeStats {
                 #[cfg(not(feature = "privacy-mode"))]
                 address: Some(backend.addr.to_string()),
                 #[cfg(feature = "privacy-mode")]
                 address: None,
-                alias: aliases.get(&policy_key).map(|alias| alias.to_string()),
+                alias: inputs
+                    .aliases
+                    .get(&policy_key)
+                    .map(|alias| alias.to_string()),
                 weight: backend.weight,
                 ready: inner.backends().ready(backend),
-                backup: backend_policy.backup(policy_key),
-                drained: backend_policy.drained(policy_key),
-                disabled: backend_policy.disabled(policy_key),
-                runtime_state_override: backend_policy.runtime_backend_state(policy_key),
-                runtime_state_changed_at_unix_secs: backend_policy
+                backup: inputs.backend_policy.backup(policy_key),
+                drained: inputs.backend_policy.drained(policy_key),
+                disabled: inputs.backend_policy.disabled(policy_key),
+                runtime_state_override: inputs.backend_policy.runtime_backend_state(policy_key),
+                runtime_state_changed_at_unix_secs: inputs
+                    .backend_policy
                     .runtime_backend_state_changed_at_unix_secs(policy_key),
-                priority_group: backend_policy.priority_group(policy_key),
-                max_in_flight: backend_policy.max_in_flight_key(policy_key),
-                in_flight: counters.count_existing(backend),
+                persistence_entry_count: inputs
+                    .persistence_entry_counts
+                    .get(&policy_key)
+                    .copied()
+                    .unwrap_or(0),
+                priority_group: inputs.backend_policy.priority_group(policy_key),
+                max_in_flight: inputs.backend_policy.max_in_flight_key(policy_key),
+                in_flight: inputs.counters.count_existing(backend),
                 passive_ejected,
                 circuit_state: if passive_ejected {
                     LoadBalancerCircuitState::Open
                 } else {
                     LoadBalancerCircuitState::Closed
                 },
-                passive_consecutive_failures: passive_health
+                passive_consecutive_failures: inputs
+                    .passive_health
                     .and_then(|health| health.key_consecutive_failures(connection_key)),
-                passive_ejection_remaining_secs: passive_health
+                passive_ejection_remaining_secs: inputs
+                    .passive_health
                     .and_then(|health| health.key_ejection_remaining_secs(connection_key)),
-                slow_start_permitting: slow_start
+                slow_start_permitting: inputs
+                    .slow_start
                     .is_none_or(|state| state.permits_read_only(backend)),
-                latency_micros: latency.and_then(|state| state.score_key(connection_key)),
+                latency_micros: inputs
+                    .latency
+                    .and_then(|state| state.score_key(connection_key)),
             }
         })
         .collect()
@@ -2861,6 +2864,32 @@ mod tests {
         assert_eq!(stats.persistence.entry_count, 2);
         assert_eq!(stats.persistence.table_max_entries, 16);
         assert_eq!(stats.persistence.ttl_secs, 60);
+        assert_eq!(
+            stats
+                .backends
+                .iter()
+                .map(|backend| backend.persistence_entry_count)
+                .sum::<usize>(),
+            2
+        );
+        assert_eq!(
+            stats
+                .backends
+                .iter()
+                .find(|backend| backend.address.as_deref() == Some("127.0.0.1:3000"))
+                .expect("first persisted backend")
+                .persistence_entry_count,
+            1
+        );
+        assert_eq!(
+            stats
+                .backends
+                .iter()
+                .find(|backend| backend.address.as_deref() == Some("127.0.0.1:3001"))
+                .expect("second persisted backend")
+                .persistence_entry_count,
+            1
+        );
     }
 
     #[test]
@@ -2914,6 +2943,14 @@ mod tests {
         assert_eq!(stats.persistence.mode, LoadBalancePersistenceMode::Header);
         assert_eq!(stats.persistence.header.as_deref(), Some("x-session"));
         assert_eq!(stats.persistence.entry_count, 1);
+        assert_eq!(
+            stats
+                .backends
+                .iter()
+                .map(|backend| backend.persistence_entry_count)
+                .sum::<usize>(),
+            1
+        );
 
         assert_eq!(balancer.clear_persistence(), 1);
         assert_eq!(balancer.runtime_stats().persistence.entry_count, 0);
@@ -2972,6 +3009,14 @@ mod tests {
         assert_eq!(stats.persistence.mode, LoadBalancePersistenceMode::Cookie);
         assert_eq!(stats.persistence.cookie.as_deref(), Some("sid"));
         assert_eq!(stats.persistence.entry_count, 1);
+        assert_eq!(
+            stats
+                .backends
+                .iter()
+                .map(|backend| backend.persistence_entry_count)
+                .sum::<usize>(),
+            1
+        );
     }
 
     #[test]

@@ -314,7 +314,8 @@ all-down settings, health-check frequency and parallel mode, retry policy,
 passive-health thresholds, slow-start duration, persistence policy and table
 size, priority group, max in-flight cap, current in-flight count, passive
 failure count, passive ejection, passive ejection remaining seconds, circuit
-state, slow-start allowance, and least-time latency state where available. In
+state, slow-start allowance, persistence entries currently pinned to each
+backend, and least-time latency state where available. In
 `1.5.0`, `circuit_state = "open"` is the runtime status view for a backend
 currently ejected by passive health; `"closed"` means the backend is not
 passively ejected. Per-backend rows include `runtime_state_override` when an
