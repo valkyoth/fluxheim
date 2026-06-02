@@ -599,6 +599,14 @@ impl FluxProxy {
         self.snapshot().set_load_balancer_member_state(request)
     }
 
+    #[cfg(feature = "load-balancer")]
+    pub fn clear_load_balancer_persistence(
+        &self,
+        request: LoadBalancerPersistenceClearRequest<'_>,
+    ) -> io::Result<LoadBalancerPersistenceClearResult> {
+        self.snapshot().clear_load_balancer_persistence(request)
+    }
+
     #[cfg(feature = "cache")]
     pub fn reset_cache_activity(&self) -> CacheActivityResetResult {
         self.snapshot().reset_cache_activity()
@@ -716,6 +724,21 @@ pub struct LoadBalancerMemberStateResult {
     pub state: LoadBalancerRuntimeBackendState,
     pub address: String,
     pub alias: Option<String>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadBalancerPersistenceClearRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct LoadBalancerPersistenceClearResult {
+    pub vhost: String,
+    pub route: Option<String>,
+    pub cleared_entries: usize,
 }
 
 impl ProxySnapshot {
@@ -1018,6 +1041,67 @@ impl ProxySnapshot {
             state: mutation.state,
             address: mutation.address,
             alias: mutation.alias,
+        })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn clear_load_balancer_persistence(
+        &self,
+        request: LoadBalancerPersistenceClearRequest<'_>,
+    ) -> io::Result<LoadBalancerPersistenceClearResult> {
+        let vhost_name = request.vhost.trim();
+        if vhost_name.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer vhost is required",
+            ));
+        }
+        let vhost = self
+            .state
+            .vhosts
+            .iter()
+            .find(|vhost| vhost.name == vhost_name)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost is not configured",
+                )
+            })?;
+        let route = request
+            .route
+            .map(str::trim)
+            .filter(|route| !route.is_empty());
+        let (route_name, pool) = if let Some(route_name) = route {
+            let route = vhost
+                .routes
+                .iter()
+                .find(|route| route.name == route_name)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "load balancer route is not configured",
+                    )
+                })?;
+            let pool = route.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer route has no configured pool",
+                )
+            })?;
+            (Some(route.name.clone()), pool)
+        } else {
+            let pool = vhost.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost has no configured pool",
+                )
+            })?;
+            (None, pool)
+        };
+        Ok(LoadBalancerPersistenceClearResult {
+            vhost: vhost.name.clone(),
+            route: route_name,
+            cleared_entries: pool.clear_persistence(),
         })
     }
 

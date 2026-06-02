@@ -79,6 +79,9 @@ behavior when the change improves security or project direction.
 - Add bounded local request-header load-balancer persistence with explicit
   header-name validation and the same TTL/table limits as source-IP
   persistence.
+- Add authenticated runtime clearing for vhost or route load-balancer
+  persistence tables through
+  `POST /_fluxheim/load-balancer/persistence/clear`.
 - Count load-balancer persistence hits, misses, and fallbacks in
   `fluxheim_load_balancer_events_total` when metrics are compiled.
 - Add a validated `examples/load-balancer-enterprise.toml` migration fixture

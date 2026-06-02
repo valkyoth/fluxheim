@@ -672,6 +672,12 @@ impl UpstreamLoadBalancer {
                 .map(|alias| alias.to_string()),
         })
     }
+
+    pub fn clear_persistence(&self) -> usize {
+        self.persistence
+            .as_ref()
+            .map_or(0, |persistence| persistence.clear())
+    }
 }
 
 fn backend_runtime_status_eligible(backend: &LoadBalancerBackendRuntimeStats) -> bool {
@@ -1410,6 +1416,16 @@ impl LoadBalancerPersistenceState {
                 },
             );
         }
+    }
+
+    fn clear(&self) -> usize {
+        let mut table = self
+            .table
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let removed = table.len();
+        table.clear();
+        removed
     }
 
     fn entry_count(&self) -> usize {
@@ -2858,6 +2874,9 @@ mod tests {
         assert_eq!(stats.persistence.mode, LoadBalancePersistenceMode::Header);
         assert_eq!(stats.persistence.header.as_deref(), Some("x-session"));
         assert_eq!(stats.persistence.entry_count, 1);
+
+        assert_eq!(balancer.clear_persistence(), 1);
+        assert_eq!(balancer.runtime_stats().persistence.entry_count, 0);
     }
 
     #[test]

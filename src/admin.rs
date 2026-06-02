@@ -25,9 +25,9 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMode, Config};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::LoadBalancerRuntimeBackendState;
-#[cfg(feature = "load-balancer")]
-use crate::proxy::LoadBalancerMemberStateRequest;
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
+#[cfg(feature = "load-balancer")]
+use crate::proxy::{LoadBalancerMemberStateRequest, LoadBalancerPersistenceClearRequest};
 use crate::reload::{ReloadReason, classify_reload};
 use crate::snapshot::{ConfigSnapshot, SnapshotError, SnapshotStore};
 
@@ -641,6 +641,13 @@ impl AdminApp {
                     header_value(headers, "x-fluxheim-lb-state")
                         .or_else(|| query_param(query, "state")),
                 ),
+            ("POST", "/_fluxheim/load-balancer/persistence/clear") => self
+                .load_balancer_persistence_clear_response(
+                    header_value(headers, "x-fluxheim-lb-vhost")
+                        .or_else(|| query_param(query, "vhost")),
+                    header_value(headers, "x-fluxheim-lb-route")
+                        .or_else(|| query_param(query, "route")),
+                ),
             ("POST", "/_fluxheim/cache/purge") => self.cache_purge_response(
                 header_value(headers, "x-fluxheim-cache-vhost")
                     .or_else(|| query_param(query, "vhost")),
@@ -987,6 +994,82 @@ impl AdminApp {
         }
     }
 
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_persistence_clear_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer vhost is required");
+        };
+        match self
+            .proxy
+            .clear_load_balancer_persistence(LoadBalancerPersistenceClearRequest { vhost, route })
+        {
+            Ok(result) => {
+                let scope = if result.route.is_some() {
+                    "route"
+                } else {
+                    "vhost"
+                };
+                log::info!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer persistence table cleared vhost={} route={} scope={} cleared_entries={} persistent=false",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.cleared_entries
+                );
+                record_load_balancer_member_state_event(
+                    &result.vhost,
+                    result.route.as_deref(),
+                    None,
+                    "persistence_clear",
+                );
+                json_response_value(
+                    StatusCode::OK,
+                    &json!({
+                        "status": "ok",
+                        "vhost": result.vhost,
+                        "route": result.route,
+                        "scope": scope,
+                        "cleared_entries": result.cleared_entries,
+                        "persistent": false,
+                    }),
+                )
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer persistence clear rejected invalid input vhost={} route={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    error
+                );
+                record_load_balancer_member_state_event(vhost, route, None, "member_state_invalid");
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer persistence clear target not found vhost={} route={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    error
+                );
+                record_load_balancer_member_state_event(
+                    vhost,
+                    route,
+                    None,
+                    "member_state_not_found",
+                );
+                error_response(StatusCode::NOT_FOUND, &error.to_string())
+            }
+            Err(error) => internal_error_response(&error),
+        }
+    }
+
     #[cfg(not(feature = "load-balancer"))]
     fn load_balancer_member_state_response(
         &self,
@@ -994,6 +1077,18 @@ impl AdminApp {
         _route: Option<&str>,
         _member: Option<&str>,
         _state: Option<&str>,
+    ) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "load balancer support is not compiled in",
+        )
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    fn load_balancer_persistence_clear_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
     ) -> AdminResponse {
         error_response(
             StatusCode::BAD_REQUEST,
@@ -3748,6 +3843,38 @@ mod tests {
             &auth_headers(),
         );
         assert_eq!(missing_member.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_persistence_clear_endpoint_reports_scope() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_admin_config());
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/persistence/clear",
+            Some("vhost=one"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["vhost"], "one");
+        assert_eq!(body["route"], Value::Null);
+        assert_eq!(body["scope"], "vhost");
+        assert_eq!(body["cleared_entries"], 0);
+        assert_eq!(body["persistent"], false);
+
+        let missing_vhost = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/persistence/clear",
+            None,
+            &auth_headers(),
+        );
+        assert_eq!(missing_vhost.status, StatusCode::BAD_REQUEST);
     }
 
     #[test]

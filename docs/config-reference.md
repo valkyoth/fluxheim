@@ -348,6 +348,22 @@ Successful and rejected member-state operations are logged under the
 `fluxheim_load_balancer_events_total` with bounded events `member_state`,
 `member_state_invalid`, and `member_state_not_found`.
 
+Authenticated admins can clear the local persistence table for one configured
+vhost or route pool without reloading:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/persistence/clear?vhost=app"
+```
+
+Use the optional `route` query parameter or `X-Fluxheim-Lb-Route` header to
+target a route-local pool. The response includes `cleared_entries`,
+`scope = "vhost"` or `"route"`, and `"persistent": false`. The operation is
+local to the current runtime; it does not alter config or durable snapshots.
+When metrics are compiled, successful clears are counted as
+`persistence_clear` in `fluxheim_load_balancer_events_total`.
+
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the
 trusted local sidecar, but Fluxheim can require a validated downstream client
@@ -1040,8 +1056,9 @@ selectable, Fluxheim falls back to the normal load-balancing algorithm and
 refreshes the table with the new backend. `table_max_entries` bounds memory
 use; expired entries are pruned and the oldest expiry is evicted when the table
 is full. Persistence is local to one Fluxheim process in `1.5.0` and is reset
-by process restart or runtime rebuild. It is rejected in `privacy-mode` builds
-because persistence retains client-derived identifiers.
+by process restart, runtime rebuild, or the authenticated persistence-clear
+admin operation. It is rejected in `privacy-mode` builds because persistence
+retains client-derived identifiers.
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

@@ -1518,6 +1518,7 @@ fn load_balancer_event_label(event: &str) -> &'static str {
         "persistence_hit" => "persistence_hit",
         "persistence_miss" => "persistence_miss",
         "persistence_fallback" => "persistence_fallback",
+        "persistence_clear" => "persistence_clear",
         _ => "other",
     }
 }
@@ -1896,6 +1897,12 @@ mod tests {
             Some("origin-a"),
             "persistence_fallback",
         );
+        record_load_balancer_event(
+            "lb-test",
+            Some("api"),
+            Some("origin-a"),
+            "persistence_clear",
+        );
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "attacker-event");
         record_load_balancer_event("lb-test", Some("api"), Some("http://raw:3000"), "selected");
 
@@ -1924,6 +1931,7 @@ mod tests {
         assert!(output.contains(r#"event="persistence_hit""#));
         assert!(output.contains(r#"event="persistence_miss""#));
         assert!(output.contains(r#"event="persistence_fallback""#));
+        assert!(output.contains(r#"event="persistence_clear""#));
         assert!(output.contains(r#"event="other""#));
         assert!(!output.contains("attacker-event"));
         assert!(!output.contains("http://raw:3000"));
