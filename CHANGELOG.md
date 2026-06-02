@@ -133,6 +133,9 @@ behavior when the change improves security or project direction.
   member disable/normal operations through the 1.5 admin control plane.
 - Expose passive-health ejection as per-backend `circuit_state` plus a
   pool-level `circuit_open_backend_count` in load-balancer runtime status.
+- Make slow-start admission vary per selection attempt instead of using only
+  the backend identity hash, so warming members receive a bounded traffic
+  sample rather than a fixed backend-key class during the ramp window.
 - Include passive-health ejection remaining time in load-balancer runtime
   status so temporary ejections are explainable through the admin plane.
 - Include per-backend passive-health consecutive failure counts in

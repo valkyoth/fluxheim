@@ -6,7 +6,7 @@ use std::process;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -1490,6 +1490,7 @@ impl PassiveHealthState {
 struct SlowStartState {
     duration: Duration,
     backends: Mutex<std::collections::HashMap<u64, Instant>>,
+    sample_counter: AtomicU64,
 }
 
 impl SlowStartState {
@@ -1497,6 +1498,7 @@ impl SlowStartState {
         Self {
             duration: Duration::from_secs(config.duration_secs),
             backends: Mutex::new(std::collections::HashMap::new()),
+            sample_counter: AtomicU64::new(0),
         }
     }
 
@@ -1515,7 +1517,9 @@ impl SlowStartState {
 
         let progress_per_mille =
             ((elapsed.as_millis() * 1000) / self.duration.as_millis()).clamp(1, 1000) as u64;
-        (key % 1000) < progress_per_mille
+        let sample = self.sample_counter.fetch_add(1, Ordering::Relaxed);
+        let bucket = fnv1a64_with_seed(&sample.to_le_bytes(), key) % 1000;
+        bucket < progress_per_mille
     }
 
     fn reset_at(&self, key: u64, restart_at: Instant) {
@@ -3497,6 +3501,7 @@ where
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};
 
     use pingora::http::{RequestHeader, ResponseHeader};
@@ -3513,8 +3518,9 @@ mod tests {
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
         LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, MAX_PERSISTENCE_KEY_BYTES,
         PassiveHealthState, SlowStartState, UpstreamLoadBalancer, backend_connection_key,
-        configured_http_health_check, cookie_key, least_connections_score_is_lower,
-        request_header_key, validate_http_health_response, validate_http_health_response_body,
+        configured_http_health_check, cookie_key, fnv1a64_with_seed,
+        least_connections_score_is_lower, request_header_key, validate_http_health_response,
+        validate_http_health_response_body,
     };
     use crate::test_support::unique_temp_path;
 
@@ -3525,6 +3531,13 @@ mod tests {
 
     fn request() -> RequestHeader {
         RequestHeader::build("GET", b"/app?id=42", None).unwrap()
+    }
+
+    fn slow_start_blocking_sample(backend: &Backend) -> u64 {
+        let key = backend_connection_key(backend);
+        (0u64..10_000)
+            .find(|sample| fnv1a64_with_seed(&sample.to_le_bytes(), key) % 1000 >= 1)
+            .expect("blocking slow-start sample")
     }
 
     #[test]
@@ -4472,10 +4485,10 @@ mod tests {
             enabled: true,
             duration_secs: 60,
         });
-        let backend = (3000..4000)
-            .filter_map(|port| Backend::new(&format!("127.0.0.1:{port}")).ok())
-            .find(|backend| backend_connection_key(backend) % 1000 > 900)
-            .expect("test backend with high slow-start gate");
+        let backend = Backend::new("127.0.0.1:3000").unwrap();
+        state
+            .sample_counter
+            .store(slow_start_blocking_sample(&backend), Ordering::Relaxed);
 
         assert!(!state.permits(&backend));
         state.backends.lock().unwrap().insert(
@@ -4512,10 +4525,7 @@ mod tests {
             enabled: true,
             duration_secs: 60,
         }));
-        let backend = (3000..4000)
-            .filter_map(|port| Backend::new(&format!("127.0.0.1:{port}")).ok())
-            .find(|backend| backend_connection_key(backend) % 1000 > 900)
-            .expect("test backend with high slow-start gate");
+        let backend = Backend::new("127.0.0.1:3000").unwrap();
         let key = backend_connection_key(&backend);
         slow_start
             .backends
@@ -4541,6 +4551,9 @@ mod tests {
         assert!(outcome.failed);
         assert!(outcome.ejected);
 
+        slow_start
+            .sample_counter
+            .store(slow_start_blocking_sample(&backend), Ordering::Relaxed);
         assert!(!slow_start.permits(&backend));
     }
 

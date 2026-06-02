@@ -1749,13 +1749,27 @@ Stable scope:
   True runtime add/remove, runtime weight change, and runtime metadata updates
   are later `1.5.x` control-plane work because they need either an atomic
   backend-set swap or a selector weight overlay across every algorithm.
+- Runtime weight changes are the required `1.5.x` canary-control follow-up:
+  the admin plane should be able to move a configured backend from 5% to 10%,
+  25%, 50%, and 100% without a config reload, with audit events and selector
+  behavior documented for weighted, least-connections, least-time, hash,
+  Maglev, priority-group, locality, persistence, health, and queue policy.
 - Persisted pool state for operator actions and reload survival remains later
   `1.5.x` work, with safe snapshot/write semantics and audit events.
 - Cluster-aware state sharing for selected tables where single-node behavior is
   insufficient:
-  - sticky-session tables;
+  - load-balancer-managed cookie/sticky-session tables, including explicit
+    cookie mirroring for active-active HA setups where a request may land on a
+    different Fluxheim node after failover or normal balancing;
+  - application-cookie persistence tables when operators choose to mirror the
+    affinity decision rather than relying only on the application cookie value;
   - rate-limit counters if local-only limits prove insufficient;
-  - passive health/circuit state only where sharing is safe and bounded.
+  - passive health/circuit state only where sharing is safe and bounded;
+  - runtime drain/disable/forced-down overrides so HA peers do not route to a
+    member another node has administratively removed.
+  Retry budgets, queue counters, and high-churn telemetry should stay local
+  unless a later design proves that replication is bounded and operationally
+  useful.
 - Named upstream pools can be selected globally, per vhost, or per route, so one
   vhost can proxy normal app traffic and route-specific traffic to different
   backend sets.
@@ -1799,19 +1813,35 @@ Stable scope:
   - locality-aware preferred selection so same-zone or same-site backends can
     be tried before remote failure domains.
 - Session persistence:
-  - cookie persistence with signed/opaque cookies;
+  - `1.5.0` request-cookie persistence consumes an application or upstream
+    cookie selected by configuration; load-balancer-managed cookie insertion is
+    a later `1.5.x` persistence slice;
+  - load-balancer-managed cookie persistence with signed/opaque `Set-Cookie`
+    insertion on the first eligible response, configurable `Secure`,
+    `HttpOnly`, `SameSite`, `Path`, `Domain`, and `Max-Age` attributes,
+    key-rotation behavior, backend identity privacy, and explicit interaction
+    with compression/cache/header policies;
   - source-address persistence with TTL and table-size limits;
   - header-based persistence from a configured allow-list;
   - TLS session/client-certificate persistence only after privacy/security
     review;
   - persistence must be visible, bounded, purgeable, and incompatible with
     privacy-mode unless a no-retention policy is configured.
+  - persistence dump/restore for reload and restart survival is later `1.5.x`
+    work. The file format must be versioned, size-limited, atomically written,
+    auditable, and safe to ignore on corruption rather than poisoning a pool.
 - Active health checks:
   - TCP connect checks;
   - TLS handshake checks with SNI and verification controls;
   - HTTP checks with method, path, expected status range, expected response
     header/body substring, Host header, and upstream TLS/SNI where configured;
   - HTTP/2 and gRPC health checks where protocol support is stable;
+  - protocol-aware monitors for common load-balanced services such as MySQL,
+    PostgreSQL, Redis, SMTP, LDAP, and custom send/expect checks are a later
+    `1.5.x` monitor slice, with strict timeout/body-size bounds and no
+    unbounded script execution;
+  - authenticated agent checks may be added later for applications that can
+    report local overload or drain state more accurately than protocol probes;
   - UDP checks only in the later UDP follow-up, with explicit send/expect
     patterns and timeout limits;
   - interval, timeout, consecutive success/failure thresholds, initial state,
@@ -1830,6 +1860,9 @@ Stable scope:
   fast-recheck, temporary ejection, or circuit-open state.
 - Circuit breaking and adaptive concurrency:
   - per-pool and per-member circuit state;
+  - named open/half-open/closed state that maps existing passive ejection,
+    max-in-flight saturation, pending-request queue pressure, retry budget
+    exhaustion, and cooldown behavior into operator-visible breaker reasons;
   - half-open probe limits;
   - cooldown windows;
   - optional adaptive concurrency inspired by queue/latency feedback, with
@@ -1909,6 +1942,18 @@ Beta scope:
   operations after the backend-set swap or selector-overlay design is proven
   across round-robin, weighted, hash, consistent-hash, least-connections,
   least-time, priority-group, locality, persistence, health, and queue policy.
+- Load-balancer-managed cookie insertion and sticky-session cookie mirroring
+  for HA pairs or active-active Fluxheim clusters. This must include signed or
+  opaque cookie values, rotation, table-size/TTL limits, peer authentication,
+  replay handling, fail-open/fail-closed choices, and clear cache/compression
+  interactions before being promoted to stable scope.
+- Persistence table dump/restore so source, header, application-cookie, and
+  load-balancer-managed cookie affinity can survive reloads and controlled
+  restarts without unbounded disk growth.
+- HA state replication for runtime member overrides, selected sticky-session
+  tables, and optionally passive-health/circuit state. The first design should
+  prefer a small authenticated peer protocol over ad hoc shared files, and it
+  must document split-brain, peer loss, replay, and bounded-memory behavior.
 - Weighted random two-choice as a distributed-load-balancer policy.
 - Dynamic ratio / external load-score selection when the score source, trust
   boundary, expiration, replay behavior, and audit trail are proven.

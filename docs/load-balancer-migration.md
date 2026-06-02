@@ -151,6 +151,14 @@ curl -X POST \
 
 - Dynamic weight changes and add/remove-member operations are future control
   plane work.
+- Load-balancer-managed cookie insertion is future persistence work. In
+  `1.5.0`, cookie persistence uses an application or upstream-issued request
+  cookie that the operator explicitly names; Fluxheim does not yet create a
+  signed/opaque affinity cookie with `Set-Cookie`.
+- HA persistence/cookie mirroring is future cluster-state work. Persistence
+  tables, passive health, retry budgets, queue counters, and runtime overrides
+  are local to one Fluxheim process in `1.5.0`; active-active deployments must
+  either accept independent local state or place another HA layer in front.
 - Maglev hashing is available for static `proxy.upstreams` pools. File-refreshed
   and DNS-refreshed pools reject Maglev in `1.5.0` until dynamic table rebuild
   behavior is specified and observable.
