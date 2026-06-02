@@ -569,6 +569,7 @@ pub enum LoadBalancePersistenceMode {
     #[default]
     SourceIp,
     Header,
+    Cookie,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -580,6 +581,8 @@ pub struct LoadBalancePersistenceConfig {
     pub mode: LoadBalancePersistenceMode,
     #[serde(default)]
     pub header: Option<String>,
+    #[serde(default)]
+    pub cookie: Option<String>,
     #[serde(default = "default_lb_persistence_ttl_secs")]
     pub ttl_secs: u64,
     #[serde(default = "default_lb_persistence_table_max_entries")]
@@ -592,6 +595,7 @@ impl Default for LoadBalancePersistenceConfig {
             enabled: false,
             mode: LoadBalancePersistenceMode::default(),
             header: None,
+            cookie: None,
             ttl_secs: default_lb_persistence_ttl_secs(),
             table_max_entries: default_lb_persistence_table_max_entries(),
         }
@@ -618,14 +622,18 @@ impl LoadBalancePersistenceConfig {
                 reason: "proxy.load_balance.persistence.table_max_entries must be between 1 and 1000000",
             });
         }
+        if self.mode != LoadBalancePersistenceMode::Header && self.header.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.persistence.header can only be used with mode = \"header\"",
+            });
+        }
+        if self.mode != LoadBalancePersistenceMode::Cookie && self.cookie.is_some() {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.persistence.cookie can only be used with mode = \"cookie\"",
+            });
+        }
         match self.mode {
-            LoadBalancePersistenceMode::SourceIp => {
-                if self.header.is_some() {
-                    return Err(ConfigError::InvalidLoadBalanceSelection {
-                        reason: "proxy.load_balance.persistence.header can only be used with mode = \"header\"",
-                    });
-                }
-            }
+            LoadBalancePersistenceMode::SourceIp => {}
             LoadBalancePersistenceMode::Header => {
                 let Some(header) = self.header.as_deref() else {
                     return Err(ConfigError::InvalidLoadBalanceSelection {
@@ -636,6 +644,18 @@ impl LoadBalancePersistenceConfig {
                     return Err(ConfigError::InvalidHeaderName {
                         field: "proxy.load_balance.persistence.header",
                         name: header.to_owned(),
+                    });
+                }
+            }
+            LoadBalancePersistenceMode::Cookie => {
+                let Some(cookie) = self.cookie.as_deref() else {
+                    return Err(ConfigError::InvalidLoadBalanceSelection {
+                        reason: "proxy.load_balance.persistence.cookie is required when mode = \"cookie\"",
+                    });
+                };
+                if !valid_http_header_name(cookie) {
+                    return Err(ConfigError::InvalidLoadBalanceSelection {
+                        reason: "proxy.load_balance.persistence.cookie must be a valid cookie name",
                     });
                 }
             }

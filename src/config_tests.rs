@@ -2790,6 +2790,53 @@ fn rejects_invalid_load_balance_persistence() {
             name: "bad header".to_owned()
         })
     );
+
+    let missing_cookie: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "cookie"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        missing_cookie.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.cookie is required when mode = \"cookie\""
+        })
+    );
+
+    let cookie_with_source_ip: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "source-ip"
+            cookie = "sid"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        cookie_with_source_ip.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.cookie can only be used with mode = \"cookie\""
+        })
+    );
+
+    let invalid_cookie: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "cookie"
+            cookie = "bad cookie"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_cookie.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.cookie must be a valid cookie name"
+        })
+    );
 }
 
 #[test]

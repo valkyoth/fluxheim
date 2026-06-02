@@ -1049,11 +1049,14 @@ started.
 `proxy.load_balance.persistence.enabled = true` enables a bounded local
 persistence table. `mode = "source-ip"` maps a client IP to the selected
 backend for `ttl_secs`; `mode = "header"` maps the configured request `header`
-value, for example an operator-trusted session header. Stored backends are
-reused while they remain ready, not drained/disabled/forced-down, not passively
-ejected, and below their in-flight cap. If the stored backend is no longer
-selectable, Fluxheim falls back to the normal load-balancing algorithm and
-refreshes the table with the new backend. `table_max_entries` bounds memory
+value, for example an operator-trusted session header; `mode = "cookie"` maps
+the configured request `cookie` value from the client request. Cookie mode does
+not insert or sign a new persistence cookie in `1.5.0`; it uses an application
+or upstream-issued cookie that the operator explicitly names. Stored backends
+are reused while they remain ready, not drained/disabled/forced-down, not
+passively ejected, and below their in-flight cap. If the stored backend is no
+longer selectable, Fluxheim falls back to the normal load-balancing algorithm
+and refreshes the table with the new backend. `table_max_entries` bounds memory
 use; expired entries are pruned and the oldest expiry is evicted when the table
 is full. Persistence is local to one Fluxheim process in `1.5.0` and is reset
 by process restart, runtime rebuild, or the authenticated persistence-clear

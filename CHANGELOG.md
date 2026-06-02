@@ -79,6 +79,8 @@ behavior when the change improves security or project direction.
 - Add bounded local request-header load-balancer persistence with explicit
   header-name validation and the same TTL/table limits as source-IP
   persistence.
+- Add bounded local request-cookie load-balancer persistence for explicitly
+  named application or upstream cookies.
 - Add authenticated runtime clearing for vhost or route load-balancer
   persistence tables through
   `POST /_fluxheim/load-balancer/persistence/clear`.

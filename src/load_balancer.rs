@@ -183,6 +183,7 @@ pub struct LoadBalancerPersistenceRuntimeStats {
     pub enabled: bool,
     pub mode: LoadBalancePersistenceMode,
     pub header: Option<String>,
+    pub cookie: Option<String>,
     pub ttl_secs: u64,
     pub table_max_entries: usize,
     pub entry_count: usize,
@@ -605,6 +606,7 @@ impl UpstreamLoadBalancer {
                 enabled: self.persistence.is_some(),
                 mode: self.persistence_policy.mode,
                 header: self.persistence_policy.header.clone(),
+                cookie: self.persistence_policy.cookie.clone(),
                 ttl_secs: self.persistence_policy.ttl_secs,
                 table_max_entries: self.persistence_policy.table_max_entries,
                 entry_count: self
@@ -1344,6 +1346,7 @@ impl BackendLatencyState {
 struct LoadBalancerPersistenceState {
     mode: LoadBalancePersistenceMode,
     header: Option<String>,
+    cookie: Option<String>,
     ttl: Duration,
     table_max_entries: usize,
     table: Mutex<std::collections::HashMap<Vec<u8>, LoadBalancerPersistenceEntry>>,
@@ -1360,6 +1363,7 @@ impl LoadBalancerPersistenceState {
         Self {
             mode: config.mode,
             header: config.header.clone(),
+            cookie: config.cookie.clone(),
             ttl: Duration::from_secs(config.ttl_secs),
             table_max_entries: config.table_max_entries,
             table: Mutex::new(std::collections::HashMap::new()),
@@ -1373,6 +1377,10 @@ impl LoadBalancerPersistenceState {
                 .header
                 .as_deref()
                 .and_then(|header| request_header_key(request, header)),
+            LoadBalancePersistenceMode::Cookie => self
+                .cookie
+                .as_deref()
+                .and_then(|cookie| cookie_key(request, cookie)),
         }
     }
 
@@ -2841,6 +2849,7 @@ mod tests {
                     header: Some("x-session".to_owned()),
                     ttl_secs: 60,
                     table_max_entries: 16,
+                    ..LoadBalancePersistenceConfig::default()
                 },
                 ..LoadBalanceConfig::default()
             },
@@ -2877,6 +2886,61 @@ mod tests {
 
         assert_eq!(balancer.clear_persistence(), 1);
         assert_eq!(balancer.runtime_stats().persistence.entry_count, 0);
+    }
+
+    #[test]
+    fn cookie_persistence_reuses_selected_backend() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec![
+                "127.0.0.1:3000".to_owned(),
+                "127.0.0.1:3001".to_owned(),
+                "127.0.0.1:3002".to_owned(),
+            ],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    mode: LoadBalancePersistenceMode::Cookie,
+                    cookie: Some("sid".to_owned()),
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let mut first_request = request();
+        first_request
+            .insert_header("cookie", "theme=dark; sid=abc")
+            .unwrap();
+        let first = balancer.select(&first_request, None).unwrap();
+        assert_eq!(
+            first.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Miss)
+        );
+
+        let mut second_request = request();
+        second_request.insert_header("cookie", "sid=abc").unwrap();
+        let second = balancer.select(&second_request, None).unwrap();
+        assert_eq!(first.backend.addr, second.backend.addr);
+        assert_eq!(
+            second.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Hit)
+        );
+
+        let missing_cookie = balancer.select(&request(), None).unwrap();
+        assert_eq!(missing_cookie.persistence_outcome, None);
+
+        let stats = balancer.runtime_stats();
+        assert!(stats.persistence_enabled);
+        assert_eq!(stats.persistence.mode, LoadBalancePersistenceMode::Cookie);
+        assert_eq!(stats.persistence.cookie.as_deref(), Some("sid"));
+        assert_eq!(stats.persistence.entry_count, 1);
     }
 
     #[test]
