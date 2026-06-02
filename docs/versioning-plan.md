@@ -1743,6 +1743,11 @@ Stable scope:
 
 - Compile-time `load-balancer` module remains the place for estate-scale
   features that go beyond one Fluxheim instance's normal proxy routing.
+- The `1.5.0` maintenance split keeps health checks, backend state,
+  persistence, selection algorithms, backend policy/status, and file/DNS
+  discovery in separate `src/load_balancer/*` modules. Future load-balancer
+  work should extend those domains or create a new focused module instead of
+  growing the parent orchestration file.
 - Runtime pool and member state through a local authenticated control plane:
   drain, disable, force-down, enable/normal, manual resume, persistence-table
   clear, and load-balancer-only runtime status without full process restart.

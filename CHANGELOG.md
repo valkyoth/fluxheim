@@ -141,6 +141,9 @@ behavior when the change improves security or project direction.
 - Extract HTTP/TCP load-balancer health-check construction, validation, and
   response-body handling into `src/load_balancer/health.rs` so monitor logic is
   reviewable without navigating the full load-balancer orchestration module.
+- Split load-balancer backend state, persistence, selection, backend policy,
+  and discovery/factory code into focused `src/load_balancer/*` modules while
+  keeping `crate::load_balancer::*` stable for callers.
 - Align read-only slow-start status with the sampled admission mechanism instead
   of the old backend-key-only gate.
 - Include passive-health ejection remaining time in load-balancer runtime

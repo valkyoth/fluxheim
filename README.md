@@ -122,6 +122,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
+| Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
 | Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
 | HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
