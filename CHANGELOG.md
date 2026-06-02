@@ -151,6 +151,11 @@ behavior when the change improves security or project direction.
   fixed 65,537-slot lookup table and policy-aware fallback probing. Dynamic
   file/DNS-refreshed pools reject Maglev until table rebuild semantics are
   promoted in a later control-plane slice.
+- Harden load-balancer state handling after SAST review by capping
+  client-derived persistence keys, secret-salting Maglev route lookup,
+  consolidating runtime member-state overrides behind one mutex, pruning stale
+  per-backend runtime maps periodically, using stable backend identity hashes,
+  and applying the 64 KiB health-check body cap to drain-only probes.
 
 ## 1.4.7 - 2026-05-31
 

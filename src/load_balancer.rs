@@ -1,11 +1,11 @@
-use std::collections::hash_map::DefaultHasher;
 use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher};
 use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
+use std::process;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -40,6 +40,8 @@ use crate::config::{
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
 const MAGLEV_TABLE_SIZE: usize = 65_537;
+const MAX_PERSISTENCE_KEY_BYTES: usize = 512;
+const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 
 #[derive(Clone)]
 pub struct UpstreamLoadBalancer {
@@ -55,6 +57,7 @@ pub struct UpstreamLoadBalancer {
     persistence_policy: LoadBalancePersistenceConfig,
     queue_policy: LoadBalanceQueueConfig,
     queue_waiting: Arc<AtomicUsize>,
+    state_prune_counter: Arc<AtomicUsize>,
     counters: Arc<BackendConnectionCounters>,
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
@@ -634,6 +637,7 @@ impl UpstreamLoadBalancer {
         persistence_key: Option<&[u8]>,
         persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
     ) -> Option<SelectedUpstream> {
+        self.prune_stale_backend_state_periodically();
         let key = self.key_source.request_key(request, client_ip);
         let persistence_entry_counts = self
             .persistence
@@ -735,11 +739,32 @@ impl UpstreamLoadBalancer {
             persistence_policy: config.load_balance.persistence.clone(),
             queue_policy: config.load_balance.queue.clone(),
             queue_waiting: Arc::new(AtomicUsize::new(0)),
+            state_prune_counter: Arc::new(AtomicUsize::new(0)),
             counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
             all_down_status: config.load_balance.all_down_status,
             retry: LoadBalancerRetryRuntimeStats::from_config(&config.load_balance.retry),
+        }
+    }
+
+    fn prune_stale_backend_state_periodically(&self) {
+        let current = self.state_prune_counter.fetch_add(1, Ordering::Relaxed);
+        if !current.is_multiple_of(BACKEND_STATE_PRUNE_INTERVAL) {
+            return;
+        }
+        let live_keys = self
+            .inner
+            .backends()
+            .into_iter()
+            .map(|backend| backend_connection_key(&backend))
+            .collect::<std::collections::HashSet<_>>();
+        self.counters.prune_stale(&live_keys);
+        if let Some(slow_start) = &self.slow_start {
+            slow_start.prune_stale(&live_keys);
+        }
+        if let Some(latency) = self.inner.latency_state() {
+            latency.prune_stale(&live_keys);
         }
     }
 
@@ -1500,6 +1525,13 @@ impl SlowStartState {
             .insert(key, restart_at);
     }
 
+    fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
+        self.backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|key, _| live_keys.contains(key));
+    }
+
     fn permits_read_only(&self, backend: &Backend) -> bool {
         let now = Instant::now();
         let key = backend_connection_key(backend);
@@ -1572,6 +1604,13 @@ impl BackendConnectionCounters {
             .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
             .clone()
     }
+
+    fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
+        self.counters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|key, counter| live_keys.contains(key) || counter.load(Ordering::Acquire) > 0);
+    }
 }
 
 #[derive(Default)]
@@ -1604,6 +1643,13 @@ impl BackendLatencyState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(&key)
             .copied()
+    }
+
+    fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
+        self.latency_micros
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|key, _| live_keys.contains(key));
     }
 }
 
@@ -1717,9 +1763,7 @@ impl LoadBalancerPersistenceState {
 }
 
 fn backend_connection_key(backend: &Backend) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    backend.hash(&mut hasher);
-    hasher.finish()
+    fnv1a64(backend.addr.to_string().as_bytes())
 }
 
 fn unix_secs() -> u64 {
@@ -1745,10 +1789,15 @@ struct BackendSelectionPolicy {
 
 #[derive(Debug, Default)]
 struct RuntimeBackendPolicyOverrides {
-    drain: Mutex<std::collections::HashSet<u64>>,
-    disabled: Mutex<std::collections::HashSet<u64>>,
-    forced_down: Mutex<std::collections::HashSet<u64>>,
-    changed_at_unix_secs: Mutex<std::collections::HashMap<u64, u64>>,
+    state: Mutex<RuntimeBackendPolicyOverrideState>,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeBackendPolicyOverrideState {
+    drain: std::collections::HashSet<u64>,
+    disabled: std::collections::HashSet<u64>,
+    forced_down: std::collections::HashSet<u64>,
+    changed_at_unix_secs: std::collections::HashMap<u64, u64>,
 }
 
 impl BackendSelectionPolicy {
@@ -1874,96 +1923,71 @@ impl BackendSelectionPolicy {
 
 impl RuntimeBackendPolicyOverrides {
     fn drained(&self, key: u64) -> bool {
-        self.drain
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain
             .contains(&key)
     }
 
     fn disabled(&self, key: u64) -> bool {
-        self.disabled
+        let state = self
+            .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .contains(&key)
-            || self.forced_down(key)
-    }
-
-    fn forced_down(&self, key: u64) -> bool {
-        self.forced_down
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .contains(&key)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.disabled.contains(&key) || state.forced_down.contains(&key)
     }
 
     fn set_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
-        let mut drain = self
-            .drain
+        let mut overrides = self
+            .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut disabled = self
-            .disabled
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut forced_down = self
-            .forced_down
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut changed_at = self
-            .changed_at_unix_secs
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        drain.remove(&key);
-        disabled.remove(&key);
-        forced_down.remove(&key);
+        overrides.drain.remove(&key);
+        overrides.disabled.remove(&key);
+        overrides.forced_down.remove(&key);
         match state {
             LoadBalancerRuntimeBackendState::Normal
             | LoadBalancerRuntimeBackendState::ManualResume => {
-                changed_at.remove(&key);
+                overrides.changed_at_unix_secs.remove(&key);
             }
             LoadBalancerRuntimeBackendState::Drained => {
-                drain.insert(key);
-                changed_at.insert(key, unix_secs());
+                overrides.drain.insert(key);
+                overrides.changed_at_unix_secs.insert(key, unix_secs());
             }
             LoadBalancerRuntimeBackendState::Disabled => {
-                disabled.insert(key);
-                changed_at.insert(key, unix_secs());
+                overrides.disabled.insert(key);
+                overrides.changed_at_unix_secs.insert(key, unix_secs());
             }
             LoadBalancerRuntimeBackendState::ForcedDown => {
-                forced_down.insert(key);
-                changed_at.insert(key, unix_secs());
+                overrides.forced_down.insert(key);
+                overrides.changed_at_unix_secs.insert(key, unix_secs());
             }
         }
     }
 
     fn state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
-        let drain = self
-            .drain
+        let state = self
+            .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let disabled = self
-            .disabled
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let forced_down = self
-            .forced_down
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if forced_down.contains(&key) {
+        if state.forced_down.contains(&key) {
             return Some(LoadBalancerRuntimeBackendState::ForcedDown);
         }
-        if disabled.contains(&key) {
+        if state.disabled.contains(&key) {
             return Some(LoadBalancerRuntimeBackendState::Disabled);
         }
-        if drain.contains(&key) {
+        if state.drain.contains(&key) {
             return Some(LoadBalancerRuntimeBackendState::Drained);
         }
         None
     }
 
     fn changed_at_unix_secs(&self, key: u64) -> Option<u64> {
-        self.changed_at_unix_secs
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .changed_at_unix_secs
             .get(&key)
             .copied()
     }
@@ -1978,9 +2002,7 @@ fn backend_policy_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
 }
 
 fn backend_policy_key(backend: &Backend) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    backend.addr.hash(&mut hasher);
-    hasher.finish()
+    fnv1a64(backend.addr.to_string().as_bytes())
 }
 
 fn backend_priority_groups(config: &ProxyConfig) -> std::collections::HashMap<u64, u16> {
@@ -2795,7 +2817,7 @@ impl MaglevTable {
         key: &'a [u8],
         max_iterations: usize,
     ) -> impl Iterator<Item = u64> + 'a {
-        let start = fnv1a64_with_seed(key, 0xaf63_dc4c_8601_ec8c) as usize % self.slots.len();
+        let start = fnv1a64_with_seed(key, maglev_route_secret()) as usize % self.slots.len();
         let limit = max_iterations.max(1).min(self.slots.len());
         (0..limit).map(move |offset| self.slots[(start + offset) % self.slots.len()])
     }
@@ -2847,6 +2869,10 @@ fn select_maglev(
     None
 }
 
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    fnv1a64_with_seed(bytes, 0xcbf2_9ce4_8422_2325)
+}
+
 fn fnv1a64_with_seed(bytes: &[u8], seed: u64) -> u64 {
     let mut hash = seed;
     for byte in bytes {
@@ -2854,6 +2880,21 @@ fn fnv1a64_with_seed(bytes: &[u8], seed: u64) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
+}
+
+fn maglev_route_secret() -> u64 {
+    static SECRET: OnceLock<u64> = OnceLock::new();
+    *SECRET.get_or_init(|| {
+        let mut bytes = [0u8; 8];
+        if let Err(error) = getrandom::fill(&mut bytes) {
+            log::error!(
+                target: "fluxheim::security",
+                "failed to seed Maglev routing hash secret: {error}"
+            );
+            process::abort();
+        }
+        u64::from_le_bytes(bytes)
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -2919,6 +2960,9 @@ fn request_header_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
         let bytes = value.as_bytes();
         key.extend_from_slice(&bytes.len().to_le_bytes());
         key.extend_from_slice(bytes);
+        if key.len() > MAX_PERSISTENCE_KEY_BYTES {
+            return None;
+        }
     }
     (!key.is_empty()).then_some(key)
 }
@@ -2933,7 +2977,11 @@ fn cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
                 continue;
             };
             if candidate.trim() == name {
-                return Some(value.trim().as_bytes().to_vec());
+                let bytes = value.trim().as_bytes();
+                if bytes.len() > MAX_PERSISTENCE_KEY_BYTES {
+                    return None;
+                }
+                return Some(bytes.to_vec());
             }
         }
     }
@@ -3335,7 +3383,16 @@ fn validate_http_health_response(
 }
 
 async fn drain_http_health_response_body(session: &mut HttpSession) -> pingora::Result<()> {
-    while session.read_response_body().await?.is_some() {}
+    let mut drained = 0usize;
+    while let Some(chunk) = session.read_response_body().await? {
+        drained = drained.saturating_add(chunk.len());
+        if drained > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
+            return Error::e_explain(
+                ErrorType::ReadError,
+                "HTTP health check response body exceeded maximum size",
+            );
+        }
+    }
     Ok(())
 }
 
@@ -3454,10 +3511,10 @@ mod tests {
 
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
-        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, PassiveHealthState,
-        SlowStartState, UpstreamLoadBalancer, backend_connection_key, configured_http_health_check,
-        least_connections_score_is_lower, validate_http_health_response,
-        validate_http_health_response_body,
+        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, MAX_PERSISTENCE_KEY_BYTES,
+        PassiveHealthState, SlowStartState, UpstreamLoadBalancer, backend_connection_key,
+        configured_http_health_check, cookie_key, least_connections_score_is_lower,
+        request_header_key, validate_http_health_response, validate_http_health_response_body,
     };
     use crate::test_support::unique_temp_path;
 
@@ -3468,6 +3525,48 @@ mod tests {
 
     fn request() -> RequestHeader {
         RequestHeader::build("GET", b"/app?id=42", None).unwrap()
+    }
+
+    #[test]
+    fn persistence_keys_reject_oversized_header_and_cookie_values() {
+        let max_single_header_value = MAX_PERSISTENCE_KEY_BYTES - std::mem::size_of::<usize>();
+        let mut header_request = request();
+        header_request
+            .insert_header("x-session", "a".repeat(max_single_header_value))
+            .unwrap();
+        assert_eq!(
+            request_header_key(&header_request, "x-session")
+                .unwrap()
+                .len(),
+            MAX_PERSISTENCE_KEY_BYTES
+        );
+
+        let mut oversized_header_request = request();
+        oversized_header_request
+            .insert_header("x-session", "a".repeat(max_single_header_value + 1))
+            .unwrap();
+        assert!(request_header_key(&oversized_header_request, "x-session").is_none());
+
+        let mut cookie_request = request();
+        cookie_request
+            .insert_header(
+                "cookie",
+                format!("sid={}", "b".repeat(MAX_PERSISTENCE_KEY_BYTES)),
+            )
+            .unwrap();
+        assert_eq!(
+            cookie_key(&cookie_request, "sid").unwrap().len(),
+            MAX_PERSISTENCE_KEY_BYTES
+        );
+
+        let mut oversized_cookie_request = request();
+        oversized_cookie_request
+            .insert_header(
+                "cookie",
+                format!("sid={}", "b".repeat(MAX_PERSISTENCE_KEY_BYTES + 1)),
+            )
+            .unwrap();
+        assert!(cookie_key(&oversized_cookie_request, "sid").is_none());
     }
 
     #[test]
