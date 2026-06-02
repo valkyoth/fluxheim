@@ -2433,7 +2433,12 @@ fn select_power_of_two(
         })
         .find(|backend| backend_connection_key(backend) != first_key)
         .unwrap_or_else(|| first.clone());
-    let selected = if counters.count(&second) < counters.count(&first) {
+    let selected = if least_connections_score_is_lower(
+        counters.count(&second),
+        second.weight.max(1),
+        counters.count(&first),
+        first.weight.max(1),
+    ) {
         second
     } else {
         first
@@ -3030,8 +3035,8 @@ mod tests {
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
         LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
-        backend_connection_key, configured_http_health_check, validate_http_health_response,
-        validate_http_health_response_body,
+        backend_connection_key, configured_http_health_check, least_connections_score_is_lower,
+        validate_http_health_response, validate_http_health_response_body,
     };
     use crate::test_support::unique_temp_path;
 
@@ -3549,6 +3554,12 @@ mod tests {
 
         let third = balancer.select(&request(), None).unwrap();
         assert_eq!(third.backend.addr.to_string(), "127.0.0.1:3001");
+    }
+
+    #[test]
+    fn weighted_two_choice_uses_weighted_connection_pressure() {
+        assert!(least_connections_score_is_lower(2, 4, 1, 1));
+        assert!(!least_connections_score_is_lower(2, 1, 1, 4));
     }
 
     #[test]

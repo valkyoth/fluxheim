@@ -993,7 +993,8 @@ healthy backends are allowed to receive traffic so new or recovered pool
 members can establish a latency baseline. `power-of-two`
 also accepts `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
 `weighted-random-two-choice`; all names sample two healthy backends through
-Pingora's random weighted selector and choose the lower in-flight count.
+Pingora's random weighted selector and choose the lower weighted in-flight
+pressure using `upstream_weights`.
 With metrics enabled, load-balanced selections, unavailable pools, retries, and
 success/failure/ejection outcomes are counted by
 `fluxheim_load_balancer_events_total` with bounded configured vhost/route

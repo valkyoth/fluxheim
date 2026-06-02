@@ -28,6 +28,8 @@ behavior when the change improves security or project direction.
   persistence table for sticky-session-aware distribution.
 - Add `least-time` selection using weighted EWMA upstream latency plus
   in-flight request counts for latency-sensitive application pools.
+- Make the `power-of-two` / `weighted-random-two-choice` selector compare
+  weighted in-flight pressure after Pingora's weighted random sampling.
 - Add static `upstream_priority_groups` for F5-style preferred/fallback
   selection across configured static upstream pools.
 - Add `upstream_priority_group_min_active` so lower priority groups activate
