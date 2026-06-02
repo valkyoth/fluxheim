@@ -760,6 +760,9 @@ impl UpstreamLoadBalancer {
             .map(|backend| backend_connection_key(&backend))
             .collect::<std::collections::HashSet<_>>();
         self.counters.prune_stale(&live_keys);
+        if let Some(passive_health) = &self.passive_health {
+            passive_health.prune_stale(&live_keys);
+        }
         if let Some(slow_start) = &self.slow_start {
             slow_start.prune_stale(&live_keys);
         }
@@ -1464,6 +1467,16 @@ impl PassiveHealthState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(&key);
+    }
+
+    fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
+        let now = Instant::now();
+        self.backends
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|key, state| {
+                live_keys.contains(key) || state.ejected_until.is_some_and(|until| now < until)
+            });
     }
 
     fn failure_status(&self, status: u16) -> bool {
@@ -3517,8 +3530,8 @@ mod tests {
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
         LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, MAX_PERSISTENCE_KEY_BYTES,
-        PassiveHealthState, SlowStartState, UpstreamLoadBalancer, backend_connection_key,
-        configured_http_health_check, cookie_key, fnv1a64_with_seed,
+        PassiveBackendHealth, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
+        backend_connection_key, configured_http_health_check, cookie_key, fnv1a64_with_seed,
         least_connections_score_is_lower, request_header_key, validate_http_health_response,
         validate_http_health_response_body,
     };
@@ -4648,6 +4661,52 @@ mod tests {
         assert!(health.failure_status(520));
         assert!(health.failure_status(529));
         assert!(!health.failure_status(503));
+    }
+
+    #[test]
+    fn passive_health_prune_keeps_live_and_active_ejections() {
+        let health = PassiveHealthState::from_config(&LoadBalancePassiveHealthConfig {
+            enabled: true,
+            ..LoadBalancePassiveHealthConfig::default()
+        });
+        let now = Instant::now();
+        health.backends.lock().unwrap().extend([
+            (
+                1,
+                PassiveBackendHealth {
+                    consecutive_failures: 1,
+                    ejected_until: None,
+                },
+            ),
+            (
+                2,
+                PassiveBackendHealth {
+                    consecutive_failures: 1,
+                    ejected_until: None,
+                },
+            ),
+            (
+                3,
+                PassiveBackendHealth {
+                    consecutive_failures: 0,
+                    ejected_until: Some(now + Duration::from_secs(60)),
+                },
+            ),
+            (
+                4,
+                PassiveBackendHealth {
+                    consecutive_failures: 0,
+                    ejected_until: Some(now - Duration::from_secs(1)),
+                },
+            ),
+        ]);
+        health.prune_stale(&[1].into_iter().collect());
+        let backends = health.backends.lock().unwrap();
+
+        assert!(backends.contains_key(&1));
+        assert!(!backends.contains_key(&2));
+        assert!(backends.contains_key(&3));
+        assert!(!backends.contains_key(&4));
     }
 
     #[test]
