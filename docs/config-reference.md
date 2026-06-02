@@ -1027,6 +1027,9 @@ queue wait/full/timeout outcomes, and success/failure/ejection outcomes are coun
 `fluxheim_load_balancer_events_total` with bounded configured vhost/route
 labels. The metric does not label raw upstream addresses; it uses
 `upstream_aliases` when present and otherwise leaves the upstream label empty.
+Queued requests that actually wait also record
+`fluxheim_load_balancer_queue_wait_seconds` by configured vhost/route and
+bounded outcome (`waited` or `timeout`).
 When persistence is enabled, the same counter records bounded
 `persistence_hit`, `persistence_miss`, and `persistence_fallback` events.
 `examples/load-balancer-enterprise.toml` is the validated 1.5 migration

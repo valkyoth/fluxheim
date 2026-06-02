@@ -72,6 +72,7 @@ pub struct SelectedUpstream {
 pub struct LoadBalancerSelectionResult {
     pub selected: Option<SelectedUpstream>,
     pub queue_outcome: Option<LoadBalancerQueueOutcome>,
+    pub queue_wait: Option<Duration>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -495,26 +496,31 @@ impl UpstreamLoadBalancer {
             return LoadBalancerSelectionResult {
                 selected: Some(selected),
                 queue_outcome: None,
+                queue_wait: None,
             };
         }
         if !self.queue_policy.enabled() {
             return LoadBalancerSelectionResult {
                 selected: None,
                 queue_outcome: None,
+                queue_wait: None,
             };
         }
         let Some(_slot) = self.acquire_queue_slot() else {
             return LoadBalancerSelectionResult {
                 selected: None,
                 queue_outcome: Some(LoadBalancerQueueOutcome::Full),
+                queue_wait: None,
             };
         };
-        let deadline = Instant::now() + Duration::from_millis(self.queue_policy.timeout_ms);
+        let queued_at = Instant::now();
+        let deadline = queued_at + Duration::from_millis(self.queue_policy.timeout_ms);
         loop {
             if let Some(selected) = self.select(request, client_ip) {
                 return LoadBalancerSelectionResult {
                     selected: Some(selected),
                     queue_outcome: Some(LoadBalancerQueueOutcome::Waited),
+                    queue_wait: Some(queued_at.elapsed()),
                 };
             }
             let now = Instant::now();
@@ -522,6 +528,7 @@ impl UpstreamLoadBalancer {
                 return LoadBalancerSelectionResult {
                     selected: None,
                     queue_outcome: Some(LoadBalancerQueueOutcome::Timeout),
+                    queue_wait: Some(queued_at.elapsed()),
                 };
             }
             let sleep_for = deadline

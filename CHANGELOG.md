@@ -45,6 +45,8 @@ behavior when the change improves security or project direction.
   briefly for capacity before returning the configured all-down status.
 - Count load-balancer queue wait, full, and timeout outcomes in
   `fluxheim_load_balancer_events_total` when metrics are compiled.
+- Add `fluxheim_load_balancer_queue_wait_seconds` to observe bounded
+  load-balancer queue wait and timeout duration by configured vhost/route.
 - Add static `disabled_upstreams` so configured members can be kept in the pool
   definition while being administratively removed from selection and reported
   distinctly from drained members; disabled members also show as not ready in

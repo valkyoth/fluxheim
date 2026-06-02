@@ -4246,6 +4246,9 @@ impl ProxyHttp for FluxProxy {
             #[cfg(feature = "metrics")]
             if let Some(outcome) = selection.queue_outcome {
                 record_load_balancer_metric(vhost, ctx, outcome.event());
+                if let Some(duration) = selection.queue_wait {
+                    record_load_balancer_queue_wait_metric(vhost, ctx, outcome.event(), duration);
+                }
             }
             if let Some(selected) = selection.selected {
                 ctx.upstream_load_balancer_alias = selected.alias.clone();
@@ -9034,6 +9037,20 @@ fn record_load_balancer_metric(vhost: &RuntimeVhost, ctx: &RequestContext, event
         ctx.upstream_load_balancer_alias.as_deref(),
         event,
     );
+}
+
+#[cfg(all(feature = "load-balancer", feature = "metrics"))]
+fn record_load_balancer_queue_wait_metric(
+    vhost: &RuntimeVhost,
+    ctx: &RequestContext,
+    outcome: &str,
+    duration: Duration,
+) {
+    let route = ctx
+        .route_index
+        .and_then(|route_index| vhost.routes.get(route_index))
+        .map(|route| route.name.as_str());
+    crate::metrics::record_load_balancer_queue_wait(vhost.name.as_str(), route, outcome, duration);
 }
 
 #[cfg(all(feature = "load-balancer", feature = "metrics"))]

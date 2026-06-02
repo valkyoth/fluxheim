@@ -7,6 +7,7 @@ static PROXY_REQUESTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static HOST_ROUTING_REJECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static EDGE_POLICY_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static LOAD_BALANCER_EVENTS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
+static LOAD_BALANCER_QUEUE_WAIT_SECONDS: OnceLock<HistogramVec> = OnceLock::new();
 static RESPONSE_COMPRESSIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static STREAM_CONNECTIONS_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
 static STREAM_BYTES_TOTAL: OnceLock<IntCounterVec> = OnceLock::new();
@@ -65,6 +66,7 @@ pub fn init() -> Result<(), prometheus::Error> {
     host_routing_rejections_total()?;
     edge_policy_events_total()?;
     load_balancer_events_total()?;
+    load_balancer_queue_wait_seconds()?;
     response_compressions_total()?;
     stream_connections_total()?;
     stream_bytes_total()?;
@@ -241,6 +243,25 @@ pub fn record_load_balancer_event(
             ])
             .inc(),
         Err(error) => log::debug!("metrics load balancer counter unavailable: {error}"),
+    }
+}
+
+pub fn record_load_balancer_queue_wait(
+    vhost: &str,
+    route: Option<&str>,
+    outcome: &str,
+    duration: Duration,
+) {
+    match load_balancer_queue_wait_seconds() {
+        Ok(histogram) => histogram
+            .with_label_values(&[
+                cache_scope_label(route),
+                vhost,
+                route.unwrap_or(""),
+                load_balancer_queue_outcome_label(outcome),
+            ])
+            .observe(duration.as_secs_f64()),
+        Err(error) => log::debug!("metrics load balancer queue histogram unavailable: {error}"),
     }
 }
 
@@ -657,6 +678,36 @@ fn load_balancer_events_total() -> Result<&'static IntCounterVec, prometheus::Er
     LOAD_BALANCER_EVENTS_TOTAL.get().ok_or_else(|| {
         prometheus::Error::Msg(
             "fluxheim_load_balancer_events_total failed to initialize".to_owned(),
+        )
+    })
+}
+
+fn load_balancer_queue_wait_seconds() -> Result<&'static HistogramVec, prometheus::Error> {
+    if let Some(histogram) = LOAD_BALANCER_QUEUE_WAIT_SECONDS.get() {
+        return Ok(histogram);
+    }
+
+    let histogram = HistogramVec::new(
+        HistogramOpts::new(
+            "fluxheim_load_balancer_queue_wait_seconds",
+            "Fluxheim load-balancer queue wait duration by configured vhost, optional route, and bounded queue outcome.",
+        )
+        .buckets(vec![
+            0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
+            60.0,
+        ]),
+        &["scope", "vhost", "route", "outcome"],
+    )?;
+    match prometheus::default_registry().register(Box::new(histogram.clone())) {
+        Ok(()) => {}
+        Err(prometheus::Error::AlreadyReg) => {}
+        Err(error) => return Err(error),
+    }
+
+    let _ = LOAD_BALANCER_QUEUE_WAIT_SECONDS.set(histogram);
+    LOAD_BALANCER_QUEUE_WAIT_SECONDS.get().ok_or_else(|| {
+        prometheus::Error::Msg(
+            "fluxheim_load_balancer_queue_wait_seconds failed to initialize".to_owned(),
         )
     })
 }
@@ -1526,6 +1577,14 @@ fn load_balancer_event_label(event: &str) -> &'static str {
     }
 }
 
+fn load_balancer_queue_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "queue_waited" | "waited" => "waited",
+        "queue_timeout" | "timeout" => "timeout",
+        _ => "other",
+    }
+}
+
 fn load_balancer_upstream_label(upstream: Option<&str>) -> &str {
     let Some(upstream) = upstream else {
         return "";
@@ -1736,10 +1795,10 @@ mod tests {
         record_cache_activity, record_cache_activity_scope, record_cache_operation_duration,
         record_cache_purge, record_cache_purger_duration, record_cache_purger_entries,
         record_cache_purger_run, record_config, record_edge_policy_event,
-        record_host_routing_rejection, record_load_balancer_event, record_metrics_otlp_export,
-        record_php_fpm_pool_event, record_php_fpm_pool_idle, record_php_fpm_retry,
-        record_php_request, record_php_stderr, record_proxy_outcome, record_response_compression,
-        record_stream_bytes, record_stream_connection, status_class,
+        record_host_routing_rejection, record_load_balancer_event, record_load_balancer_queue_wait,
+        record_metrics_otlp_export, record_php_fpm_pool_event, record_php_fpm_pool_idle,
+        record_php_fpm_retry, record_php_request, record_php_stderr, record_proxy_outcome,
+        record_response_compression, record_stream_bytes, record_stream_connection, status_class,
     };
 
     #[test]
@@ -1944,6 +2003,46 @@ mod tests {
         assert!(output.contains(r#"event="other""#));
         assert!(!output.contains("attacker-event"));
         assert!(!output.contains("http://raw:3000"));
+    }
+
+    #[test]
+    fn records_load_balancer_queue_wait_histogram_with_bounded_labels() {
+        let _guard = metrics_test_lock();
+        init().unwrap();
+
+        record_load_balancer_queue_wait(
+            "lb-queue-test",
+            Some("api"),
+            "queue_waited",
+            Duration::from_millis(25),
+        );
+        record_load_balancer_queue_wait(
+            "lb-queue-test",
+            Some("api"),
+            "queue_timeout",
+            Duration::from_millis(250),
+        );
+        record_load_balancer_queue_wait(
+            "lb-queue-test",
+            Some("api"),
+            "attacker-outcome",
+            Duration::from_millis(5),
+        );
+
+        let metric_families = prometheus::gather();
+        let mut output = Vec::new();
+        prometheus::TextEncoder::new()
+            .encode(&metric_families, &mut output)
+            .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("fluxheim_load_balancer_queue_wait_seconds"));
+        assert!(output.contains(r#"scope="route""#));
+        assert!(output.contains(r#"vhost="lb-queue-test""#));
+        assert!(output.contains(r#"route="api""#));
+        assert!(output.contains(r#"outcome="waited""#));
+        assert!(output.contains(r#"outcome="timeout""#));
+        assert!(output.contains(r#"outcome="other""#));
+        assert!(!output.contains("attacker-outcome"));
     }
 
     #[test]
