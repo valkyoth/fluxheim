@@ -562,6 +562,11 @@ fn parses_proxy_upstream_pool() {
             ttl_secs = 600
             table_max_entries = 4096
 
+            [proxy.load_balance.queue]
+            max_waiting = 32
+            timeout_ms = 250
+            retry_interval_ms = 5
+
             [[proxy.error_pages]]
             status = 502
             path = "/502.html"
@@ -735,6 +740,9 @@ fn parses_proxy_upstream_pool() {
         config.proxy.load_balance.persistence.table_max_entries,
         4096
     );
+    assert_eq!(config.proxy.load_balance.queue.max_waiting, 32);
+    assert_eq!(config.proxy.load_balance.queue.timeout_ms, 250);
+    assert_eq!(config.proxy.load_balance.queue.retry_interval_ms, 5);
     config.validate().unwrap();
 }
 
@@ -2617,6 +2625,47 @@ fn rejects_invalid_load_balance_all_down_status() {
 
     assert!(matches!(
         config.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
+}
+
+#[test]
+fn rejects_invalid_load_balance_queue_policy() {
+    let waiting_without_timeout: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.queue]
+            max_waiting = 10
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        waiting_without_timeout.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
+
+    let timeout_without_waiting: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.queue]
+            timeout_ms = 100
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        timeout_without_waiting.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
+
+    let invalid_retry_interval: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.queue]
+            max_waiting = 10
+            timeout_ms = 100
+            retry_interval_ms = 0
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        invalid_retry_interval.validate(),
         Err(ConfigError::InvalidLoadBalanceSelection { .. })
     ));
 }

@@ -39,6 +39,8 @@ behavior when the change improves security or project direction.
   preferred backend is selectable.
 - Add static per-upstream `upstream_max_in_flight` caps so saturated members
   are skipped consistently across load-balancing selectors.
+- Add opt-in bounded load-balancer queue policy so saturated pools can wait
+  briefly for capacity before returning the configured all-down status.
 - Add static `disabled_upstreams` so configured members can be kept in the pool
   definition while being administratively removed from selection and reported
   distinctly from drained members; disabled members also show as not ready in

@@ -104,3 +104,8 @@ statuses = [500, 502, 503]
 status_ranges = [{ start = 520, end = 529 }]
 budget_per_window = 1000
 budget_window_secs = 1
+
+[proxy.load_balance.queue]
+max_waiting = 512
+timeout_ms = 250
+retry_interval_ms = 10

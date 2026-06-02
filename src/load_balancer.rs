@@ -33,8 +33,8 @@ use serde::Serialize;
 use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
     LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig,
-    LoadBalancePersistenceMode, LoadBalanceRetryConfig, LoadBalanceSelection,
-    LoadBalanceSlowStartConfig, ProxyConfig,
+    LoadBalancePersistenceMode, LoadBalanceQueueConfig, LoadBalanceRetryConfig,
+    LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
 };
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
@@ -52,6 +52,8 @@ pub struct UpstreamLoadBalancer {
     passive_health_policy: LoadBalancePassiveHealthConfig,
     slow_start_policy: LoadBalanceSlowStartConfig,
     persistence_policy: LoadBalancePersistenceConfig,
+    queue_policy: LoadBalanceQueueConfig,
+    queue_waiting: Arc<AtomicUsize>,
     counters: Arc<BackendConnectionCounters>,
     backend_policy: BackendSelectionPolicy,
     max_iterations: usize,
@@ -168,6 +170,7 @@ pub struct LoadBalancerPoolRuntimeStats {
     pub passive_health: LoadBalancePassiveHealthConfig,
     pub slow_start: LoadBalanceSlowStartConfig,
     pub persistence: LoadBalancerPersistenceRuntimeStats,
+    pub queue: LoadBalancerQueueRuntimeStats,
     pub retry: LoadBalancerRetryRuntimeStats,
     pub backends: Vec<LoadBalancerBackendRuntimeStats>,
 }
@@ -192,6 +195,15 @@ pub struct LoadBalancerPersistenceRuntimeStats {
     pub ttl_secs: u64,
     pub table_max_entries: usize,
     pub entry_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct LoadBalancerQueueRuntimeStats {
+    pub enabled: bool,
+    pub max_waiting: usize,
+    pub timeout_ms: u64,
+    pub retry_interval_ms: u64,
+    pub waiting: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -224,6 +236,11 @@ pub struct LoadBalancedConnectionPermit {
     counter: Arc<AtomicUsize>,
 }
 
+#[derive(Debug)]
+struct LoadBalancerQueueSlot {
+    waiting: Arc<AtomicUsize>,
+}
+
 #[derive(Clone)]
 pub struct LoadBalancedUpstreamReporter {
     backend_key: u64,
@@ -244,6 +261,12 @@ impl Debug for LoadBalancedUpstreamReporter {
 impl Drop for LoadBalancedConnectionPermit {
     fn drop(&mut self) {
         self.counter.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl Drop for LoadBalancerQueueSlot {
+    fn drop(&mut self) {
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -430,6 +453,57 @@ impl UpstreamLoadBalancer {
         )
     }
 
+    pub async fn select_or_wait(
+        &self,
+        request: &RequestHeader,
+        client_ip: Option<IpAddr>,
+    ) -> Option<SelectedUpstream> {
+        if let Some(selected) = self.select(request, client_ip) {
+            return Some(selected);
+        }
+        if !self.queue_policy.enabled() {
+            return None;
+        }
+        let _slot = self.acquire_queue_slot()?;
+        let deadline = Instant::now() + Duration::from_millis(self.queue_policy.timeout_ms);
+        loop {
+            if let Some(selected) = self.select(request, client_ip) {
+                return Some(selected);
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return None;
+            }
+            let sleep_for = deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(self.queue_policy.retry_interval_ms));
+            tokio::time::sleep(sleep_for).await;
+        }
+    }
+
+    fn acquire_queue_slot(&self) -> Option<LoadBalancerQueueSlot> {
+        let max_waiting = self.queue_policy.max_waiting;
+        let mut current = self.queue_waiting.load(Ordering::Acquire);
+        loop {
+            if current >= max_waiting {
+                return None;
+            }
+            match self.queue_waiting.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(LoadBalancerQueueSlot {
+                        waiting: self.queue_waiting.clone(),
+                    });
+                }
+                Err(next) => current = next,
+            }
+        }
+    }
+
     fn select_fresh(
         &self,
         request: &RequestHeader,
@@ -536,6 +610,8 @@ impl UpstreamLoadBalancer {
             passive_health_policy: config.load_balance.passive_health.clone(),
             slow_start_policy: config.load_balance.slow_start.clone(),
             persistence_policy: config.load_balance.persistence.clone(),
+            queue_policy: config.load_balance.queue.clone(),
+            queue_waiting: Arc::new(AtomicUsize::new(0)),
             counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
             max_iterations: config.load_balance.max_iterations,
@@ -648,6 +724,13 @@ impl UpstreamLoadBalancer {
                 ttl_secs: self.persistence_policy.ttl_secs,
                 table_max_entries: self.persistence_policy.table_max_entries,
                 entry_count: persistence_entry_count,
+            },
+            queue: LoadBalancerQueueRuntimeStats {
+                enabled: self.queue_policy.enabled(),
+                max_waiting: self.queue_policy.max_waiting,
+                timeout_ms: self.queue_policy.timeout_ms,
+                retry_interval_ms: self.queue_policy.retry_interval_ms,
+                waiting: self.queue_waiting.load(Ordering::Acquire),
             },
             retry: self.retry.clone(),
             backends,
@@ -2933,7 +3016,7 @@ mod tests {
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
         LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol,
         LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
-        LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+        LoadBalanceQueueConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
 
     use super::{
@@ -3619,6 +3702,49 @@ mod tests {
 
         let fourth = balancer.select(&request(), None).unwrap();
         assert_eq!(fourth.backend.addr.to_string(), "127.0.0.1:3000");
+    }
+
+    #[tokio::test]
+    async fn load_balancer_queue_waits_for_saturated_pool_capacity() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_max_in_flight: vec![1, 1],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                queue: LoadBalanceQueueConfig {
+                    max_waiting: 1,
+                    timeout_ms: 250,
+                    retry_interval_ms: 5,
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let held_a = balancer.select(&request(), None).unwrap();
+        let held_b = balancer.select(&request(), None).unwrap();
+        assert!(balancer.select(&request(), None).is_none());
+        assert!(balancer.runtime_stats().queue.enabled);
+
+        let request = request();
+        let (selected, _) = tokio::join!(
+            async { balancer.select_or_wait(&request, None).await },
+            async {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                drop(held_a);
+                drop(held_b);
+            }
+        );
+
+        let selected = selected.expect("queued selection should complete");
+        assert!(
+            selected.backend.addr.to_string() == "127.0.0.1:3000"
+                || selected.backend.addr.to_string() == "127.0.0.1:3001"
+        );
+        assert_eq!(balancer.runtime_stats().queue.waiting, 0);
     }
 
     #[test]

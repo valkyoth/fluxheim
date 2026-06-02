@@ -4237,10 +4237,12 @@ impl ProxyHttp for FluxProxy {
 
         #[cfg(feature = "load-balancer")]
         if let Some(load_balancer) = selected_upstream_load_balancer(vhost, ctx)
-            && let Some(selected) = load_balancer.select(
-                session.req_header(),
-                effective_acl_client_ip(session, &state),
-            )
+            && let Some(selected) = load_balancer
+                .select_or_wait(
+                    session.req_header(),
+                    effective_acl_client_ip(session, &state),
+                )
+                .await
         {
             ctx.upstream_load_balancer_alias = selected.alias.clone();
             #[cfg(feature = "metrics")]

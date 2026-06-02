@@ -312,10 +312,11 @@ counts, drain/disabled/forced-down/ejected/saturated summary counts, runtime
 override counts, circuit-open counts, selection policy, max-iteration and
 all-down settings, health-check frequency and parallel mode, retry policy,
 passive-health thresholds, slow-start duration, persistence policy and table
-size, priority group, max in-flight cap, current in-flight count, passive
-failure count, passive ejection, passive ejection remaining seconds, circuit
-state, slow-start allowance, persistence entries currently pinned to each
-backend, and least-time latency state where available. In
+size, queue policy and current waiting count, priority group, locality, max
+in-flight cap, current in-flight count, passive failure count, passive ejection,
+passive ejection remaining seconds, circuit state, slow-start allowance,
+persistence entries currently pinned to each backend, and least-time latency
+state where available. In
 `1.5.0`, `circuit_state = "open"` is the runtime status view for a backend
 currently ejected by passive health; `"closed"` means the backend is not
 passively ejected. Per-backend rows include `runtime_state_override` when an
@@ -849,6 +850,11 @@ status_ranges = []
 budget_per_window = 0
 budget_window_secs = 1
 
+[proxy.load_balance.queue]
+max_waiting = 0
+timeout_ms = 0
+retry_interval_ms = 10
+
 [proxy.load_balance.persistence]
 enabled = false
 mode = "source-ip"
@@ -1070,6 +1076,14 @@ Empty `statuses` and `status_ranges` keep response-status retries disabled.
 `budget_window_secs` to cap total redispatch attempts for this vhost or route
 over a moving window. Fluxheim does not retry after response streaming has
 started.
+`proxy.load_balance.queue` is disabled by default. Set both `max_waiting` and
+`timeout_ms` to let a bounded number of requests wait briefly when no backend is
+selectable, for example because every member is at its per-upstream
+`upstream_max_in_flight` cap. `max_waiting = 0` and `timeout_ms = 0` preserve
+the default immediate `all_down_status` behavior. When enabled, `max_waiting`
+is capped at 100000, `timeout_ms` at 60000, and `retry_interval_ms` must be 1
+through 1000. Waiting requests occupy only the load-balancer queue counter; no
+upstream permit is held until a backend becomes selectable.
 `proxy.load_balance.persistence.enabled = true` enables a bounded local
 persistence table. `mode = "source-ip"` maps a client IP to the selected
 backend for `ttl_secs`; `mode = "header"` maps the configured request `header`
