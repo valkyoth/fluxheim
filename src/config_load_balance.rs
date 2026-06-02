@@ -9,6 +9,8 @@ use crate::config_net::normalize_host;
 pub(crate) const LB_SAFE_RETRY_METHODS: &[&str] = &["GET", "HEAD", "OPTIONS", "TRACE"];
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRINGS: usize = 8;
 const LB_HEALTH_CHECK_MAX_EXPECTED_BODY_SUBSTRING_BYTES: usize = 1024;
+const MIN_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 1000;
+const MAX_BOUNDED_LOAD_FACTOR_PER_MILLE: u16 = 10000;
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +25,8 @@ pub struct LoadBalanceConfig {
     pub max_iterations: usize,
     #[serde(default = "default_lb_all_down_status")]
     pub all_down_status: u16,
+    #[serde(default = "default_bounded_load_factor_per_mille")]
+    pub bounded_load_factor_per_mille: u16,
     #[serde(default)]
     pub health_check: LoadBalanceHealthCheckConfig,
     #[serde(default)]
@@ -45,6 +49,7 @@ impl Default for LoadBalanceConfig {
             hash_cookie: None,
             max_iterations: default_lb_max_iterations(),
             all_down_status: default_lb_all_down_status(),
+            bounded_load_factor_per_mille: default_bounded_load_factor_per_mille(),
             health_check: LoadBalanceHealthCheckConfig::default(),
             passive_health: LoadBalancePassiveHealthConfig::default(),
             slow_start: LoadBalanceSlowStartConfig::default(),
@@ -103,6 +108,20 @@ impl LoadBalanceConfig {
                 reason: "proxy.load_balance.all_down_status must be an HTTP 5xx status",
             });
         }
+        if !(MIN_BOUNDED_LOAD_FACTOR_PER_MILLE..=MAX_BOUNDED_LOAD_FACTOR_PER_MILLE)
+            .contains(&self.bounded_load_factor_per_mille)
+        {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.bounded_load_factor_per_mille must be between 1000 and 10000",
+            });
+        }
+        if self.bounded_load_factor_per_mille != default_bounded_load_factor_per_mille()
+            && !self.selection.uses_bounded_load()
+        {
+            return Err(ConfigError::InvalidLoadBalanceSelection {
+                reason: "proxy.load_balance.bounded_load_factor_per_mille can only be used with bounded-load consistent-hash selections",
+            });
+        }
 
         self.health_check.validate()?;
         self.passive_health.validate()?;
@@ -142,6 +161,10 @@ pub enum LoadBalanceSelection {
     ConsistentUriHash,
     ConsistentHeaderHash,
     ConsistentCookieHash,
+    BoundedLoadConsistentSourceHash,
+    BoundedLoadConsistentUriHash,
+    BoundedLoadConsistentHeaderHash,
+    BoundedLoadConsistentCookieHash,
     #[serde(alias = "maglev", alias = "maglev-hash")]
     MaglevSourceHash,
     MaglevUriHash,
@@ -153,14 +176,30 @@ impl LoadBalanceSelection {
     pub(crate) fn requires_hash_header(self) -> bool {
         matches!(
             self,
-            Self::HeaderHash | Self::ConsistentHeaderHash | Self::MaglevHeaderHash
+            Self::HeaderHash
+                | Self::ConsistentHeaderHash
+                | Self::BoundedLoadConsistentHeaderHash
+                | Self::MaglevHeaderHash
         )
     }
 
     pub(crate) fn requires_hash_cookie(self) -> bool {
         matches!(
             self,
-            Self::CookieHash | Self::ConsistentCookieHash | Self::MaglevCookieHash
+            Self::CookieHash
+                | Self::ConsistentCookieHash
+                | Self::BoundedLoadConsistentCookieHash
+                | Self::MaglevCookieHash
+        )
+    }
+
+    pub(crate) fn uses_bounded_load(self) -> bool {
+        matches!(
+            self,
+            Self::BoundedLoadConsistentSourceHash
+                | Self::BoundedLoadConsistentUriHash
+                | Self::BoundedLoadConsistentHeaderHash
+                | Self::BoundedLoadConsistentCookieHash
         )
     }
 
@@ -813,6 +852,10 @@ fn default_lb_max_iterations() -> usize {
 
 fn default_lb_all_down_status() -> u16 {
     502
+}
+
+pub(crate) fn default_bounded_load_factor_per_mille() -> u16 {
+    1250
 }
 
 fn default_lb_health_check_interval_secs() -> u64 {

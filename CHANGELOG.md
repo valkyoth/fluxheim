@@ -30,6 +30,12 @@ behavior when the change improves security or project direction.
   in-flight request counts for latency-sensitive application pools.
 - Make the `power-of-two` / `weighted-random-two-choice` selector compare
   weighted in-flight pressure after Pingora's weighted random sampling.
+- Add bounded-load consistent-hash selections
+  (`bounded-load-consistent-source-hash`,
+  `bounded-load-consistent-uri-hash`,
+  `bounded-load-consistent-header-hash`, and
+  `bounded-load-consistent-cookie-hash`) so hash-persistent pools can skip an
+  overloaded hash target before falling back to normal consistent selection.
 - Add static `upstream_priority_groups` for F5-style preferred/fallback
   selection across configured static upstream pools.
 - Add `upstream_priority_group_min_active` so lower priority groups activate

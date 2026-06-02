@@ -1684,6 +1684,18 @@ fn load_balancer_selection_label(selection: crate::config::LoadBalanceSelection)
         crate::config::LoadBalanceSelection::ConsistentUriHash => "consistent_uri_hash",
         crate::config::LoadBalanceSelection::ConsistentHeaderHash => "consistent_header_hash",
         crate::config::LoadBalanceSelection::ConsistentCookieHash => "consistent_cookie_hash",
+        crate::config::LoadBalanceSelection::BoundedLoadConsistentSourceHash => {
+            "bounded_load_consistent_source_hash"
+        }
+        crate::config::LoadBalanceSelection::BoundedLoadConsistentUriHash => {
+            "bounded_load_consistent_uri_hash"
+        }
+        crate::config::LoadBalanceSelection::BoundedLoadConsistentHeaderHash => {
+            "bounded_load_consistent_header_hash"
+        }
+        crate::config::LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
+            "bounded_load_consistent_cookie_hash"
+        }
         crate::config::LoadBalanceSelection::MaglevSourceHash => "maglev_source_hash",
         crate::config::LoadBalanceSelection::MaglevUriHash => "maglev_uri_hash",
         crate::config::LoadBalanceSelection::MaglevHeaderHash => "maglev_header_hash",
@@ -2395,6 +2407,30 @@ mod tests {
 
     #[test]
     fn load_balancer_selection_labels_include_maglev_variants() {
+        assert_eq!(
+            load_balancer_selection_label(
+                crate::config::LoadBalanceSelection::BoundedLoadConsistentSourceHash
+            ),
+            "bounded_load_consistent_source_hash"
+        );
+        assert_eq!(
+            load_balancer_selection_label(
+                crate::config::LoadBalanceSelection::BoundedLoadConsistentUriHash
+            ),
+            "bounded_load_consistent_uri_hash"
+        );
+        assert_eq!(
+            load_balancer_selection_label(
+                crate::config::LoadBalanceSelection::BoundedLoadConsistentHeaderHash
+            ),
+            "bounded_load_consistent_header_hash"
+        );
+        assert_eq!(
+            load_balancer_selection_label(
+                crate::config::LoadBalanceSelection::BoundedLoadConsistentCookieHash
+            ),
+            "bounded_load_consistent_cookie_hash"
+        );
         assert_eq!(
             load_balancer_selection_label(crate::config::LoadBalanceSelection::MaglevSourceHash),
             "maglev_source_hash"

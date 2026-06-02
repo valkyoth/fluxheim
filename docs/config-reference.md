@@ -1017,16 +1017,26 @@ and at least one upstream must remain a normal primary.
 `ratio-least-connections`, `least-sessions`, `least-time`, `power-of-two`,
 `source-hash`, `uri-hash`, `header-hash`, `cookie-hash`, `consistent-source-hash`,
 `consistent-uri-hash`, `consistent-header-hash`, and
-`consistent-cookie-hash`, plus static-pool Maglev modes `maglev` /
-`maglev-source-hash`, `maglev-uri-hash`, `maglev-header-hash`, and
-`maglev-cookie-hash`. Header-hash modes require
+`consistent-cookie-hash`, bounded-load consistent modes
+`bounded-load-consistent-source-hash`,
+`bounded-load-consistent-uri-hash`,
+`bounded-load-consistent-header-hash`, and
+`bounded-load-consistent-cookie-hash`, plus static-pool Maglev modes
+`maglev` / `maglev-source-hash`, `maglev-uri-hash`,
+`maglev-header-hash`, and `maglev-cookie-hash`. Header-hash modes require
 `proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
 name. Cookie-hash modes require `proxy.load_balance.hash_cookie = "session"` or
 another valid cookie name. Hash modes use weighted FNV selection; consistent
 modes use Pingora's weighted Ketama ring for lower remapping when upstream
-membership changes. Maglev modes use a fixed 65,537-slot bounded lookup table
-for static `proxy.upstreams` pools only; file-refreshed and DNS-refreshed pools
-reject Maglev until dynamic table rebuild semantics are promoted later.
+membership changes. Bounded-load consistent modes use the same ring and skip a
+hash target whose weighted in-flight pressure is above the configured soft
+bound when another eligible candidate is available inside `max_iterations`;
+they fall back to normal consistent selection if no bounded candidate is found.
+`bounded_load_factor_per_mille` defaults to `1250`, meaning roughly 125% of
+current weighted average load, and is valid only with bounded-load consistent
+selectors. Maglev modes use a fixed 65,537-slot bounded lookup table for static
+`proxy.upstreams` pools only; file-refreshed and DNS-refreshed pools reject
+Maglev until dynamic table rebuild semantics are promoted later.
 `max_iterations` bounds how many ready candidates Pingora or Fluxheim may
 inspect while applying health, drain, slow-start, backup, priority, and
 in-flight policies. `all_down_status` defaults to `502` and may be set to

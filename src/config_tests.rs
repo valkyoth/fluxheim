@@ -2648,6 +2648,43 @@ fn validates_load_balance_hash_selection() {
     .unwrap();
     least_time.validate().unwrap();
 
+    let bounded_load_consistent_uri: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "bounded-load-consistent-uri-hash"
+            bounded_load_factor_per_mille = 1500
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        bounded_load_consistent_uri.proxy.load_balance.selection,
+        LoadBalanceSelection::BoundedLoadConsistentUriHash
+    );
+    bounded_load_consistent_uri.validate().unwrap();
+
+    let bounded_load_consistent_header: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "bounded-load-consistent-header-hash"
+            hash_header = "x-session"
+            "#,
+    )
+    .unwrap();
+    bounded_load_consistent_header.validate().unwrap();
+
+    let invalid_bounded_load_factor: Config = toml::from_str(
+        r#"
+            [proxy.load_balance]
+            selection = "round-robin"
+            bounded_load_factor_per_mille = 1500
+            "#,
+    )
+    .unwrap();
+    assert!(matches!(
+        invalid_bounded_load_factor.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+    ));
+
     let maglev_alias: Config = toml::from_str(
         r#"
             [proxy.load_balance]

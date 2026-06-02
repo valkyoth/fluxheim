@@ -379,6 +379,21 @@ impl UpstreamLoadBalancer {
                     config,
                 )))
             }
+            LoadBalanceSelection::BoundedLoadConsistentSourceHash
+            | LoadBalanceSelection::BoundedLoadConsistentUriHash
+            | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
+            | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
+                let Some(inner) = configured_load_balancer::<Consistent>(config)? else {
+                    return Ok(None);
+                };
+                Ok(Some(Self::from_inner(
+                    UpstreamLoadBalancerInner::BoundedLoadConsistentHash {
+                        inner: Arc::new(inner),
+                        factor_per_mille: config.load_balance.bounded_load_factor_per_mille,
+                    },
+                    config,
+                )))
+            }
             LoadBalanceSelection::MaglevSourceHash
             | LoadBalanceSelection::MaglevUriHash
             | LoadBalanceSelection::MaglevHeaderHash
@@ -403,23 +418,23 @@ impl UpstreamLoadBalancer {
         config: &ProxyConfig,
     ) -> io::Result<Option<(Self, UpstreamLoadBalancerService)>> {
         match config.load_balance.selection {
-            LoadBalanceSelection::RoundRobin => background_service_for::<RoundRobin>(
+            LoadBalanceSelection::RoundRobin => background_service_for::<RoundRobin, _>(
                 name,
                 config,
                 UpstreamLoadBalancerInner::RoundRobin,
             ),
             LoadBalanceSelection::LeastConnections => {
-                background_service_for::<RoundRobin>(name, config, |inner| {
+                background_service_for::<RoundRobin, _>(name, config, |inner| {
                     UpstreamLoadBalancerInner::LeastConnections(inner)
                 })
             }
             LoadBalanceSelection::LeastSessions => {
-                background_service_for::<RoundRobin>(name, config, |inner| {
+                background_service_for::<RoundRobin, _>(name, config, |inner| {
                     UpstreamLoadBalancerInner::LeastSessions(inner)
                 })
             }
             LoadBalanceSelection::LeastTime => {
-                background_service_for::<RoundRobin>(name, config, |inner| {
+                background_service_for::<RoundRobin, _>(name, config, |inner| {
                     UpstreamLoadBalancerInner::LeastTime {
                         inner,
                         latency: Arc::new(BackendLatencyState::default()),
@@ -427,24 +442,40 @@ impl UpstreamLoadBalancer {
                 })
             }
             LoadBalanceSelection::PowerOfTwo => {
-                background_service_for::<Random>(name, config, |inner| {
+                background_service_for::<Random, _>(name, config, |inner| {
                     UpstreamLoadBalancerInner::PowerOfTwo(inner)
                 })
             }
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
-            | LoadBalanceSelection::CookieHash => {
-                background_service_for::<FNVHash>(name, config, UpstreamLoadBalancerInner::FnvHash)
-            }
+            | LoadBalanceSelection::CookieHash => background_service_for::<FNVHash, _>(
+                name,
+                config,
+                UpstreamLoadBalancerInner::FnvHash,
+            ),
             LoadBalanceSelection::ConsistentSourceHash
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::ConsistentHeaderHash
-            | LoadBalanceSelection::ConsistentCookieHash => background_service_for::<Consistent>(
-                name,
-                config,
-                UpstreamLoadBalancerInner::ConsistentHash,
-            ),
+            | LoadBalanceSelection::ConsistentCookieHash => {
+                background_service_for::<Consistent, _>(
+                    name,
+                    config,
+                    UpstreamLoadBalancerInner::ConsistentHash,
+                )
+            }
+            LoadBalanceSelection::BoundedLoadConsistentSourceHash
+            | LoadBalanceSelection::BoundedLoadConsistentUriHash
+            | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
+            | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
+                let factor_per_mille = config.load_balance.bounded_load_factor_per_mille;
+                background_service_for::<Consistent, _>(name, config, move |inner| {
+                    UpstreamLoadBalancerInner::BoundedLoadConsistentHash {
+                        inner,
+                        factor_per_mille,
+                    }
+                })
+            }
             LoadBalanceSelection::MaglevSourceHash
             | LoadBalanceSelection::MaglevUriHash
             | LoadBalanceSelection::MaglevHeaderHash
@@ -929,6 +960,10 @@ enum UpstreamLoadBalancerInner {
     PowerOfTwo(Arc<LoadBalancer<Random>>),
     FnvHash(Arc<LoadBalancer<FNVHash>>),
     ConsistentHash(Arc<LoadBalancer<Consistent>>),
+    BoundedLoadConsistentHash {
+        inner: Arc<LoadBalancer<Consistent>>,
+        factor_per_mille: u16,
+    },
     MaglevHash {
         inner: Arc<LoadBalancer<RoundRobin>>,
         table: Arc<MaglevTable>,
@@ -1010,6 +1045,10 @@ impl UpstreamLoadBalancerInner {
                 inputs.backend_policy,
             )
             .map(SelectedUpstream::new),
+            Self::BoundedLoadConsistentHash {
+                inner,
+                factor_per_mille,
+            } => select_bounded_load_consistent(inner, *factor_per_mille, inputs),
             Self::MaglevHash { inner, table } => select_maglev(inner, table, inputs),
         }
     }
@@ -1023,6 +1062,7 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => inner.backends().get_backend().len(),
             Self::FnvHash(inner) => inner.backends().get_backend().len(),
             Self::ConsistentHash(inner) => inner.backends().get_backend().len(),
+            Self::BoundedLoadConsistentHash { inner, .. } => inner.backends().get_backend().len(),
             Self::MaglevHash { inner, .. } => inner.backends().get_backend().len(),
         }
     }
@@ -1055,6 +1095,9 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => load_balancer_backend_stats(inner, inputs),
             Self::FnvHash(inner) => load_balancer_backend_stats(inner, inputs),
             Self::ConsistentHash(inner) => load_balancer_backend_stats(inner, inputs),
+            Self::BoundedLoadConsistentHash { inner, .. } => {
+                load_balancer_backend_stats(inner, inputs)
+            }
             Self::MaglevHash { inner, .. } => load_balancer_backend_stats(inner, inputs),
         }
     }
@@ -1069,6 +1112,7 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => backend_weights(inner),
             Self::FnvHash(inner) => backend_weights(inner),
             Self::ConsistentHash(inner) => backend_weights(inner),
+            Self::BoundedLoadConsistentHash { inner, .. } => backend_weights(inner),
             Self::MaglevHash { inner, .. } => backend_weights(inner),
         }
     }
@@ -1082,6 +1126,7 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => inner.health_check_frequency,
             Self::FnvHash(inner) => inner.health_check_frequency,
             Self::ConsistentHash(inner) => inner.health_check_frequency,
+            Self::BoundedLoadConsistentHash { inner, .. } => inner.health_check_frequency,
             Self::MaglevHash { inner, .. } => inner.health_check_frequency,
         }
     }
@@ -1095,6 +1140,7 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => inner.parallel_health_check,
             Self::FnvHash(inner) => inner.parallel_health_check,
             Self::ConsistentHash(inner) => inner.parallel_health_check,
+            Self::BoundedLoadConsistentHash { inner, .. } => inner.parallel_health_check,
             Self::MaglevHash { inner, .. } => inner.parallel_health_check,
         }
     }
@@ -1108,6 +1154,7 @@ impl UpstreamLoadBalancerInner {
             | Self::PowerOfTwo(_)
             | Self::FnvHash(_)
             | Self::ConsistentHash(_)
+            | Self::BoundedLoadConsistentHash { .. }
             | Self::MaglevHash { .. } => None,
         }
     }
@@ -1122,6 +1169,9 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => inner.backends().run_health_check(parallel).await,
             Self::FnvHash(inner) => inner.backends().run_health_check(parallel).await,
             Self::ConsistentHash(inner) => inner.backends().run_health_check(parallel).await,
+            Self::BoundedLoadConsistentHash { inner, .. } => {
+                inner.backends().run_health_check(parallel).await
+            }
             Self::MaglevHash { inner, .. } => inner.backends().run_health_check(parallel).await,
         }
     }
@@ -1177,6 +1227,7 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => inner.backends().ready(backend),
             Self::FnvHash(inner) => inner.backends().ready(backend),
             Self::ConsistentHash(inner) => inner.backends().ready(backend),
+            Self::BoundedLoadConsistentHash { inner, .. } => inner.backends().ready(backend),
             Self::MaglevHash { inner, .. } => inner.backends().ready(backend),
         }
     }
@@ -1194,6 +1245,9 @@ impl UpstreamLoadBalancerInner {
             Self::PowerOfTwo(inner) => inner.backends().get_backend().iter().cloned().collect(),
             Self::FnvHash(inner) => inner.backends().get_backend().iter().cloned().collect(),
             Self::ConsistentHash(inner) => inner.backends().get_backend().iter().cloned().collect(),
+            Self::BoundedLoadConsistentHash { inner, .. } => {
+                inner.backends().get_backend().iter().cloned().collect()
+            }
             Self::MaglevHash { inner, .. } => {
                 inner.backends().get_backend().iter().cloned().collect()
             }
@@ -2572,6 +2626,119 @@ fn select_power_of_two(
     })
 }
 
+fn select_bounded_load_consistent(
+    inner: &LoadBalancer<Consistent>,
+    factor_per_mille: u16,
+    inputs: LoadBalancerSelectInputs<'_>,
+) -> Option<SelectedUpstream> {
+    let context = SelectionContext {
+        passive_health: inputs.passive_health,
+        slow_start: inputs.slow_start,
+        counters: inputs.counters,
+        backend_policy: inputs.backend_policy,
+    };
+    for pass in selection_passes(inputs.backend_policy) {
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(backend) = select_bounded_load_consistent_with_backup_policy(
+            inner,
+            inputs.key.unwrap_or_default(),
+            inputs.max_iterations,
+            context,
+            pass,
+            factor_per_mille,
+        ) {
+            return Some(SelectedUpstream::new(backend));
+        }
+    }
+    None
+}
+
+fn select_bounded_load_consistent_with_backup_policy(
+    inner: &LoadBalancer<Consistent>,
+    key: &[u8],
+    max_iterations: usize,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+    factor_per_mille: u16,
+) -> Option<Backend> {
+    let Some(bound) = bounded_load_snapshot(inner, context, pass, factor_per_mille) else {
+        return select_pingora_with_backup_policy(inner, key, max_iterations, context, pass);
+    };
+    let bounded = inner.select_with(key, max_iterations, |backend, ready| {
+        ready
+            && context
+                .backend_policy
+                .permits(backend, pass, context.counters)
+            && context
+                .passive_health
+                .is_none_or(|health| !health.is_ejected(backend))
+            && (pass.ignore_slow_start
+                || context
+                    .slow_start
+                    .is_none_or(|state| state.permits(backend)))
+            && bounded_load_permits(backend, context.counters, &bound)
+    });
+    bounded.or_else(|| select_pingora_with_backup_policy(inner, key, max_iterations, context, pass))
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BoundedLoadSnapshot {
+    total_connections: usize,
+    total_weight: usize,
+    factor_per_mille: u16,
+}
+
+fn bounded_load_snapshot(
+    inner: &LoadBalancer<Consistent>,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+    factor_per_mille: u16,
+) -> Option<BoundedLoadSnapshot> {
+    let mut total_connections = 0usize;
+    let mut total_weight = 0usize;
+    for backend in inner.backends().get_backend().iter() {
+        if !inner.backends().ready(backend)
+            || !context
+                .backend_policy
+                .permits(backend, pass, context.counters)
+            || context
+                .passive_health
+                .is_some_and(|health| health.is_ejected(backend))
+            || (!pass.ignore_slow_start
+                && context
+                    .slow_start
+                    .is_some_and(|state| !state.permits(backend)))
+        {
+            continue;
+        }
+        total_connections = total_connections.saturating_add(context.counters.count(backend));
+        total_weight = total_weight.saturating_add(backend.weight.max(1));
+    }
+    (total_weight > 0 && total_connections > 0).then_some(BoundedLoadSnapshot {
+        total_connections,
+        total_weight,
+        factor_per_mille,
+    })
+}
+
+fn bounded_load_permits(
+    backend: &Backend,
+    counters: &BackendConnectionCounters,
+    bound: &BoundedLoadSnapshot,
+) -> bool {
+    let candidate_connections = counters.count(backend) as u128;
+    let candidate_weight = backend.weight.max(1) as u128;
+    let left = candidate_connections
+        .saturating_mul(bound.total_weight as u128)
+        .saturating_mul(1000);
+    let right = (bound.total_connections as u128)
+        .saturating_mul(candidate_weight)
+        .saturating_mul(u128::from(bound.factor_per_mille));
+    left <= right
+}
+
 #[derive(Clone, Debug)]
 struct MaglevTable {
     slots: Vec<u64>,
@@ -2708,12 +2875,15 @@ impl LoadBalanceKeySource {
             LoadBalanceSelection::PowerOfTwo => Self::None,
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::ConsistentSourceHash
+            | LoadBalanceSelection::BoundedLoadConsistentSourceHash
             | LoadBalanceSelection::MaglevSourceHash => Self::SourceIp,
             LoadBalanceSelection::UriHash
             | LoadBalanceSelection::ConsistentUriHash
+            | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::MaglevUriHash => Self::Uri,
             LoadBalanceSelection::HeaderHash
             | LoadBalanceSelection::ConsistentHeaderHash
+            | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
             | LoadBalanceSelection::MaglevHeaderHash => config
                 .load_balance
                 .hash_header
@@ -2722,6 +2892,7 @@ impl LoadBalanceKeySource {
                 .unwrap_or(Self::None),
             LoadBalanceSelection::CookieHash
             | LoadBalanceSelection::ConsistentCookieHash
+            | LoadBalanceSelection::BoundedLoadConsistentCookieHash
             | LoadBalanceSelection::MaglevCookieHash => config
                 .load_balance
                 .hash_cookie
@@ -3200,15 +3371,16 @@ fn validate_http_health_response_body(
     Ok(())
 }
 
-fn background_service_for<S>(
+fn background_service_for<S, F>(
     name: &str,
     config: &ProxyConfig,
-    wrap: fn(Arc<LoadBalancer<S>>) -> UpstreamLoadBalancerInner,
+    wrap: F,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>>
 where
     S: BackendSelection + Send + Sync + 'static,
     S::Iter: BackendIter,
     LoadBalancer<S>: BackgroundService,
+    F: FnOnce(Arc<LoadBalancer<S>>) -> UpstreamLoadBalancerInner,
 {
     let Some(inner) = configured_load_balancer::<S>(config)? else {
         return Ok(None);
@@ -3813,6 +3985,28 @@ mod tests {
                 .unwrap();
             assert_ne!(selected.backend.addr.to_string(), disabled);
         }
+    }
+
+    #[test]
+    fn bounded_load_consistent_hash_skips_over_bound_target() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::BoundedLoadConsistentUriHash,
+                bounded_load_factor_per_mille: 1000,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        let second = balancer.select(&request(), None).unwrap();
+
+        assert_ne!(first.backend.addr, second.backend.addr);
     }
 
     #[test]
