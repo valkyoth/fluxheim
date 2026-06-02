@@ -135,6 +135,20 @@ interval_secs = 1
 consecutive_success = 1
 consecutive_failure = 1
 parallel = true
+
+[[vhosts.routes]]
+name = "maglev"
+path_prefix = "/maglev/"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
+upstream_aliases = ["origin-one", "origin-two"]
+upstream_tls = false
+
+[vhosts.routes.proxy.load_balance]
+selection = "maglev-uri-hash"
+max_iterations = 256
+all_down_status = 503
 EOF
 
 wait_http() {
@@ -208,6 +222,23 @@ curl -fsS "http://127.0.0.1:$METRICS_PORT/metrics" > "$TMP_DIR/metrics-before-di
 if ! grep -q 'fluxheim_load_balancer_pools{scope="vhost",selection="round_robin"} 1' "$TMP_DIR/metrics-before-disable.txt"; then
     echo "load balancer metrics did not report configured round-robin vhost pool" >&2
     cat "$TMP_DIR/metrics-before-disable.txt" >&2
+    exit 1
+fi
+if ! grep -q 'fluxheim_load_balancer_pools{scope="route",selection="maglev_uri_hash"} 1' "$TMP_DIR/metrics-before-disable.txt"; then
+    echo "load balancer metrics did not report configured Maglev route pool" >&2
+    cat "$TMP_DIR/metrics-before-disable.txt" >&2
+    exit 1
+fi
+
+MAGLEV_RESPONSES="$TMP_DIR/maglev-responses.txt"
+: > "$MAGLEV_RESPONSES"
+for _ in 1 2 3 4 5 6; do
+    curl -fsS "http://127.0.0.1:$FLUXHEIM_PORT/maglev/stable-key" >> "$MAGLEV_RESPONSES"
+done
+
+if [ "$(sort -u "$MAGLEV_RESPONSES" | wc -l)" -ne 1 ]; then
+    echo "Maglev route did not keep the same URI pinned to one selected origin" >&2
+    cat "$MAGLEV_RESPONSES" >&2
     exit 1
 fi
 
