@@ -4236,31 +4236,36 @@ impl ProxyHttp for FluxProxy {
         }
 
         #[cfg(feature = "load-balancer")]
-        if let Some(load_balancer) = selected_upstream_load_balancer(vhost, ctx)
-            && let Some(selected) = load_balancer
-                .select_or_wait(
+        if let Some(load_balancer) = selected_upstream_load_balancer(vhost, ctx) {
+            let selection = load_balancer
+                .select_or_wait_result(
                     session.req_header(),
                     effective_acl_client_ip(session, &state),
                 )
-                .await
-        {
-            ctx.upstream_load_balancer_alias = selected.alias.clone();
+                .await;
             #[cfg(feature = "metrics")]
-            record_load_balancer_metric(vhost, ctx, "selected");
-            #[cfg(feature = "metrics")]
-            if let Some(outcome) = selected.persistence_outcome {
-                record_load_balancer_persistence_metric(vhost, ctx, outcome);
+            if let Some(outcome) = selection.queue_outcome {
+                record_load_balancer_metric(vhost, ctx, outcome.event());
             }
-            #[cfg(not(feature = "privacy-mode"))]
-            {
-                ctx.upstream = Some(selected.backend.addr.to_string());
+            if let Some(selected) = selection.selected {
+                ctx.upstream_load_balancer_alias = selected.alias.clone();
+                #[cfg(feature = "metrics")]
+                record_load_balancer_metric(vhost, ctx, "selected");
+                #[cfg(feature = "metrics")]
+                if let Some(outcome) = selected.persistence_outcome {
+                    record_load_balancer_persistence_metric(vhost, ctx, outcome);
+                }
+                #[cfg(not(feature = "privacy-mode"))]
+                {
+                    ctx.upstream = Some(selected.backend.addr.to_string());
+                }
+                ctx.upstream_load_balancer_permit = selected.permit;
+                ctx.upstream_load_balancer_reporter = selected.reporter;
+                ctx.upstream_load_balancer_selected_at = Some(Instant::now());
+                let mut peer = http_peer_for_runtime_proxy(selected.backend, proxy)?;
+                apply_upstream_proxy_protocol(&mut peer, &proxy.config, session, &state);
+                return Ok(Box::new(peer));
             }
-            ctx.upstream_load_balancer_permit = selected.permit;
-            ctx.upstream_load_balancer_reporter = selected.reporter;
-            ctx.upstream_load_balancer_selected_at = Some(Instant::now());
-            let mut peer = http_peer_for_runtime_proxy(selected.backend, proxy)?;
-            apply_upstream_proxy_protocol(&mut peer, &proxy.config, session, &state);
-            return Ok(Box::new(peer));
         }
         #[cfg(feature = "load-balancer")]
         if selected_upstream_load_balancer(vhost, ctx).is_some() {

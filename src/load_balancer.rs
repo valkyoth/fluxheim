@@ -69,6 +69,11 @@ pub struct SelectedUpstream {
     pub persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
 }
 
+pub struct LoadBalancerSelectionResult {
+    pub selected: Option<SelectedUpstream>,
+    pub queue_outcome: Option<LoadBalancerQueueOutcome>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LoadBalancerPersistenceOutcome {
     Hit,
@@ -82,6 +87,23 @@ impl LoadBalancerPersistenceOutcome {
             Self::Hit => "persistence_hit",
             Self::Miss => "persistence_miss",
             Self::Fallback => "persistence_fallback",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LoadBalancerQueueOutcome {
+    Waited,
+    Full,
+    Timeout,
+}
+
+impl LoadBalancerQueueOutcome {
+    pub fn event(self) -> &'static str {
+        match self {
+            Self::Waited => "queue_waited",
+            Self::Full => "queue_full",
+            Self::Timeout => "queue_timeout",
         }
     }
 }
@@ -459,21 +481,48 @@ impl UpstreamLoadBalancer {
         request: &RequestHeader,
         client_ip: Option<IpAddr>,
     ) -> Option<SelectedUpstream> {
+        self.select_or_wait_result(request, client_ip)
+            .await
+            .selected
+    }
+
+    pub async fn select_or_wait_result(
+        &self,
+        request: &RequestHeader,
+        client_ip: Option<IpAddr>,
+    ) -> LoadBalancerSelectionResult {
         if let Some(selected) = self.select(request, client_ip) {
-            return Some(selected);
+            return LoadBalancerSelectionResult {
+                selected: Some(selected),
+                queue_outcome: None,
+            };
         }
         if !self.queue_policy.enabled() {
-            return None;
+            return LoadBalancerSelectionResult {
+                selected: None,
+                queue_outcome: None,
+            };
         }
-        let _slot = self.acquire_queue_slot()?;
+        let Some(_slot) = self.acquire_queue_slot() else {
+            return LoadBalancerSelectionResult {
+                selected: None,
+                queue_outcome: Some(LoadBalancerQueueOutcome::Full),
+            };
+        };
         let deadline = Instant::now() + Duration::from_millis(self.queue_policy.timeout_ms);
         loop {
             if let Some(selected) = self.select(request, client_ip) {
-                return Some(selected);
+                return LoadBalancerSelectionResult {
+                    selected: Some(selected),
+                    queue_outcome: Some(LoadBalancerQueueOutcome::Waited),
+                };
             }
             let now = Instant::now();
             if now >= deadline {
-                return None;
+                return LoadBalancerSelectionResult {
+                    selected: None,
+                    queue_outcome: Some(LoadBalancerQueueOutcome::Timeout),
+                };
             }
             let sleep_for = deadline
                 .saturating_duration_since(now)
@@ -3047,9 +3096,10 @@ mod tests {
 
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
-        LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
-        backend_connection_key, configured_http_health_check, least_connections_score_is_lower,
-        validate_http_health_response, validate_http_health_response_body,
+        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, PassiveHealthState,
+        SlowStartState, UpstreamLoadBalancer, backend_connection_key, configured_http_health_check,
+        least_connections_score_is_lower, validate_http_health_response,
+        validate_http_health_response_body,
     };
     use crate::test_support::unique_temp_path;
 
@@ -3762,7 +3812,7 @@ mod tests {
 
         let request = request();
         let (selected, _) = tokio::join!(
-            async { balancer.select_or_wait(&request, None).await },
+            async { balancer.select_or_wait_result(&request, None).await },
             async {
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 drop(held_a);
@@ -3770,11 +3820,57 @@ mod tests {
             }
         );
 
-        let selected = selected.expect("queued selection should complete");
+        assert_eq!(
+            selected.queue_outcome,
+            Some(LoadBalancerQueueOutcome::Waited)
+        );
+        let selected = selected.selected.expect("queued selection should complete");
         assert!(
             selected.backend.addr.to_string() == "127.0.0.1:3000"
                 || selected.backend.addr.to_string() == "127.0.0.1:3001"
         );
+        assert_eq!(balancer.runtime_stats().queue.waiting, 0);
+    }
+
+    #[tokio::test]
+    async fn load_balancer_queue_reports_full_and_timeout() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_max_in_flight: vec![1, 1],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                queue: LoadBalanceQueueConfig {
+                    max_waiting: 1,
+                    timeout_ms: 25,
+                    retry_interval_ms: 5,
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let _held_a = balancer.select(&request(), None).unwrap();
+        let _held_b = balancer.select(&request(), None).unwrap();
+
+        let request = request();
+        let (timed_out, full) = tokio::join!(
+            async { balancer.select_or_wait_result(&request, None).await },
+            async {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                balancer.select_or_wait_result(&request, None).await
+            }
+        );
+
+        assert_eq!(full.queue_outcome, Some(LoadBalancerQueueOutcome::Full));
+        assert!(full.selected.is_none());
+        assert_eq!(
+            timed_out.queue_outcome,
+            Some(LoadBalancerQueueOutcome::Timeout)
+        );
+        assert!(timed_out.selected.is_none());
         assert_eq!(balancer.runtime_stats().queue.waiting, 0);
     }
 

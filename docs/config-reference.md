@@ -1022,8 +1022,8 @@ also accepts `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
 `weighted-random-two-choice`; all names sample two healthy backends through
 Pingora's random weighted selector and choose the lower weighted in-flight
 pressure using `upstream_weights`.
-With metrics enabled, load-balanced selections, unavailable pools, retries, and
-success/failure/ejection outcomes are counted by
+With metrics enabled, load-balanced selections, unavailable pools, retries,
+queue wait/full/timeout outcomes, and success/failure/ejection outcomes are counted by
 `fluxheim_load_balancer_events_total` with bounded configured vhost/route
 labels. The metric does not label raw upstream addresses; it uses
 `upstream_aliases` when present and otherwise leaves the upstream label empty.

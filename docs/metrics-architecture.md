@@ -199,8 +199,9 @@ Cache:
 Load balancer:
 
 - `fluxheim_load_balancer_events_total` counts selected upstreams, retries,
-  all-nodes-down/unavailable pools, success/failure outcomes, and
-  passive-health ejections with bounded configured vhost/route labels. The
+  all-nodes-down/unavailable pools, queue wait/full/timeout outcomes,
+  success/failure outcomes, and passive-health ejections with bounded
+  configured vhost/route labels. The
   `upstream` label is empty unless the operator configures a safe
   low-cardinality `proxy.upstream_aliases` entry.
 - richer upstream health state transition metrics remain planned; they should
