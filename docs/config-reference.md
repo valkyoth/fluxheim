@@ -336,7 +336,9 @@ until the config changes. Runtime member state is intentionally in-memory in
 `"persistent": false` in the mutation response. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.
 Successful and rejected member-state operations are logged under the
-`fluxheim::load_balancer` target.
+`fluxheim::load_balancer` target and, when metrics are compiled, counted by
+`fluxheim_load_balancer_events_total` with bounded events `member_state`,
+`member_state_invalid`, and `member_state_not_found`.
 
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the

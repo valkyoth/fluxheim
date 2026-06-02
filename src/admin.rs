@@ -926,6 +926,12 @@ impl AdminApp {
                     result.address,
                     result.alias.as_deref().unwrap_or("")
                 );
+                record_load_balancer_member_state_event(
+                    &result.vhost,
+                    result.route.as_deref(),
+                    result.alias.as_deref().or(Some(result.member.as_str())),
+                    "member_state",
+                );
                 json_response_value(
                     StatusCode::OK,
                     &json!({
@@ -951,6 +957,12 @@ impl AdminApp {
                     state.as_str(),
                     error
                 );
+                record_load_balancer_member_state_event(
+                    vhost,
+                    route,
+                    Some(member),
+                    "member_state_invalid",
+                );
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -962,6 +974,12 @@ impl AdminApp {
                     member,
                     state.as_str(),
                     error
+                );
+                record_load_balancer_member_state_event(
+                    vhost,
+                    route,
+                    Some(member),
+                    "member_state_not_found",
                 );
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
             }
@@ -2566,6 +2584,25 @@ fn record_admin_auth_event(event: &str, scope: AdminAuthThrottleScope) {
 
 #[cfg(not(feature = "metrics"))]
 fn record_admin_auth_event(_event: &str, _scope: AdminAuthThrottleScope) {}
+
+#[cfg(all(feature = "metrics", feature = "load-balancer"))]
+fn record_load_balancer_member_state_event(
+    vhost: &str,
+    route: Option<&str>,
+    member: Option<&str>,
+    event: &str,
+) {
+    crate::metrics::record_load_balancer_event(vhost, route, member, event);
+}
+
+#[cfg(not(all(feature = "metrics", feature = "load-balancer")))]
+fn record_load_balancer_member_state_event(
+    _vhost: &str,
+    _route: Option<&str>,
+    _member: Option<&str>,
+    _event: &str,
+) {
+}
 
 fn snapshot_json(snapshot: &ConfigSnapshot, current: Option<&str>) -> Value {
     json!({

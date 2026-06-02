@@ -1512,6 +1512,9 @@ fn load_balancer_event_label(event: &str) -> &'static str {
         "success" => "success",
         "failure" => "failure",
         "ejected" => "ejected",
+        "member_state" => "member_state",
+        "member_state_invalid" => "member_state_invalid",
+        "member_state_not_found" => "member_state_not_found",
         _ => "other",
     }
 }
@@ -1869,6 +1872,19 @@ mod tests {
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "success");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "failure");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "ejected");
+        record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "member_state");
+        record_load_balancer_event(
+            "lb-test",
+            Some("api"),
+            Some("origin-a"),
+            "member_state_invalid",
+        );
+        record_load_balancer_event(
+            "lb-test",
+            Some("api"),
+            Some("origin-a"),
+            "member_state_not_found",
+        );
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "attacker-event");
         record_load_balancer_event("lb-test", Some("api"), Some("http://raw:3000"), "selected");
 
@@ -1891,6 +1907,9 @@ mod tests {
         assert!(output.contains(r#"event="success""#));
         assert!(output.contains(r#"event="failure""#));
         assert!(output.contains(r#"event="ejected""#));
+        assert!(output.contains(r#"event="member_state""#));
+        assert!(output.contains(r#"event="member_state_invalid""#));
+        assert!(output.contains(r#"event="member_state_not_found""#));
         assert!(output.contains(r#"event="other""#));
         assert!(!output.contains("attacker-event"));
         assert!(!output.contains("http://raw:3000"));
