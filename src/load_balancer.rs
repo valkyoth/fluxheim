@@ -31,9 +31,11 @@ use crate::config::{
 };
 
 mod health;
+mod persistence;
 mod state;
 
 use self::health::configured_health_check;
+use self::persistence::{LoadBalanceKeySource, LoadBalancerPersistenceState};
 use self::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
     backend_connection_key,
@@ -42,7 +44,6 @@ pub use self::state::{LoadBalancedConnectionPermit, LoadBalancedUpstreamReporter
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 const MAGLEV_TABLE_SIZE: usize = 65_537;
-const MAX_PERSISTENCE_KEY_BYTES: usize = 512;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
 
 #[derive(Clone)]
@@ -1269,115 +1270,6 @@ impl SelectedUpstream {
     }
 }
 
-#[derive(Debug)]
-struct LoadBalancerPersistenceState {
-    mode: LoadBalancePersistenceMode,
-    header: Option<String>,
-    cookie: Option<String>,
-    ttl: Duration,
-    table_max_entries: usize,
-    table: Mutex<std::collections::HashMap<Vec<u8>, LoadBalancerPersistenceEntry>>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct LoadBalancerPersistenceEntry {
-    backend_key: u64,
-    expires_at: Instant,
-}
-
-impl LoadBalancerPersistenceState {
-    fn from_config(config: &LoadBalancePersistenceConfig) -> Self {
-        Self {
-            mode: config.mode,
-            header: config.header.clone(),
-            cookie: config.cookie.clone(),
-            ttl: Duration::from_secs(config.ttl_secs),
-            table_max_entries: config.table_max_entries,
-            table: Mutex::new(std::collections::HashMap::new()),
-        }
-    }
-
-    fn key(&self, request: &RequestHeader, client_ip: Option<IpAddr>) -> Option<Vec<u8>> {
-        match self.mode {
-            LoadBalancePersistenceMode::SourceIp => client_ip.map(|ip| ip.to_string().into_bytes()),
-            LoadBalancePersistenceMode::Header => self
-                .header
-                .as_deref()
-                .and_then(|header| request_header_key(request, header)),
-            LoadBalancePersistenceMode::Cookie => self
-                .cookie
-                .as_deref()
-                .and_then(|cookie| cookie_key(request, cookie)),
-        }
-    }
-
-    fn lookup(&self, key: &[u8]) -> Option<u64> {
-        let now = Instant::now();
-        let mut table = self
-            .table
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let entry = table.get(key).copied()?;
-        if entry.expires_at <= now {
-            table.remove(key);
-            return None;
-        }
-        Some(entry.backend_key)
-    }
-
-    fn record(&self, key: &[u8], backend_key: u64) {
-        let now = Instant::now();
-        let mut table = self
-            .table
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if table.len() >= self.table_max_entries && !table.contains_key(key) {
-            table.retain(|_, entry| entry.expires_at > now);
-            if table.len() >= self.table_max_entries
-                && let Some(stale_key) = table
-                    .iter()
-                    .min_by_key(|(_, entry)| entry.expires_at)
-                    .map(|(key, _)| key.clone())
-            {
-                table.remove(&stale_key);
-            }
-        }
-        if table.len() < self.table_max_entries || table.contains_key(key) {
-            table.insert(
-                key.to_vec(),
-                LoadBalancerPersistenceEntry {
-                    backend_key,
-                    expires_at: now + self.ttl,
-                },
-            );
-        }
-    }
-
-    fn clear(&self) -> usize {
-        let mut table = self
-            .table
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let removed = table.len();
-        table.clear();
-        removed
-    }
-
-    fn runtime_counts(&self) -> (usize, std::collections::HashMap<u64, usize>) {
-        let now = Instant::now();
-        let mut table = self
-            .table
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        table.retain(|_, entry| entry.expires_at > now);
-        let mut backend_counts = std::collections::HashMap::new();
-        for entry in table.values() {
-            *backend_counts.entry(entry.backend_key).or_insert(0) += 1;
-        }
-        (table.len(), backend_counts)
-    }
-}
-
 fn unix_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2509,97 +2401,6 @@ fn maglev_route_secret() -> u64 {
     })
 }
 
-#[derive(Clone, Debug)]
-enum LoadBalanceKeySource {
-    None,
-    SourceIp,
-    Uri,
-    Header(String),
-    Cookie(String),
-}
-
-impl LoadBalanceKeySource {
-    fn from_config(config: &ProxyConfig) -> Self {
-        match config.load_balance.selection {
-            LoadBalanceSelection::RoundRobin => Self::None,
-            LoadBalanceSelection::LeastConnections => Self::None,
-            LoadBalanceSelection::LeastSessions => Self::None,
-            LoadBalanceSelection::LeastTime => Self::None,
-            LoadBalanceSelection::PowerOfTwo => Self::None,
-            LoadBalanceSelection::SourceHash
-            | LoadBalanceSelection::ConsistentSourceHash
-            | LoadBalanceSelection::BoundedLoadConsistentSourceHash
-            | LoadBalanceSelection::MaglevSourceHash => Self::SourceIp,
-            LoadBalanceSelection::UriHash
-            | LoadBalanceSelection::ConsistentUriHash
-            | LoadBalanceSelection::BoundedLoadConsistentUriHash
-            | LoadBalanceSelection::MaglevUriHash => Self::Uri,
-            LoadBalanceSelection::HeaderHash
-            | LoadBalanceSelection::ConsistentHeaderHash
-            | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
-            | LoadBalanceSelection::MaglevHeaderHash => config
-                .load_balance
-                .hash_header
-                .clone()
-                .map(Self::Header)
-                .unwrap_or(Self::None),
-            LoadBalanceSelection::CookieHash
-            | LoadBalanceSelection::ConsistentCookieHash
-            | LoadBalanceSelection::BoundedLoadConsistentCookieHash
-            | LoadBalanceSelection::MaglevCookieHash => config
-                .load_balance
-                .hash_cookie
-                .clone()
-                .map(Self::Cookie)
-                .unwrap_or(Self::None),
-        }
-    }
-
-    fn request_key(&self, request: &RequestHeader, client_ip: Option<IpAddr>) -> Option<Vec<u8>> {
-        match self {
-            Self::None => None,
-            Self::SourceIp => client_ip.map(|ip| ip.to_string().into_bytes()),
-            Self::Uri => Some(request.uri.to_string().into_bytes()),
-            Self::Header(name) => request_header_key(request, name),
-            Self::Cookie(name) => cookie_key(request, name),
-        }
-    }
-}
-
-fn request_header_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
-    let mut key = Vec::new();
-    for value in request.headers.get_all(name) {
-        let bytes = value.as_bytes();
-        key.extend_from_slice(&bytes.len().to_le_bytes());
-        key.extend_from_slice(bytes);
-        if key.len() > MAX_PERSISTENCE_KEY_BYTES {
-            return None;
-        }
-    }
-    (!key.is_empty()).then_some(key)
-}
-
-fn cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
-    for header in request.headers.get_all("cookie") {
-        let Ok(header) = header.to_str() else {
-            continue;
-        };
-        for part in header.split(';') {
-            let Some((candidate, value)) = part.trim().split_once('=') else {
-                continue;
-            };
-            if candidate.trim() == name {
-                let bytes = value.trim().as_bytes();
-                if bytes.len() > MAX_PERSISTENCE_KEY_BYTES {
-                    return None;
-                }
-                return Some(bytes.to_vec());
-            }
-        }
-    }
-    None
-}
-
 fn configured_load_balancer<S>(config: &ProxyConfig) -> io::Result<Option<LoadBalancer<S>>>
 where
     S: BackendSelection + 'static,
@@ -2846,12 +2647,13 @@ mod tests {
         LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
 
+    use super::persistence::{MAX_PERSISTENCE_KEY_BYTES, cookie_key, request_header_key};
     use super::state::PassiveBackendHealth;
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
-        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, MAX_PERSISTENCE_KEY_BYTES,
-        PassiveHealthState, SlowStartState, UpstreamLoadBalancer, backend_connection_key,
-        cookie_key, fnv1a64_with_seed, least_connections_score_is_lower, request_header_key,
+        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, PassiveHealthState,
+        SlowStartState, UpstreamLoadBalancer, backend_connection_key, fnv1a64_with_seed,
+        least_connections_score_is_lower,
     };
     use crate::test_support::unique_temp_path;
 
