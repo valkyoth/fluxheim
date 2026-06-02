@@ -620,6 +620,7 @@ impl AdminApp {
         match (method, path) {
             ("GET", "/_fluxheim/status") => self.status_response(),
             ("GET", "/_fluxheim/cache/status") => self.cache_status_response(),
+            ("GET", "/_fluxheim/load-balancer/status") => self.load_balancer_status_response(),
             ("GET", "/_fluxheim/snapshots") => self.snapshots_response(),
             ("POST", "/_fluxheim/cache/activity/reset") => self.cache_activity_reset_response(),
             ("POST", "/_fluxheim/self-heal/confirm") => self.self_heal_confirm_response(),
@@ -763,12 +764,14 @@ impl AdminApp {
                 _,
                 "/_fluxheim/status"
                 | "/_fluxheim/cache/status"
+                | "/_fluxheim/load-balancer/status"
                 | "/_fluxheim/snapshots"
                 | "/_fluxheim/cache/activity/reset"
                 | "/_fluxheim/self-heal/confirm"
                 | "/_fluxheim/self-heal/fail"
                 | "/_fluxheim/self-heal/report"
                 | "/_fluxheim/load-balancer/member-state"
+                | "/_fluxheim/load-balancer/persistence/clear"
                 | "/_fluxheim/cache/purge"
                 | "/_fluxheim/cache/purge-bulk"
                 | "/_fluxheim/cache/purge-index"
@@ -803,7 +806,10 @@ impl AdminApp {
         }
         let known_read_only_path = matches!(
             path,
-            "/_fluxheim/status" | "/_fluxheim/cache/status" | "/_fluxheim/snapshots"
+            "/_fluxheim/status"
+                | "/_fluxheim/cache/status"
+                | "/_fluxheim/load-balancer/status"
+                | "/_fluxheim/snapshots"
         ) || path == self.health_path;
         if method != "GET" {
             return if known_read_only_path {
@@ -819,6 +825,7 @@ impl AdminApp {
         match path {
             "/_fluxheim/status" => self.status_response(),
             "/_fluxheim/cache/status" => self.cache_status_response(),
+            "/_fluxheim/load-balancer/status" => self.load_balancer_status_response(),
             "/_fluxheim/snapshots" => self.snapshots_response(),
             path if path == self.health_path => self.health_response(),
             _ => json_response(StatusCode::NOT_FOUND, br#"{"error":"not_found"}"#),
@@ -887,6 +894,25 @@ impl AdminApp {
             }
             Err(error) => internal_error_response(&error),
         }
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_status_response(&self) -> AdminResponse {
+        json_response_value(
+            StatusCode::OK,
+            &json!({
+                "status": "ok",
+                "load_balancer": self.proxy.load_balancer_runtime_stats(),
+            }),
+        )
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    fn load_balancer_status_response(&self) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "load balancer support is not compiled in",
+        )
     }
 
     #[cfg(feature = "load-balancer")]
@@ -3744,6 +3770,61 @@ mod tests {
                 .unwrap()
                 .contains(r#""pending_validation":null"#)
         );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_status_endpoint_reports_runtime_pools() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_admin_config());
+
+        let unauthenticated = app.handle(
+            "GET",
+            "/_fluxheim/load-balancer/status",
+            None,
+            &HeaderMap::new(),
+        );
+        assert_eq!(unauthenticated.status, StatusCode::UNAUTHORIZED);
+
+        let response = app.handle(
+            "GET",
+            "/_fluxheim/load-balancer/status",
+            None,
+            &auth_headers(),
+        );
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["load_balancer"]["vhosts"][0]["name"], "one");
+        assert_eq!(
+            body["load_balancer"]["vhosts"][0]["pool"]["backend_count"],
+            2
+        );
+
+        let wrong_method = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/status",
+            None,
+            &auth_headers(),
+        );
+        assert_eq!(wrong_method.status, StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[cfg(all(feature = "load-balancer", unix))]
+    #[test]
+    fn ops_socket_exposes_load_balancer_status_without_bearer_auth() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_admin_config());
+        let response = app.handle_ops_socket("GET", "/_fluxheim/load-balancer/status", None);
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["load_balancer"]["vhosts"][0]["name"], "one");
     }
 
     #[cfg(feature = "load-balancer")]

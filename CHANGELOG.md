@@ -47,6 +47,9 @@ behavior when the change improves security or project direction.
   `fluxheim_load_balancer_events_total` when metrics are compiled.
 - Add `fluxheim_load_balancer_queue_wait_seconds` to observe bounded
   load-balancer queue wait and timeout duration by configured vhost/route.
+- Add `GET /_fluxheim/load-balancer/status` so operators can retrieve
+  load-balancer runtime pool state without parsing the full admin status body;
+  the same read-only view is available on the local ops socket.
 - Add static `disabled_upstreams` so configured members can be kept in the pool
   definition while being administratively removed from selection and reported
   distinctly from drained members; disabled members also show as not ready in

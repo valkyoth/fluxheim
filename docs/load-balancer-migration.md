@@ -129,6 +129,14 @@ Supported states are `normal`, `drain`, `disable`, `forced_down`, and
 `manual_resume`. Runtime mutations are intentionally in-memory in `1.5.0`; they
 survive neither process restart nor runtime rebuild.
 
+The load-balancer-only status view is available without parsing the full admin
+status body:
+
+```bash
+curl -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/status"
+```
+
 Persistence tables can be cleared without a reload:
 
 ```bash

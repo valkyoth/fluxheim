@@ -352,6 +352,22 @@ Successful and rejected member-state operations are logged under the
 `fluxheim_load_balancer_events_total` with bounded events `member_state`,
 `member_state_invalid`, and `member_state_not_found`.
 
+Authenticated admins can fetch only load-balancer runtime state without parsing
+the full `/_fluxheim/status` payload:
+
+```bash
+curl -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/status"
+```
+
+The response is `{"status":"ok","load_balancer":...}` and uses the same
+runtime pool schema embedded in `/_fluxheim/status`: vhost pools, route pools,
+backend health, runtime member-state overrides, queue depth, persistence table
+size, circuit/passive-health state, slow-start state, locality, tags, aliases,
+and in-flight counts. When `admin.ops_socket.enabled = true`, the same read-only
+endpoint is available over the local Unix ops socket without bearer-token
+authentication.
+
 Authenticated admins can clear the local persistence table for one configured
 vhost or route pool without reloading:
 
