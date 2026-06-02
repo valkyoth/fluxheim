@@ -459,7 +459,9 @@ release.
   slow-start, richer active/adaptive health checks, circuit breaking, queue and
   overflow behavior, locality/failure-domain policy, richer selection
   algorithms, admin/audit visibility, and migration fixtures. It is not a WAF,
-  GSLB/DNS appliance, UDP proxy, or iRules-compatible scripting release.
+  GSLB/DNS appliance, UDP proxy, or iRules-compatible scripting release. See
+  [Load Balancer Migration Notes](docs/load-balancer-migration.md) for HAProxy,
+  nginx, and F5 pool mappings.
 
 Detailed cache behavior, config examples, operational limits, and smoke-test
 coverage are documented in [Cache Backends](docs/cache-backends.md),
@@ -485,6 +487,7 @@ full release ladder.
 - [OWASP Top 10 2025 Baseline](docs/owasp-top10-2025-baseline.md)
 - [FIPS-Capable Deployments](docs/fips.md)
 - [Config Reference](docs/config-reference.md)
+- [Load Balancer Migration Notes](docs/load-balancer-migration.md)
 - [Gateway Recipes](docs/gateway-recipes.md)
 - [GitHub Repository Setup](docs/github-setup.md)
 - [Cache Backends](docs/cache-backends.md)

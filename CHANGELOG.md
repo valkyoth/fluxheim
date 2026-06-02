@@ -104,6 +104,9 @@ behavior when the change improves security or project direction.
 - Add a validated `examples/load-balancer-enterprise.toml` migration fixture
   for HAProxy/F5-style weighted pools, priority groups, health policy,
   persistence, retry budgets, and all-down behavior.
+- Add `docs/load-balancer-migration.md` with nginx, HAProxy, and F5 LTM pool
+  mappings plus explicit boundaries for UDP, GSLB, WAF, VPN, and scripting
+  roadmap items.
 - Extend the local load-balancer smoke to use temporary process paths and verify
   configured all-down status after all checked origins are unavailable.
 - Extend the local load-balancer smoke to exercise authenticated runtime
