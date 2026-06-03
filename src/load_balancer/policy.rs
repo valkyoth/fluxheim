@@ -168,6 +168,10 @@ impl BackendSelectionPolicy {
         self.runtime.set_state(key, state);
     }
 
+    pub(super) fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
+        self.runtime.prune_stale(live_keys);
+    }
+
     fn runtime_backend_state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
         self.runtime.state(key)
     }
@@ -247,6 +251,19 @@ impl RuntimeBackendPolicyOverrides {
             .get(&key)
             .copied()
     }
+
+    fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.drain.retain(|key| live_keys.contains(key));
+        state.disabled.retain(|key| live_keys.contains(key));
+        state.forced_down.retain(|key| live_keys.contains(key));
+        state
+            .changed_at_unix_secs
+            .retain(|key, _| live_keys.contains(key));
+    }
 }
 
 fn backend_policy_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
@@ -255,6 +272,53 @@ fn backend_policy_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
         .filter_map(|upstream| Backend::new(upstream).ok())
         .map(|backend| backend_policy_key(&backend))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_backend_policy_overrides_prune_stale_keys() {
+        let policy = BackendSelectionPolicy::default();
+        policy.set_runtime_backend_state(1, LoadBalancerRuntimeBackendState::Drained);
+        policy.set_runtime_backend_state(2, LoadBalancerRuntimeBackendState::Disabled);
+        policy.set_runtime_backend_state(3, LoadBalancerRuntimeBackendState::ForcedDown);
+
+        assert_eq!(
+            policy.runtime_backend_state(1),
+            Some(LoadBalancerRuntimeBackendState::Drained)
+        );
+        assert_eq!(
+            policy.runtime_backend_state(2),
+            Some(LoadBalancerRuntimeBackendState::Disabled)
+        );
+        assert_eq!(
+            policy.runtime_backend_state(3),
+            Some(LoadBalancerRuntimeBackendState::ForcedDown)
+        );
+        assert!(
+            policy
+                .runtime_backend_state_changed_at_unix_secs(1)
+                .is_some()
+        );
+
+        policy.prune_stale(&[2].into_iter().collect());
+
+        assert_eq!(policy.runtime_backend_state(1), None);
+        assert_eq!(
+            policy.runtime_backend_state(2),
+            Some(LoadBalancerRuntimeBackendState::Disabled)
+        );
+        assert_eq!(policy.runtime_backend_state(3), None);
+        assert_eq!(policy.runtime_backend_state_changed_at_unix_secs(1), None);
+        assert!(
+            policy
+                .runtime_backend_state_changed_at_unix_secs(2)
+                .is_some()
+        );
+        assert_eq!(policy.runtime_backend_state_changed_at_unix_secs(3), None);
+    }
 }
 
 pub(super) fn backend_policy_key(backend: &Backend) -> u64 {

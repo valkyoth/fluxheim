@@ -716,24 +716,27 @@ impl UpstreamLoadBalancer {
         if !current.is_multiple_of(BACKEND_STATE_PRUNE_INTERVAL) {
             return;
         }
-        let live_keys = self
-            .inner
-            .backends()
-            .into_iter()
-            .map(|backend| backend_connection_key(&backend))
+        let backends = self.inner.backends();
+        let live_connection_keys = backends
+            .iter()
+            .map(backend_connection_key)
             .collect::<std::collections::HashSet<_>>();
-        self.counters.prune_stale(&live_keys);
+        let live_policy_keys = backends
+            .iter()
+            .map(backend_policy_key)
+            .collect::<std::collections::HashSet<_>>();
+        self.counters.prune_stale(&live_connection_keys);
+        self.backend_policy.prune_stale(&live_policy_keys);
         if let Some(passive_health) = &self.passive_health {
-            passive_health.prune_stale(&live_keys);
+            passive_health.prune_stale(&live_connection_keys);
         }
         if let Some(slow_start) = &self.slow_start {
-            slow_start.prune_stale(&live_keys);
+            slow_start.prune_stale(&live_connection_keys);
         }
         if let Some(latency) = self.inner.latency_state() {
-            latency.prune_stale(&live_keys);
+            latency.prune_stale(&live_connection_keys);
         }
     }
-
     pub fn runtime_stats(&self) -> LoadBalancerPoolRuntimeStats {
         let health_check_frequency = self.inner.health_check_frequency();
         let (persistence_entry_count, persistence_backend_entry_counts) = self

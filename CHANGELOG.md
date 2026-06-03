@@ -17,6 +17,9 @@ behavior when the change improves security or project direction.
   surfaces stay in later `1.5.x` milestones.
 - Keep load-balancer persistence-clear metrics distinct from member-state
   mutation metrics for clearer admin audit dashboards.
+- Prune stale load-balancer runtime member-state overrides when dynamic
+  discovery removes backends, matching the existing backend counter, health,
+  slow-start, and latency cleanup.
 
 ## 1.5.0 - 2026-06-01
 
