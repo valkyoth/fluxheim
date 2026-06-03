@@ -22,6 +22,10 @@ behavior when the change improves security or project direction.
   slow-start, and latency cleanup.
 - Prune persistence-table entries that point at removed dynamic-discovery
   backends before computing runtime status and least-sessions selection counts.
+- Clarify the current `1.5.x` load-balancer boundaries in README and config
+  documentation so local persistence/runtime overrides are not mistaken for
+  managed affinity cookies, restart-persistent HA state, runtime weight
+  mutation, runtime member add/remove, or cross-node synchronization.
 
 ## 1.5.0 - 2026-06-01
 
