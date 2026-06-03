@@ -2764,9 +2764,19 @@ fn rejects_maglev_for_dynamic_upstream_discovery() {
         upstreams_file.display()
     ))
     .unwrap();
+    let file_error = file_config.validate().expect_err("file Maglev config");
+    #[cfg(feature = "load-balancer")]
     assert!(matches!(
-        file_config.validate(),
-        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+        file_error,
+        ConfigError::InvalidLoadBalanceSelection { .. }
+    ));
+    #[cfg(not(feature = "load-balancer"))]
+    assert!(matches!(
+        file_error,
+        ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstreams_file",
+            ..
+        }
     ));
 
     let dns_config: Config = toml::from_str(
@@ -2780,9 +2790,19 @@ fn rejects_maglev_for_dynamic_upstream_discovery() {
             "#,
     )
     .unwrap();
+    let dns_error = dns_config.validate().expect_err("DNS Maglev config");
+    #[cfg(feature = "load-balancer")]
     assert!(matches!(
-        dns_config.validate(),
-        Err(ConfigError::InvalidLoadBalanceSelection { .. })
+        dns_error,
+        ConfigError::InvalidLoadBalanceSelection { .. }
+    ));
+    #[cfg(not(feature = "load-balancer"))]
+    assert!(matches!(
+        dns_error,
+        ConfigError::InvalidProxyUpstreamPolicy {
+            field: "proxy.upstream_dns_refresh_secs",
+            ..
+        }
     ));
 }
 
