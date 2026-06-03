@@ -3943,6 +3943,28 @@ mod tests {
             &auth_headers(),
         );
         assert_eq!(missing_vhost.status, StatusCode::BAD_REQUEST);
+
+        let unknown_vhost = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/persistence/clear",
+            Some("vhost=missing"),
+            &auth_headers(),
+        );
+        assert_eq!(unknown_vhost.status, StatusCode::NOT_FOUND);
+        let body: Value = serde_json::from_slice(&unknown_vhost.body).unwrap();
+        assert_eq!(body["status"], "error");
+        assert_eq!(body["error"], "load balancer vhost is not configured");
+
+        let unknown_route = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/persistence/clear",
+            Some("vhost=one&route=missing"),
+            &auth_headers(),
+        );
+        assert_eq!(unknown_route.status, StatusCode::NOT_FOUND);
+        let body: Value = serde_json::from_slice(&unknown_route.body).unwrap();
+        assert_eq!(body["status"], "error");
+        assert_eq!(body["error"], "load balancer route is not configured");
     }
 
     #[test]
