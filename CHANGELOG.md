@@ -30,6 +30,9 @@ behavior when the change improves security or project direction.
 - Extend the local load-balancer smoke to exercise route-scoped header
   persistence, authenticated persistence-table clear, and the
   `persistence_clear` metrics event.
+- Add a focused `packaging/container/load-balancer.toml` template and wire the
+  load-balancer image/profile validation to that config instead of the generic
+  proxy container template.
 
 ## 1.5.0 - 2026-06-01
 

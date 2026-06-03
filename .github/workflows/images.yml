@@ -86,7 +86,7 @@ jobs:
           - name: load-balancer
             tag: load-balancer
             features: profile-load-balancer-edge,acme-client
-            config: packaging/container/proxy.toml
+            config: packaging/container/load-balancer.toml
             wolfi_config: ""
             wolfi_runtime_packages: ""
     env:

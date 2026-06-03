@@ -157,7 +157,7 @@ fi
 * Wed Jun 03 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.1-1
 - Stabilize enterprise load-balancer persistence metrics, stale dynamic state
   pruning, local persistence-table cleanup, release smoke coverage, and
-  1.5.x boundary documentation.
+  focused load-balancer container/release documentation.
 
 * Tue Jun 02 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.0-1
 - Release 1.5.0 enterprise HTTP/TCP load-balancer control-plane line.

@@ -359,7 +359,7 @@ Build the load-balancer profile locally:
 ```bash
 podman build \
   --build-arg FLUXHEIM_FEATURES=profile-load-balancer-edge,acme-client \
-  --build-arg FLUXHEIM_CONFIG=packaging/container/proxy.toml \
+  --build-arg FLUXHEIM_CONFIG=packaging/container/load-balancer.toml \
   -t fluxheim:load-balancer-wolfi \
   -f containers/Containerfile.wolfi .
 ```

@@ -196,6 +196,7 @@ config_tester examples/container/fluxheim.toml
 config_tester packaging/container/fluxheim.toml
 config_tester packaging/container/cache.toml cache
 config_tester packaging/container/proxy.toml proxy
+config_tester packaging/container/load-balancer.toml load-balancer
 config_tester packaging/container/php.toml web-php
 config_tester packaging/default/fluxheim.toml
 config_tester examples/conf.d

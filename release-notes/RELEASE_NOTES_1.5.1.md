@@ -18,6 +18,10 @@ documentation.
 - README, configuration, migration, and container documentation now describe
   the current 1.5.x load-balancer boundaries instead of tying the local
   persistence/runtime override limits only to 1.5.0.
+- The focused load-balancer image now uses
+  `packaging/container/load-balancer.toml`, a load-balancer-shaped container
+  config with aliases, least-connections selection, health checks, retry,
+  queueing, and bounded source-IP persistence.
 
 ## Test Coverage
 
@@ -26,6 +30,8 @@ documentation.
 - The local load-balancer smoke now exercises route-scoped header persistence,
   authenticated persistence-table clear, and the `persistence_clear` metrics
   event.
+- The load-balancer container config is validated with the focused
+  `profile-load-balancer-edge,acme-client` feature set.
 
 ## Boundaries
 
