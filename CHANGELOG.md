@@ -7,6 +7,15 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.1 - Unreleased
+
+### Changed
+
+- Start the enterprise load-balancer stabilization release after the `1.5.0`
+  control-plane launch. The stop line is load-balancer correctness,
+  documentation, migration polish, and release-profile fixes; new large feature
+  surfaces stay in later `1.5.x` milestones.
+
 ## 1.5.0 - 2026-06-01
 
 ### Changed

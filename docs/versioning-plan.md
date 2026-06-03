@@ -3298,7 +3298,12 @@ the exception while the cache server is being completed as a focused sequence:
   packaging decisions, signed/notarized binary policy, and a macOS-specific
   filesystem/security review. Keep Linux as the production baseline until that
   line is explicitly scheduled.
-- `v1.5.1`: fixes for enterprise load-balancer operations.
+- `v1.5.1`: enterprise load-balancer stabilization. Stop at correctness fixes,
+  release-profile polish, docs/migration cleanup, bounded operational
+  hardening, and test coverage for behavior already shipped in `1.5.0`. Do not
+  add runtime add/remove-member, runtime weight mutation, managed affinity
+  cookies, cross-instance state sync, UDP/GSLB, WAF, VPN/firewall appliance
+  behavior, or Wasm/iRules/Lua scripting in this release.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 
 ## Changelog Shape
