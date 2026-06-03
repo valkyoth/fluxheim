@@ -108,13 +108,19 @@ impl LoadBalancerPersistenceState {
         removed
     }
 
-    pub(super) fn runtime_counts(&self) -> (usize, std::collections::HashMap<u64, usize>) {
+    pub(super) fn runtime_counts_for_live_backends(
+        &self,
+        live_backend_keys: Option<&std::collections::HashSet<u64>>,
+    ) -> (usize, std::collections::HashMap<u64, usize>) {
         let now = Instant::now();
         let mut table = self
             .table
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        table.retain(|_, entry| entry.expires_at > now);
+        table.retain(|_, entry| {
+            entry.expires_at > now
+                && live_backend_keys.is_none_or(|live_keys| live_keys.contains(&entry.backend_key))
+        });
         let mut backend_counts = std::collections::HashMap::new();
         for entry in table.values() {
             *backend_counts.entry(entry.backend_key).or_insert(0) += 1;
@@ -216,4 +222,31 @@ pub(super) fn cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>>
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_counts_prune_entries_for_removed_backend_keys() {
+        let state = LoadBalancerPersistenceState::from_config(&LoadBalancePersistenceConfig {
+            enabled: true,
+            ttl_secs: 60,
+            table_max_entries: 16,
+            ..LoadBalancePersistenceConfig::default()
+        });
+        state.record(b"client-a", 10);
+        state.record(b"client-b", 20);
+
+        let live_keys = [20].into_iter().collect::<std::collections::HashSet<_>>();
+        let (entry_count, backend_counts) =
+            state.runtime_counts_for_live_backends(Some(&live_keys));
+
+        assert_eq!(entry_count, 1);
+        assert_eq!(backend_counts.get(&10), None);
+        assert_eq!(backend_counts.get(&20).copied(), Some(1));
+        assert_eq!(state.lookup(b"client-a"), None);
+        assert_eq!(state.lookup(b"client-b"), Some(20));
+    }
 }

@@ -20,6 +20,8 @@ behavior when the change improves security or project direction.
 - Prune stale load-balancer runtime member-state overrides when dynamic
   discovery removes backends, matching the existing backend counter, health,
   slow-start, and latency cleanup.
+- Prune persistence-table entries that point at removed dynamic-discovery
+  backends before computing runtime status and least-sessions selection counts.
 
 ## 1.5.0 - 2026-06-01
 
