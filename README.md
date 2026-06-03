@@ -85,7 +85,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |
 | Load-balancer status | ✅ | Admin status includes configured pools, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state. |
-| Load-balancer 1.5.0 boundaries | Limited | Local persistence and runtime overrides are in-memory only; Fluxheim does not yet insert managed affinity cookies, persist LB state across restarts, change weights/add members at runtime, or sync state across active-active nodes. |
+| Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides are in-memory only; Fluxheim does not yet insert managed affinity cookies, persist LB state across restarts, change weights/add members at runtime, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
@@ -328,8 +328,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.5.0-wolfi`, `v1.5.0-cache-wolfi`, `v1.5.0-proxy-wolfi`,
-`v1.5.0-load-balancer-wolfi`, and `v1.5.0-php-wolfi`.
+`v1.5.1-wolfi`, `v1.5.1-cache-wolfi`, `v1.5.1-proxy-wolfi`,
+`v1.5.1-load-balancer-wolfi`, and `v1.5.1-php-wolfi`.
 
 Manual feature selection also works:
 
@@ -344,11 +344,11 @@ and explicit `.php` scripts to php-fpm. See
 [`docs/php-fpm-app-recipes.md`](docs/php-fpm-app-recipes.md), and
 [`examples/php-fpm.toml`](examples/php-fpm.toml).
 Fluxheim `1.3.7` completed the production PHP-FPM line with managed php-fpm
-supervision as an opt-in runtime mode. The current Wolfi `v1.5.0-php` image is
-self-contained for managed PHP-FPM and includes the Wolfi `php-8.5-fpm`
-runtime; non-Wolfi PHP image variants keep the external php-fpm container
-config unless customized. Pure-Rust PHP/phprs support is not planned; managed
-php-fpm is the supported zero-admin PHP path.
+supervision as an opt-in runtime mode. The Wolfi PHP image is self-contained
+for managed PHP-FPM and includes the Wolfi `php-8.5-fpm` runtime; non-Wolfi PHP
+image variants keep the external php-fpm container config unless customized.
+Pure-Rust PHP/phprs support is not planned; managed php-fpm is the supported
+zero-admin PHP path.
 
 TLS backends are mutually exclusive. Select exactly one backend when TLS is
 needed:
@@ -422,7 +422,7 @@ release.
   Apple Silicon Level 1 development support, bounded GeoIP/Geo-Context policy,
   TCP stream proxying with idle timeouts and stream upstream TLS/mTLS, and the
   proxy/config module splits that keep future feature domains in focused files.
-- `1.5.0` is the enterprise load-balancer/control-plane line. It promotes the
+- `1.5.x` is the enterprise load-balancer/control-plane line. It promotes the
   load-balancer image profile and focuses on F5/HAProxy/Envoy-class pool
   operations: runtime pool/member mutation, priority groups, persistence,
   slow-start, richer active/adaptive health checks, circuit breaking, queue and
