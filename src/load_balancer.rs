@@ -601,16 +601,13 @@ impl UpstreamLoadBalancer {
         persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
     ) -> Option<SelectedUpstream> {
         self.prune_stale_backend_state_periodically();
-        let live_policy_keys = self.live_backend_policy_keys();
         let key = self.key_source.request_key(request, client_ip);
-        let persistence_entry_counts =
-            self.persistence
-                .as_ref()
-                .map_or_else(std::collections::HashMap::new, |persistence| {
-                    persistence
-                        .runtime_counts_for_live_backends(Some(&live_policy_keys))
-                        .1
-                });
+        let persistence_entry_counts = self
+            .persistence
+            .as_ref()
+            .map_or_else(std::collections::HashMap::new, |persistence| {
+                persistence.runtime_counts().1
+            });
         let selected = self.inner.select(LoadBalancerSelectInputs {
             key: key.as_deref(),
             max_iterations: self.max_iterations,
@@ -730,6 +727,9 @@ impl UpstreamLoadBalancer {
             .collect::<std::collections::HashSet<_>>();
         self.counters.prune_stale(&live_connection_keys);
         self.backend_policy.prune_stale(&live_policy_keys);
+        if let Some(persistence) = &self.persistence {
+            persistence.prune_stale_for_live_backends(&live_policy_keys);
+        }
         if let Some(passive_health) = &self.passive_health {
             passive_health.prune_stale(&live_connection_keys);
         }

@@ -17,11 +17,12 @@ behavior when the change improves security or project direction.
   surfaces stay in later `1.5.x` milestones.
 - Keep load-balancer persistence-clear metrics distinct from member-state
   mutation metrics for clearer admin audit dashboards.
-- Prune stale load-balancer runtime member-state overrides when dynamic
-  discovery removes backends, matching the existing backend counter, health,
-  slow-start, and latency cleanup.
+- Prune stale transient load-balancer drain overrides when dynamic discovery
+  removes backends, while preserving explicit runtime `disabled` and
+  `forced_down` operator decisions until an authenticated admin clears them.
 - Prune persistence-table entries that point at removed dynamic-discovery
-  backends before computing runtime status and least-sessions selection counts.
+  backends from the periodic backend-state cleanup path, while keeping normal
+  selection and status persistence counts read-only.
 - Clarify the current `1.5.x` load-balancer boundaries in README, config,
   migration, and container documentation so local persistence/runtime overrides
   are not mistaken for managed affinity cookies, restart-persistent HA state,

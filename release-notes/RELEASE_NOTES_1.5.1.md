@@ -11,10 +11,13 @@ documentation.
   `persistence_clear`, `persistence_clear_invalid`, and
   `persistence_clear_not_found`. They no longer share member-state mutation
   labels.
-- Dynamic DNS/file discovery pools now prune stale runtime member-state
-  overrides when removed backends disappear from the live pool.
+- Dynamic DNS/file discovery pools now prune stale transient runtime drain
+  overrides when removed backends disappear from the live pool. Runtime
+  `disabled` and `forced_down` overrides are preserved until explicit admin
+  action clears them.
 - Local persistence tables now prune entries pinned to removed dynamic-discovery
-  backends before runtime status and least-sessions counts are computed.
+  backends from the periodic backend-state cleanup path, while runtime status
+  and least-sessions counts use read-only table scans.
 - README, configuration, migration, and container documentation now describe
   the current 1.5.x load-balancer boundaries instead of tying the local
   persistence/runtime override limits only to 1.5.0.

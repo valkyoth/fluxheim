@@ -258,11 +258,14 @@ impl RuntimeBackendPolicyOverrides {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.drain.retain(|key| live_keys.contains(key));
-        state.disabled.retain(|key| live_keys.contains(key));
-        state.forced_down.retain(|key| live_keys.contains(key));
+        let retained_override_keys = state
+            .disabled
+            .union(&state.forced_down)
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
         state
             .changed_at_unix_secs
-            .retain(|key, _| live_keys.contains(key));
+            .retain(|key, _| live_keys.contains(key) || retained_override_keys.contains(key));
     }
 }
 
@@ -279,7 +282,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_backend_policy_overrides_prune_stale_keys() {
+    fn runtime_backend_policy_overrides_prune_only_transient_drain_keys() {
         let policy = BackendSelectionPolicy::default();
         policy.set_runtime_backend_state(1, LoadBalancerRuntimeBackendState::Drained);
         policy.set_runtime_backend_state(2, LoadBalancerRuntimeBackendState::Disabled);
@@ -310,14 +313,21 @@ mod tests {
             policy.runtime_backend_state(2),
             Some(LoadBalancerRuntimeBackendState::Disabled)
         );
-        assert_eq!(policy.runtime_backend_state(3), None);
+        assert_eq!(
+            policy.runtime_backend_state(3),
+            Some(LoadBalancerRuntimeBackendState::ForcedDown)
+        );
         assert_eq!(policy.runtime_backend_state_changed_at_unix_secs(1), None);
         assert!(
             policy
                 .runtime_backend_state_changed_at_unix_secs(2)
                 .is_some()
         );
-        assert_eq!(policy.runtime_backend_state_changed_at_unix_secs(3), None);
+        assert!(
+            policy
+                .runtime_backend_state_changed_at_unix_secs(3)
+                .is_some()
+        );
     }
 }
 

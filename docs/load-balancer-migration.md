@@ -164,6 +164,10 @@ later `1.5.x` or future module lines.
   are local to one Fluxheim process in the current `1.5.x` line; active-active
   deployments must either accept independent local state or place another HA
   layer in front.
+- In dynamic DNS/file discovery pools, stale runtime `drain` overrides may be
+  reclaimed when a member leaves the live discovery set. Runtime `disable` and
+  `forced_down` overrides are preserved across discovery churn until explicit
+  admin resume/normal action.
 - Maglev hashing is available for static `proxy.upstreams` pools. File-refreshed
   and DNS-refreshed pools reject Maglev in the current `1.5.x` line until
   dynamic table rebuild behavior is specified and observable.

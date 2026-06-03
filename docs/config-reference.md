@@ -347,6 +347,10 @@ changes. Runtime member state is intentionally in-memory in the current `1.5.x`
 line, is reset by process restart or runtime rebuild, and is returned with
 `"persistent": false` in the mutation response. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.
+For dynamic DNS/file-discovery pools, Fluxheim may reclaim stale runtime
+`drain` overrides after a member disappears from the live discovery set.
+Runtime `disable` and `forced_down` overrides are retained across discovery
+churn and are cleared only by explicit `normal` or `manual_resume` admin action.
 Successful and rejected member-state operations are logged under the
 `fluxheim::load_balancer` target and, when metrics are compiled, counted by
 `fluxheim_load_balancer_events_total` with bounded events `member_state`,
