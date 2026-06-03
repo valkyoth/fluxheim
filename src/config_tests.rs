@@ -752,7 +752,15 @@ fn parses_proxy_upstream_pool() {
     assert_eq!(config.proxy.load_balance.queue.max_waiting, 32);
     assert_eq!(config.proxy.load_balance.queue.timeout_ms, 250);
     assert_eq!(config.proxy.load_balance.queue.retry_interval_ms, 5);
+    #[cfg(not(feature = "privacy-mode"))]
     config.validate().unwrap();
+    #[cfg(feature = "privacy-mode")]
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence is not available in privacy-mode builds"
+        })
+    );
 }
 
 #[cfg(feature = "load-balancer")]
@@ -2731,7 +2739,15 @@ fn validates_load_balance_hash_selection() {
             "#,
     )
     .unwrap();
+    #[cfg(not(feature = "privacy-mode"))]
     least_sessions.validate().unwrap();
+    #[cfg(feature = "privacy-mode")]
+    assert_eq!(
+        least_sessions.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence is not available in privacy-mode builds"
+        })
+    );
 
     let least_sessions_without_persistence: Config = toml::from_str(
         r#"
@@ -3093,6 +3109,7 @@ fn rejects_invalid_load_balance_slow_start() {
     );
 }
 
+#[cfg(not(feature = "privacy-mode"))]
 #[test]
 fn rejects_invalid_load_balance_persistence() {
     let invalid_ttl: Config = toml::from_str(
@@ -3217,6 +3234,25 @@ fn rejects_invalid_load_balance_persistence() {
         invalid_cookie.validate(),
         Err(ConfigError::InvalidLoadBalanceSelection {
             reason: "proxy.load_balance.persistence.cookie must be a valid cookie name"
+        })
+    );
+}
+
+#[cfg(feature = "privacy-mode")]
+#[test]
+fn rejects_load_balance_persistence_in_privacy_mode() {
+    let config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence is not available in privacy-mode builds"
         })
     );
 }
