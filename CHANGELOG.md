@@ -26,6 +26,9 @@ behavior when the change improves security or project direction.
   documentation so local persistence/runtime overrides are not mistaken for
   managed affinity cookies, restart-persistent HA state, runtime weight
   mutation, runtime member add/remove, or cross-node synchronization.
+- Extend the local load-balancer smoke to exercise route-scoped header
+  persistence, authenticated persistence-table clear, and the
+  `persistence_clear` metrics event.
 
 ## 1.5.0 - 2026-06-01
 

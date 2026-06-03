@@ -149,6 +149,27 @@ upstream_tls = false
 selection = "maglev-uri-hash"
 max_iterations = 256
 all_down_status = 503
+
+[[vhosts.routes]]
+name = "sticky"
+path_prefix = "/sticky/"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
+upstream_aliases = ["origin-one", "origin-two"]
+upstream_tls = false
+
+[vhosts.routes.proxy.load_balance]
+selection = "round-robin"
+max_iterations = 256
+all_down_status = 503
+
+[vhosts.routes.proxy.load_balance.persistence]
+enabled = true
+mode = "header"
+header = "x-sticky-session"
+ttl_secs = 60
+table_max_entries = 16
 EOF
 
 wait_http() {
@@ -239,6 +260,53 @@ done
 if [ "$(sort -u "$MAGLEV_RESPONSES" | wc -l)" -ne 1 ]; then
     echo "Maglev route did not keep the same URI pinned to one selected origin" >&2
     cat "$MAGLEV_RESPONSES" >&2
+    exit 1
+fi
+
+STICKY_RESPONSES="$TMP_DIR/sticky-responses.txt"
+: > "$STICKY_RESPONSES"
+for _ in 1 2; do
+    curl -fsS \
+        -H "x-sticky-session: smoke-session" \
+        "http://127.0.0.1:$FLUXHEIM_PORT/sticky/session" >> "$STICKY_RESPONSES"
+done
+
+if [ "$(sort -u "$STICKY_RESPONSES" | wc -l)" -ne 1 ]; then
+    echo "header persistence route did not keep the same session pinned" >&2
+    cat "$STICKY_RESPONSES" >&2
+    exit 1
+fi
+
+curl -fsS \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/status" \
+    > "$TMP_DIR/load-balancer-status-sticky.json"
+
+if ! grep -q '"name":"sticky"' "$TMP_DIR/load-balancer-status-sticky.json" \
+    || ! grep -q '"entry_count":1' "$TMP_DIR/load-balancer-status-sticky.json"; then
+    echo "load balancer status endpoint did not report route persistence entry" >&2
+    cat "$TMP_DIR/load-balancer-status-sticky.json" >&2
+    exit 1
+fi
+
+curl -fsS -X POST \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/persistence/clear?vhost=smoke&route=sticky" \
+    > "$TMP_DIR/persistence-clear.json"
+
+if ! grep -q '"status":"ok"' "$TMP_DIR/persistence-clear.json" \
+    || ! grep -q '"scope":"route"' "$TMP_DIR/persistence-clear.json" \
+    || ! grep -q '"cleared_entries":1' "$TMP_DIR/persistence-clear.json" \
+    || ! grep -q '"persistent":false' "$TMP_DIR/persistence-clear.json"; then
+    echo "load balancer persistence clear endpoint did not report cleared route entry" >&2
+    cat "$TMP_DIR/persistence-clear.json" >&2
+    exit 1
+fi
+
+curl -fsS "http://127.0.0.1:$METRICS_PORT/metrics" > "$TMP_DIR/metrics-after-persistence-clear.txt"
+if ! grep -q 'fluxheim_load_balancer_events_total{event="persistence_clear",route="sticky",scope="route",upstream="",vhost="smoke"} 1' "$TMP_DIR/metrics-after-persistence-clear.txt"; then
+    echo "load balancer metrics missed persistence_clear event" >&2
+    cat "$TMP_DIR/metrics-after-persistence-clear.txt" >&2
     exit 1
 fi
 
