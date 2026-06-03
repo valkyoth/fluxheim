@@ -22,10 +22,11 @@ behavior when the change improves security or project direction.
   slow-start, and latency cleanup.
 - Prune persistence-table entries that point at removed dynamic-discovery
   backends before computing runtime status and least-sessions selection counts.
-- Clarify the current `1.5.x` load-balancer boundaries in README and config
-  documentation so local persistence/runtime overrides are not mistaken for
-  managed affinity cookies, restart-persistent HA state, runtime weight
-  mutation, runtime member add/remove, or cross-node synchronization.
+- Clarify the current `1.5.x` load-balancer boundaries in README, config,
+  migration, and container documentation so local persistence/runtime overrides
+  are not mistaken for managed affinity cookies, restart-persistent HA state,
+  runtime weight mutation, runtime member add/remove, or cross-node
+  synchronization.
 - Extend the local load-balancer smoke to exercise route-scoped header
   persistence, authenticated persistence-table clear, and the
   `persistence_clear` metrics event.

@@ -316,10 +316,10 @@ size, queue policy and current waiting count, priority group, locality, tags, ma
 in-flight cap, current in-flight count, passive failure count, passive ejection,
 passive ejection remaining seconds, circuit state, slow-start allowance,
 persistence entries currently pinned to each backend, and least-time latency
-state where available. In
-`1.5.0`, `circuit_state = "open"` is the runtime status view for a backend
-currently ejected by passive health; `"closed"` means the backend is not
-passively ejected. Per-backend rows include `runtime_state_override` when an
+state where available. In the current `1.5.x` line, `circuit_state = "open"`
+is the runtime status view for a backend currently ejected by passive health;
+`"closed"` means the backend is not passively ejected. Per-backend rows include
+`runtime_state_override` when an
 authenticated runtime member operation is active and
 `runtime_state_changed_at_unix_secs` when that override currently has a recorded
 manual transition time. In `privacy-mode`, backend addresses are omitted from
@@ -343,8 +343,8 @@ maintenance disables. `manual_resume` clears any runtime override, clears the
 member's passive-health failure/ejection state, and restarts slow-start ramp
 when slow-start is configured. `normal` clears only runtime overrides; static
 `drain_upstreams` and `disabled_upstreams` remain enforced until the config
-changes. Runtime member state is intentionally in-memory in
-`1.5.0`, is reset by process restart or runtime rebuild, and is returned with
+changes. Runtime member state is intentionally in-memory in the current `1.5.x`
+line, is reset by process restart or runtime rebuild, and is returned with
 `"persistent": false` in the mutation response. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.
 Successful and rejected member-state operations are logged under the

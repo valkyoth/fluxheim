@@ -15,9 +15,9 @@ documentation.
   overrides when removed backends disappear from the live pool.
 - Local persistence tables now prune entries pinned to removed dynamic-discovery
   backends before runtime status and least-sessions counts are computed.
-- README and configuration documentation now describe the current 1.5.x
-  load-balancer boundaries instead of tying the local persistence/runtime
-  override limits only to 1.5.0.
+- README, configuration, migration, and container documentation now describe
+  the current 1.5.x load-balancer boundaries instead of tying the local
+  persistence/runtime override limits only to 1.5.0.
 
 ## Test Coverage
 

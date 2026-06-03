@@ -29,7 +29,7 @@ and load-balancing primitives, but the operator-facing product is Fluxheim:
 focused release profiles are available for full, cache, proxy, load-balancer,
 and PHP deployments, with matching container images and Linux runtime archives.
 
-The `1.5.0` load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style
+The `1.5.x` load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style
 HTTP/TCP pool operations: weighted and adaptive selection, health and circuit
 state, slow start, retry budgets, bounded queueing, local persistence, runtime
 member-state controls, status/metrics/audit visibility, and a validated

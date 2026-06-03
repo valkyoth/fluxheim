@@ -1,6 +1,6 @@
 # Load Balancer Migration Notes
 
-Fluxheim `1.5.0` focuses on HTTP/TCP edge load-balancer operations that map
+Fluxheim `1.5.x` focuses on HTTP/TCP edge load-balancer operations that map
 cleanly from HAProxy, nginx, Envoy, and F5 LTM-style pools. The validated
 starting fixture is `examples/load-balancer-enterprise.toml`.
 
@@ -72,8 +72,8 @@ consecutive_failure = 3
 ```
 
 HAProxy stick-table patterns map only to Fluxheim's bounded local persistence
-tables in `1.5.0`. Multi-counter stick-table expressions remain future
-advanced ACL/stick-table work.
+tables in the current `1.5.x` line. Multi-counter stick-table expressions
+remain future advanced ACL/stick-table work.
 
 ## F5 LTM Pool
 
@@ -82,7 +82,7 @@ administrative state, persistence, and manual drain/resume workflows.
 
 Fluxheim maps those pieces as follows:
 
-| F5 / BIG-IP concept | Fluxheim `1.5.0` mapping |
+| F5 / BIG-IP concept | Fluxheim `1.5.x` mapping |
 | --- | --- |
 | Pool members | `proxy.upstreams` |
 | Member names | `proxy.upstream_aliases` |
@@ -128,8 +128,8 @@ curl -X POST \
 ```
 
 Supported states are `normal`, `drain`, `disable`, `forced_down`, and
-`manual_resume`. Runtime mutations are intentionally in-memory in `1.5.0`; they
-survive neither process restart nor runtime rebuild.
+`manual_resume`. Runtime mutations are intentionally in-memory in the current
+`1.5.x` line; they survive neither process restart nor runtime rebuild.
 
 The load-balancer-only status view is available without parsing the full admin
 status body:
@@ -149,27 +149,28 @@ curl -X POST \
 
 ## Known Migration Boundaries
 
-The following are intentional `1.5.0` boundaries. They are not defects in the
-shipped load-balancer behavior; they are architectural gaps tracked for later
-`1.5.x` or future module lines.
+The following are intentional current `1.5.x` boundaries. They are not defects
+in the shipped load-balancer behavior; they are architectural gaps tracked for
+later `1.5.x` or future module lines.
 
 - Dynamic weight changes and add/remove-member operations are future control
   plane work.
-- Load-balancer-managed cookie insertion is future persistence work. In
-  `1.5.0`, cookie persistence uses an application or upstream-issued request
-  cookie that the operator explicitly names; Fluxheim does not yet create a
-  signed/opaque affinity cookie with `Set-Cookie`.
+- Load-balancer-managed cookie insertion is future persistence work. In the
+  current `1.5.x` line, cookie persistence uses an application or
+  upstream-issued request cookie that the operator explicitly names; Fluxheim
+  does not yet create a signed/opaque affinity cookie with `Set-Cookie`.
 - HA persistence/cookie mirroring is future cluster-state work. Persistence
   tables, passive health, retry budgets, queue counters, and runtime overrides
-  are local to one Fluxheim process in `1.5.0`; active-active deployments must
-  either accept independent local state or place another HA layer in front.
+  are local to one Fluxheim process in the current `1.5.x` line; active-active
+  deployments must either accept independent local state or place another HA
+  layer in front.
 - Maglev hashing is available for static `proxy.upstreams` pools. File-refreshed
-  and DNS-refreshed pools reject Maglev in `1.5.0` until dynamic table rebuild
-  behavior is specified and observable.
+  and DNS-refreshed pools reject Maglev in the current `1.5.x` line until
+  dynamic table rebuild behavior is specified and observable.
 - Bounded-load consistent hashing is local to one Fluxheim process. It avoids
   selecting an over-bound hash target when another eligible ring candidate is
   available, but it does not coordinate load across multiple Fluxheim nodes.
-- Runtime state is local and in-memory in `1.5.0`.
+- Runtime state is local and in-memory in the current `1.5.x` line.
 - UDP, GSLB/DNS steering, WAF, VPN/firewall appliance behavior, and scripted
   iRules/Lua/Wasm behavior are intentionally separate roadmap lines.
 - `proxy.load_balance.queue` is opt-in. Defaults keep fail-fast behavior when
