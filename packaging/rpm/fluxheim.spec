@@ -9,7 +9,7 @@
 Name:           fluxheim
 Version:        1.5.0
 Release:        1%{?dist}
-Summary:        Modular Pingora-based reverse proxy and static web server
+Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
 URL:            https://github.com/valkyoth/fluxheim
 Source0:        https://github.com/valkyoth/fluxheim/archive/refs/tags/v%{version}/%{name}-%{version}.tar.gz
@@ -47,12 +47,12 @@ Requires(pre):   shadow-utils
 Requires:       ca-certificates
 
 %description
-Fluxheim is a modular Rust edge server built on Pingora. The 1.5 line adds the
-enterprise HTTP/TCP load-balancer control-plane track while keeping the
-packaged native build on the full production feature set: proxy, static web
-serving, cache, load balancing, managed ACME, Prometheus metrics,
-OpenTelemetry export support, GeoIP policy, stream proxying, and PHP-FPM
-support.
+Fluxheim is a modular Rust edge gateway for websites, applications, caching,
+and load balancing. The 1.5 line adds the enterprise HTTP/TCP load-balancer
+control-plane track while keeping the packaged native build on the full
+production feature set: proxy, static web serving, cache, load balancing,
+managed ACME, Prometheus metrics, OpenTelemetry export support, GeoIP policy,
+stream proxying, and PHP-FPM support.
 
 This spec builds from vendored Cargo dependencies and uses Cargo offline mode.
 It intentionally does not download crates during the RPM build.

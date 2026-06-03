@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
 publish = false
-description = "A modular Pingora-based reverse proxy and static web server."
+description = "A modular Rust edge gateway for websites, caching, and load balancing."
 default-run = "fluxheim"
 
 [features]
