@@ -1654,6 +1654,8 @@ fn load_balancer_event_label(event: &str) -> &'static str {
         "persistence_miss" => "persistence_miss",
         "persistence_fallback" => "persistence_fallback",
         "persistence_clear" => "persistence_clear",
+        "persistence_clear_invalid" => "persistence_clear_invalid",
+        "persistence_clear_not_found" => "persistence_clear_not_found",
         "queue_waited" => "queue_waited",
         "queue_full" => "queue_full",
         "queue_timeout" => "queue_timeout",
@@ -2084,6 +2086,18 @@ mod tests {
             Some("origin-a"),
             "persistence_clear",
         );
+        record_load_balancer_event(
+            "lb-test",
+            Some("api"),
+            Some("origin-a"),
+            "persistence_clear_invalid",
+        );
+        record_load_balancer_event(
+            "lb-test",
+            Some("api"),
+            Some("origin-a"),
+            "persistence_clear_not_found",
+        );
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "queue_waited");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "queue_full");
         record_load_balancer_event("lb-test", Some("api"), Some("origin-a"), "queue_timeout");
@@ -2116,6 +2130,8 @@ mod tests {
         assert!(output.contains(r#"event="persistence_miss""#));
         assert!(output.contains(r#"event="persistence_fallback""#));
         assert!(output.contains(r#"event="persistence_clear""#));
+        assert!(output.contains(r#"event="persistence_clear_invalid""#));
+        assert!(output.contains(r#"event="persistence_clear_not_found""#));
         assert!(output.contains(r#"event="queue_waited""#));
         assert!(output.contains(r#"event="queue_full""#));
         assert!(output.contains(r#"event="queue_timeout""#));

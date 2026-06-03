@@ -382,7 +382,9 @@ target a route-local pool. The response includes `cleared_entries`,
 `scope = "vhost"` or `"route"`, and `"persistent": false`. The operation is
 local to the current runtime; it does not alter config or durable snapshots.
 When metrics are compiled, successful clears are counted as
-`persistence_clear` in `fluxheim_load_balancer_events_total`.
+`persistence_clear` in `fluxheim_load_balancer_events_total`; rejected clear
+requests are counted separately as `persistence_clear_invalid` or
+`persistence_clear_not_found`.
 
 `admin.client_certificate` is an extra hardening gate for that trusted
 terminator pattern. The admin listener still receives plain HTTP from the

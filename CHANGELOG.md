@@ -15,6 +15,8 @@ behavior when the change improves security or project direction.
   control-plane launch. The stop line is load-balancer correctness,
   documentation, migration polish, and release-profile fixes; new large feature
   surfaces stay in later `1.5.x` milestones.
+- Keep load-balancer persistence-clear metrics distinct from member-state
+  mutation metrics for clearer admin audit dashboards.
 
 ## 1.5.0 - 2026-06-01
 

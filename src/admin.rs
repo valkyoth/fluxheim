@@ -963,7 +963,7 @@ impl AdminApp {
                     result.address,
                     result.alias.as_deref().unwrap_or("")
                 );
-                record_load_balancer_member_state_event(
+                record_load_balancer_event(
                     &result.vhost,
                     result.route.as_deref(),
                     result.alias.as_deref().or(Some(result.member.as_str())),
@@ -994,12 +994,7 @@ impl AdminApp {
                     state.as_str(),
                     error
                 );
-                record_load_balancer_member_state_event(
-                    vhost,
-                    route,
-                    Some(member),
-                    "member_state_invalid",
-                );
+                record_load_balancer_event(vhost, route, Some(member), "member_state_invalid");
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -1012,12 +1007,7 @@ impl AdminApp {
                     state.as_str(),
                     error
                 );
-                record_load_balancer_member_state_event(
-                    vhost,
-                    route,
-                    Some(member),
-                    "member_state_not_found",
-                );
+                record_load_balancer_event(vhost, route, Some(member), "member_state_not_found");
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
             }
             Err(error) => internal_error_response(&error),
@@ -1051,7 +1041,7 @@ impl AdminApp {
                     scope,
                     result.cleared_entries
                 );
-                record_load_balancer_member_state_event(
+                record_load_balancer_event(
                     &result.vhost,
                     result.route.as_deref(),
                     None,
@@ -1077,7 +1067,7 @@ impl AdminApp {
                     route.unwrap_or(""),
                     error
                 );
-                record_load_balancer_member_state_event(vhost, route, None, "member_state_invalid");
+                record_load_balancer_event(vhost, route, None, "persistence_clear_invalid");
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -1088,12 +1078,7 @@ impl AdminApp {
                     route.unwrap_or(""),
                     error
                 );
-                record_load_balancer_member_state_event(
-                    vhost,
-                    route,
-                    None,
-                    "member_state_not_found",
-                );
+                record_load_balancer_event(vhost, route, None, "persistence_clear_not_found");
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
             }
             Err(error) => internal_error_response(&error),
@@ -2711,17 +2696,12 @@ fn record_admin_auth_event(event: &str, scope: AdminAuthThrottleScope) {
 fn record_admin_auth_event(_event: &str, _scope: AdminAuthThrottleScope) {}
 
 #[cfg(all(feature = "metrics", feature = "load-balancer"))]
-fn record_load_balancer_member_state_event(
-    vhost: &str,
-    route: Option<&str>,
-    member: Option<&str>,
-    event: &str,
-) {
+fn record_load_balancer_event(vhost: &str, route: Option<&str>, member: Option<&str>, event: &str) {
     crate::metrics::record_load_balancer_event(vhost, route, member, event);
 }
 
 #[cfg(all(not(feature = "metrics"), feature = "load-balancer"))]
-fn record_load_balancer_member_state_event(
+fn record_load_balancer_event(
     _vhost: &str,
     _route: Option<&str>,
     _member: Option<&str>,
