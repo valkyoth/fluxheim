@@ -30,8 +30,9 @@ documentation.
 - The local load-balancer smoke now exercises route-scoped header persistence,
   authenticated persistence-table clear, and the `persistence_clear` metrics
   event.
-- The load-balancer container config is validated with the focused
-  `profile-load-balancer-edge,acme-client` feature set.
+- The load-balancer container config is validated through the load-balancer
+  config-tester profile, while the focused `profile-load-balancer-edge`
+  release profile remains covered by cargo check/clippy and image builds.
 
 ## Boundaries
 

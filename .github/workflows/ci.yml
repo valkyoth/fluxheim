@@ -174,7 +174,7 @@ jobs:
           cargo run --quiet --no-default-features --features profile-cache-edge,acme-client -- --validate-config --config packaging/container/cache.toml
           cargo run --quiet --no-default-features --features profile-proxy-edge,acme-client -- --validate-config --config packaging/container/proxy.toml
           cargo run --quiet --no-default-features --features profile-web-server,php-fpm,acme-client -- --check-config --config packaging/container/php.toml
-          cargo run --quiet --no-default-features --features profile-load-balancer-edge,acme-client -- --validate-config --config packaging/container/load-balancer.toml
+          cargo run --quiet --no-default-features --features profile-development --bin fluxheim-config-tester -- --config packaging/container/load-balancer.toml --profile load-balancer --no-runtime-paths
           cargo run --quiet -- --check-config --config examples/conf.d
           cargo run --quiet -- --check-config --config examples/gateway-1-0
           cargo run --quiet --no-default-features --features profile-privacy -- --check-config --config examples/privacy.toml
