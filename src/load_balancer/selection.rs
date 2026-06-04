@@ -1,6 +1,7 @@
 use std::io;
 use std::process;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
@@ -37,6 +38,7 @@ pub(super) struct LoadBalancerSelectInputs<'a> {
     pub(super) counters: &'a BackendConnectionCounters,
     pub(super) backend_policy: &'a BackendSelectionPolicy,
     pub(super) persistence_entry_counts: &'a std::collections::HashMap<u64, usize>,
+    pub(super) round_robin_cursor: &'a AtomicUsize,
 }
 
 pub(super) fn select_pingora<S>(
@@ -185,6 +187,78 @@ where
     })
 }
 
+pub(super) fn select_weighted_round_robin(
+    inner: &LoadBalancer<RoundRobin>,
+    inputs: LoadBalancerSelectInputs<'_>,
+) -> Option<SelectedUpstream> {
+    let context = SelectionContext {
+        passive_health: inputs.passive_health,
+        slow_start: inputs.slow_start,
+        counters: inputs.counters,
+        backend_policy: inputs.backend_policy,
+    };
+    for pass in selection_passes(inputs.backend_policy) {
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(selected) = select_weighted_round_robin_with_backup_policy(
+            inner,
+            inputs.round_robin_cursor,
+            context,
+            pass,
+        ) {
+            return Some(selected);
+        }
+    }
+    None
+}
+
+fn select_weighted_round_robin_with_backup_policy(
+    inner: &LoadBalancer<RoundRobin>,
+    cursor: &AtomicUsize,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+) -> Option<SelectedUpstream> {
+    let mut candidates = Vec::new();
+    let mut total_weight = 0usize;
+    for backend in inner.backends().get_backend().iter() {
+        if !inner.backends().ready(backend)
+            || !context
+                .backend_policy
+                .permits(backend, pass, context.counters)
+            || context
+                .passive_health
+                .is_some_and(|health| health.is_ejected(backend))
+            || (!pass.ignore_slow_start
+                && context
+                    .slow_start
+                    .is_some_and(|state| !state.permits(backend)))
+        {
+            continue;
+        }
+        let weight = context.backend_policy.effective_weight(backend);
+        total_weight = total_weight.saturating_add(weight);
+        candidates.push((backend.clone(), weight));
+    }
+    if total_weight == 0 {
+        return None;
+    }
+    let mut target = cursor.fetch_add(1, Ordering::Relaxed) % total_weight;
+    for (backend, weight) in candidates {
+        if target < weight {
+            return Some(SelectedUpstream {
+                permit: None,
+                alias: None,
+                backend,
+                reporter: None,
+                persistence_outcome: None,
+            });
+        }
+        target = target.saturating_sub(weight);
+    }
+    None
+}
+
 pub(super) fn select_least_connections(
     inner: &LoadBalancer<RoundRobin>,
     counters: &BackendConnectionCounters,
@@ -234,7 +308,7 @@ fn select_least_connections_with_backup_policy(
             continue;
         }
         let connections = counters.count(backend);
-        let weight = backend.weight.max(1);
+        let weight = backend_policy.effective_weight(backend);
         if selected.as_ref().is_none_or(
             |(_, selected_connections, selected_weight): &(Backend, usize, usize)| {
                 least_connections_score_is_lower(
@@ -313,7 +387,7 @@ fn select_least_sessions_with_backup_policy(
             .get(&backend_policy_key(backend))
             .copied()
             .unwrap_or(0);
-        let weight = backend.weight.max(1);
+        let weight = backend_policy.effective_weight(backend);
         if selected.as_ref().is_none_or(
             |(_, selected_sessions, selected_weight): &(Backend, usize, usize)| {
                 least_connections_score_is_lower(
@@ -400,7 +474,7 @@ fn select_least_time_with_backup_policy(
         }
         let latency_score = latency.score(backend).unwrap_or(0);
         let connections = counters.count(backend);
-        let weight = backend.weight.max(1);
+        let weight = backend_policy.effective_weight(backend);
         if selected.as_ref().is_none_or(
             |(_, selected_latency, selected_connections, selected_weight): &(
                 Backend,

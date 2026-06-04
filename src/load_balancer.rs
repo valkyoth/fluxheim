@@ -37,7 +37,7 @@ use self::policy::{
 use self::selection::{
     LoadBalancerSelectInputs, MaglevTable, SelectionPass, select_bounded_load_consistent,
     select_least_connections, select_least_sessions, select_least_time, select_maglev,
-    select_pingora, select_power_of_two,
+    select_pingora, select_power_of_two, select_weighted_round_robin,
 };
 use self::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
@@ -47,6 +47,7 @@ pub use self::state::{LoadBalancedConnectionPermit, LoadBalancedUpstreamReporter
 
 pub type UpstreamLoadBalancerService = Box<dyn ServiceWithDependents>;
 const BACKEND_STATE_PRUNE_INTERVAL: usize = 1024;
+pub const MAX_RUNTIME_BACKEND_WEIGHT: usize = 1000;
 
 #[derive(Clone)]
 pub struct UpstreamLoadBalancer {
@@ -62,6 +63,7 @@ pub struct UpstreamLoadBalancer {
     persistence_policy: LoadBalancePersistenceConfig,
     queue_policy: LoadBalanceQueueConfig,
     queue_waiting: Arc<AtomicUsize>,
+    round_robin_cursor: Arc<AtomicUsize>,
     state_prune_counter: Arc<AtomicUsize>,
     counters: Arc<BackendConnectionCounters>,
     backend_policy: BackendSelectionPolicy,
@@ -167,6 +169,16 @@ pub struct LoadBalancerRuntimeBackendMutation {
     pub alias: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct LoadBalancerRuntimeBackendWeightMutation {
+    pub member: String,
+    pub configured_weight: usize,
+    pub effective_weight: usize,
+    pub runtime_weight_override: Option<usize>,
+    pub address: String,
+    pub alias: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadBalancerCircuitState {
@@ -244,6 +256,9 @@ pub struct LoadBalancerBackendRuntimeStats {
     pub alias: Option<String>,
     pub tags: Vec<String>,
     pub weight: usize,
+    pub effective_weight: usize,
+    pub runtime_weight_override: Option<usize>,
+    pub runtime_weight_changed_at_unix_secs: Option<u64>,
     pub locality: Option<String>,
     pub locality_preferred: bool,
     pub ready: bool,
@@ -616,6 +631,7 @@ impl UpstreamLoadBalancer {
             counters: &self.counters,
             backend_policy: &self.backend_policy,
             persistence_entry_counts: &persistence_entry_counts,
+            round_robin_cursor: &self.round_robin_cursor,
         })?;
         let selected = self.prepare_selected(selected, persistence_outcome)?;
         if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key) {
@@ -702,6 +718,7 @@ impl UpstreamLoadBalancer {
             persistence_policy: config.load_balance.persistence.clone(),
             queue_policy: config.load_balance.queue.clone(),
             queue_waiting: Arc::new(AtomicUsize::new(0)),
+            round_robin_cursor: Arc::new(AtomicUsize::new(0)),
             state_prune_counter: Arc::new(AtomicUsize::new(0)),
             counters: Arc::new(BackendConnectionCounters::default()),
             backend_policy: BackendSelectionPolicy::from_config(config),
@@ -923,6 +940,44 @@ impl UpstreamLoadBalancer {
         })
     }
 
+    pub fn set_runtime_backend_weight(
+        &self,
+        member: &str,
+        weight: Option<usize>,
+    ) -> io::Result<LoadBalancerRuntimeBackendWeightMutation> {
+        if !self.selection.supports_runtime_weight_override() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime load-balancer weight overrides are available only for round-robin, least-connections, least-sessions, and least-time selections in this release",
+            ));
+        }
+        if let Some(weight) = weight
+            && (weight == 0 || weight > MAX_RUNTIME_BACKEND_WEIGHT)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer runtime weight must be between 1 and 1000",
+            ));
+        }
+        let backend = self
+            .inner
+            .backend_by_member(member, &self.backend_aliases)?;
+        let policy_key = backend_policy_key(&backend);
+        self.backend_policy
+            .set_runtime_backend_weight(policy_key, weight);
+        Ok(LoadBalancerRuntimeBackendWeightMutation {
+            member: member.to_owned(),
+            configured_weight: backend.weight,
+            effective_weight: self.backend_policy.effective_weight(&backend),
+            runtime_weight_override: self.backend_policy.runtime_backend_weight(policy_key),
+            address: backend.addr.to_string(),
+            alias: self
+                .backend_aliases
+                .get(&policy_key)
+                .map(|alias| alias.to_string()),
+        })
+    }
+
     pub fn clear_persistence(&self) -> usize {
         self.persistence
             .as_ref()
@@ -980,16 +1035,7 @@ enum UpstreamLoadBalancerInner {
 impl UpstreamLoadBalancerInner {
     fn select(&self, inputs: LoadBalancerSelectInputs<'_>) -> Option<SelectedUpstream> {
         match self {
-            Self::RoundRobin(inner) => select_pingora(
-                inner,
-                b"",
-                inputs.max_iterations,
-                inputs.passive_health,
-                inputs.slow_start,
-                inputs.counters,
-                inputs.backend_policy,
-            )
-            .map(SelectedUpstream::new),
+            Self::RoundRobin(inner) => select_weighted_round_robin(inner, inputs),
             Self::LeastConnections(inner) => select_least_connections(
                 inner,
                 inputs.counters,
@@ -1279,6 +1325,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::io::ErrorKind;
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
@@ -1406,6 +1453,87 @@ mod tests {
             ),
             "selected alias should come from configured upstream_aliases"
         );
+    }
+
+    #[test]
+    fn runtime_weight_override_changes_round_robin_distribution() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_weights: vec![1, 1],
+            upstream_aliases: vec!["origin-a".to_owned(), "origin-b".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let mutation = balancer
+            .set_runtime_backend_weight("origin-a", Some(4))
+            .unwrap();
+        assert_eq!(mutation.configured_weight, 1);
+        assert_eq!(mutation.effective_weight, 4);
+        assert_eq!(mutation.runtime_weight_override, Some(4));
+        balancer
+            .set_runtime_backend_weight("origin-b", Some(1))
+            .unwrap();
+
+        let selected_aliases = (0..5)
+            .map(|_| {
+                balancer
+                    .select(&request(), None)
+                    .unwrap()
+                    .alias
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selected_aliases,
+            ["origin-a", "origin-a", "origin-a", "origin-a", "origin-b"]
+        );
+
+        let stats = balancer.runtime_stats();
+        let origin_a = stats
+            .backends
+            .iter()
+            .find(|backend| backend.alias.as_deref() == Some("origin-a"))
+            .unwrap();
+        assert_eq!(origin_a.weight, 1);
+        assert_eq!(origin_a.effective_weight, 4);
+        assert_eq!(origin_a.runtime_weight_override, Some(4));
+        assert!(origin_a.runtime_weight_changed_at_unix_secs.is_some());
+
+        let reset = balancer
+            .set_runtime_backend_weight("origin-a", None)
+            .unwrap();
+        assert_eq!(reset.effective_weight, 1);
+        assert_eq!(reset.runtime_weight_override, None);
+    }
+
+    #[test]
+    fn runtime_weight_override_rejects_hash_selection() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_aliases: vec!["origin-a".to_owned(), "origin-b".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::SourceHash,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let error = balancer
+            .set_runtime_backend_weight("origin-a", Some(4))
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
     }
 
     #[test]
@@ -2037,11 +2165,14 @@ mod tests {
         assert_eq!(failed.backend.addr.to_string(), "127.0.0.1:3000");
         failed.reporter.unwrap().record_failure();
 
-        let preferred = balancer.select(&request(), None).unwrap();
-        assert_eq!(preferred.backend.addr.to_string(), "127.0.0.1:3001");
-
         let activated = balancer.select(&request(), None).unwrap();
         assert_eq!(activated.backend.addr.to_string(), "127.0.0.1:3002");
+
+        let remaining_preferred = balancer.select(&request(), None).unwrap();
+        assert_eq!(
+            remaining_preferred.backend.addr.to_string(),
+            "127.0.0.1:3001"
+        );
     }
 
     #[test]

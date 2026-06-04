@@ -97,6 +97,7 @@ Fluxheim maps those pieces as follows:
 | Slow ramp after recovery | `proxy.load_balance.slow_start` |
 | Source-address persistence | `proxy.load_balance.persistence` with `mode = "source-ip"` |
 | Manual drain/disable/force-down/resume | `POST /_fluxheim/load-balancer/member-state` |
+| Runtime member weight shift | `POST /_fluxheim/load-balancer/member-weight` for round-robin and least-* selectors |
 | Saturation queue | `proxy.load_balance.queue` |
 | Pool all-down response | `proxy.load_balance.all_down_status` |
 
@@ -131,6 +132,21 @@ Supported states are `normal`, `drain`, `disable`, `forced_down`, and
 `manual_resume`. Runtime mutations are intentionally in-memory in the current
 `1.5.x` line; they survive neither process restart nor runtime rebuild.
 
+Configured member weights can be shifted at runtime for canary or traffic-ramp
+workflows when the pool uses `round-robin`, `least-connections`,
+`least-sessions`, or `least-time`:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/member-weight?vhost=app&member=app-a&weight=25"
+```
+
+Use `weight=default`, `reset`, `clear`, or `configured` to clear the override.
+Hash, consistent-hash, bounded-load consistent, Maglev, and power-of-two
+selectors reject runtime weights in the current release because their
+ring/table or weighted-sampling semantics need a separate design.
+
 The load-balancer-only status view is available without parsing the full admin
 status body:
 
@@ -153,8 +169,10 @@ The following are intentional current `1.5.x` boundaries. They are not defects
 in the shipped load-balancer behavior; they are architectural gaps tracked for
 later `1.5.x` or future module lines.
 
-- Dynamic weight changes and add/remove-member operations are future control
-  plane work.
+- Runtime add/remove-member operations are future control-plane work.
+- Runtime weight changes are available for round-robin and least-* selectors.
+  Hash/ring selectors need future table-rebuild semantics before runtime
+  weights are accepted there.
 - Load-balancer-managed cookie insertion is future persistence work. In the
   current `1.5.x` line, cookie persistence uses an application or
   upstream-issued request cookie that the operator explicitly names; Fluxheim

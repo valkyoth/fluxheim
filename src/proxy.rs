@@ -616,6 +616,14 @@ impl FluxProxy {
     }
 
     #[cfg(feature = "load-balancer")]
+    pub fn set_load_balancer_member_weight(
+        &self,
+        request: LoadBalancerMemberWeightRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberWeightResult> {
+        self.snapshot().set_load_balancer_member_weight(request)
+    }
+
+    #[cfg(feature = "load-balancer")]
     pub fn clear_load_balancer_persistence(
         &self,
         request: LoadBalancerPersistenceClearRequest<'_>,
@@ -738,6 +746,28 @@ pub struct LoadBalancerMemberStateResult {
     pub route: Option<String>,
     pub member: String,
     pub state: LoadBalancerRuntimeBackendState,
+    pub address: String,
+    pub alias: Option<String>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadBalancerMemberWeightRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub member: &'a str,
+    pub weight: Option<usize>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct LoadBalancerMemberWeightResult {
+    pub vhost: String,
+    pub route: Option<String>,
+    pub member: String,
+    pub configured_weight: usize,
+    pub effective_weight: usize,
+    pub runtime_weight_override: Option<usize>,
     pub address: String,
     pub alias: Option<String>,
 }
@@ -1055,6 +1085,80 @@ impl ProxySnapshot {
             route: route_name,
             member: mutation.member,
             state: mutation.state,
+            address: mutation.address,
+            alias: mutation.alias,
+        })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn set_load_balancer_member_weight(
+        &self,
+        request: LoadBalancerMemberWeightRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberWeightResult> {
+        let vhost_name = request.vhost.trim();
+        if vhost_name.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer vhost is required",
+            ));
+        }
+        let member = request.member.trim();
+        if member.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member is required",
+            ));
+        }
+        let vhost = self
+            .state
+            .vhosts
+            .iter()
+            .find(|vhost| vhost.name == vhost_name)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost is not configured",
+                )
+            })?;
+        let route = request
+            .route
+            .map(str::trim)
+            .filter(|route| !route.is_empty());
+        let (route_name, pool) = if let Some(route_name) = route {
+            let route = vhost
+                .routes
+                .iter()
+                .find(|route| route.name == route_name)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "load balancer route is not configured",
+                    )
+                })?;
+            let pool = route.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer route has no configured pool",
+                )
+            })?;
+            (Some(route.name.clone()), pool)
+        } else {
+            let pool = vhost.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost has no configured pool",
+                )
+            })?;
+            (None, pool)
+        };
+        let mutation = pool.set_runtime_backend_weight(member, request.weight)?;
+        Ok(LoadBalancerMemberWeightResult {
+            vhost: vhost.name.clone(),
+            route: route_name,
+            member: mutation.member,
+            configured_weight: mutation.configured_weight,
+            effective_weight: mutation.effective_weight,
+            runtime_weight_override: mutation.runtime_weight_override,
             address: mutation.address,
             alias: mutation.alias,
         })

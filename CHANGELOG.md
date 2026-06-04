@@ -17,6 +17,13 @@ behavior when the change improves security or project direction.
   affinity-cookie insertion, cross-node state synchronization, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, and iRules/Lua/Wasm scripting remain later
   roadmap tracks.
+- Add authenticated runtime load-balancer member weight mutation through
+  `POST /_fluxheim/load-balancer/member-weight` for configured members in
+  `round-robin`, `least-connections`, `least-sessions`, and `least-time` pools.
+- Report configured weight, effective weight, runtime weight override, and
+  runtime weight transition timestamp in load-balancer backend status.
+- Count successful, invalid, and not-found runtime member-weight operations as
+  bounded load-balancer events.
 
 ## 1.5.1 - 2026-06-03
 

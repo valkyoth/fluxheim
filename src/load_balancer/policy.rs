@@ -49,6 +49,8 @@ struct RuntimeBackendPolicyOverrideState {
     drain: std::collections::HashSet<u64>,
     disabled: std::collections::HashSet<u64>,
     forced_down: std::collections::HashSet<u64>,
+    weights: std::collections::HashMap<u64, usize>,
+    weight_changed_at_unix_secs: std::collections::HashMap<u64, u64>,
     changed_at_unix_secs: std::collections::HashMap<u64, u64>,
 }
 
@@ -168,6 +170,17 @@ impl BackendSelectionPolicy {
         self.runtime.set_state(key, state);
     }
 
+    pub(super) fn set_runtime_backend_weight(&self, key: u64, weight: Option<usize>) {
+        self.runtime.set_weight(key, weight);
+    }
+
+    pub(super) fn effective_weight(&self, backend: &Backend) -> usize {
+        self.runtime
+            .weight(backend_policy_key(backend))
+            .unwrap_or(backend.weight)
+            .max(1)
+    }
+
     pub(super) fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
         self.runtime.prune_stale(live_keys);
     }
@@ -178,6 +191,14 @@ impl BackendSelectionPolicy {
 
     fn runtime_backend_state_changed_at_unix_secs(&self, key: u64) -> Option<u64> {
         self.runtime.changed_at_unix_secs(key)
+    }
+
+    pub(super) fn runtime_backend_weight(&self, key: u64) -> Option<usize> {
+        self.runtime.weight(key)
+    }
+
+    fn runtime_backend_weight_changed_at_unix_secs(&self, key: u64) -> Option<u64> {
+        self.runtime.weight_changed_at_unix_secs(key)
     }
 }
 
@@ -226,6 +247,22 @@ impl RuntimeBackendPolicyOverrides {
         }
     }
 
+    fn set_weight(&self, key: u64, weight: Option<usize>) {
+        let mut overrides = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(weight) = weight {
+            overrides.weights.insert(key, weight);
+            overrides
+                .weight_changed_at_unix_secs
+                .insert(key, unix_secs());
+        } else {
+            overrides.weights.remove(&key);
+            overrides.weight_changed_at_unix_secs.remove(&key);
+        }
+    }
+
     fn state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
         let state = self
             .state
@@ -252,6 +289,24 @@ impl RuntimeBackendPolicyOverrides {
             .copied()
     }
 
+    fn weight(&self, key: u64) -> Option<usize> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .weights
+            .get(&key)
+            .copied()
+    }
+
+    fn weight_changed_at_unix_secs(&self, key: u64) -> Option<u64> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .weight_changed_at_unix_secs
+            .get(&key)
+            .copied()
+    }
+
     fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
         let mut state = self
             .state
@@ -266,6 +321,10 @@ impl RuntimeBackendPolicyOverrides {
         state
             .changed_at_unix_secs
             .retain(|key, _| live_keys.contains(key) || retained_override_keys.contains(key));
+        state.weights.retain(|key, _| live_keys.contains(key));
+        state
+            .weight_changed_at_unix_secs
+            .retain(|key, _| live_keys.contains(key));
     }
 }
 
@@ -326,6 +385,27 @@ mod tests {
         assert!(
             policy
                 .runtime_backend_state_changed_at_unix_secs(3)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn runtime_backend_policy_prune_stale_runtime_weight_keys() {
+        let policy = BackendSelectionPolicy::default();
+        policy.set_runtime_backend_weight(1, Some(4));
+        policy.set_runtime_backend_weight(2, Some(8));
+
+        assert_eq!(policy.runtime_backend_weight(1), Some(4));
+        assert_eq!(policy.runtime_backend_weight(2), Some(8));
+
+        policy.prune_stale(&[2].into_iter().collect());
+
+        assert_eq!(policy.runtime_backend_weight(1), None);
+        assert_eq!(policy.runtime_backend_weight(2), Some(8));
+        assert_eq!(policy.runtime_backend_weight_changed_at_unix_secs(1), None);
+        assert!(
+            policy
+                .runtime_backend_weight_changed_at_unix_secs(2)
                 .is_some()
         );
     }
@@ -464,6 +544,11 @@ where
                     .map(|alias| alias.to_string()),
                 tags: inputs.backend_policy.tags(policy_key),
                 weight: backend.weight,
+                effective_weight: inputs.backend_policy.effective_weight(backend),
+                runtime_weight_override: inputs.backend_policy.runtime_backend_weight(policy_key),
+                runtime_weight_changed_at_unix_secs: inputs
+                    .backend_policy
+                    .runtime_backend_weight_changed_at_unix_secs(policy_key),
                 locality: inputs
                     .backend_policy
                     .locality_key(policy_key)

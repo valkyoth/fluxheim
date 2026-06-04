@@ -212,6 +212,14 @@ impl LoadBalanceSelection {
                 | Self::MaglevCookieHash
         )
     }
+
+    #[cfg(feature = "load-balancer")]
+    pub(crate) fn supports_runtime_weight_override(self) -> bool {
+        matches!(
+            self,
+            Self::RoundRobin | Self::LeastConnections | Self::LeastSessions | Self::LeastTime
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]

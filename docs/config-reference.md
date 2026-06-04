@@ -356,6 +356,24 @@ Successful and rejected member-state operations are logged under the
 `fluxheim_load_balancer_events_total` with bounded events `member_state`,
 `member_state_invalid`, and `member_state_not_found`.
 
+Authenticated admins can adjust the runtime weight of an already configured
+member without reloading when the pool uses `round-robin`, `least-connections`,
+`least-sessions`, or `least-time` selection:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/member-weight?vhost=app&member=app-a&weight=25"
+```
+
+Use `weight = "default"`, `reset`, `clear`, or `configured` to remove the
+runtime override and return to the configured `upstream_weights` value. Runtime
+weights are bounded to `1..=1000`, are local/in-memory like runtime member
+state, and are returned in backend status as `effective_weight`,
+`runtime_weight_override`, and `runtime_weight_changed_at_unix_secs`.
+Successful and rejected weight operations are counted as `member_weight`,
+`member_weight_invalid`, and `member_weight_not_found`.
+
 Authenticated admins can fetch only load-balancer runtime state without parsing
 the full `/_fluxheim/status` payload:
 
@@ -1058,7 +1076,12 @@ bounded persistence-entry share per backend, weighted by `upstream_weights`.
 `least-time` uses the same request permits plus an EWMA of observed upstream
 latency from completed requests, weighted by `upstream_weights`; unsampled
 healthy backends are allowed to receive traffic so new or recovered pool
-members can establish a latency baseline. `power-of-two`
+members can establish a latency baseline. Runtime weight overrides through the
+admin API are honored by `round-robin`, `least-connections`, `least-sessions`,
+and `least-time` in the current release. Hash, consistent hash, bounded-load
+consistent hash, Maglev, and power-of-two selections reject runtime weight
+changes until ring/table rebuild and sampling semantics are specified.
+`power-of-two`
 also accepts `power-of-two-choices`, `two-choice`, `weighted-two-choice`, and
 `weighted-random-two-choice`; all names sample two healthy backends through
 Pingora's random weighted selector and choose the lower weighted in-flight

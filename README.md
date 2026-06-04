@@ -35,9 +35,11 @@ state, slow start, retry budgets, bounded queueing, local persistence, runtime
 member-state controls, status/metrics/audit visibility, and a validated
 enterprise migration fixture. It is not a complete BIG-IP platform clone:
 managed cookie insertion, restart-persistent load-balancer state, runtime
-weight changes, runtime add/remove-member, cross-instance state sync, UDP, GSLB,
-WAF, VPN/firewall appliance behavior, and iRules/Lua/Wasm scripting are
-documented future tracks rather than hidden or implied behavior.
+add/remove-member, cross-instance state sync, UDP, GSLB, WAF, VPN/firewall
+appliance behavior, and iRules/Lua/Wasm scripting are documented future tracks
+rather than hidden or implied behavior. Runtime weight overrides are local,
+in-memory controls for round-robin and least-* selectors in the current
+`1.5.x` line.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
@@ -79,13 +81,13 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | --- | --- | --- |
 | Reverse proxy | ✅ | Whole-vhost and route-level proxying. |
 | Compression | ✅ | Optional gzip, Zstandard, and Brotli with vhost/route controls. |
-| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-sessions, least-time EWMA, priority groups, locality preference with fallback, per-upstream tags and in-flight caps, bounded queue/overflow policy, local source-IP/header/request-cookie persistence with runtime clear, weighted power-of-two, hash, consistent-hash, bounded-load consistent-hash, static-pool Maglev hash, backup, drain, disabled/forced-down members, runtime drain/disable/force-down/enable/manual-resume, slow start, retry budgets/statuses, configurable all-down status, and a validated enterprise fixture in `examples/load-balancer-enterprise.toml`. |
+| Load balancing | ✅ | Weighted round-robin, least/weighted/ratio least connections, least-sessions, least-time EWMA, priority groups, locality preference with fallback, per-upstream tags and in-flight caps, bounded queue/overflow policy, local source-IP/header/request-cookie persistence with runtime clear, weighted power-of-two, hash, consistent-hash, bounded-load consistent-hash, static-pool Maglev hash, backup, drain, disabled/forced-down members, runtime drain/disable/force-down/enable/manual-resume, runtime weight overrides for round-robin and least-* selectors, slow start, retry budgets/statuses, configurable all-down status, and a validated enterprise fixture in `examples/load-balancer-enterprise.toml`. |
 | DNS-refreshed upstream pools | ✅ | `1.4.1`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |
 | Load-balancer status | ✅ | Admin status includes configured pools, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state. |
-| Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides are in-memory only; Fluxheim does not yet insert managed affinity cookies, persist LB state across restarts, change weights/add members at runtime, or sync state across active-active nodes. |
+| Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides are in-memory only; Fluxheim does not yet insert managed affinity cookies, persist LB state across restarts, add/remove members at runtime, apply runtime weights to hash/ring selectors, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |

@@ -27,7 +27,10 @@ use crate::config::{AdminAuthThrottleConfig, AdminConfig, AdminHealthResponseMod
 use crate::load_balancer::LoadBalancerRuntimeBackendState;
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
 #[cfg(feature = "load-balancer")]
-use crate::proxy::{LoadBalancerMemberStateRequest, LoadBalancerPersistenceClearRequest};
+use crate::proxy::{
+    LoadBalancerMemberStateRequest, LoadBalancerMemberWeightRequest,
+    LoadBalancerPersistenceClearRequest,
+};
 use crate::reload::{ReloadReason, classify_reload};
 use crate::snapshot::{ConfigSnapshot, SnapshotError, SnapshotStore};
 
@@ -642,6 +645,17 @@ impl AdminApp {
                     header_value(headers, "x-fluxheim-lb-state")
                         .or_else(|| query_param(query, "state")),
                 ),
+            ("POST", "/_fluxheim/load-balancer/member-weight") => self
+                .load_balancer_member_weight_response(
+                    header_value(headers, "x-fluxheim-lb-vhost")
+                        .or_else(|| query_param(query, "vhost")),
+                    header_value(headers, "x-fluxheim-lb-route")
+                        .or_else(|| query_param(query, "route")),
+                    header_value(headers, "x-fluxheim-lb-member")
+                        .or_else(|| query_param(query, "member")),
+                    header_value(headers, "x-fluxheim-lb-weight")
+                        .or_else(|| query_param(query, "weight")),
+                ),
             ("POST", "/_fluxheim/load-balancer/persistence/clear") => self
                 .load_balancer_persistence_clear_response(
                     header_value(headers, "x-fluxheim-lb-vhost")
@@ -771,6 +785,7 @@ impl AdminApp {
                 | "/_fluxheim/self-heal/fail"
                 | "/_fluxheim/self-heal/report"
                 | "/_fluxheim/load-balancer/member-state"
+                | "/_fluxheim/load-balancer/member-weight"
                 | "/_fluxheim/load-balancer/persistence/clear"
                 | "/_fluxheim/cache/purge"
                 | "/_fluxheim/cache/purge-bulk"
@@ -1015,6 +1030,108 @@ impl AdminApp {
     }
 
     #[cfg(feature = "load-balancer")]
+    fn load_balancer_member_weight_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        member: Option<&str>,
+        weight: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer vhost is required");
+        };
+        let Some(member) = member else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer member is required");
+        };
+        let Some(weight) = weight else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer weight is required");
+        };
+        let weight = match parse_load_balancer_runtime_weight(weight) {
+            Ok(weight) => weight,
+            Err(error) => return error_response(StatusCode::BAD_REQUEST, error),
+        };
+        match self
+            .proxy
+            .set_load_balancer_member_weight(LoadBalancerMemberWeightRequest {
+                vhost,
+                route,
+                member,
+                weight,
+            }) {
+            Ok(result) => {
+                let scope = if result.route.is_some() {
+                    "route"
+                } else {
+                    "vhost"
+                };
+                log::info!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} address={} alias={} persistent=false",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.configured_weight,
+                    result.effective_weight,
+                    result
+                        .runtime_weight_override
+                        .map(|weight| weight.to_string())
+                        .unwrap_or_else(|| "none".to_owned()),
+                    result.address,
+                    result.alias.as_deref().unwrap_or("")
+                );
+                record_load_balancer_event(
+                    &result.vhost,
+                    result.route.as_deref(),
+                    result.alias.as_deref().or(Some(result.member.as_str())),
+                    "member_weight",
+                );
+                json_response_value(
+                    StatusCode::OK,
+                    &json!({
+                        "status": "ok",
+                        "vhost": result.vhost,
+                        "route": result.route,
+                        "scope": scope,
+                        "member": result.member,
+                        "configured_weight": result.configured_weight,
+                        "effective_weight": result.effective_weight,
+                        "runtime_weight_override": result.runtime_weight_override,
+                        "address": result.address,
+                        "alias": result.alias,
+                        "persistent": false,
+                    }),
+                )
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member weight rejected invalid input vhost={} route={} member={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    error
+                );
+                record_load_balancer_event(vhost, route, Some(member), "member_weight_invalid");
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member weight target not found vhost={} route={} member={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    error
+                );
+                record_load_balancer_event(vhost, route, Some(member), "member_weight_not_found");
+                error_response(StatusCode::NOT_FOUND, &error.to_string())
+            }
+            Err(error) => internal_error_response(&error),
+        }
+    }
+
+    #[cfg(feature = "load-balancer")]
     fn load_balancer_persistence_clear_response(
         &self,
         vhost: Option<&str>,
@@ -1083,6 +1200,20 @@ impl AdminApp {
             }
             Err(error) => internal_error_response(&error),
         }
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    fn load_balancer_member_weight_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _member: Option<&str>,
+        _weight: Option<&str>,
+    ) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "load balancer support is not compiled in",
+        )
     }
 
     #[cfg(not(feature = "load-balancer"))]
@@ -3325,6 +3456,25 @@ fn query_params<'a>(query: Option<&'a str>, name: &str) -> Vec<&'a str> {
         .unwrap_or_default()
 }
 
+#[cfg(feature = "load-balancer")]
+fn parse_load_balancer_runtime_weight(value: &str) -> Result<Option<usize>, &'static str> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("default")
+        || value.eq_ignore_ascii_case("reset")
+        || value.eq_ignore_ascii_case("clear")
+        || value.eq_ignore_ascii_case("configured")
+    {
+        return Ok(None);
+    }
+    let Ok(weight) = value.parse::<usize>() else {
+        return Err("load balancer weight must be a number or one of default/reset/clear");
+    };
+    if weight == 0 || weight > crate::load_balancer::MAX_RUNTIME_BACKEND_WEIGHT {
+        return Err("load balancer weight must be between 1 and 1000");
+    }
+    Ok(Some(weight))
+}
+
 fn cache_purge_paths<'a>(headers: &'a HeaderMap, query: Option<&'a str>) -> Vec<&'a str> {
     let query_paths = query_params(query, "path");
     if !query_paths.is_empty() {
@@ -3879,6 +4029,57 @@ mod tests {
             app_b["runtime_state_override"],
             Value::String("forced_down".to_owned())
         );
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_member_weight_endpoint_updates_runtime_status() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_admin_config());
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-weight",
+            Some("vhost=one&member=app-a&weight=7"),
+            &auth_headers(),
+        );
+
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["vhost"], "one");
+        assert_eq!(body["member"], "app-a");
+        assert_eq!(body["configured_weight"], 1);
+        assert_eq!(body["effective_weight"], 7);
+        assert_eq!(body["runtime_weight_override"], 7);
+        assert_eq!(body["persistent"], false);
+
+        let response = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        let pool = &body["load_balancer"]["vhosts"][0]["pool"];
+        let app_a = pool["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|backend| backend["alias"] == "app-a")
+            .expect("app-a backend status");
+        assert_eq!(app_a["weight"], 1);
+        assert_eq!(app_a["effective_weight"], 7);
+        assert_eq!(app_a["runtime_weight_override"], 7);
+        assert!(app_a["runtime_weight_changed_at_unix_secs"].is_number());
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-weight",
+            Some("vhost=one&member=app-a&weight=reset"),
+            &auth_headers(),
+        );
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["effective_weight"], 1);
+        assert_eq!(body["runtime_weight_override"], Value::Null);
     }
 
     #[cfg(feature = "load-balancer")]

@@ -251,6 +251,69 @@ if ! grep -q 'fluxheim_load_balancer_pools{scope="route",selection="maglev_uri_h
     exit 1
 fi
 
+curl -fsS -X POST \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/member-weight?vhost=smoke&member=origin-one&weight=4" \
+    > "$TMP_DIR/member-weight.json"
+
+if ! grep -q '"status":"ok"' "$TMP_DIR/member-weight.json" \
+    || ! grep -q '"configured_weight":1' "$TMP_DIR/member-weight.json" \
+    || ! grep -q '"effective_weight":4' "$TMP_DIR/member-weight.json" \
+    || ! grep -q '"runtime_weight_override":4' "$TMP_DIR/member-weight.json"; then
+    echo "load balancer member-weight endpoint did not report runtime weight override" >&2
+    cat "$TMP_DIR/member-weight.json" >&2
+    exit 1
+fi
+
+curl -fsS \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/status" \
+    > "$TMP_DIR/load-balancer-status-weighted.json"
+
+if ! grep -q '"alias":"origin-one"' "$TMP_DIR/load-balancer-status-weighted.json" \
+    || ! grep -q '"effective_weight":4' "$TMP_DIR/load-balancer-status-weighted.json" \
+    || ! grep -q '"runtime_weight_override":4' "$TMP_DIR/load-balancer-status-weighted.json"; then
+    echo "load balancer status endpoint did not report runtime weight override" >&2
+    cat "$TMP_DIR/load-balancer-status-weighted.json" >&2
+    exit 1
+fi
+
+WEIGHTED_RESPONSES="$TMP_DIR/weighted-responses.txt"
+: > "$WEIGHTED_RESPONSES"
+for _ in 1 2 3 4 5; do
+    curl -fsS "http://127.0.0.1:$FLUXHEIM_PORT/weighted" >> "$WEIGHTED_RESPONSES"
+done
+
+if [ "$(grep -c '^origin-one$' "$WEIGHTED_RESPONSES")" -ne 4 ] \
+    || [ "$(grep -c '^origin-two$' "$WEIGHTED_RESPONSES")" -ne 1 ]; then
+    echo "runtime member-weight override did not change round-robin distribution" >&2
+    cat "$WEIGHTED_RESPONSES" >&2
+    cat "$TMP_DIR/member-weight.json" >&2
+    exit 1
+fi
+
+maglev_weight_status=$(curl -sS -o "$TMP_DIR/member-weight-maglev-reject.json" -w "%{http_code}" -X POST \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/member-weight?vhost=smoke&route=maglev&member=origin-one&weight=4" || true)
+if [ "$maglev_weight_status" != "400" ]; then
+    echo "load balancer member-weight endpoint did not reject Maglev route" >&2
+    cat "$TMP_DIR/member-weight-maglev-reject.json" >&2
+    exit 1
+fi
+
+curl -fsS "http://127.0.0.1:$METRICS_PORT/metrics" > "$TMP_DIR/metrics-after-member-weight.txt"
+if ! grep -q 'fluxheim_load_balancer_events_total{event="member_weight",route="",scope="vhost",upstream="origin-one",vhost="smoke"} 1' "$TMP_DIR/metrics-after-member-weight.txt" \
+    || ! grep -q 'fluxheim_load_balancer_events_total{event="member_weight_invalid",route="maglev",scope="route",upstream="origin-one",vhost="smoke"} 1' "$TMP_DIR/metrics-after-member-weight.txt"; then
+    echo "load balancer metrics missed member_weight events" >&2
+    cat "$TMP_DIR/metrics-after-member-weight.txt" >&2
+    exit 1
+fi
+
+curl -fsS -X POST \
+    -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+    "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/member-weight?vhost=smoke&member=origin-one&weight=reset" \
+    > "$TMP_DIR/member-weight-reset.json"
+
 MAGLEV_RESPONSES="$TMP_DIR/maglev-responses.txt"
 : > "$MAGLEV_RESPONSES"
 for _ in 1 2 3 4 5 6; do

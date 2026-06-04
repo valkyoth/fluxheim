@@ -1750,15 +1750,13 @@ Stable scope:
   growing the parent orchestration file.
 - Runtime pool and member state through a local authenticated control plane:
   drain, disable, force-down, enable/normal, manual resume, persistence-table
-  clear, and load-balancer-only runtime status without full process restart.
-  True runtime add/remove, runtime weight change, and runtime metadata updates
-  are later `1.5.x` control-plane work because they need either an atomic
-  backend-set swap or a selector weight overlay across every algorithm.
-- Runtime weight changes are the required `1.5.x` canary-control follow-up:
-  the admin plane should be able to move a configured backend from 5% to 10%,
-  25%, 50%, and 100% without a config reload, with audit events and selector
-  behavior documented for weighted, least-connections, least-time, hash,
-  Maglev, priority-group, locality, persistence, health, and queue policy.
+  clear, configured-member runtime weight overrides, and load-balancer-only
+  runtime status without full process restart. Runtime weight controls are
+  available for round-robin and least-* selectors where the selector can apply
+  a bounded overlay directly. Runtime add/remove-member, runtime metadata
+  updates, and runtime weight mutation for hash/ring/Maglev/power-of-two
+  selectors remain future control-plane work because they need either an atomic
+  backend-set swap or selector-specific table/ring semantics.
 - Persisted pool state for operator actions and reload survival remains later
   `1.5.x` work, with safe snapshot/write semantics and audit events.
 - Cluster-aware state sharing for selected tables where single-node behavior is
@@ -1801,9 +1799,11 @@ Stable scope:
   per-upstream TLS/SNI settings.
 - `1.4` selection algorithms remain the single-node default. `1.5` adds
   operational controls around them: priority groups, maintenance mode,
-  runtime member-state changes, pool-level policy templates, and migration
-  tools that translate common HAProxy/nginx pool definitions into Fluxheim
-  config. Runtime-safe weight changes are a later control-plane slice.
+  runtime member-state changes, runtime weight overrides for supported
+  selectors, pool-level policy templates, and migration tools that translate
+  common HAProxy/nginx pool definitions into Fluxheim config. Runtime
+  add/remove-member and selector-specific weight changes for hash/ring/Maglev
+  policies remain later control-plane slices.
   - weighted least-connections / ratio least-connections for heterogeneous
     backends;
   - least-time / EWMA latency-aware selection from observed upstream request
@@ -1943,10 +1943,11 @@ Beta scope:
 
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Pingora's service-discovery interface when it can be tested reliably.
-- Runtime add/remove-member, runtime weight-change, and runtime metadata-update
-  operations after the backend-set swap or selector-overlay design is proven
-  across round-robin, weighted, hash, consistent-hash, least-connections,
-  least-time, priority-group, locality, persistence, health, and queue policy.
+- Runtime add/remove-member and runtime metadata-update operations after the
+  backend-set swap design is proven across priority-group, locality,
+  persistence, health, and queue policy. Runtime weight changes for
+  hash/ring/Maglev/power-of-two selectors stay here until their table,
+  sampling, and remap semantics are explicitly designed.
 - Load-balancer-managed cookie insertion and sticky-session cookie mirroring
   for HA pairs or active-active Fluxheim clusters. This must include signed or
   opaque cookie values, rotation, table-size/TTL limits, peer authentication,
@@ -3288,8 +3289,9 @@ the exception while the cache server is being completed as a focused sequence:
   groups, persistence, slow-start, adaptive health, circuit breaking,
   queue/overflow policy, locality/failure-domain policy, richer selection
   algorithms, load-balancer-only admin status, audit visibility, and migration
-  fixtures. True runtime add/remove/weight changes remain later `1.5.x`
-  control-plane work. Include TLS passthrough SNI routing only after a bounded
+  fixtures. Runtime add/remove-member and selector-specific hash/ring weight
+  changes remain later `1.5.x` control-plane work. Include TLS passthrough SNI
+  routing only after a bounded
   ClientHello parser, preread buffer limit, and byte replay model are proven. Dynamic
   xDS/Kubernetes/Consul discovery belongs here or a later control-plane line
   after local DNS/file discovery and runtime backend mutation are stable.
