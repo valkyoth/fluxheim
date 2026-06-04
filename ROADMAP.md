@@ -650,9 +650,10 @@ without parsing text fixtures for every module.
 
 5. **TLS And ACME**
    - Compile-time TLS backend feature selection:
-     `tls-rustls`, `tls-openssl`, `tls-boringssl`, or `tls-s2n`.
-   - Default to `tls-rustls` for local/rootless portability while documenting
-     Pingora's experimental rustls status.
+     `tls-rustls` or `tls-openssl`, with `tls-rustls-fips` and
+     `tls-openssl-fips` compliance variants. `tls-boringssl` and `tls-s2n`
+     are planned for removal.
+   - Default to `tls-rustls` for local/rootless portability.
    - Typed global TLS/ACME config. Implemented.
    - Static certificate file config. Implemented.
    - Let's Encrypt issuer config. Implemented.
@@ -678,9 +679,8 @@ without parsing text fixtures for every module.
      driven, not a generic marketing flag. Planned direction:
      `tls-rustls-fips` uses rustls' AWS-LC FIPS provider path and runtime FIPS
      checks; `tls-openssl-fips` relies on OpenSSL 3.x with a validated FIPS
-     provider plus provider/default-property verification; BoringSSL and s2n
-     FIPS modes remain research until Fluxheim can prove the exact validated
-     module boundary and runtime status. FIPS profiles must stay separate from
+     provider plus provider/default-property verification. BoringSSL and s2n
+     FIPS modes are no longer planned. FIPS profiles must stay separate from
      default builds and fail closed when the configured backend/provider cannot
      prove FIPS-required operation. The tracked compliance references are
      FIPS PUB 140-3, the current FIPS 140-3 Implementation Guidance, NIST SP

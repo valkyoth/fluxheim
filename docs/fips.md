@@ -12,15 +12,17 @@ published Security Policy.
 
 ## Status
 
-Current release line: `1.4.0`. The FIPS/ISO internal-crypto closure was
-completed in `1.3.6`; `1.4.0` does not broaden the compliance claim.
+Current release line: `1.5.x`. The FIPS/ISO internal-crypto closure was
+completed in `1.3.6`; the `1.5.x` load-balancer line does not broaden the
+compliance claim.
 
 The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
 ISO/IEC 19790 terminology aliases for compliance evidence plumbing. The
 `1.3.5` release line adds a rustls/AWS-LC FIPS candidate path. Neither is a
 broad "FIPS compliant" or "ISO/IEC 19790 compliant" claim. The implemented
-targets are backend proof paths, while BoringSSL, s2n, and non-TLS internal
-crypto work remain explicitly staged.
+targets are backend proof paths. BoringSSL and s2n are no longer planned
+compliance paths; future Fluxheim TLS support is limited to rustls and OpenSSL
+families.
 
 ## Official References
 
@@ -404,17 +406,12 @@ Policy, platform, and build procedure. Fluxheim's check proves that its rustls
 TLS listener is built from a provider and config that report FIPS mode; it does
 not prove the whole deployment or every non-TLS crypto path.
 
-### BoringSSL And s2n
+### Unsupported TLS Backends
 
-These remain research tracks.
-
-`tls-boringssl-fips` is not planned until Fluxheim can prove it is linked to a
-validated BoringCrypto module stream and can expose the module/version/runtime
-status. Normal BoringSSL must not be described as FIPS validated.
-
-`tls-s2n-fips` is not planned until the s2n/Pingora integration can prove s2n
-was built with a FIPS-capable AWS-LC path, can expose runtime FIPS status, and
-can restrict configured s2n security policies to approved cryptography.
+BoringSSL and s2n are not planned compliance paths. The future supported TLS
+matrix is rustls, rustls/AWS-LC FIPS, OpenSSL, and OpenSSL FIPS. Normal
+BoringSSL must not be described as FIPS validated, and `tls-s2n` is not a
+complete Fluxheim policy backend.
 
 ## Internal Crypto Inventory
 

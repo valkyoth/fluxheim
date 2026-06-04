@@ -220,9 +220,8 @@ upstream_tls = false
   upstream certificate matching. `upstream_ca_path` loads a route-local PEM CA
   bundle. `upstream_client_cert_path` and `upstream_client_key_path` configure
   upstream mTLS client material and must be set together. Custom trust roots
-  and upstream client certificates are supported for rustls, OpenSSL, and
-  BoringSSL builds; s2n remains fail-closed for these files until Fluxheim can
-  load them without backend panics.
+  and upstream client certificates are supported for rustls and OpenSSL builds.
+  BoringSSL and s2n support is planned for removal.
 
 When `metrics` is compiled and enabled,
 `fluxheim_stream_connections_total{route,outcome}` records bounded connection
@@ -966,9 +965,9 @@ store for this proxy policy. `upstream_client_cert_path` and
 key for origin mTLS and must be set together. These file paths are resolved
 relative to the containing config file, reject parent-directory traversal,
 reject symlinked existing path components, and reject group/world-writable
-existing parents. Rustls, OpenSSL, and BoringSSL builds support custom upstream
-trust roots and upstream client certificates. s2n builds currently reject these
-fields until Fluxheim has panic-free PEM loading for that backend.
+existing parents. Rustls and OpenSSL builds support custom upstream trust roots
+and upstream client certificates. BoringSSL and s2n support is planned for
+removal.
 `upstream_proxy_protocol` defaults to `off`. Set it to `v1` or `v2` to send a
 HAProxy PROXY protocol header to the origin immediately after the upstream TCP/Unix
 connection is established and before any upstream TLS handshake. The source
@@ -1919,11 +1918,12 @@ mode = "off"
 # ca_path = "tls/client-ca.pem"
 ```
 
-TLS backend values: `rustls`, `openssl`, `boringssl`, `s2n`.
+TLS backend values: `rustls`, `openssl`. `boringssl` and `s2n` are planned for
+removal and should not be used for new deployments.
 
 Exactly one matching TLS compile-time feature should be selected:
-`tls-rustls`, `tls-openssl`, `tls-boringssl`, or `tls-s2n`. The default build
-uses `tls-rustls`.
+`tls-rustls` or `tls-openssl`, with `tls-rustls-fips` and `tls-openssl-fips`
+for compliance builds. The default build uses `tls-rustls`.
 
 TLS policy values:
 
@@ -1949,12 +1949,9 @@ so the named modern policy cannot be weakened by accident. `alpn` may be
 matching the 1.0 listener behavior.
 
 The rustls and OpenSSL backends enforce the configured minimum protocol, ALPN
-policy, curve preferences, and cipher suite allow-list. BoringSSL enforces
-minimum protocol, ALPN, curve preferences, and TLS 1.2 cipher allow-lists; its
-Rust API does not currently expose TLS 1.3 cipher-suite allow-lists, so explicit
-TLS 1.3 `cipher_suites` are rejected for that backend. The s2n backend
-currently accepts only Fluxheim's default TLS 1.2+ / HTTP/1.1+HTTP/2 listener
-policy because the project does not yet expose the needed s2n listener controls.
+policy, curve preferences, and cipher suite allow-list. BoringSSL and s2n are
+not part of the future supported TLS matrix because their Fluxheim integrations
+do not provide the same complete policy, SNI, and client-auth coverage.
 Explicit `curve_preferences` are capped at 16 entries, and explicit
 `cipher_suites` are capped at 32 entries.
 
@@ -1962,8 +1959,8 @@ Supported curve names are `X25519`, `CurveP256`, and `CurveP384`.
 `X25519MLKEM768` is accepted by the config schema for future post-quantum
 hybrid key exchange support, but the default rustls/ring backend rejects it
 until Fluxheim offers a rustls crypto provider with post-quantum groups. OpenSSL
-and BoringSSL pass configured group names to the TLS library; runtime startup
-fails if the installed library does not support a configured group.
+passes configured group names to the TLS library; runtime startup fails if the
+installed library does not support a configured group.
 
 The first global `[[tls.certificates]]` entry is the default downstream
 certificate. Vhosts may provide their own static certificate for SNI selection:
@@ -1999,10 +1996,9 @@ chain trusted by `ca_path`. `mode = "optional"` asks for a client certificate
 and verifies it when present, but still accepts clients without one. The CA
 bundle path uses the same safe-path validation as other TLS files: no
 parent-directory traversal, no symlinked path components, and no group- or
-world-writable existing parent directory. The current implementation wires
-rustls and OpenSSL/BoringSSL listeners. The s2n backend fails closed when client
-auth is enabled until Fluxheim exposes panic-free CA bundle loading for that
-backend. Verified client-certificate identity can be forwarded explicitly with
+world-writable existing parent directory. The future supported TLS matrix wires
+rustls and OpenSSL listeners only; BoringSSL and s2n are planned for removal.
+Verified client-certificate identity can be forwarded explicitly with
 request header templates such as `{tls.client_cert_sha256}`. Route decisions
 based on certificate identity remain future work; do not rely on client-cert
 attributes for routing or authorization unless a later release documents that

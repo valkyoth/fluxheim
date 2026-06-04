@@ -93,7 +93,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |
 | mTLS/client certificates | ✅ | Listener client-auth, fingerprint ACLs, and safe upstream identity forwarding templates. |
-| TLS backends | ✅ | rustls default, plus OpenSSL/BoringSSL/s2n build paths where supported. |
+| TLS backends | ✅ | rustls default/recommended, plus OpenSSL for operators who need OpenSSL integration. BoringSSL and s2n are planned for removal. |
 | FIPS/ISO-capable builds | ✅ | OpenSSL FIPS provider path and rustls/AWS-LC FIPS-capable candidate path. |
 | ACME | ✅ | Managed HTTP-01 and rustls TLS-ALPN-01 issuance/renewal, plus external HTTP-01 forwarding helper. |
 | PROXY protocol | ✅ | v1/v2 receive and upstream send. |
@@ -360,8 +360,10 @@ needed:
 | --- | --- |
 | `tls-rustls` | Default and recommended. |
 | `tls-openssl` | Optional OpenSSL backend. |
-| `tls-boringssl` | Optional BoringSSL backend. |
-| `tls-s2n` | Optional s2n-tls backend. |
+| `tls-rustls-fips` / `tls-rustls-iso19790` | rustls/AWS-LC FIPS-capable candidate backend. |
+| `tls-openssl-fips` / `tls-openssl-iso19790` | OpenSSL FIPS provider backend. |
+| `tls-boringssl` | Planned for removal; inherited Pingora/Cloudflare backend with poor external packaging and incomplete policy coverage. |
+| `tls-s2n` | Planned for removal; incomplete Fluxheim integration. |
 
 Selecting more than one TLS backend is a compile error.
 Use `scripts/validate-features.sh` in packaging or custom CI jobs when accepting

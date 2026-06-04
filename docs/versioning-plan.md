@@ -188,9 +188,8 @@ Stable scope:
 - Default downstream certificate support in the default rustls build.
 - SNI certificate selection for multiple configured downstream certificates in
   the default rustls build and callback-capable TLS backends.
-- Optional OpenSSL and s2n TLS builds when they pass the release matrix.
-- Optional BoringSSL TLS builds on builders with `libclang` available for
-  bindgen.
+- Optional OpenSSL TLS builds when they pass the release matrix. BoringSSL and
+  s2n are planned for removal from the supported matrix.
 - TLS listener cipher/protocol policy follows the selected Pingora TLS backend
   defaults in `1.0`; user-configurable TLS policy is not stable until a later
   release.
@@ -272,9 +271,8 @@ Stable scope:
   TLS 1.3-only profile and `intermediate` as the default compatibility profile.
 - Minimum protocol version config, bounded to safe values.
 - ALPN policy for HTTP/1.1 and future HTTP/2/HTTP/3 work.
-- Downstream curve preferences and cipher-suite allow-lists for rustls,
-  OpenSSL, and BoringSSL where the selected backend exposes enforceable
-  listener controls.
+- Downstream curve preferences and cipher-suite allow-lists for rustls and
+  OpenSSL where the selected backend exposes enforceable listener controls.
 - Structured HSTS response policy.
 - Per-backend validation that rejects cipher or protocol settings unsupported
   by the selected TLS backend.
@@ -590,9 +588,13 @@ builds unless the operator selected them.
 Stable scope:
 
 - Introduce an explicit shared ingress/runtime feature boundary.
-- Make `tls`, `tls-rustls`, `tls-openssl`, `tls-boringssl`, `tls-s2n`, `acme`,
-  and `acme-client` depend on shared ingress/TLS primitives rather than
-  implicitly selecting the generic `proxy` feature.
+- Make `tls`, `tls-rustls`, `tls-rustls-fips`, `tls-openssl`,
+  `tls-openssl-fips`, `acme`, and `acme-client` depend on shared ingress/TLS
+  primitives rather than implicitly selecting the generic `proxy` feature.
+- Remove the incomplete/low-value `tls-boringssl` and `tls-s2n` backends from
+  the future supported matrix. Rustls remains the default go-to backend; OpenSSL
+  remains supported for operators who need OpenSSL integration or OpenSSL FIPS
+  evidence.
 - Keep exactly one TLS backend selectable at a time.
 - Keep ACME certificate loading and renewal usable for every TLS-capable
   focused profile.
@@ -817,13 +819,8 @@ recommended for production.
     `fips=yes` fetch, enables OpenSSL default FIPS properties through a small
     local support crate, verifies those properties, and checks that a non-FIPS
     cipher is rejected through the default fetch path.
-  - `tls-boringssl-fips`: research-only until Fluxheim can prove it is linked
-    to a BoringCrypto validated module stream, can query the module/version, and
-    can document the exact CMVP certificate/security-policy boundary. Normal
-    BoringSSL must not be described as FIPS validated.
-  - `tls-s2n-fips`: research-only until the s2n/Pingora integration can prove
-    s2n was built with FIPS-capable AWS-LC, expose `s2n_get_fips_mode`, and
-    restrict configured s2n security policies to FIPS-approved cryptography.
+  - BoringSSL and s2n are not planned FIPS/ISO paths. The future supported TLS
+    matrix is rustls, rustls/AWS-LC FIPS, OpenSSL, and OpenSSL FIPS.
 - Keep `tls.fips.required` as the high-level config guard and require
   backend-specific proof features underneath it. When enabled, non-FIPS TLS
   backends, non-FIPS cipher/curve choices, non-FIPS ACME/account crypto paths,
@@ -1171,23 +1168,23 @@ Release shape:
     metrics remain later work.
   - TLS, identity, and protocol parity:
   - listener-level mTLS/client certificate auth with `off`, `optional`, and
-    `required` modes plus safe CA file handling for rustls and
-    OpenSSL/BoringSSL is implemented. Verified downstream TLS/client
+    `required` modes plus safe CA file handling for rustls and OpenSSL is
+    implemented. Verified downstream TLS/client
     certificate identity can now be forwarded through explicit request header
     templates such as `{tls.client_cert_sha256}` and is included in structured
     access logs through bounded `tls_*` fields. Vhost and route access policies
     can require a verified client certificate or allow/deny specific
     certificate SHA-256 fingerprints. The admin control plane can also require
     or allow/deny SHA-256 client-certificate fingerprints supplied by a trusted
-    TLS/mTLS terminator through `[admin.client_certificate]`. Remaining work is
-    s2n parity;
+    TLS/mTLS terminator through `[admin.client_certificate]`. BoringSSL and s2n
+    are planned for removal rather than parity work;
   - upstream TLS controls: SNI override, trust roots, upstream mTLS client cert,
     protocol/cipher policy where supported, and auditable insecure-skip-verify
     behavior. SNI override already existed; certificate verification, hostname
     verification, alternative-CN controls, custom upstream trust roots, and
-    upstream mTLS client certificates are implemented for rustls, OpenSSL, and
-    BoringSSL. Remaining work is s2n parity and per-upstream protocol/cipher
-    policy;
+    upstream mTLS client certificates are implemented for rustls and OpenSSL.
+    BoringSSL and s2n are planned for removal; remaining work is per-upstream
+    protocol/cipher policy;
   - PROXY protocol v1/v2 accept/send with explicit trust boundaries. Listener
     v1/v2 receive is implemented through `server.proxy_protocol` with mandatory
     trusted-peer gating, and upstream v1/v2 send is implemented through
@@ -1357,8 +1354,8 @@ Release shape:
     machine for static serving, reverse proxying, disk cache with a Mac-safe
     path, structured logs, and managed PHP-FPM when Homebrew PHP is available;
   - audit native dependency behavior on macOS, especially `ring`,
-    `aws-lc-sys`, `zstd-sys`, `libz-ng-sys`, OpenSSL/BoringSSL/S2N optional
-    TLS backends, and PHP-FPM process management. Prefer feature/profile fixes
+    `aws-lc-sys`, `zstd-sys`, `libz-ng-sys`, optional OpenSSL TLS backends,
+    and PHP-FPM process management. Prefer feature/profile fixes
     that avoid compiling unused native dependencies for developer builds;
   - document required local prerequisites such as Xcode Command Line Tools,
     Rust target/toolchain, CMake when selected features need it, and optional
@@ -3333,7 +3330,16 @@ the exception while the cache server is being completed as a focused sequence:
   runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.4`: Fluxheim-native load-balancer core line. Stop at replacing
+- `v1.5.4`: TLS backend simplification line. Stop at removing the incomplete
+  BoringSSL and s2n backend support from the future supported matrix, leaving
+  rustls as the default/recommended backend and OpenSSL as the supported
+  alternative for non-FIPS and FIPS/ISO evidence paths. Update features,
+  preflight validation, docs, examples, packaging, release scripts, and tests so
+  supported TLS means rustls/rustls-FIPS or OpenSSL/OpenSSL-FIPS only. Do not
+  add new TLS backends, HTTP/3/QUIC, native load-balancer internals,
+  restart-persistent state, cross-node sync, UDP/GSLB, WAF, VPN/firewall
+  appliance behavior, or Wasm/iRules/Lua scripting in this release.
+- `v1.5.5`: Fluxheim-native load-balancer core line. Stop at replacing
   `pingora-load-balancing` with Fluxheim-owned backend types, backend-set
   readiness, discovery trait, static/file/DNS discovery adapters, TCP/HTTP
   health-check scheduling, background update lifecycle, and existing selector
@@ -3344,28 +3350,28 @@ the exception while the cache server is being completed as a focused sequence:
   sync, runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.5`: restart-persistent load-balancer state line. Stop at versioned,
+- `v1.5.6`: restart-persistent load-balancer state line. Stop at versioned,
   size-limited, atomically written, auditable persistence for selected runtime
   member overrides and bounded persistence tables after the Fluxheim-native
   backend model is stable. Corrupt or incompatible state must fail closed to
   "ignore and rebuild" rather than poisoning a pool. Do not add cross-node
   state sync, runtime add/remove-member, dynamic discovery control planes,
   UDP/GSLB, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.6`: runtime backend-set mutation line. Stop at authenticated
+- `v1.5.7`: runtime backend-set mutation line. Stop at authenticated
   add/remove/update operations for configured pool members through atomic
   backend-set swaps, including validation, audit events, status/metrics
   visibility, drain behavior, and clear selector limitations for hash, ring,
   Maglev, and power-of-two policies. Do not add xDS/Kubernetes/Consul
   discovery, UDP/GSLB, WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua
   scripting in this release.
-- `v1.5.7`: service-discovery and control-plane integration line. Stop at one
+- `v1.5.8`: service-discovery and control-plane integration line. Stop at one
   or more bounded discovery adapters such as Kubernetes, Consul, or xDS after
   local DNS/file discovery and runtime backend mutation are stable. Discovery
   must include authentication/trust boundaries, churn limits, safe fallback,
   status, audit/metrics, and reload behavior. Do not add UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.8`: UDP and GSLB exploration line. Stop at explicitly scoped beta
+- `v1.5.9`: UDP and GSLB exploration line. Stop at explicitly scoped beta
   modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
   pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if
   each target has bounded session/affinity semantics, timeouts, health checks,
