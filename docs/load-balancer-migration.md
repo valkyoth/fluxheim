@@ -173,6 +173,10 @@ in the shipped load-balancer behavior; they are architectural gaps tracked for
 later `1.5.x` or future module lines.
 
 - Runtime add/remove-member operations are future control-plane work.
+- The remaining Pingora load-balancing substrate is planned to be replaced by a
+  Fluxheim-native backend set and health/discovery loop in the `1.5.x` line.
+  Pingora remains the HTTP proxy transport while the load-balancer core becomes
+  Fluxheim-owned.
 - Runtime weight changes are available for round-robin and least-* selectors.
   Hash/ring selectors need future table-rebuild semantics before runtime
   weights are accepted there.

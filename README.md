@@ -34,12 +34,13 @@ HTTP/TCP pool operations: weighted and adaptive selection, health and circuit
 state, slow start, retry budgets, bounded queueing, local persistence, runtime
 member-state controls, status/metrics/audit visibility, and a validated
 enterprise migration fixture. It is not a complete BIG-IP platform clone:
-managed cookie insertion, restart-persistent load-balancer state, runtime
+managed affinity cookies are local to one process, while a Fluxheim-native
+load-balancer core, restart-persistent load-balancer state, runtime
 add/remove-member, cross-instance state sync, UDP, GSLB, WAF, VPN/firewall
 appliance behavior, and iRules/Lua/Wasm scripting are documented future tracks
 rather than hidden or implied behavior. Runtime weight overrides are local,
-in-memory controls for round-robin and least-* selectors in the current
-`1.5.x` line.
+in-memory controls for round-robin and least-* selectors in the current `1.5.x`
+line.
 
 Fluxheim is licensed under the European Union Public Licence 1.2.
 
