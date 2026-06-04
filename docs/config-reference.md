@@ -1186,7 +1186,10 @@ addresses, aliases, or weights. Configure the cookie name through `cookie =
 `managed_cookie_path` (default `/`), `managed_cookie_secure` (default `true`),
 `managed_cookie_http_only` (default `true`), `managed_cookie_same_site`
 (default `lax`), and `managed_cookie_max_age_secs` (default `ttl_secs`).
-`SameSite=None` requires `managed_cookie_secure = true`.
+`SameSite=None` requires `managed_cookie_secure = true`. Managed-cookie
+signing keys are generated locally at process start, rotated daily, and verified
+against the current or previous key generation so in-flight cookies survive a
+normal rotation window.
 Stored backends are reused while they remain ready, not
 drained/disabled/forced-down, not passively ejected, and below their in-flight
 cap. If the stored backend is no longer selectable, Fluxheim falls back to the
@@ -1199,10 +1202,10 @@ in `privacy-mode` builds because persistence retains client-derived identifiers.
 
 The current `1.5.x` load-balancer line does not persist load-balancer
 persistence/runtime override state across restarts, add/remove pool members at
-runtime, apply runtime weights to hash/ring selectors, or synchronize
-load-balancer state across active-active Fluxheim nodes. Managed-cookie HA
-mirroring is tracked separately from the local managed-cookie table shipped in
-`1.5.3`.
+runtime, apply runtime weights to hash/ring selectors, share managed-cookie
+signing keys across nodes, or synchronize load-balancer state across
+active-active Fluxheim nodes. Managed-cookie HA mirroring is tracked separately
+from the local managed-cookie table shipped in `1.5.3`.
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

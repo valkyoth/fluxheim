@@ -14,6 +14,7 @@ pub(super) const MAX_PERSISTENCE_KEY_BYTES: usize = 512;
 const MANAGED_COOKIE_KEY_BYTES: usize = 16;
 const MANAGED_COOKIE_TAG_BYTES: usize = 32;
 const MANAGED_COOKIE_TOKEN_BYTES: usize = MANAGED_COOKIE_KEY_BYTES + MANAGED_COOKIE_TAG_BYTES;
+const MANAGED_COOKIE_HMAC_ROTATION: Duration = Duration::from_secs(86_400);
 
 #[derive(Debug)]
 pub(super) struct LoadBalancerPersistenceState {
@@ -329,8 +330,12 @@ fn managed_cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
         return None;
     }
     let (key, tag) = token.split_at(MANAGED_COOKIE_KEY_BYTES);
-    let expected = managed_cookie_tag(key);
-    if expected.as_slice().ct_eq(tag).unwrap_u8() != 1 {
+    let mut matched = 0_u8;
+    for hmac_key in managed_cookie_hmac_keys_for_verify() {
+        let expected = managed_cookie_tag_with_key(&hmac_key, key);
+        matched |= expected.as_slice().ct_eq(tag).unwrap_u8();
+    }
+    if matched != 1 {
         return None;
     }
     Some(key.to_vec())
@@ -340,31 +345,105 @@ fn managed_cookie_token(key: &[u8]) -> Option<String> {
     if key.len() != MANAGED_COOKIE_KEY_BYTES {
         return None;
     }
-    let tag = managed_cookie_tag(key);
+    let tag = managed_cookie_tag_with_key(&managed_cookie_hmac_key_for_sign(), key);
     let mut token = Vec::with_capacity(MANAGED_COOKIE_TOKEN_BYTES);
     token.extend_from_slice(key);
     token.extend_from_slice(&tag);
     base64_ng::URL_SAFE_NO_PAD.encode_string(&token).ok()
 }
 
-fn managed_cookie_tag(key: &[u8]) -> [u8; MANAGED_COOKIE_TAG_BYTES] {
+fn managed_cookie_tag_with_key(hmac_key: &[u8; 32], key: &[u8]) -> [u8; MANAGED_COOKIE_TAG_BYTES] {
     crate::internal_crypto::admin_hmac_sha256_or_abort(
         crate::internal_crypto::admin_mac_provider(),
-        managed_cookie_hmac_key(),
+        hmac_key,
         key,
     )
 }
 
-fn managed_cookie_hmac_key() -> &'static [u8; 32] {
-    static KEY: OnceLock<[u8; 32]> = OnceLock::new();
-    KEY.get_or_init(|| {
-        let mut key = [0_u8; 32];
-        if let Err(error) = getrandom::fill(&mut key) {
-            log::error!("fatal: managed load-balancer cookie HMAC key generation failed: {error}");
-            std::process::abort();
+fn managed_cookie_hmac_key_for_sign() -> [u8; 32] {
+    let mut key_ring = managed_cookie_hmac_key_ring()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    key_ring.current_key(Instant::now())
+}
+
+fn managed_cookie_hmac_keys_for_verify() -> Vec<[u8; 32]> {
+    let mut key_ring = managed_cookie_hmac_key_ring()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    key_ring.verify_keys(Instant::now())
+}
+
+fn managed_cookie_hmac_key_ring() -> &'static Mutex<ManagedCookieHmacKeyRing> {
+    static KEY_RING: OnceLock<Mutex<ManagedCookieHmacKeyRing>> = OnceLock::new();
+    KEY_RING.get_or_init(|| Mutex::new(ManagedCookieHmacKeyRing::new(Instant::now())))
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ManagedCookieHmacKey {
+    key: [u8; 32],
+    created_at: Instant,
+}
+
+#[derive(Debug)]
+struct ManagedCookieHmacKeyRing {
+    current: ManagedCookieHmacKey,
+    previous: Option<ManagedCookieHmacKey>,
+}
+
+impl ManagedCookieHmacKeyRing {
+    fn new(now: Instant) -> Self {
+        Self {
+            current: ManagedCookieHmacKey {
+                key: random_managed_cookie_hmac_key(),
+                created_at: now,
+            },
+            previous: None,
         }
-        key
-    })
+    }
+
+    #[cfg(test)]
+    fn with_current_key(key: [u8; 32], created_at: Instant) -> Self {
+        Self {
+            current: ManagedCookieHmacKey { key, created_at },
+            previous: None,
+        }
+    }
+
+    fn current_key(&mut self, now: Instant) -> [u8; 32] {
+        self.rotate_if_due(now);
+        self.current.key
+    }
+
+    fn verify_keys(&mut self, now: Instant) -> Vec<[u8; 32]> {
+        self.rotate_if_due(now);
+        let mut keys = Vec::with_capacity(2);
+        keys.push(self.current.key);
+        if let Some(previous) = self.previous {
+            keys.push(previous.key);
+        }
+        keys
+    }
+
+    fn rotate_if_due(&mut self, now: Instant) {
+        if now.saturating_duration_since(self.current.created_at) < MANAGED_COOKIE_HMAC_ROTATION {
+            return;
+        }
+        self.previous = Some(self.current);
+        self.current = ManagedCookieHmacKey {
+            key: random_managed_cookie_hmac_key(),
+            created_at: now,
+        };
+    }
+}
+
+fn random_managed_cookie_hmac_key() -> [u8; 32] {
+    let mut key = [0_u8; 32];
+    if let Err(error) = getrandom::fill(&mut key) {
+        log::error!("fatal: managed load-balancer cookie HMAC key generation failed: {error}");
+        std::process::abort();
+    }
+    key
 }
 
 #[cfg(test)]
@@ -409,5 +488,23 @@ mod tests {
 
         assert_eq!(state.lookup(b"client-a"), None);
         assert_eq!(state.lookup(b"client-b"), Some(20));
+    }
+
+    #[test]
+    fn managed_cookie_hmac_rotation_retains_previous_key() {
+        let now = Instant::now();
+        let first_key = [7_u8; 32];
+        let mut key_ring = ManagedCookieHmacKeyRing::with_current_key(first_key, now);
+
+        assert_eq!(key_ring.current_key(now), first_key);
+
+        let rotated_at = now + MANAGED_COOKIE_HMAC_ROTATION + Duration::from_secs(1);
+        let current = key_ring.current_key(rotated_at);
+        assert_ne!(current, first_key);
+        let verify_keys = key_ring.verify_keys(rotated_at);
+
+        assert_eq!(verify_keys.len(), 2);
+        assert!(verify_keys.contains(&current));
+        assert!(verify_keys.contains(&first_key));
     }
 }

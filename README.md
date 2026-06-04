@@ -87,7 +87,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
 | Active health checks | ✅ | TCP/TLS and HTTP health checks. |
 | Load-balancer status | ✅ | Admin status includes configured pools, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state. |
-| Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides are in-memory only; managed affinity cookies are process-local; Fluxheim does not yet persist LB state across restarts, add/remove members at runtime, apply runtime weights to hash/ring selectors, or sync state across active-active nodes. |
+| Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides are in-memory only; managed affinity cookies and their rotating signing keys are process-local; Fluxheim does not yet persist LB state across restarts, add/remove members at runtime, apply runtime weights to hash/ring selectors, share managed-cookie keys, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |
 | Concurrency limits | ✅ | Vhost/route in-flight limits with bounded wait queues. |
 | IP ACLs | ✅ | Trusted-proxy-aware allow/deny rules. |

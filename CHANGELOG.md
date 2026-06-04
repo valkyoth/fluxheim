@@ -21,6 +21,9 @@ behavior when the change improves security or project direction.
   signed/opaque, process-local load-balancer affinity cookies. Fresh 2xx/3xx
   backend responses receive `Set-Cookie`, and later requests with a valid
   managed cookie reuse the selected backend while it remains selectable.
+- Rotate local managed-cookie signing keys daily and verify against the current
+  or previous key generation so normal key rotation does not immediately break
+  in-flight affinity cookies.
 - Add managed-cookie validation for path/domain/max-age/SameSite attributes
   and keep persistence rejected in `privacy-mode` builds.
 
