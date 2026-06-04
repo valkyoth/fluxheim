@@ -1742,7 +1742,8 @@ Stable scope:
   features that go beyond one Fluxheim instance's normal proxy routing.
 - The `1.5.x` dependency-reduction line should keep Pingora for the HTTP proxy
   core while removing it from domains where Fluxheim already owns the datapath:
-  the TCP stream proxy and the load-balancer substrate.
+  the TCP stream proxy, the load-balancer substrate, and mechanical background
+  task registration.
 - The stream proxy should become Fluxheim-native before the load-balancer
   substrate work. Its tunnel, PROXY protocol framing, connection limits, byte
   caps, idle/lifetime limits, and metrics are already Fluxheim-owned; the
@@ -1758,6 +1759,11 @@ Stable scope:
   scheduler, and background update loop. Pingora remains the HTTP proxy
   transport/runtime while the load-balancer image becomes independent from
   `pingora-load-balancing`.
+- Background tasks should eventually use a Fluxheim-owned Tokio task registry
+  with explicit cancellation rather than Pingora `GenBackgroundService`,
+  `ServiceWithDependents`, and `ShutdownWatch` wrappers. This is mechanical
+  cleanup after native stream and native load-balancer tasks have reduced the
+  Pingora background-service surface.
 - Runtime pool and member state through a local authenticated control plane:
   drain, disable, force-down, enable/normal, manual resume, persistence-table
   clear, configured-member runtime weight overrides, and load-balancer-only
@@ -1961,6 +1967,11 @@ Beta scope:
   Preserve existing stream config, route selection, PROXY protocol, byte/idle
   limits, metrics, upstream TLS/mTLS behavior, and smoke coverage while using a
   direct Tokio listener loop and explicit TLS connector.
+- Fluxheim-native background task registry replacement for Pingora
+  `GenBackgroundService`, `ServiceWithDependents`, `background_service()`, and
+  `ShutdownWatch` usage. Use explicit Tokio tasks plus a cancellation primitive
+  such as `tokio-util`'s `CancellationToken`, preserve graceful shutdown
+  behavior, and keep task metrics/status visible.
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Fluxheim's native discovery interface after the backend-set model is no
   longer coupled to Pingora's load-balancing crate.
@@ -3394,7 +3405,17 @@ the exception while the cache server is being completed as a focused sequence:
   status, audit/metrics, and reload behavior. Do not add UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.10`: UDP and GSLB exploration line. Stop at explicitly scoped beta
+- `v1.5.10`: Fluxheim-native background task registry line. Stop at replacing
+  Pingora `GenBackgroundService`, `ServiceWithDependents`,
+  `background_service()`, and `ShutdownWatch` usage for Fluxheim-owned
+  background work such as cache metrics, ACME renewal scheduling, stale purging,
+  load-balancer updates, and future discovery refresh loops. Use explicit Tokio
+  tasks plus a cancellation primitive such as `tokio-util`'s
+  `CancellationToken`, preserve graceful shutdown semantics, task ordering where
+  needed, status/metrics visibility, and release smoke coverage. Do not change
+  HTTP proxy request handling, add UDP/GSLB, WAF, VPN/firewall appliance
+  behavior, or Wasm/iRules/Lua scripting in this release.
+- `v1.5.11`: UDP and GSLB exploration line. Stop at explicitly scoped beta
   modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
   pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if
   each target has bounded session/affinity semantics, timeouts, health checks,
