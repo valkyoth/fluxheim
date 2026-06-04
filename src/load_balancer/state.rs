@@ -410,7 +410,11 @@ impl BackendLatencyState {
         latency_micros
             .entry(key)
             .and_modify(|stored| {
-                *stored = stored.saturating_mul(3).saturating_add(sample) / 4;
+                *stored = stored
+                    .saturating_mul(3)
+                    .saturating_add(sample)
+                    .saturating_add(2)
+                    / 4;
             })
             .or_insert(sample);
     }
@@ -449,5 +453,15 @@ mod tests {
 
         assert!(state.permits(&backend));
         assert!(state.permits_read_only(&backend));
+    }
+
+    #[test]
+    fn latency_ewma_rounds_instead_of_sticking_on_fractional_update() {
+        let state = BackendLatencyState::default();
+
+        state.record_latency(1, Duration::from_micros(1000));
+        state.record_latency(1, Duration::from_micros(1003));
+
+        assert_eq!(state.score_key(1), Some(1001));
     }
 }
