@@ -347,10 +347,16 @@ changes. Runtime member state is intentionally in-memory in the current `1.5.x`
 line, is reset by process restart or runtime rebuild, and is returned with
 `"persistent": false` in the mutation response. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.
+In `privacy-mode`, member mutation responses and structured mutation logs omit
+the backend address just like status output. Successful mutation metrics label
+only configured aliases, not raw `IP:port` members.
 For dynamic DNS/file-discovery pools, Fluxheim may reclaim stale runtime
 `drain` overrides after a member disappears from the live discovery set.
 Runtime `disable` and `forced_down` overrides are retained across discovery
 churn and are cleared only by explicit `normal` or `manual_resume` admin action.
+The retained runtime override table is bounded; if the table is full, new
+runtime state or weight overrides fail with a bounded admin error instead of
+growing memory without limit.
 Successful and rejected member-state operations are logged under the
 `fluxheim::load_balancer` target and, when metrics are compiled, counted by
 `fluxheim_load_balancer_events_total` with bounded events `member_state`,
@@ -371,6 +377,9 @@ runtime override and return to the configured `upstream_weights` value. Runtime
 weights are bounded to `1..=1000`, are local/in-memory like runtime member
 state, and are returned in backend status as `effective_weight`,
 `runtime_weight_override`, and `runtime_weight_changed_at_unix_secs`.
+For dynamic DNS/file-discovery pools, runtime weight overrides are retained
+while the same backend is explicitly `disable`d or `forced_down`, and are
+otherwise reclaimed after the backend leaves the live discovery set.
 Successful and rejected weight operations are counted as `member_weight`,
 `member_weight_invalid`, and `member_weight_not_found`.
 

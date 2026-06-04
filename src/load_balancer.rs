@@ -165,6 +165,7 @@ impl LoadBalancerRuntimeBackendState {
 pub struct LoadBalancerRuntimeBackendMutation {
     pub member: String,
     pub state: LoadBalancerRuntimeBackendState,
+    #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
 }
@@ -175,6 +176,7 @@ pub struct LoadBalancerRuntimeBackendWeightMutation {
     pub configured_weight: usize,
     pub effective_weight: usize,
     pub runtime_weight_override: Option<usize>,
+    #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
 }
@@ -919,8 +921,15 @@ impl UpstreamLoadBalancer {
             .backend_by_member(member, &self.backend_aliases)?;
         let policy_key = backend_policy_key(&backend);
         let connection_key = backend_connection_key(&backend);
-        self.backend_policy
-            .set_runtime_backend_state(policy_key, state);
+        if !self
+            .backend_policy
+            .set_runtime_backend_state(policy_key, state)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer runtime override table is full",
+            ));
+        }
         if state == LoadBalancerRuntimeBackendState::ManualResume {
             if let Some(passive_health) = &self.passive_health {
                 passive_health.clear_key(connection_key);
@@ -932,6 +941,7 @@ impl UpstreamLoadBalancer {
         Ok(LoadBalancerRuntimeBackendMutation {
             member: member.to_owned(),
             state,
+            #[cfg(not(feature = "privacy-mode"))]
             address: backend.addr.to_string(),
             alias: self
                 .backend_aliases
@@ -951,25 +961,25 @@ impl UpstreamLoadBalancer {
                 "runtime load-balancer weight overrides are available only for round-robin, least-connections, least-sessions, and least-time selections in this release",
             ));
         }
-        if let Some(weight) = weight
-            && (weight == 0 || weight > MAX_RUNTIME_BACKEND_WEIGHT)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "load balancer runtime weight must be between 1 and 1000",
-            ));
-        }
         let backend = self
             .inner
             .backend_by_member(member, &self.backend_aliases)?;
         let policy_key = backend_policy_key(&backend);
-        self.backend_policy
-            .set_runtime_backend_weight(policy_key, weight);
+        if !self
+            .backend_policy
+            .set_runtime_backend_weight(policy_key, weight)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer runtime override table is full",
+            ));
+        }
         Ok(LoadBalancerRuntimeBackendWeightMutation {
             member: member.to_owned(),
             configured_weight: backend.weight,
             effective_weight: self.backend_policy.effective_weight(&backend),
             runtime_weight_override: self.backend_policy.runtime_backend_weight(policy_key),
+            #[cfg(not(feature = "privacy-mode"))]
             address: backend.addr.to_string(),
             alias: self
                 .backend_aliases

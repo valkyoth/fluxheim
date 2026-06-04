@@ -18,6 +18,8 @@ use super::{
     LoadBalancerBackendRuntimeStats, LoadBalancerCircuitState, LoadBalancerRuntimeBackendState,
 };
 
+const MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES: usize = 4096;
+
 fn unix_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -166,12 +168,12 @@ impl BackendSelectionPolicy {
         &self,
         key: u64,
         state: LoadBalancerRuntimeBackendState,
-    ) {
-        self.runtime.set_state(key, state);
+    ) -> bool {
+        self.runtime.set_state(key, state)
     }
 
-    pub(super) fn set_runtime_backend_weight(&self, key: u64, weight: Option<usize>) {
-        self.runtime.set_weight(key, weight);
+    pub(super) fn set_runtime_backend_weight(&self, key: u64, weight: Option<usize>) -> bool {
+        self.runtime.set_weight(key, weight)
     }
 
     pub(super) fn effective_weight(&self, backend: &Backend) -> usize {
@@ -219,7 +221,7 @@ impl RuntimeBackendPolicyOverrides {
         state.disabled.contains(&key) || state.forced_down.contains(&key)
     }
 
-    fn set_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) {
+    fn set_state(&self, key: u64, state: LoadBalancerRuntimeBackendState) -> bool {
         let mut overrides = self
             .state
             .lock()
@@ -231,28 +233,46 @@ impl RuntimeBackendPolicyOverrides {
             LoadBalancerRuntimeBackendState::Normal
             | LoadBalancerRuntimeBackendState::ManualResume => {
                 overrides.changed_at_unix_secs.remove(&key);
+                true
             }
             LoadBalancerRuntimeBackendState::Drained => {
+                if !runtime_override_key_has_capacity(&overrides.drain, key) {
+                    return false;
+                }
                 overrides.drain.insert(key);
                 overrides.changed_at_unix_secs.insert(key, unix_secs());
+                true
             }
             LoadBalancerRuntimeBackendState::Disabled => {
+                if !runtime_override_key_has_capacity(&overrides.disabled, key) {
+                    return false;
+                }
                 overrides.disabled.insert(key);
                 overrides.changed_at_unix_secs.insert(key, unix_secs());
+                true
             }
             LoadBalancerRuntimeBackendState::ForcedDown => {
+                if !runtime_override_key_has_capacity(&overrides.forced_down, key) {
+                    return false;
+                }
                 overrides.forced_down.insert(key);
                 overrides.changed_at_unix_secs.insert(key, unix_secs());
+                true
             }
         }
     }
 
-    fn set_weight(&self, key: u64, weight: Option<usize>) {
+    fn set_weight(&self, key: u64, weight: Option<usize>) -> bool {
         let mut overrides = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(weight) = weight {
+            if !overrides.weights.contains_key(&key)
+                && overrides.weights.len() >= MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES
+            {
+                return false;
+            }
             overrides.weights.insert(key, weight);
             overrides
                 .weight_changed_at_unix_secs
@@ -261,6 +281,7 @@ impl RuntimeBackendPolicyOverrides {
             overrides.weights.remove(&key);
             overrides.weight_changed_at_unix_secs.remove(&key);
         }
+        true
     }
 
     fn state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
@@ -321,11 +342,17 @@ impl RuntimeBackendPolicyOverrides {
         state
             .changed_at_unix_secs
             .retain(|key, _| live_keys.contains(key) || retained_override_keys.contains(key));
-        state.weights.retain(|key, _| live_keys.contains(key));
+        state
+            .weights
+            .retain(|key, _| live_keys.contains(key) || retained_override_keys.contains(key));
         state
             .weight_changed_at_unix_secs
-            .retain(|key, _| live_keys.contains(key));
+            .retain(|key, _| live_keys.contains(key) || retained_override_keys.contains(key));
     }
+}
+
+fn runtime_override_key_has_capacity(keys: &std::collections::HashSet<u64>, key: u64) -> bool {
+    keys.contains(&key) || keys.len() < MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES
 }
 
 fn backend_policy_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
@@ -408,6 +435,54 @@ mod tests {
                 .runtime_backend_weight_changed_at_unix_secs(2)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn runtime_backend_policy_keeps_weight_for_disabled_churned_backend() {
+        let policy = BackendSelectionPolicy::default();
+        assert!(policy.set_runtime_backend_state(1, LoadBalancerRuntimeBackendState::Disabled));
+        assert!(policy.set_runtime_backend_weight(1, Some(4)));
+
+        policy.prune_stale(&std::collections::HashSet::new());
+
+        assert_eq!(
+            policy.runtime_backend_state(1),
+            Some(LoadBalancerRuntimeBackendState::Disabled)
+        );
+        assert_eq!(policy.runtime_backend_weight(1), Some(4));
+        assert!(
+            policy
+                .runtime_backend_weight_changed_at_unix_secs(1)
+                .is_some()
+        );
+
+        assert!(policy.set_runtime_backend_state(1, LoadBalancerRuntimeBackendState::Normal));
+        policy.prune_stale(&std::collections::HashSet::new());
+
+        assert_eq!(policy.runtime_backend_state(1), None);
+        assert_eq!(policy.runtime_backend_weight(1), None);
+        assert_eq!(policy.runtime_backend_weight_changed_at_unix_secs(1), None);
+    }
+
+    #[test]
+    fn runtime_backend_policy_rejects_oversized_persistent_override_table() {
+        let policy = BackendSelectionPolicy::default();
+        for key in 0..MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES as u64 {
+            assert!(
+                policy.set_runtime_backend_state(key, LoadBalancerRuntimeBackendState::Disabled)
+            );
+        }
+
+        assert!(!policy.set_runtime_backend_state(
+            MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES as u64,
+            LoadBalancerRuntimeBackendState::Disabled
+        ));
+        assert!(policy.set_runtime_backend_state(0, LoadBalancerRuntimeBackendState::ForcedDown));
+        assert!(policy.set_runtime_backend_state(0, LoadBalancerRuntimeBackendState::Normal));
+        assert!(policy.set_runtime_backend_state(
+            MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES as u64,
+            LoadBalancerRuntimeBackendState::Disabled
+        ));
     }
 }
 

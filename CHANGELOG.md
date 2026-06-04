@@ -24,6 +24,12 @@ behavior when the change improves security or project direction.
   runtime weight transition timestamp in load-balancer backend status.
 - Count successful, invalid, and not-found runtime member-weight operations as
   bounded load-balancer events.
+- Omit backend addresses from member-state and member-weight mutation responses
+  and structured mutation logs in `privacy-mode`, and label successful mutation
+  metrics only by configured upstream alias.
+- Bound retained runtime load-balancer override state and preserve runtime
+  weight overrides across dynamic backend churn while the same backend is
+  explicitly disabled or forced down.
 
 ## 1.5.1 - 2026-06-03
 

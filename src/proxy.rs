@@ -746,6 +746,7 @@ pub struct LoadBalancerMemberStateResult {
     pub route: Option<String>,
     pub member: String,
     pub state: LoadBalancerRuntimeBackendState,
+    #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
 }
@@ -768,6 +769,7 @@ pub struct LoadBalancerMemberWeightResult {
     pub configured_weight: usize,
     pub effective_weight: usize,
     pub runtime_weight_override: Option<usize>,
+    #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
 }
@@ -1085,6 +1087,7 @@ impl ProxySnapshot {
             route: route_name,
             member: mutation.member,
             state: mutation.state,
+            #[cfg(not(feature = "privacy-mode"))]
             address: mutation.address,
             alias: mutation.alias,
         })
@@ -1159,6 +1162,7 @@ impl ProxySnapshot {
             configured_weight: mutation.configured_weight,
             effective_weight: mutation.effective_weight,
             runtime_weight_override: mutation.runtime_weight_override,
+            #[cfg(not(feature = "privacy-mode"))]
             address: mutation.address,
             alias: mutation.alias,
         })

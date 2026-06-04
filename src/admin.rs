@@ -967,6 +967,7 @@ impl AdminApp {
                 } else {
                     "vhost"
                 };
+                #[cfg(not(feature = "privacy-mode"))]
                 log::info!(
                     target: "fluxheim::load_balancer",
                     "load balancer member state updated vhost={} route={} scope={} member={} state={} address={} alias={} persistent=false",
@@ -978,26 +979,35 @@ impl AdminApp {
                     result.address,
                     result.alias.as_deref().unwrap_or("")
                 );
+                #[cfg(feature = "privacy-mode")]
+                log::info!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member state updated vhost={} route={} scope={} member={} state={} alias={} persistent=false",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.state.as_str(),
+                    result.alias.as_deref().unwrap_or("")
+                );
                 record_load_balancer_event(
                     &result.vhost,
                     result.route.as_deref(),
-                    result.alias.as_deref().or(Some(result.member.as_str())),
+                    result.alias.as_deref(),
                     "member_state",
                 );
-                json_response_value(
-                    StatusCode::OK,
-                    &json!({
-                        "status": "ok",
-                        "vhost": result.vhost,
-                        "route": result.route,
-                        "scope": scope,
-                        "member": result.member,
-                        "state": result.state,
-                        "address": result.address,
-                        "alias": result.alias,
-                        "persistent": false,
-                    }),
-                )
+                let mut body = serde_json::Map::new();
+                body.insert("status".to_owned(), json!("ok"));
+                body.insert("vhost".to_owned(), json!(result.vhost));
+                body.insert("route".to_owned(), json!(result.route));
+                body.insert("scope".to_owned(), json!(scope));
+                body.insert("member".to_owned(), json!(result.member));
+                body.insert("state".to_owned(), json!(result.state));
+                #[cfg(not(feature = "privacy-mode"))]
+                body.insert("address".to_owned(), json!(result.address));
+                body.insert("alias".to_owned(), json!(result.alias));
+                body.insert("persistent".to_owned(), json!(false));
+                json_response_value(StatusCode::OK, &Value::Object(body))
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
                 log::warn!(
@@ -1064,6 +1074,7 @@ impl AdminApp {
                 } else {
                     "vhost"
                 };
+                #[cfg(not(feature = "privacy-mode"))]
                 log::info!(
                     target: "fluxheim::load_balancer",
                     "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} address={} alias={} persistent=false",
@@ -1080,28 +1091,51 @@ impl AdminApp {
                     result.address,
                     result.alias.as_deref().unwrap_or("")
                 );
+                #[cfg(feature = "privacy-mode")]
+                log::info!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} alias={} persistent=false",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.configured_weight,
+                    result.effective_weight,
+                    result
+                        .runtime_weight_override
+                        .map(|weight| weight.to_string())
+                        .unwrap_or_else(|| "none".to_owned()),
+                    result.alias.as_deref().unwrap_or("")
+                );
                 record_load_balancer_event(
                     &result.vhost,
                     result.route.as_deref(),
-                    result.alias.as_deref().or(Some(result.member.as_str())),
+                    result.alias.as_deref(),
                     "member_weight",
                 );
-                json_response_value(
-                    StatusCode::OK,
-                    &json!({
-                        "status": "ok",
-                        "vhost": result.vhost,
-                        "route": result.route,
-                        "scope": scope,
-                        "member": result.member,
-                        "configured_weight": result.configured_weight,
-                        "effective_weight": result.effective_weight,
-                        "runtime_weight_override": result.runtime_weight_override,
-                        "address": result.address,
-                        "alias": result.alias,
-                        "persistent": false,
-                    }),
-                )
+                let mut body = serde_json::Map::new();
+                body.insert("status".to_owned(), json!("ok"));
+                body.insert("vhost".to_owned(), json!(result.vhost));
+                body.insert("route".to_owned(), json!(result.route));
+                body.insert("scope".to_owned(), json!(scope));
+                body.insert("member".to_owned(), json!(result.member));
+                body.insert(
+                    "configured_weight".to_owned(),
+                    json!(result.configured_weight),
+                );
+                body.insert(
+                    "effective_weight".to_owned(),
+                    json!(result.effective_weight),
+                );
+                body.insert(
+                    "runtime_weight_override".to_owned(),
+                    json!(result.runtime_weight_override),
+                );
+                #[cfg(not(feature = "privacy-mode"))]
+                body.insert("address".to_owned(), json!(result.address));
+                body.insert("alias".to_owned(), json!(result.alias));
+                body.insert("persistent".to_owned(), json!(false));
+                json_response_value(StatusCode::OK, &Value::Object(body))
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
                 log::warn!(

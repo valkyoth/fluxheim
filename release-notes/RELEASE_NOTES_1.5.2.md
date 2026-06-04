@@ -17,12 +17,16 @@ runtime weight overrides for already configured members.
   `runtime_weight_changed_at_unix_secs`.
 - Runtime member-weight operations emit bounded audit/metrics events:
   `member_weight`, `member_weight_invalid`, and `member_weight_not_found`.
+- `privacy-mode` builds omit backend addresses from member-state and
+  member-weight mutation responses and structured mutation logs.
+- Retained runtime override state is bounded, and runtime weight overrides stay
+  attached to disabled or forced-down dynamic members across discovery churn.
 
 ## Test Coverage
 
 - Unit tests cover runtime weight selection behavior, unsupported hash-selector
-  rejection, runtime status fields, stale dynamic-backend cleanup, and the
-  authenticated admin endpoint.
+  rejection, runtime status fields, stale dynamic-backend cleanup, retained
+  override bounds, and the authenticated admin endpoint.
 
 ## Boundaries
 

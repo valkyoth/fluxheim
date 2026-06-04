@@ -559,9 +559,9 @@ pub(super) fn select_power_of_two(
         .unwrap_or_else(|| first.clone());
     let selected = if least_connections_score_is_lower(
         counters.count(&second),
-        second.weight.max(1),
+        backend_policy.effective_weight(&second),
         counters.count(&first),
-        first.weight.max(1),
+        backend_policy.effective_weight(&first),
     ) {
         second
     } else {
