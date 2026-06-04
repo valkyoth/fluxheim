@@ -683,6 +683,7 @@ pub enum LoadBalanceManagedCookieSameSite {
     None,
 }
 
+#[cfg(feature = "load-balancer")]
 impl LoadBalanceManagedCookieSameSite {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
