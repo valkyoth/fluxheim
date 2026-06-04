@@ -9,6 +9,9 @@ every product module. UDP, GSLB/DNS steering, WAF policy, VPN/firewall
 appliance behavior, and iRules/Lua/Wasm scripting are tracked as separate
 roadmap lines.
 
+For active-active managed-cookie and persistence-state boundaries, see
+[Load Balancer HA Design Notes](load-balancer-ha.md).
+
 ## nginx Upstream
 
 Typical nginx upstreams:

@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
   in-flight affinity cookies.
 - Add managed-cookie validation for path/domain/max-age/SameSite attributes
   and keep persistence rejected in `privacy-mode` builds.
+- Add `docs/load-balancer-ha.md` to pin the future active-active
+  cookie-mirroring and persistence-state replication design boundaries.
 
 ## 1.5.2 - 2026-06-04
 

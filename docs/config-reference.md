@@ -1205,7 +1205,8 @@ persistence/runtime override state across restarts, add/remove pool members at
 runtime, apply runtime weights to hash/ring selectors, share managed-cookie
 signing keys across nodes, or synchronize load-balancer state across
 active-active Fluxheim nodes. Managed-cookie HA mirroring is tracked separately
-from the local managed-cookie table shipped in `1.5.3`.
+from the local managed-cookie table shipped in `1.5.3`; see
+[Load Balancer HA Design Notes](load-balancer-ha.md).
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

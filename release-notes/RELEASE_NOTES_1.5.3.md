@@ -18,6 +18,8 @@ Fluxheim-owned sticky-cookie option for HTTP load-balanced routes.
   `managed_cookie_http_only`, `managed_cookie_same_site`, and
   `managed_cookie_max_age_secs`.
 - Keep load-balancer persistence rejected in `privacy-mode` builds.
+- Add `docs/load-balancer-ha.md` as the active-active cookie-mirroring and
+  persistence-state design boundary for future `1.5.x` HA work.
 - Number the remaining `1.5.x` roadmap through restart-persistent state,
   runtime backend-set mutation, service discovery/control-plane integration,
   and scoped UDP/GSLB exploration.
