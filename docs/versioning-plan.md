@@ -1740,6 +1740,14 @@ Stable scope:
 
 - Compile-time `load-balancer` module remains the place for estate-scale
   features that go beyond one Fluxheim instance's normal proxy routing.
+- The `1.5.x` dependency-reduction line should keep Pingora for the HTTP proxy
+  core while removing it from domains where Fluxheim already owns the datapath:
+  the TCP stream proxy and the load-balancer substrate.
+- The stream proxy should become Fluxheim-native before the load-balancer
+  substrate work. Its tunnel, PROXY protocol framing, connection limits, byte
+  caps, idle/lifetime limits, and metrics are already Fluxheim-owned; the
+  remaining Pingora pieces are listener entrypoint, stream abstraction, and
+  upstream TLS connector wiring.
 - The `1.5.0` maintenance split keeps health checks, backend state,
   persistence, selection algorithms, backend policy/status, and file/DNS
   discovery in separate `src/load_balancer/*` modules. Future load-balancer
@@ -1948,6 +1956,11 @@ Beta scope:
   `ServiceDiscovery`, static discovery, readiness maps, health-check wiring,
   and background service lifecycle. Preserve existing config/admin behavior and
   keep Pingora for the HTTP proxy core.
+- Fluxheim-native stream-proxy runtime replacement for the remaining Pingora
+  stream pieces: `ServerApp`, `protocols::Stream`, and `TransportConnector`.
+  Preserve existing stream config, route selection, PROXY protocol, byte/idle
+  limits, metrics, upstream TLS/mTLS behavior, and smoke coverage while using a
+  direct Tokio listener loop and explicit TLS connector.
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Fluxheim's native discovery interface after the backend-set model is no
   longer coupled to Pingora's load-balancing crate.
@@ -3339,7 +3352,17 @@ the exception while the cache server is being completed as a focused sequence:
   add new TLS backends, HTTP/3/QUIC, native load-balancer internals,
   restart-persistent state, cross-node sync, UDP/GSLB, WAF, VPN/firewall
   appliance behavior, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.5`: Fluxheim-native load-balancer core line. Stop at replacing
+- `v1.5.5`: Fluxheim-native stream-proxy runtime line. Stop at replacing
+  Pingora's stream service entrypoint and stream/TLS connector wrappers with a
+  Fluxheim-owned Tokio listener loop and explicit outbound connector for raw
+  TCP plus upstream TLS/mTLS. Preserve existing stream config, route matching,
+  weighted upstream selection, drain/backup policy, route-local PROXY protocol
+  receive/send, true idle timeouts, lifetime and byte caps, metrics, smoke
+  tests, and release-profile behavior. Do not add UDP proxying, HTTP/3/QUIC,
+  native load-balancer internals, restart-persistent state, cross-node sync,
+  WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
+  release.
+- `v1.5.6`: Fluxheim-native load-balancer core line. Stop at replacing
   `pingora-load-balancing` with Fluxheim-owned backend types, backend-set
   readiness, discovery trait, static/file/DNS discovery adapters, TCP/HTTP
   health-check scheduling, background update lifecycle, and existing selector
@@ -3350,28 +3373,28 @@ the exception while the cache server is being completed as a focused sequence:
   sync, runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.6`: restart-persistent load-balancer state line. Stop at versioned,
+- `v1.5.7`: restart-persistent load-balancer state line. Stop at versioned,
   size-limited, atomically written, auditable persistence for selected runtime
   member overrides and bounded persistence tables after the Fluxheim-native
   backend model is stable. Corrupt or incompatible state must fail closed to
   "ignore and rebuild" rather than poisoning a pool. Do not add cross-node
   state sync, runtime add/remove-member, dynamic discovery control planes,
   UDP/GSLB, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.7`: runtime backend-set mutation line. Stop at authenticated
+- `v1.5.8`: runtime backend-set mutation line. Stop at authenticated
   add/remove/update operations for configured pool members through atomic
   backend-set swaps, including validation, audit events, status/metrics
   visibility, drain behavior, and clear selector limitations for hash, ring,
   Maglev, and power-of-two policies. Do not add xDS/Kubernetes/Consul
   discovery, UDP/GSLB, WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua
   scripting in this release.
-- `v1.5.8`: service-discovery and control-plane integration line. Stop at one
+- `v1.5.9`: service-discovery and control-plane integration line. Stop at one
   or more bounded discovery adapters such as Kubernetes, Consul, or xDS after
   local DNS/file discovery and runtime backend mutation are stable. Discovery
   must include authentication/trust boundaries, churn limits, safe fallback,
   status, audit/metrics, and reload behavior. Do not add UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.9`: UDP and GSLB exploration line. Stop at explicitly scoped beta
+- `v1.5.10`: UDP and GSLB exploration line. Stop at explicitly scoped beta
   modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
   pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if
   each target has bounded session/affinity semantics, timeouts, health checks,

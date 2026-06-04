@@ -150,7 +150,10 @@ Notes:
 `[stream]` is disabled by default and requires a build with the
 `stream-proxy` feature. Stream routes are raw L4 TCP services. They do not run
 HTTP routing, headers, cache, compression, auth subrequests, PHP, or web
-serving logic.
+serving logic. The current stream datapath is Fluxheim-owned; the remaining
+Pingora stream entrypoint/connector wrappers are planned to be replaced by a
+Fluxheim-native Tokio listener and connector in the `1.5.x` dependency
+reduction line.
 
 ```toml
 [stream]

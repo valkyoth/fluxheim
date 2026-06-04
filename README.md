@@ -24,10 +24,12 @@
 Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
 edge caching, PHP-FPM application serving, ACME automation, observability,
 FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
-enterprise HTTP/TCP load balancing. It uses Pingora internally for core proxy
-and load-balancing primitives, but the operator-facing product is Fluxheim:
-focused release profiles are available for full, cache, proxy, load-balancer,
-and PHP deployments, with matching container images and Linux runtime archives.
+enterprise HTTP/TCP load balancing. It uses Pingora internally for the current
+HTTP proxy core and some transport primitives, while `1.5.x` tracks a smaller
+Pingora surface through native stream and load-balancer internals. The
+operator-facing product is Fluxheim: focused release profiles are available for
+full, cache, proxy, load-balancer, and PHP deployments, with matching container
+images and Linux runtime archives.
 
 The `1.5.x` load-balancer line targets F5 LTM, HAProxy, nginx, and Envoy-style
 HTTP/TCP pool operations: weighted and adaptive selection, health and circuit
@@ -139,8 +141,8 @@ Apple Silicon developer workflow.
 
 - **Rust first**: memory-safe implementation with a pinned stable toolchain.
 - **Production proxy core**: uses Pingora internally for HTTP proxying and
-  load-balancing primitives while keeping Fluxheim's config, security, and
-  operations model as the public interface.
+  selected transport/runtime primitives while keeping Fluxheim's config,
+  security, and operations model as the public interface.
 - **Modular builds**: compile only the modules needed for a deployment.
 - **Secure defaults**: strict config validation, request limits, safe filesystem
   handling, dependency policy, and no hidden legacy protocol fallback.
