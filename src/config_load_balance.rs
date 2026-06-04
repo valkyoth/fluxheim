@@ -905,25 +905,26 @@ fn validate_managed_cookie_attributes(
 ) -> Result<(), ConfigError> {
     if let Some(path) = config.managed_cookie_path.as_deref()
         && (!path.starts_with('/')
-            || path.is_empty()
+            || !path.is_ascii()
             || path.len() > 256
             || path
-                .chars()
-                .any(|character| character.is_control() || matches!(character, ';' | ',')))
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || matches!(byte, b';' | b',')))
     {
         return Err(ConfigError::InvalidLoadBalanceSelection {
-            reason: "proxy.load_balance.persistence.managed_cookie_path must be an absolute cookie path without controls, ';', or ','",
+            reason: "proxy.load_balance.persistence.managed_cookie_path must be an absolute ASCII cookie path without controls, ';', or ','",
         });
     }
     if let Some(domain) = config.managed_cookie_domain.as_deref()
         && (domain.is_empty()
+            || !domain.is_ascii()
             || domain.len() > 253
             || domain
-                .chars()
-                .any(|character| character.is_control() || matches!(character, ';' | ',')))
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || matches!(byte, b';' | b',')))
     {
         return Err(ConfigError::InvalidLoadBalanceSelection {
-            reason: "proxy.load_balance.persistence.managed_cookie_domain must be a non-empty cookie domain without controls, ';', or ','",
+            reason: "proxy.load_balance.persistence.managed_cookie_domain must be a non-empty ASCII cookie domain without controls, ';', or ','",
         });
     }
     if let Some(max_age) = config.managed_cookie_max_age_secs

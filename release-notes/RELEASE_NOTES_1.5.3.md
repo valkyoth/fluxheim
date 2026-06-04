@@ -13,6 +13,10 @@ Fluxheim-owned sticky-cookie option for HTTP load-balanced routes.
   do not expose backend addresses, aliases, or weights to clients.
 - Rotate local managed-cookie signing keys daily and verify cookies against the
   current or previous key generation.
+- Bind managed-cookie HMAC tags to the configured cookie name so tokens minted
+  for one managed-cookie name cannot validate under another name.
+- Enforce ASCII-only managed-cookie domain/path attributes and zeroize retired
+  managed-cookie signing keys on rotation/drop.
 - Add configurable managed-cookie attributes:
   `managed_cookie_domain`, `managed_cookie_path`, `managed_cookie_secure`,
   `managed_cookie_http_only`, `managed_cookie_same_site`, and

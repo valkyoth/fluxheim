@@ -3317,7 +3317,41 @@ fn rejects_invalid_load_balance_persistence() {
     assert_eq!(
         invalid_managed_cookie_path.validate(),
         Err(ConfigError::InvalidLoadBalanceSelection {
-            reason: "proxy.load_balance.persistence.managed_cookie_path must be an absolute cookie path without controls, ';', or ','"
+            reason: "proxy.load_balance.persistence.managed_cookie_path must be an absolute ASCII cookie path without controls, ';', or ','"
+        })
+    );
+
+    let non_ascii_managed_cookie_path: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "managed-cookie"
+            cookie = "fluxheim_lb"
+            managed_cookie_path = "/例え"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        non_ascii_managed_cookie_path.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_path must be an absolute ASCII cookie path without controls, ';', or ','"
+        })
+    );
+
+    let non_ascii_managed_cookie_domain: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "managed-cookie"
+            cookie = "fluxheim_lb"
+            managed_cookie_domain = "例え.jp"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        non_ascii_managed_cookie_domain.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_domain must be a non-empty ASCII cookie domain without controls, ';', or ','"
         })
     );
 

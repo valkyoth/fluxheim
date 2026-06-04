@@ -57,6 +57,7 @@ static OPENSSL_ADMIN_HMAC_READY: std::sync::OnceLock<Result<(), String>> =
 #[cfg(feature = "proxy")]
 pub fn admin_hmac_sha256_or_abort(
     provider: AdminMacProvider,
+    context: &'static str,
     key: &[u8],
     message: &[u8],
 ) -> [u8; 32] {
@@ -64,7 +65,7 @@ pub fn admin_hmac_sha256_or_abort(
         Ok(digest) => digest,
         Err(error) => {
             log::error!(
-                "fatal: admin bearer-token HMAC failed through {}: {error}",
+                "fatal: {context} HMAC failed through {}: {error}",
                 provider.label()
             );
             std::process::abort();

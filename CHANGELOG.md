@@ -28,6 +28,10 @@ behavior when the change improves security or project direction.
   and keep persistence rejected in `privacy-mode` builds.
 - Add `docs/load-balancer-ha.md` to pin the future active-active
   cookie-mirroring and persistence-state replication design boundaries.
+- Harden managed-cookie pentest findings: enforce ASCII-only cookie
+  domain/path attributes, bind the HMAC tag to the configured cookie name,
+  zeroize retired signing keys on rotation/drop, and label HMAC abort logs by
+  caller context.
 
 ## 1.5.2 - 2026-06-04
 

@@ -2813,7 +2813,12 @@ fn digest_admin_token(
     token: &[u8],
     mac_provider: crate::internal_crypto::AdminMacProvider,
 ) -> [u8; 32] {
-    crate::internal_crypto::admin_hmac_sha256_or_abort(mac_provider, token_mac_key(), token)
+    crate::internal_crypto::admin_hmac_sha256_or_abort(
+        mac_provider,
+        "admin bearer-token",
+        token_mac_key(),
+        token,
+    )
 }
 
 fn token_mac_key() -> &'static [u8; 32] {

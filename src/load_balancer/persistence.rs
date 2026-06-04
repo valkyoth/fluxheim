@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use pingora::http::RequestHeader;
 use subtle::ConstantTimeEq;
+use zeroize::Zeroize;
 
 use crate::config::{
     LoadBalanceManagedCookieSameSite, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
@@ -197,7 +198,7 @@ impl LoadBalancerPersistenceState {
             log::error!("fatal: managed load-balancer cookie key generation failed: {error}");
             std::process::abort();
         }
-        let token = managed_cookie_token(&key)?;
+        let token = managed_cookie_token(config.name.as_bytes(), &key)?;
         Some((
             key,
             ManagedAffinityCookie {
@@ -332,7 +333,7 @@ fn managed_cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
     let (key, tag) = token.split_at(MANAGED_COOKIE_KEY_BYTES);
     let mut matched = 0_u8;
     for hmac_key in managed_cookie_hmac_keys_for_verify() {
-        let expected = managed_cookie_tag_with_key(&hmac_key, key);
+        let expected = managed_cookie_tag_with_key(&hmac_key, name.as_bytes(), key);
         matched |= expected.as_slice().ct_eq(tag).unwrap_u8();
     }
     if matched != 1 {
@@ -341,22 +342,35 @@ fn managed_cookie_key(request: &RequestHeader, name: &str) -> Option<Vec<u8>> {
     Some(key.to_vec())
 }
 
-fn managed_cookie_token(key: &[u8]) -> Option<String> {
+fn managed_cookie_token(cookie_name: &[u8], key: &[u8]) -> Option<String> {
     if key.len() != MANAGED_COOKIE_KEY_BYTES {
         return None;
     }
-    let tag = managed_cookie_tag_with_key(&managed_cookie_hmac_key_for_sign(), key);
+    let tag = managed_cookie_tag_with_key(&managed_cookie_hmac_key_for_sign(), cookie_name, key);
     let mut token = Vec::with_capacity(MANAGED_COOKIE_TOKEN_BYTES);
     token.extend_from_slice(key);
     token.extend_from_slice(&tag);
     base64_ng::URL_SAFE_NO_PAD.encode_string(&token).ok()
 }
 
-fn managed_cookie_tag_with_key(hmac_key: &[u8; 32], key: &[u8]) -> [u8; MANAGED_COOKIE_TAG_BYTES] {
+fn managed_cookie_tag_with_key(
+    hmac_key: &[u8; 32],
+    cookie_name: &[u8],
+    key: &[u8],
+) -> [u8; MANAGED_COOKIE_TAG_BYTES] {
+    let cookie_name_len = u16::try_from(cookie_name.len()).unwrap_or_else(|_| {
+        log::error!("fatal: managed load-balancer cookie name exceeds HMAC context limit");
+        std::process::abort();
+    });
+    let mut message = Vec::with_capacity(2 + cookie_name.len() + key.len());
+    message.extend_from_slice(&cookie_name_len.to_le_bytes());
+    message.extend_from_slice(cookie_name);
+    message.extend_from_slice(key);
     crate::internal_crypto::admin_hmac_sha256_or_abort(
         crate::internal_crypto::admin_mac_provider(),
+        "lb managed-cookie",
         hmac_key,
-        key,
+        &message,
     )
 }
 
@@ -379,10 +393,16 @@ fn managed_cookie_hmac_key_ring() -> &'static Mutex<ManagedCookieHmacKeyRing> {
     KEY_RING.get_or_init(|| Mutex::new(ManagedCookieHmacKeyRing::new(Instant::now())))
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct ManagedCookieHmacKey {
     key: [u8; 32],
     created_at: Instant,
+}
+
+impl Drop for ManagedCookieHmacKey {
+    fn drop(&mut self) {
+        self.key.zeroize();
+    }
 }
 
 #[derive(Debug)]
@@ -419,7 +439,7 @@ impl ManagedCookieHmacKeyRing {
         self.rotate_if_due(now);
         let mut keys = Vec::with_capacity(2);
         keys.push(self.current.key);
-        if let Some(previous) = self.previous {
+        if let Some(previous) = &self.previous {
             keys.push(previous.key);
         }
         keys
@@ -429,11 +449,15 @@ impl ManagedCookieHmacKeyRing {
         if now.saturating_duration_since(self.current.created_at) < MANAGED_COOKIE_HMAC_ROTATION {
             return;
         }
-        self.previous = Some(self.current);
-        self.current = ManagedCookieHmacKey {
+        let new_current = ManagedCookieHmacKey {
             key: random_managed_cookie_hmac_key(),
             created_at: now,
         };
+        let old_current = std::mem::replace(&mut self.current, new_current);
+        if let Some(mut previous) = self.previous.take() {
+            previous.key.zeroize();
+        }
+        self.previous = Some(old_current);
     }
 }
 
@@ -506,5 +530,27 @@ mod tests {
         assert_eq!(verify_keys.len(), 2);
         assert!(verify_keys.contains(&current));
         assert!(verify_keys.contains(&first_key));
+    }
+
+    #[test]
+    fn managed_cookie_hmac_binds_cookie_name() {
+        let key = [9_u8; MANAGED_COOKIE_KEY_BYTES];
+        let token = managed_cookie_token(b"fluxheim_lb", &key).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
+        request
+            .append_header("cookie", format!("fluxheim_lb={token}"))
+            .unwrap();
+
+        assert_eq!(
+            managed_cookie_key(&request, "fluxheim_lb").as_deref(),
+            Some(key.as_slice())
+        );
+        assert_eq!(managed_cookie_key(&request, "other_lb"), None);
+
+        let mut replay = RequestHeader::build("GET", b"/", None).unwrap();
+        replay
+            .append_header("cookie", format!("other_lb={token}"))
+            .unwrap();
+        assert_eq!(managed_cookie_key(&replay, "other_lb"), None);
     }
 }
