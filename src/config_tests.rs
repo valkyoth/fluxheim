@@ -2,18 +2,20 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[cfg(not(feature = "privacy-mode"))]
+use super::LoadBalanceManagedCookieSameSite;
 use super::{
     AdminConfig, AdminHealthConfig, AdminHealthResponseMode, AdminRemoteTransportMode,
     AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
     CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig, CacheStaleErrorKind,
     CompressionConfig, Config, ConfigError, ConfigLoadError, DownstreamProxyProtocol,
-    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoadBalanceManagedCookieSameSite,
-    LoadBalancePersistenceMode, LoadBalanceSelection, LoggingConfig, MetricsConfig, ProxyConfig,
-    RateLimitMode, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
-    TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion,
-    TracingConfig, UpstreamHttpVersion, UpstreamProxyProtocol, VhostConfig,
-    VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
-    valid_dynamic_header_variable, validate_dynamic_header_template,
+    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoadBalancePersistenceMode,
+    LoadBalanceSelection, LoggingConfig, MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig,
+    ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode,
+    TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, UpstreamHttpVersion,
+    UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
+    normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
+    validate_dynamic_header_template,
 };
 #[cfg(feature = "cache")]
 use super::{CachePeerConfig, CachePeerFillConfig};

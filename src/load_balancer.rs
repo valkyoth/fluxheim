@@ -2827,6 +2827,7 @@ mod tests {
         let mutation = balancer
             .set_runtime_backend_state("primary-a", LoadBalancerRuntimeBackendState::Drained)
             .unwrap();
+        #[cfg(not(feature = "privacy-mode"))]
         assert_eq!(mutation.address, "127.0.0.1:3000");
         assert_eq!(mutation.alias.as_deref(), Some("primary-a"));
         let stats = balancer.runtime_stats();

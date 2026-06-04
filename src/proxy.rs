@@ -9864,7 +9864,9 @@ mod tests {
         feature = "compression-gzip",
         feature = "load-balancer"
     ))]
-    use pingora::http::{ResponseHeader, StatusCode};
+    use pingora::http::ResponseHeader;
+    #[cfg(any(feature = "php-fpm", feature = "compression-gzip"))]
+    use pingora::http::StatusCode;
 
     #[cfg(feature = "compression-gzip")]
     use crate::config::CompressionConfig;
@@ -15916,6 +15918,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.route.as_deref(), Some("api"));
+        #[cfg(not(feature = "privacy-mode"))]
         assert_eq!(result.address, "127.0.0.1:3011");
         let stats = proxy.load_balancer_runtime_stats();
         assert_eq!(
