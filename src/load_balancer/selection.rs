@@ -723,7 +723,7 @@ impl MaglevTable {
             for (index, backend) in backends.iter().enumerate() {
                 loop {
                     let (offset, skip) = permutations[index];
-                    let candidate = (offset + next[index].saturating_mul(skip)) % MAGLEV_TABLE_SIZE;
+                    let candidate = maglev_candidate(offset, next[index], skip);
                     next[index] = next[index].saturating_add(1);
                     if slots[candidate] == u64::MAX {
                         slots[candidate] = backend_policy_key(backend);
@@ -749,6 +749,10 @@ impl MaglevTable {
         let limit = max_iterations.max(1).min(self.slots.len());
         (0..limit).map(move |offset| self.slots[(start + offset) % self.slots.len()])
     }
+}
+
+fn maglev_candidate(offset: usize, next: usize, skip: usize) -> usize {
+    ((offset as u128 + (next as u128 * skip as u128)) % MAGLEV_TABLE_SIZE as u128) as usize
 }
 
 pub(super) fn select_maglev(
@@ -810,4 +814,22 @@ fn maglev_route_secret() -> u64 {
         }
         u64::from_le_bytes(bytes)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maglev_candidate_uses_exact_wide_modular_arithmetic() {
+        let offset = 0;
+        let next = MAGLEV_TABLE_SIZE - 1;
+        let skip = MAGLEV_TABLE_SIZE - 1;
+        let expected =
+            ((offset as u128 + (next as u128 * skip as u128)) % MAGLEV_TABLE_SIZE as u128) as usize;
+
+        assert_eq!(maglev_candidate(offset, next, skip), expected);
+        assert_eq!(expected, 1);
+        assert_eq!(u32::MAX as usize % MAGLEV_TABLE_SIZE, 0);
+    }
 }
