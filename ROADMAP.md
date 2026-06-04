@@ -212,6 +212,15 @@ configuration where that control is worth the complexity; and a later
 Fluxheim-owned HTTP proxy runtime to replace Pingora `ProxyHttp`/`Session` with
 a linear request/response pipeline. These are major-release-sized projects, not
 minor cleanup items.
+Active load-balancer health checks should grow in focused slices before the
+larger protocol/runtime work: first close the HTTP request-header gap, add the
+standard gRPC Health Checking Protocol, add simple JSON field validation for
+structured health bodies, and support bounded health-derived degraded weights
+such as `X-Health-Weight`; later add opt-in local exec/agent checks with strict
+no-shell/no-ambient-env rules; then add database/service protocol probes such
+as Redis `PING`, PostgreSQL readiness, MySQL handshake/readiness, and carefully
+bounded SMTP/LDAP/custom send-expect monitors for stream/database proxy use
+cases.
 
 PHP execution is the next application-server milestone after the `1.3.0`
 ingress/TLS split. It must stay disabled by default and compile only through

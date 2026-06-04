@@ -89,7 +89,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | DNS-refreshed upstream pools | ✅ | `1.4.1`; `upstream_dns_refresh_secs` for load-balancer service-name pools. |
 | File-refreshed upstream pools | ✅ | `1.4.1`; `upstreams_file` for load-balancer builds with bounded refresh and safe file handling. |
 | Passive health | ✅ | Failure, selected 5xx, and latency-based ejection with circuit-open status visibility. |
-| Active health checks | ✅ | TCP/TLS and HTTP health checks. |
+| Active health checks | ✅ | TCP/TLS and HTTP health checks today; custom health request headers, gRPC health, JSON body validation, degraded weight signals, exec/agent checks, and database protocol probes are planned across later `1.5.x` health-check lines. |
 | Load-balancer status | ✅ | Admin status includes configured pools, selection/health/retry policy metadata, ready/available summary counts, runtime override counts/timestamps, backend readiness, disabled/drained state, in-flight counts, persistence-entry skew, passive failure/ejection and circuit state, slow-start, and least-time latency state. |
 | Load-balancer 1.5.x boundaries | Limited | Local persistence and runtime overrides are in-memory only; managed affinity cookies and their rotating signing keys are process-local; Fluxheim does not yet persist LB state across restarts, add/remove members at runtime, apply runtime weights to hash/ring selectors, share managed-cookie keys, or sync state across active-active nodes. |
 | Rate limits | ✅ | Local vhost/route token buckets, delay mode, bounded tables, and optional indeterminate-IP rejection. |

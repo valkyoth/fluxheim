@@ -1883,13 +1883,35 @@ Stable scope:
   - TLS handshake checks with SNI and verification controls;
   - HTTP checks with method, path, expected status range, expected response
     header/body substring, Host header, and upstream TLS/SNI where configured;
-  - HTTP/2 and gRPC health checks where protocol support is stable;
-  - protocol-aware monitors for common load-balanced services such as MySQL,
-    PostgreSQL, Redis, SMTP, LDAP, and custom send/expect checks are a later
+  - HTTP health-check request headers, including support for authenticated
+    health endpoints through explicitly configured low-sensitivity headers.
+    Header names and values must be validated, redacted in logs/status where
+    needed, and excluded from high-cardinality metric labels;
+  - HTTP/2 and gRPC health checks using the standard gRPC Health Checking
+    Protocol, with optional service name, strict message-size limits, no
+    general protobuf parser requirement for the first slice, and response
+    status mapped into normal active-health state;
+  - structured JSON response checks for common health bodies, using bounded
+    `serde_json` parsing and simple exact field-path comparisons before any
+    JSONPath-like language is considered;
+  - weighted degraded health responses where a trusted health endpoint can
+    return a bounded effective-weight signal such as `X-Health-Weight`. This is
+    a health-derived overlay separate from configured weight and runtime
+    operator overrides, must be visible in status/audit, and must automatically
+    clear when the backend returns to normal;
+  - local exec/command checks are a later `1.5.x` monitor slice, not part of
+    the first L7 expansion. They must use absolute allow-listed paths, no
+    shell, no ambient environment injection, strict timeout/output limits,
+    redaction, and compile/config gates because they introduce process
+    execution;
+  - protocol-aware database/service monitors for common load-balanced services
+    such as Redis `PING`, PostgreSQL startup/auth-safe readiness, MySQL
+    handshake/readiness, SMTP, LDAP, and custom send/expect checks are a later
     `1.5.x` monitor slice, with strict timeout/body-size bounds and no
     unbounded script execution;
   - authenticated agent checks may be added later for applications that can
-    report local overload or drain state more accurately than protocol probes;
+    report local overload, reduced capacity, or drain state more accurately
+    than protocol probes;
   - UDP checks only in the later UDP follow-up, with explicit send/expect
     patterns and timeout limits;
   - interval, timeout, consecutive success/failure thresholds, initial state,
@@ -3556,28 +3578,43 @@ the exception while the cache server is being completed as a focused sequence:
   sync, runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.8`: restart-persistent load-balancer state line. Stop at versioned,
+- `v1.5.8`: active health-check expansion line. Stop at closing the existing
+  HTTP health-check request-header gap, adding standard gRPC health checks,
+  adding bounded JSON field validation for common health response bodies, and
+  adding health-derived degraded weight signals such as `X-Health-Weight`.
+  Custom request headers must be explicitly configured, validated, redacted
+  where needed, and omitted from high-cardinality labels. gRPC health should
+  implement only the standard Health Checking Protocol with optional service
+  name and strict message-size/time limits. JSON validation should be simple
+  exact field-path matching, not a full JSONPath language. Degraded weights
+  must be bounded, status-visible, separate from configured/runtime operator
+  weights, and cleared automatically when normal health resumes. Do not add
+  local command execution, database protocol probes, restart-persistent state,
+  runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
+  release.
+- `v1.5.9`: restart-persistent load-balancer state line. Stop at versioned,
   size-limited, atomically written, auditable persistence for selected runtime
   member overrides and bounded persistence tables after the Fluxheim-native
   backend model is stable. Corrupt or incompatible state must fail closed to
   "ignore and rebuild" rather than poisoning a pool. Do not add cross-node
   state sync, runtime add/remove-member, dynamic discovery control planes,
   UDP/GSLB, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.9`: runtime backend-set mutation line. Stop at authenticated
+- `v1.5.10`: runtime backend-set mutation line. Stop at authenticated
   add/remove/update operations for configured pool members through atomic
   backend-set swaps, including validation, audit events, status/metrics
   visibility, drain behavior, and clear selector limitations for hash, ring,
   Maglev, and power-of-two policies. Do not add xDS/Kubernetes/Consul
   discovery, UDP/GSLB, WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua
   scripting in this release.
-- `v1.5.10`: service-discovery and control-plane integration line. Stop at one
+- `v1.5.11`: service-discovery and control-plane integration line. Stop at one
   or more bounded discovery adapters such as Kubernetes, Consul, or xDS after
   local DNS/file discovery and runtime backend mutation are stable. Discovery
   must include authentication/trust boundaries, churn limits, safe fallback,
   status, audit/metrics, and reload behavior. Do not add UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.11`: Fluxheim-native background task registry line. Stop at replacing
+- `v1.5.12`: Fluxheim-native background task registry line. Stop at replacing
   Pingora `GenBackgroundService`, `ServiceWithDependents`,
   `background_service()`, and `ShutdownWatch` usage for Fluxheim-owned
   background work such as cache metrics, ACME renewal scheduling, stale purging,
@@ -3587,7 +3624,7 @@ the exception while the cache server is being completed as a focused sequence:
   needed, status/metrics visibility, and release smoke coverage. Do not change
   HTTP proxy request handling, add UDP/GSLB, WAF, VPN/firewall appliance
   behavior, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.12`: Fluxheim-owned cache interface line. Stop at defining and using a
+- `v1.5.13`: Fluxheim-owned cache interface line. Stop at defining and using a
   `FluxCacheStorage`-style interface that captures Fluxheim's existing cache
   hit/miss/admission/stale/purge semantics without depending on Pingora's
   session-bound `Storage`, `HandleHit`, and `HandleMiss` types. Keep the
@@ -3597,7 +3634,24 @@ the exception while the cache server is being completed as a focused sequence:
   change cache policy semantics, add cross-node cache replication, add UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.13`: UDP and GSLB exploration line. Stop at explicitly scoped beta
+- `v1.5.14`: local exec and agent health-check line. Stop at opt-in, bounded
+  local command/agent checks for cases that cannot be represented by TCP, TLS,
+  HTTP, gRPC, JSON, or database protocol probes. Require absolute allow-listed
+  command paths, no shell expansion, no inherited unsafe environment, strict
+  timeout/output-size limits, redaction, status/audit visibility, and clear
+  compile/profile compatibility. Do not add arbitrary scripting, Wasm policy,
+  runtime backend mutation, UDP/GSLB, WAF, VPN/firewall appliance behavior, or
+  database protocol probes in this release.
+- `v1.5.15`: database and protocol-aware health-check line. Stop at bounded
+  protocol probes for stream/load-balancer deployments where TCP connect is not
+  enough: Redis `PING`, PostgreSQL startup/readiness, MySQL handshake/readiness,
+  and optionally SMTP/LDAP/custom send-expect checks if each protocol has
+  strict timeout, byte, authentication, privacy, and logging limits. Treat
+  database checks as health probes only, not a database proxy feature or query
+  execution engine. Do not add UDP/GSLB, WAF, VPN/firewall appliance behavior,
+  arbitrary command execution beyond the prior opt-in exec line, or new Wasm
+  ABI scope in this release.
+- `v1.5.16`: UDP and GSLB exploration line. Stop at explicitly scoped beta
   modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
   pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if
   each target has bounded session/affinity semantics, timeouts, health checks,
