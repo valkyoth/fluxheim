@@ -1245,11 +1245,10 @@ fn default_upstream_priority_group_min_active() -> usize {
     1
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "load-balancer"))]
 mod tests {
     use super::*;
 
-    #[cfg(feature = "load-balancer")]
     #[test]
     fn load_balancer_backend_keys_reject_collisions() {
         let upstreams = vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3000".to_owned()];
