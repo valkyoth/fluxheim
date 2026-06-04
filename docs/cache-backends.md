@@ -805,6 +805,14 @@ committing the final object, avoiding whole-object admission buffering for the
 disk tier. Reader-visible partial writes remain disabled until Fluxheim can
 provide a safe tagged reader for in-progress objects.
 
+The future dependency-reduction line should decouple the cache interface rather
+than replace the cache implementation. `cache.rs` already owns Fluxheim's disk
+format, index, encryption, eviction, stale policy, purge index, and admission
+rules; the remaining Pingora dependency is the session-bound `Storage` /
+`HandleHit` / `HandleMiss` interface. A Fluxheim-owned cache trait should keep
+the existing semantics and expose a narrow Pingora adapter for the current HTTP
+proxy path.
+
 Additional Pingora cache primitives worth exposing as Fluxheim matures:
 
 - `HttpCacheDigest` records cache lock wait time and lookup/header-read time.

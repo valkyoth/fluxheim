@@ -1743,7 +1743,8 @@ Stable scope:
 - The `1.5.x` dependency-reduction line should keep Pingora for the HTTP proxy
   core while removing it from domains where Fluxheim already owns the datapath:
   the TCP stream proxy, the load-balancer substrate, and mechanical background
-  task registration.
+  task registration. Cache should be decoupled through a Fluxheim-owned storage
+  interface rather than replaced.
 - The stream proxy should become Fluxheim-native before the load-balancer
   substrate work. Its tunnel, PROXY protocol framing, connection limits, byte
   caps, idle/lifetime limits, and metrics are already Fluxheim-owned; the
@@ -1764,6 +1765,11 @@ Stable scope:
   `ServiceWithDependents`, and `ShutdownWatch` wrappers. This is mechanical
   cleanup after native stream and native load-balancer tasks have reduced the
   Pingora background-service surface.
+- Cache storage should grow a `FluxCacheStorage` interface owned by Fluxheim so
+  memory, disk, encrypted disk, tiered storage, predictors, stale policy,
+  purge/index behavior, and admission tests are no longer coupled to Pingora's
+  `Storage` / `HandleHit` / `HandleMiss` session types. The Pingora HTTP proxy
+  path can keep an adapter while cache internals become independently testable.
 - Runtime pool and member state through a local authenticated control plane:
   drain, disable, force-down, enable/normal, manual resume, persistence-table
   clear, configured-member runtime weight overrides, and load-balancer-only
@@ -1972,6 +1978,10 @@ Beta scope:
   `ShutdownWatch` usage. Use explicit Tokio tasks plus a cancellation primitive
   such as `tokio-util`'s `CancellationToken`, preserve graceful shutdown
   behavior, and keep task metrics/status visible.
+- Fluxheim-owned cache interface decoupling for Pingora cache `Storage`,
+  `HandleHit`, and `HandleMiss` semantics. Preserve existing cache behavior and
+  add an adapter for the Pingora HTTP path rather than rewriting the cache
+  implementation.
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Fluxheim's native discovery interface after the backend-set model is no
   longer coupled to Pingora's load-balancing crate.
@@ -3415,7 +3425,17 @@ the exception while the cache server is being completed as a focused sequence:
   needed, status/metrics visibility, and release smoke coverage. Do not change
   HTTP proxy request handling, add UDP/GSLB, WAF, VPN/firewall appliance
   behavior, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.11`: UDP and GSLB exploration line. Stop at explicitly scoped beta
+- `v1.5.11`: Fluxheim-owned cache interface line. Stop at defining and using a
+  `FluxCacheStorage`-style interface that captures Fluxheim's existing cache
+  hit/miss/admission/stale/purge semantics without depending on Pingora's
+  session-bound `Storage`, `HandleHit`, and `HandleMiss` types. Keep the
+  existing memory, disk, encrypted disk, tiered, predictor, stale, purge,
+  range/slice, and cache-lock behavior unchanged, and provide a narrow adapter
+  for the current Pingora HTTP proxy path. Do not rewrite the cache format,
+  change cache policy semantics, add cross-node cache replication, add UDP/GSLB,
+  WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
+  release.
+- `v1.5.12`: UDP and GSLB exploration line. Stop at explicitly scoped beta
   modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
   pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if
   each target has bounded session/affinity semantics, timeouts, health checks,
