@@ -1775,6 +1775,21 @@ Stable scope:
   purge/index behavior, and admission tests are no longer coupled to Pingora's
   `Storage` / `HandleHit` / `HandleMiss` session types. The Pingora HTTP proxy
   path can keep an adapter while cache internals become independently testable.
+- Server bootstrap, listener ownership, and TLS listener configuration remain
+  a later major dependency-reduction line, not a `1.5` goal. Pingora's worker
+  setup, signal handling, hot-restart file-descriptor passing, service
+  orchestration, `TlsSettings`, SNI resolver hooks, mTLS, ALPN, and OCSP
+  wiring are valuable but also the part where Fluxheim has already needed
+  vendor patches. Replacing them requires a dedicated server-runtime milestone
+  with bare-metal and cloud-native deployment models considered separately.
+- Replacing Pingora `ProxyHttp` and `Session` is the final HTTP core
+  dependency-reduction line and should be treated as a major release-sized
+  project. Fluxheim's routing, access control, header policy, cache,
+  compression, PHP-FPM, GeoIP, mirroring, auth-request, and logging currently
+  hang from Pingora's callback lifecycle. A future `hyper`-style
+  `async fn(Request<Body>) -> Response<Body>` core may make that flow more
+  linear and testable, but it must not be mixed with smaller subsystem
+  refactors.
 - Runtime pool and member state through a local authenticated control plane:
   drain, disable, force-down, enable/normal, manual resume, persistence-table
   clear, configured-member runtime weight overrides, and load-balancer-only
@@ -1993,6 +2008,18 @@ Beta scope:
   `HandleHit`, and `HandleMiss` semantics. Preserve existing cache behavior and
   add an adapter for the Pingora HTTP path rather than rewriting the cache
   implementation.
+- Post-`1.6` server-runtime ownership planning: decide whether Fluxheim should
+  replace Pingora `Server`, listener/TLS setup, hot-restart fd passing,
+  service registration, signal handling, and TLS resolver hooks with a
+  Fluxheim-owned Tokio server bootstrap. Preserve bare-metal hot restart only
+  if its operational value justifies the complexity; cloud-native deployments
+  may accept a simpler listener model.
+- Post-`1.6` HTTP runtime replacement planning: evaluate replacing Pingora
+  `ProxyHttp` and `Session` with a Fluxheim-owned HTTP core built around
+  standard `http` types and an async request/response pipeline. Treat this as
+  the largest dependency-reduction project, with migration fixtures proving
+  that cache, compression, PHP-FPM, GeoIP, mirroring, auth-request, rate
+  limits, access policy, observability, and failure paths behave the same.
 - Dynamic service discovery beyond static config and normal DNS resolution,
   using Fluxheim's native discovery interface after the backend-set model is no
   longer coupled to Pingora's load-balancing crate.
@@ -3465,7 +3492,32 @@ the exception while the cache server is being completed as a focused sequence:
   turn this into a generic catchall UDP or authoritative-DNS platform, and do
   not add WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in
   this release.
+- `v1.6.0`: shared Wasm extensibility runtime line. Stop at one sandboxed,
+  typed, resource-limited extension runtime for operator policy normally solved
+  with F5 iRules, nginx Lua/OpenResty, HAProxy Lua/SPOE, and VCL-like cache
+  policy. Do not replace server bootstrap/listeners/TLS, or replace
+  `ProxyHttp`/`Session`, add generic UDP/GSLB platform behavior, or turn Wasm
+  into an unbounded scripting language in this release.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
+- `v1.7.0`: Fluxheim-owned server bootstrap and listener/TLS runtime line.
+  Stop at replacing or isolating Pingora `Server`, worker setup, service
+  registration, signal handling, log-rotation signal behavior, hot-restart
+  file-descriptor passing, listener creation, and TLS listener configuration
+  behind Fluxheim-owned APIs. Preserve secure defaults, per-vhost SNI,
+  mTLS/client-auth policy, ALPN, OCSP stapling where supported, graceful
+  shutdown, release profiles, and bare-metal versus container deployment
+  semantics. Do not replace the HTTP proxy request lifecycle,
+  `ProxyHttp`/`Session`, cache behavior, Wasm ABI, UDP/GSLB, WAF, or
+  VPN/firewall appliance behavior in this release.
+- `v1.8.0`: Fluxheim-owned HTTP proxy runtime line. Stop at replacing Pingora
+  `ProxyHttp` and `Session` with a Fluxheim-owned HTTP request/response
+  pipeline, likely based on standard `http` types and a `hyper`/body-stream
+  model, after the server bootstrap and smaller dependency-reduction layers are
+  stable. Preserve HTTP/1.1 and HTTP/2 behavior, routing, upstream selection,
+  caching, compression, PHP-FPM, ACME, GeoIP, traffic mirroring, auth-request,
+  rate/concurrency limits, header policy, observability, admin-visible failure
+  semantics, and migration fixtures. Do not add HTTP/3/QUIC, UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, or new Wasm ABI scope in this release.
 
 ## Changelog Shape
 

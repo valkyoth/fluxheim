@@ -447,7 +447,9 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 [Production Readiness](docs/production-readiness.md).
 
 Next lines are planned separately after `1.5`: `1.6` for shared Wasm
-extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks. See
+extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks,
+then later major dependency-reduction lines for Fluxheim-owned server
+bootstrap/listener/TLS handling and the HTTP proxy runtime. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
 

@@ -204,6 +204,14 @@ engines;
 keep mature crates for TLS, cryptography, complex protocol state machines,
 async runtime behavior, compression, and parsers until a later milestone can
 prove a replacement safer.
+After the smaller `1.5` dependency-reduction work and the `1.6` Wasm runtime,
+track two larger architecture lines separately: a Fluxheim-owned server
+bootstrap/listener/TLS runtime to replace Pingora `Server`, service
+registration, signal handling, hot-restart fd passing, and TLS listener
+configuration where that control is worth the complexity; and a later
+Fluxheim-owned HTTP proxy runtime to replace Pingora `ProxyHttp`/`Session` with
+a linear request/response pipeline. These are major-release-sized projects, not
+minor cleanup items.
 
 PHP execution is the next application-server milestone after the `1.3.0`
 ingress/TLS split. It must stay disabled by default and compile only through
