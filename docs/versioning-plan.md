@@ -2395,6 +2395,71 @@ Exit criteria:
   cache hook ABI with typed inputs, configured output limits, and explicit
   operator opt-in per vhost or route.
 
+### 1.7 - Server Bootstrap And Listener/TLS Runtime
+
+Goal: replace or isolate Pingora's server bootstrap, listener setup, and TLS
+listener configuration behind Fluxheim-owned APIs after the smaller `1.5`
+dependency-reduction layers and shared `1.6` Wasm ABI are stable.
+
+This is a major dependency-reduction line, not cleanup. Pingora currently owns
+worker setup, service registration, signal handling, graceful shutdown,
+SIGUSR1-style log rotation behavior, hot-restart file-descriptor passing, and
+parts of listener/TLS configuration. Those pieces are valuable, especially for
+traditional bare-metal process models, but they are also the places where
+Fluxheim has already needed vendor patches to get TLS behavior exactly right.
+
+Stable scope:
+
+- Fluxheim-owned server bootstrap API for worker setup, service registration,
+  shutdown, and task orchestration.
+- Listener setup owned by Fluxheim for the supported release profiles.
+- TLS listener configuration owned or isolated behind Fluxheim APIs for
+  rustls/rustls-FIPS and OpenSSL/OpenSSL-FIPS.
+- Preserve per-vhost SNI, mTLS/client-auth policy, ALPN, OCSP stapling where
+  supported, secure defaults, config validation, and release evidence.
+- Preserve bare-metal hot restart only if the implementation can remain
+  bounded and testable; cloud-native deployments may use a simpler listener
+  model.
+
+Out of scope:
+
+- Replacing Pingora `ProxyHttp` or `Session`.
+- Changing cache, compression, PHP-FPM, load-balancer, Wasm, or admin API
+  semantics.
+- HTTP/3/QUIC, UDP/GSLB, WAF, VPN/firewall appliance behavior, or new Wasm ABI
+  scope.
+
+### 1.8 - HTTP Proxy Runtime
+
+Goal: replace Pingora `ProxyHttp` and `Session` with a Fluxheim-owned HTTP
+request/response pipeline after server bootstrap and the smaller
+dependency-reduction layers are stable.
+
+This is the largest Pingora-decoupling project. Today the HTTP proxy callback
+lifecycle carries routing, upstream selection, access policy, header mutation,
+caching, compression, PHP-FPM, ACME, GeoIP, mirroring, auth-request,
+observability, failure handling, and logging through Pingora `Session`. A
+future Fluxheim HTTP core should use standard `http` types and a linear async
+request/response body-stream model where possible, while preserving the
+operator-facing behavior that existing releases have proven.
+
+Stable scope:
+
+- Fluxheim-owned HTTP/1.1 and HTTP/2 request/response pipeline.
+- Preserve routing, upstream selection, load-balancer interaction, access
+  policy, rate/concurrency limits, auth-request, traffic mirroring, header
+  policy, compression, caching, PHP-FPM, ACME, GeoIP, observability, and admin
+  failure semantics.
+- Migration fixtures proving behavior parity against the Pingora-backed path.
+- Narrow compatibility adapters where needed during transition, but no
+  permanent hidden dependency on Pingora `Session`.
+
+Out of scope:
+
+- HTTP/3/QUIC.
+- UDP/GSLB, WAF, VPN/firewall appliance behavior.
+- New Wasm ABI scope beyond preserving the `1.6` host-call contract.
+
 ### Future Edge Firewall And VPN Modes
 
 Goal: evaluate whether Fluxheim should grow separate edge-firewall and TLS/VPN
@@ -2469,12 +2534,13 @@ Repository/layout rule:
   the directory and dependency boundary should let the SDK move to its own
   GitHub project later without extracting proxy internals.
 
-### 1.7 - Reserved
+### Future - Compression Follow-Ups
 
 Compression was pulled forward into the `1.4` production proxy parity line
 because it is a normal reverse-proxy expectation rather than a separate feature
-family. Keep `1.7` reserved until a later major planning pass identifies a
-coherent post-Wasm release theme.
+family. Keep follow-up compression work as a future compatibility track rather
+than consuming the `1.7` slot now used for server bootstrap and listener/TLS
+ownership.
 - Bounded offload for expensive compression work.
 
 Beta scope:
@@ -2492,7 +2558,7 @@ Exit criteria:
 - Downstream disconnects cancel or stop compression work.
 - Default and `privacy-mode` builds prove compression is absent.
 
-### 1.8 - Media Transform Pack
+### Future - Media Transform Pack
 
 Goal: add safe, opt-in image transformation for static and proxied image
 responses.
