@@ -26,8 +26,8 @@ edge caching, PHP-FPM application serving, ACME automation, observability,
 FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
 enterprise HTTP/TCP load balancing. It uses Pingora internally for the current
 HTTP proxy core and some transport primitives, while `1.5.x` tracks a smaller
-Pingora surface through native stream, load-balancer, and background-task
-internals. The
+Pingora surface through standard HTTP/error boundaries plus native stream,
+load-balancer, background-task, and cache-interface internals. The
 operator-facing product is Fluxheim: focused release profiles are available for
 full, cache, proxy, load-balancer, and PHP deployments, with matching container
 images and Linux runtime archives.

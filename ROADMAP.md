@@ -196,9 +196,11 @@ engines behind Fluxheim-owned interfaces. This must not compromise feature
 parity or security. In the `1.4` and `1.5` work, prefer small local
 implementations for queue policy, load-balancer algorithms, persistence state,
 rewrite helpers, and typed variable evaluation when they are easy to review;
-add Fluxheim-owned interfaces around subsystems that are already mostly
-Fluxheim code, such as cache storage, before trying to replace mature external
-protocol engines;
+standardize Fluxheim-owned modules on Rust `http` crate types and a
+Fluxheim-owned error taxonomy where Pingora wrappers are only adapter glue; add
+Fluxheim-owned interfaces around subsystems that are already mostly Fluxheim
+code, such as cache storage, before trying to replace mature external protocol
+engines;
 keep mature crates for TLS, cryptography, complex protocol state machines,
 async runtime behavior, compression, and parsers until a later milestone can
 prove a replacement safer.

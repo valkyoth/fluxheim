@@ -1742,9 +1742,14 @@ Stable scope:
   features that go beyond one Fluxheim instance's normal proxy routing.
 - The `1.5.x` dependency-reduction line should keep Pingora for the HTTP proxy
   core while removing it from domains where Fluxheim already owns the datapath:
-  the TCP stream proxy, the load-balancer substrate, and mechanical background
-  task registration. Cache should be decoupled through a Fluxheim-owned storage
-  interface rather than replaced.
+  standard HTTP/error type plumbing, the TCP stream proxy, the load-balancer
+  substrate, and mechanical background task registration. Cache should be
+  decoupled through a Fluxheim-owned storage interface rather than replaced.
+- Fluxheim-owned modules should standardize on the Rust `http` crate for
+  request/response/status/header types and a Fluxheim-owned `FluxError` /
+  `FluxResult` taxonomy instead of propagating Pingora HTTP wrappers and
+  `pingora::Error` through internal APIs. Keep narrow adapters at Pingora
+  HTTP proxy boundaries until a later HTTP runtime replacement line exists.
 - The stream proxy should become Fluxheim-native before the load-balancer
   substrate work. Its tunnel, PROXY protocol framing, connection limits, byte
   caps, idle/lifetime limits, and metrics are already Fluxheim-owned; the
@@ -1963,6 +1968,12 @@ Stable scope:
 
 Beta scope:
 
+- Fluxheim-native HTTP/error type boundary replacement for Pingora wrapper
+  types in Fluxheim-owned modules. Use Rust `http` crate request, response,
+  status, method, URI, and header types where practical, and replace
+  `pingora::{Error, ErrorType}` propagation with a `thiserror`-backed
+  Fluxheim error taxonomy carrying explicit context. Keep Pingora adapters at
+  `ProxyHttp`, service, and transport edges.
 - Fluxheim-native load-balancer substrate replacement for the remaining
   Pingora LB pieces: `Backend`, `Backends`, `LoadBalancer<S>`,
   `ServiceDiscovery`, static discovery, readiness maps, health-check wiring,
@@ -3373,7 +3384,18 @@ the exception while the cache server is being completed as a focused sequence:
   add new TLS backends, HTTP/3/QUIC, native load-balancer internals,
   restart-persistent state, cross-node sync, UDP/GSLB, WAF, VPN/firewall
   appliance behavior, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.5`: Fluxheim-native stream-proxy runtime line. Stop at replacing
+- `v1.5.5`: Fluxheim-native HTTP/error type boundary line. Stop at
+  standardizing Fluxheim-owned modules on Rust `http` crate request, response,
+  status, method, URI, and header types where practical, plus a
+  `thiserror`-backed `FluxError` / `FluxResult` hierarchy for internal error
+  propagation. Keep narrow adapters at Pingora `ProxyHttp`, service, and
+  transport boundaries, preserve externally visible status codes, messages,
+  metrics labels, config validation behavior, release profiles, and tests. Do
+  not replace the HTTP proxy runtime, change stream proxy runtime, change
+  cache semantics, change load-balancer selection/state behavior, add
+  HTTP/3/QUIC, UDP/GSLB, WAF, VPN/firewall appliance behavior, or
+  Wasm/iRules/Lua scripting in this release.
+- `v1.5.6`: Fluxheim-native stream-proxy runtime line. Stop at replacing
   Pingora's stream service entrypoint and stream/TLS connector wrappers with a
   Fluxheim-owned Tokio listener loop and explicit outbound connector for raw
   TCP plus upstream TLS/mTLS. Preserve existing stream config, route matching,
@@ -3383,7 +3405,7 @@ the exception while the cache server is being completed as a focused sequence:
   native load-balancer internals, restart-persistent state, cross-node sync,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.6`: Fluxheim-native load-balancer core line. Stop at replacing
+- `v1.5.7`: Fluxheim-native load-balancer core line. Stop at replacing
   `pingora-load-balancing` with Fluxheim-owned backend types, backend-set
   readiness, discovery trait, static/file/DNS discovery adapters, TCP/HTTP
   health-check scheduling, background update lifecycle, and existing selector
@@ -3394,28 +3416,28 @@ the exception while the cache server is being completed as a focused sequence:
   sync, runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.7`: restart-persistent load-balancer state line. Stop at versioned,
+- `v1.5.8`: restart-persistent load-balancer state line. Stop at versioned,
   size-limited, atomically written, auditable persistence for selected runtime
   member overrides and bounded persistence tables after the Fluxheim-native
   backend model is stable. Corrupt or incompatible state must fail closed to
   "ignore and rebuild" rather than poisoning a pool. Do not add cross-node
   state sync, runtime add/remove-member, dynamic discovery control planes,
   UDP/GSLB, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.8`: runtime backend-set mutation line. Stop at authenticated
+- `v1.5.9`: runtime backend-set mutation line. Stop at authenticated
   add/remove/update operations for configured pool members through atomic
   backend-set swaps, including validation, audit events, status/metrics
   visibility, drain behavior, and clear selector limitations for hash, ring,
   Maglev, and power-of-two policies. Do not add xDS/Kubernetes/Consul
   discovery, UDP/GSLB, WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua
   scripting in this release.
-- `v1.5.9`: service-discovery and control-plane integration line. Stop at one
+- `v1.5.10`: service-discovery and control-plane integration line. Stop at one
   or more bounded discovery adapters such as Kubernetes, Consul, or xDS after
   local DNS/file discovery and runtime backend mutation are stable. Discovery
   must include authentication/trust boundaries, churn limits, safe fallback,
   status, audit/metrics, and reload behavior. Do not add UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.10`: Fluxheim-native background task registry line. Stop at replacing
+- `v1.5.11`: Fluxheim-native background task registry line. Stop at replacing
   Pingora `GenBackgroundService`, `ServiceWithDependents`,
   `background_service()`, and `ShutdownWatch` usage for Fluxheim-owned
   background work such as cache metrics, ACME renewal scheduling, stale purging,
@@ -3425,7 +3447,7 @@ the exception while the cache server is being completed as a focused sequence:
   needed, status/metrics visibility, and release smoke coverage. Do not change
   HTTP proxy request handling, add UDP/GSLB, WAF, VPN/firewall appliance
   behavior, or Wasm/iRules/Lua scripting in this release.
-- `v1.5.11`: Fluxheim-owned cache interface line. Stop at defining and using a
+- `v1.5.12`: Fluxheim-owned cache interface line. Stop at defining and using a
   `FluxCacheStorage`-style interface that captures Fluxheim's existing cache
   hit/miss/admission/stale/purge semantics without depending on Pingora's
   session-bound `Storage`, `HandleHit`, and `HandleMiss` types. Keep the
@@ -3435,7 +3457,7 @@ the exception while the cache server is being completed as a focused sequence:
   change cache policy semantics, add cross-node cache replication, add UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
-- `v1.5.12`: UDP and GSLB exploration line. Stop at explicitly scoped beta
+- `v1.5.13`: UDP and GSLB exploration line. Stop at explicitly scoped beta
   modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
   pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if
   each target has bounded session/affinity semantics, timeouts, health checks,
