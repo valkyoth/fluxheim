@@ -285,7 +285,7 @@ impl SlowStartState {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let started_at = *backends.entry(key).or_insert(now);
         let elapsed = now.saturating_duration_since(started_at);
-        if elapsed >= self.duration {
+        if self.duration.is_zero() || elapsed >= self.duration {
             return true;
         }
 
@@ -436,4 +436,21 @@ impl BackendLatencyState {
 
 pub(super) fn backend_connection_key(backend: &Backend) -> u64 {
     fnv1a64(backend.addr.to_string().as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slow_start_zero_duration_permits_without_division() {
+        let backend = Backend::new("127.0.0.1:3000").unwrap();
+        let state = SlowStartState::from_config(&LoadBalanceSlowStartConfig {
+            enabled: true,
+            duration_secs: 0,
+        });
+
+        assert!(state.permits(&backend));
+        assert!(state.permits_read_only(&backend));
+    }
 }
