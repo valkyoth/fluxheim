@@ -3312,6 +3312,45 @@ the exception while the cache server is being completed as a focused sequence:
   Do not add runtime add/remove-member, managed affinity-cookie insertion,
   restart-persistent or cross-node state, UDP/GSLB, WAF, VPN/firewall appliance
   behavior, or Wasm/iRules/Lua scripting in this release.
+- `v1.5.3`: managed affinity-cookie and HA persistence line. Stop at
+  signed/opaque load-balancer `Set-Cookie` insertion for eligible HTTP
+  responses, cookie verification on inbound requests, key rotation, configured
+  cookie attributes, backend identity privacy, explicit privacy-mode rejection
+  unless no-retention behavior is proven, and documented interaction with
+  cache, compression, and header policies. Include an active-active
+  cookie-mirroring design and tests, but do not add restart-persistent state,
+  runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
+  release.
+- `v1.5.4`: restart-persistent load-balancer state line. Stop at versioned,
+  size-limited, atomically written, auditable persistence for selected runtime
+  member overrides and bounded persistence tables. Corrupt or incompatible
+  state must fail closed to "ignore and rebuild" rather than poisoning a pool.
+  Do not add cross-node state sync, runtime add/remove-member, dynamic
+  discovery control planes, UDP/GSLB, or Wasm/iRules/Lua scripting in this
+  release.
+- `v1.5.5`: runtime backend-set mutation line. Stop at authenticated
+  add/remove/update operations for configured pool members through atomic
+  backend-set swaps, including validation, audit events, status/metrics
+  visibility, drain behavior, and clear selector limitations for hash, ring,
+  Maglev, and power-of-two policies. Do not add xDS/Kubernetes/Consul
+  discovery, UDP/GSLB, WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua
+  scripting in this release.
+- `v1.5.6`: service-discovery and control-plane integration line. Stop at one
+  or more bounded discovery adapters such as Kubernetes, Consul, or xDS after
+  local DNS/file discovery and runtime backend mutation are stable. Discovery
+  must include authentication/trust boundaries, churn limits, safe fallback,
+  status, audit/metrics, and reload behavior. Do not add UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
+  release.
+- `v1.5.7`: UDP and GSLB exploration line. Stop at explicitly scoped beta
+  modules only: DNS UDP load balancing, syslog UDP forwarding, QUIC
+  pass-through, game-server UDP proxying, and/or DNS/GSLB traffic steering if
+  each target has bounded session/affinity semantics, timeouts, health checks,
+  metrics, rootless/container-network behavior, and clear non-goals. Do not
+  turn this into a generic catchall UDP or authoritative-DNS platform, and do
+  not add WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in
+  this release.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 
 ## Changelog Shape

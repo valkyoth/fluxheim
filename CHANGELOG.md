@@ -7,6 +7,17 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.3 - Unreleased
+
+### Changed
+
+- Start the managed affinity-cookie and HA persistence release line. The stop
+  line is signed/opaque load-balancer cookie insertion, cookie rotation,
+  privacy-mode constraints, cache/compression/header-policy interaction,
+  cookie-mirroring design for active-active HA, and focused smoke coverage.
+- Number the remaining `1.5.x` roadmap stops through UDP/GSLB exploration so
+  the load-balancer line does not spill into the `1.6` Wasm line.
+
 ## 1.5.2 - 2026-06-04
 
 ### Changed

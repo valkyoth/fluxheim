@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.2
+Version:        1.5.3
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Jun 04 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.3-1
+- Start the managed affinity-cookie and HA persistence release line; planned
+  stop is signed/opaque load-balancer cookie insertion, cookie rotation,
+  privacy-mode constraints, and active-active cookie-mirroring design.
+
 * Thu Jun 04 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.2-1
 - Start the runtime load-balancer weight-control release line, focused on
   authenticated runtime weight overrides for configured members, audit/status
