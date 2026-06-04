@@ -348,8 +348,9 @@ line, is reset by process restart or runtime rebuild, and is returned with
 `"persistent": false` in the mutation response. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.
 In `privacy-mode`, member mutation responses and structured mutation logs omit
-the backend address just like status output. Successful mutation metrics label
-only configured aliases, not raw `IP:port` members.
+the backend address just like status output. Successful mutation metrics keep
+member attribution in normal builds and use configured aliases only in
+privacy-mode.
 For dynamic DNS/file-discovery pools, Fluxheim may reclaim stale runtime
 `drain` overrides after a member disappears from the live discovery set.
 Runtime `disable` and `forced_down` overrides are retained across discovery

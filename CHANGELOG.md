@@ -30,6 +30,12 @@ behavior when the change improves security or project direction.
 - Bound retained runtime load-balancer override state and preserve runtime
   weight overrides across dynamic backend churn while the same backend is
   explicitly disabled or forced down.
+- Emit successful runtime member-state and member-weight mutations to the
+  `fluxheim::audit` log target in addition to operational load-balancer logs.
+- Restore backend metric attribution for unaliased member mutations in
+  non-privacy builds, while keeping privacy-mode alias-only behavior.
+- Reject configured load-balancer upstream pools whose backend identity keys
+  collide.
 
 ## 1.5.1 - 2026-06-03
 

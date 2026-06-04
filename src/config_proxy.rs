@@ -16,6 +16,8 @@ use crate::config_net::{normalize_host, upstream_host, valid_authority, valid_up
 use crate::config_path::{validate_non_world_writable_parent, validate_path};
 use crate::config_route::validate_route_path;
 use crate::config_web::WebConfig;
+#[cfg(feature = "load-balancer")]
+use crate::load_balancer::backend_authority_key;
 
 const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
 
@@ -594,6 +596,8 @@ impl ProxyConfig {
                 });
             }
         }
+        #[cfg(feature = "load-balancer")]
+        validate_load_balancer_backend_keys(&self.upstreams)?;
         self.validate_upstream_policy()?;
 
         if let Some(sni) = &self.upstream_sni
@@ -1184,6 +1188,21 @@ fn validate_proxy_upstream_subset(
     Ok(seen)
 }
 
+#[cfg(feature = "load-balancer")]
+fn validate_load_balancer_backend_keys(upstreams: &[String]) -> Result<(), ConfigError> {
+    let mut seen = HashSet::new();
+    for upstream in upstreams {
+        let normalized = upstream.to_ascii_lowercase();
+        if !seen.insert(backend_authority_key(&normalized)) {
+            return Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstreams",
+                reason: "load-balancer backend key collision detected; use distinct upstream addresses",
+            });
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProxyErrorPageConfig {
@@ -1224,4 +1243,23 @@ fn default_proxy_upstreams_file_refresh_secs() -> u64 {
 
 fn default_upstream_priority_group_min_active() -> usize {
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_backend_keys_reject_collisions() {
+        let upstreams = vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3000".to_owned()];
+
+        assert!(matches!(
+            validate_load_balancer_backend_keys(&upstreams),
+            Err(ConfigError::InvalidProxyUpstreamPolicy {
+                field: "proxy.upstreams",
+                ..
+            })
+        ));
+    }
 }

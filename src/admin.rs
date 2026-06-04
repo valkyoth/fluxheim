@@ -990,10 +990,23 @@ impl AdminApp {
                     result.state.as_str(),
                     result.alias.as_deref().unwrap_or("")
                 );
+                log::info!(
+                    target: "fluxheim::audit",
+                    "load balancer member state updated vhost={} route={} scope={} member={} state={} alias={} persistent=false",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.state.as_str(),
+                    result.alias.as_deref().unwrap_or("")
+                );
                 record_load_balancer_event(
                     &result.vhost,
                     result.route.as_deref(),
-                    result.alias.as_deref(),
+                    load_balancer_metric_member_label(
+                        result.alias.as_deref(),
+                        result.member.as_str(),
+                    ),
                     "member_state",
                 );
                 let mut body = serde_json::Map::new();
@@ -1107,10 +1120,28 @@ impl AdminApp {
                         .unwrap_or_else(|| "none".to_owned()),
                     result.alias.as_deref().unwrap_or("")
                 );
+                log::info!(
+                    target: "fluxheim::audit",
+                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} alias={} persistent=false",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.configured_weight,
+                    result.effective_weight,
+                    result
+                        .runtime_weight_override
+                        .map(|weight| weight.to_string())
+                        .unwrap_or_else(|| "none".to_owned()),
+                    result.alias.as_deref().unwrap_or("")
+                );
                 record_load_balancer_event(
                     &result.vhost,
                     result.route.as_deref(),
-                    result.alias.as_deref(),
+                    load_balancer_metric_member_label(
+                        result.alias.as_deref(),
+                        result.member.as_str(),
+                    ),
                     "member_weight",
                 );
                 let mut body = serde_json::Map::new();
@@ -2874,6 +2905,22 @@ fn record_load_balancer_event(
 ) {
 }
 
+#[cfg(all(feature = "load-balancer", not(feature = "privacy-mode")))]
+fn load_balancer_metric_member_label<'a>(
+    alias: Option<&'a str>,
+    member: &'a str,
+) -> Option<&'a str> {
+    alias.or(Some(member))
+}
+
+#[cfg(all(feature = "load-balancer", feature = "privacy-mode"))]
+fn load_balancer_metric_member_label<'a>(
+    alias: Option<&'a str>,
+    _member: &'a str,
+) -> Option<&'a str> {
+    alias
+}
+
 fn snapshot_json(snapshot: &ConfigSnapshot, current: Option<&str>) -> Value {
     json!({
         "id": snapshot.id,
@@ -3501,7 +3548,9 @@ fn parse_load_balancer_runtime_weight(value: &str) -> Result<Option<usize>, &'st
         return Ok(None);
     }
     let Ok(weight) = value.parse::<usize>() else {
-        return Err("load balancer weight must be a number or one of default/reset/clear");
+        return Err(
+            "load balancer weight must be a number or one of default/reset/clear/configured",
+        );
     };
     if weight == 0 || weight > crate::load_balancer::MAX_RUNTIME_BACKEND_WEIGHT {
         return Err("load balancer weight must be between 1 and 1000");
@@ -4114,6 +4163,32 @@ mod tests {
         let body: Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(body["effective_weight"], 1);
         assert_eq!(body["runtime_weight_override"], Value::Null);
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_runtime_weight_parser_documents_all_reset_keywords() {
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight("configured"),
+            Ok(None)
+        );
+        assert_eq!(
+            super::parse_load_balancer_runtime_weight("bogus"),
+            Err("load balancer weight must be a number or one of default/reset/clear/configured")
+        );
+    }
+
+    #[cfg(all(feature = "load-balancer", not(feature = "privacy-mode")))]
+    #[test]
+    fn load_balancer_metric_member_label_falls_back_to_member_outside_privacy_mode() {
+        assert_eq!(
+            super::load_balancer_metric_member_label(None, "127.0.0.1:3000"),
+            Some("127.0.0.1:3000")
+        );
+        assert_eq!(
+            super::load_balancer_metric_member_label(Some("origin-a"), "127.0.0.1:3000"),
+            Some("origin-a")
+        );
     }
 
     #[cfg(feature = "load-balancer")]

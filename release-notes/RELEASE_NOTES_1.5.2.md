@@ -17,8 +17,14 @@ runtime weight overrides for already configured members.
   `runtime_weight_changed_at_unix_secs`.
 - Runtime member-weight operations emit bounded audit/metrics events:
   `member_weight`, `member_weight_invalid`, and `member_weight_not_found`.
+- Successful runtime member-state and member-weight mutations are emitted to
+  the `fluxheim::audit` log target as privileged admin operations.
 - `privacy-mode` builds omit backend addresses from member-state and
   member-weight mutation responses and structured mutation logs.
+- Non-privacy metrics keep backend attribution for unaliased member mutations;
+  privacy-mode keeps alias-only attribution.
+- Static configured load-balancer pools reject backend identity-key collisions
+  during config validation.
 - Retained runtime override state is bounded, and runtime weight overrides stay
   attached to disabled or forced-down dynamic members across discovery churn.
 

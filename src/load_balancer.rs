@@ -30,7 +30,7 @@ use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
     configured_maglev_table,
 };
-use self::key::backend_key;
+pub(crate) use self::key::{backend_authority_key, backend_key};
 use self::persistence::{LoadBalanceKeySource, LoadBalancerPersistenceState};
 use self::policy::{
     BackendSelectionPolicy, BackendStatsInputs, backend_aliases, load_balancer_backend_stats,

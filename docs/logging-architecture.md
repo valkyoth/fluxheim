@@ -33,7 +33,8 @@ Fluxheim should split logs by intent:
   failures, path traversal, denied PHP/CGI execution, and TLS/cert permission
   failures.
 - `audit`: admin operations such as snapshot, rollback, reload, purge, cache
-  activity reset, certificate renewal, and future account/key changes.
+  activity reset, load-balancer member-state or member-weight mutation,
+  certificate renewal, and future account/key changes.
 
 Security and audit logs should not be silently disabled per vhost. They may be
 rerouted or filtered by level, but Fluxheim should make disabling them an
