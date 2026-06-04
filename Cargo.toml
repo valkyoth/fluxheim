@@ -206,6 +206,7 @@ proptest = "1.6.0"
 
 [profile.release]
 panic = "abort"
+overflow-checks = true
 
 [patch.crates-io]
 # Pingora 0.8 rustls listeners do not expose a certificate resolver hook.

@@ -50,7 +50,7 @@ The baseline does not prove:
 | [A07 Authentication Failures](https://owasp.org/Top10/2025/A07_2025-Authentication_Failures/) | Admin token file size/path tests, full bearer-token comparison, per-source and global admin-auth throttle tests. |
 | [A08 Software or Data Integrity Failures](https://owasp.org/Top10/2025/A08_2025-Software_or_Data_Integrity_Failures/) | Snapshot store safe-path tests, symlinked config rejection, reload process-upgrade rejection, self-healing rollback fail-closed tests. |
 | [A09 Security Logging and Alerting Failures](https://owasp.org/Top10/2025/A09_2025-Security_Logging_and_Alerting_Failures/) | JSON log escaping, access-log escaping, request-id generation, release evidence and observability smoke gates. |
-| [A10 Mishandling of Exceptional Conditions](https://owasp.org/Top10/2025/A10_2025-Mishandling_of_Exceptional_Conditions/) | Oversized admin error clamping, config parse context tests, permission-error diagnostics, saturating response counters, `forbid(unsafe_code)` and release `panic = "abort"` checks. |
+| [A10 Mishandling of Exceptional Conditions](https://owasp.org/Top10/2025/A10_2025-Mishandling_of_Exceptional_Conditions/) | Oversized admin error clamping, config parse context tests, permission-error diagnostics, saturating response counters, `forbid(unsafe_code)`, release `panic = "abort"`, and release `overflow-checks = true` checks. |
 
 ## Maintenance Rule
 

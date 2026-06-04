@@ -39,6 +39,7 @@ run_test() {
 echo "owasp baseline: static policy checks"
 require_file_contains src/lib.rs '#!\[forbid\(unsafe_code\)\]' "unsafe-code ban"
 require_file_contains Cargo.toml 'panic = "abort"' "release panic abort"
+require_file_contains Cargo.toml 'overflow-checks = true' "release overflow checks"
 require_file_contains .github/workflows/ci.yml 'cargo deny check' "dependency policy gate"
 require_file_contains .github/workflows/ci.yml 'cargo audit' "RustSec advisory gate"
 require_file_contains .github/workflows/ci.yml 'scripts/generate-sbom.sh' "SBOM generation gate"

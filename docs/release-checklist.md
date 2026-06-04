@@ -229,10 +229,11 @@ scripts/smoke_1_0_core.sh
   this is enforced by the normal compile, clippy, and feature-matrix gates.
   Do not add direct `unsafe` blocks or raw FFI to Fluxheim source. Prefer safe
   wrapper crates for platform APIs and safe task/waker primitives in tests.
-- Panic policy. Release artifacts build with `panic = "abort"`, and crate roots
-  deny production `unwrap()`, `expect()`, and `panic!()` through clippy. Keep
-  operational errors on `Result` or explicit fallback responses. Test-only
-  assertions may continue using panicking helpers.
+- Panic and overflow policy. Release artifacts build with `panic = "abort"` and
+  `overflow-checks = true`, and crate roots deny production `unwrap()`,
+  `expect()`, and `panic!()` through clippy. Keep operational errors on
+  `Result` or explicit fallback responses. Test-only assertions may continue
+  using panicking helpers.
 - Native dependency policy. FIPS-capable profiles can intentionally pull native
   cryptographic modules such as OpenSSL providers or `aws-lc-fips-sys`. Record
   the provider/module certificate, compiler, platform, and Security Policy in
