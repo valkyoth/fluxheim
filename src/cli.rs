@@ -460,10 +460,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    #[cfg(all(
-        feature = "tls-rustls-backend",
-        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-    ))]
+    #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     crate::tls::install_rustls_crypto_provider()?;
 
     let cli = Cli::parse_from(args);
@@ -676,9 +673,7 @@ fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + S
     #[cfg(any(
         feature = "tls",
         feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
+        feature = "tls-openssl"
     ))]
     {
         crate::tls::validate_fips_runtime_config(config)
@@ -687,9 +682,7 @@ fn validate_fips_runtime_config(config: &Config) -> Result<(), Box<dyn Error + S
     #[cfg(not(any(
         feature = "tls",
         feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
+        feature = "tls-openssl"
     )))]
     {
         let compliance_mode = config.tls.compliance_mode();
@@ -953,8 +946,6 @@ pub fn print_crypto_diagnostics(config: Option<&Config>, config_path: Option<&st
     println!("  tls backends:");
     println!("    rustls: {}", cfg!(feature = "tls-rustls-backend"));
     println!("    openssl: {}", cfg!(feature = "tls-openssl"));
-    println!("    boringssl: {}", cfg!(feature = "tls-boringssl"));
-    println!("    s2n: {}", cfg!(feature = "tls-s2n"));
     println!("  fips-capable features:");
     println!("    tls-rustls-fips: {}", cfg!(feature = "tls-rustls-fips"));
     println!(
@@ -1062,8 +1053,6 @@ fn tls_backend_name(backend: crate::config::TlsBackend) -> &'static str {
     match backend {
         crate::config::TlsBackend::Rustls => "rustls",
         crate::config::TlsBackend::Openssl => "openssl",
-        crate::config::TlsBackend::Boringssl => "boringssl",
-        crate::config::TlsBackend::S2n => "s2n",
     }
 }
 
@@ -3845,9 +3834,7 @@ fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
 #[cfg(any(
     feature = "tls",
     feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl",
-    feature = "tls-s2n"
+    feature = "tls-openssl"
 ))]
 pub fn check_tls_storage(config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     let check = crate::tls::validate_tls_storage(config);
@@ -3870,9 +3857,7 @@ pub fn check_tls_storage(config: &Config) -> Result<(), Box<dyn Error + Send + S
 #[cfg(not(any(
     feature = "tls",
     feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl",
-    feature = "tls-s2n"
+    feature = "tls-openssl"
 )))]
 pub fn check_tls_storage(_config: &Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     Err("TLS storage checks require a TLS feature".into())
@@ -3883,9 +3868,7 @@ pub fn check_tls_storage(_config: &Config) -> Result<(), Box<dyn Error + Send + 
     any(
         feature = "tls",
         feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
+        feature = "tls-openssl"
     )
 ))]
 mod tests {

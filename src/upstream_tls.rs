@@ -1,52 +1,24 @@
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use std::io;
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use std::sync::Arc;
 
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::config::ProxyConfig;
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use zeroize::Zeroizing;
 
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RuntimeUpstreamTls {
     pub(crate) ca: Option<Arc<pingora::protocols::tls::CaType>>,
     pub(crate) client_cert_key: Option<Arc<pingora::utils::tls::CertKey>>,
 }
 
-#[cfg(not(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-)))]
+#[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
 pub(crate) struct RuntimeUpstreamTls;
 
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 impl RuntimeUpstreamTls {
     pub(crate) fn from_config(config: &ProxyConfig) -> io::Result<Self> {
         Self::from_paths(
@@ -72,21 +44,13 @@ impl RuntimeUpstreamTls {
 }
 
 #[cfg(all(
-    any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ),
+    any(feature = "tls-rustls-backend", feature = "tls-openssl"),
     target_os = "linux"
 ))]
 const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0o400000;
 
 #[cfg(all(
-    any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ),
+    any(feature = "tls-rustls-backend", feature = "tls-openssl"),
     any(
         target_os = "macos",
         target_os = "ios",
@@ -100,11 +64,7 @@ const UPSTREAM_TLS_O_NOFOLLOW: i32 = 0x0100;
 
 #[cfg(all(
     unix,
-    any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ),
+    any(feature = "tls-rustls-backend", feature = "tls-openssl"),
     not(any(
         target_os = "linux",
         target_os = "macos",
@@ -119,18 +79,10 @@ compile_error!(
     "O_NOFOLLOW is unknown on this Unix platform; audit upstream TLS file opening before building Fluxheim"
 );
 
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;
 
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -189,10 +141,7 @@ fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
     Ok(contents)
 }
 
-#[cfg(all(
-    feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-))]
+#[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
 fn load_upstream_ca_bundle(
     path: &std::path::Path,
 ) -> io::Result<Arc<pingora::protocols::tls::CaType>> {
@@ -235,10 +184,7 @@ fn load_upstream_ca_bundle(
     Ok(Arc::from(wrapped.into_boxed_slice()))
 }
 
-#[cfg(all(
-    any(feature = "tls-openssl", feature = "tls-boringssl"),
-    not(feature = "tls-rustls-backend")
-))]
+#[cfg(all(feature = "tls-openssl", not(feature = "tls-rustls-backend")))]
 fn load_upstream_ca_bundle(
     path: &std::path::Path,
 ) -> io::Result<Arc<pingora::protocols::tls::CaType>> {
@@ -264,10 +210,7 @@ fn load_upstream_ca_bundle(
     Ok(Arc::from(certs.into_boxed_slice()))
 }
 
-#[cfg(all(
-    feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-))]
+#[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
 fn load_upstream_client_cert_key(
     cert_path: &std::path::Path,
     key_path: &std::path::Path,
@@ -328,10 +271,7 @@ fn load_upstream_client_cert_key(
     Ok(Arc::new(cert_key))
 }
 
-#[cfg(all(
-    any(feature = "tls-openssl", feature = "tls-boringssl"),
-    not(feature = "tls-rustls-backend")
-))]
+#[cfg(all(feature = "tls-openssl", not(feature = "tls-rustls-backend")))]
 fn load_upstream_client_cert_key(
     cert_path: &std::path::Path,
     key_path: &std::path::Path,

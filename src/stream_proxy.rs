@@ -7,38 +7,19 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use pingora::apps::ServerApp;
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl",
-    feature = "tls-s2n"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use pingora::connectors::TransportConnector;
 use pingora::protocols::Stream;
 use pingora::server::ShutdownWatch;
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl",
-    feature = "tls-s2n"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use pingora::upstreams::peer::HttpPeer;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl",
-    feature = "tls-s2n"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::config_net::upstream_host;
 use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot};
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::upstream_tls::RuntimeUpstreamTls;
 
 pub(crate) type StreamProxyService = pingora::services::listening::Service<StreamProxyApp>;
@@ -82,46 +63,17 @@ pub(crate) struct StreamProxyApp {
     next_upstream: AtomicUsize,
     upstream_proxy_protocol: UpstreamProxyProtocol,
     upstream_tls: bool,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_sni: Option<Arc<str>>,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_verify_cert: bool,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_verify_hostname: bool,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_alternative_cn: Option<Arc<str>>,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_tls_material: RuntimeUpstreamTls,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     connector: Option<Arc<TransportConnector>>,
 }
 
@@ -158,11 +110,7 @@ impl StreamProxyApp {
             .sum::<usize>()
             .max(1);
 
-        #[cfg(any(
-            feature = "tls-rustls-backend",
-            feature = "tls-openssl",
-            feature = "tls-boringssl"
-        ))]
+        #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
         let upstream_tls_material = RuntimeUpstreamTls::from_paths(
             route.upstream_ca_path.as_deref(),
             route.upstream_client_cert_path.as_deref(),
@@ -193,46 +141,17 @@ impl StreamProxyApp {
             next_upstream: AtomicUsize::new(0),
             upstream_proxy_protocol: route.upstream_proxy_protocol,
             upstream_tls: route.upstream_tls,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_sni: route.upstream_sni.as_deref().map(Arc::from),
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_verify_cert: route.upstream_verify_cert,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_verify_hostname: route.upstream_verify_hostname,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_alternative_cn: route.upstream_alternative_cn.as_deref().map(Arc::from),
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_tls_material,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             connector: route
                 .upstream_tls
                 .then(|| Arc::new(TransportConnector::new(None))),
@@ -284,46 +203,17 @@ impl StreamProxyApp {
             max_connection_bytes: self.max_connection_bytes,
             upstream_proxy_protocol: self.upstream_proxy_protocol,
             upstream_tls: self.upstream_tls,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_sni: self.upstream_sni.clone(),
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_verify_cert: self.upstream_verify_cert,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_verify_hostname: self.upstream_verify_hostname,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_alternative_cn: self.upstream_alternative_cn.clone(),
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_tls_material: self.upstream_tls_material.clone(),
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             connector: self.connector.clone(),
         }
     }
@@ -585,46 +475,17 @@ struct StreamProxyConnectionOptions {
     max_connection_bytes: Option<u64>,
     upstream_proxy_protocol: UpstreamProxyProtocol,
     upstream_tls: bool,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_sni: Option<Arc<str>>,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_verify_cert: bool,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_verify_hostname: bool,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_alternative_cn: Option<Arc<str>>,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_tls_material: RuntimeUpstreamTls,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     connector: Option<Arc<TransportConnector>>,
 }
 
@@ -805,32 +666,17 @@ async fn connect_upstream(
 
 async fn connect_tls_upstream(
     #[cfg_attr(
-        not(any(
-            feature = "tls-rustls-backend",
-            feature = "tls-openssl",
-            feature = "tls-boringssl",
-            feature = "tls-s2n"
-        )),
+        not(any(feature = "tls-rustls-backend", feature = "tls-openssl")),
         allow(unused_variables)
     )]
     upstream_authority: &str,
     #[cfg_attr(
-        not(any(
-            feature = "tls-rustls-backend",
-            feature = "tls-openssl",
-            feature = "tls-boringssl",
-            feature = "tls-s2n"
-        )),
+        not(any(feature = "tls-rustls-backend", feature = "tls-openssl")),
         allow(unused_variables)
     )]
     options: &StreamProxyConnectionOptions,
 ) -> io::Result<Stream> {
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     {
         let connect = async {
             let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
@@ -844,11 +690,7 @@ async fn connect_tls_upstream(
                 .upstream_alternative_cn
                 .as_deref()
                 .map(str::to_owned);
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             {
                 peer.options.ca = options.upstream_tls_material.ca.clone();
                 peer.client_cert_key = options.upstream_tls_material.client_cert_key.clone();
@@ -876,12 +718,7 @@ async fn connect_tls_upstream(
             )),
         }
     }
-    #[cfg(not(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    )))]
+    #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
     {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -890,12 +727,7 @@ async fn connect_tls_upstream(
     }
 }
 
-#[cfg(any(
-    feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl",
-    feature = "tls-s2n"
-))]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 fn stream_upstream_tls_sni(configured: Option<&str>, upstream_authority: &str) -> String {
     configured
         .map(str::to_owned)
@@ -1045,46 +877,17 @@ mod tests {
             max_connection_bytes,
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_tls: false,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_sni: None,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_verify_cert: true,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_verify_hostname: true,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_alternative_cn: None,
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_tls_material: crate::upstream_tls::RuntimeUpstreamTls::default(),
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl",
-                feature = "tls-s2n"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             connector: None,
         }
     }

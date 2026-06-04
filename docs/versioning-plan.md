@@ -189,7 +189,7 @@ Stable scope:
 - SNI certificate selection for multiple configured downstream certificates in
   the default rustls build and callback-capable TLS backends.
 - Optional OpenSSL TLS builds when they pass the release matrix. BoringSSL and
-  s2n are planned for removal from the supported matrix.
+  s2n were removed from the supported matrix in `1.5.4`.
 - TLS listener cipher/protocol policy follows the selected Pingora TLS backend
   defaults in `1.0`; user-configurable TLS policy is not stable until a later
   release.
@@ -819,7 +819,7 @@ recommended for production.
     `fips=yes` fetch, enables OpenSSL default FIPS properties through a small
     local support crate, verifies those properties, and checks that a non-FIPS
     cipher is rejected through the default fetch path.
-  - BoringSSL and s2n are not planned FIPS/ISO paths. The future supported TLS
+  - BoringSSL and s2n are not supported FIPS/ISO paths. The supported TLS
     matrix is rustls, rustls/AWS-LC FIPS, OpenSSL, and OpenSSL FIPS.
 - Keep `tls.fips.required` as the high-level config guard and require
   backend-specific proof features underneath it. When enabled, non-FIPS TLS
@@ -1177,13 +1177,13 @@ Release shape:
     certificate SHA-256 fingerprints. The admin control plane can also require
     or allow/deny SHA-256 client-certificate fingerprints supplied by a trusted
     TLS/mTLS terminator through `[admin.client_certificate]`. BoringSSL and s2n
-    are planned for removal rather than parity work;
+    are not supported Fluxheim TLS backends;
   - upstream TLS controls: SNI override, trust roots, upstream mTLS client cert,
     protocol/cipher policy where supported, and auditable insecure-skip-verify
     behavior. SNI override already existed; certificate verification, hostname
     verification, alternative-CN controls, custom upstream trust roots, and
     upstream mTLS client certificates are implemented for rustls and OpenSSL.
-    BoringSSL and s2n are planned for removal; remaining work is per-upstream
+    BoringSSL and s2n were removed in `1.5.4`; remaining work is per-upstream
     protocol/cipher policy;
   - PROXY protocol v1/v2 accept/send with explicit trust boundaries. Listener
     v1/v2 receive is implemented through `server.proxy_protocol` with mandatory
@@ -3538,7 +3538,7 @@ the exception while the cache server is being completed as a focused sequence:
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
 - `v1.5.4`: TLS backend simplification line. Stop at removing the incomplete
-  BoringSSL and s2n backend support from the future supported matrix, leaving
+  BoringSSL and s2n backend support from the supported matrix, leaving
   rustls as the default/recommended backend and OpenSSL as the supported
   alternative for non-FIPS and FIPS/ISO evidence paths. Update features,
   preflight validation, docs, examples, packaging, release scripts, and tests so

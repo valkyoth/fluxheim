@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.5.3"
+version = "1.5.4"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -58,8 +58,6 @@ tls-rustls-iso19790 = ["tls-rustls-fips"]
 tls-openssl = ["tls", "pingora/openssl"]
 tls-openssl-fips = ["tls-openssl", "dep:fluxheim-openssl-fips-support", "dep:openssl"]
 tls-openssl-iso19790 = ["tls-openssl-fips"]
-tls-boringssl = ["tls", "pingora/boringssl"]
-tls-s2n = ["tls", "pingora/s2n"]
 acme = [
     "tls",
     "dep:instant-acme",

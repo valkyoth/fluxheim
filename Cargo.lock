@@ -258,7 +258,6 @@ checksum = "5ec2f1fc3ec205783a5da9a7e6c1509cc69dedf09a1949e412c1e18469326d00"
 dependencies = [
  "aws-lc-fips-sys",
  "aws-lc-sys",
- "untrusted 0.7.1",
  "zeroize",
 ]
 
@@ -382,31 +381,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdd35008169921d80bc60d3d0ab416eecb028c4cd653352907921d95084790be"
 dependencies = [
  "hybrid-array",
-]
-
-[[package]]
-name = "boring"
-version = "4.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b0e3bc837369e9e662d3845c374ac3771b054d4bc2dee5457591198d16d684c"
-dependencies = [
- "bitflags 2.11.1",
- "boring-sys",
- "foreign-types 0.5.0",
- "libc",
- "openssl-macros",
-]
-
-[[package]]
-name = "boring-sys"
-version = "4.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15aad385759d3da2737772aefb391332227bef7cb71fb85c106cadd9d1e63a98"
-dependencies = [
- "bindgen",
- "cmake",
- "fs_extra",
- "fslock",
 ]
 
 [[package]]
@@ -1042,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "1.5.3"
+version = "1.5.4"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1119,28 +1093,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
 dependencies = [
- "foreign-types-shared 0.1.1",
-]
-
-[[package]]
-name = "foreign-types"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d737d9aa519fb7b749cbc3b962edcf310a8dd1f4b67c91c4f83975dbdd17d965"
-dependencies = [
- "foreign-types-macros",
- "foreign-types-shared 0.3.1",
-]
-
-[[package]]
-name = "foreign-types-macros"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a5c6c585bc94aaf2c7b51dd4c2ba22680844aba4c687be581871a6f518c5742"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
+ "foreign-types-shared",
 ]
 
 [[package]]
@@ -1148,12 +1101,6 @@ name = "foreign-types-shared"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
-
-[[package]]
-name = "foreign-types-shared"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "form_urlencoded"
@@ -1169,16 +1116,6 @@ name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
-
-[[package]]
-name = "fslock"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04412b8935272e3a9bae6f48c7bfff74c2911f60525404edfdd28e49884c3bfb"
-dependencies = [
- "libc",
- "winapi",
-]
 
 [[package]]
 name = "futures"
@@ -2162,7 +2099,7 @@ checksum = "a45fa2aa886c42762255da344f0a0d313e254066c46aad76f300c3d3da62d967"
 dependencies = [
  "bitflags 2.11.1",
  "cfg-if",
- "foreign-types 0.3.2",
+ "foreign-types",
  "libc",
  "openssl-macros",
  "openssl-sys",
@@ -2297,20 +2234,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pingora-boringssl"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42c14f7d2002b24c809a0540e13c6bce1406549d527e99c2d6ced1f32a1d2b7b"
-dependencies = [
- "boring",
- "boring-sys",
- "foreign-types-shared 0.3.1",
- "futures-util",
- "libc",
- "tokio",
-]
-
-[[package]]
 name = "pingora-cache"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2369,21 +2292,18 @@ dependencies = [
  "httpdate",
  "libc",
  "log",
- "lru",
  "nix",
  "once_cell",
  "openssl-probe 0.1.6",
  "ouroboros",
  "parking_lot",
  "percent-encoding",
- "pingora-boringssl",
  "pingora-error",
  "pingora-http",
  "pingora-openssl",
  "pingora-pool",
  "pingora-runtime",
  "pingora-rustls",
- "pingora-s2n",
  "pingora-timeout",
  "prometheus",
  "rand 0.8.6",
@@ -2484,7 +2404,7 @@ dependencies = [
 name = "pingora-openssl"
 version = "0.8.0"
 dependencies = [
- "foreign-types 0.3.2",
+ "foreign-types",
  "libc",
  "openssl",
  "openssl-sys",
@@ -2556,18 +2476,6 @@ dependencies = [
  "rustls-pemfile",
  "rustls-pki-types",
  "tokio-rustls",
-]
-
-[[package]]
-name = "pingora-s2n"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a450d0e75a0871427774fb1f0b9f803e2f586af99c7c7ad65fe45b00d2efb9f"
-dependencies = [
- "pingora-error",
- "ring",
- "s2n-tls",
- "s2n-tls-tokio",
 ]
 
 [[package]]
@@ -2896,7 +2804,7 @@ dependencies = [
  "cfg-if",
  "getrandom 0.2.17",
  "libc",
- "untrusted 0.9.0",
+ "untrusted",
  "windows-sys 0.52.0",
 ]
 
@@ -3088,7 +2996,7 @@ dependencies = [
  "aws-lc-rs",
  "ring",
  "rustls-pki-types",
- "untrusted 0.9.0",
+ "untrusted",
 ]
 
 [[package]]
@@ -3114,43 +3022,6 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
-
-[[package]]
-name = "s2n-tls"
-version = "0.3.36"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d22c36f207d0bb6a38272d5d1fa1cd99094335c70db1bfef54e0b8b672ae26f"
-dependencies = [
- "errno",
- "hex",
- "libc",
- "pin-project-lite",
- "s2n-tls-sys",
-]
-
-[[package]]
-name = "s2n-tls-sys"
-version = "0.3.36"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcf9e3b136cdd2c99f0cee2811d80b9f6bc44b5fd48c172857de32babb506f5e"
-dependencies = [
- "aws-lc-rs",
- "cc",
- "libc",
-]
-
-[[package]]
-name = "s2n-tls-tokio"
-version = "0.3.36"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0ab00b075ab482e89509de51e1972a8f38ff70e1dbd5279caa0fd8d25f86cb"
-dependencies = [
- "errno",
- "libc",
- "pin-project-lite",
- "s2n-tls",
- "tokio",
-]
 
 [[package]]
 name = "same-file"
@@ -3786,12 +3657,6 @@ checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
-
-[[package]]
-name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
@@ -4030,22 +3895,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "winapi"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c839a674fcd7a98952e593242ea400abe93992746761e38641405d28b00f419"
-dependencies = [
- "winapi-i686-pc-windows-gnu",
- "winapi-x86_64-pc-windows-gnu",
-]
-
-[[package]]
-name = "winapi-i686-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
-
-[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4053,12 +3902,6 @@ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "winapi-x86_64-pc-windows-gnu"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows-core"

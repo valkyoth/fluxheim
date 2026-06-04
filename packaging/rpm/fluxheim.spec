@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.3
+Version:        1.5.4
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Jun 04 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.4-1
+- Remove incomplete BoringSSL and s2n TLS backend support from the supported
+  feature/config matrix; keep rustls as the default and OpenSSL as the
+  supported alternative for non-FIPS and FIPS/ISO evidence paths.
+
 * Thu Jun 04 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.3-1
 - Start the managed affinity-cookie and HA persistence release line; planned
   stop is signed/opaque load-balancer cookie insertion, cookie rotation,

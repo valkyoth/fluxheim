@@ -414,17 +414,12 @@ scripts/smoke_peer_fill_cache.sh
 scripts/smoke_observability_local.sh
 ```
 
-TLS backend validation is split into its own helper because BoringSSL requires
-`libclang` for bindgen on the build host:
+TLS backend validation is split into its own helper so release builders can
+check the supported rustls and OpenSSL backend families explicitly:
 
 ```bash
 scripts/validate-tls-backends.sh release
-FLUXHEIM_REQUIRE_BORINGSSL=1 scripts/validate-tls-backends.sh release
 ```
-
-Use the second command on release builders that are expected to support
-`tls-boringssl`; otherwise the helper validates Rustls, OpenSSL, and s2n and
-prints an explicit skip when `libclang` is unavailable.
 
 The rustls/AWS-LC FIPS validation helper requires the `aws-lc-fips-sys` build
 toolchain, including CMake, Go, and a C compiler. Skip it on release builders

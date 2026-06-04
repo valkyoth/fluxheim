@@ -4319,26 +4319,18 @@ fn rejects_tls_client_auth_without_ca_bundle() {
 }
 
 #[test]
-fn rejects_tls_client_auth_with_s2n_for_now() {
-    let config: Config = toml::from_str(
+fn rejects_removed_s2n_tls_backend() {
+    let error = toml::from_str::<Config>(
         r#"
             [tls]
             backend = "s2n"
-
-            [tls.client_auth]
-            mode = "required"
-            ca_path = "tests/fixtures/tls/localhost-cert.pem"
             "#,
     )
-    .unwrap();
+    .unwrap_err()
+    .to_string();
 
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidTlsPolicy {
-            field: "tls.client_auth.mode",
-            reason: "the s2n backend has mTLS primitives, but Fluxheim does not yet expose panic-free CA bundle loading for listener client auth; use rustls, OpenSSL, or BoringSSL for client certificate authentication"
-        })
-    );
+    assert!(error.contains("s2n"));
+    assert!(error.contains("unknown variant"));
 }
 
 #[test]
@@ -4450,23 +4442,18 @@ fn rejects_tls12_cipher_suites_with_tls13_minimum() {
 }
 
 #[test]
-fn rejects_boringssl_explicit_tls13_cipher_suites() {
-    let config: Config = toml::from_str(
+fn rejects_removed_boringssl_tls_backend() {
+    let error = toml::from_str::<Config>(
         r#"
             [tls]
             backend = "boringssl"
-            cipher_suites = ["TLS_AES_256_GCM_SHA384"]
             "#,
     )
-    .unwrap();
+    .unwrap_err()
+    .to_string();
 
-    assert_eq!(
-        config.validate(),
-        Err(ConfigError::InvalidTlsPolicy {
-            field: "tls.cipher_suites",
-            reason: "the BoringSSL backend does not expose Fluxheim-controlled TLS 1.3 cipher-suite allow-lists; omit TLS 1.3 cipher_suites or use the OpenSSL/rustls backend"
-        })
-    );
+    assert!(error.contains("boringssl"));
+    assert!(error.contains("unknown variant"));
 }
 
 #[test]

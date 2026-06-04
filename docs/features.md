@@ -58,14 +58,12 @@ Select at most one:
 | `tls-rustls-fips` | Optional rustls/AWS-LC FIPS-capable candidate. |
 | `tls-rustls-iso19790` | ISO/IEC 19790 terminology alias for `tls-rustls-fips`. |
 | `tls-openssl` | Optional OpenSSL backend. |
-| `tls-boringssl` | Optional BoringSSL backend. |
-| `tls-s2n` | Optional s2n-tls backend. |
 
-Cargo features are additive, and Pingora does not support compiling multiple
-TLS backends together. The feature validator catches this before build.
-Pingora `0.8.0` does not expose an mbedTLS backend; supporting mbedTLS would
-require a new Pingora TLS integration rather than a Fluxheim feature toggle.
-`tls-boringssl` requires a build host with `libclang` available for bindgen.
+Cargo features are additive, and Fluxheim supports exactly one TLS backend per
+build. The feature validator catches conflicting TLS backend selections before
+build. BoringSSL and s2n-tls are no longer supported Fluxheim backends because
+their integrations did not provide the same complete policy, SNI, upstream TLS,
+and client-auth coverage as rustls and OpenSSL.
 Use `scripts/validate-tls-backends.sh` to validate the supported TLS backends on
 the current machine.
 

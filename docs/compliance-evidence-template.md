@@ -124,7 +124,7 @@ Operational-environment objectives:
 | Field | Value |
 | --- | --- |
 | Required mode | none / FIPS 140-3 / ISO/IEC 19790 |
-| TLS backend | rustls / OpenSSL / BoringSSL / s2n |
+| TLS backend | rustls / OpenSSL |
 | Fluxheim feature profile | |
 | Module provider | OpenSSL FIPS provider / AWS-LC FIPS / other |
 | CMVP certificate number | |

@@ -90,9 +90,7 @@ mod stream_proxy;
 #[cfg(any(
     feature = "tls",
     feature = "tls-rustls-backend",
-    feature = "tls-openssl",
-    feature = "tls-boringssl",
-    feature = "tls-s2n"
+    feature = "tls-openssl"
 ))]
 pub mod tls;
 #[cfg(feature = "otel-tracing")]
@@ -112,14 +110,9 @@ pub(crate) mod test_support;
 #[cfg(any(
     all(feature = "tls-rustls", feature = "tls-rustls-fips"),
     all(feature = "tls-rustls-backend", feature = "tls-openssl"),
-    all(feature = "tls-rustls-backend", feature = "tls-boringssl"),
-    all(feature = "tls-rustls-backend", feature = "tls-s2n"),
-    all(feature = "tls-openssl", feature = "tls-boringssl"),
-    all(feature = "tls-openssl", feature = "tls-s2n"),
-    all(feature = "tls-boringssl", feature = "tls-s2n"),
 ))]
 compile_error!(
-    "select only one Fluxheim TLS backend feature: tls-rustls, tls-rustls-fips, tls-openssl, tls-boringssl, or tls-s2n"
+    "select only one Fluxheim TLS backend feature: tls-rustls, tls-rustls-fips, or tls-openssl"
 );
 
 #[cfg(all(feature = "privacy-mode", feature = "geoip"))]

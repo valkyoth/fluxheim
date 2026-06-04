@@ -68,10 +68,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    #[cfg(all(
-        feature = "tls-rustls-backend",
-        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-    ))]
+    #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     crate::tls::install_rustls_crypto_provider()?;
 
     let cli = ConfigTesterCli::parse_from(args);

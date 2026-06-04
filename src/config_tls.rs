@@ -172,46 +172,6 @@ impl TlsConfig {
                 reason: "TLS 1.2 cipher suites cannot be used when min_protocol = \"tls1.3\"",
             });
         }
-        if self.backend == TlsBackend::S2n {
-            if effective_min_protocol == TlsProtocolVersion::Tls13 {
-                return Err(ConfigError::InvalidTlsPolicy {
-                    field: "tls.min_protocol",
-                    reason: "the s2n backend does not expose a Fluxheim-controlled TLS 1.3-only listener policy yet",
-                });
-            }
-            if self.effective_alpn() != TlsAlpnPolicy::Http1AndHttp2 {
-                return Err(ConfigError::InvalidTlsPolicy {
-                    field: "tls.alpn",
-                    reason: "the s2n backend currently supports only \"http1-and-http2\" in Fluxheim listener policy",
-                });
-            }
-            if !self.curve_preferences.is_empty() {
-                return Err(ConfigError::InvalidTlsPolicy {
-                    field: "tls.curve_preferences",
-                    reason: "the s2n backend does not expose Fluxheim-controlled listener curve preferences yet",
-                });
-            }
-            if !self.cipher_suites.is_empty() {
-                return Err(ConfigError::InvalidTlsPolicy {
-                    field: "tls.cipher_suites",
-                    reason: "the s2n backend does not expose Fluxheim-controlled listener cipher allow-lists yet",
-                });
-            }
-            if self.client_auth.mode != TlsClientAuthMode::Off {
-                return Err(ConfigError::InvalidTlsPolicy {
-                    field: "tls.client_auth.mode",
-                    reason: "the s2n backend has mTLS primitives, but Fluxheim does not yet expose panic-free CA bundle loading for listener client auth; use rustls, OpenSSL, or BoringSSL for client certificate authentication",
-                });
-            }
-        }
-        if self.backend == TlsBackend::Boringssl
-            && self.cipher_suites.iter().any(|cipher| !cipher.is_tls12())
-        {
-            return Err(ConfigError::InvalidTlsPolicy {
-                field: "tls.cipher_suites",
-                reason: "the BoringSSL backend does not expose Fluxheim-controlled TLS 1.3 cipher-suite allow-lists; omit TLS 1.3 cipher_suites or use the OpenSSL/rustls backend",
-            });
-        }
         #[cfg(not(feature = "tls-rustls-fips"))]
         if self.backend == TlsBackend::Rustls
             && self
@@ -548,8 +508,6 @@ pub enum TlsBackend {
     #[default]
     Rustls,
     Openssl,
-    Boringssl,
-    S2n,
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]

@@ -447,33 +447,11 @@ impl StreamRouteConfig {
                 });
             }
         }
-        #[cfg(not(any(
-            feature = "tls-rustls-backend",
-            feature = "tls-openssl",
-            feature = "tls-boringssl",
-            feature = "tls-s2n"
-        )))]
+        #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
         if self.upstream_tls {
             return Err(ConfigError::InvalidStreamProxyPolicy {
                 field: "stream.routes.upstream_tls",
                 reason: "requires a TLS backend feature",
-            });
-        }
-        #[cfg(all(
-            feature = "tls-s2n",
-            not(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))
-        ))]
-        if self.upstream_ca_path.is_some()
-            || self.upstream_client_cert_path.is_some()
-            || self.upstream_client_key_path.is_some()
-        {
-            return Err(ConfigError::InvalidStreamProxyPolicy {
-                field: "stream.routes.upstream_ca_path",
-                reason: "the s2n backend does not yet expose panic-free upstream CA and client certificate loading in Fluxheim; use rustls, OpenSSL, or BoringSSL for upstream mTLS and custom trust roots",
             });
         }
         Ok(())

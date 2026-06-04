@@ -44,8 +44,8 @@ production modules enabled: full proxy/web/cache and load-balancer support,
 PHP-FPM, ACME, Prometheus, OTLP metrics, and OTel tracing.
 
 TLS backends are mutually exclusive. Select exactly one of `tls-rustls`,
-`tls-rustls-fips`, `tls-openssl`, `tls-boringssl`, or `tls-s2n`; `tls-rustls`
-is the default and recommended non-FIPS backend.
+`tls-rustls-fips`, or `tls-openssl`; `tls-rustls` is the default and
+recommended non-FIPS backend.
 
 For FIPS/ISO-capable OpenSSL testing, build with `tls-openssl-fips` or the
 `tls-openssl-iso19790` alias instead of the default rustls backend and
@@ -175,15 +175,6 @@ Optional backend-specific packages:
 
 - `tls-openssl`: install OpenSSL development headers, such as `libssl-dev`,
   `openssl-devel`, or the distro equivalent.
-- `tls-boringssl`: install `clang` and a `libclang` development/runtime package
-  for bindgen. On SUSE/openSUSE systems where `libclang` is installed but the
-  frontend is versioned, for example `clang-22`, the validation helper
-  automatically discovers the versioned compiler, `libclang`, and clang/GCC
-  include paths for bindgen. Set `CLANG_PATH`, `LIBCLANG_PATH`, or
-  `BINDGEN_EXTRA_CLANG_ARGS` manually only if your distro uses non-standard
-  locations.
-- `tls-s2n`: usually works with the default toolchain packages above, but keep
-  `cmake` and `perl` installed.
 
 Container builds install the same requirements in the builder stage. The
 runtime images only need CA certificates plus the Fluxheim binary and config.

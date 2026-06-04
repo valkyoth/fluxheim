@@ -3117,11 +3117,7 @@ enum RuntimeRouteAction {
 struct RuntimeProxy {
     enabled: bool,
     config: ProxyConfig,
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     upstream_tls: RuntimeUpstreamTls,
     #[cfg(feature = "load-balancer")]
     retry_budget: Option<RuntimeRetryBudget>,
@@ -3180,11 +3176,7 @@ impl RuntimeProxy {
         Ok(Self {
             enabled: config.has_configured_upstream(),
             config: config.clone(),
-            #[cfg(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))]
+            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
             upstream_tls: RuntimeUpstreamTls::from_config(config).map_err(|error| {
                 io::Error::new(
                     error.kind(),
@@ -9532,20 +9524,12 @@ fn http_peer_for_runtime_proxy<A>(address: A, proxy: &RuntimeProxy) -> Result<Ht
 where
     A: ToSocketAddrs + std::fmt::Debug,
 {
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     {
         http_peer_for_proxy_with_tls(address, &proxy.config, Some(&proxy.upstream_tls))
     }
 
-    #[cfg(not(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    )))]
+    #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
     {
         http_peer_for_proxy_with_tls(address, &proxy.config, None)
     }
@@ -9595,11 +9579,7 @@ fn http_peer_for_proxy_with_tls<A>(
     address: A,
     proxy: &ProxyConfig,
     #[cfg_attr(
-        not(any(
-            feature = "tls-rustls-backend",
-            feature = "tls-openssl",
-            feature = "tls-boringssl"
-        )),
+        not(any(feature = "tls-rustls-backend", feature = "tls-openssl")),
         allow(unused_variables)
     )]
     upstream_tls: Option<&RuntimeUpstreamTls>,
@@ -9621,11 +9601,7 @@ where
         )
     })?;
     let mut peer = HttpPeer::new(address, proxy.upstream_tls, proxy.upstream_sni());
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     if let Some(upstream_tls) = upstream_tls {
         peer.options.ca = upstream_tls.ca.clone();
         peer.client_cert_key = upstream_tls.client_cert_key.clone();
@@ -13219,11 +13195,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     #[test]
     fn proxy_upstream_tls_material_maps_to_pingora_peer() {
         let proxy = ProxyConfig {

@@ -697,22 +697,6 @@ impl ProxyConfig {
                 reason: "must be between 1 and 1024",
             });
         }
-        #[cfg(all(
-            feature = "tls-s2n",
-            not(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))
-        ))]
-        if self.upstream_ca_path.is_some()
-            || self.upstream_client_cert_path.is_some()
-            || self.upstream_client_key_path.is_some()
-        {
-            return Err(ConfigError::InvalidProxyTlsPolicy {
-                reason: "the s2n backend does not yet expose panic-free upstream CA and client certificate loading in Fluxheim; use rustls, OpenSSL, or BoringSSL for upstream mTLS and custom trust roots",
-            });
-        }
         if let Some(alternative_cn) = &self.upstream_alternative_cn {
             if alternative_cn.contains('*') {
                 return Err(ConfigError::InvalidProxyTlsPolicy {

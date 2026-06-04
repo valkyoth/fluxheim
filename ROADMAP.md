@@ -674,7 +674,7 @@ without parsing text fixtures for every module.
    - Compile-time TLS backend feature selection:
      `tls-rustls` or `tls-openssl`, with `tls-rustls-fips` and
      `tls-openssl-fips` compliance variants. `tls-boringssl` and `tls-s2n`
-     are planned for removal.
+     were removed from the supported matrix in `1.5.4`.
    - Default to `tls-rustls` for local/rootless portability.
    - Typed global TLS/ACME config. Implemented.
    - Static certificate file config. Implemented.
@@ -702,7 +702,7 @@ without parsing text fixtures for every module.
      `tls-rustls-fips` uses rustls' AWS-LC FIPS provider path and runtime FIPS
      checks; `tls-openssl-fips` relies on OpenSSL 3.x with a validated FIPS
      provider plus provider/default-property verification. BoringSSL and s2n
-     FIPS modes are no longer planned. FIPS profiles must stay separate from
+     are not supported Fluxheim compliance paths. FIPS profiles must stay separate from
      default builds and fail closed when the configured backend/provider cannot
      prove FIPS-required operation. The tracked compliance references are
      FIPS PUB 140-3, the current FIPS 140-3 Implementation Guidance, NIST SP

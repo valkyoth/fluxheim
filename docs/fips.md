@@ -20,9 +20,8 @@ The `1.3.4` release line adds OpenSSL FIPS-capable TLS validation and
 ISO/IEC 19790 terminology aliases for compliance evidence plumbing. The
 `1.3.5` release line adds a rustls/AWS-LC FIPS candidate path. Neither is a
 broad "FIPS compliant" or "ISO/IEC 19790 compliant" claim. The implemented
-targets are backend proof paths. BoringSSL and s2n are no longer planned
-compliance paths; future Fluxheim TLS support is limited to rustls and OpenSSL
-families.
+targets are backend proof paths. BoringSSL and s2n are not supported compliance
+paths; Fluxheim TLS support is limited to rustls and OpenSSL families.
 
 ## Official References
 
@@ -408,10 +407,10 @@ not prove the whole deployment or every non-TLS crypto path.
 
 ### Unsupported TLS Backends
 
-BoringSSL and s2n are not planned compliance paths. The future supported TLS
-matrix is rustls, rustls/AWS-LC FIPS, OpenSSL, and OpenSSL FIPS. Normal
-BoringSSL must not be described as FIPS validated, and `tls-s2n` is not a
-complete Fluxheim policy backend.
+BoringSSL and s2n are not supported compliance paths. The supported TLS matrix
+is rustls, rustls/AWS-LC FIPS, OpenSSL, and OpenSSL FIPS. Normal BoringSSL must
+not be described as FIPS validated, and `tls-s2n` is not a complete Fluxheim
+policy backend.
 
 ## Internal Crypto Inventory
 

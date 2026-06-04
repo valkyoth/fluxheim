@@ -7,6 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.4 - 2026-06-04
+
+### Changed
+
+- Remove incomplete `tls-boringssl` and `tls-s2n` backend support from the
+  supported feature/config matrix.
+- Keep rustls as the default/recommended TLS backend and OpenSSL as the
+  supported alternative for non-FIPS and FIPS/ISO evidence paths.
+- Reject removed TLS backend config values and update tests around the reduced
+  backend enum.
+- Simplify TLS backend validation tooling and release documentation around the
+  rustls/OpenSSL-only support matrix.
+
 ## 1.5.3 - 2026-06-04
 
 ### Changed

@@ -18,7 +18,7 @@ use crate::config::AcmeAutomationMode;
     feature = "acme",
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 use crate::config::AcmeChallenge;
 #[cfg(all(feature = "proxy", feature = "cache"))]
@@ -32,39 +32,20 @@ const CACHE_RUNTIME_METRICS_INTERVAL_SECS: u64 = 5;
 #[cfg(all(
     feature = "proxy",
     any(
-        all(
-            feature = "tls-rustls-backend",
-            not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-        ),
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        all(
-            feature = "tls-s2n",
-            not(any(
-                feature = "tls-rustls-backend",
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
-            ))
-        )
+        all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
+        feature = "tls-openssl"
     )
 ))]
 use crate::config::{TlsAlpnPolicy, TlsConfig, TlsProtocolVersion};
 #[cfg(all(
     feature = "proxy",
     any(
-        all(
-            feature = "tls-rustls-backend",
-            not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-        ),
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
+        all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
+        feature = "tls-openssl"
     )
 ))]
 use crate::config::{TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference};
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 use pingora::tls::{
     pkey::{PKey, Private},
     ssl::{SslVerifyMode, SslVersion},
@@ -74,17 +55,12 @@ use pingora::tls::{
 #[cfg(feature = "proxy")]
 pub fn run(config: Config) -> Result<(), Box<dyn Error + Send + Sync>> {
     init_logging(&config)?;
-    #[cfg(all(
-        feature = "tls-rustls-backend",
-        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-    ))]
+    #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     crate::tls::install_rustls_crypto_provider()?;
     #[cfg(any(
         feature = "tls",
         feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
+        feature = "tls-openssl"
     ))]
     crate::tls::validate_fips_runtime_config(&config)?;
 
@@ -942,7 +918,7 @@ mod tests {
     #[cfg(all(
         feature = "tls-rustls-backend",
         feature = "acme",
-        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+        not(feature = "tls-openssl")
     ))]
     #[test]
     fn rustls_alpn_protocols_include_acme_tls_alpn_when_enabled() {
@@ -966,10 +942,7 @@ mod tests {
         assert!(protocols.iter().any(|protocol| protocol == b"http/1.1"));
     }
 
-    #[cfg(all(
-        feature = "tls-rustls-backend",
-        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-    ))]
+    #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     #[test]
     fn rustls_sni_resolver_can_reload_certificate_files()
     -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -1004,7 +977,7 @@ mod tests {
     #[cfg(all(
         feature = "tls-rustls-backend",
         feature = "acme",
-        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+        not(feature = "tls-openssl")
     ))]
     #[test]
     fn rustls_sni_resolver_allows_pending_managed_acme_certificates() {
@@ -1071,12 +1044,7 @@ mod tests {
 
 #[cfg(all(
     feature = "proxy",
-    any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    )
+    any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 fn add_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
@@ -1104,10 +1072,7 @@ where
     Ok(reloader)
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn tls_alpn_policy(policy: TlsAlpnPolicy) -> pingora::protocols::ALPN {
     match policy {
         TlsAlpnPolicy::Http1 => pingora::protocols::ALPN::H1,
@@ -1119,7 +1084,7 @@ fn tls_alpn_policy(policy: TlsAlpnPolicy) -> pingora::protocols::ALPN {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn apply_tls_policy(
     settings: &mut pingora::listeners::tls::TlsSettings,
@@ -1154,7 +1119,7 @@ fn apply_tls_policy(
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn rustls_client_cert_verifier(
     tls: &TlsConfig,
@@ -1223,7 +1188,7 @@ fn rustls_client_cert_verifier(
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
     let protocols = match tls.effective_alpn() {
@@ -1248,7 +1213,7 @@ fn rustls_alpn_protocols(tls: &TlsConfig) -> Vec<Vec<u8>> {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn rustls_cipher_suite(
     cipher: TlsCipherSuite,
@@ -1366,7 +1331,7 @@ fn rustls_cipher_suite(
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn rustls_kx_group(
     curve: TlsCurvePreference,
@@ -1453,34 +1418,7 @@ fn apply_tls_policy(
     Ok(())
 }
 
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-boringssl",
-    not(feature = "tls-openssl")
-))]
-fn apply_tls_policy(
-    settings: &mut pingora::listeners::tls::TlsSettings,
-    tls: &TlsConfig,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    settings.set_alpn(tls_alpn_policy(tls.effective_alpn()));
-    settings.set_curves_list(&openssl_curve_list(&tls.effective_curve_preferences()))?;
-    let (tls12_ciphers, _tls13_ciphers) = openssl_cipher_lists(&tls.effective_cipher_suites());
-    if !tls12_ciphers.is_empty() {
-        settings.set_cipher_list(&tls12_ciphers)?;
-    }
-    let min_version = match tls.effective_min_protocol() {
-        TlsProtocolVersion::Tls12 => SslVersion::TLS1_2,
-        TlsProtocolVersion::Tls13 => SslVersion::TLS1_3,
-    };
-    settings.set_min_proto_version(Some(min_version))?;
-    apply_openssl_client_auth(settings, tls)?;
-    Ok(())
-}
-
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn apply_openssl_client_auth(
     settings: &mut pingora::listeners::tls::TlsSettings,
     tls: &TlsConfig,
@@ -1507,10 +1445,7 @@ fn apply_openssl_client_auth(
     Ok(())
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn openssl_curve_list(curves: &[TlsCurvePreference]) -> String {
     curves
         .iter()
@@ -1524,10 +1459,7 @@ fn openssl_curve_list(curves: &[TlsCurvePreference]) -> String {
         .join(":")
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn openssl_cipher_lists(ciphers: &[TlsCipherSuite]) -> (String, String) {
     let mut tls12 = Vec::new();
     let mut tls13 = Vec::new();
@@ -1561,35 +1493,13 @@ fn openssl_cipher_lists(ciphers: &[TlsCipherSuite]) -> (String, String) {
     (tls12.join(":"), tls13.join(":"))
 }
 
-#[cfg(all(
-    feature = "proxy",
-    feature = "tls-s2n",
-    not(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))
-))]
-fn apply_tls_policy(
-    settings: &mut pingora::listeners::tls::TlsSettings,
-    tls: &TlsConfig,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    debug_assert_eq!(tls.effective_alpn(), TlsAlpnPolicy::Http1AndHttp2);
-    debug_assert_eq!(tls.effective_min_protocol(), TlsProtocolVersion::Tls12);
-    settings.enable_h2();
-    Ok(())
-}
-
 #[cfg(feature = "proxy")]
 #[cfg_attr(not(feature = "acme-client"), allow(dead_code))]
 #[derive(Clone)]
 enum DownstreamCertificateReloader {
-    #[cfg(all(
-        feature = "tls-rustls-backend",
-        not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-    ))]
+    #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
     Rustls(std::sync::Arc<RustlsSniCertificateResolver>),
-    #[cfg(any(feature = "tls-openssl", feature = "tls-boringssl"))]
+    #[cfg(feature = "tls-openssl")]
     Openssl(std::sync::Arc<SniCertificateCallback>),
 }
 
@@ -1599,30 +1509,20 @@ impl DownstreamCertificateReloader {
     #[cfg_attr(not(feature = "acme-client"), allow(dead_code))]
     fn reload(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         match self {
-            #[cfg(all(
-                feature = "tls-rustls-backend",
-                not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-            ))]
+            #[cfg(all(feature = "tls-rustls-backend", not(feature = "tls-openssl")))]
             Self::Rustls(resolver) => resolver.reload(),
-            #[cfg(any(feature = "tls-openssl", feature = "tls-boringssl"))]
+            #[cfg(feature = "tls-openssl")]
             Self::Openssl(callback) => callback.reload(),
             #[cfg(not(any(
-                all(
-                    feature = "tls-rustls-backend",
-                    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
-                ),
-                feature = "tls-openssl",
-                feature = "tls-boringssl"
+                all(feature = "tls-rustls-backend", not(feature = "tls-openssl")),
+                feature = "tls-openssl"
             )))]
             _ => Ok(()),
         }
     }
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn add_downstream_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
     listens: &[String],
@@ -1661,7 +1561,7 @@ where
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn add_downstream_tls_listeners<S>(
     service: &mut pingora::services::listening::Service<S>,
@@ -1697,44 +1597,8 @@ where
 
 #[cfg(all(
     feature = "proxy",
-    feature = "tls-s2n",
-    not(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    ))
-))]
-fn add_downstream_tls_listeners<S>(
-    service: &mut pingora::services::listening::Service<S>,
-    listens: &[String],
-    selector: &crate::tls::DownstreamCertificateSelector,
-    tls: &TlsConfig,
-) -> Result<Option<DownstreamCertificateReloader>, Box<dyn Error + Send + Sync>>
-where
-    S: Send + Sync + 'static,
-{
-    if selector.has_sni_certificates() {
-        return Err(
-            "vhost TLS certificates require a TLS backend with SNI certificate selection support"
-                .into(),
-        );
-    }
-
-    let certificate = selector.certificate_for_sni(None);
-    let (cert_path, key_path) = downstream_certificate_paths(certificate)?;
-    for listen in listens {
-        log::info!("proxy TLS listener enabled on {listen}");
-        let mut settings = pingora::listeners::tls::TlsSettings::intermediate(cert_path, key_path)?;
-        apply_tls_policy(&mut settings, tls)?;
-        service.add_tls_with_settings(listen, None, settings);
-    }
-    Ok(None)
-}
-
-#[cfg(all(
-    feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 struct RustlsSniCertificateResolver {
     selector: crate::tls::DownstreamCertificateSelector,
@@ -1746,7 +1610,7 @@ struct RustlsSniCertificateResolver {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 impl std::fmt::Debug for RustlsSniCertificateResolver {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1760,7 +1624,7 @@ impl std::fmt::Debug for RustlsSniCertificateResolver {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 impl RustlsSniCertificateResolver {
     fn new(
@@ -1799,7 +1663,7 @@ impl RustlsSniCertificateResolver {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
     fn resolve(
@@ -1826,7 +1690,7 @@ impl rustls::server::ResolvesServerCert for RustlsSniCertificateResolver {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
     #[cfg(feature = "acme")]
@@ -1844,7 +1708,7 @@ fn rustls_acme_tls_alpn_enabled(tls: &TlsConfig) -> bool {
     feature = "proxy",
     feature = "tls-rustls-backend",
     feature = "acme",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn rustls_client_hello_requests_acme_tls_alpn(
     client_hello: &rustls::server::ClientHello<'_>,
@@ -1858,7 +1722,7 @@ fn rustls_client_hello_requests_acme_tls_alpn(
     feature = "proxy",
     feature = "tls-rustls-backend",
     feature = "acme",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 impl RustlsSniCertificateResolver {
     fn load_acme_tls_alpn_challenge(
@@ -1880,7 +1744,7 @@ impl RustlsSniCertificateResolver {
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn load_rustls_certified_key(
     certificate: &crate::config::StaticCertificateConfig,
@@ -1892,7 +1756,7 @@ fn load_rustls_certified_key(
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn load_rustls_certified_keys(
     selector: &crate::tls::DownstreamCertificateSelector,
@@ -1921,7 +1785,7 @@ fn load_rustls_certified_keys(
 #[cfg(all(
     feature = "proxy",
     feature = "tls-rustls-backend",
-    not(any(feature = "tls-openssl", feature = "tls-boringssl"))
+    not(feature = "tls-openssl")
 ))]
 fn load_rustls_certified_key_from_paths(
     cert_path: &Path,
@@ -1942,19 +1806,13 @@ fn load_rustls_certified_key_from_paths(
     Ok(certified_key)
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 struct SniCertificateCallback {
     selector: crate::tls::DownstreamCertificateSelector,
     certificates: arc_swap::ArcSwap<Vec<Option<CallbackCertificate>>>,
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 impl SniCertificateCallback {
     fn new(
         selector: &crate::tls::DownstreamCertificateSelector,
@@ -1974,10 +1832,7 @@ impl SniCertificateCallback {
     }
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 fn load_callback_certificates(
     selector: &crate::tls::DownstreamCertificateSelector,
 ) -> Result<Vec<Option<CallbackCertificate>>, Box<dyn Error + Send + Sync>> {
@@ -2001,18 +1856,12 @@ fn load_callback_certificates(
     Ok(certificates)
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 struct SharedSniCertificateCallback {
     inner: std::sync::Arc<SniCertificateCallback>,
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 #[async_trait::async_trait]
 impl pingora::listeners::TlsAccept for SniCertificateCallback {
     async fn certificate_callback(&self, ssl: &mut pingora::tls::ssl::SslRef) {
@@ -2037,10 +1886,7 @@ impl pingora::listeners::TlsAccept for SniCertificateCallback {
     }
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 #[async_trait::async_trait]
 impl pingora::listeners::TlsAccept for SharedSniCertificateCallback {
     async fn certificate_callback(&self, ssl: &mut pingora::tls::ssl::SslRef) {
@@ -2048,19 +1894,13 @@ impl pingora::listeners::TlsAccept for SharedSniCertificateCallback {
     }
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 struct CallbackCertificate {
     chain: Vec<X509>,
     private_key: PKey<Private>,
 }
 
-#[cfg(all(
-    feature = "proxy",
-    any(feature = "tls-openssl", feature = "tls-boringssl")
-))]
+#[cfg(all(feature = "proxy", feature = "tls-openssl"))]
 impl CallbackCertificate {
     fn load(cert_path: &str, key_path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let cert_bytes = std::fs::read(cert_path)?;
@@ -2075,7 +1915,6 @@ impl CallbackCertificate {
         Ok(Self { chain, private_key })
     }
 
-    #[cfg(all(feature = "tls-openssl", not(feature = "tls-boringssl")))]
     fn apply_to_ssl(
         &self,
         ssl: &mut pingora::tls::ssl::SslRef,
@@ -2091,33 +1930,11 @@ impl CallbackCertificate {
         }
         Ok(())
     }
-
-    #[cfg(feature = "tls-boringssl")]
-    fn apply_to_ssl(
-        &self,
-        ssl: &mut pingora::tls::ssl::SslRef,
-    ) -> Result<(), pingora::tls::error::ErrorStack> {
-        let Some((leaf, chain)) = self.chain.split_first() else {
-            log::error!("TLS callback certificate chain unexpectedly empty");
-            return Ok(());
-        };
-        ssl.set_certificate(leaf)?;
-        ssl.set_private_key(&self.private_key)?;
-        for certificate in chain {
-            ssl.add_chain_cert(certificate)?;
-        }
-        Ok(())
-    }
 }
 
 #[cfg(all(
     feature = "proxy",
-    any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    )
+    any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 fn downstream_certificate_paths(
     certificate: &crate::config::StaticCertificateConfig,
@@ -2136,11 +1953,7 @@ fn downstream_certificate_paths(
 
 #[cfg(all(
     feature = "proxy",
-    any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl"
-    )
+    any(feature = "tls-rustls-backend", feature = "tls-openssl")
 ))]
 fn certificate_paths_are_absent(
     certificate: &crate::config::StaticCertificateConfig,
@@ -2150,12 +1963,7 @@ fn certificate_paths_are_absent(
 
 #[cfg(all(
     feature = "proxy",
-    not(any(
-        feature = "tls-rustls-backend",
-        feature = "tls-openssl",
-        feature = "tls-boringssl",
-        feature = "tls-s2n"
-    ))
+    not(any(feature = "tls-rustls-backend", feature = "tls-openssl"))
 ))]
 fn add_tls_listeners<S>(
     _service: &mut pingora::services::listening::Service<S>,

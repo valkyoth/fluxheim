@@ -39,7 +39,7 @@ for backend in $TLS_BACKENDS; do
 done
 
 if [ "$tls_count" -gt 1 ]; then
-    echo "select only one Fluxheim TLS backend feature: tls-rustls, tls-rustls-fips, tls-openssl, tls-boringssl, or tls-s2n; selected $tls_selected" >&2
+    echo "select only one Fluxheim TLS backend feature: tls-rustls, tls-rustls-fips, or tls-openssl; selected $tls_selected" >&2
     exit 1
 fi
 
