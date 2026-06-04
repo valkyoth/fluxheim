@@ -246,13 +246,7 @@ fn select_weighted_round_robin_with_backup_policy(
     let mut target = cursor.fetch_add(1, Ordering::Relaxed) % total_weight;
     for (backend, weight) in candidates {
         if target < weight {
-            return Some(SelectedUpstream {
-                permit: None,
-                alias: None,
-                backend,
-                reporter: None,
-                persistence_outcome: None,
-            });
+            return Some(SelectedUpstream::new(backend));
         }
         target = target.saturating_sub(weight);
     }
@@ -323,13 +317,7 @@ fn select_least_connections_with_backup_policy(
         }
     }
     let backend = selected.map(|(backend, _, _)| backend)?;
-    Some(SelectedUpstream {
-        permit: None,
-        alias: None,
-        backend,
-        reporter: None,
-        persistence_outcome: None,
-    })
+    Some(SelectedUpstream::new(backend))
 }
 
 pub(super) fn select_least_sessions(
@@ -402,13 +390,7 @@ fn select_least_sessions_with_backup_policy(
         }
     }
     let backend = selected.map(|(backend, _, _)| backend)?;
-    Some(SelectedUpstream {
-        permit: None,
-        alias: None,
-        backend,
-        reporter: None,
-        persistence_outcome: None,
-    })
+    Some(SelectedUpstream::new(backend))
 }
 
 pub(super) fn least_connections_score_is_lower(
@@ -496,13 +478,7 @@ fn select_least_time_with_backup_policy(
         }
     }
     let backend = selected.map(|(backend, _, _, _)| backend)?;
-    Some(SelectedUpstream {
-        permit: None,
-        alias: None,
-        backend,
-        reporter: None,
-        persistence_outcome: None,
-    })
+    Some(SelectedUpstream::new(backend))
 }
 
 fn least_time_score_is_lower(
@@ -567,13 +543,7 @@ pub(super) fn select_power_of_two(
     } else {
         first
     };
-    Some(SelectedUpstream {
-        permit: None,
-        alias: None,
-        backend: selected,
-        reporter: None,
-        persistence_outcome: None,
-    })
+    Some(SelectedUpstream::new(selected))
 }
 
 pub(super) fn select_bounded_load_consistent(

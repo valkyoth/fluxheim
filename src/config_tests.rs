@@ -7,13 +7,13 @@ use super::{
     AdminSelfHealingConfig, AdminTransportConfig, ByteSize, CacheConfig, CacheDiskBackend,
     CacheDiskEncryptionProvider, CacheKeyPart, CachePreset, CachePurgerConfig, CacheStaleErrorKind,
     CompressionConfig, Config, ConfigError, ConfigLoadError, DownstreamProxyProtocol,
-    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoadBalancePersistenceMode,
-    LoadBalanceSelection, LoggingConfig, MetricsConfig, ProxyConfig, RateLimitMode, ServerConfig,
-    ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy, TlsCipherSuite, TlsClientAuthMode,
-    TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion, TracingConfig, UpstreamHttpVersion,
-    UpstreamProxyProtocol, VhostConfig, VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig,
-    normalize_host, normalize_host_pattern, valid_dynamic_header_variable,
-    validate_dynamic_header_template,
+    HeaderPolicyConfig, LoadBalanceHealthCheckProtocol, LoadBalanceManagedCookieSameSite,
+    LoadBalancePersistenceMode, LoadBalanceSelection, LoggingConfig, MetricsConfig, ProxyConfig,
+    RateLimitMode, ServerConfig, ServerLimitsConfig, StaticCertificateConfig, TlsAlpnPolicy,
+    TlsCipherSuite, TlsClientAuthMode, TlsCurvePreference, TlsPolicyProfile, TlsProtocolVersion,
+    TracingConfig, UpstreamHttpVersion, UpstreamProxyProtocol, VhostConfig,
+    VhostHeaderPolicyConfig, VhostTlsConfig, WebConfig, normalize_host, normalize_host_pattern,
+    valid_dynamic_header_variable, validate_dynamic_header_template,
 };
 #[cfg(feature = "cache")]
 use super::{CachePeerConfig, CachePeerFillConfig};
@@ -3111,6 +3111,73 @@ fn rejects_invalid_load_balance_slow_start() {
 
 #[cfg(not(feature = "privacy-mode"))]
 #[test]
+fn parses_managed_cookie_load_balance_persistence() {
+    let config: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "managed-cookie"
+            cookie = "fluxheim_lb"
+            ttl_secs = 600
+            table_max_entries = 4096
+            managed_cookie_domain = "example.test"
+            managed_cookie_path = "/app"
+            managed_cookie_secure = true
+            managed_cookie_http_only = true
+            managed_cookie_same_site = "strict"
+            managed_cookie_max_age_secs = 300
+            "#,
+    )
+    .unwrap();
+
+    config.validate().unwrap();
+    assert!(config.proxy.load_balance.persistence.enabled);
+    assert_eq!(
+        config.proxy.load_balance.persistence.mode,
+        LoadBalancePersistenceMode::ManagedCookie
+    );
+    assert_eq!(
+        config.proxy.load_balance.persistence.cookie.as_deref(),
+        Some("fluxheim_lb")
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .persistence
+            .managed_cookie_domain
+            .as_deref(),
+        Some("example.test")
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .persistence
+            .managed_cookie_path
+            .as_deref(),
+        Some("/app")
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .persistence
+            .managed_cookie_same_site,
+        LoadBalanceManagedCookieSameSite::Strict
+    );
+    assert_eq!(
+        config
+            .proxy
+            .load_balance
+            .persistence
+            .managed_cookie_max_age_secs,
+        Some(300)
+    );
+}
+
+#[cfg(not(feature = "privacy-mode"))]
+#[test]
 fn rejects_invalid_load_balance_persistence() {
     let invalid_ttl: Config = toml::from_str(
         r#"
@@ -3201,7 +3268,7 @@ fn rejects_invalid_load_balance_persistence() {
     assert_eq!(
         missing_cookie.validate(),
         Err(ConfigError::InvalidLoadBalanceSelection {
-            reason: "proxy.load_balance.persistence.cookie is required when mode = \"cookie\""
+            reason: "proxy.load_balance.persistence.cookie is required when mode = \"cookie\" or \"managed-cookie\""
         })
     );
 
@@ -3217,7 +3284,7 @@ fn rejects_invalid_load_balance_persistence() {
     assert_eq!(
         cookie_with_source_ip.validate(),
         Err(ConfigError::InvalidLoadBalanceSelection {
-            reason: "proxy.load_balance.persistence.cookie can only be used with mode = \"cookie\""
+            reason: "proxy.load_balance.persistence.cookie can only be used with mode = \"cookie\" or \"managed-cookie\""
         })
     );
 
@@ -3234,6 +3301,41 @@ fn rejects_invalid_load_balance_persistence() {
         invalid_cookie.validate(),
         Err(ConfigError::InvalidLoadBalanceSelection {
             reason: "proxy.load_balance.persistence.cookie must be a valid cookie name"
+        })
+    );
+
+    let invalid_managed_cookie_path: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "managed-cookie"
+            cookie = "fluxheim_lb"
+            managed_cookie_path = "relative"
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        invalid_managed_cookie_path.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_path must be an absolute cookie path without controls, ';', or ','"
+        })
+    );
+
+    let same_site_none_without_secure: Config = toml::from_str(
+        r#"
+            [proxy.load_balance.persistence]
+            enabled = true
+            mode = "managed-cookie"
+            cookie = "fluxheim_lb"
+            managed_cookie_same_site = "none"
+            managed_cookie_secure = false
+            "#,
+    )
+    .unwrap();
+    assert_eq!(
+        same_site_none_without_secure.validate(),
+        Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_same_site = \"none\" requires managed_cookie_secure = true"
         })
     );
 }

@@ -173,10 +173,10 @@ later `1.5.x` or future module lines.
 - Runtime weight changes are available for round-robin and least-* selectors.
   Hash/ring selectors need future table-rebuild semantics before runtime
   weights are accepted there.
-- Load-balancer-managed cookie insertion is future persistence work. In the
-  current `1.5.x` line, cookie persistence uses an application or
-  upstream-issued request cookie that the operator explicitly names; Fluxheim
-  does not yet create a signed/opaque affinity cookie with `Set-Cookie`.
+- Load-balancer-managed cookie insertion is available through
+  `mode = "managed-cookie"` in the `1.5.3` line. It is signed/opaque and local
+  to one Fluxheim process. Restart-persistent managed-cookie state and
+  active-active cookie mirroring remain future HA work.
 - HA persistence/cookie mirroring is future cluster-state work. Persistence
   tables, passive health, retry budgets, queue counters, and runtime overrides
   are local to one Fluxheim process in the current `1.5.x` line; active-active

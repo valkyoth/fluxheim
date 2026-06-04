@@ -170,6 +170,31 @@ mode = "header"
 header = "x-sticky-session"
 ttl_secs = 60
 table_max_entries = 16
+
+[[vhosts.routes]]
+name = "managed"
+path_prefix = "/managed/"
+
+[vhosts.routes.proxy]
+upstreams = ["127.0.0.1:$ORIGIN_ONE_PORT", "127.0.0.1:$ORIGIN_TWO_PORT"]
+upstream_aliases = ["origin-one", "origin-two"]
+upstream_tls = false
+
+[vhosts.routes.proxy.load_balance]
+selection = "round-robin"
+max_iterations = 256
+all_down_status = 503
+
+[vhosts.routes.proxy.load_balance.persistence]
+enabled = true
+mode = "managed-cookie"
+cookie = "fluxheim_lb"
+ttl_secs = 60
+table_max_entries = 16
+managed_cookie_path = "/managed"
+managed_cookie_secure = true
+managed_cookie_http_only = true
+managed_cookie_same_site = "lax"
 EOF
 
 wait_http() {
@@ -337,6 +362,37 @@ done
 if [ "$(sort -u "$STICKY_RESPONSES" | wc -l)" -ne 1 ]; then
     echo "header persistence route did not keep the same session pinned" >&2
     cat "$STICKY_RESPONSES" >&2
+    exit 1
+fi
+
+curl -fsS -D "$TMP_DIR/managed-headers.txt" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/managed/session" \
+    > "$TMP_DIR/managed-first.txt"
+managed_cookie=$(
+    awk 'BEGIN{IGNORECASE=1} /^set-cookie:/ {print $0; exit}' "$TMP_DIR/managed-headers.txt" \
+        | sed -n 's/^[Ss]et-[Cc]ookie:[[:space:]]*\([^;]*\).*/\1/p'
+)
+if [ -z "$managed_cookie" ] || ! grep -qi '^set-cookie: fluxheim_lb=' "$TMP_DIR/managed-headers.txt"; then
+    echo "managed-cookie route did not emit fluxheim_lb Set-Cookie" >&2
+    cat "$TMP_DIR/managed-headers.txt" >&2
+    exit 1
+fi
+if ! grep -q 'Path=/managed' "$TMP_DIR/managed-headers.txt" \
+    || ! grep -q 'HttpOnly' "$TMP_DIR/managed-headers.txt" \
+    || ! grep -q 'Secure' "$TMP_DIR/managed-headers.txt" \
+    || ! grep -q 'SameSite=Lax' "$TMP_DIR/managed-headers.txt"; then
+    echo "managed-cookie route emitted incomplete cookie attributes" >&2
+    cat "$TMP_DIR/managed-headers.txt" >&2
+    exit 1
+fi
+
+curl -fsS -H "Cookie: $managed_cookie" \
+    "http://127.0.0.1:$FLUXHEIM_PORT/managed/session" \
+    > "$TMP_DIR/managed-second.txt"
+if ! cmp -s "$TMP_DIR/managed-first.txt" "$TMP_DIR/managed-second.txt"; then
+    echo "managed-cookie route did not keep the selected backend pinned" >&2
+    cat "$TMP_DIR/managed-first.txt" >&2
+    cat "$TMP_DIR/managed-second.txt" >&2
     exit 1
 fi
 

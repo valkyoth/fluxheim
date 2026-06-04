@@ -17,6 +17,12 @@ behavior when the change improves security or project direction.
   cookie-mirroring design for active-active HA, and focused smoke coverage.
 - Number the remaining `1.5.x` roadmap stops through UDP/GSLB exploration so
   the load-balancer line does not spill into the `1.6` Wasm line.
+- Add `proxy.load_balance.persistence.mode = "managed-cookie"` for
+  signed/opaque, process-local load-balancer affinity cookies. Fresh 2xx/3xx
+  backend responses receive `Set-Cookie`, and later requests with a valid
+  managed cookie reuse the selected backend while it remains selectable.
+- Add managed-cookie validation for path/domain/max-age/SameSite attributes
+  and keep persistence rejected in `privacy-mode` builds.
 
 ## 1.5.2 - 2026-06-04
 

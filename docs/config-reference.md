@@ -1176,10 +1176,18 @@ upstream permit is held until a backend becomes selectable.
 persistence table. `mode = "source-ip"` maps a client IP to the selected
 backend for `ttl_secs`; `mode = "header"` maps the configured request `header`
 value, for example an operator-trusted session header; `mode = "cookie"` maps
-the configured request `cookie` value from the client request. Cookie mode does
-not insert or sign a new persistence cookie in the current `1.5.x` load-balancer
-line; it uses an application or upstream-issued cookie that the operator
-explicitly names. Stored backends are reused while they remain ready, not
+the configured request `cookie` value from the client request. `mode =
+"managed-cookie"` creates a Fluxheim-owned signed/opaque affinity cookie with
+`Set-Cookie` on eligible 2xx/3xx backend responses, verifies that cookie on
+later requests, and maps the opaque cookie key to the selected backend in the
+same bounded local table. Managed-cookie values do not expose backend
+addresses, aliases, or weights. Configure the cookie name through `cookie =
+"fluxheim_lb"` and optional attributes through `managed_cookie_domain`,
+`managed_cookie_path` (default `/`), `managed_cookie_secure` (default `true`),
+`managed_cookie_http_only` (default `true`), `managed_cookie_same_site`
+(default `lax`), and `managed_cookie_max_age_secs` (default `ttl_secs`).
+`SameSite=None` requires `managed_cookie_secure = true`.
+Stored backends are reused while they remain ready, not
 drained/disabled/forced-down, not passively ejected, and below their in-flight
 cap. If the stored backend is no longer selectable, Fluxheim falls back to the
 normal load-balancing algorithm and refreshes the table with the new backend.
@@ -1189,12 +1197,12 @@ process in the current `1.5.x` line and is reset by process restart, runtime
 rebuild, or the authenticated persistence-clear admin operation. It is rejected
 in `privacy-mode` builds because persistence retains client-derived identifiers.
 
-The current `1.5.x` load-balancer line does not insert or sign managed
-load-balancer affinity cookies, persist load-balancer persistence/runtime
-override state across restarts, change upstream weights or add/remove pool
-members at runtime, or synchronize load-balancer state across active-active
-Fluxheim nodes. Those are explicit future control-plane and HA tracks, not
-implied behavior of the local persistence table.
+The current `1.5.x` load-balancer line does not persist load-balancer
+persistence/runtime override state across restarts, add/remove pool members at
+runtime, apply runtime weights to hash/ring selectors, or synchronize
+load-balancer state across active-active Fluxheim nodes. Managed-cookie HA
+mirroring is tracked separately from the local managed-cookie table shipped in
+`1.5.3`.
 
 `upstreams` is the preferred static proxy target form for both one and many origins.
 The older single `upstream = "host:port"` field remains supported for simple

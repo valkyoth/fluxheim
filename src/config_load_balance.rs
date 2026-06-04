@@ -671,6 +671,26 @@ pub enum LoadBalancePersistenceMode {
     SourceIp,
     Header,
     Cookie,
+    ManagedCookie,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LoadBalanceManagedCookieSameSite {
+    Strict,
+    #[default]
+    Lax,
+    None,
+}
+
+impl LoadBalanceManagedCookieSameSite {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "Strict",
+            Self::Lax => "Lax",
+            Self::None => "None",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Deserialize, Serialize)]
@@ -688,6 +708,18 @@ pub struct LoadBalancePersistenceConfig {
     pub ttl_secs: u64,
     #[serde(default = "default_lb_persistence_table_max_entries")]
     pub table_max_entries: usize,
+    #[serde(default)]
+    pub managed_cookie_domain: Option<String>,
+    #[serde(default)]
+    pub managed_cookie_path: Option<String>,
+    #[serde(default = "default_lb_managed_cookie_secure")]
+    pub managed_cookie_secure: bool,
+    #[serde(default = "default_lb_managed_cookie_http_only")]
+    pub managed_cookie_http_only: bool,
+    #[serde(default)]
+    pub managed_cookie_same_site: LoadBalanceManagedCookieSameSite,
+    #[serde(default)]
+    pub managed_cookie_max_age_secs: Option<u64>,
 }
 
 impl Default for LoadBalancePersistenceConfig {
@@ -699,6 +731,12 @@ impl Default for LoadBalancePersistenceConfig {
             cookie: None,
             ttl_secs: default_lb_persistence_ttl_secs(),
             table_max_entries: default_lb_persistence_table_max_entries(),
+            managed_cookie_domain: None,
+            managed_cookie_path: None,
+            managed_cookie_secure: default_lb_managed_cookie_secure(),
+            managed_cookie_http_only: default_lb_managed_cookie_http_only(),
+            managed_cookie_same_site: LoadBalanceManagedCookieSameSite::default(),
+            managed_cookie_max_age_secs: None,
         }
     }
 }
@@ -728,9 +766,13 @@ impl LoadBalancePersistenceConfig {
                 reason: "proxy.load_balance.persistence.header can only be used with mode = \"header\"",
             });
         }
-        if self.mode != LoadBalancePersistenceMode::Cookie && self.cookie.is_some() {
+        if !matches!(
+            self.mode,
+            LoadBalancePersistenceMode::Cookie | LoadBalancePersistenceMode::ManagedCookie
+        ) && self.cookie.is_some()
+        {
             return Err(ConfigError::InvalidLoadBalanceSelection {
-                reason: "proxy.load_balance.persistence.cookie can only be used with mode = \"cookie\"",
+                reason: "proxy.load_balance.persistence.cookie can only be used with mode = \"cookie\" or \"managed-cookie\"",
             });
         }
         match self.mode {
@@ -748,10 +790,10 @@ impl LoadBalancePersistenceConfig {
                     });
                 }
             }
-            LoadBalancePersistenceMode::Cookie => {
+            LoadBalancePersistenceMode::Cookie | LoadBalancePersistenceMode::ManagedCookie => {
                 let Some(cookie) = self.cookie.as_deref() else {
                     return Err(ConfigError::InvalidLoadBalanceSelection {
-                        reason: "proxy.load_balance.persistence.cookie is required when mode = \"cookie\"",
+                        reason: "proxy.load_balance.persistence.cookie is required when mode = \"cookie\" or \"managed-cookie\"",
                     });
                 };
                 if !valid_http_header_name(cookie) {
@@ -760,6 +802,21 @@ impl LoadBalancePersistenceConfig {
                     });
                 }
             }
+        }
+        if self.mode != LoadBalancePersistenceMode::ManagedCookie {
+            if self.managed_cookie_domain.is_some()
+                || self.managed_cookie_path.is_some()
+                || self.managed_cookie_max_age_secs.is_some()
+                || !self.managed_cookie_secure
+                || !self.managed_cookie_http_only
+                || self.managed_cookie_same_site != LoadBalanceManagedCookieSameSite::default()
+            {
+                return Err(ConfigError::InvalidLoadBalanceSelection {
+                    reason: "proxy.load_balance.persistence managed_cookie_* fields can only be used with mode = \"managed-cookie\"",
+                });
+            }
+        } else {
+            validate_managed_cookie_attributes(self)?;
         }
         Ok(())
     }
@@ -832,6 +889,57 @@ fn default_lb_persistence_ttl_secs() -> u64 {
 
 fn default_lb_persistence_table_max_entries() -> usize {
     65_536
+}
+
+fn default_lb_managed_cookie_secure() -> bool {
+    true
+}
+
+fn default_lb_managed_cookie_http_only() -> bool {
+    true
+}
+
+fn validate_managed_cookie_attributes(
+    config: &LoadBalancePersistenceConfig,
+) -> Result<(), ConfigError> {
+    if let Some(path) = config.managed_cookie_path.as_deref()
+        && (!path.starts_with('/')
+            || path.is_empty()
+            || path.len() > 256
+            || path
+                .chars()
+                .any(|character| character.is_control() || matches!(character, ';' | ',')))
+    {
+        return Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_path must be an absolute cookie path without controls, ';', or ','",
+        });
+    }
+    if let Some(domain) = config.managed_cookie_domain.as_deref()
+        && (domain.is_empty()
+            || domain.len() > 253
+            || domain
+                .chars()
+                .any(|character| character.is_control() || matches!(character, ';' | ',')))
+    {
+        return Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_domain must be a non-empty cookie domain without controls, ';', or ','",
+        });
+    }
+    if let Some(max_age) = config.managed_cookie_max_age_secs
+        && (max_age == 0 || max_age > MAX_LB_PERSISTENCE_TTL_SECS)
+    {
+        return Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_max_age_secs must be between 1 and 86400",
+        });
+    }
+    if config.managed_cookie_same_site == LoadBalanceManagedCookieSameSite::None
+        && !config.managed_cookie_secure
+    {
+        return Err(ConfigError::InvalidLoadBalanceSelection {
+            reason: "proxy.load_balance.persistence.managed_cookie_same_site = \"none\" requires managed_cookie_secure = true",
+        });
+    }
+    Ok(())
 }
 
 fn default_lb_retry_max_retries() -> u8 {

@@ -3892,6 +3892,8 @@ pub struct RequestContext {
     upstream_load_balancer_retries: u8,
     #[cfg(feature = "load-balancer")]
     upstream_load_balancer_alias: Option<std::sync::Arc<str>>,
+    #[cfg(feature = "load-balancer")]
+    upstream_load_balancer_managed_cookie: Option<String>,
     #[cfg(feature = "geoip")]
     geo_context: Option<crate::geo_context::GeoContext>,
     request_body_bytes_seen: u64,
@@ -4357,6 +4359,7 @@ impl ProxyHttp for FluxProxy {
             ctx.upstream_load_balancer_outcome_recorded = false;
             ctx.upstream_load_balancer_selected_at = None;
             ctx.upstream_load_balancer_alias = None;
+            ctx.upstream_load_balancer_managed_cookie = None;
         }
 
         #[cfg(feature = "load-balancer")]
@@ -4376,6 +4379,9 @@ impl ProxyHttp for FluxProxy {
             }
             if let Some(selected) = selection.selected {
                 ctx.upstream_load_balancer_alias = selected.alias.clone();
+                ctx.upstream_load_balancer_managed_cookie = selected
+                    .managed_affinity_cookie
+                    .map(|cookie| cookie.header_value);
                 #[cfg(feature = "metrics")]
                 record_load_balancer_metric(vhost, ctx, "selected");
                 #[cfg(feature = "metrics")]
@@ -4853,6 +4859,8 @@ impl ProxyHttp for FluxProxy {
         )?;
         let response_headers = selected_response_headers(vhost, ctx);
         crate::headers::apply_response_policy(response, response_headers)?;
+        #[cfg(feature = "load-balancer")]
+        append_load_balancer_managed_cookie(response, ctx)?;
         #[cfg(any(
             feature = "compression-brotli",
             feature = "compression-gzip",
@@ -9128,6 +9136,21 @@ fn record_load_balanced_upstream_status(
 }
 
 #[cfg(feature = "load-balancer")]
+fn append_load_balancer_managed_cookie(
+    response: &mut ResponseHeader,
+    ctx: &mut RequestContext,
+) -> Result<()> {
+    if !(200..=399).contains(&response.status.as_u16()) {
+        return Ok(());
+    }
+    let Some(cookie) = ctx.upstream_load_balancer_managed_cookie.take() else {
+        return Ok(());
+    };
+    response.append_header("set-cookie", cookie.as_str())?;
+    Ok(())
+}
+
+#[cfg(feature = "load-balancer")]
 fn record_load_balanced_upstream_failure(
     ctx: &mut RequestContext,
 ) -> Option<LoadBalancedUpstreamOutcome> {
@@ -9836,7 +9859,11 @@ mod tests {
 
     #[allow(unused_imports)]
     use bytes::Bytes;
-    #[cfg(any(feature = "php-fpm", feature = "compression-gzip"))]
+    #[cfg(any(
+        feature = "php-fpm",
+        feature = "compression-gzip",
+        feature = "load-balancer"
+    ))]
     use pingora::http::{ResponseHeader, StatusCode};
 
     #[cfg(feature = "compression-gzip")]
@@ -15779,6 +15806,44 @@ mod tests {
 
         assert!(vhost.load_balancer.is_some());
         assert!(super::selected_upstream_load_balancer(vhost, &ctx).is_none());
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_managed_cookie_appends_on_eligible_response() {
+        let mut response = ResponseHeader::build(200, None).unwrap();
+        let mut ctx = super::RequestContext {
+            upstream_load_balancer_managed_cookie: Some(
+                "fluxheim_lb=opaque; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax".to_owned(),
+            ),
+            ..super::RequestContext::default()
+        };
+
+        super::append_load_balancer_managed_cookie(&mut response, &mut ctx).unwrap();
+        let cookies = response
+            .headers
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            cookies,
+            ["fluxheim_lb=opaque; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax"]
+        );
+        assert!(ctx.upstream_load_balancer_managed_cookie.is_none());
+
+        ctx.upstream_load_balancer_managed_cookie = Some("fluxheim_lb=next; Path=/".to_owned());
+        let mut failure = ResponseHeader::build(500, None).unwrap();
+        super::append_load_balancer_managed_cookie(&mut failure, &mut ctx).unwrap();
+        assert!(
+            failure
+                .headers
+                .get_all("set-cookie")
+                .iter()
+                .next()
+                .is_none()
+        );
+        assert!(ctx.upstream_load_balancer_managed_cookie.is_some());
     }
 
     #[cfg(feature = "load-balancer")]

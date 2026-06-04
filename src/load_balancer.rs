@@ -31,7 +31,9 @@ use self::discovery::{
     configured_maglev_table,
 };
 pub(crate) use self::key::{backend_authority_key, backend_key};
-use self::persistence::{LoadBalanceKeySource, LoadBalancerPersistenceState};
+use self::persistence::{
+    LoadBalanceKeySource, LoadBalancerPersistenceState, ManagedAffinityCookie,
+};
 use self::policy::{
     BackendSelectionPolicy, BackendStatsInputs, backend_aliases, load_balancer_backend_stats,
 };
@@ -78,6 +80,7 @@ pub struct SelectedUpstream {
     pub permit: Option<LoadBalancedConnectionPermit>,
     pub reporter: Option<LoadBalancedUpstreamReporter>,
     pub persistence_outcome: Option<LoadBalancerPersistenceOutcome>,
+    pub(crate) managed_affinity_cookie: Option<ManagedAffinityCookie>,
 }
 
 pub struct LoadBalancerSelectionResult {
@@ -638,6 +641,13 @@ impl UpstreamLoadBalancer {
         let selected = self.prepare_selected(selected, persistence_outcome)?;
         if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key) {
             persistence.record(key, backend_key(&selected.backend));
+        } else if let Some(persistence) = &self.persistence
+            && let Some((key, cookie)) = persistence.new_managed_cookie()
+        {
+            persistence.record(&key, backend_key(&selected.backend));
+            let mut selected = selected;
+            selected.managed_affinity_cookie = Some(cookie);
+            return Some(selected);
         }
         Some(selected)
     }
@@ -1303,6 +1313,7 @@ impl SelectedUpstream {
             permit: None,
             reporter: None,
             persistence_outcome: None,
+            managed_affinity_cookie: None,
         }
     }
 }
@@ -1334,9 +1345,9 @@ mod tests {
 
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedStatusRange,
-        LoadBalanceHealthCheckProtocol, LoadBalancePassiveHealthConfig,
-        LoadBalancePersistenceConfig, LoadBalancePersistenceMode, LoadBalanceQueueConfig,
-        LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
+        LoadBalanceHealthCheckProtocol, LoadBalanceManagedCookieSameSite,
+        LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
+        LoadBalanceQueueConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
 
     use super::persistence::{MAX_PERSISTENCE_KEY_BYTES, cookie_key, request_header_key};
@@ -1405,6 +1416,59 @@ mod tests {
             )
             .unwrap();
         assert!(cookie_key(&oversized_cookie_request, "sid").is_none());
+    }
+
+    #[test]
+    fn managed_cookie_persistence_reuses_selected_backend() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    mode: LoadBalancePersistenceMode::ManagedCookie,
+                    cookie: Some("fluxheim_lb".to_owned()),
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                    managed_cookie_path: Some("/app".to_owned()),
+                    managed_cookie_same_site: LoadBalanceManagedCookieSameSite::Strict,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let first = balancer.select(&request(), None).unwrap();
+        let first_backend = backend_key(&first.backend);
+        let cookie = first
+            .managed_affinity_cookie
+            .expect("fresh selection emits managed cookie")
+            .header_value;
+        assert!(cookie.starts_with("fluxheim_lb="));
+        assert!(cookie.contains("; Path=/app"));
+        assert!(cookie.contains("; HttpOnly"));
+        assert!(cookie.contains("; Secure"));
+        assert!(cookie.contains("; SameSite=Strict"));
+
+        let cookie_value = cookie
+            .strip_prefix("fluxheim_lb=")
+            .and_then(|value| value.split_once(';').map(|(value, _)| value))
+            .unwrap();
+        let mut persisted_request = request();
+        persisted_request
+            .insert_header("cookie", format!("fluxheim_lb={cookie_value}"))
+            .unwrap();
+        let second = balancer.select(&persisted_request, None).unwrap();
+        assert_eq!(backend_key(&second.backend), first_backend);
+        assert_eq!(
+            second.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Hit)
+        );
+        assert!(second.managed_affinity_cookie.is_none());
     }
 
     #[test]

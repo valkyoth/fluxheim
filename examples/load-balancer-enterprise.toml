@@ -93,9 +93,14 @@ duration_secs = 30
 
 [proxy.load_balance.persistence]
 enabled = true
-mode = "source-ip"
+mode = "managed-cookie"
+cookie = "fluxheim_lb"
 ttl_secs = 600
 table_max_entries = 65536
+managed_cookie_path = "/"
+managed_cookie_secure = true
+managed_cookie_http_only = true
+managed_cookie_same_site = "lax"
 
 [proxy.load_balance.retry]
 enabled = true
