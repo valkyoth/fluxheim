@@ -8,11 +8,10 @@ use pingora::lb::selection::{BackendIter, BackendSelection};
 
 use crate::config::ProxyConfig;
 
+use super::key::backend_key;
 use super::selection::SelectionPass;
-use super::selection::fnv1a64;
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
-    backend_connection_key,
 };
 use super::{
     LoadBalancerBackendRuntimeStats, LoadBalancerCircuitState, LoadBalancerRuntimeBackendState,
@@ -61,9 +60,9 @@ impl BackendSelectionPolicy {
         let priority = backend_priority_groups(config);
         let priority_groups = sorted_priority_groups(&priority);
         Self {
-            backup: backend_policy_keys(&config.backup_upstreams).into(),
-            drain: backend_policy_keys(&config.drain_upstreams).into(),
-            disabled: backend_policy_keys(&config.disabled_upstreams).into(),
+            backup: backend_keys(&config.backup_upstreams).into(),
+            drain: backend_keys(&config.drain_upstreams).into(),
+            disabled: backend_keys(&config.disabled_upstreams).into(),
             runtime: Arc::new(RuntimeBackendPolicyOverrides::default()),
             priority: priority.into(),
             localities: backend_localities(config).into(),
@@ -86,7 +85,7 @@ impl BackendSelectionPolicy {
         pass: SelectionPass,
         counters: &BackendConnectionCounters,
     ) -> bool {
-        let key = backend_policy_key(backend);
+        let key = backend_key(backend);
         !self.disabled(key)
             && !self.drained(key)
             && (pass.allow_backup || !self.backup.contains(&key))
@@ -115,9 +114,7 @@ impl BackendSelectionPolicy {
     }
 
     pub(super) fn max_in_flight(&self, backend: &Backend) -> Option<usize> {
-        self.max_in_flight
-            .get(&backend_policy_key(backend))
-            .copied()
+        self.max_in_flight.get(&backend_key(backend)).copied()
     }
 
     pub(super) fn preferred_localities(&self) -> &std::collections::HashSet<Arc<str>> {
@@ -178,7 +175,7 @@ impl BackendSelectionPolicy {
 
     pub(super) fn effective_weight(&self, backend: &Backend) -> usize {
         self.runtime
-            .weight(backend_policy_key(backend))
+            .weight(backend_key(backend))
             .unwrap_or(backend.weight)
             .max(1)
     }
@@ -355,11 +352,11 @@ fn runtime_override_key_has_capacity(keys: &std::collections::HashSet<u64>, key:
     keys.contains(&key) || keys.len() < MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES
 }
 
-fn backend_policy_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
+fn backend_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
     upstreams
         .iter()
         .filter_map(|upstream| Backend::new(upstream).ok())
-        .map(|backend| backend_policy_key(&backend))
+        .map(|backend| backend_key(&backend))
         .collect()
 }
 
@@ -486,10 +483,6 @@ mod tests {
     }
 }
 
-pub(super) fn backend_policy_key(backend: &Backend) -> u64 {
-    fnv1a64(backend.addr.to_string().as_bytes())
-}
-
 fn backend_priority_groups(config: &ProxyConfig) -> std::collections::HashMap<u64, u16> {
     config
         .upstreams
@@ -497,7 +490,7 @@ fn backend_priority_groups(config: &ProxyConfig) -> std::collections::HashMap<u6
         .zip(&config.upstream_priority_groups)
         .filter_map(|(upstream, priority)| {
             let backend = Backend::new(upstream).ok()?;
-            Some((backend_policy_key(&backend), *priority))
+            Some((backend_key(&backend), *priority))
         })
         .collect()
 }
@@ -509,7 +502,7 @@ fn backend_max_in_flight(config: &ProxyConfig) -> std::collections::HashMap<u64,
         .zip(&config.upstream_max_in_flight)
         .filter_map(|(upstream, max_in_flight)| {
             let backend = Backend::new(upstream).ok()?;
-            Some((backend_policy_key(&backend), *max_in_flight))
+            Some((backend_key(&backend), *max_in_flight))
         })
         .collect()
 }
@@ -522,7 +515,7 @@ fn backend_localities(config: &ProxyConfig) -> std::collections::HashMap<u64, Ar
         .filter_map(|(upstream, locality)| {
             let backend = Backend::new(upstream).ok()?;
             Some((
-                backend_policy_key(&backend),
+                backend_key(&backend),
                 Arc::<str>::from(locality.to_ascii_lowercase()),
             ))
         })
@@ -536,10 +529,7 @@ fn backend_tags(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<[Str
         .zip(&config.upstream_tags)
         .filter_map(|(upstream, tags)| {
             let backend = Backend::new(upstream).ok()?;
-            Some((
-                backend_policy_key(&backend),
-                Arc::<[String]>::from(tags.clone()),
-            ))
+            Some((backend_key(&backend), Arc::<[String]>::from(tags.clone())))
         })
         .collect()
 }
@@ -562,10 +552,7 @@ pub(super) fn backend_aliases(config: &ProxyConfig) -> std::collections::HashMap
         .zip(&config.upstream_aliases)
         .filter_map(|(upstream, alias)| {
             let backend = Backend::new(upstream).ok()?;
-            Some((
-                backend_policy_key(&backend),
-                Arc::<str>::from(alias.as_str()),
-            ))
+            Some((backend_key(&backend), Arc::<str>::from(alias.as_str())))
         })
         .collect()
 }
@@ -603,32 +590,28 @@ where
         .get_backend()
         .iter()
         .map(|backend| {
-            let policy_key = backend_policy_key(backend);
-            let connection_key = backend_connection_key(backend);
+            let key = backend_key(backend);
             let passive_ejected = inputs
                 .passive_health
-                .is_some_and(|health| health.key_is_currently_ejected(connection_key));
+                .is_some_and(|health| health.key_is_currently_ejected(key));
             LoadBalancerBackendRuntimeStats {
                 #[cfg(not(feature = "privacy-mode"))]
                 address: Some(backend.addr.to_string()),
                 #[cfg(feature = "privacy-mode")]
                 address: None,
-                alias: inputs
-                    .aliases
-                    .get(&policy_key)
-                    .map(|alias| alias.to_string()),
-                tags: inputs.backend_policy.tags(policy_key),
+                alias: inputs.aliases.get(&key).map(|alias| alias.to_string()),
+                tags: inputs.backend_policy.tags(key),
                 weight: backend.weight,
                 effective_weight: inputs.backend_policy.effective_weight(backend),
-                runtime_weight_override: inputs.backend_policy.runtime_backend_weight(policy_key),
+                runtime_weight_override: inputs.backend_policy.runtime_backend_weight(key),
                 runtime_weight_changed_at_unix_secs: inputs
                     .backend_policy
-                    .runtime_backend_weight_changed_at_unix_secs(policy_key),
+                    .runtime_backend_weight_changed_at_unix_secs(key),
                 locality: inputs
                     .backend_policy
-                    .locality_key(policy_key)
+                    .locality_key(key)
                     .map(|locality| locality.to_string()),
-                locality_preferred: inputs.backend_policy.locality_key(policy_key).is_some_and(
+                locality_preferred: inputs.backend_policy.locality_key(key).is_some_and(
                     |locality| {
                         inputs
                             .backend_policy
@@ -637,20 +620,20 @@ where
                     },
                 ),
                 ready: inner.backends().ready(backend),
-                backup: inputs.backend_policy.backup(policy_key),
-                drained: inputs.backend_policy.drained(policy_key),
-                disabled: inputs.backend_policy.disabled(policy_key),
-                runtime_state_override: inputs.backend_policy.runtime_backend_state(policy_key),
+                backup: inputs.backend_policy.backup(key),
+                drained: inputs.backend_policy.drained(key),
+                disabled: inputs.backend_policy.disabled(key),
+                runtime_state_override: inputs.backend_policy.runtime_backend_state(key),
                 runtime_state_changed_at_unix_secs: inputs
                     .backend_policy
-                    .runtime_backend_state_changed_at_unix_secs(policy_key),
+                    .runtime_backend_state_changed_at_unix_secs(key),
                 persistence_entry_count: inputs
                     .persistence_entry_counts
-                    .get(&policy_key)
+                    .get(&key)
                     .copied()
                     .unwrap_or(0),
-                priority_group: inputs.backend_policy.priority_group(policy_key),
-                max_in_flight: inputs.backend_policy.max_in_flight_key(policy_key),
+                priority_group: inputs.backend_policy.priority_group(key),
+                max_in_flight: inputs.backend_policy.max_in_flight_key(key),
                 in_flight: inputs.counters.count_existing(backend),
                 passive_ejected,
                 circuit_state: if passive_ejected {
@@ -660,16 +643,14 @@ where
                 },
                 passive_consecutive_failures: inputs
                     .passive_health
-                    .and_then(|health| health.key_consecutive_failures(connection_key)),
+                    .and_then(|health| health.key_consecutive_failures(key)),
                 passive_ejection_remaining_secs: inputs
                     .passive_health
-                    .and_then(|health| health.key_ejection_remaining_secs(connection_key)),
+                    .and_then(|health| health.key_ejection_remaining_secs(key)),
                 slow_start_permitting: inputs
                     .slow_start
                     .is_none_or(|state| state.permits_read_only(backend)),
-                latency_micros: inputs
-                    .latency
-                    .and_then(|state| state.score_key(connection_key)),
+                latency_micros: inputs.latency.and_then(|state| state.score_key(key)),
             }
         })
         .collect()

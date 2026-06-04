@@ -12,7 +12,8 @@ use crate::config::{
 };
 
 use super::LoadBalancedUpstreamOutcome;
-use super::selection::{fnv1a64, fnv1a64_with_seed};
+use super::key::backend_key;
+use super::selection::fnv1a64_with_seed;
 
 #[derive(Debug)]
 pub struct LoadBalancedConnectionPermit {
@@ -135,7 +136,7 @@ impl PassiveHealthState {
     }
 
     pub(super) fn is_ejected(&self, backend: &Backend) -> bool {
-        let key = backend_connection_key(backend);
+        let key = backend_key(backend);
         self.key_is_ejected(key)
     }
 
@@ -278,7 +279,7 @@ impl SlowStartState {
 
     pub(super) fn permits(&self, backend: &Backend) -> bool {
         let now = Instant::now();
-        let key = backend_connection_key(backend);
+        let key = backend_key(backend);
         let mut backends = self
             .backends
             .lock()
@@ -312,7 +313,7 @@ impl SlowStartState {
 
     pub(super) fn permits_read_only(&self, backend: &Backend) -> bool {
         let now = Instant::now();
-        let key = backend_connection_key(backend);
+        let key = backend_key(backend);
         let Some(started_at) = self
             .backends
             .lock()
@@ -350,7 +351,7 @@ impl BackendConnectionCounters {
         self.counters
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get(&backend_connection_key(backend))
+            .get(&backend_key(backend))
             .map(|counter| counter.load(Ordering::Acquire))
             .unwrap_or(0)
     }
@@ -381,7 +382,7 @@ impl BackendConnectionCounters {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         counters
-            .entry(backend_connection_key(backend))
+            .entry(backend_key(backend))
             .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
             .clone()
     }
@@ -415,7 +416,7 @@ impl BackendLatencyState {
     }
 
     pub(super) fn score(&self, backend: &Backend) -> Option<u64> {
-        self.score_key(backend_connection_key(backend))
+        self.score_key(backend_key(backend))
     }
 
     pub(super) fn score_key(&self, key: u64) -> Option<u64> {
@@ -432,10 +433,6 @@ impl BackendLatencyState {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .retain(|key, _| live_keys.contains(key));
     }
-}
-
-pub(super) fn backend_connection_key(backend: &Backend) -> u64 {
-    fnv1a64(backend.addr.to_string().as_bytes())
 }
 
 #[cfg(test)]

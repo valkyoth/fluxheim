@@ -8,10 +8,10 @@ use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, Random, RoundRobin};
 
 use super::SelectedUpstream;
-use super::policy::{BackendSelectionPolicy, backend_policy_key};
+use super::key::backend_key;
+use super::policy::BackendSelectionPolicy;
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
-    backend_connection_key,
 };
 
 const MAGLEV_TABLE_SIZE: usize = 65_537;
@@ -384,7 +384,7 @@ fn select_least_sessions_with_backup_policy(
             continue;
         }
         let sessions = persistence_entry_counts
-            .get(&backend_policy_key(backend))
+            .get(&backend_key(backend))
             .copied()
             .unwrap_or(0);
         let weight = backend_policy.effective_weight(backend);
@@ -542,7 +542,7 @@ pub(super) fn select_power_of_two(
         counters,
         backend_policy,
     )?;
-    let first_key = backend_connection_key(&first);
+    let first_key = backend_key(&first);
     let second = (0..max_iterations)
         .filter_map(|_| {
             select_pingora(
@@ -555,7 +555,7 @@ pub(super) fn select_power_of_two(
                 backend_policy,
             )
         })
-        .find(|backend| backend_connection_key(backend) != first_key)
+        .find(|backend| backend_key(backend) != first_key)
         .unwrap_or_else(|| first.clone());
     let selected = if least_connections_score_is_lower(
         counters.count(&second),
@@ -708,7 +708,7 @@ impl MaglevTable {
         let permutations: Vec<(usize, usize)> = backends
             .iter()
             .map(|backend| {
-                let key = backend_policy_key(backend).to_le_bytes();
+                let key = backend_key(backend).to_le_bytes();
                 let offset =
                     fnv1a64_with_seed(&key, 0xcbf2_9ce4_8422_2325) as usize % MAGLEV_TABLE_SIZE;
                 let skip = (fnv1a64_with_seed(&key, 0x8422_2325_cbf2_9ce4) as usize
@@ -726,7 +726,7 @@ impl MaglevTable {
                     let candidate = maglev_candidate(offset, next[index], skip);
                     next[index] = next[index].saturating_add(1);
                     if slots[candidate] == u64::MAX {
-                        slots[candidate] = backend_policy_key(backend);
+                        slots[candidate] = backend_key(backend);
                         filled = filled.saturating_add(1);
                         break;
                     }
@@ -765,7 +765,7 @@ pub(super) fn select_maglev(
         .get_backend()
         .iter()
         .cloned()
-        .map(|backend| (backend_policy_key(&backend), backend))
+        .map(|backend| (backend_key(&backend), backend))
         .collect();
     for pass in selection_passes(inputs.backend_policy) {
         if !priority_activation_satisfied(

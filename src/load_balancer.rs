@@ -20,6 +20,7 @@ use crate::config::{
 
 mod discovery;
 mod health;
+mod key;
 mod persistence;
 mod policy;
 mod selection;
@@ -29,10 +30,10 @@ use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
     configured_maglev_table,
 };
+use self::key::backend_key;
 use self::persistence::{LoadBalanceKeySource, LoadBalancerPersistenceState};
 use self::policy::{
-    BackendSelectionPolicy, BackendStatsInputs, backend_aliases, backend_policy_key,
-    load_balancer_backend_stats,
+    BackendSelectionPolicy, BackendStatsInputs, backend_aliases, load_balancer_backend_stats,
 };
 use self::selection::{
     LoadBalancerSelectInputs, MaglevTable, SelectionPass, select_bounded_load_consistent,
@@ -41,7 +42,6 @@ use self::selection::{
 };
 use self::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
-    backend_connection_key,
 };
 pub use self::state::{LoadBalancedConnectionPermit, LoadBalancedUpstreamReporter};
 
@@ -637,7 +637,7 @@ impl UpstreamLoadBalancer {
         })?;
         let selected = self.prepare_selected(selected, persistence_outcome)?;
         if let (Some(persistence), Some(key)) = (&self.persistence, persistence_key) {
-            persistence.record(key, backend_policy_key(&selected.backend));
+            persistence.record(key, backend_key(&selected.backend));
         }
         Some(selected)
     }
@@ -653,12 +653,12 @@ impl UpstreamLoadBalancer {
         )?);
         selected.alias = self
             .backend_aliases
-            .get(&backend_policy_key(&selected.backend))
+            .get(&backend_key(&selected.backend))
             .cloned();
         let latency = self.inner.latency_state();
         selected.reporter = (self.passive_health.is_some() || latency.is_some()).then(|| {
             LoadBalancedUpstreamReporter::new(
-                backend_connection_key(&selected.backend),
+                backend_key(&selected.backend),
                 self.passive_health.clone(),
                 self.slow_start.clone(),
                 latency,
@@ -669,13 +669,12 @@ impl UpstreamLoadBalancer {
     }
 
     fn backend_available_for_persistence(&self, backend: &Backend) -> bool {
-        let policy_key = backend_policy_key(backend);
-        let connection_key = backend_connection_key(backend);
+        let key = backend_key(backend);
         self.inner.backend_ready(backend)
             && !self
                 .passive_health
                 .as_ref()
-                .is_some_and(|health| health.key_is_currently_ejected(connection_key))
+                .is_some_and(|health| health.key_is_currently_ejected(key))
             && self
                 .slow_start
                 .as_ref()
@@ -690,8 +689,8 @@ impl UpstreamLoadBalancer {
                 },
                 &self.counters,
             )
-            && !self.backend_policy.disabled(policy_key)
-            && !self.backend_policy.drained(policy_key)
+            && !self.backend_policy.disabled(key)
+            && !self.backend_policy.drained(key)
     }
 
     fn from_inner(inner: UpstreamLoadBalancerInner, config: &ProxyConfig) -> Self {
@@ -738,11 +737,11 @@ impl UpstreamLoadBalancer {
         let backends = self.inner.backends();
         let live_connection_keys = backends
             .iter()
-            .map(backend_connection_key)
+            .map(backend_key)
             .collect::<std::collections::HashSet<_>>();
         let live_policy_keys = backends
             .iter()
-            .map(backend_policy_key)
+            .map(backend_key)
             .collect::<std::collections::HashSet<_>>();
         self.counters.prune_stale(&live_connection_keys);
         self.backend_policy.prune_stale(&live_policy_keys);
@@ -760,17 +759,13 @@ impl UpstreamLoadBalancer {
         }
     }
 
-    fn live_backend_policy_keys(&self) -> std::collections::HashSet<u64> {
-        self.inner
-            .backends()
-            .iter()
-            .map(backend_policy_key)
-            .collect()
+    fn live_backend_keys(&self) -> std::collections::HashSet<u64> {
+        self.inner.backends().iter().map(backend_key).collect()
     }
 
     pub fn runtime_stats(&self) -> LoadBalancerPoolRuntimeStats {
         let health_check_frequency = self.inner.health_check_frequency();
-        let live_policy_keys = self.live_backend_policy_keys();
+        let live_policy_keys = self.live_backend_keys();
         let (persistence_entry_count, persistence_backend_entry_counts) = self
             .persistence
             .as_ref()
@@ -919,12 +914,8 @@ impl UpstreamLoadBalancer {
         let backend = self
             .inner
             .backend_by_member(member, &self.backend_aliases)?;
-        let policy_key = backend_policy_key(&backend);
-        let connection_key = backend_connection_key(&backend);
-        if !self
-            .backend_policy
-            .set_runtime_backend_state(policy_key, state)
-        {
+        let key = backend_key(&backend);
+        if !self.backend_policy.set_runtime_backend_state(key, state) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "load balancer runtime override table is full",
@@ -932,10 +923,10 @@ impl UpstreamLoadBalancer {
         }
         if state == LoadBalancerRuntimeBackendState::ManualResume {
             if let Some(passive_health) = &self.passive_health {
-                passive_health.clear_key(connection_key);
+                passive_health.clear_key(key);
             }
             if let Some(slow_start) = &self.slow_start {
-                slow_start.reset_at(connection_key, Instant::now());
+                slow_start.reset_at(key, Instant::now());
             }
         }
         Ok(LoadBalancerRuntimeBackendMutation {
@@ -945,7 +936,7 @@ impl UpstreamLoadBalancer {
             address: backend.addr.to_string(),
             alias: self
                 .backend_aliases
-                .get(&policy_key)
+                .get(&key)
                 .map(|alias| alias.to_string()),
         })
     }
@@ -964,11 +955,8 @@ impl UpstreamLoadBalancer {
         let backend = self
             .inner
             .backend_by_member(member, &self.backend_aliases)?;
-        let policy_key = backend_policy_key(&backend);
-        if !self
-            .backend_policy
-            .set_runtime_backend_weight(policy_key, weight)
-        {
+        let key = backend_key(&backend);
+        if !self.backend_policy.set_runtime_backend_weight(key, weight) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "load balancer runtime override table is full",
@@ -978,12 +966,12 @@ impl UpstreamLoadBalancer {
             member: member.to_owned(),
             configured_weight: backend.weight,
             effective_weight: self.backend_policy.effective_weight(&backend),
-            runtime_weight_override: self.backend_policy.runtime_backend_weight(policy_key),
+            runtime_weight_override: self.backend_policy.runtime_backend_weight(key),
             #[cfg(not(feature = "privacy-mode"))]
             address: backend.addr.to_string(),
             alias: self
                 .backend_aliases
-                .get(&policy_key)
+                .get(&key)
                 .map(|alias| alias.to_string()),
         })
     }
@@ -1242,7 +1230,7 @@ impl UpstreamLoadBalancerInner {
         }
         let mut matched = None;
         for backend in self.backends() {
-            let policy_key = backend_policy_key(&backend);
+            let policy_key = backend_key(&backend);
             let alias_matches = aliases
                 .get(&policy_key)
                 .is_some_and(|alias| alias.eq_ignore_ascii_case(member));
@@ -1267,7 +1255,7 @@ impl UpstreamLoadBalancerInner {
     fn backend_by_policy_key(&self, key: u64) -> Option<Backend> {
         self.backends()
             .into_iter()
-            .find(|backend| backend_policy_key(backend) == key)
+            .find(|backend| backend_key(backend) == key)
     }
 
     fn backend_ready(&self, backend: &Backend) -> bool {
@@ -1357,7 +1345,7 @@ mod tests {
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
         LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, PassiveHealthState,
-        SlowStartState, UpstreamLoadBalancer, backend_connection_key,
+        SlowStartState, UpstreamLoadBalancer, backend_key,
     };
     use crate::test_support::unique_temp_path;
 
@@ -1371,7 +1359,7 @@ mod tests {
     }
 
     fn slow_start_blocking_sample(backend: &Backend) -> u64 {
-        let key = backend_connection_key(backend);
+        let key = backend_key(backend);
         (0u64..10_000)
             .find(|sample| fnv1a64_with_seed(&sample.to_le_bytes(), key) % 1000 >= 1)
             .expect("blocking slow-start sample")
@@ -2413,7 +2401,7 @@ mod tests {
 
         assert!(!state.permits(&backend));
         state.backends.lock().unwrap().insert(
-            backend_connection_key(&backend),
+            backend_key(&backend),
             Instant::now() - Duration::from_secs(61),
         );
         assert!(state.permits(&backend));
@@ -2430,11 +2418,11 @@ mod tests {
             .backends
             .lock()
             .unwrap()
-            .insert(backend_connection_key(&backend), Instant::now());
+            .insert(backend_key(&backend), Instant::now());
         assert!(!state.permits_read_only(&backend));
 
         state.backends.lock().unwrap().insert(
-            backend_connection_key(&backend),
+            backend_key(&backend),
             Instant::now() - Duration::from_secs(31),
         );
         assert!(state.permits_read_only(&backend));
@@ -2468,7 +2456,7 @@ mod tests {
             duration_secs: 60,
         }));
         let backend = Backend::new("127.0.0.1:3000").unwrap();
-        let key = backend_connection_key(&backend);
+        let key = backend_key(&backend);
         slow_start
             .backends
             .lock()
