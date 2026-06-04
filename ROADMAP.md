@@ -1299,16 +1299,17 @@ without parsing text fixtures for every module.
 15. **Future HTTP/3 And QUIC**
    - HTTP/3 is the modern protocol direction, not a legacy-compatibility
      feature.
-   - Keep it outside `1.0.0`. HTTP/3 changes Fluxheim's listener model from
-     TCP/TLS-only ingress to a dual TCP plus UDP service. It should land first
-     as an opt-in `http3` or `http3-experimental` compile feature after the
-     gateway core and TLS policy surface are stable.
-   - Plan as a separate future milestone after MVP hardening: evaluate whether
-     a supported Pingora HTTP/3 server API can be reused before falling back to
-     direct ecosystem QUIC integration. The milestone must cover TLS/ALPN
+   - Track it as Fluxheim-owned `1.9` work, after server bootstrap/listener/TLS
+     ownership and the HTTP proxy runtime are stable. The intended ecosystem
+     path is Rust `quinn` for QUIC transport plus the `h3` stack for HTTP/3
+     framing, behind Fluxheim-owned listener, TLS, routing, and policy
+     boundaries.
+   - HTTP/3 changes Fluxheim's listener model from TCP/TLS-only ingress to a
+     dual TCP plus UDP service. It should land first as an opt-in `http3` or
+     `http3-experimental` compile feature. The milestone must cover TLS/ALPN
      handling, UDP listener ownership, rootless Podman networking constraints,
      certificate reload interaction, metrics, graceful shutdown, and
-     zero-downtime process upgrades.
+     zero-downtime process upgrade semantics where still supported.
    - Do not treat `Alt-Svc` as the implementation. Advertising HTTP/3 is easy;
      Fluxheim must only emit `Alt-Svc` from listeners/vhosts where the UDP
      QUIC service is actually configured and healthy, with the advertised port

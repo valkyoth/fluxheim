@@ -24,10 +24,10 @@
 Fluxheim is a modular Rust edge gateway for static sites, reverse proxying,
 edge caching, PHP-FPM application serving, ACME automation, observability,
 FIPS/ISO-capable TLS build paths, GeoIP policy, TCP stream proxying, and
-enterprise HTTP/TCP load balancing. It uses Pingora internally for the current
-HTTP proxy core and some transport primitives, while `1.5.x` tracks a smaller
-Pingora surface through standard HTTP/error boundaries plus native stream,
-load-balancer, background-task, and cache-interface internals. The
+enterprise HTTP/TCP load balancing. The roadmap is moving Fluxheim-owned
+boundaries outward through standard HTTP/error types, native stream and
+load-balancer internals, explicit task orchestration, cache interfaces, server
+bootstrap, HTTP runtime ownership, and eventually HTTP/3/QUIC. The
 operator-facing product is Fluxheim: focused release profiles are available for
 full, cache, proxy, load-balancer, and PHP deployments, with matching container
 images and Linux runtime archives.
@@ -128,9 +128,9 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | Proxy module split | ✅ | `1.4.2`; access logs, compression, auth subrequests, traffic mirroring, edge policy, route policy, cache API DTOs, request-side cache policy, path safety, upstream TLS loading, PROXY protocol framing, and PHP-FPM process/spool/FastCGI handling are split into focused modules, with a new rule that future feature domains start outside the proxy orchestration file. |
 | Config module split | ✅ | `1.4.3`; config loading, shared helpers, domain validation, and large config tests are split into focused `config_*` modules while keeping `crate::config::*` stable. |
 | Load-balancer module split | ✅ | `1.5.0`; health checks, backend state, persistence, selection algorithms, backend policy/status, and file/DNS discovery are split into focused `load_balancer/*` modules while keeping `crate::load_balancer::*` stable. |
-| Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while Pingora macOS support remains experimental. |
+| Apple Silicon macOS dev builds | ✅ | `1.4.4`; Level 1 developer support with Mac-safe runtime paths while some upstream macOS support remains experimental. |
 | GeoIP/Geo-Context policy | ✅ | `1.4.5`; optional `geoip` feature with local MMDB support for MaxMind GeoIP2/GeoLite2 and CIRCL Geo Open datasets, plus vhost/route country and ASN ACLs. |
-| HTTP/3/QUIC | ❌ | Deferred until Pingora support and a bounded design are ready. |
+| HTTP/3/QUIC | ❌ | Planned as a Fluxheim-owned `1.9` protocol milestone using the Rust `quinn`/`h3` stack after server and HTTP runtime ownership are stable. |
 | WASM policy hooks | ❌ | Planned for the later `1.6` extensibility line. |
 
 See [Production Readiness](docs/production-readiness.md) for the precise
@@ -141,9 +141,10 @@ Apple Silicon developer workflow.
 ## Why Fluxheim
 
 - **Rust first**: memory-safe implementation with a pinned stable toolchain.
-- **Production proxy core**: uses Pingora internally for HTTP proxying and
-  selected transport/runtime primitives while keeping Fluxheim's config,
-  security, and operations model as the public interface.
+- **Production edge core**: Fluxheim owns the config, security, operations,
+  load-balancer, cache, PHP-FPM, stream, and observability model, with the
+  remaining HTTP runtime internals being reduced behind project-owned
+  boundaries over the `1.5` to `1.9` roadmap.
 - **Modular builds**: compile only the modules needed for a deployment.
 - **Secure defaults**: strict config validation, request limits, safe filesystem
   handling, dependency policy, and no hidden legacy protocol fallback.
@@ -241,7 +242,7 @@ Individual module features:
 
 | Feature | Default | Notes |
 | --- | --- | --- |
-| `proxy` | Yes | Fluxheim reverse-proxy runtime backed by Pingora's HTTP path. |
+| `proxy` | Yes | Fluxheim reverse-proxy runtime; the current HTTP path is being isolated behind project-owned boundaries. |
 | `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
 | `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
 | `load-balancer` | No | Fluxheim load-balancing module, health checks, and runtime pool policy. |
@@ -365,13 +366,13 @@ needed:
 | `tls-openssl` | Optional OpenSSL backend. |
 | `tls-rustls-fips` / `tls-rustls-iso19790` | rustls/AWS-LC FIPS-capable candidate backend. |
 | `tls-openssl-fips` / `tls-openssl-iso19790` | OpenSSL FIPS provider backend. |
-| `tls-boringssl` | Planned for removal; inherited Pingora/Cloudflare backend with poor external packaging and incomplete policy coverage. |
+| `tls-boringssl` | Planned for removal; inherited backend with poor external packaging and incomplete policy coverage. |
 | `tls-s2n` | Planned for removal; incomplete Fluxheim integration. |
 
 Selecting more than one TLS backend is a compile error.
 Use `scripts/validate-features.sh` in packaging or custom CI jobs when accepting
-user-provided feature strings; Cargo features are additive, and Pingora itself
-does not support compiling multiple TLS backends together.
+user-provided feature strings; Cargo features are additive, and Fluxheim
+supports one TLS backend per build.
 
 Future optional modules such as `waf`, `cloudflare`, PHP, CGI, and legacy
 static HTTP are documented in the architecture docs but are not enabled in the
@@ -449,7 +450,8 @@ coverage are documented in [Cache Backends](docs/cache-backends.md),
 Next lines are planned separately after `1.5`: `1.6` for shared Wasm
 extensibility covering nginx-Lua-style hooks and VCL-like cache policy hooks,
 then later major dependency-reduction lines for Fluxheim-owned server
-bootstrap/listener/TLS handling and the HTTP proxy runtime. See
+bootstrap/listener/TLS handling, the HTTP proxy runtime, and HTTP/3/QUIC based
+on the Rust `quinn`/`h3` stack. See
 [Versioning Plan](docs/versioning-plan.md) and [Roadmap](ROADMAP.md) for the
 full release ladder.
 

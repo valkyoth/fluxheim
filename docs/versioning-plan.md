@@ -1123,7 +1123,7 @@ Reference parity map:
 | mTLS/client auth | NGINX `ssl_verify_client`, HAProxy `verify required`, Envoy TLS validation context | Listener-level required/optional client cert verification, CA bundle validation, identity variables, and route/admin policy use |
 | PROXY protocol | NGINX/HAProxy/Envoy listener and upstream support | Accept v1/v2 only from trusted peers; optionally send v1/v2 upstream |
 | gRPC | Envoy first-class gRPC/trailers, NGINX `grpc_pass` | Preserve HTTP/2 trailers/status/body limits/timeouts; no transcoding in 1.4 |
-| HTTP/3/QUIC | NGINX/Caddy/Envoy support | Track behind a protocol milestone; do not block 1.4 unless Pingora server support is stable enough |
+| HTTP/3/QUIC | NGINX/Caddy/Envoy support | Track as Fluxheim-owned `1.9` protocol milestone using Rust `quinn`/`h3` after server and HTTP runtime ownership are stable |
 | Traffic mirroring | NGINX `mirror`, Envoy shadowing | First slice: safe bodyless shadow requests with deterministic sampling, timeout budgets, allow-listed headers, and no effect on primary response; body mirroring/redaction later |
 | Dynamic discovery | Envoy xDS, Caddy dynamic upstreams, DNS/service integrations | DNS refresh and file-watched upstream lists first; xDS/Kubernetes/Consul later |
 | Regex routing and rewrites | NGINX `location ~`, named captures, `rewrite`; HAProxy regex ACLs | Rust `regex`-based route matchers, capture variables, and bounded rewrite/header templates |
@@ -1658,9 +1658,10 @@ Out of scope for `1.4`:
   constraints are documented.
 - Full Envoy-style global rate-limit service, xDS control plane, Kubernetes
   controller, Consul integration, gRPC-Web transcoding, gRPC-JSON transcoding,
-  and HTTP/3/QUIC are tracked as later work unless a low-risk subset becomes
-  available through existing dependencies. HTTP/3/QUIC is specifically
-  upstream-blocked until Pingora exposes stable server-side QUIC support.
+  and HTTP/3/QUIC are tracked as later work. HTTP/3/QUIC is now planned as a
+  Fluxheim-owned protocol milestone after server bootstrap and HTTP runtime
+  ownership are stable, using reviewed Rust QUIC/HTTP3 ecosystem crates rather
+  than waiting on a proxy-framework API.
 - Arbitrary Lua/Wasm script execution. `1.4` should define typed hook points and
   bounded policy surfaces; the shared Wasm runtime remains a separate `1.6`
   line. NGINX rewrite-module-style `if` conditions should be evaluated there
@@ -1831,8 +1832,8 @@ Stable scope:
   - xDS/Kubernetes/Consul discovery only after local DNS/file discovery and
     runtime backend mutation are stable. Treat this as a control-plane feature,
     not a quick stream-proxy add-on;
-  - HTTP/3/QUIC remains a later protocol milestone unless the QUIC ingress
-    stack is already stable before `1.5`.
+  - HTTP/3/QUIC remains a later protocol milestone targeted at `1.9`, after
+    Fluxheim-owned server/listener/TLS and HTTP runtime boundaries are stable.
 - Multiple upstreams per pool with safe address validation and per-upstream
   metadata: name, address, weight, backup, disabled/down, drain/maintenance,
   max in-flight requests or connections, max queue, priority group, manual
@@ -2591,7 +2592,53 @@ Exit criteria:
   format, dimensions, quality, and `Accept` bucket.
 - `privacy-mode` rejects incompatible transform/cache combinations.
 
-### 1.9 - Advanced Certificate Automation
+### 1.9 - HTTP/3 And QUIC
+
+Goal: add opt-in HTTP/3 ingress with Fluxheim-owned UDP listener, QUIC, ALPN,
+certificate, routing, policy, and observability integration.
+
+This should be built as a Fluxheim protocol milestone after `1.7` server
+bootstrap/listener/TLS ownership and `1.8` HTTP runtime ownership are stable.
+The intended implementation path is the Rust `quinn` crate for QUIC transport
+and the Rust `h3` stack for HTTP/3 framing, with Fluxheim-owned adapters around
+TLS policy, vhost routing, request limits, access policy, cache/proxy behavior,
+metrics, logs, and graceful shutdown.
+
+Stable first scope:
+
+- Compile-time `http3` or `http3-experimental` feature, absent from default
+  builds until interop and resilience evidence is strong.
+- UDP listener ownership with explicit rootless/container port mapping docs.
+- ALPN and certificate selection consistent with HTTP/1.1 and HTTP/2 vhost
+  behavior.
+- `Alt-Svc` advertisement only when the matching UDP QUIC listener is
+  configured, healthy, and mapped to the advertised port.
+- Conservative config: `enabled`, `listen`, `advertise_alt_svc`,
+  `max_concurrent_streams`, `idle_timeout`, `max_request_body_bytes`, and
+  `enable_0rtt = false`.
+- 0-RTT disabled by default and rejected until route policy can prove replay
+  safety for explicitly idempotent traffic.
+- GET/HEAD first, then request-body streaming, upload limits, proxying, static
+  serving, cache behavior, access/error logs, dynamic headers, and failure
+  semantics matched to the HTTP/1.1 and HTTP/2 paths.
+
+Exit criteria:
+
+- Interop tests with HTTP/3-capable clients and browser `Alt-Svc` discovery.
+- Packet loss/reordering tests, malformed frame tests, anti-amplification
+  behavior checks, connection-id lifecycle tests, stream timeout tests, and
+  mixed HTTP/1.1, HTTP/2, and HTTP/3 request-boundary tests.
+- Metrics and logs identify protocol without creating high-cardinality labels.
+- Security posture matches the existing HTTP paths: strict parsing, no hidden
+  downgrade shortcuts, no legacy fallback on modern listeners, and consistent
+  vhost/cache/admin isolation.
+
+Out of first scope:
+
+- Generic UDP proxying, DNS/GSLB, QUIC pass-through, game-server UDP proxying,
+  WAF, VPN/firewall appliance behavior, and new Wasm ABI scope.
+
+### Future - Advanced Certificate Automation
 
 Goal: extend the `1.1` certificate lifecycle with provider-specific and
 zero-downtime automation that is too broad for the first ACME release.
@@ -2969,7 +3016,7 @@ Exit criteria:
 - Source files are never served as static fallback.
 - Rootless Podman examples exist for every runtime.
 
-### 1.9 - Crypto RPC Edge
+### Future - Crypto RPC Edge
 
 Goal: add a compile-time optional crypto RPC edge family for blockchain-aware
 JSON-RPC/WebSocket proxying, safe POST-body caching, and node-health-aware
@@ -3584,6 +3631,16 @@ the exception while the cache server is being completed as a focused sequence:
   rate/concurrency limits, header policy, observability, admin-visible failure
   semantics, and migration fixtures. Do not add HTTP/3/QUIC, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or new Wasm ABI scope in this release.
+- `v1.9.0`: Fluxheim-owned HTTP/3 and QUIC line. Stop at an opt-in
+  `http3`/`http3-experimental` feature using Rust `quinn` for QUIC transport
+  and the Rust `h3` stack for HTTP/3 framing behind Fluxheim-owned listener,
+  TLS, routing, access-policy, cache/proxy, metrics, logging, and graceful
+  shutdown boundaries. Preserve HTTP/1.1 and HTTP/2 behavior, advertise
+  `Alt-Svc` only for healthy configured QUIC listeners, keep 0-RTT disabled
+  unless explicit replay-safe route policy exists, and require interop,
+  malformed-input, packet-loss, anti-amplification, timeout, container-network,
+  and mixed-protocol boundary tests. Do not add generic UDP proxying, DNS/GSLB,
+  WAF, VPN/firewall appliance behavior, or new Wasm ABI scope in this release.
 
 ## Changelog Shape
 
