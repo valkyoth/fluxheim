@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.1
+Version:        1.5.2
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Thu Jun 04 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.2-1
+- Start the runtime load-balancer weight-control release line, focused on
+  authenticated runtime weight overrides for configured members, audit/status
+  visibility, and migration documentation without adding managed cookies,
+  cross-node state sync, UDP/GSLB, WAF, VPN/firewall, or scripting surfaces.
+
 * Wed Jun 03 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.1-1
 - Stabilize enterprise load-balancer persistence metrics, stale dynamic state
   pruning, local persistence-table cleanup, release smoke coverage, and

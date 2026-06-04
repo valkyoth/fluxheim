@@ -7,6 +7,17 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.2 - Unreleased
+
+### Changed
+
+- Start the runtime load-balancer weight-control release line. The stop line is
+  authenticated runtime weight overrides for configured members, audit/status
+  visibility, migration documentation, and focused smoke coverage. Managed
+  affinity-cookie insertion, cross-node state synchronization, UDP/GSLB, WAF,
+  VPN/firewall appliance behavior, and iRules/Lua/Wasm scripting remain later
+  roadmap tracks.
+
 ## 1.5.1 - 2026-06-03
 
 ### Changed

@@ -3304,6 +3304,12 @@ the exception while the cache server is being completed as a focused sequence:
   add runtime add/remove-member, runtime weight mutation, managed affinity
   cookies, cross-instance state sync, UDP/GSLB, WAF, VPN/firewall appliance
   behavior, or Wasm/iRules/Lua scripting in this release.
+- `v1.5.2`: runtime load-balancer weight-control line. Stop at authenticated
+  runtime weight overrides for already configured members, status/metrics/audit
+  visibility, canary traffic-shift migration docs, and focused smoke coverage.
+  Do not add runtime add/remove-member, managed affinity-cookie insertion,
+  restart-persistent or cross-node state, UDP/GSLB, WAF, VPN/firewall appliance
+  behavior, or Wasm/iRules/Lua scripting in this release.
 - `v1.6.1`: fixes for the shared Wasm extensibility runtime.
 
 ## Changelog Shape
