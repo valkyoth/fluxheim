@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use pingora::http::RequestHeader;
 use subtle::ConstantTimeEq;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::config::{
     LoadBalanceManagedCookieSameSite, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
@@ -374,14 +374,14 @@ fn managed_cookie_tag_with_key(
     )
 }
 
-fn managed_cookie_hmac_key_for_sign() -> [u8; 32] {
+fn managed_cookie_hmac_key_for_sign() -> Zeroizing<[u8; 32]> {
     let mut key_ring = managed_cookie_hmac_key_ring()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     key_ring.current_key(Instant::now())
 }
 
-fn managed_cookie_hmac_keys_for_verify() -> Vec<[u8; 32]> {
+fn managed_cookie_hmac_keys_for_verify() -> Vec<Zeroizing<[u8; 32]>> {
     let mut key_ring = managed_cookie_hmac_key_ring()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -430,17 +430,17 @@ impl ManagedCookieHmacKeyRing {
         }
     }
 
-    fn current_key(&mut self, now: Instant) -> [u8; 32] {
+    fn current_key(&mut self, now: Instant) -> Zeroizing<[u8; 32]> {
         self.rotate_if_due(now);
-        self.current.key
+        Zeroizing::new(self.current.key)
     }
 
-    fn verify_keys(&mut self, now: Instant) -> Vec<[u8; 32]> {
+    fn verify_keys(&mut self, now: Instant) -> Vec<Zeroizing<[u8; 32]>> {
         self.rotate_if_due(now);
         let mut keys = Vec::with_capacity(2);
-        keys.push(self.current.key);
+        keys.push(Zeroizing::new(self.current.key));
         if let Some(previous) = &self.previous {
-            keys.push(previous.key);
+            keys.push(Zeroizing::new(previous.key));
         }
         keys
     }
@@ -520,16 +520,16 @@ mod tests {
         let first_key = [7_u8; 32];
         let mut key_ring = ManagedCookieHmacKeyRing::with_current_key(first_key, now);
 
-        assert_eq!(key_ring.current_key(now), first_key);
+        assert_eq!(*key_ring.current_key(now), first_key);
 
         let rotated_at = now + MANAGED_COOKIE_HMAC_ROTATION + Duration::from_secs(1);
         let current = key_ring.current_key(rotated_at);
-        assert_ne!(current, first_key);
+        assert_ne!(*current, first_key);
         let verify_keys = key_ring.verify_keys(rotated_at);
 
         assert_eq!(verify_keys.len(), 2);
-        assert!(verify_keys.contains(&current));
-        assert!(verify_keys.contains(&first_key));
+        assert!(verify_keys.iter().any(|key| **key == *current));
+        assert!(verify_keys.iter().any(|key| **key == first_key));
     }
 
     #[test]
