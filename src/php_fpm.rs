@@ -550,7 +550,7 @@ pub(crate) fn parse_php_response(
             "php-fpm response exceeds maximum buffered size",
         ));
     }
-    let (header_bytes, body) = split_php_response(stdout)?;
+    let (header_bytes, body) = split_php_response(stdout).map_err(FluxError::into_io)?;
     if header_bytes.len() as u64 > max_response_header_bytes {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -580,7 +580,7 @@ pub(crate) fn parse_php_response(
             ));
         }
         if name.eq_ignore_ascii_case(b"status") {
-            status = parse_php_status(value)?;
+            status = parse_php_status(value).map_err(FluxError::into_io)?;
             response.status = StatusCode::from_u16(status)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             continue;
@@ -607,35 +607,41 @@ pub(crate) fn php_response_header(status: u16) -> FluxResult<ResponseHeader> {
         .map_err(|error| FluxError::invalid_input(error.to_string()))
 }
 
-fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
+fn split_php_response(stdout: &[u8]) -> FluxResult<(&[u8], &[u8])> {
     if let Some(index) = stdout.windows(4).position(|window| window == b"\r\n\r\n") {
         return Ok((&stdout[..index], &stdout[index + 4..]));
     }
     if let Some(index) = stdout.windows(2).position(|window| window == b"\n\n") {
         return Ok((&stdout[..index], &stdout[index + 2..]));
     }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidData,
+    Err(php_response_parse_error(
         "php-fpm response is missing header terminator",
     ))
 }
 
-fn parse_php_status(value: &[u8]) -> io::Result<u16> {
-    let text = std::str::from_utf8(value)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+fn parse_php_status(value: &[u8]) -> FluxResult<u16> {
+    let text = std::str::from_utf8(value).map_err(|error| {
+        php_response_parse_error(format!("PHP Status header is not valid UTF-8: {error}"))
+    })?;
     let status = text
         .split_whitespace()
         .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "empty PHP Status header"))?
+        .ok_or_else(|| php_response_parse_error("empty PHP Status header"))?
         .parse::<u16>()
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        .map_err(|error| php_response_parse_error(error.to_string()))?;
     if !(100..=599).contains(&status) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
+        return Err(php_response_parse_error(
             "PHP Status header is outside HTTP status range",
         ));
     }
     Ok(status)
+}
+
+fn php_response_parse_error(detail: impl Into<String>) -> FluxError {
+    FluxError::io(
+        "parse php-fpm response",
+        io::Error::new(io::ErrorKind::InvalidData, detail.into()),
+    )
 }
 
 fn trim_ascii_cr(value: &[u8]) -> &[u8] {

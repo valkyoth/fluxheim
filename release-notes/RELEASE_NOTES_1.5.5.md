@@ -70,6 +70,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   `FluxResult`, with Pingora adaptation kept at the PHP response boundary.
 - Move PHP FastCGI response-header construction failures onto `FluxResult`,
   with conversion back to `io::Error` kept at the PHP response parser boundary.
+- Route PHP FastCGI response split/status parsing through `FluxError` while
+  preserving `InvalidData` at the parser boundary.
 
 ## Boundaries
 
