@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,6 +8,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::config::RateLimitMode;
+use crate::flux_error::{FluxError, FluxResult};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum TrustedProxy {
@@ -324,7 +324,7 @@ pub(crate) struct RuntimeAccessPolicy {
 }
 
 impl RuntimeAccessPolicy {
-    pub(crate) fn from_config(config: &crate::config::AccessPolicyConfig) -> io::Result<Self> {
+    pub(crate) fn from_config(config: &crate::config::AccessPolicyConfig) -> FluxResult<Self> {
         Ok(Self {
             enabled: config.enabled,
             allow: parse_trusted_proxies(&config.allow)?,
@@ -441,14 +441,14 @@ fn normalized_countries(values: &[String]) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn parse_trusted_proxies(values: &[String]) -> io::Result<Vec<TrustedProxy>> {
+pub(crate) fn parse_trusted_proxies(values: &[String]) -> FluxResult<Vec<TrustedProxy>> {
     values
         .iter()
         .map(|value| parse_trusted_proxy(value))
         .collect()
 }
 
-fn parse_trusted_proxy(value: &str) -> io::Result<TrustedProxy> {
+fn parse_trusted_proxy(value: &str) -> FluxResult<TrustedProxy> {
     let value = value.trim();
     if let Some((address, prefix)) = value.split_once('/') {
         let network = address.parse::<IpAddr>().map_err(invalid_trusted_proxy)?;
@@ -469,11 +469,8 @@ fn parse_trusted_proxy(value: &str) -> io::Result<TrustedProxy> {
         .map_err(invalid_trusted_proxy)
 }
 
-fn invalid_trusted_proxy(error: impl std::fmt::Display) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidInput,
-        format!("invalid trusted proxy: {error}"),
-    )
+fn invalid_trusted_proxy(error: impl std::fmt::Display) -> FluxError {
+    FluxError::invalid_input(format!("invalid trusted proxy: {error}"))
 }
 
 fn ipv4_prefix_match(network: Ipv4Addr, address: Ipv4Addr, prefix: u8) -> bool {

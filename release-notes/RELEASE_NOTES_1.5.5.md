@@ -53,6 +53,9 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   boundary.
 - Move traffic mirror dispatch failures and response body-limit enforcement
   onto `FluxResult` inside the fire-and-forget mirror task.
+- Move trusted-proxy parsing and runtime access-policy construction onto
+  `FluxResult`, with conversion back to `io::Error` kept at proxy runtime
+  construction boundaries.
 
 ## Boundaries
 

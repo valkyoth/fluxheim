@@ -50,6 +50,9 @@ behavior when the change improves security or project direction.
   boundary.
 - Move traffic mirror dispatch failures and response body-limit enforcement
   onto `FluxResult` inside the fire-and-forget mirror task.
+- Move trusted-proxy parsing and runtime access-policy construction onto
+  `FluxResult`, with conversion back to `io::Error` kept at proxy runtime
+  construction boundaries.
 
 ## 1.5.4 - 2026-06-04
 

@@ -2362,7 +2362,8 @@ impl ProxyRuntimeState {
             host_index,
             wildcard_hosts,
             default_vhost,
-            trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
+            trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)
+                .map_err(crate::flux_error::FluxError::into_io)?,
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
@@ -2441,7 +2442,8 @@ impl ProxyRuntimeState {
             host_index,
             wildcard_hosts,
             default_vhost,
-            trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)?,
+            trusted_proxies: parse_trusted_proxies(&config.server.trusted_proxies)
+                .map_err(crate::flux_error::FluxError::into_io)?,
             limits: config.server.limits,
             https_redirect: config.server.https_redirect,
             host_routing: config.server.host_routing,
@@ -3490,7 +3492,8 @@ impl RuntimeRoute {
             rewrite_prefix: route.rewrite_prefix.clone(),
             rewrite_template: route.rewrite_template.clone(),
             max_request_body_bytes: route.max_request_body_bytes,
-            access: RuntimeAccessPolicy::from_config(&route.access)?,
+            access: RuntimeAccessPolicy::from_config(&route.access)
+                .map_err(crate::flux_error::FluxError::into_io)?,
             rate_limit: RuntimeRateLimit::from_config(&route.rate_limit),
             concurrency: RuntimeConcurrencyLimit::from_config(&route.concurrency),
             grpc: route.grpc,
@@ -3820,7 +3823,8 @@ impl RuntimeVhost {
             name: vhost.name.clone(),
             hosts: vhost.normalized_hosts(),
             max_request_body_bytes: vhost.max_request_body_bytes,
-            access: RuntimeAccessPolicy::from_config(&vhost.access)?,
+            access: RuntimeAccessPolicy::from_config(&vhost.access)
+                .map_err(crate::flux_error::FluxError::into_io)?,
             rate_limit: RuntimeRateLimit::from_config(&vhost.rate_limit),
             concurrency: RuntimeConcurrencyLimit::from_config(&vhost.concurrency),
             #[cfg(feature = "load-balancer")]
