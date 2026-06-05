@@ -4922,13 +4922,7 @@ impl ProxyHttp for FluxProxy {
         if let Some(compression) = &mut ctx.compression {
             let encoded = compression
                 .encode_chunk(body.as_ref(), _end_of_stream)
-                .map_err(|error| {
-                    Error::because(
-                        ErrorType::InternalError,
-                        "response compression failed",
-                        error,
-                    )
-                })?;
+                .map_err(|error| error.into_pingora(ErrorType::InternalError))?;
             *body = (!encoded.is_empty()).then_some(encoded);
         }
 
@@ -10253,7 +10247,7 @@ mod tests {
             .encode_chunk(Some(&Bytes::from_static(b"hello fluxheim")), true)
             .unwrap_err();
 
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidData));
     }
 
     #[cfg(all(feature = "compression-brotli", feature = "compression-gzip"))]

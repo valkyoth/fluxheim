@@ -12,7 +12,7 @@ use flate2::{Compression, write::GzEncoder};
 use pingora::ErrorType;
 use pingora::prelude::Result;
 
-use crate::flux_error::FluxError;
+use crate::flux_error::{FluxError, FluxResult};
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -90,13 +90,14 @@ impl ResponseCompressionEncoder {
     }
 
     #[cfg(feature = "compression-zstd")]
-    pub(crate) fn zstd(level: i32, max_output_bytes: usize) -> io::Result<Self> {
+    pub(crate) fn zstd(level: i32, max_output_bytes: usize) -> FluxResult<Self> {
         Ok(Self {
             encoding: "zstd",
-            inner: ResponseCompressionEncoderInner::Zstd(Some(zstd::stream::write::Encoder::new(
-                Vec::new(),
-                level,
-            )?)),
+            inner: ResponseCompressionEncoderInner::Zstd(Some(
+                zstd::stream::write::Encoder::new(Vec::new(), level).map_err(|error| {
+                    FluxError::io("initialize zstd response compression", error)
+                })?,
+            )),
             emitted: 0,
             max_output_bytes,
         })
@@ -106,7 +107,7 @@ impl ResponseCompressionEncoder {
         &mut self,
         input: Option<&Bytes>,
         end_of_stream: bool,
-    ) -> io::Result<Bytes> {
+    ) -> FluxResult<Bytes> {
         match &mut self.inner {
             #[cfg(feature = "compression-brotli")]
             ResponseCompressionEncoderInner::Brotli(encoder_slot) => {
@@ -114,12 +115,16 @@ impl ResponseCompressionEncoder {
                     return Ok(Bytes::new());
                 };
                 if let Some(input) = input {
-                    encoder.write_all(input)?;
+                    encoder
+                        .write_all(input)
+                        .map_err(|error| FluxError::io("write brotli response chunk", error))?;
                 }
                 let output = if end_of_stream {
                     encoder.into_inner()
                 } else {
-                    encoder.flush()?;
+                    encoder
+                        .flush()
+                        .map_err(|error| FluxError::io("flush brotli response chunk", error))?;
                     let bytes = copy_new_compression_bytes(
                         encoder.get_ref(),
                         &mut self.emitted,
@@ -133,12 +138,18 @@ impl ResponseCompressionEncoder {
             #[cfg(feature = "compression-gzip")]
             ResponseCompressionEncoderInner::Gzip(encoder) => {
                 if let Some(input) = input {
-                    encoder.write_all(input)?;
+                    encoder
+                        .write_all(input)
+                        .map_err(|error| FluxError::io("write gzip response chunk", error))?;
                 }
                 if end_of_stream {
-                    encoder.try_finish()?;
+                    encoder
+                        .try_finish()
+                        .map_err(|error| FluxError::io("finish gzip response stream", error))?;
                 } else {
-                    encoder.flush()?;
+                    encoder
+                        .flush()
+                        .map_err(|error| FluxError::io("flush gzip response chunk", error))?;
                 }
                 copy_new_compression_bytes(
                     encoder.get_ref(),
@@ -152,12 +163,18 @@ impl ResponseCompressionEncoder {
                     return Ok(Bytes::new());
                 };
                 if let Some(input) = input {
-                    encoder.write_all(input)?;
+                    encoder
+                        .write_all(input)
+                        .map_err(|error| FluxError::io("write zstd response chunk", error))?;
                 }
                 let output = if end_of_stream {
-                    encoder.finish()?
+                    encoder
+                        .finish()
+                        .map_err(|error| FluxError::io("finish zstd response stream", error))?
                 } else {
-                    encoder.flush()?;
+                    encoder
+                        .flush()
+                        .map_err(|error| FluxError::io("flush zstd response chunk", error))?;
                     let bytes = copy_new_compression_bytes(
                         encoder.get_ref(),
                         &mut self.emitted,
@@ -181,11 +198,14 @@ fn copy_new_compression_bytes(
     output: &[u8],
     emitted: &mut usize,
     max_output_bytes: usize,
-) -> io::Result<Bytes> {
+) -> FluxResult<Bytes> {
     if output.len() > max_output_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
+        return Err(FluxError::io(
             "compressed response exceeds max_output_bytes",
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "compressed response exceeds max_output_bytes",
+            ),
         ));
     }
     let bytes = Bytes::copy_from_slice(&output[*emitted..]);
@@ -212,8 +232,7 @@ pub(crate) fn prepare_response_compression(
     response.remove_header("etag");
     append_vary_accept_encoding(response)?;
     Ok(Some(encoding.encoder(config).map_err(|error| {
-        FluxError::io("response compression initialization failed", error)
-            .into_pingora(ErrorType::InternalError)
+        error.into_pingora(ErrorType::InternalError)
     })?))
 }
 
@@ -252,7 +271,7 @@ impl ResponseCompressionEncoding {
     fn encoder(
         self,
         config: &crate::config::CompressionConfig,
-    ) -> io::Result<ResponseCompressionEncoder> {
+    ) -> FluxResult<ResponseCompressionEncoder> {
         match self {
             #[cfg(feature = "compression-brotli")]
             Self::Brotli => Ok(ResponseCompressionEncoder::brotli(

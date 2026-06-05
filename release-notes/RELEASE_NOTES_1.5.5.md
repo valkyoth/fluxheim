@@ -43,6 +43,9 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   with Pingora adaptation kept at the proxy cache boundary.
 - Move static-file body read/open validation onto `FluxResult` while keeping
   Pingora adaptation at static serving and proxy cache call sites.
+- Move response compression encoder initialization and chunk emission onto
+  `FluxResult`, with Pingora adaptation kept at compression setup and proxy body
+  filter boundaries.
 
 ## Boundaries
 
