@@ -1751,6 +1751,13 @@ Stable scope:
   `FluxResult` taxonomy instead of propagating Pingora HTTP wrappers and
   `pingora::Error` through internal APIs. Keep narrow adapters at Pingora
   HTTP proxy boundaries until a later HTTP runtime replacement line exists.
+- The `1.5.5` HTTP/error boundary line deliberately stops before broad
+  runtime rewrites. Any leftover plain `io::Result` / Pingora adapter use in
+  PHP-FPM process lifecycle, PHP request-body spool files, stream data-path
+  copy/connect/shutdown helpers, upstream TLS material loading, and
+  load-balancer factory/background wiring should move with the future native
+  PHP/HTTP-runtime, stream-runtime, TLS/server-runtime, and load-balancer-core
+  milestones below rather than being chipped away as unbounded cleanup.
 - The stream proxy should become Fluxheim-native before the load-balancer
   substrate work. Its tunnel, PROXY protocol framing, connection limits, byte
   caps, idle/lifetime limits, and metrics are already Fluxheim-owned; the
@@ -2438,6 +2445,9 @@ Stable scope:
 - Listener setup owned by Fluxheim for the supported release profiles.
 - TLS listener configuration owned or isolated behind Fluxheim APIs for
   rustls/rustls-FIPS and OpenSSL/OpenSSL-FIPS.
+- Upstream TLS material loading and evidence paths audited under the same
+  Fluxheim-owned TLS boundary, including any remaining upstream TLS helper
+  errors that were intentionally left out of `1.5.5`.
 - Preserve per-vhost SNI, mTLS/client-auth policy, ALPN, OCSP stapling where
   supported, secure defaults, config validation, and release evidence.
 - Preserve bare-metal hot restart only if the implementation can remain
@@ -2449,6 +2459,9 @@ Out of scope:
 - Replacing Pingora `ProxyHttp` or `Session`.
 - Changing cache, compression, PHP-FPM, load-balancer, Wasm, or admin API
   semantics.
+- Rewriting PHP-FPM process supervision, request-body spool I/O, or FastCGI
+  request execution. Those stay in the HTTP proxy runtime dependency line
+  unless a focused PHP release requires them earlier.
 - HTTP/3/QUIC, UDP/GSLB, WAF, VPN/firewall appliance behavior, or new Wasm ABI
   scope.
 
@@ -3556,14 +3569,23 @@ the exception while the cache server is being completed as a focused sequence:
   not replace the HTTP proxy runtime, change stream proxy runtime, change
   cache semantics, change load-balancer selection/state behavior, add
   HTTP/3/QUIC, UDP/GSLB, WAF, VPN/firewall appliance behavior, or
-  Wasm/iRules/Lua scripting in this release.
+  Wasm/iRules/Lua scripting in this release. Defer remaining runtime-heavy
+  error-boundary work explicitly: PHP-FPM process supervision and request-body
+  spool I/O move with later PHP/HTTP-runtime work, stream connect/copy/shutdown
+  helpers move with `v1.5.6`, load-balancer factory/background wiring moves
+  with `v1.5.7`, and upstream TLS material loading moves with the later
+  server/listener/TLS runtime line unless it is required earlier for stream
+  runtime correctness.
 - `v1.5.6`: Fluxheim-native stream-proxy runtime line. Stop at replacing
   Pingora's stream service entrypoint and stream/TLS connector wrappers with a
   Fluxheim-owned Tokio listener loop and explicit outbound connector for raw
   TCP plus upstream TLS/mTLS. Preserve existing stream config, route matching,
   weighted upstream selection, drain/backup policy, route-local PROXY protocol
   receive/send, true idle timeouts, lifetime and byte caps, metrics, smoke
-  tests, and release-profile behavior. Do not add UDP proxying, HTTP/3/QUIC,
+  tests, and release-profile behavior. This is also where remaining stream
+  data-path `io::Result` helpers should be moved behind Fluxheim-owned error
+  types because the stream runtime boundary becomes Fluxheim-owned. Do not add
+  UDP proxying, HTTP/3/QUIC,
   native load-balancer internals, restart-persistent state, cross-node sync,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this
   release.
@@ -3573,7 +3595,10 @@ the exception while the cache server is being completed as a focused sequence:
   health-check scheduling, background update lifecycle, and existing selector
   entry points. Preserve current config, admin API, status shape, metrics,
   smoke tests, privacy-mode behavior, managed-cookie behavior, and all
-  selection results as far as possible. Keep Pingora's HTTP proxy core and
+  selection results as far as possible. Convert remaining load-balancer
+  construction/factory/background update errors onto Fluxheim-owned error
+  types as part of this substrate replacement, not as scattered cleanup. Keep
+  Pingora's HTTP proxy core and
   upstream transport in place. Do not add restart-persistent state, cross-node
   sync, runtime add/remove-member, xDS/Kubernetes/Consul discovery, UDP/GSLB,
   WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting in this

@@ -204,6 +204,13 @@ engines;
 keep mature crates for TLS, cryptography, complex protocol state machines,
 async runtime behavior, compression, and parsers until a later milestone can
 prove a replacement safer.
+The `1.5.5` HTTP/error boundary work intentionally stops before runtime-heavy
+cleanup. Remaining plain `io::Result` / Pingora adapter paths in PHP-FPM
+process supervision and body spooling, stream connect/copy/shutdown helpers,
+upstream TLS material loading, and load-balancer factory/background wiring are
+tracked in the future native stream, load-balancer core, server/listener/TLS,
+and HTTP proxy runtime milestones instead of being treated as forgotten
+leftovers.
 After the smaller `1.5` dependency-reduction work and the `1.6` Wasm runtime,
 track two larger architecture lines separately: a Fluxheim-owned server
 bootstrap/listener/TLS runtime to replace Pingora `Server`, service
