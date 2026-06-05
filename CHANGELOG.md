@@ -61,6 +61,9 @@ behavior when the change improves security or project direction.
   conversion back to `io::Error` kept at stream service construction.
 - Move HTTP health-check request-header setup onto `FluxResult`, with
   conversion back to `io::Error` kept at the health-check factory boundary.
+- Move cache peer-fill and origin-slice request URL validation onto
+  `FluxResult`, with conversion back to `io::Error` kept at blocking fetch
+  boundaries.
 
 ## 1.5.4 - 2026-06-04
 

@@ -80,6 +80,8 @@ use crate::edge_policy::{
     InFlightPermit, RateLimitDecision, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
     RuntimeRateLimit, TrustedProxy, parse_trusted_proxies,
 };
+#[cfg(feature = "cache")]
+use crate::flux_error::{FluxError, FluxResult};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{
     LoadBalancedUpstreamOutcome, LoadBalancerPoolRuntimeStats, LoadBalancerRuntimeBackendState,
@@ -5954,9 +5956,11 @@ async fn fetch_origin_slice(
     max_body_bytes: u64,
 ) -> std::io::Result<CacheSliceOriginResponse> {
     let proxy = proxy.clone();
-    let request = origin_slice_request_from_header(request, route, bounds)?;
+    let request =
+        origin_slice_request_from_header(request, route, bounds).map_err(FluxError::into_io)?;
     tokio::task::spawn_blocking(move || {
-        let url = origin_slice_url(&proxy.config, &request.path_and_query)?;
+        let url =
+            origin_slice_url(&proxy.config, &request.path_and_query).map_err(FluxError::into_io)?;
         let timeout = std::time::Duration::from_secs(
             proxy
                 .config
@@ -6025,7 +6029,7 @@ fn origin_slice_request_from_header(
     request: &RequestHeader,
     route: Option<&RuntimeRoute>,
     _bounds: CacheSliceBounds,
-) -> std::io::Result<OriginSliceRequest> {
+) -> FluxResult<OriginSliceRequest> {
     let path_and_query = route
         .and_then(|route| route_rewritten_path_and_query(request, route))
         .or_else(|| {
@@ -6036,8 +6040,7 @@ fn origin_slice_request_from_header(
         })
         .unwrap_or_else(|| request.uri.path().to_owned());
     if !path_and_query.starts_with('/') || path_and_query.chars().any(char::is_control) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
+        return Err(FluxError::InvalidInput(
             "origin slice path must be absolute and printable",
         ));
     }
@@ -6048,11 +6051,10 @@ fn origin_slice_request_from_header(
 }
 
 #[cfg(feature = "cache")]
-fn origin_slice_url(proxy: &ProxyConfig, path_and_query: &str) -> std::io::Result<String> {
+fn origin_slice_url(proxy: &ProxyConfig, path_and_query: &str) -> FluxResult<String> {
     let scheme = if proxy.upstream_tls { "https" } else { "http" };
     if !path_and_query.starts_with('/') {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
+        return Err(FluxError::InvalidInput(
             "origin slice request path must be absolute",
         ));
     }
@@ -6518,7 +6520,8 @@ fn fetch_peer_fill_response(
     request: &PeerFillRequest,
     max_body_bytes: u64,
 ) -> std::io::Result<Option<PeerFillResponse>> {
-    let url = peer_fill_url(&peer.base_url, &request.uri_path_and_query)?;
+    let url =
+        peer_fill_url(&peer.base_url, &request.uri_path_and_query).map_err(FluxError::into_io)?;
     let timeout = std::time::Duration::from_secs(
         peer_fill
             .connect_timeout_secs
@@ -6577,13 +6580,12 @@ fn fetch_peer_fill_response(
 }
 
 #[cfg(feature = "cache")]
-fn peer_fill_url(base_url: &str, path_and_query: &str) -> std::io::Result<String> {
+fn peer_fill_url(base_url: &str, path_and_query: &str) -> FluxResult<String> {
     let base_url = base_url.trim_end_matches('/');
     if crate::path_safety::safe_forward_path_and_query(path_and_query) {
         Ok(format!("{base_url}{path_and_query}"))
     } else {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
+        Err(FluxError::InvalidInput(
             "peer fill request path must be absolute and traversal-free",
         ))
     }
