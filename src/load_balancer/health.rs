@@ -258,10 +258,10 @@ async fn drain_http_health_response_body(session: &mut HttpSession) -> pingora::
     while let Some(chunk) = session.read_response_body().await? {
         drained = drained.saturating_add(chunk.len());
         if drained > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
-            return Error::e_explain(
+            return Err(http_health_check_error(
                 ErrorType::ReadError,
                 "HTTP health check response body exceeded maximum size",
-            );
+            ));
         }
     }
     Ok(())
@@ -271,10 +271,10 @@ async fn read_http_health_response_body(session: &mut HttpSession) -> pingora::R
     let mut body = Vec::new();
     while let Some(chunk) = session.read_response_body().await? {
         if body.len().saturating_add(chunk.len()) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
-            return Error::e_explain(
+            return Err(http_health_check_error(
                 ErrorType::ReadError,
                 "HTTP health check response body exceeded maximum size",
-            );
+            ));
         }
         body.extend_from_slice(&chunk);
     }
