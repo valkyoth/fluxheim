@@ -5,6 +5,8 @@ use crate::http_types::PingoraRequestHeader as RequestHeader;
 use bytes::Bytes;
 use zeroize::Zeroizing;
 
+use crate::flux_error::{FluxError, FluxResult};
+
 #[derive(Debug)]
 pub(crate) struct AuthRequestInput {
     pub(crate) headers: Vec<(String, Zeroizing<String>)>,
@@ -32,13 +34,11 @@ pub(crate) fn auth_request_input(
 pub(crate) fn fetch_auth_request_decision(
     auth: &crate::config::AuthRequestConfig,
     input: &AuthRequestInput,
-) -> io::Result<AuthRequestDecision> {
-    let url = auth.url.as_deref().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "enabled auth_request requires url",
-        )
-    })?;
+) -> FluxResult<AuthRequestDecision> {
+    let url = auth
+        .url
+        .as_deref()
+        .ok_or(FluxError::InvalidInput("enabled auth_request requires url"))?;
     let timeout = Duration::from_secs(
         auth.connect_timeout_secs
             .saturating_add(auth.read_timeout_secs),
@@ -62,9 +62,12 @@ pub(crate) fn fetch_auth_request_decision(
         .read_to_vec()
         .map_err(auth_request_io_error)?;
     if body.len() as u64 > auth.max_response_bytes.as_u64() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
+        return Err(FluxError::io(
             "auth_request response exceeds configured body limit",
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "auth_request response exceeds configured body limit",
+            ),
         ));
     }
     if (200..300).contains(&status) {
@@ -106,8 +109,11 @@ fn auth_response_allowed_headers(
         .collect()
 }
 
-fn auth_request_io_error(error: impl std::fmt::Display) -> io::Error {
-    io::Error::other(error.to_string())
+fn auth_request_io_error(error: impl std::fmt::Display) -> FluxError {
+    FluxError::io(
+        "auth_request HTTP subrequest",
+        io::Error::other(error.to_string()),
+    )
 }
 
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {

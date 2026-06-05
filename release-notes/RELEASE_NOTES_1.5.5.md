@@ -48,6 +48,9 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   filter boundaries.
 - Move route regex matcher construction onto `FluxResult`, with conversion back
   to `io::Error` kept at the legacy vhost route-construction boundary.
+- Move auth subrequest fetch failures and response body-limit enforcement onto
+  `FluxResult`, with Pingora adaptation kept at the proxy authorization
+  boundary.
 
 ## Boundaries
 

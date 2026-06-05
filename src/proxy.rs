@@ -8376,11 +8376,7 @@ async fn authorize_proxy_request(
                 "auth_request",
                 "error",
             );
-            return Err(Error::because(
-                ErrorType::HTTPStatus(502),
-                "auth_request subrequest failed",
-                error,
-            ));
+            return Err(error.into_pingora(ErrorType::HTTPStatus(502)));
         }
         Err(error) => {
             #[cfg(feature = "metrics")]

@@ -45,6 +45,9 @@ behavior when the change improves security or project direction.
   filter boundaries.
 - Move route regex matcher construction onto `FluxResult`, with conversion back
   to `io::Error` kept at the legacy vhost route-construction boundary.
+- Move auth subrequest fetch failures and response body-limit enforcement onto
+  `FluxResult`, with Pingora adaptation kept at the proxy authorization
+  boundary.
 
 ## 1.5.4 - 2026-06-04
 
