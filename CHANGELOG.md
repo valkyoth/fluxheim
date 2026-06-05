@@ -63,6 +63,8 @@ behavior when the change improves security or project direction.
   conversion back to `io::Error` kept at the health-check factory boundary.
 - Move cache peer-fill and origin-slice request validation plus blocking fetch
   helper failures onto `FluxResult`.
+- Move PHP `X-Accel-Expires` response header mutation failures onto
+  `FluxResult`, with Pingora adaptation kept at the PHP response boundary.
 
 ## 1.5.4 - 2026-06-04
 

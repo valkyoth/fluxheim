@@ -66,6 +66,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   conversion back to `io::Error` kept at the health-check factory boundary.
 - Move cache peer-fill and origin-slice request validation plus blocking fetch
   helper failures onto `FluxResult`.
+- Move PHP `X-Accel-Expires` response header mutation failures onto
+  `FluxResult`, with Pingora adaptation kept at the PHP response boundary.
 
 ## Boundaries
 

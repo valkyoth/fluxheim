@@ -80,7 +80,7 @@ use crate::edge_policy::{
     InFlightPermit, RateLimitDecision, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
     RuntimeRateLimit, TrustedProxy, parse_trusted_proxies,
 };
-#[cfg(feature = "cache")]
+#[cfg(any(feature = "cache", feature = "php-fpm"))]
 use crate::flux_error::{FluxError, FluxResult};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{
@@ -6982,13 +6982,8 @@ async fn respond_php_request(
     let PhpFpmParsedResponse {
         mut response, body, ..
     } = parsed;
-    apply_php_x_accel_expires(&mut response).map_err(|error| {
-        Error::because(
-            ErrorType::HTTPStatus(502),
-            "php-fpm response cache controls were invalid",
-            error,
-        )
-    })?;
+    apply_php_x_accel_expires(&mut response)
+        .map_err(|error| error.into_pingora(ErrorType::HTTPStatus(502)))?;
     ignore_php_origin_cache_headers(&mut response, &php.config);
     if response.status == StatusCode::OK {
         match php_static_offload_file(&mut response, php) {
@@ -8798,7 +8793,7 @@ fn php_static_offload_file_allowed(php: &RuntimePhp, file: &crate::web::StaticFi
 }
 
 #[cfg(feature = "php-fpm")]
-fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> io::Result<()> {
+fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> FluxResult<()> {
     let Some(raw_value) = response
         .headers
         .get_all("x-accel-expires")
@@ -8825,13 +8820,13 @@ fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> io::Result<()> {
     if ttl_secs == 0 {
         response
             .insert_header("cache-control", "no-store, private")
-            .map_err(|error| io::Error::other(error.to_string()))?;
+            .map_err(php_x_accel_header_error)?;
         response
             .insert_header(
                 "expires",
                 httpdate::fmt_http_date(std::time::SystemTime::UNIX_EPOCH),
             )
-            .map_err(|error| io::Error::other(error.to_string()))?;
+            .map_err(php_x_accel_header_error)?;
         return Ok(());
     }
 
@@ -8842,14 +8837,22 @@ fn apply_php_x_accel_expires(response: &mut ResponseHeader) -> io::Result<()> {
     };
     response
         .insert_header("cache-control", directive)
-        .map_err(|error| io::Error::other(error.to_string()))?;
+        .map_err(php_x_accel_header_error)?;
     let expires = std::time::SystemTime::now()
         .checked_add(std::time::Duration::from_secs(ttl_secs))
         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
     response
         .insert_header("expires", httpdate::fmt_http_date(expires))
-        .map_err(|error| io::Error::other(error.to_string()))?;
+        .map_err(php_x_accel_header_error)?;
     Ok(())
+}
+
+#[cfg(feature = "php-fpm")]
+fn php_x_accel_header_error(error: impl std::fmt::Display) -> FluxError {
+    FluxError::io(
+        "apply PHP X-Accel-Expires response headers",
+        io::Error::other(error.to_string()),
+    )
 }
 
 #[cfg(feature = "php-fpm")]
