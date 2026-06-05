@@ -1340,7 +1340,6 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};
 
-    use pingora::http::RequestHeader;
     use pingora::lb::Backend;
 
     use crate::config::{
@@ -1349,6 +1348,7 @@ mod tests {
         LoadBalancePassiveHealthConfig, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
         LoadBalanceQueueConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
     };
+    use crate::http_types::PingoraRequestHeader as RequestHeader;
 
     use super::persistence::{MAX_PERSISTENCE_KEY_BYTES, cookie_key, request_header_key};
     use super::selection::{fnv1a64_with_seed, least_connections_score_is_lower};

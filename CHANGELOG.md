@@ -22,6 +22,8 @@ behavior when the change improves security or project direction.
 - Extend HTTP boundary aliases into load-balancer health/persistence and static
   web response helpers, and route selected compression/cache errors through
   `FluxError` before Pingora adaptation.
+- Move load-balancer tests, access-log tests, and the cache-key CLI request
+  builder through explicit HTTP adapter aliases.
 
 ## 1.5.4 - 2026-06-04
 

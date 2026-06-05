@@ -495,7 +495,7 @@ mod tests {
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn access_log_request_id_reuses_valid_inbound_value() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
         request
             .insert_header("x-request-id", "edge-req-123")
             .unwrap();
@@ -510,13 +510,13 @@ mod tests {
     #[cfg(not(feature = "privacy-mode"))]
     #[test]
     fn access_log_request_id_generates_for_missing_or_invalid_value() {
-        let missing = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        let missing = RequestHeader::build("GET", b"/", None).unwrap();
         let generated =
             access_log_request_id(&crate::config::AccessLoggingConfig::default(), &missing)
                 .unwrap();
         assert!(generated.starts_with("fh-"));
 
-        let mut invalid = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        let mut invalid = RequestHeader::build("GET", b"/", None).unwrap();
         invalid.insert_header("x-request-id", "bad value").unwrap();
         let regenerated =
             access_log_request_id(&crate::config::AccessLoggingConfig::default(), &invalid)

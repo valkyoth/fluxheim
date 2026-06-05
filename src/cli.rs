@@ -14,6 +14,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use zeroize::Zeroizing;
 
 use crate::config::Config;
+#[cfg(all(feature = "cache", feature = "proxy"))]
+use crate::http_types::PingoraRequestHeader;
 
 #[derive(Debug, Parser)]
 #[command(version = env!("FLUXHEIM_VERSION"), about = "Fluxheim reverse proxy")]
@@ -2684,7 +2686,7 @@ fn run_cache_lookup_command(
 #[cfg(all(feature = "cache", feature = "proxy"))]
 fn cache_key_command_request(
     options: &CacheKeyOptions<'_>,
-) -> Result<(Config, pingora::http::RequestHeader), Box<dyn Error + Send + Sync>> {
+) -> Result<(Config, PingoraRequestHeader), Box<dyn Error + Send + Sync>> {
     let config = Config::load(options.config_path)?;
     config.validate()?;
 
@@ -2699,8 +2701,7 @@ fn cache_key_command_request(
     let uri = cache_key_uri(&options.path, options.query.as_deref())?;
     validate_cache_key_method(&options.method)?;
 
-    let mut request =
-        pingora::http::RequestHeader::build(options.method.as_str(), uri.as_bytes(), None)?;
+    let mut request = PingoraRequestHeader::build(options.method.as_str(), uri.as_bytes(), None)?;
     request.insert_header("host", host.as_str())?;
     if options.headers.len() > 32 {
         return Err("cache-key accepts at most 32 --header values".into());

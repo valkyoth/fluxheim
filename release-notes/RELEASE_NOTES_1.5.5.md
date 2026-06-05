@@ -19,6 +19,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   HTTP boundary aliases.
 - Extend the HTTP boundary aliases into load-balancer health checks,
   persistence-cookie parsing, and static web response builders.
+- Move load-balancer tests, access-log tests, and the cache-key CLI request
+  builder through the explicit Pingora request-header adapter alias.
 - Route response-compression initialization errors and cache range/slice key
   validation errors through `FluxError` before adapting them back to Pingora
   errors.
