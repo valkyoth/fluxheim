@@ -28,6 +28,9 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   profiles so the Apple Silicon macOS developer CI matrix can check
   `web`, `profile-static-site`, `profile-reverse-proxy`, `profile-full`, and
   `profile-development` without feature-gate drift.
+- Move header policy request/response signatures and tests through the explicit
+  Pingora HTTP adapter aliases while preserving the current mutation and rewrite
+  behavior.
 
 ## Boundaries
 

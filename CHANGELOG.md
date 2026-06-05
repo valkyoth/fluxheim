@@ -26,6 +26,8 @@ behavior when the change improves security or project direction.
   builder through explicit HTTP adapter aliases.
 - Fix proxy HTTP adapter feature gates so the macOS developer CI matrix can
   check static-site, reverse-proxy, full, and development profiles consistently.
+- Move header policy request/response signatures and tests through the explicit
+  Pingora HTTP adapter aliases.
 
 ## 1.5.4 - 2026-06-04
 

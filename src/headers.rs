@@ -7,6 +7,9 @@ use crate::config::{
 };
 #[cfg(feature = "privacy-mode")]
 use crate::config::{HeaderValues, RequestHeaderPolicyConfig, ResponseHeaderPolicyConfig};
+use crate::http_types::{
+    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
+};
 
 const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
     "x-forwarded-for",
@@ -21,7 +24,7 @@ const SPOOFABLE_CLIENT_IP_HEADERS: &[&str] = &[
 const DEFAULT_SERVER_HEADER: &str = "fluxheim";
 
 pub fn apply_upstream_request_policy(
-    request: &mut pingora::http::RequestHeader,
+    request: &mut RequestHeader,
     policy: &RequestHeaderPolicyConfig,
     context: UpstreamRequestPolicyContext<'_>,
 ) -> pingora::Result<()> {
@@ -104,7 +107,7 @@ impl RouteRegexCaptures {
 
 #[cfg(feature = "privacy-mode")]
 fn apply_privacy_upstream_request_policy(
-    request: &mut pingora::http::RequestHeader,
+    request: &mut RequestHeader,
     policy: &RequestHeaderPolicyConfig,
     request_id: Option<&str>,
 ) -> pingora::Result<()> {
@@ -123,7 +126,7 @@ fn apply_privacy_upstream_request_policy(
 
 #[cfg(not(feature = "privacy-mode"))]
 fn apply_standard_upstream_request_policy(
-    request: &mut pingora::http::RequestHeader,
+    request: &mut RequestHeader,
     policy: &RequestHeaderPolicyConfig,
     context: UpstreamRequestPolicyContext<'_>,
 ) -> pingora::Result<()> {
@@ -238,7 +241,7 @@ struct RequestHeaderTemplateContext {
 
 impl RequestHeaderTemplateContext {
     fn new(
-        request: &pingora::http::RequestHeader,
+        request: &RequestHeader,
         client_ip: Option<IpAddr>,
         downstream_tls: bool,
         request_id: Option<&str>,
@@ -318,7 +321,7 @@ impl RequestHeaderTemplateContext {
 }
 
 pub fn apply_response_policy(
-    response: &mut pingora::http::ResponseHeader,
+    response: &mut ResponseHeader,
     policy: &ResponseHeaderPolicyConfig,
 ) -> pingora::Result<()> {
     if !policy.enabled {
@@ -361,7 +364,7 @@ pub fn apply_response_policy(
 }
 
 fn apply_request_mutations(
-    request: &mut pingora::http::RequestHeader,
+    request: &mut RequestHeader,
     unset: &[String],
     set: &std::collections::BTreeMap<String, String>,
     append: &std::collections::BTreeMap<String, HeaderValues>,
@@ -426,7 +429,7 @@ fn hex_lower(bytes: &[u8]) -> String {
 }
 
 fn apply_response_mutations(
-    response: &mut pingora::http::ResponseHeader,
+    response: &mut ResponseHeader,
     unset: &[String],
     set: &std::collections::BTreeMap<String, String>,
     append: &std::collections::BTreeMap<String, HeaderValues>,
@@ -448,7 +451,7 @@ fn apply_response_mutations(
 }
 
 fn apply_response_rewrites(
-    response: &mut pingora::http::ResponseHeader,
+    response: &mut ResponseHeader,
     rewrite: &crate::config::ResponseHeaderRewriteConfig,
 ) -> pingora::Result<()> {
     rewrite_header_values(
@@ -462,7 +465,7 @@ fn apply_response_rewrites(
 }
 
 fn rewrite_header_values(
-    response: &mut pingora::http::ResponseHeader,
+    response: &mut ResponseHeader,
     name: &'static str,
     rules: &[crate::config::ResponseHeaderRewriteRuleConfig],
     rewrite_value: fn(&str, &[crate::config::ResponseHeaderRewriteRuleConfig]) -> Option<String>,
@@ -574,7 +577,7 @@ fn find_refresh_url_start(value: &str) -> Option<usize> {
 }
 
 fn rewrite_set_cookie_values(
-    response: &mut pingora::http::ResponseHeader,
+    response: &mut ResponseHeader,
     rewrite: &crate::config::ResponseHeaderRewriteConfig,
 ) -> pingora::Result<()> {
     if rewrite.cookie_domain.is_empty() && rewrite.cookie_path.is_empty() {
@@ -714,7 +717,7 @@ fn rewrite_domain(
 
 #[cfg(not(feature = "privacy-mode"))]
 fn apply_x_forwarded_for(
-    request: &mut pingora::http::RequestHeader,
+    request: &mut RequestHeader,
     mode: ForwardedClientIpHeaderMode,
     original_value: Option<&str>,
     client_ip: IpAddr,
@@ -821,7 +824,7 @@ fn quote_forwarded_value(value: &str) -> String {
 }
 
 fn set_optional_header(
-    response: &mut pingora::http::ResponseHeader,
+    response: &mut ResponseHeader,
     name: &'static str,
     value: Option<&str>,
 ) -> pingora::Result<()> {
@@ -841,13 +844,14 @@ mod tests {
     #[cfg(feature = "privacy-mode")]
     use std::net::{Ipv4Addr, SocketAddr};
 
+    use super::{
+        RequestHeader, ResponseHeader, UpstreamRequestPolicyContext, apply_response_policy,
+        apply_upstream_request_policy,
+    };
     #[cfg(not(feature = "privacy-mode"))]
     use super::{
         RequestHeaderTemplateContext, RequestTlsClientIdentity, RouteRegexCaptures,
         render_header_template,
-    };
-    use super::{
-        UpstreamRequestPolicyContext, apply_response_policy, apply_upstream_request_policy,
     };
     #[cfg(not(feature = "privacy-mode"))]
     use proptest::prelude::*;
@@ -875,7 +879,7 @@ mod tests {
     #[test]
     fn applies_default_response_headers() {
         let policy = crate::config::ResponseHeaderPolicyConfig::default();
-        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        let mut response = ResponseHeader::build(200, None).unwrap();
         response.insert_header("server", "origin/1.2.3").unwrap();
         response.insert_header("x-powered-by", "framework").unwrap();
 
@@ -918,7 +922,7 @@ mod tests {
             enabled: false,
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        let mut response = ResponseHeader::build(200, None).unwrap();
 
         apply_response_policy(&mut response, &policy).unwrap();
 
@@ -952,7 +956,7 @@ mod tests {
             ]),
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        let mut response = ResponseHeader::build(200, None).unwrap();
         response.insert_header("server", "origin-version").unwrap();
 
         apply_response_policy(&mut response, &policy).unwrap();
@@ -1001,7 +1005,7 @@ mod tests {
             },
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        let mut response = ResponseHeader::build(200, None).unwrap();
         response.insert_header("x-origin-banner", "origin").unwrap();
         response.insert_header("x-debug", "1").unwrap();
 
@@ -1031,7 +1035,7 @@ mod tests {
             set: std::collections::BTreeMap::from([("server".to_owned(), "Fluxheim".to_owned())]),
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        let mut response = ResponseHeader::build(200, None).unwrap();
         response.insert_header("server", "origin-version").unwrap();
 
         apply_response_policy(&mut response, &policy).unwrap();
@@ -1061,7 +1065,7 @@ mod tests {
             },
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(302, None).unwrap();
+        let mut response = ResponseHeader::build(302, None).unwrap();
         response
             .insert_header("location", "http://backend.internal/login?next=/admin")
             .unwrap();
@@ -1100,7 +1104,7 @@ mod tests {
             },
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(302, None).unwrap();
+        let mut response = ResponseHeader::build(302, None).unwrap();
         response
             .insert_header("location", "https://other.example/login")
             .unwrap();
@@ -1132,7 +1136,7 @@ mod tests {
             },
             ..crate::config::ResponseHeaderPolicyConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, None).unwrap();
+        let mut response = ResponseHeader::build(200, None).unwrap();
         response
             .append_header(
                 "set-cookie",
@@ -1163,7 +1167,7 @@ mod tests {
     #[test]
     fn applies_default_upstream_request_headers() {
         let policy = crate::config::RequestHeaderPolicyConfig::default();
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request
             .insert_header("x-forwarded-for", "198.51.100.9")
@@ -1210,7 +1214,7 @@ mod tests {
             x_real_ip: true,
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
 
@@ -1245,7 +1249,7 @@ mod tests {
             )]),
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request
             .insert_header("x-powered-by", "origin-version")
@@ -1309,8 +1313,7 @@ mod tests {
             ]),
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/chat/?room=main", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/chat/?room=main", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request.insert_header("upgrade", "websocket").unwrap();
         let client_addr = SocketAddr::from((Ipv4Addr::new(203, 0, 113, 10), 53210));
@@ -1422,8 +1425,7 @@ mod tests {
 
     #[cfg(not(feature = "privacy-mode"))]
     fn safe_dynamic_header_context() -> RequestHeaderTemplateContext {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/chat/?room=main", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/chat/?room=main", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request.insert_header("upgrade", "websocket").unwrap();
 
@@ -1533,8 +1535,7 @@ mod tests {
             ],
             named,
         );
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/api/v2/users", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/api/v2/users", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         let context = RequestHeaderTemplateContext::new(
             &request,
@@ -1572,7 +1573,7 @@ mod tests {
             },
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request
             .insert_header("x-powered-by", "origin-version")
@@ -1609,8 +1610,7 @@ mod tests {
     #[test]
     fn preserves_upgrade_headers_by_default() {
         let policy = crate::config::RequestHeaderPolicyConfig::default();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/chat/room", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/chat/room", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request
             .insert_header("connection", "keep-alive, Upgrade")
@@ -1656,7 +1656,7 @@ mod tests {
             x_forwarded_for: crate::config::ForwardedClientIpHeaderMode::Append,
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(4)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(4)).unwrap();
         request
             .insert_header("x-forwarded-for", "198.51.100.9")
             .unwrap();
@@ -1691,7 +1691,7 @@ mod tests {
             )]),
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(4)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(4)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request
             .insert_header("x-forwarded-for", "198.51.100.9, 203.0.113.10")
@@ -1750,7 +1750,7 @@ mod tests {
             x_forwarded_for: crate::config::ForwardedClientIpHeaderMode::Append,
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(4)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(4)).unwrap();
         request
             .insert_header("x-forwarded-for", "198.51.100.9")
             .unwrap();
@@ -1779,7 +1779,7 @@ mod tests {
             forwarded: true,
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(4)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(4)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         let client_addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 53210);
 
@@ -1811,7 +1811,7 @@ mod tests {
             )]),
             ..crate::config::RequestHeaderPolicyConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", Some(8)).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", Some(8)).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request
             .insert_header("x-forwarded-for", "198.51.100.9")
