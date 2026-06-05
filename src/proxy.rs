@@ -21,8 +21,9 @@ use std::time::Duration;
 use std::time::Instant;
 
 #[cfg(any(feature = "cache", feature = "php-fpm"))]
+use crate::http_types::StatusCode;
 use crate::http_types::{
-    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader, StatusCode,
+    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;

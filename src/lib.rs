@@ -51,6 +51,7 @@ mod config_types;
 mod config_web;
 #[cfg(feature = "proxy")]
 mod edge_policy;
+#[cfg(feature = "proxy")]
 mod flux_error;
 mod fs_trust;
 #[cfg(feature = "proxy")]

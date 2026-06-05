@@ -24,6 +24,10 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Route response-compression initialization errors and cache range/slice key
   validation errors through `FluxError` before adapting them back to Pingora
   errors.
+- Keep proxy request/response adapter aliases available across all proxy
+  profiles so the Apple Silicon macOS developer CI matrix can check
+  `web`, `profile-static-site`, `profile-reverse-proxy`, `profile-full`, and
+  `profile-development` without feature-gate drift.
 
 ## Boundaries
 

@@ -24,6 +24,8 @@ behavior when the change improves security or project direction.
   `FluxError` before Pingora adaptation.
 - Move load-balancer tests, access-log tests, and the cache-key CLI request
   builder through explicit HTTP adapter aliases.
+- Fix proxy HTTP adapter feature gates so the macOS developer CI matrix can
+  check static-site, reverse-proxy, full, and development profiles consistently.
 
 ## 1.5.4 - 2026-06-04
 
