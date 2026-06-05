@@ -2,7 +2,6 @@ use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use pingora::http::RequestHeader;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -10,6 +9,7 @@ use crate::config::{
     LoadBalanceManagedCookieSameSite, LoadBalancePersistenceConfig, LoadBalancePersistenceMode,
     LoadBalanceSelection, ProxyConfig,
 };
+use crate::http_types::PingoraRequestHeader as RequestHeader;
 
 pub(super) const MAX_PERSISTENCE_KEY_BYTES: usize = 512;
 const MANAGED_COOKIE_KEY_BYTES: usize = 16;

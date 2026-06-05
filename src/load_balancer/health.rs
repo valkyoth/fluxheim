@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pingora::connectors::http::Connector as HttpConnector;
-use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::lb::Backend;
 use pingora::lb::health_check::{HealthCheck, TcpHealthCheck};
 use pingora::protocols::http::client::HttpSession;
@@ -14,6 +13,9 @@ use pingora::{Error, ErrorType};
 use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
     LoadBalanceHealthCheckProtocol, ProxyConfig,
+};
+use crate::http_types::{
+    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
 
 const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
@@ -298,8 +300,6 @@ fn validate_http_health_response_body(
 mod tests {
     use std::time::Duration;
 
-    use pingora::http::ResponseHeader;
-
     use super::{
         configured_http_health_check, validate_http_health_response,
         validate_http_health_response_body,
@@ -308,6 +308,7 @@ mod tests {
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedHeader,
         LoadBalanceHealthCheckExpectedStatusRange, LoadBalanceHealthCheckProtocol, ProxyConfig,
     };
+    use crate::http_types::PingoraResponseHeader as ResponseHeader;
 
     fn install_test_crypto_provider() {
         #[cfg(feature = "tls-rustls-backend")]

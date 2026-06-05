@@ -17,6 +17,11 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Move selected access-log, auth-request, compression, PHP-FPM, route-policy,
   traffic-mirror, proxy-cache, load-balancer, and proxy imports through the new
   HTTP boundary aliases.
+- Extend the HTTP boundary aliases into load-balancer health checks,
+  persistence-cookie parsing, and static web response builders.
+- Route response-compression initialization errors and cache range/slice key
+  validation errors through `FluxError` before adapting them back to Pingora
+  errors.
 
 ## Boundaries
 

@@ -9,8 +9,10 @@ use brotli::CompressorWriter;
 use bytes::Bytes;
 #[cfg(feature = "compression-gzip")]
 use flate2::{Compression, write::GzEncoder};
+use pingora::ErrorType;
 use pingora::prelude::Result;
-use pingora::{Error, ErrorType};
+
+use crate::flux_error::FluxError;
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -210,11 +212,8 @@ pub(crate) fn prepare_response_compression(
     response.remove_header("etag");
     append_vary_accept_encoding(response)?;
     Ok(Some(encoding.encoder(config).map_err(|error| {
-        Error::because(
-            ErrorType::InternalError,
-            "response compression initialization failed",
-            error,
-        )
+        FluxError::io("response compression initialization failed", error)
+            .into_pingora(ErrorType::InternalError)
     })?))
 }
 

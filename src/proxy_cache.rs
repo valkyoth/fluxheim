@@ -6,6 +6,8 @@ use pingora::cache::{CacheKey as PingoraCacheKey, CachePhase, NoCacheReason};
 use pingora::prelude::Result;
 use pingora::{Error, ErrorType};
 
+use crate::flux_error::FluxError;
+
 pub(crate) const MAX_VARY_FIELDS: usize = 16;
 const MAX_VARY_HEADER_BYTES: usize = 2048;
 
@@ -328,9 +330,9 @@ pub(crate) fn range_cache_key(
     let namespace = base.namespace().to_vec();
     let user_tag = base.user_tag.clone();
     let Some(primary) = base.primary_key_str() else {
-        return Error::e_explain(
-            ErrorType::InternalError,
-            "cache range key requires utf-8 primary key material",
+        return Err(
+            FluxError::InvalidInput("cache range key requires utf-8 primary key material")
+                .into_pingora(ErrorType::InternalError),
         );
     };
     let mut primary = primary.to_owned();
@@ -346,9 +348,9 @@ pub(crate) fn slice_cache_key(
     let namespace = base.namespace().to_vec();
     let user_tag = base.user_tag.clone();
     let Some(primary) = base.primary_key_str() else {
-        return Error::e_explain(
-            ErrorType::InternalError,
-            "cache slice key requires utf-8 primary key material",
+        return Err(
+            FluxError::InvalidInput("cache slice key requires utf-8 primary key material")
+                .into_pingora(ErrorType::InternalError),
         );
     };
     let mut primary = primary.to_owned();

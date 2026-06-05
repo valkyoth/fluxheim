@@ -19,6 +19,9 @@ behavior when the change improves security or project direction.
   internal error propagation.
 - Convert the upstream PROXY-protocol connector to use the typed internal error
   surface and convert back to Pingora errors only at the connector boundary.
+- Extend HTTP boundary aliases into load-balancer health/persistence and static
+  web response helpers, and route selected compression/cache errors through
+  `FluxError` before Pingora adaptation.
 
 ## 1.5.4 - 2026-06-04
 

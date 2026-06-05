@@ -10,6 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 
 use crate::config::WebConfig;
+#[cfg(feature = "proxy")]
+use crate::http_types::PingoraResponseHeader as ResponseHeader;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -686,7 +688,7 @@ pub async fn serve_directory_listing(
     } else {
         body.len() as u64
     };
-    let mut response = pingora::http::ResponseHeader::build(200, Some(4))?;
+    let mut response = ResponseHeader::build(200, Some(4))?;
     response.insert_header("content-type", "text/html; charset=utf-8")?;
     response.insert_header("content-length", body.len())?;
     response.insert_header("cache-control", "private, no-store")?;
@@ -793,8 +795,8 @@ pub fn build_static_response_header(
     plan: &StaticResponsePlan,
     response_policy: &crate::config::ResponseHeaderPolicyConfig,
     cache_headers: StaticCacheHeaders<'_>,
-) -> pingora::Result<pingora::http::ResponseHeader> {
-    let mut response = pingora::http::ResponseHeader::build(plan.status, Some(9))?;
+) -> pingora::Result<ResponseHeader> {
+    let mut response = ResponseHeader::build(plan.status, Some(9))?;
     response.insert_header("content-type", file.mime.as_str())?;
     if let Some(content_length) = plan.content_length {
         response.insert_header("content-length", content_length)?;
