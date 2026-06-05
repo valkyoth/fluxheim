@@ -58,7 +58,10 @@ impl FluxError {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(all(feature = "web", feature = "proxy"), feature = "compression-gzip")
+    ))]
     pub(crate) fn io_kind(&self) -> Option<io::ErrorKind> {
         match self {
             Self::Io { source, .. } => Some(source.kind()),
