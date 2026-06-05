@@ -15,6 +15,7 @@ use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::{Error, ErrorType};
 
 use crate::config::ProxyConfig;
+use crate::flux_error::FluxError;
 
 use super::health::configured_health_check;
 use super::selection::MaglevTable;
@@ -84,15 +85,20 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
         std::collections::BTreeSet<Backend>,
         std::collections::HashMap<u64, bool>,
     )> {
-        let upstreams = read_proxy_upstreams_file_for_discovery(self.path.clone()).await?;
+        let upstreams = read_proxy_upstreams_file_for_discovery(self.path.clone())
+            .await
+            .map_err(DiscoveryError::into_pingora)?;
         let mut backends = std::collections::BTreeSet::new();
         for upstream in upstreams {
             let backend = Backend::new(&upstream).map_err(|error| {
-                Error::because(
+                DiscoveryError::new(
                     ErrorType::InvalidHTTPHeader,
-                    "proxy upstreams file contains an invalid backend",
-                    io::Error::other(error.to_string()),
+                    FluxError::io(
+                        "proxy upstreams file contains an invalid backend",
+                        io::Error::other(error.to_string()),
+                    ),
                 )
+                .into_pingora()
             })?;
             backends.insert(backend);
         }
@@ -100,15 +106,19 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
     }
 }
 
-async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> pingora::Result<Vec<String>> {
+async fn read_proxy_upstreams_file_for_discovery(
+    path: PathBuf,
+) -> Result<Vec<String>, DiscoveryError> {
     let result = if tokio::runtime::Handle::try_current().is_ok() {
         tokio::task::spawn_blocking(move || crate::config::read_proxy_upstreams_file(&path))
             .await
             .map_err(|error| {
-                Error::because(
+                DiscoveryError::new(
                     ErrorType::InternalError,
-                    "proxy upstreams file discovery task failed",
-                    io::Error::other(error.to_string()),
+                    FluxError::io(
+                        "proxy upstreams file discovery task failed",
+                        io::Error::other(error.to_string()),
+                    ),
                 )
             })?
     } else {
@@ -119,10 +129,9 @@ async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> pingora::Resu
     };
 
     result.map_err(|error| {
-        Error::because(
+        DiscoveryError::new(
             ErrorType::ReadError,
-            "failed to read proxy upstreams file",
-            error,
+            FluxError::io("failed to read proxy upstreams file", error),
         )
     })
 }
@@ -141,29 +150,37 @@ impl ServiceDiscovery for DnsUpstreamDiscovery {
     )> {
         let mut backends = std::collections::BTreeSet::new();
         for upstream in self.upstreams.iter() {
-            let resolved = resolve_proxy_upstream_for_discovery(upstream).await?;
+            let resolved = resolve_proxy_upstream_for_discovery(upstream)
+                .await
+                .map_err(DiscoveryError::into_pingora)?;
             for address in resolved {
                 let backend = Backend::new(&address.to_string()).map_err(|error| {
-                    Error::because(
+                    DiscoveryError::new(
                         ErrorType::InternalError,
-                        "resolved proxy upstream is not usable as a backend",
-                        io::Error::other(error.to_string()),
+                        FluxError::io(
+                            "resolved proxy upstream is not usable as a backend",
+                            io::Error::other(error.to_string()),
+                        ),
                     )
+                    .into_pingora()
                 })?;
                 backends.insert(backend);
             }
         }
         if backends.is_empty() {
-            return Error::e_explain(
+            return Err(DiscoveryError::new(
                 ErrorType::ConnectError,
-                "DNS discovery resolved no proxy upstreams",
-            );
+                FluxError::InvalidInput("DNS discovery resolved no proxy upstreams"),
+            )
+            .into_pingora());
         }
         Ok((backends, std::collections::HashMap::new()))
     }
 }
 
-async fn resolve_proxy_upstream_for_discovery(upstream: &str) -> pingora::Result<Vec<SocketAddr>> {
+async fn resolve_proxy_upstream_for_discovery(
+    upstream: &str,
+) -> Result<Vec<SocketAddr>, DiscoveryError> {
     let result = if tokio::runtime::Handle::try_current().is_ok() {
         tokio::net::lookup_host(upstream)
             .await
@@ -178,12 +195,26 @@ async fn resolve_proxy_upstream_for_discovery(upstream: &str) -> pingora::Result
     };
 
     result.map_err(|error| {
-        Error::because(
+        DiscoveryError::new(
             ErrorType::ConnectError,
-            "failed to resolve proxy upstream",
-            error,
+            FluxError::io("failed to resolve proxy upstream", error),
         )
     })
+}
+
+struct DiscoveryError {
+    kind: ErrorType,
+    error: FluxError,
+}
+
+impl DiscoveryError {
+    fn new(kind: ErrorType, error: FluxError) -> Self {
+        Self { kind, error }
+    }
+
+    fn into_pingora(self) -> Box<Error> {
+        Error::because(self.kind, "load-balancer discovery failed", self.error)
+    }
 }
 
 pub(super) fn background_service_for<S, F>(

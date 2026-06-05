@@ -34,6 +34,9 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Route load-balancer HTTP health-check response/header/body validation through
   the internal `FluxError` surface before adapting back to Pingora health-check
   errors.
+- Route load-balancer file/DNS discovery helper failures through the internal
+  `FluxError` surface before adapting back to Pingora `ServiceDiscovery`
+  errors.
 
 ## Boundaries
 

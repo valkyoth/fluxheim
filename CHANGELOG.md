@@ -31,6 +31,9 @@ behavior when the change improves security or project direction.
 - Route load-balancer HTTP health-check response/header/body validation through
   the internal `FluxError` surface before adapting back to Pingora health-check
   errors.
+- Route load-balancer file/DNS discovery helper failures through the internal
+  `FluxError` surface before adapting back to Pingora `ServiceDiscovery`
+  errors.
 
 ## 1.5.4 - 2026-06-04
 
