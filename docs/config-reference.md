@@ -213,8 +213,8 @@ upstream_tls = false
 - `upstream_proxy_protocol` writes a HAProxy PROXY protocol header to the
   selected upstream before forwarding stream bytes. Use it only when the
   upstream explicitly expects PROXY protocol. It cannot be combined with
-  `upstream_tls` in `1.4.7`; stream TLS handshakes need a dedicated
-  pre-TLS PROXY connector before that combination can be enabled safely.
+  `upstream_tls`; stream TLS handshakes need a dedicated pre-TLS PROXY
+  connector before that combination can be enabled safely.
 - `upstream_tls = true` sends TLS to the selected stream upstream.
   `upstream_sni` is optional; when unset Fluxheim derives SNI from the selected
   upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default

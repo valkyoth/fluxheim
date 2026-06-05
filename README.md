@@ -105,7 +105,7 @@ Fluxheim is licensed under the European Union Public Licence 1.2.
 | WebSocket / HTTP upgrade | ✅ | `1.4.1`; explicit `proxy.websocket = true` on HTTP/1.1 upstream routes. |
 | External auth subrequests | ✅ | `1.4.1`; `[proxy.auth_request]` with bounded header/body forwarding. |
 | Traffic mirroring | ✅ | `1.4.1`; `traffic-mirror` feature with safe bodyless shadow requests. |
-| TCP stream proxying | ✅ | `1.4.6+`; optional `stream-proxy` feature with raw L4 TCP listeners, weighted upstream selection, drain/backup policy, bounded idle/lifetime/byte/connect controls, route-local PROXY protocol receive/send, and stream upstream TLS/mTLS controls. |
+| TCP stream proxying | ✅ | Optional `stream-proxy` feature with Fluxheim-owned L4 TCP listener/data-path and upstream TLS connector boundaries in `1.5.6`, weighted upstream selection, drain/backup policy, bounded idle/lifetime/byte/connect controls, route-local PROXY protocol receive/send, and stream upstream TLS/mTLS controls. |
 
 ### Operations And Packaging
 
@@ -246,7 +246,7 @@ Individual module features:
 | `web` | Yes | Static file resolver and static response handling. Runtime serving currently uses `proxy` sessions. |
 | `cache` | Yes | Cache module compiled in; runtime cache remains disabled until configured. |
 | `load-balancer` | No | Fluxheim load-balancing module, health checks, and runtime pool policy. |
-| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. Depends on the shared proxy runtime in `1.4.6`; hardened in `1.4.7` with true idle timeouts, stream upstream TLS/mTLS controls, weighted/drain/backup policy, and expanded smoke coverage. |
+| `stream-proxy` | No | Raw L4 TCP stream proxy service with separate stream semantics. `1.5.6` owns the stream listener loop, async IO boundary, and upstream TLS connector path while the current supervisor still registers it as a service. Includes true idle timeouts, stream upstream TLS/mTLS controls, weighted/drain/backup policy, and expanded smoke coverage. |
 | `metrics` | No | Prometheus metrics listener. |
 | `acme` | No | ACME planning/renewal support. Requires TLS config and should be paired with one TLS backend for serving. |
 | `acme-client` | No | Live ACME account/order HTTP client and background renewal service for HTTP-01 and rustls TLS-ALPN-01 certificate issuance and renewal. |
@@ -427,8 +427,9 @@ release.
   health checks, retry budgets, PROXY protocol v1/v2, upstream TLS controls,
   mTLS/client certificate policy, HTTP/2 origin controls, gRPC pass-through,
   Apple Silicon Level 1 development support, bounded GeoIP/Geo-Context policy,
-  TCP stream proxying with idle timeouts and stream upstream TLS/mTLS, and the
-  proxy/config module splits that keep future feature domains in focused files.
+  TCP stream proxying with idle timeouts and stream upstream TLS/mTLS controls,
+  and the proxy/config/module splits that keep future feature domains in
+  focused files.
 - `1.5.x` is the enterprise load-balancer/control-plane line. It promotes the
   load-balancer image profile and focuses on F5/HAProxy/Envoy-class pool
   operations: runtime pool/member mutation, priority groups, persistence,
