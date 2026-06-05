@@ -5954,13 +5954,11 @@ async fn fetch_origin_slice(
     route: Option<&RuntimeRoute>,
     bounds: CacheSliceBounds,
     max_body_bytes: u64,
-) -> std::io::Result<CacheSliceOriginResponse> {
+) -> FluxResult<CacheSliceOriginResponse> {
     let proxy = proxy.clone();
-    let request =
-        origin_slice_request_from_header(request, route, bounds).map_err(FluxError::into_io)?;
+    let request = origin_slice_request_from_header(request, route, bounds)?;
     tokio::task::spawn_blocking(move || {
-        let url =
-            origin_slice_url(&proxy.config, &request.path_and_query).map_err(FluxError::into_io)?;
+        let url = origin_slice_url(&proxy.config, &request.path_and_query)?;
         let timeout = std::time::Duration::from_secs(
             proxy
                 .config
@@ -5983,7 +5981,10 @@ async fn fetch_origin_slice(
         }
         let mut response = builder.call().map_err(peer_fill_io_error)?;
         let status = StatusCode::from_u16(response.status().as_u16()).map_err(|error| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+            FluxError::io(
+                "origin slice returned invalid status",
+                std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()),
+            )
         })?;
         let headers = response
             .headers()
@@ -6002,9 +6003,12 @@ async fn fetch_origin_slice(
             .read_to_vec()
             .map_err(peer_fill_io_error)?;
         if body.len() as u64 > max_body_bytes {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(FluxError::io(
                 "origin slice exceeds configured slice size",
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "origin slice exceeds configured slice size",
+                ),
             ));
         }
         Ok(CacheSliceOriginResponse {
@@ -6014,7 +6018,12 @@ async fn fetch_origin_slice(
         })
     })
     .await
-    .map_err(|error| std::io::Error::other(error.to_string()))?
+    .map_err(|error| {
+        FluxError::io(
+            "origin slice worker task failed",
+            std::io::Error::other(error.to_string()),
+        )
+    })?
 }
 
 #[cfg(feature = "cache")]
@@ -6519,9 +6528,8 @@ fn fetch_peer_fill_response(
     peer_fill: &crate::config::CachePeerFillConfig,
     request: &PeerFillRequest,
     max_body_bytes: u64,
-) -> std::io::Result<Option<PeerFillResponse>> {
-    let url =
-        peer_fill_url(&peer.base_url, &request.uri_path_and_query).map_err(FluxError::into_io)?;
+) -> FluxResult<Option<PeerFillResponse>> {
+    let url = peer_fill_url(&peer.base_url, &request.uri_path_and_query)?;
     let timeout = std::time::Duration::from_secs(
         peer_fill
             .connect_timeout_secs
@@ -6566,9 +6574,12 @@ fn fetch_peer_fill_response(
         .read_to_vec()
         .map_err(peer_fill_io_error)?;
     if body.len() as u64 > max_body_bytes {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
+        return Err(FluxError::io(
             "peer fill response exceeds configured object limit",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "peer fill response exceeds configured object limit",
+            ),
         ));
     }
 
@@ -6592,8 +6603,11 @@ fn peer_fill_url(base_url: &str, path_and_query: &str) -> FluxResult<String> {
 }
 
 #[cfg(feature = "cache")]
-fn peer_fill_io_error(error: ureq::Error) -> std::io::Error {
-    std::io::Error::other(error.to_string())
+fn peer_fill_io_error(error: ureq::Error) -> FluxError {
+    FluxError::io(
+        "cache peer/origin HTTP fetch failed",
+        std::io::Error::other(error.to_string()),
+    )
 }
 
 #[cfg(feature = "cache")]
