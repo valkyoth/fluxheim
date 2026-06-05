@@ -39,7 +39,7 @@ pub(crate) fn stream_services_from_config(config: &Config) -> io::Result<Vec<Str
 }
 
 fn stream_service_from_route(route: &StreamRouteConfig) -> io::Result<StreamProxyService> {
-    let app = StreamProxyApp::from_config(route)?;
+    let app = StreamProxyApp::from_config(route).map_err(FluxError::into_io)?;
     let mut service =
         pingora::services::listening::Service::new(format!("Stream proxy {}", route.name), app);
     for listen in &route.listen {
@@ -79,11 +79,10 @@ pub(crate) struct StreamProxyApp {
 }
 
 impl StreamProxyApp {
-    fn from_config(route: &StreamRouteConfig) -> io::Result<Self> {
+    fn from_config(route: &StreamRouteConfig) -> FluxResult<Self> {
         let upstreams = runtime_stream_upstreams(route);
         if upstreams.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+            return Err(FluxError::InvalidInput(
                 "stream route requires at least one upstream",
             ));
         }
@@ -95,8 +94,7 @@ impl StreamProxyApp {
             })
             .collect::<Vec<_>>();
         if primary_indices.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+            return Err(FluxError::InvalidInput(
                 "stream route requires at least one selectable primary upstream",
             ));
         }
@@ -118,12 +116,9 @@ impl StreamProxyApp {
             route.upstream_client_key_path.as_deref(),
         )
         .map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!(
-                    "failed to load stream upstream TLS material for route {}: {error}",
-                    route.name
-                ),
+            FluxError::io(
+                "load stream upstream TLS material",
+                io::Error::new(error.kind(), format!("route {}: {error}", route.name)),
             )
         })?;
 
