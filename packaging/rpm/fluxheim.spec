@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.5
+Version:        1.5.6
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,11 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Fri Jun 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.6-1
+- Start the Fluxheim-native stream-proxy runtime line, focused on moving stream
+  connect/copy/shutdown helpers behind owned runtime and error boundaries while
+  preserving existing TCP stream proxy behavior.
+
 * Fri Jun 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.5-1
 - Start the Fluxheim-native HTTP/error type boundary line with standard HTTP
   aliases and a typed internal error surface while keeping Pingora adapters at

@@ -7,6 +7,23 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.6 - 2026-06-05
+
+### Changed
+
+- Start the Fluxheim-native stream-proxy runtime line. The stop line is stream
+  connect/copy/shutdown ownership and error-boundary cleanup while preserving
+  existing TCP stream route config, route-local PROXY protocol behavior,
+  weighted upstream selection, byte/lifetime/idle limits, metrics, and release
+  profiles.
+- Move stream connect, copy, shutdown, upstream resolution, upstream PROXY
+  header writes, byte-limit enforcement, and lifetime/idle timeout helpers onto
+  `FluxResult` while keeping `io::Error` adaptation only at legacy runtime
+  boundaries.
+- Make the stream copy/proxy data path generic over Tokio
+  `AsyncRead + AsyncWrite` streams instead of requiring Pingora's stream wrapper
+  in the internal helper signatures.
+
 ## 1.5.5 - 2026-06-05
 
 ### Changed

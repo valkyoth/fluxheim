@@ -13,7 +13,7 @@ use pingora::protocols::Stream;
 use pingora::server::ShutdownWatch;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use pingora::upstreams::peer::HttpPeer;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
@@ -294,9 +294,12 @@ impl ServerApp for StreamProxyApp {
         let started = Instant::now();
 
         let mut selected_upstream = None;
-        let mut result = Err(io::Error::new(
-            io::ErrorKind::AddrNotAvailable,
-            "stream route has no selectable upstream",
+        let mut result = Err(FluxError::io(
+            "select stream upstream",
+            io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                "stream route has no selectable upstream",
+            ),
         ));
         for (attempt, candidate) in candidates.iter().enumerate() {
             match connect_upstream(&candidate.authority, &options).await {
@@ -394,8 +397,15 @@ fn record_stream_bytes(route: &str, direction: &str, bytes: u64) {
 #[cfg(not(feature = "metrics"))]
 fn record_stream_bytes(_route: &str, _direction: &str, _bytes: u64) {}
 
-fn stream_error_outcome(error: &io::Error) -> &'static str {
-    match error.kind() {
+fn stream_error_outcome(error: &FluxError) -> &'static str {
+    let kind = match error {
+        FluxError::Io { source, .. } | FluxError::WriteProxyHeader(source) => source.kind(),
+        FluxError::Timeout { .. } => io::ErrorKind::TimedOut,
+        FluxError::InvalidInput(_) | FluxError::InvalidInputMessage(_) => {
+            io::ErrorKind::InvalidInput
+        }
+    };
+    match kind {
         io::ErrorKind::Interrupted => "shutdown",
         io::ErrorKind::TimedOut => "timeout",
         io::ErrorKind::ConnectionRefused
@@ -417,7 +427,7 @@ async fn proxy_stream_connection(
     options: StreamProxyConnectionOptions,
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
-) -> io::Result<(u64, u64)> {
+) -> FluxResult<(u64, u64)> {
     let mut upstream = connect_upstream(upstream_authority, &options).await?;
     proxy_connected_stream_connection(
         &mut *downstream,
@@ -430,12 +440,12 @@ async fn proxy_stream_connection(
 }
 
 async fn proxy_connected_stream_connection(
-    downstream: &mut Stream,
-    upstream: &mut Stream,
+    downstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    upstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
     options: &StreamProxyConnectionOptions,
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
-) -> io::Result<(u64, u64)> {
+) -> FluxResult<(u64, u64)> {
     write_upstream_proxy_protocol(
         upstream,
         options.upstream_proxy_protocol,
@@ -454,8 +464,8 @@ async fn proxy_connected_stream_connection(
     if let Some(max_connection_lifetime) = options.max_connection_lifetime {
         match tokio::time::timeout(max_connection_lifetime, copy).await {
             Ok(result) => result,
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
+            Err(_) => Err(FluxError::timeout(
+                "stream connection lifetime",
                 "stream max connection lifetime elapsed",
             )),
         }
@@ -493,11 +503,11 @@ enum StreamCopyEvent {
 }
 
 async fn copy_bidirectional_with_limits(
-    downstream: &mut Stream,
-    upstream: &mut Stream,
+    downstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    upstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
     idle_timeout: Duration,
     max_connection_bytes: Option<u64>,
-) -> io::Result<(u64, u64)> {
+) -> FluxResult<(u64, u64)> {
     let (mut downstream_reader, mut downstream_writer) = tokio::io::split(downstream);
     let (mut upstream_reader, mut upstream_writer) = tokio::io::split(upstream);
     let mut downstream_buffer = [0u8; 16 * 1024];
@@ -517,7 +527,7 @@ async fn copy_bidirectional_with_limits(
                 ).await?;
                 if bytes == 0 {
                     shutdown_with_idle_timeout(&mut upstream_writer, idle_timeout).await?;
-                    Ok::<_, io::Error>(StreamCopyEvent::DownstreamEof)
+                    Ok::<_, FluxError>(StreamCopyEvent::DownstreamEof)
                 } else {
                     let next = checked_stream_byte_count(
                         downstream_to_upstream,
@@ -529,7 +539,7 @@ async fn copy_bidirectional_with_limits(
                         &downstream_buffer[..bytes],
                         idle_timeout,
                     ).await?;
-                    Ok::<_, io::Error>(StreamCopyEvent::DownstreamTotal(next))
+                    Ok::<_, FluxError>(StreamCopyEvent::DownstreamTotal(next))
                 }
             }, if !downstream_eof => result,
             result = async {
@@ -540,7 +550,7 @@ async fn copy_bidirectional_with_limits(
                 ).await?;
                 if bytes == 0 {
                     shutdown_with_idle_timeout(&mut downstream_writer, idle_timeout).await?;
-                    Ok::<_, io::Error>(StreamCopyEvent::UpstreamEof)
+                    Ok::<_, FluxError>(StreamCopyEvent::UpstreamEof)
                 } else {
                     let next = checked_stream_byte_count(
                         upstream_to_downstream,
@@ -552,7 +562,7 @@ async fn copy_bidirectional_with_limits(
                         &upstream_buffer[..bytes],
                         idle_timeout,
                     ).await?;
-                    Ok::<_, io::Error>(StreamCopyEvent::UpstreamTotal(next))
+                    Ok::<_, FluxError>(StreamCopyEvent::UpstreamTotal(next))
                 }
             }, if !upstream_eof => result,
         }?;
@@ -572,14 +582,14 @@ async fn read_with_idle_timeout<R>(
     reader: &mut R,
     buffer: &mut [u8],
     idle_timeout: Duration,
-) -> io::Result<usize>
+) -> FluxResult<usize>
 where
-    R: tokio::io::AsyncRead + Unpin,
+    R: AsyncRead + Unpin,
 {
     match tokio::time::timeout(idle_timeout, reader.read(buffer)).await {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
+        Ok(result) => result.map_err(|error| FluxError::io("read stream", error)),
+        Err(_) => Err(FluxError::timeout(
+            "stream idle timeout",
             "stream idle timeout elapsed",
         )),
     }
@@ -589,27 +599,27 @@ async fn write_with_idle_timeout<W>(
     writer: &mut W,
     buffer: &[u8],
     idle_timeout: Duration,
-) -> io::Result<()>
+) -> FluxResult<()>
 where
-    W: tokio::io::AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin,
 {
     match tokio::time::timeout(idle_timeout, writer.write_all(buffer)).await {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
+        Ok(result) => result.map_err(|error| FluxError::io("write stream", error)),
+        Err(_) => Err(FluxError::timeout(
+            "stream write timeout",
             "stream write timeout elapsed",
         )),
     }
 }
 
-async fn shutdown_with_idle_timeout<W>(writer: &mut W, idle_timeout: Duration) -> io::Result<()>
+async fn shutdown_with_idle_timeout<W>(writer: &mut W, idle_timeout: Duration) -> FluxResult<()>
 where
-    W: tokio::io::AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin,
 {
     match tokio::time::timeout(idle_timeout, writer.shutdown()).await {
-        Ok(result) => result,
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
+        Ok(result) => result.map_err(|error| FluxError::io("shutdown stream", error)),
+        Err(_) => Err(FluxError::timeout(
+            "stream shutdown timeout",
             "stream shutdown timeout elapsed",
         )),
     }
@@ -619,17 +629,23 @@ fn checked_stream_byte_count(
     current: u64,
     additional: u64,
     max_connection_bytes: Option<u64>,
-) -> io::Result<u64> {
+) -> FluxResult<u64> {
     let next = current.checked_add(additional).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "stream copied byte counter overflowed",
+        FluxError::io(
+            "count stream bytes",
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "stream copied byte counter overflowed",
+            ),
         )
     })?;
     if max_connection_bytes.is_some_and(|limit| next > limit) {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "stream max connection bytes exceeded",
+        return Err(FluxError::io(
+            "enforce stream byte limit",
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "stream max connection bytes exceeded",
+            ),
         ));
     }
     Ok(next)
@@ -638,7 +654,7 @@ fn checked_stream_byte_count(
 async fn connect_upstream(
     upstream_authority: &str,
     options: &StreamProxyConnectionOptions,
-) -> io::Result<Stream> {
+) -> FluxResult<Stream> {
     if options.upstream_tls {
         return connect_tls_upstream(upstream_authority, options).await;
     }
@@ -653,8 +669,8 @@ async fn connect_upstream(
             stream,
         ))),
         Ok(Err(error)) => Err(error),
-        Err(_) => Err(io::Error::new(
-            io::ErrorKind::TimedOut,
+        Err(_) => Err(FluxError::timeout(
+            "stream upstream connect timeout",
             "stream upstream connect timeout elapsed",
         )),
     }
@@ -671,7 +687,7 @@ async fn connect_tls_upstream(
         allow(unused_variables)
     )]
     options: &StreamProxyConnectionOptions,
-) -> io::Result<Stream> {
+) -> FluxResult<Stream> {
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     {
         let connect = async {
@@ -692,8 +708,7 @@ async fn connect_tls_upstream(
                 peer.client_cert_key = options.upstream_tls_material.client_cert_key.clone();
             }
             let Some(connector) = &options.connector else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                return Err(FluxError::InvalidInput(
                     "stream upstream TLS connector is not initialized",
                 ));
             };
@@ -702,22 +717,21 @@ async fn connect_tls_upstream(
                 .await
                 .map(|(stream, _reused)| stream)
                 .map_err(|error| {
-                    io::Error::other(format!("stream upstream TLS connect failed: {error}"))
+                    FluxError::invalid_input(format!("stream upstream TLS connect failed: {error}"))
                 })
         };
 
         match tokio::time::timeout(options.connect_timeout, connect).await {
             Ok(result) => result,
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::TimedOut,
+            Err(_) => Err(FluxError::timeout(
+                "stream upstream TLS connect timeout",
                 "stream upstream TLS connect timeout elapsed",
             )),
         }
     }
     #[cfg(not(any(feature = "tls-rustls-backend", feature = "tls-openssl")))]
     {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
+        Err(FluxError::InvalidInput(
             "stream upstream TLS requires a TLS backend feature",
         ))
     }
@@ -734,32 +748,39 @@ fn stream_upstream_tls_sni(configured: Option<&str>, upstream_authority: &str) -
         .unwrap_or_default()
 }
 
-async fn connect_upstream_inner(upstream_authority: &str) -> io::Result<tokio::net::TcpStream> {
+async fn connect_upstream_inner(upstream_authority: &str) -> FluxResult<tokio::net::TcpStream> {
     let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
-    tokio::net::TcpStream::connect(socket_addr).await
+    tokio::net::TcpStream::connect(socket_addr)
+        .await
+        .map_err(|error| FluxError::io("connect stream upstream", error))
 }
 
-async fn resolve_upstream_socket_addr(upstream_authority: &str) -> io::Result<SocketAddr> {
+async fn resolve_upstream_socket_addr(upstream_authority: &str) -> FluxResult<SocketAddr> {
     if let Ok(socket_addr) = upstream_authority.parse::<SocketAddr>() {
         return Ok(socket_addr);
     }
 
-    let resolved = tokio::net::lookup_host(upstream_authority).await?;
+    let resolved = tokio::net::lookup_host(upstream_authority)
+        .await
+        .map_err(|error| FluxError::io("resolve stream upstream", error))?;
     resolved.into_iter().next().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::AddrNotAvailable,
-            "stream upstream resolved to no socket addresses",
+        FluxError::io(
+            "resolve stream upstream",
+            io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                "stream upstream resolved to no socket addresses",
+            ),
         )
     })
 }
 
 async fn write_upstream_proxy_protocol(
-    upstream: &mut Stream,
+    upstream: &mut (impl AsyncWrite + Unpin),
     protocol: UpstreamProxyProtocol,
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
     idle_timeout: Duration,
-) -> io::Result<()> {
+) -> FluxResult<()> {
     let header = match protocol {
         UpstreamProxyProtocol::Off => return Ok(()),
         UpstreamProxyProtocol::V1 => {
@@ -1054,7 +1075,7 @@ mod tests {
             let _ = client.shutdown().await;
 
             let error = proxy_task.await.unwrap().unwrap_err();
-            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(error.into_io().kind(), io::ErrorKind::PermissionDenied);
             upstream_task.await.unwrap();
         });
     }
@@ -1096,7 +1117,7 @@ mod tests {
                 .unwrap();
 
             let error = proxy_task.await.unwrap().unwrap_err();
-            assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+            assert_eq!(error.into_io().kind(), io::ErrorKind::TimedOut);
             upstream_task.abort();
         });
     }
@@ -1142,7 +1163,7 @@ mod tests {
                 .unwrap();
 
             let error = proxy_task.await.unwrap().unwrap_err();
-            assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+            assert_eq!(error.into_io().kind(), io::ErrorKind::TimedOut);
             upstream_task.abort();
         });
     }
