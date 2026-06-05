@@ -58,6 +58,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   construction boundaries.
 - Move Maglev table construction validation onto `FluxResult`, with conversion
   back to `io::Error` kept at the load-balancer discovery factory boundary.
+- Move static load-balancer backend construction onto `FluxResult`, with
+  conversion back to `io::Error` kept at load-balancer discovery setup.
 
 ## Boundaries
 

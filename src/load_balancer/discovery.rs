@@ -15,7 +15,7 @@ use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::{Error, ErrorType};
 
 use crate::config::ProxyConfig;
-use crate::flux_error::FluxError;
+use crate::flux_error::{FluxError, FluxResult};
 
 use super::health::configured_health_check;
 use super::selection::MaglevTable;
@@ -256,19 +256,26 @@ pub(super) fn background_maglev_service_for(
     Ok(Some((load_balancer, Box::new(service))))
 }
 
-fn configured_backends(config: &ProxyConfig) -> io::Result<std::collections::BTreeSet<Backend>> {
+fn configured_backends(config: &ProxyConfig) -> FluxResult<std::collections::BTreeSet<Backend>> {
     let mut backends = std::collections::BTreeSet::new();
     for (index, upstream) in config.upstreams.iter().enumerate() {
         let weight = config.upstream_weights.get(index).copied().unwrap_or(1);
-        let backend = Backend::new_with_weight(upstream, weight)
-            .map_err(|error| io::Error::other(error.to_string()))?;
+        let backend = Backend::new_with_weight(upstream, weight).map_err(|error| {
+            FluxError::io(
+                "configured proxy upstream is not usable as a backend",
+                io::Error::other(error.to_string()),
+            )
+        })?;
         backends.insert(backend);
     }
     Ok(backends)
 }
 
 pub(super) fn configured_maglev_table(config: &ProxyConfig) -> io::Result<MaglevTable> {
-    let backends: Vec<_> = configured_backends(config)?.into_iter().collect();
+    let backends: Vec<_> = configured_backends(config)
+        .map_err(FluxError::into_io)?
+        .into_iter()
+        .collect();
     MaglevTable::from_backends(&backends).map_err(FluxError::into_io)
 }
 
@@ -284,5 +291,7 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {
         })));
     }
 
-    Ok(Backends::new(Static::new(configured_backends(config)?)))
+    Ok(Backends::new(Static::new(
+        configured_backends(config).map_err(FluxError::into_io)?,
+    )))
 }

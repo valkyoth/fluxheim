@@ -55,6 +55,8 @@ behavior when the change improves security or project direction.
   construction boundaries.
 - Move Maglev table construction validation onto `FluxResult`, with conversion
   back to `io::Error` kept at the load-balancer discovery factory boundary.
+- Move static load-balancer backend construction onto `FluxResult`, with
+  conversion back to `io::Error` kept at load-balancer discovery setup.
 
 ## 1.5.4 - 2026-06-04
 
