@@ -156,8 +156,9 @@ fi
 %changelog
 * Fri Jun 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.6-1
 - Start the Fluxheim-native stream-proxy runtime line, focused on moving stream
-  connect/copy/shutdown helpers behind owned runtime and error boundaries while
-  preserving existing TCP stream proxy behavior.
+  listener, connect/copy/shutdown, and upstream TLS connector helpers behind
+  owned runtime and error boundaries while preserving existing TCP stream proxy
+  behavior.
 
 * Fri Jun 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.5-1
 - Start the Fluxheim-native HTTP/error type boundary line with standard HTTP
