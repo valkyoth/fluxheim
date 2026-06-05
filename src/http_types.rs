@@ -10,7 +10,7 @@ pub(crate) use http::{
     HeaderMap, HeaderName, HeaderValue, Method, Response, StatusCode, Uri, Version, header,
 };
 
-#[cfg(feature = "ingress")]
+#[cfg(feature = "proxy")]
 pub(crate) type PingoraRequestHeader = pingora::http::RequestHeader;
-#[cfg(feature = "ingress")]
+#[cfg(feature = "proxy")]
 pub(crate) type PingoraResponseHeader = pingora::http::ResponseHeader;
