@@ -68,6 +68,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   helper failures onto `FluxResult`.
 - Move PHP `X-Accel-Expires` response header mutation failures onto
   `FluxResult`, with Pingora adaptation kept at the PHP response boundary.
+- Move PHP FastCGI response-header construction failures onto `FluxResult`,
+  with conversion back to `io::Error` kept at the PHP response parser boundary.
 
 ## Boundaries
 

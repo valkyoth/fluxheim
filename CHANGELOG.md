@@ -65,6 +65,8 @@ behavior when the change improves security or project direction.
   helper failures onto `FluxResult`.
 - Move PHP `X-Accel-Expires` response header mutation failures onto
   `FluxResult`, with Pingora adaptation kept at the PHP response boundary.
+- Move PHP FastCGI response-header construction failures onto `FluxResult`,
+  with conversion back to `io::Error` kept at the PHP response parser boundary.
 
 ## 1.5.4 - 2026-06-04
 

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use crate::http_types::{PingoraResponseHeader as ResponseHeader, StatusCode};
 
 use crate::config::{PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager};
+use crate::flux_error::{FluxError, FluxResult};
 
 const MANAGED_PHP_FPM_STABLE_RESTART_SECS: u64 = 30;
 static MANAGED_PHP_FPM_INSTANCE_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -558,7 +559,7 @@ pub(crate) fn parse_php_response(
     }
 
     let mut status = 200;
-    let mut response = php_response_header(status)?;
+    let mut response = php_response_header(status).map_err(FluxError::into_io)?;
     for line in header_bytes.split(|byte| *byte == b'\n') {
         let line = trim_ascii_cr(line);
         if line.is_empty() {
@@ -601,8 +602,9 @@ pub fn fuzz_parse_php_response(stdout: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn php_response_header(status: u16) -> io::Result<ResponseHeader> {
-    ResponseHeader::build(status, Some(8)).map_err(|error| io::Error::other(error.to_string()))
+pub(crate) fn php_response_header(status: u16) -> FluxResult<ResponseHeader> {
+    ResponseHeader::build(status, Some(8))
+        .map_err(|error| FluxError::invalid_input(error.to_string()))
 }
 
 fn split_php_response(stdout: &[u8]) -> io::Result<(&[u8], &[u8])> {
