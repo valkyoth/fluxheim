@@ -46,6 +46,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Move response compression encoder initialization and chunk emission onto
   `FluxResult`, with Pingora adaptation kept at compression setup and proxy body
   filter boundaries.
+- Move route regex matcher construction onto `FluxResult`, with conversion back
+  to `io::Error` kept at the legacy vhost route-construction boundary.
 
 ## Boundaries
 

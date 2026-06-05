@@ -1,5 +1,4 @@
-use std::io;
-
+use crate::flux_error::{FluxError, FluxResult};
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use crate::path_safety::safe_forward_path;
 
@@ -18,7 +17,7 @@ impl RuntimeRouteMatcher {
     pub(crate) fn from_config(
         vhost_name: &str,
         route: &crate::config::RouteConfig,
-    ) -> io::Result<Self> {
+    ) -> FluxResult<Self> {
         if let Some(path) = &route.path_exact {
             Ok(Self::Exact(path.clone()))
         } else if let Some(path) = &route.path_prefix {
@@ -29,13 +28,10 @@ impl RuntimeRouteMatcher {
                     .size_limit(crate::config::MAX_ROUTE_REGEX_PROGRAM_BYTES)
                     .build()
                     .map_err(|error| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!(
-                                "vhost {vhost_name:?} route {:?} path_regex failed to compile: {error}",
-                                route.name
-                            ),
-                        )
+                        FluxError::invalid_input(format!(
+                            "vhost {vhost_name:?} route {:?} path_regex failed to compile: {error}",
+                            route.name
+                        ))
                     })?,
             ))
         } else {

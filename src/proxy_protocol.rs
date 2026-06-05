@@ -108,7 +108,9 @@ impl pingora::connectors::L4Connect for ProxyProtocolConnector {
             .await
             .map_err(|error| {
                 let kind = match &error {
-                    FluxError::InvalidInput(_) => ErrorType::ConnectError,
+                    FluxError::InvalidInput(_) | FluxError::InvalidInputMessage(_) => {
+                        ErrorType::ConnectError
+                    }
                     FluxError::Timeout { .. } => ErrorType::ConnectTimedout,
                     FluxError::Io { context, .. } if *context == "write PROXY header" => {
                         ErrorType::WriteError

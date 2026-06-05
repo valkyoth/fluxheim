@@ -43,6 +43,8 @@ behavior when the change improves security or project direction.
 - Move response compression encoder initialization and chunk emission onto
   `FluxResult`, with Pingora adaptation kept at compression setup and proxy body
   filter boundaries.
+- Move route regex matcher construction onto `FluxResult`, with conversion back
+  to `io::Error` kept at the legacy vhost route-construction boundary.
 
 ## 1.5.4 - 2026-06-04
 

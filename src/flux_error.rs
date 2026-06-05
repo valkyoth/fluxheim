@@ -19,6 +19,9 @@ pub(crate) enum FluxError {
     #[error("{0}")]
     InvalidInput(&'static str),
 
+    #[error("{0}")]
+    InvalidInputMessage(String),
+
     #[error("{context}: {detail}")]
     Timeout {
         context: &'static str,
@@ -31,6 +34,10 @@ impl FluxError {
         Self::Io { context, source }
     }
 
+    pub(crate) fn invalid_input(detail: impl Into<String>) -> Self {
+        Self::InvalidInputMessage(detail.into())
+    }
+
     pub(crate) fn timeout(context: &'static str, detail: impl Into<String>) -> Self {
         Self::Timeout {
             context,
@@ -38,11 +45,24 @@ impl FluxError {
         }
     }
 
+    pub(crate) fn into_io(self) -> io::Error {
+        match self {
+            Self::Io { context, source } => {
+                let kind = source.kind();
+                io::Error::new(kind, Self::Io { context, source })
+            }
+            Self::InvalidInput(_) | Self::InvalidInputMessage(_) => {
+                io::Error::new(io::ErrorKind::InvalidInput, self)
+            }
+            Self::Timeout { .. } => io::Error::new(io::ErrorKind::TimedOut, self),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn io_kind(&self) -> Option<io::ErrorKind> {
         match self {
             Self::Io { source, .. } => Some(source.kind()),
-            Self::InvalidInput(_) | Self::Timeout { .. } => None,
+            Self::InvalidInput(_) | Self::InvalidInputMessage(_) | Self::Timeout { .. } => None,
         }
     }
 

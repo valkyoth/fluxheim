@@ -3404,7 +3404,8 @@ impl RuntimeRoute {
         let _ = vhost_name;
 
         let headers = base_headers.with_vhost_overlay(&route.headers);
-        let matcher = RuntimeRouteMatcher::from_config(vhost_name, route)?;
+        let matcher = RuntimeRouteMatcher::from_config(vhost_name, route)
+            .map_err(crate::flux_error::FluxError::into_io)?;
         let action = if let Some(redirect) = &route.redirect {
             RuntimeRouteAction::Redirect(redirect.clone())
         } else if let Some(proxy) = &route.proxy {
