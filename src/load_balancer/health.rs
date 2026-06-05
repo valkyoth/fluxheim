@@ -14,6 +14,7 @@ use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
     LoadBalanceHealthCheckProtocol, ProxyConfig,
 };
+use crate::flux_error::FluxError;
 use crate::http_types::{
     PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
@@ -87,23 +88,25 @@ impl HealthCheck for FluxHttpHealthCheck {
 
         session.read_response_header().await?;
         let Some(response) = session.response_header() else {
-            return Error::e_explain(
+            return Err(http_health_check_error(
                 ErrorType::ReadError,
                 "missing HTTP health check response header",
-            );
+            ));
         };
         validate_http_health_response(
             response,
             &self.expected_statuses,
             &self.expected_status_ranges,
             &self.expected_headers,
-        )?;
+        )
+        .map_err(HttpHealthCheckError::into_pingora)?;
 
         if self.expected_body_contains.is_empty() {
             drain_http_health_response_body(&mut session).await?;
         } else {
             let body = read_http_health_response_body(&mut session).await?;
-            validate_http_health_response_body(&body, &self.expected_body_contains)?;
+            validate_http_health_response_body(&body, &self.expected_body_contains)
+                .map_err(HttpHealthCheckError::into_pingora)?;
         }
 
         if self.reuse_connection {
@@ -212,24 +215,24 @@ fn validate_http_health_response(
     expected_statuses: &[u16],
     expected_status_ranges: &[LoadBalanceHealthCheckExpectedStatusRange],
     expected_headers: &[LoadBalanceHealthCheckExpectedHeader],
-) -> pingora::Result<()> {
+) -> Result<(), HttpHealthCheckError> {
     let status = response.status.as_u16();
     if expected_statuses.is_empty() && expected_status_ranges.is_empty() {
         if status != 200 {
-            return Error::e_explain(
+            return Err(HttpHealthCheckError::new(
                 ErrorType::HTTPStatus(status),
                 "unexpected HTTP health check status",
-            );
+            ));
         }
     } else if !expected_statuses.contains(&status)
         && !expected_status_ranges
             .iter()
             .any(|range| (range.start..=range.end).contains(&status))
     {
-        return Error::e_explain(
+        return Err(HttpHealthCheckError::new(
             ErrorType::HTTPStatus(status),
             "unexpected HTTP health check status",
-        );
+        ));
     }
 
     for expected in expected_headers {
@@ -241,10 +244,10 @@ fn validate_http_health_response(
             }
         }
         if !matched {
-            return Error::e_explain(
+            return Err(HttpHealthCheckError::new(
                 ErrorType::InvalidHTTPHeader,
                 "missing expected HTTP health check header",
-            );
+            ));
         }
     }
     Ok(())
@@ -281,19 +284,41 @@ async fn read_http_health_response_body(session: &mut HttpSession) -> pingora::R
 fn validate_http_health_response_body(
     body: &[u8],
     expected_body_contains: &[String],
-) -> pingora::Result<()> {
+) -> Result<(), HttpHealthCheckError> {
     for expected in expected_body_contains {
         if !body
             .windows(expected.len())
             .any(|window| window == expected.as_bytes())
         {
-            return Error::e_explain(
+            return Err(HttpHealthCheckError::new(
                 ErrorType::ReadError,
                 "missing expected HTTP health check response body substring",
-            );
+            ));
         }
     }
     Ok(())
+}
+
+struct HttpHealthCheckError {
+    kind: ErrorType,
+    error: FluxError,
+}
+
+impl HttpHealthCheckError {
+    fn new(kind: ErrorType, detail: &'static str) -> Self {
+        Self {
+            kind,
+            error: FluxError::InvalidInput(detail),
+        }
+    }
+
+    fn into_pingora(self) -> Box<Error> {
+        Error::because(self.kind, "HTTP health check failed", self.error)
+    }
+}
+
+fn http_health_check_error(kind: ErrorType, detail: &'static str) -> Box<Error> {
+    HttpHealthCheckError::new(kind, detail).into_pingora()
 }
 
 #[cfg(test)]

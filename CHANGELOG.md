@@ -28,6 +28,9 @@ behavior when the change improves security or project direction.
   check static-site, reverse-proxy, full, and development profiles consistently.
 - Move header policy request/response signatures and tests through the explicit
   Pingora HTTP adapter aliases.
+- Route load-balancer HTTP health-check response/header/body validation through
+  the internal `FluxError` surface before adapting back to Pingora health-check
+  errors.
 
 ## 1.5.4 - 2026-06-04
 

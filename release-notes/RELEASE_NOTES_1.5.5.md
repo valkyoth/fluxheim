@@ -31,6 +31,9 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Move header policy request/response signatures and tests through the explicit
   Pingora HTTP adapter aliases while preserving the current mutation and rewrite
   behavior.
+- Route load-balancer HTTP health-check response/header/body validation through
+  the internal `FluxError` surface before adapting back to Pingora health-check
+  errors.
 
 ## Boundaries
 
