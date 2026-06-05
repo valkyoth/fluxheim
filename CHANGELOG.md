@@ -59,6 +59,8 @@ behavior when the change improves security or project direction.
   conversion back to `io::Error` kept at load-balancer discovery setup.
 - Move stream downstream PROXY trusted-source parsing onto `FluxResult`, with
   conversion back to `io::Error` kept at stream service construction.
+- Move HTTP health-check request-header setup onto `FluxResult`, with
+  conversion back to `io::Error` kept at the health-check factory boundary.
 
 ## 1.5.4 - 2026-06-04
 

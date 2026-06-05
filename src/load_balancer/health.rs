@@ -14,7 +14,7 @@ use crate::config::{
     LoadBalanceHealthCheckExpectedHeader, LoadBalanceHealthCheckExpectedStatusRange,
     LoadBalanceHealthCheckProtocol, ProxyConfig,
 };
-use crate::flux_error::FluxError;
+use crate::flux_error::{FluxError, FluxResult};
 use crate::http_types::{
     PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
@@ -41,6 +41,7 @@ pub(super) fn configured_health_check(
             Ok(health_check)
         }
         LoadBalanceHealthCheckProtocol::Http => configured_http_health_check(config)
+            .map_err(FluxError::into_io)
             .map(|check| check as Box<dyn HealthCheck + Send + Sync + 'static>),
     }
 }
@@ -120,7 +121,7 @@ impl HealthCheck for FluxHttpHealthCheck {
     }
 }
 
-fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<FluxHttpHealthCheck>> {
+fn configured_http_health_check(config: &ProxyConfig) -> FluxResult<Box<FluxHttpHealthCheck>> {
     let host = config
         .load_balance
         .health_check
@@ -132,10 +133,18 @@ fn configured_http_health_check(config: &ProxyConfig) -> io::Result<Box<FluxHttp
         config.load_balance.health_check.path.as_bytes(),
         None,
     )
-    .map_err(|error| io::Error::other(error.to_string()))?;
-    request
-        .append_header("Host", &host)
-        .map_err(|error| io::Error::other(error.to_string()))?;
+    .map_err(|error| {
+        FluxError::io(
+            "build HTTP health check request header",
+            io::Error::other(error.to_string()),
+        )
+    })?;
+    request.append_header("Host", &host).map_err(|error| {
+        FluxError::io(
+            "append HTTP health check Host header",
+            io::Error::other(error.to_string()),
+        )
+    })?;
 
     let sni = if config.upstream_tls {
         host.clone()
