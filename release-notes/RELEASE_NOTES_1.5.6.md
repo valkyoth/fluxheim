@@ -33,6 +33,9 @@ configuration and behavior.
   `tokio-rustls` / `tokio-openssl` connectors. Stream routes now use
   Fluxheim-owned TCP connect, TLS handshake, route-local trust roots, SNI
   derivation, verification policy, and upstream mTLS client material loading.
+- Extend the local stream smoke to prove rustls upstream TLS with generated
+  server certificate, explicit SNI, and route-local custom trust-root
+  validation.
 
 ## Boundaries
 

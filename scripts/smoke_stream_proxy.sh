@@ -5,12 +5,17 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fluxheim-stream-smoke.XXXXXX")
 KEEP_LOGS=${FLUXHEIM_SMOKE_KEEP_LOGS:-0}
 
+if ! command -v openssl >/dev/null 2>&1; then
+    echo "stream proxy smoke requires openssl to generate a temporary TLS upstream certificate" >&2
+    exit 1
+fi
+
 ports=$(python3 - <<'PY'
 import socket
 
 sockets = []
 try:
-    for _ in range(7):
+    for _ in range(9):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(("127.0.0.1", 0))
         sockets.append(sock)
@@ -29,17 +34,20 @@ PROXY_STREAM_PORT=$4
 PROXY_UPSTREAM_PORT=$5
 PROXY_RECV_STREAM_PORT=$6
 PROXY_RECV_UPSTREAM_PORT=$7
+TLS_STREAM_PORT=$8
+TLS_UPSTREAM_PORT=$9
 
 FLUXHEIM_PID=
 PRIMARY_PID=
 BACKUP_PID=
 PROXY_UPSTREAM_PID=
 PROXY_RECV_UPSTREAM_PID=
+TLS_UPSTREAM_PID=
 
 cleanup() {
     status=$?
 
-    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID"; do
+    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID" "$TLS_UPSTREAM_PID"; do
         if [ -n "$pid" ]; then
             kill "$pid" 2>/dev/null || true
         fi
@@ -47,13 +55,13 @@ cleanup() {
 
     sleep 0.2
 
-    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID"; do
+    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID" "$TLS_UPSTREAM_PID"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -9 "$pid" 2>/dev/null || true
         fi
     done
 
-    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID"; do
+    for pid in "$FLUXHEIM_PID" "$PRIMARY_PID" "$BACKUP_PID" "$PROXY_UPSTREAM_PID" "$PROXY_RECV_UPSTREAM_PID" "$TLS_UPSTREAM_PID"; do
         if [ -n "$pid" ]; then
             wait "$pid" 2>/dev/null || true
         fi
@@ -116,6 +124,31 @@ if __name__ == "__main__":
         server.serve_forever()
 PY
 
+cat > "$TMP_DIR/tls_server.py" <<'PY'
+import socketserver
+import ssl
+import sys
+
+
+class Handler(socketserver.BaseRequestHandler):
+    def handle(self):
+        data = self.request.recv(4096)
+        self.request.sendall(b"tls:" + data)
+
+
+if __name__ == "__main__":
+    host = sys.argv[1]
+    port = int(sys.argv[2])
+    cert = sys.argv[3]
+    key = sys.argv[4]
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile=cert, keyfile=key)
+    with socketserver.ThreadingTCPServer((host, port), Handler) as server:
+        server.allow_reuse_address = True
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.serve_forever()
+PY
+
 cat > "$TMP_DIR/stream_client.py" <<'PY'
 import socket
 import sys
@@ -158,6 +191,22 @@ if received != expected:
     sys.exit(1)
 PY
 
+mkdir -p "$TMP_DIR/tls"
+openssl req \
+    -x509 \
+    -newkey rsa:2048 \
+    -nodes \
+    -sha256 \
+    -days 1 \
+    -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -addext "keyUsage=digitalSignature,keyEncipherment" \
+    -addext "extendedKeyUsage=serverAuth" \
+    -keyout "$TMP_DIR/tls/upstream-key.pem" \
+    -out "$TMP_DIR/tls/upstream-cert.pem" >/dev/null 2>&1
+chmod 600 "$TMP_DIR/tls/upstream-key.pem"
+
 cat > "$TMP_DIR/fluxheim.toml" <<EOF
 [server]
 listen = []
@@ -198,6 +247,16 @@ connect_timeout_secs = 1
 idle_timeout_secs = 5
 downstream_proxy_protocol = "v1"
 trusted_proxies = ["127.0.0.1/32"]
+
+[[stream.routes]]
+name = "stream-upstream-tls"
+listen = ["127.0.0.1:$TLS_STREAM_PORT"]
+upstream = "127.0.0.1:$TLS_UPSTREAM_PORT"
+connect_timeout_secs = 1
+idle_timeout_secs = 5
+upstream_tls = true
+upstream_sni = "localhost"
+upstream_ca_path = "$TMP_DIR/tls/upstream-cert.pem"
 EOF
 
 wait_tcp() {
@@ -229,16 +288,19 @@ python3 "$TMP_DIR/proxy_protocol_server.py" 127.0.0.1 "$PROXY_UPSTREAM_PORT" >"$
 PROXY_UPSTREAM_PID=$!
 python3 "$TMP_DIR/tcp_server.py" 127.0.0.1 "$PROXY_RECV_UPSTREAM_PORT" pp-recv >"$TMP_DIR/proxy-recv-upstream.log" 2>&1 &
 PROXY_RECV_UPSTREAM_PID=$!
+python3 "$TMP_DIR/tls_server.py" 127.0.0.1 "$TLS_UPSTREAM_PORT" "$TMP_DIR/tls/upstream-cert.pem" "$TMP_DIR/tls/upstream-key.pem" >"$TMP_DIR/tls-upstream.log" 2>&1 &
+TLS_UPSTREAM_PID=$!
 
 wait_tcp "$PRIMARY_PORT"
 wait_tcp "$BACKUP_PORT"
 wait_tcp "$PROXY_UPSTREAM_PORT"
 wait_tcp "$PROXY_RECV_UPSTREAM_PORT"
+wait_tcp "$TLS_UPSTREAM_PORT"
 
-"$ROOT_DIR/scripts/validate-features.sh" stream-proxy
+"$ROOT_DIR/scripts/validate-features.sh" stream-proxy,tls-rustls,security
 (
     cd "$ROOT_DIR"
-    cargo build --quiet --no-default-features --features stream-proxy
+    cargo build --quiet --no-default-features --features stream-proxy,tls-rustls,security
 )
 
 "$ROOT_DIR/target/debug/fluxheim" --config "$TMP_DIR/fluxheim.toml" >"$TMP_DIR/fluxheim.log" 2>&1 &
@@ -247,6 +309,7 @@ FLUXHEIM_PID=$!
 wait_tcp "$STREAM_PORT"
 wait_tcp "$PROXY_STREAM_PORT"
 wait_tcp "$PROXY_RECV_STREAM_PORT"
+wait_tcp "$TLS_STREAM_PORT"
 
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$STREAM_PORT" probe primary:probe
 
@@ -258,5 +321,6 @@ sleep 0.3
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$STREAM_PORT" probe backup:probe
 python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$PROXY_STREAM_PORT" probe proxy-v1-ok
 python3 "$TMP_DIR/proxy_protocol_client.py" 127.0.0.1 "$PROXY_RECV_STREAM_PORT" probe pp-recv:probe
+python3 "$TMP_DIR/stream_client.py" 127.0.0.1 "$TLS_STREAM_PORT" probe tls:probe
 
 echo "stream proxy smoke passed"

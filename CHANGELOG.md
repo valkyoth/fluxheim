@@ -42,6 +42,9 @@ behavior when the change improves security or project direction.
   Fluxheim-owned TCP connect, TLS handshake, trust-root loading, SNI derivation,
   hostname/certificate verification policy, and upstream mTLS client material
   while preserving the existing route configuration.
+- Extend the local stream smoke to exercise a route-local rustls upstream TLS
+  connection with generated server certificate, explicit SNI, and custom trust
+  root validation.
 
 ## 1.5.5 - 2026-06-05
 
