@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use pingora::connectors::TransportConnector;
-use pingora::protocols::Stream;
 #[cfg(unix)]
 use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
@@ -28,6 +27,12 @@ use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot}
 use crate::flux_error::{FluxError, FluxResult};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::upstream_tls::RuntimeUpstreamTls;
+
+trait StreamIo: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> StreamIo for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+type FluxStream = Box<dyn StreamIo>;
 
 pub(crate) fn stream_services_from_config(config: &Config) -> io::Result<Vec<StreamProxyService>> {
     if !config.stream.enabled {
@@ -788,7 +793,7 @@ fn checked_stream_byte_count(
 async fn connect_upstream(
     upstream_authority: &str,
     options: &StreamProxyConnectionOptions,
-) -> FluxResult<Stream> {
+) -> FluxResult<FluxStream> {
     if options.upstream_tls {
         return connect_tls_upstream(upstream_authority, options).await;
     }
@@ -799,9 +804,7 @@ async fn connect_upstream(
     )
     .await
     {
-        Ok(Ok(stream)) => Ok(Box::new(pingora::protocols::l4::stream::Stream::from(
-            stream,
-        ))),
+        Ok(Ok(stream)) => Ok(Box::new(stream)),
         Ok(Err(error)) => Err(error),
         Err(_) => Err(FluxError::timeout(
             "stream upstream connect timeout",
@@ -821,7 +824,7 @@ async fn connect_tls_upstream(
         allow(unused_variables)
     )]
     options: &StreamProxyConnectionOptions,
-) -> FluxResult<Stream> {
+) -> FluxResult<FluxStream> {
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     {
         let connect = async {
@@ -849,7 +852,7 @@ async fn connect_tls_upstream(
             connector
                 .get_stream(&peer)
                 .await
-                .map(|(stream, _reused)| stream)
+                .map(|(stream, _reused)| Box::new(stream) as FluxStream)
                 .map_err(|error| {
                     FluxError::invalid_input(format!("stream upstream TLS connect failed: {error}"))
                 })

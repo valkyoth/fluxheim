@@ -30,6 +30,11 @@ behavior when the change improves security or project direction.
   and trusted-source matching for stream routes.
 - Move stream data-path tests off Pingora's stream wrapper and add regression
   coverage for downstream PROXY parser and trusted CIDR matching.
+- Replace the stream upstream connection return type with a Fluxheim-owned
+  async IO boundary so plain TCP upstreams stay as Tokio `TcpStream` values
+  instead of being wrapped in Pingora's L4 stream type. TLS upstreams are
+  adapted behind the same boundary while the explicit connector replacement
+  remains in the `1.5.6` line.
 
 ## 1.5.5 - 2026-06-05
 
