@@ -7,8 +7,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 ## Changed
 
 - Add `http_types` as the internal standard HTTP type boundary.
-- Re-export standard `http` crate method, URI, status, version, response, and
-  header types for internal modules.
+- Keep `http_types` exports limited to active internal boundary items and add
+  further standard HTTP aliases only as each migration step consumes them.
 - Keep Pingora request/response header wrappers named explicitly as adapter
   types at ingress/runtime boundaries.
 - Add a `thiserror`-backed `FluxError` / `FluxResult` internal error surface.

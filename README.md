@@ -335,8 +335,8 @@ Official container images are published to GitHub Container Registry and Quay:
 - `quay.io/valkyoth/fluxheim`
 
 Release tags use the same profile/OS suffixes on both registries, for example
-`v1.5.2-wolfi`, `v1.5.2-cache-wolfi`, `v1.5.2-proxy-wolfi`,
-`v1.5.2-load-balancer-wolfi`, and `v1.5.2-php-wolfi`.
+`v1.5.5-wolfi`, `v1.5.5-cache-wolfi`, `v1.5.5-proxy-wolfi`,
+`v1.5.5-load-balancer-wolfi`, and `v1.5.5-php-wolfi`.
 
 Manual feature selection also works:
 
