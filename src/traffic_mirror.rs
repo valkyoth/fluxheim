@@ -7,6 +7,8 @@ use std::time::Duration;
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use sha2::{Digest, Sha256};
 
+use crate::flux_error::{FluxError, FluxResult};
+
 const TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;
 
 #[derive(Clone, Copy, Debug)]
@@ -244,7 +246,7 @@ pub(crate) fn traffic_mirror_url(base_url: &str, path_and_query: &str) -> Option
     Some(url)
 }
 
-fn send_traffic_mirror_request(request: &TrafficMirrorRequest) -> io::Result<()> {
+fn send_traffic_mirror_request(request: &TrafficMirrorRequest) -> FluxResult<()> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(request.timeout_secs)))
         .max_redirects(0)
@@ -257,8 +259,7 @@ fn send_traffic_mirror_request(request: &TrafficMirrorRequest) -> io::Result<()>
         "OPTIONS" => agent.options(&request.url),
         "TRACE" => agent.trace(&request.url),
         _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+            return Err(FluxError::InvalidInput(
                 "traffic mirror method is not supported",
             ));
         }
@@ -276,16 +277,22 @@ fn send_traffic_mirror_request(request: &TrafficMirrorRequest) -> io::Result<()>
         .read_to_vec()
         .map_err(traffic_mirror_io_error)?;
     if body.len() as u64 > request.max_response_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
+        return Err(FluxError::io(
             "traffic mirror response exceeds configured body limit",
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "traffic mirror response exceeds configured body limit",
+            ),
         ));
     }
     Ok(())
 }
 
-fn traffic_mirror_io_error(error: impl std::fmt::Display) -> io::Error {
-    io::Error::other(error.to_string())
+fn traffic_mirror_io_error(error: impl std::fmt::Display) -> FluxError {
+    FluxError::io(
+        "traffic mirror HTTP subrequest",
+        io::Error::other(error.to_string()),
+    )
 }
 
 fn request_header_values_joined(request: &RequestHeader, name: &str) -> Option<String> {

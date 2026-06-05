@@ -48,6 +48,8 @@ behavior when the change improves security or project direction.
 - Move auth subrequest fetch failures and response body-limit enforcement onto
   `FluxResult`, with Pingora adaptation kept at the proxy authorization
   boundary.
+- Move traffic mirror dispatch failures and response body-limit enforcement
+  onto `FluxResult` inside the fire-and-forget mirror task.
 
 ## 1.5.4 - 2026-06-04
 

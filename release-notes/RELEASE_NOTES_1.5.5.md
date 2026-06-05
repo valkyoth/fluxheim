@@ -51,6 +51,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Move auth subrequest fetch failures and response body-limit enforcement onto
   `FluxResult`, with Pingora adaptation kept at the proxy authorization
   boundary.
+- Move traffic mirror dispatch failures and response body-limit enforcement
+  onto `FluxResult` inside the fire-and-forget mirror task.
 
 ## Boundaries
 
