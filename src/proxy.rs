@@ -80,7 +80,7 @@ use crate::edge_policy::{
     InFlightPermit, RateLimitDecision, RuntimeAccessPolicy, RuntimeConcurrencyLimit,
     RuntimeRateLimit, TrustedProxy, parse_trusted_proxies,
 };
-#[cfg(any(feature = "cache", feature = "php-fpm"))]
+#[cfg(any(feature = "cache", feature = "php-fpm", feature = "web"))]
 use crate::flux_error::{FluxError, FluxResult};
 #[cfg(feature = "load-balancer")]
 use crate::load_balancer::{
@@ -9857,16 +9857,12 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
+    use crate::http_types::PingoraRequestHeader as RequestHeader;
+    use crate::http_types::PingoraResponseHeader as ResponseHeader;
+    #[cfg(any(feature = "php-fpm", feature = "compression-gzip"))]
+    use crate::http_types::StatusCode;
     #[allow(unused_imports)]
     use bytes::Bytes;
-    #[cfg(any(
-        feature = "php-fpm",
-        feature = "compression-gzip",
-        feature = "load-balancer"
-    ))]
-    use pingora::http::ResponseHeader;
-    #[cfg(any(feature = "php-fpm", feature = "compression-gzip"))]
-    use pingora::http::StatusCode;
 
     #[cfg(feature = "compression-gzip")]
     use crate::config::CompressionConfig;
@@ -9981,7 +9977,7 @@ mod tests {
 
     #[test]
     fn normalizes_split_cookie_headers_for_upstream_http1() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
         request
             .append_header("cookie", "wordpress_logged_in=abc")
             .unwrap();
@@ -10009,9 +10005,8 @@ mod tests {
     }
 
     #[cfg(feature = "compression-gzip")]
-    fn compression_request() -> pingora::http::RequestHeader {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+    fn compression_request() -> RequestHeader {
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request
             .insert_header("accept-encoding", "br, gzip")
             .unwrap();
@@ -10185,15 +10180,13 @@ mod tests {
     #[cfg(feature = "compression-gzip")]
     #[test]
     fn gzip_accept_encoding_honors_q_zero() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request
             .insert_header("accept-encoding", "br, gzip;q=0")
             .unwrap();
         assert!(!request_accepts_gzip(&request));
 
-        let mut wildcard =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut wildcard = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         wildcard
             .insert_header("accept-encoding", "*;q=0.5")
             .unwrap();
@@ -10297,8 +10290,7 @@ mod tests {
     #[cfg(all(feature = "compression-gzip", feature = "compression-zstd"))]
     #[test]
     fn zstd_is_preferred_over_gzip_when_enabled_and_accepted() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request
             .insert_header("accept-encoding", "zstd, gzip")
             .unwrap();
@@ -10316,7 +10308,7 @@ mod tests {
 
     #[test]
     fn leaves_single_cookie_header_unchanged() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
         request
             .insert_header(
                 "cookie",
@@ -11007,7 +10999,7 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_directory_slash_redirect_location_preserves_query() {
-        let request = pingora::http::RequestHeader::build("GET", b"/blog?preview=1", None).unwrap();
+        let request = RequestHeader::build("GET", b"/blog?preview=1", None).unwrap();
 
         assert_eq!(
             directory_slash_redirect_location(&request).as_deref(),
@@ -11042,7 +11034,7 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_header_param_translation_adds_common_headers_and_drops_httpoxy_proxy() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/index.php", None).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request.insert_header("x-forwarded-proto", "https").unwrap();
         request
@@ -11072,7 +11064,7 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_header_param_translation_joins_split_cookie_headers_with_semicolon() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/index.php", None).unwrap();
         request
             .append_header("cookie", "wordpress_logged_in=abc")
             .unwrap();
@@ -11097,7 +11089,7 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_header_param_translation_caps_joined_header_values() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/index.php", None).unwrap();
         let cookie = "a".repeat(MAX_PHP_PARAM_VALUE_BYTES / 2);
         request.append_header("cookie", cookie.as_str()).unwrap();
         request.append_header("cookie", cookie.as_str()).unwrap();
@@ -11132,7 +11124,7 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_host_param_uses_resolved_request_host_without_literal_host_header() {
-        let request = pingora::http::RequestHeader::build("GET", b"/index.php", None).unwrap();
+        let request = RequestHeader::build("GET", b"/index.php", None).unwrap();
         let mut params = fastcgi_client::Params::default();
 
         add_php_request_header_params(&mut params, &request);
@@ -11165,7 +11157,7 @@ mod tests {
     #[cfg(feature = "php-fpm")]
     #[test]
     fn php_content_type_param_rejects_unsafe_values() {
-        let mut request = pingora::http::RequestHeader::build("POST", b"/index.php", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/index.php", None).unwrap();
         request
             .insert_header("content-type", "application/x-www-form-urlencoded")
             .unwrap();
@@ -11174,7 +11166,7 @@ mod tests {
             "application/x-www-form-urlencoded"
         );
 
-        let mut request = pingora::http::RequestHeader::build("POST", b"/index.php", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/index.php", None).unwrap();
         let content_type = "a".repeat(MAX_PHP_PARAM_VALUE_BYTES + 1);
         request
             .insert_header("content-type", content_type.as_str())
@@ -12380,8 +12372,7 @@ mod tests {
 
     #[test]
     fn builds_safe_https_redirect_location() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/shop/item?id=42", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/shop/item?id=42", None).unwrap();
         request.insert_header("host", "Example.Test:8080").unwrap();
         let config = HttpsRedirectConfig {
             enabled: true,
@@ -12397,7 +12388,7 @@ mod tests {
 
     #[test]
     fn default_https_redirect_drops_source_http_port() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/docs", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/docs", None).unwrap();
         request.insert_header("host", "example.test:8080").unwrap();
 
         assert_eq!(
@@ -12416,7 +12407,7 @@ mod tests {
 
     #[test]
     fn rejects_redirect_location_without_safe_host() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
         request.insert_header("host", "example.test/bad").unwrap();
 
         assert_eq!(
@@ -12747,8 +12738,7 @@ mod tests {
 
     #[test]
     fn route_redirect_templates_preserve_safe_uri() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/old/path?x=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/old/path?x=1", None).unwrap();
         request.insert_header("host", "www.example.test").unwrap();
         let redirect = RouteRedirectConfig {
             to: "https://example.test{uri}".to_owned(),
@@ -12763,13 +12753,13 @@ mod tests {
 
     #[test]
     fn websocket_upgrade_policy_preserves_required_hop_by_hop_headers() {
-        let mut downstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        let mut downstream = RequestHeader::build("GET", b"/chat", None).unwrap();
         downstream
             .insert_header("connection", "keep-alive, Upgrade")
             .unwrap();
         downstream.insert_header("upgrade", "websocket").unwrap();
 
-        let mut upstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        let mut upstream = RequestHeader::build("GET", b"/chat", None).unwrap();
         upstream.insert_header("connection", "close").unwrap();
         upstream.insert_header("upgrade", "h2c").unwrap();
         let proxy = ProxyConfig {
@@ -12798,7 +12788,7 @@ mod tests {
 
     #[test]
     fn websocket_upgrade_policy_is_explicit_opt_in() {
-        let mut downstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        let mut downstream = RequestHeader::build("GET", b"/chat", None).unwrap();
         downstream.insert_header("connection", "upgrade").unwrap();
         downstream.insert_header("upgrade", "websocket").unwrap();
         let proxy = ProxyConfig::default();
@@ -12808,7 +12798,7 @@ mod tests {
 
     #[test]
     fn websocket_upgrade_policy_rejects_invalid_upgrade_tokens() {
-        let mut downstream = pingora::http::RequestHeader::build("GET", b"/chat", None).unwrap();
+        let mut downstream = RequestHeader::build("GET", b"/chat", None).unwrap();
         downstream.insert_header("connection", "upgrade").unwrap();
         downstream.insert_header("upgrade", "web socket").unwrap();
         let proxy = ProxyConfig {
@@ -12821,7 +12811,7 @@ mod tests {
 
     #[test]
     fn auth_request_input_forwards_only_configured_headers() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/private", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/private", None).unwrap();
         request
             .insert_header("authorization", "Bearer abc")
             .unwrap();
@@ -12851,8 +12841,7 @@ mod tests {
     #[test]
     #[cfg(feature = "traffic-mirror")]
     fn traffic_mirror_builds_shadow_url_and_forwarded_headers() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/api/items?q=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/api/items?q=1", None).unwrap();
         request.insert_header("host", "example.test").unwrap();
         request
             .insert_header("user-agent", "fluxheim-test")
@@ -12893,7 +12882,7 @@ mod tests {
     #[test]
     #[cfg(feature = "traffic-mirror")]
     fn traffic_mirror_sampling_is_deterministic() {
-        let request = pingora::http::RequestHeader::build("GET", b"/api/items?q=1", None).unwrap();
+        let request = RequestHeader::build("GET", b"/api/items?q=1", None).unwrap();
 
         assert!(traffic_mirror_sample_selected(&request, 1000));
         assert!(!traffic_mirror_sample_selected(&request, 0));
@@ -12909,7 +12898,7 @@ mod tests {
 
     #[test]
     fn route_strip_prefix_rewrites_path_and_preserves_query() {
-        let request = pingora::http::RequestHeader::build("GET", b"/chat/room?id=7", None).unwrap();
+        let request = RequestHeader::build("GET", b"/chat/room?id=7", None).unwrap();
         let route = super::RuntimeRoute {
             name: "chat".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/chat/".to_owned()),
@@ -12944,8 +12933,7 @@ mod tests {
 
     #[test]
     fn route_rewrite_prefix_rewrites_to_upstream_prefix() {
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/public/api/users?id=7", None).unwrap();
+        let request = RequestHeader::build("GET", b"/public/api/users?id=7", None).unwrap();
         let route = super::RuntimeRoute {
             name: "api".to_owned(),
             matcher: super::RuntimeRouteMatcher::Prefix("/public/api/".to_owned()),
@@ -12980,8 +12968,7 @@ mod tests {
 
     #[test]
     fn route_rewrite_template_uses_regex_captures() {
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/api/v2/users?id=7", None).unwrap();
+        let request = RequestHeader::build("GET", b"/api/v2/users?id=7", None).unwrap();
         let route = super::RuntimeRoute {
             name: "api".to_owned(),
             matcher: super::RuntimeRouteMatcher::Regex(
@@ -13017,12 +13004,11 @@ mod tests {
             Some("/internal/v2/users?id=7")
         );
 
-        let traversal =
-            pingora::http::RequestHeader::build("GET", b"/api/v2/../admin", None).unwrap();
+        let traversal = RequestHeader::build("GET", b"/api/v2/../admin", None).unwrap();
         assert_eq!(route_rewritten_path_and_query(&traversal, &route), None);
 
         let encoded_separator =
-            pingora::http::RequestHeader::build("GET", b"/api/v2/users%2fadmin", None).unwrap();
+            RequestHeader::build("GET", b"/api/v2/users%2fadmin", None).unwrap();
         assert_eq!(
             route_rewritten_path_and_query(&encoded_separator, &route),
             None
@@ -13057,29 +13043,26 @@ mod tests {
             response_headers: crate::config::ResponseHeaderPolicyConfig::default(),
         };
 
-        let raw = pingora::http::RequestHeader::build("GET", b"/api/../admin", None).unwrap();
+        let raw = RequestHeader::build("GET", b"/api/../admin", None).unwrap();
         assert_eq!(route_rewritten_path_and_query(&raw, &route), None);
 
-        let encoded =
-            pingora::http::RequestHeader::build("GET", b"/api/%2e%2e/admin", None).unwrap();
+        let encoded = RequestHeader::build("GET", b"/api/%2e%2e/admin", None).unwrap();
         assert_eq!(route_rewritten_path_and_query(&encoded, &route), None);
 
-        let double_encoded =
-            pingora::http::RequestHeader::build("GET", b"/api/%252e%252e/admin", None).unwrap();
+        let double_encoded = RequestHeader::build("GET", b"/api/%252e%252e/admin", None).unwrap();
         assert_eq!(
             route_rewritten_path_and_query(&double_encoded, &route),
             None
         );
 
         let encoded_separator =
-            pingora::http::RequestHeader::build("GET", b"/api/safe%2f..%2fadmin", None).unwrap();
+            RequestHeader::build("GET", b"/api/safe%2f..%2fadmin", None).unwrap();
         assert_eq!(
             route_rewritten_path_and_query(&encoded_separator, &route),
             None
         );
 
-        let encoded_null =
-            pingora::http::RequestHeader::build("GET", b"/api/safe%00admin", None).unwrap();
+        let encoded_null = RequestHeader::build("GET", b"/api/safe%00admin", None).unwrap();
         assert_eq!(route_rewritten_path_and_query(&encoded_null, &route), None);
     }
 
@@ -13173,22 +13156,19 @@ mod tests {
             enabled: true,
             require_content_type: true,
         };
-        let get_request =
-            pingora::http::RequestHeader::build("GET", b"/service.Method", None).unwrap();
+        let get_request = RequestHeader::build("GET", b"/service.Method", None).unwrap();
         assert_eq!(
             grpc_route_rejection_status(&grpc, &get_request),
             Some(super::GrpcRouteRejectionStatus::MethodNotAllowed)
         );
 
-        let post_request =
-            pingora::http::RequestHeader::build("POST", b"/service.Method", None).unwrap();
+        let post_request = RequestHeader::build("POST", b"/service.Method", None).unwrap();
         assert_eq!(
             grpc_route_rejection_status(&grpc, &post_request),
             Some(super::GrpcRouteRejectionStatus::UnsupportedMediaType)
         );
 
-        let mut grpc_request =
-            pingora::http::RequestHeader::build("POST", b"/service.Method", None).unwrap();
+        let mut grpc_request = RequestHeader::build("POST", b"/service.Method", None).unwrap();
         grpc_request
             .insert_header("content-type", "application/grpc+proto")
             .unwrap();
@@ -13532,8 +13512,7 @@ mod tests {
             ..Config::default()
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         let snapshot = proxy.snapshot();
 
@@ -13600,8 +13579,7 @@ mod tests {
             ..Config::default()
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/asset.webp?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/asset.webp?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
 
         let preview = proxy
@@ -13766,8 +13744,7 @@ mod tests {
         assert!(route_cache.pingora_memory_storage.is_some());
         assert!(route_cache.pingora_cache_lock.is_some());
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         let key = snapshot
             .state
@@ -13782,8 +13759,7 @@ mod tests {
             )
         );
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         assert!(
             snapshot
@@ -13856,8 +13832,7 @@ mod tests {
             ..Config::default()
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
 
         let preview = proxy
@@ -13925,8 +13900,7 @@ mod tests {
             ..Config::default()
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/video.bin", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/video.bin", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         request.insert_header("range", "bytes=4-11").unwrap();
 
@@ -13977,8 +13951,7 @@ mod tests {
             ..Config::default()
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("POST", b"/assets/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/assets/logo.png", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
 
         let preview = proxy
@@ -13999,8 +13972,7 @@ mod tests {
         );
         assert_eq!(preview.primary_key, None);
 
-        let mut request =
-            pingora::http::RequestHeader::build("HEAD", b"/assets/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("HEAD", b"/assets/logo.png", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
 
         let preview = proxy
@@ -14054,8 +14026,7 @@ mod tests {
         let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
         let vhost = snapshot.state.vhost(vhost_index);
         let storage = vhost.pingora_memory_storage.unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         let key = snapshot
             .state
@@ -14141,8 +14112,7 @@ mod tests {
             vhost.pingora_memory_storage.unwrap() as &'static (dyn pingora::cache::Storage + Sync);
         let span = pingora::cache::trace::Span::inactive().handle();
 
-        let mut gzip_request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut gzip_request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         gzip_request
             .insert_header("host", "cached.example")
             .unwrap();
@@ -14165,8 +14135,7 @@ mod tests {
         block_on(miss.write_body(Bytes::from_static(b"gzip-body"), true)).unwrap();
         block_on(miss.finish()).unwrap();
 
-        let mut br_request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut br_request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         br_request.insert_header("host", "cached.example").unwrap();
         br_request.insert_header("accept-encoding", "br").unwrap();
         let br_key = snapshot
@@ -14254,8 +14223,7 @@ mod tests {
         let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
         let vhost = snapshot.state.vhost(vhost_index);
         let storage = vhost.pingora_disk_storage.unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         let key = snapshot
             .state
@@ -14376,8 +14344,7 @@ mod tests {
         let route = vhost.route(route_index);
         let route_cache = route.cache.as_ref().unwrap();
         let storage = route_cache.pingora_disk_storage.unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/logo.png?v=1", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         let key = snapshot
             .state
@@ -14445,8 +14412,7 @@ mod tests {
             ..Config::default()
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         let snapshot = proxy.snapshot();
 
@@ -14511,8 +14477,7 @@ mod tests {
             ..Config::default()
         };
         let proxy = FluxProxy::from_config(&config).unwrap();
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request.insert_header("host", "cached.example").unwrap();
         let snapshot = proxy.snapshot();
         let vhost_index = snapshot.state.vhost_index(Some("cached.example"));
@@ -15936,7 +15901,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(1024),
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/ok", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/ok", None).unwrap();
         request.insert_header("host", "example.test").unwrap();
 
         assert_eq!(request_limit_status(&limits, None, &request), None);
@@ -15950,7 +15915,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(1024),
         };
-        let request = pingora::http::RequestHeader::build("GET", b"/too-long", None).unwrap();
+        let request = RequestHeader::build("GET", b"/too-long", None).unwrap();
 
         assert_eq!(request_limit_status(&limits, None, &request), Some(414));
     }
@@ -15963,7 +15928,7 @@ mod tests {
             max_request_headers: 1,
             max_request_body_bytes: ByteSize::from_bytes(1024),
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/ok", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/ok", None).unwrap();
         request.append_header("x-one", "1").unwrap();
         request.append_header("x-two", "2").unwrap();
 
@@ -15978,7 +15943,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(1024),
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/ok", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/ok", None).unwrap();
         request
             .insert_header("x-long-header", "this-value-is-too-large")
             .unwrap();
@@ -15988,7 +15953,7 @@ mod tests {
 
     #[test]
     fn request_header_byte_estimate_counts_request_line_and_headers() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/ok", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/ok", None).unwrap();
         request.insert_header("host", "example.test").unwrap();
 
         assert!(approximate_request_header_bytes(&request) >= "GET /ok HTTP/1.1\r\n".len());
@@ -16003,7 +15968,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(16),
         };
-        let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/upload", None).unwrap();
         request.insert_header("content-length", "17").unwrap();
 
         assert_eq!(request_limit_status(&limits, None, &request), Some(413));
@@ -16017,7 +15982,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(1024),
         };
-        let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/upload", None).unwrap();
         request.insert_header("content-length", "64").unwrap();
 
         assert_eq!(request_limit_status(&limits, Some(32), &request), Some(413));
@@ -16032,7 +15997,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(16),
         };
-        let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/upload", None).unwrap();
         request.insert_header("content-length", "invalid").unwrap();
 
         assert_eq!(request_limit_status(&limits, None, &request), Some(400));
@@ -16046,7 +16011,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(16),
         };
-        let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/upload", None).unwrap();
         request.insert_header("content-length", "4").unwrap();
         request
             .insert_header("transfer-encoding", "chunked")
@@ -16063,7 +16028,7 @@ mod tests {
             max_request_headers: 8,
             max_request_body_bytes: ByteSize::from_bytes(16),
         };
-        let mut request = pingora::http::RequestHeader::build("POST", b"/upload", None).unwrap();
+        let mut request = RequestHeader::build("POST", b"/upload", None).unwrap();
         request
             .insert_header("transfer-encoding", "chunked")
             .unwrap();
@@ -16074,8 +16039,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn request_cache_bypass_honors_client_no_store_header() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request.insert_header("cache-control", "no-store").unwrap();
 
         assert!(request_cache_bypass(&request, &CacheConfig::default()));
@@ -16098,8 +16062,7 @@ mod tests {
             ("cache-control", "public, max-age=0"),
             ("pragma", "no-cache"),
         ] {
-            let mut request =
-                pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+            let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
             request.insert_header(name, value).unwrap();
 
             assert!(
@@ -16131,8 +16094,7 @@ mod tests {
             ("cache-control", "public, max-age=0"),
             ("pragma", "no-cache"),
         ] {
-            let mut request =
-                pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+            let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
             request.insert_header(name, value).unwrap();
 
             assert!(!request_cache_bypass(&request, &cache), "{name}: {value}");
@@ -16147,8 +16109,7 @@ mod tests {
             );
         }
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -16164,8 +16125,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn request_cache_bypass_checks_repeated_headers() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request
             .append_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -16177,8 +16137,7 @@ mod tests {
             &CacheConfig::default()
         ));
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request.append_header("pragma", "ignored").unwrap();
         request.append_header("pragma", "no-cache").unwrap();
 
@@ -16198,14 +16157,12 @@ mod tests {
             "max-age=60, Only-If-Cached",
             "only-if-cached=true",
         ] {
-            let mut request =
-                pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+            let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
             request.insert_header("cache-control", value).unwrap();
             assert!(request_cache_only_if_cached(&request), "{value}");
         }
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request
             .append_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -16214,8 +16171,7 @@ mod tests {
             .unwrap();
         assert!(request_cache_only_if_cached(&request));
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -16225,13 +16181,12 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn peer_fill_store_metadata_records_response_vary_variance() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.webp", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.webp", None).unwrap();
         request.insert_header("accept-language", "de").unwrap();
         let fields = vec!["accept-language".to_owned()];
         let expected = vary_request_hash(&fields, &request);
 
-        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
         response
             .insert_header("cache-control", "public, max-age=120")
             .unwrap();
@@ -16261,11 +16216,11 @@ mod tests {
         assert_eq!(remaining_fresh_ttl_secs(120, 120), None);
         assert_eq!(remaining_fresh_ttl_secs(120, 121), None);
 
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response.insert_header("age", "42").unwrap();
         assert_eq!(response_age_secs(&response), 42);
 
-        let mut invalid = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut invalid = ResponseHeader::build(200, Some(1)).unwrap();
         invalid.insert_header("age", "not-a-number").unwrap();
         assert_eq!(response_age_secs(&invalid), 0);
     }
@@ -16313,8 +16268,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn peer_fill_request_keeps_only_safe_negotiation_headers() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.webp?v=1", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.webp?v=1", None).unwrap();
         request.insert_header("host", "site.example").unwrap();
         request.insert_header("accept", "image/webp").unwrap();
         request.insert_header("accept-encoding", "br").unwrap();
@@ -16396,21 +16350,21 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let admin = pingora::http::RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
+        let admin = RequestHeader::build("GET", b"/wp-admin/", None).unwrap();
         assert!(request_cache_bypass(&admin, &cache));
         assert_eq!(
             request_cache_bypass_reason(&admin, &cache),
             Some("request-path")
         );
 
-        let login = pingora::http::RequestHeader::build("GET", b"/wp-login.php", None).unwrap();
+        let login = RequestHeader::build("GET", b"/wp-login.php", None).unwrap();
         assert!(request_cache_bypass(&login, &cache));
         assert_eq!(
             request_cache_bypass_reason(&login, &cache),
             Some("request-path")
         );
 
-        let mut cookie = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        let mut cookie = RequestHeader::build("GET", b"/", None).unwrap();
         cookie
             .insert_header("cookie", "wordpress_logged_in_c71744=user")
             .unwrap();
@@ -16429,8 +16383,7 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
         request.insert_header("cookie", "session=private").unwrap();
@@ -16440,8 +16393,7 @@ mod tests {
             Some("request-header")
         );
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request
             .insert_header("authorization", "Bearer secret")
             .unwrap();
@@ -16460,15 +16412,13 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
         request.insert_header("x-preview-mode", "0").unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request.append_header("x-preview-mode", "0").unwrap();
         request.append_header("x-preview-mode", "1").unwrap();
         assert!(request_cache_bypass(&request, &cache));
@@ -16486,8 +16436,7 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
         request
@@ -16499,8 +16448,7 @@ mod tests {
             Some("request-cookie")
         );
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request.insert_header("cookie", "session=abc").unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
@@ -16522,15 +16470,13 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
         request.insert_header("cookie", "preview=0").unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         request
             .insert_header("cookie", "theme=dark; preview=1")
             .unwrap();
@@ -16549,11 +16495,10 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let request = pingora::http::RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
+        let request = RequestHeader::build("GET", b"/assets/app.js", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1", None).unwrap();
+        let request = RequestHeader::build("GET", b"/assets/app.js?v=1", None).unwrap();
         assert!(request_cache_bypass(&request, &cache));
         assert_eq!(
             request_cache_bypass_reason(&request, &cache),
@@ -16569,30 +16514,25 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1", None).unwrap();
+        let request = RequestHeader::build("GET", b"/assets/app.js?v=1", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
         let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1&preview=true", None)
-                .unwrap();
+            RequestHeader::build("GET", b"/assets/app.js?v=1&preview=true", None).unwrap();
         assert!(request_cache_bypass(&request, &cache));
         assert_eq!(
             request_cache_bypass_reason(&request, &cache),
             Some("request-query")
         );
 
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?token", None).unwrap();
+        let request = RequestHeader::build("GET", b"/assets/app.js?token", None).unwrap();
         assert!(request_cache_bypass(&request, &cache));
         assert_eq!(
             request_cache_bypass_reason(&request, &cache),
             Some("request-query")
         );
 
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?previewed=true", None)
-                .unwrap();
+        let request = RequestHeader::build("GET", b"/assets/app.js?previewed=true", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
     }
 
@@ -16604,23 +16544,18 @@ mod tests {
             ..CacheConfig::default()
         };
 
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?mode=public", None)
-                .unwrap();
+        let request = RequestHeader::build("GET", b"/assets/app.js?mode=public", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
 
         let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?v=1&mode=private", None)
-                .unwrap();
+            RequestHeader::build("GET", b"/assets/app.js?v=1&mode=private", None).unwrap();
         assert!(request_cache_bypass(&request, &cache));
         assert_eq!(
             request_cache_bypass_reason(&request, &cache),
             Some("request-query")
         );
 
-        let request =
-            pingora::http::RequestHeader::build("GET", b"/assets/app.js?moder=private", None)
-                .unwrap();
+        let request = RequestHeader::build("GET", b"/assets/app.js?moder=private", None).unwrap();
         assert!(!request_cache_bypass(&request, &cache));
     }
 
@@ -16734,13 +16669,13 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn revalidation_304_headers_preserve_last_modified_and_detect_vary_changes() {
-        let mut merged = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut merged = ResponseHeader::build(200, Some(1)).unwrap();
         merged
             .insert_header("last-modified", "Sun, 10 May 2026 00:00:00 GMT")
             .unwrap();
         merged.insert_header("vary", "Accept-Encoding").unwrap();
 
-        let mut not_modified = pingora::http::ResponseHeader::build(304, Some(1)).unwrap();
+        let mut not_modified = ResponseHeader::build(304, Some(1)).unwrap();
         not_modified
             .insert_header("last-modified", "Mon, 11 May 2026 00:00:00 GMT")
             .unwrap();
@@ -16760,7 +16695,7 @@ mod tests {
             Some("Mon, 11 May 2026 00:00:00 GMT")
         );
 
-        let mut changed_vary = pingora::http::ResponseHeader::build(304, Some(1)).unwrap();
+        let mut changed_vary = ResponseHeader::build(304, Some(1)).unwrap();
         changed_vary
             .insert_header("vary", "Accept-Language")
             .unwrap();
@@ -16924,7 +16859,7 @@ mod tests {
             hide_response_headers: vec!["set-cookie".to_owned(), "x-internal".to_owned()],
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(3)).unwrap();
         response.insert_header("content-type", "image/png").unwrap();
         response
             .insert_header("set-cookie", "session=abc; HttpOnly; Secure")
@@ -16952,7 +16887,7 @@ mod tests {
             hide_response_headers: vec!["set-cookie".to_owned()],
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
         response.insert_header("set-cookie", "session=abc").unwrap();
 
         strip_cache_response_headers(
@@ -16975,7 +16910,7 @@ mod tests {
             ignore_origin_cache_headers: true,
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(3)).unwrap();
         response.insert_header("content-type", "text/css").unwrap();
         response
             .insert_header("cache-control", "private, no-store")
@@ -17005,7 +16940,7 @@ mod tests {
             ignore_origin_cache_headers: true,
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
         response.insert_header("cache-control", "private").unwrap();
         response
             .insert_header("expires", "Wed, 21 Oct 2015 07:28:00 GMT")
@@ -17034,7 +16969,7 @@ mod tests {
             stale_if_error_secs: Some(120),
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(3)).unwrap();
         response.insert_header("content-type", "image/png").unwrap();
         response
             .insert_header("expires", "Wed, 21 Oct 2015 07:28:00 GMT")
@@ -17068,7 +17003,7 @@ mod tests {
             stale_if_error_secs: Some(60),
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(418, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(418, Some(1)).unwrap();
         response
             .insert_header("cache-control", "private, no-store")
             .unwrap();
@@ -17095,7 +17030,7 @@ mod tests {
             stale_if_error_secs: Some(45),
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(3)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(3)).unwrap();
         response.insert_header("content-type", "image/png").unwrap();
         response
             .append_header("cache-control", "public, max-age=60")
@@ -17125,7 +17060,7 @@ mod tests {
             stale_if_error_secs: Some(45),
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
         response.insert_header("content-type", "image/png").unwrap();
         response.insert_header("cache-control", "private").unwrap();
 
@@ -17148,7 +17083,7 @@ mod tests {
             status_ttls: BTreeMap::from([(200, 3600)]),
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
         response.insert_header("cache-control", "private").unwrap();
 
         apply_cache_status_ttl(
@@ -17167,7 +17102,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn vary_cache_policy_rejects_unsafe_vary_headers() {
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         assert_eq!(vary_cache_policy(&response.headers), VaryCachePolicy::None);
 
         response.insert_header("vary", "*").unwrap();
@@ -17176,14 +17111,14 @@ mod tests {
             VaryCachePolicy::Uncacheable("vary-star")
         );
 
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response.insert_header("vary", "accept-encoding,").unwrap();
         assert_eq!(
             vary_cache_policy(&response.headers),
             VaryCachePolicy::Uncacheable("vary-invalid")
         );
 
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response.insert_header("vary", "x-one").unwrap();
         for index in 0..MAX_VARY_FIELDS {
             response
@@ -17195,7 +17130,7 @@ mod tests {
             VaryCachePolicy::Uncacheable("vary-too-many-fields")
         );
 
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response.insert_header("vary", "cookie").unwrap();
         assert_eq!(
             vary_cache_policy(&response.headers),
@@ -17206,7 +17141,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn response_cache_admission_rejects_set_cookie() {
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -17232,7 +17167,7 @@ mod tests {
             no_store_response_headers: vec!["x-app-no-store".to_owned()],
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -17254,7 +17189,7 @@ mod tests {
                 .into(),
             ..CacheConfig::default()
         };
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -17262,7 +17197,7 @@ mod tests {
         response.insert_header("x-app-cache", "public").unwrap();
         assert_eq!(response_cache_admission_rejection(&response, &cache), None);
 
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -17285,7 +17220,7 @@ mod tests {
             ("max-age=0", "cache-control-zero-freshness"),
             ("s-maxage=0", "cache-control-zero-freshness"),
         ] {
-            let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+            let mut response = ResponseHeader::build(200, Some(1)).unwrap();
             response.insert_header("content-type", "image/png").unwrap();
             response.insert_header("cache-control", value).unwrap();
 
@@ -17302,7 +17237,7 @@ mod tests {
     fn response_cache_admission_requires_allowed_content_type() {
         use std::collections::BTreeMap;
 
-        let mut redirect = pingora::http::ResponseHeader::build(302, Some(2)).unwrap();
+        let mut redirect = ResponseHeader::build(302, Some(2)).unwrap();
         redirect
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -17321,7 +17256,7 @@ mod tests {
             None
         );
 
-        let mut missing = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut missing = ResponseHeader::build(200, Some(1)).unwrap();
         missing
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -17330,7 +17265,7 @@ mod tests {
             Some("content-type-missing")
         );
 
-        let mut html = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut html = ResponseHeader::build(200, Some(2)).unwrap();
         html.insert_header("cache-control", "public, max-age=60")
             .unwrap();
         html.insert_header("content-type", "text/html; charset=utf-8")
@@ -17340,7 +17275,7 @@ mod tests {
             Some("content-type-not-cacheable")
         );
 
-        let mut css = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut css = ResponseHeader::build(200, Some(2)).unwrap();
         css.insert_header("cache-control", "public, max-age=60")
             .unwrap();
         css.insert_header("content-type", "TEXT/CSS; charset=utf-8")
@@ -17350,7 +17285,7 @@ mod tests {
             None
         );
 
-        let mut image = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut image = ResponseHeader::build(200, Some(2)).unwrap();
         image
             .insert_header("cache-control", "public, max-age=60")
             .unwrap();
@@ -17366,7 +17301,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn vary_cache_policy_normalizes_repeated_vary_fields() {
-        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
         response
             .append_header("vary", "Accept-Encoding, Accept-Language")
             .unwrap();
@@ -17384,7 +17319,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn cache_vary_policy_merges_configured_request_headers() {
-        let mut response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(2)).unwrap();
         response.append_header("vary", "Accept-Encoding").unwrap();
         let cache = CacheConfig {
             vary_request_headers: vec!["accept-language".to_owned(), "accept-encoding".to_owned()],
@@ -17403,7 +17338,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn cache_vary_policy_uses_configured_request_headers_without_origin_vary() {
-        let response = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let response = ResponseHeader::build(200, Some(2)).unwrap();
         let cache = CacheConfig {
             vary_request_headers: vec!["accept-encoding".to_owned()],
             ..CacheConfig::default()
@@ -17452,31 +17387,30 @@ mod tests {
             },
             ..CacheConfig::default()
         };
-        let mut request = pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/video.bin", None).unwrap();
         request.append_header("range", "bytes=0-15").unwrap();
         assert_eq!(
             selected_cache_range_request(&request, &cache),
             Some(CacheRangeRequest { start: 0, end: 15 })
         );
 
-        let mut too_large =
-            pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        let mut too_large = RequestHeader::build("GET", b"/video.bin", None).unwrap();
         too_large.append_header("range", "bytes=0-16").unwrap();
         assert_eq!(selected_cache_range_request(&too_large, &cache), None);
 
-        let mut repeated = pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        let mut repeated = RequestHeader::build("GET", b"/video.bin", None).unwrap();
         repeated.append_header("range", "bytes=0-15").unwrap();
         repeated.append_header("range", "bytes=16-31").unwrap();
         assert_eq!(selected_cache_range_request(&repeated, &cache), None);
 
-        let mut if_range = pingora::http::RequestHeader::build("GET", b"/video.bin", None).unwrap();
+        let mut if_range = RequestHeader::build("GET", b"/video.bin", None).unwrap();
         if_range.append_header("range", "bytes=0-15").unwrap();
         if_range
             .append_header("if-range", "\"strong-validator\"")
             .unwrap();
         assert_eq!(selected_cache_range_request(&if_range, &cache), None);
 
-        let mut head = pingora::http::RequestHeader::build("HEAD", b"/video.bin", None).unwrap();
+        let mut head = RequestHeader::build("HEAD", b"/video.bin", None).unwrap();
         head.append_header("range", "bytes=0-15").unwrap();
         assert_eq!(selected_cache_range_request(&head, &cache), None);
     }
@@ -17597,7 +17531,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn range_cache_admission_rejects_unkeyed_partial_responses() {
-        let mut response = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(206, Some(2)).unwrap();
         response
             .insert_header("content-range", "bytes 0-15/1024")
             .unwrap();
@@ -17612,7 +17546,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn range_cache_admission_accepts_matching_partial_response() {
-        let mut response = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        let mut response = ResponseHeader::build(206, Some(2)).unwrap();
         response
             .insert_header("content-range", "bytes 0-15/1024")
             .unwrap();
@@ -17630,7 +17564,7 @@ mod tests {
     #[cfg(feature = "cache")]
     #[test]
     fn range_cache_admission_rejects_mismatched_partial_metadata() {
-        let mut ok_status = pingora::http::ResponseHeader::build(200, Some(2)).unwrap();
+        let mut ok_status = ResponseHeader::build(200, Some(2)).unwrap();
         ok_status.insert_header("content-length", "16").unwrap();
         assert_eq!(
             range_response_cache_admission_rejection(
@@ -17640,7 +17574,7 @@ mod tests {
             Some("range-cache-non-partial")
         );
 
-        let mut bad_range = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        let mut bad_range = ResponseHeader::build(206, Some(2)).unwrap();
         bad_range
             .insert_header("content-range", "bytes 16-31/1024")
             .unwrap();
@@ -17653,7 +17587,7 @@ mod tests {
             Some("range-cache-content-range")
         );
 
-        let mut bad_length = pingora::http::ResponseHeader::build(206, Some(2)).unwrap();
+        let mut bad_length = ResponseHeader::build(206, Some(2)).unwrap();
         bad_length
             .insert_header("content-range", "bytes 0-15/1024")
             .unwrap();
@@ -17672,16 +17606,15 @@ mod tests {
     fn vary_request_hash_tracks_negotiated_request_headers() {
         let fields = vec!["accept-encoding".to_owned(), "accept-language".to_owned()];
 
-        let mut br = pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut br = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         br.insert_header("accept-encoding", "br").unwrap();
         br.insert_header("accept-language", "en").unwrap();
 
-        let mut gzip = pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut gzip = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         gzip.insert_header("accept-encoding", "gzip").unwrap();
         gzip.insert_header("accept-language", "en").unwrap();
 
-        let mut repeated =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut repeated = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         repeated.append_header("accept-encoding", "br").unwrap();
         repeated.append_header("accept-encoding", "zstd").unwrap();
         repeated.insert_header("accept-language", "en").unwrap();
@@ -17703,8 +17636,7 @@ mod tests {
     #[cfg(feature = "web")]
     #[test]
     fn request_header_values_joined_preserves_repeated_static_conditions() {
-        let mut request =
-            pingora::http::RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/img/logo.png", None).unwrap();
         request.append_header("if-none-match", "\"one\"").unwrap();
         request.append_header("if-none-match", "\"two\"").unwrap();
         request.append_header("range", "bytes=0-9").unwrap();
@@ -17726,7 +17658,7 @@ mod tests {
 
     #[test]
     fn appends_fluxheim_via_to_forwarded_request_and_response() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
         request.append_header("via", "1.0 edge").unwrap();
         request.append_header("via", "1.1 cache").unwrap();
 
@@ -17740,7 +17672,7 @@ mod tests {
             Some("1.0 edge, 1.1 cache, 1.1 fluxheim")
         );
 
-        let mut response = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut response = ResponseHeader::build(200, Some(1)).unwrap();
         response.insert_header("via", "1.0 origin-proxy").unwrap();
 
         append_fluxheim_via_to_response(&mut response).unwrap();
@@ -17756,7 +17688,7 @@ mod tests {
 
     #[test]
     fn request_host_header_falls_back_to_uri_authority() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/tls/check", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/tls/check", None).unwrap();
         request.uri = "https://app.example.test/tls/check".parse().unwrap();
 
         assert_eq!(
@@ -17767,7 +17699,7 @@ mod tests {
 
     #[test]
     fn request_host_header_prefers_explicit_host_header() {
-        let mut request = pingora::http::RequestHeader::build("GET", b"/check", None).unwrap();
+        let mut request = RequestHeader::build("GET", b"/check", None).unwrap();
         request.uri = "https://authority.example.test/check".parse().unwrap();
         request.insert_header("host", "host.example.test").unwrap();
 
@@ -17853,7 +17785,7 @@ mod tests {
 
     #[cfg(feature = "cache")]
     fn pingora_meta(cache_control: &str) -> pingora::cache::CacheMeta {
-        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut header = ResponseHeader::build(200, Some(1)).unwrap();
         header
             .insert_header("cache-control", cache_control)
             .unwrap();
@@ -17869,7 +17801,7 @@ mod tests {
 
     #[cfg(feature = "cache")]
     fn stale_pingora_meta(cache_control: &str) -> pingora::cache::CacheMeta {
-        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut header = ResponseHeader::build(200, Some(1)).unwrap();
         header
             .insert_header("cache-control", cache_control)
             .unwrap();

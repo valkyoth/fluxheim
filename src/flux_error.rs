@@ -27,6 +27,9 @@ pub(crate) enum FluxError {
         context: &'static str,
         detail: String,
     },
+
+    #[error("write PROXY protocol header: {0}")]
+    WriteProxyHeader(#[source] io::Error),
 }
 
 impl FluxError {
@@ -45,6 +48,10 @@ impl FluxError {
         }
     }
 
+    pub(crate) fn write_proxy_header(source: io::Error) -> Self {
+        Self::WriteProxyHeader(source)
+    }
+
     pub(crate) fn into_io(self) -> io::Error {
         match self {
             Self::Io { context, source } => {
@@ -55,6 +62,10 @@ impl FluxError {
                 io::Error::new(io::ErrorKind::InvalidInput, self)
             }
             Self::Timeout { .. } => io::Error::new(io::ErrorKind::TimedOut, self),
+            Self::WriteProxyHeader(source) => {
+                let kind = source.kind();
+                io::Error::new(kind, Self::WriteProxyHeader(source))
+            }
         }
     }
 
@@ -65,12 +76,14 @@ impl FluxError {
     pub(crate) fn io_kind(&self) -> Option<io::ErrorKind> {
         match self {
             Self::Io { source, .. } => Some(source.kind()),
+            Self::WriteProxyHeader(source) => Some(source.kind()),
             Self::InvalidInput(_) | Self::InvalidInputMessage(_) | Self::Timeout { .. } => None,
         }
     }
 
     #[cfg(feature = "ingress")]
     pub(crate) fn into_pingora(self, kind: pingora::ErrorType) -> Box<pingora::Error> {
-        pingora::Error::because(kind, "Fluxheim internal error", self)
+        let description = self.to_string();
+        pingora::Error::because(kind, description, self)
     }
 }

@@ -5,10 +5,8 @@
 //! adapter types at service/proxy boundaries until the HTTP runtime is owned by
 //! Fluxheim.
 
-#[allow(unused_imports)]
-pub(crate) use http::{
-    HeaderMap, HeaderName, HeaderValue, Method, Response, StatusCode, Uri, Version, header,
-};
+#[cfg(any(feature = "cache", feature = "compression", feature = "php-fpm"))]
+pub(crate) use http::StatusCode;
 
 #[cfg(feature = "proxy")]
 pub(crate) type PingoraRequestHeader = pingora::http::RequestHeader;

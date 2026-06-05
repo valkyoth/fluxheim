@@ -8439,6 +8439,8 @@ mod tests {
         CacheDiskStorageBinConfig, CacheKeyPart, CacheMemoryConfig,
     };
     #[cfg(feature = "proxy")]
+    use crate::http_types::PingoraResponseHeader as ResponseHeader;
+    #[cfg(feature = "proxy")]
     use crate::test_support::unique_temp_path;
 
     fn enabled_cache() -> CacheConfig {
@@ -12906,7 +12908,7 @@ mod tests {
     #[cfg(feature = "proxy")]
     #[test]
     fn cache_object_metadata_reports_stale_serving_state() {
-        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut header = ResponseHeader::build(200, Some(1)).unwrap();
         header
             .insert_header(
                 "cache-control",
@@ -12949,7 +12951,7 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     fn pingora_meta(cache_control: &str) -> pingora::cache::CacheMeta {
-        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut header = ResponseHeader::build(200, Some(1)).unwrap();
         header
             .insert_header("cache-control", cache_control)
             .unwrap();
@@ -12965,7 +12967,7 @@ mod tests {
 
     #[cfg(feature = "proxy")]
     fn stale_pingora_meta(cache_control: &str) -> pingora::cache::CacheMeta {
-        let mut header = pingora::http::ResponseHeader::build(200, Some(1)).unwrap();
+        let mut header = ResponseHeader::build(200, Some(1)).unwrap();
         header
             .insert_header("cache-control", cache_control)
             .unwrap();

@@ -112,9 +112,7 @@ impl pingora::connectors::L4Connect for ProxyProtocolConnector {
                         ErrorType::ConnectError
                     }
                     FluxError::Timeout { .. } => ErrorType::ConnectTimedout,
-                    FluxError::Io { context, .. } if *context == "write PROXY header" => {
-                        ErrorType::WriteError
-                    }
+                    FluxError::WriteProxyHeader(_) => ErrorType::WriteError,
                     FluxError::Io { .. } => ErrorType::ConnectError,
                 };
                 error.into_pingora(kind)
@@ -164,7 +162,7 @@ impl ProxyProtocolConnector {
         stream
             .write_all(&self.header)
             .await
-            .map_err(|error| FluxError::io("write PROXY header", error))?;
+            .map_err(FluxError::write_proxy_header)?;
         Ok(stream)
     }
 }

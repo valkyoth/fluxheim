@@ -76,6 +76,12 @@ behavior when the change improves security or project direction.
   with conversion back to `io::Error` kept at the PHP response parser boundary.
 - Route PHP FastCGI response split/status parsing through `FluxError` while
   preserving `InvalidData` at the parser boundary.
+- Replace the PROXY-protocol connector's string-matched write-error
+  classification with a typed `FluxError::WriteProxyHeader` variant.
+- Use each `FluxError`'s display message as the primary Pingora error
+  description at adapter boundaries.
+- Tighten `http_types` exports to active boundary items and move proxy/cache
+  tests off direct `pingora::http` request/response header imports.
 
 ## 1.5.4 - 2026-06-04
 
