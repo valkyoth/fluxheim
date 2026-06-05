@@ -41,6 +41,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   errors.
 - Split cache range/slice key construction into internal `FluxResult` helpers
   with Pingora adaptation kept at the proxy cache boundary.
+- Move static-file body read/open validation onto `FluxResult` while keeping
+  Pingora adaptation at static serving and proxy cache call sites.
 
 ## Boundaries
 

@@ -11,6 +11,8 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode
 
 use crate::config::WebConfig;
 #[cfg(feature = "proxy")]
+use crate::flux_error::{FluxError, FluxResult};
+#[cfg(feature = "proxy")]
 use crate::http_types::PingoraResponseHeader as ResponseHeader;
 
 #[cfg(unix)]
@@ -626,7 +628,7 @@ pub async fn serve_static_file_with_cache_headers(
     status: u16,
     cache_headers: StaticCacheHeaders<'_>,
 ) -> pingora::Result<()> {
-    use pingora::prelude::{InternalError, OrErr};
+    use pingora::prelude::InternalError;
 
     let mut plan = plan.clone();
     plan.status = status;
@@ -642,7 +644,7 @@ pub async fn serve_static_file_with_cache_headers(
             .write_response_header(Box::new(response), false)
             .await?;
         let body = read_static_response_body(file, plan.body)
-            .or_err(InternalError, "failed to read static file")?;
+            .map_err(|error| error.into_pingora(InternalError))?;
         session.write_response_body(Some(body), true).await?;
     }
 
@@ -998,81 +1000,118 @@ fn if_range_allows_range(modified: Option<SystemTime>, etag: &str, if_range: Opt
 }
 
 #[cfg(feature = "proxy")]
-pub fn read_static_response_body(
+pub(crate) fn read_static_response_body(
     file: &StaticFile,
     body: StaticResponseBody,
-) -> io::Result<bytes::Bytes> {
+) -> FluxResult<bytes::Bytes> {
     match body {
         StaticResponseBody::None => Ok(bytes::Bytes::new()),
         StaticResponseBody::Full => {
             if file.len > MAX_STATIC_BUFFERED_BODY_BYTES {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                return Err(FluxError::io(
                     "static file exceeds buffered response limit",
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "static file exceeds buffered response limit",
+                    ),
                 ));
             }
             let mut reader = open_static_body_file(file)?;
             let capacity = usize::try_from(file.len).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "static file too large")
+                FluxError::io(
+                    "static file too large",
+                    io::Error::new(io::ErrorKind::InvalidInput, "static file too large"),
+                )
             })?;
             let mut body = Vec::with_capacity(capacity);
             let mut bounded_reader = reader.by_ref().take(file.len.saturating_add(1));
-            bounded_reader.read_to_end(&mut body)?;
+            bounded_reader
+                .read_to_end(&mut body)
+                .map_err(|error| FluxError::io("read static file body", error))?;
             if body.len() as u64 != file.len {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
+                return Err(FluxError::io(
                     "static file changed during body read",
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "static file changed during body read",
+                    ),
                 ));
             }
             Ok(bytes::Bytes::from(body))
         }
         StaticResponseBody::Range { start, len } => {
             if len > MAX_STATIC_BUFFERED_BODY_BYTES {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
+                return Err(FluxError::io(
                     "static range exceeds buffered response limit",
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "static range exceeds buffered response limit",
+                    ),
                 ));
             }
             let len = usize::try_from(len).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "static range too large")
+                FluxError::io(
+                    "static range too large",
+                    io::Error::new(io::ErrorKind::InvalidInput, "static range too large"),
+                )
             })?;
             let mut reader = open_static_body_file(file)?;
-            reader.seek(io::SeekFrom::Start(start))?;
+            reader
+                .seek(io::SeekFrom::Start(start))
+                .map_err(|error| FluxError::io("seek static file body", error))?;
             let mut body = vec![0; len];
-            reader.read_exact(&mut body)?;
+            reader
+                .read_exact(&mut body)
+                .map_err(|error| FluxError::io("read static range body", error))?;
             Ok(bytes::Bytes::from(body))
         }
     }
 }
 
 #[cfg(feature = "proxy")]
-fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
+fn open_static_body_file(file: &StaticFile) -> FluxResult<std::fs::File> {
     let relative = SafeRelativePath::from_rooted(&file.root, &file.path).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
+        FluxError::io(
             "static body path escaped web root",
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body path escaped web root",
+            ),
         )
     })?;
     if file.path != file.root.join(relative.as_path()) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
+        return Err(FluxError::io(
             "static body path contains a symlink",
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body path contains a symlink",
+            ),
         ));
     }
 
-    let canonical = file.path.canonicalize()?;
+    let canonical = file
+        .path
+        .canonicalize()
+        .map_err(|error| FluxError::io("canonicalize static body path", error))?;
     if !canonical.starts_with(&file.root) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
+        return Err(FluxError::io(
             "static body path escaped web root",
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body path escaped web root",
+            ),
         ));
     }
 
-    let metadata = std::fs::symlink_metadata(&canonical)?;
+    let metadata = std::fs::symlink_metadata(&canonical)
+        .map_err(|error| FluxError::io("stat static body path", error))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
+        return Err(FluxError::io(
             "static body path is not a regular file",
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body path is not a regular file",
+            ),
         ));
     }
 
@@ -1081,25 +1120,38 @@ fn open_static_body_file(file: &StaticFile) -> io::Result<std::fs::File> {
     #[cfg(unix)]
     options.custom_flags(O_NOFOLLOW);
 
-    let file_handle = options.open(&canonical)?;
-    let metadata = file_handle.metadata()?;
+    let file_handle = options
+        .open(&canonical)
+        .map_err(|error| FluxError::io("open static body file", error))?;
+    let metadata = file_handle
+        .metadata()
+        .map_err(|error| FluxError::io("stat static body handle", error))?;
     if !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
+        return Err(FluxError::io(
             "static body handle is not a regular file",
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "static body handle is not a regular file",
+            ),
         ));
     }
     #[cfg(unix)]
     if metadata.dev() != file.device || metadata.ino() != file.inode {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
+        return Err(FluxError::io(
             "static file identity changed before body read",
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "static file identity changed before body read",
+            ),
         ));
     }
     if metadata.len() != file.len {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
+        return Err(FluxError::io(
             "static file changed before body read",
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "static file changed before body read",
+            ),
         ));
     }
 
@@ -1737,7 +1789,7 @@ mod tests {
 
         let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidInput));
     }
 
     #[cfg(feature = "proxy")]
@@ -1773,7 +1825,7 @@ mod tests {
 
         let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidInput));
     }
 
     #[cfg(all(feature = "proxy", unix))]
@@ -1791,7 +1843,7 @@ mod tests {
 
         let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidData));
     }
 
     #[cfg(feature = "proxy")]
@@ -1808,7 +1860,7 @@ mod tests {
 
         let error = super::read_static_response_body(&file, StaticResponseBody::Full).unwrap_err();
 
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(error.io_kind(), Some(io::ErrorKind::InvalidData));
     }
 
     struct TestDir {

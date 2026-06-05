@@ -38,6 +38,14 @@ impl FluxError {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn io_kind(&self) -> Option<io::ErrorKind> {
+        match self {
+            Self::Io { source, .. } => Some(source.kind()),
+            Self::InvalidInput(_) | Self::Timeout { .. } => None,
+        }
+    }
+
     #[cfg(feature = "ingress")]
     pub(crate) fn into_pingora(self, kind: pingora::ErrorType) -> Box<pingora::Error> {
         pingora::Error::because(kind, "Fluxheim internal error", self)
