@@ -64,6 +64,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   conversion back to `io::Error` kept at stream service construction.
 - Move stream route app construction validation onto `FluxResult`, with
   conversion back to `io::Error` kept at stream service registration.
+- Move stream downstream PROXY protocol listener setup onto `FluxResult`, with
+  conversion back to `io::Error` kept at stream service registration.
 - Move HTTP health-check request-header setup onto `FluxResult`, with
   conversion back to `io::Error` kept at the health-check factory boundary.
 - Move cache peer-fill and origin-slice request validation plus blocking fetch

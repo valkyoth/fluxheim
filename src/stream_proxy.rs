@@ -45,7 +45,7 @@ fn stream_service_from_route(route: &StreamRouteConfig) -> io::Result<StreamProx
     for listen in &route.listen {
         service.add_tcp(listen);
     }
-    apply_stream_downstream_proxy_protocol(&mut service, route)?;
+    apply_stream_downstream_proxy_protocol(&mut service, route).map_err(FluxError::into_io)?;
     Ok(service)
 }
 
@@ -787,7 +787,7 @@ fn downstream_local_addr(downstream: &Stream) -> Option<SocketAddr> {
 fn apply_stream_downstream_proxy_protocol(
     service: &mut StreamProxyService,
     route: &StreamRouteConfig,
-) -> io::Result<()> {
+) -> FluxResult<()> {
     if route.downstream_proxy_protocol == DownstreamProxyProtocol::Off {
         return Ok(());
     }
@@ -795,8 +795,7 @@ fn apply_stream_downstream_proxy_protocol(
         .trusted_proxies
         .iter()
         .map(|source| parse_stream_proxy_protocol_trusted_source(source))
-        .collect::<FluxResult<Vec<_>>>()
-        .map_err(FluxError::into_io)?;
+        .collect::<FluxResult<Vec<_>>>()?;
     log::info!(
         "stream route {} downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
         route.name,
