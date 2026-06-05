@@ -1016,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "fluxheim"
-version = "1.5.4"
+version = "1.5.5"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1054,6 +1054,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "subtle",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
  "ureq",

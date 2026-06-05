@@ -51,6 +51,7 @@ mod config_types;
 mod config_web;
 #[cfg(feature = "proxy")]
 mod edge_policy;
+mod flux_error;
 mod fs_trust;
 #[cfg(feature = "proxy")]
 mod geo_context;
@@ -58,6 +59,8 @@ mod geo_context;
 pub mod geoip;
 #[cfg(feature = "proxy")]
 pub mod headers;
+#[cfg(feature = "ingress")]
+mod http_types;
 pub mod internal_crypto;
 #[cfg(feature = "load-balancer")]
 pub mod load_balancer;

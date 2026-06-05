@@ -20,6 +20,10 @@ use std::time::Duration;
 ))]
 use std::time::Instant;
 
+#[cfg(any(feature = "cache", feature = "php-fpm"))]
+use crate::http_types::{
+    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader, StatusCode,
+};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -33,9 +37,6 @@ use pingora::cache::key::{CacheHashKey, HashBinary};
 use pingora::cache::lock::CacheKeyLockImpl;
 #[cfg(feature = "cache")]
 use pingora::cache::predictor::{CacheablePredictor, Predictor};
-#[cfg(any(feature = "cache", feature = "php-fpm"))]
-use pingora::http::StatusCode;
-use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::prelude::{HttpPeer, Result};
 use pingora::protocols::TcpKeepalive;
 #[cfg(feature = "cache")]

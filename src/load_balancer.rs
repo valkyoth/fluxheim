@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use pingora::http::RequestHeader;
+use crate::http_types::PingoraRequestHeader as RequestHeader;
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{Consistent, FNVHash, Random, RoundRobin};

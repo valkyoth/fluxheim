@@ -1,6 +1,8 @@
+use crate::http_types::{
+    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader, StatusCode,
+};
 use pingora::cache::key::HashBinary;
 use pingora::cache::{CacheKey as PingoraCacheKey, CachePhase, NoCacheReason};
-use pingora::http::{RequestHeader, ResponseHeader, StatusCode};
 use pingora::prelude::Result;
 use pingora::{Error, ErrorType};
 

@@ -1,13 +1,14 @@
 use std::io;
 use std::io::Write as _;
 
+use crate::http_types::{
+    PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader, StatusCode,
+};
 #[cfg(feature = "compression-brotli")]
 use brotli::CompressorWriter;
 use bytes::Bytes;
 #[cfg(feature = "compression-gzip")]
 use flate2::{Compression, write::GzEncoder};
-use pingora::http::StatusCode;
-use pingora::http::{RequestHeader, ResponseHeader};
 use pingora::prelude::Result;
 use pingora::{Error, ErrorType};
 

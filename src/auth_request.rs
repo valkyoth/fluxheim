@@ -1,8 +1,8 @@
 use std::io;
 use std::time::Duration;
 
+use crate::http_types::PingoraRequestHeader as RequestHeader;
 use bytes::Bytes;
-use pingora::http::RequestHeader;
 use zeroize::Zeroizing;
 
 #[derive(Debug)]

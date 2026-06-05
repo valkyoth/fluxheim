@@ -7,6 +7,19 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.5 - 2026-06-05
+
+### Changed
+
+- Start the Fluxheim-native HTTP/error type boundary line while preserving
+  Pingora runtime adapters.
+- Add internal `http_types` aliases for standard `http` crate values and
+  explicit Pingora request/response adapter names.
+- Add a direct `thiserror` dependency plus `FluxError` / `FluxResult` for
+  internal error propagation.
+- Convert the upstream PROXY-protocol connector to use the typed internal error
+  surface and convert back to Pingora errors only at the connector boundary.
+
 ## 1.5.4 - 2026-06-04
 
 ### Changed

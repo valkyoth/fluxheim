@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use pingora::http::RequestHeader;
+use crate::http_types::PingoraRequestHeader as RequestHeader;
 use sha2::{Digest, Sha256};
 
 const TRAFFIC_MIRROR_INFLIGHT_MAX_KEYS: usize = 4096;

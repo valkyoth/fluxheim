@@ -1,6 +1,6 @@
 [package]
 name = "fluxheim"
-version = "1.5.4"
+version = "1.5.5"
 edition = "2024"
 rust-version = "1.96"
 license = "EUPL-1.2"
@@ -195,6 +195,7 @@ subtle = { version = "2.6.1", optional = true }
 tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "net", "rt", "time"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", optional = true }
+thiserror = "2.0.18"
 toml = "1.1.2"
 ureq = { version = "3.3.0", default-features = false, features = ["json", "rustls"], optional = true }
 x509-parser = { version = "0.18.1", default-features = false, optional = true }

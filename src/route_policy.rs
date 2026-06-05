@@ -1,7 +1,7 @@
 use std::io;
 
+use crate::http_types::PingoraRequestHeader as RequestHeader;
 use crate::path_safety::safe_forward_path;
-use pingora::http::RequestHeader;
 
 #[derive(Debug, Clone)]
 pub(crate) enum RuntimeRouteMatcher {

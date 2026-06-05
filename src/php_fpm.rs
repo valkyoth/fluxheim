@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pingora::http::{ResponseHeader, StatusCode};
+use crate::http_types::{PingoraResponseHeader as ResponseHeader, StatusCode};
 
 use crate::config::{PhpConfig, PhpFpmConfig, PhpFpmMode, PhpFpmProcessManager};
 

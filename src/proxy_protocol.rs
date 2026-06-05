@@ -1,14 +1,14 @@
-use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use pingora::ErrorType;
 use pingora::prelude::{HttpPeer, Result};
-use pingora::{Error, ErrorType};
 use tokio::io::AsyncWriteExt as _;
 
 use crate::config::UpstreamProxyProtocol;
+use crate::flux_error::{FluxError, FluxResult};
 
 pub(crate) fn apply_upstream_proxy_protocol(
     peer: &mut HttpPeer,
@@ -104,20 +104,44 @@ impl pingora::connectors::L4Connect for ProxyProtocolConnector {
         &self,
         addr: &pingora::protocols::l4::socket::SocketAddr,
     ) -> Result<pingora::protocols::l4::stream::Stream> {
+        self.connect_with_proxy_protocol(addr)
+            .await
+            .map_err(|error| {
+                let kind = match &error {
+                    FluxError::InvalidInput(_) => ErrorType::ConnectError,
+                    FluxError::Timeout { .. } => ErrorType::ConnectTimedout,
+                    FluxError::Io { context, .. } if *context == "write PROXY header" => {
+                        ErrorType::WriteError
+                    }
+                    FluxError::Io { .. } => ErrorType::ConnectError,
+                };
+                error.into_pingora(kind)
+            })
+    }
+}
+
+impl ProxyProtocolConnector {
+    async fn connect_with_proxy_protocol(
+        &self,
+        addr: &pingora::protocols::l4::socket::SocketAddr,
+    ) -> FluxResult<pingora::protocols::l4::stream::Stream> {
         let connect = async {
             match addr {
                 pingora::protocols::l4::socket::SocketAddr::Inet(addr) => {
-                    tokio::net::TcpStream::connect(addr).await.map(Into::into)
+                    tokio::net::TcpStream::connect(addr)
+                        .await
+                        .map(Into::into)
+                        .map_err(|error| FluxError::io("upstream connect", error))
                 }
                 #[cfg(unix)]
                 pingora::protocols::l4::socket::SocketAddr::Unix(addr) => {
-                    let path = addr.as_pathname().ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            "non-pathname Unix upstreams cannot use PROXY protocol",
-                        )
-                    })?;
-                    tokio::net::UnixStream::connect(path).await.map(Into::into)
+                    let path = addr.as_pathname().ok_or(FluxError::InvalidInput(
+                        "non-pathname Unix upstreams cannot use PROXY protocol",
+                    ))?;
+                    tokio::net::UnixStream::connect(path)
+                        .await
+                        .map(Into::into)
+                        .map_err(|error| FluxError::io("upstream connect", error))
                 }
             }
         };
@@ -126,20 +150,19 @@ impl pingora::connectors::L4Connect for ProxyProtocolConnector {
             Some(timeout) => match tokio::time::timeout(timeout, connect).await {
                 Ok(result) => result,
                 Err(_) => {
-                    return Error::e_explain(
-                        ErrorType::ConnectTimedout,
+                    return Err(FluxError::timeout(
+                        "upstream connect timeout",
                         format!("timeout {timeout:?} connecting to server {addr}"),
-                    );
+                    ));
                 }
             },
             None => connect.await,
-        }
-        .map_err(|error| Error::because(ErrorType::ConnectError, "upstream connect", error))?;
+        }?;
 
         stream
             .write_all(&self.header)
             .await
-            .map_err(|error| Error::because(ErrorType::WriteError, "write PROXY header", error))?;
+            .map_err(|error| FluxError::io("write PROXY header", error))?;
         Ok(stream)
     }
 }

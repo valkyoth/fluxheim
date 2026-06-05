@@ -1,6 +1,6 @@
-use bytes::Bytes;
 #[cfg(not(feature = "privacy-mode"))]
-use pingora::http::RequestHeader;
+use crate::http_types::PingoraRequestHeader as RequestHeader;
+use bytes::Bytes;
 
 #[cfg(not(feature = "privacy-mode"))]
 use crate::config::AccessLoggingConfig;
