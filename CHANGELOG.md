@@ -36,6 +36,8 @@ behavior when the change improves security or project direction.
 - Route load-balancer file/DNS discovery helper failures through the internal
   `FluxError` surface before adapting back to Pingora `ServiceDiscovery`
   errors.
+- Split cache range/slice key construction into internal `FluxResult` helpers
+  with Pingora adaptation kept at the proxy cache boundary.
 
 ## 1.5.4 - 2026-06-04
 

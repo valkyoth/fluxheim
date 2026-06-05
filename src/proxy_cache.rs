@@ -6,7 +6,7 @@ use pingora::cache::{CacheKey as PingoraCacheKey, CachePhase, NoCacheReason};
 use pingora::prelude::Result;
 use pingora::{Error, ErrorType};
 
-use crate::flux_error::FluxError;
+use crate::flux_error::{FluxError, FluxResult};
 
 pub(crate) const MAX_VARY_FIELDS: usize = 16;
 const MAX_VARY_HEADER_BYTES: usize = 2048;
@@ -324,16 +324,22 @@ pub(crate) fn required_slice_bounds(
 }
 
 pub(crate) fn range_cache_key(
-    mut base: PingoraCacheKey,
+    base: PingoraCacheKey,
     range: CacheRangeRequest,
 ) -> Result<PingoraCacheKey> {
+    try_range_cache_key(base, range).map_err(|error| error.into_pingora(ErrorType::InternalError))
+}
+
+fn try_range_cache_key(
+    mut base: PingoraCacheKey,
+    range: CacheRangeRequest,
+) -> FluxResult<PingoraCacheKey> {
     let namespace = base.namespace().to_vec();
     let user_tag = base.user_tag.clone();
     let Some(primary) = base.primary_key_str() else {
-        return Err(
-            FluxError::InvalidInput("cache range key requires utf-8 primary key material")
-                .into_pingora(ErrorType::InternalError),
-        );
+        return Err(FluxError::InvalidInput(
+            "cache range key requires utf-8 primary key material",
+        ));
     };
     let mut primary = primary.to_owned();
     append_cache_key_component(&mut primary, "range", &range.component());
@@ -342,16 +348,22 @@ pub(crate) fn range_cache_key(
 }
 
 pub(crate) fn slice_cache_key(
-    mut base: PingoraCacheKey,
+    base: PingoraCacheKey,
     range: CacheRangeRequest,
 ) -> Result<PingoraCacheKey> {
+    try_slice_cache_key(base, range).map_err(|error| error.into_pingora(ErrorType::InternalError))
+}
+
+fn try_slice_cache_key(
+    mut base: PingoraCacheKey,
+    range: CacheRangeRequest,
+) -> FluxResult<PingoraCacheKey> {
     let namespace = base.namespace().to_vec();
     let user_tag = base.user_tag.clone();
     let Some(primary) = base.primary_key_str() else {
-        return Err(
-            FluxError::InvalidInput("cache slice key requires utf-8 primary key material")
-                .into_pingora(ErrorType::InternalError),
-        );
+        return Err(FluxError::InvalidInput(
+            "cache slice key requires utf-8 primary key material",
+        ));
     };
     let mut primary = primary.to_owned();
     append_cache_key_component(&mut primary, "slice", &range.component());

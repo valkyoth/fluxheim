@@ -39,6 +39,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Route load-balancer file/DNS discovery helper failures through the internal
   `FluxError` surface before adapting back to Pingora `ServiceDiscovery`
   errors.
+- Split cache range/slice key construction into internal `FluxResult` helpers
+  with Pingora adaptation kept at the proxy cache boundary.
 
 ## Boundaries
 
