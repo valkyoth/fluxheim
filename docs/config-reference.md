@@ -151,9 +151,9 @@ Notes:
 `stream-proxy` feature. Stream routes are raw L4 TCP services. They do not run
 HTTP routing, headers, cache, compression, auth subrequests, PHP, or web
 serving logic. The current stream datapath is Fluxheim-owned; the remaining
-Pingora stream entrypoint/connector wrappers are planned to be replaced by a
-Fluxheim-native Tokio listener and connector in the `1.5.x` dependency
-reduction line.
+stream listener entrypoint moved to a Fluxheim-owned Tokio listener loop in the
+`1.5.6` line. The upstream TLS connector adapter remains the stream-specific
+Pingora wrapper planned for the rest of the `1.5.6` dependency-reduction line.
 
 ```toml
 [stream]

@@ -23,6 +23,13 @@ behavior when the change improves security or project direction.
 - Make the stream copy/proxy data path generic over Tokio
   `AsyncRead + AsyncWrite` streams instead of requiring Pingora's stream wrapper
   in the internal helper signatures.
+- Replace the stream proxy's Pingora `ServerApp` / listening-service entrypoint
+  with a Fluxheim-owned Tokio listener loop registered as a service in the
+  existing process supervisor.
+- Add Fluxheim-owned bounded downstream PROXY protocol v1/v2 receive parsing
+  and trusted-source matching for stream routes.
+- Move stream data-path tests off Pingora's stream wrapper and add regression
+  coverage for downstream PROXY parser and trusted CIDR matching.
 
 ## 1.5.5 - 2026-06-05
 

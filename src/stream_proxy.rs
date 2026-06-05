@@ -1,19 +1,25 @@
 use std::io;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
+use std::process;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use pingora::apps::ServerApp;
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use pingora::connectors::TransportConnector;
 use pingora::protocols::Stream;
+#[cfg(unix)]
+use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
+use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use pingora::upstreams::peer::HttpPeer;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
+use tokio::net::{TcpListener, TcpStream};
 
 use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
@@ -22,8 +28,6 @@ use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot}
 use crate::flux_error::{FluxError, FluxResult};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::upstream_tls::RuntimeUpstreamTls;
-
-pub(crate) type StreamProxyService = pingora::services::listening::Service<StreamProxyApp>;
 
 pub(crate) fn stream_services_from_config(config: &Config) -> io::Result<Vec<StreamProxyService>> {
     if !config.stream.enabled {
@@ -39,14 +43,133 @@ pub(crate) fn stream_services_from_config(config: &Config) -> io::Result<Vec<Str
 }
 
 fn stream_service_from_route(route: &StreamRouteConfig) -> io::Result<StreamProxyService> {
-    let app = StreamProxyApp::from_config(route).map_err(FluxError::into_io)?;
-    let mut service =
-        pingora::services::listening::Service::new(format!("Stream proxy {}", route.name), app);
-    for listen in &route.listen {
-        service.add_tcp(listen);
+    StreamProxyService::from_config(route).map_err(FluxError::into_io)
+}
+
+pub(crate) struct StreamProxyService {
+    name: String,
+    listen: Arc<[String]>,
+    app: Arc<StreamProxyApp>,
+    downstream_proxy_protocol: DownstreamProxyProtocol,
+    trusted_sources: Arc<[StreamTrustedSource]>,
+}
+
+impl StreamProxyService {
+    fn from_config(route: &StreamRouteConfig) -> FluxResult<Self> {
+        let trusted_sources = parse_stream_trusted_sources(route)?;
+        if route.downstream_proxy_protocol != DownstreamProxyProtocol::Off {
+            log::info!(
+                "stream route {} downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
+                route.name,
+                route.downstream_proxy_protocol,
+                trusted_sources.len()
+            );
+        }
+        Ok(Self {
+            name: format!("Stream proxy {}", route.name),
+            listen: route.listen.clone().into(),
+            app: Arc::new(StreamProxyApp::from_config(route)?),
+            downstream_proxy_protocol: route.downstream_proxy_protocol,
+            trusted_sources: trusted_sources.into(),
+        })
     }
-    apply_stream_downstream_proxy_protocol(&mut service, route).map_err(FluxError::into_io)?;
-    Ok(service)
+
+    async fn run_listener(
+        app: Arc<StreamProxyApp>,
+        listener: TcpListener,
+        listen: String,
+        downstream_proxy_protocol: DownstreamProxyProtocol,
+        trusted_sources: Arc<[StreamTrustedSource]>,
+        mut shutdown: ShutdownWatch,
+    ) {
+        loop {
+            if *shutdown.borrow() {
+                break;
+            }
+            tokio::select! {
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        break;
+                    }
+                }
+                accepted = listener.accept() => {
+                    match accepted {
+                        Ok((downstream, _peer)) => {
+                            let app = app.clone();
+                            let trusted_sources = trusted_sources.clone();
+                            tokio::spawn(async move {
+                                app.process_downstream(
+                                    downstream,
+                                    downstream_proxy_protocol,
+                                    &trusted_sources,
+                                ).await;
+                            });
+                        }
+                        Err(error) => {
+                            log::warn!(
+                                target: "fluxheim::stream",
+                                "stream listener {listen} failed to accept connection: {error}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        log::info!(target: "fluxheim::stream", "stream listener {listen} stopped");
+    }
+}
+
+#[async_trait]
+impl ServiceWithDependents for StreamProxyService {
+    async fn start_service(
+        &mut self,
+        #[cfg(unix)] _fds: Option<ListenFds>,
+        mut shutdown: ShutdownWatch,
+        _listeners_per_fd: usize,
+        ready_notifier: ServiceReadyNotifier,
+    ) {
+        let mut listeners = Vec::with_capacity(self.listen.len());
+        for listen in self.listen.iter() {
+            match TcpListener::bind(listen).await {
+                Ok(listener) => listeners.push((listen.clone(), listener)),
+                Err(error) => {
+                    log::error!(
+                        target: "fluxheim::stream",
+                        "failed to bind stream listener {listen}: {error}"
+                    );
+                    process::abort();
+                }
+            }
+        }
+        ready_notifier.notify_ready();
+        if listeners.is_empty() {
+            let _ = shutdown.changed().await;
+            return;
+        }
+        let mut tasks = Vec::with_capacity(listeners.len());
+        for (listen, listener) in listeners {
+            tasks.push(tokio::spawn(Self::run_listener(
+                self.app.clone(),
+                listener,
+                listen,
+                self.downstream_proxy_protocol,
+                self.trusted_sources.clone(),
+                shutdown.clone(),
+            )));
+        }
+        let _ = shutdown.changed().await;
+        for task in tasks {
+            task.abort();
+        }
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn threads(&self) -> Option<usize> {
+        Some(1)
+    }
 }
 
 pub(crate) struct StreamProxyApp {
@@ -213,70 +336,13 @@ impl StreamProxyApp {
             connector: self.connector.clone(),
         }
     }
-}
 
-#[derive(Debug, Clone)]
-struct RuntimeStreamUpstream {
-    authority: Arc<str>,
-    alias: Option<Arc<str>>,
-    weight: usize,
-    backup: bool,
-    drained: bool,
-}
-
-#[derive(Debug, Clone)]
-struct StreamSelectedUpstream {
-    authority: Arc<str>,
-    alias: Option<Arc<str>>,
-    backup: bool,
-}
-
-impl StreamSelectedUpstream {
-    fn label(&self) -> &str {
-        self.alias.as_deref().unwrap_or(self.authority.as_ref())
-    }
-}
-
-fn runtime_stream_upstreams(route: &StreamRouteConfig) -> Vec<RuntimeStreamUpstream> {
-    let backup = route
-        .backup_upstreams
-        .iter()
-        .map(|upstream| upstream.to_ascii_lowercase())
-        .collect::<std::collections::HashSet<_>>();
-    let drain = route
-        .drain_upstreams
-        .iter()
-        .map(|upstream| upstream.to_ascii_lowercase())
-        .collect::<std::collections::HashSet<_>>();
-    route
-        .upstreams()
-        .enumerate()
-        .map(|(index, authority)| {
-            let normalized = authority.to_ascii_lowercase();
-            RuntimeStreamUpstream {
-                authority: Arc::from(authority),
-                alias: route
-                    .upstream_aliases
-                    .get(index)
-                    .map(|alias| Arc::<str>::from(alias.as_str())),
-                weight: route.upstream_weights.get(index).copied().unwrap_or(1),
-                backup: backup.contains(&normalized),
-                drained: drain.contains(&normalized),
-            }
-        })
-        .collect()
-}
-
-#[async_trait]
-impl ServerApp for StreamProxyApp {
-    async fn process_new(
-        self: &Arc<Self>,
-        mut downstream: Stream,
-        shutdown: &ShutdownWatch,
-    ) -> Option<Stream> {
-        if *shutdown.borrow() {
-            return None;
-        }
+    async fn process_downstream(
+        self: Arc<Self>,
+        mut downstream: TcpStream,
+        downstream_proxy_protocol: DownstreamProxyProtocol,
+        trusted_sources: &[StreamTrustedSource],
+    ) {
         let Some(_slot) = self.acquire_slot() else {
             log::warn!(
                 target: "fluxheim::stream",
@@ -284,11 +350,35 @@ impl ServerApp for StreamProxyApp {
                 self.name
             );
             record_stream_connection(self.name.as_ref(), "rejected");
-            return None;
+            return;
         };
 
-        let source = downstream_peer_addr(&downstream);
-        let destination = downstream_local_addr(&downstream);
+        let direct_source = downstream.peer_addr().ok();
+        let destination = downstream.local_addr().ok();
+        let source = match apply_downstream_proxy_protocol_to_stream(
+            &mut downstream,
+            downstream_proxy_protocol,
+            trusted_sources,
+            direct_source,
+            self.idle_timeout,
+        )
+        .await
+        {
+            Ok(source) => source,
+            Err(error) => {
+                record_stream_connection(self.name.as_ref(), stream_error_outcome(&error));
+                log::warn!(
+                    target: "fluxheim::stream",
+                    "stream route {} rejected downstream PROXY protocol from {}: {}",
+                    self.name,
+                    direct_source
+                        .map(|address| address.to_string())
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    error
+                );
+                return;
+            }
+        };
         let candidates = self.select_upstream_candidates();
         let options = self.connection_options();
         let started = Instant::now();
@@ -376,9 +466,59 @@ impl ServerApp for StreamProxyApp {
                 );
             }
         }
-
-        None
     }
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeStreamUpstream {
+    authority: Arc<str>,
+    alias: Option<Arc<str>>,
+    weight: usize,
+    backup: bool,
+    drained: bool,
+}
+
+#[derive(Debug, Clone)]
+struct StreamSelectedUpstream {
+    authority: Arc<str>,
+    alias: Option<Arc<str>>,
+    backup: bool,
+}
+
+impl StreamSelectedUpstream {
+    fn label(&self) -> &str {
+        self.alias.as_deref().unwrap_or(self.authority.as_ref())
+    }
+}
+
+fn runtime_stream_upstreams(route: &StreamRouteConfig) -> Vec<RuntimeStreamUpstream> {
+    let backup = route
+        .backup_upstreams
+        .iter()
+        .map(|upstream| upstream.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    let drain = route
+        .drain_upstreams
+        .iter()
+        .map(|upstream| upstream.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    route
+        .upstreams()
+        .enumerate()
+        .map(|(index, authority)| {
+            let normalized = authority.to_ascii_lowercase();
+            RuntimeStreamUpstream {
+                authority: Arc::from(authority),
+                alias: route
+                    .upstream_aliases
+                    .get(index)
+                    .map(|alias| Arc::<str>::from(alias.as_str())),
+                weight: route.upstream_weights.get(index).copied().unwrap_or(1),
+                backup: backup.contains(&normalized),
+                drained: drain.contains(&normalized),
+            }
+        })
+        .collect()
 }
 
 #[cfg(feature = "metrics")]
@@ -422,21 +562,15 @@ fn stream_error_outcome(error: &FluxError) -> &'static str {
 
 #[cfg(test)]
 async fn proxy_stream_connection(
-    downstream: &mut Stream,
+    downstream: &mut (impl AsyncRead + AsyncWrite + Unpin),
     upstream_authority: &str,
     options: StreamProxyConnectionOptions,
     source: Option<SocketAddr>,
     destination: Option<SocketAddr>,
 ) -> FluxResult<(u64, u64)> {
     let mut upstream = connect_upstream(upstream_authority, &options).await?;
-    proxy_connected_stream_connection(
-        &mut *downstream,
-        &mut upstream,
-        &options,
-        source,
-        destination,
-    )
-    .await
+    proxy_connected_stream_connection(downstream, &mut upstream, &options, source, destination)
+        .await
 }
 
 async fn proxy_connected_stream_connection(
@@ -793,55 +927,38 @@ async fn write_upstream_proxy_protocol(
     write_with_idle_timeout(upstream, &header, idle_timeout).await
 }
 
-fn downstream_peer_addr(downstream: &Stream) -> Option<SocketAddr> {
-    downstream
-        .get_socket_digest()
-        .and_then(|digest| digest.peer_addr().and_then(|addr| addr.as_inet()).copied())
+#[derive(Debug, Clone)]
+enum StreamTrustedSource {
+    Ip(IpAddr),
+    Cidr { network: IpAddr, prefix: u8 },
 }
 
-fn downstream_local_addr(downstream: &Stream) -> Option<SocketAddr> {
-    downstream
-        .get_socket_digest()
-        .and_then(|digest| digest.local_addr().and_then(|addr| addr.as_inet()).copied())
-}
-
-fn apply_stream_downstream_proxy_protocol(
-    service: &mut StreamProxyService,
-    route: &StreamRouteConfig,
-) -> FluxResult<()> {
-    if route.downstream_proxy_protocol == DownstreamProxyProtocol::Off {
-        return Ok(());
+impl StreamTrustedSource {
+    fn matches(&self, address: IpAddr) -> bool {
+        match self {
+            Self::Ip(trusted) => *trusted == address,
+            Self::Cidr { network, prefix } => ip_in_prefix(address, *network, *prefix),
+        }
     }
-    let trusted_sources = route
+}
+
+const PROXY_PROTOCOL_V1_MAX_LINE: usize = 108;
+const PROXY_PROTOCOL_V2_HEADER_LEN: usize = 16;
+const PROXY_PROTOCOL_V2_MAX_PAYLOAD: usize = 4096;
+const PROXY_PROTOCOL_V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\0\r\nQUIT\n";
+
+fn parse_stream_trusted_sources(route: &StreamRouteConfig) -> FluxResult<Vec<StreamTrustedSource>> {
+    if route.downstream_proxy_protocol == DownstreamProxyProtocol::Off {
+        return Ok(Vec::new());
+    }
+    route
         .trusted_proxies
         .iter()
         .map(|source| parse_stream_proxy_protocol_trusted_source(source))
-        .collect::<FluxResult<Vec<_>>>()?;
-    log::info!(
-        "stream route {} downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
-        route.name,
-        route.downstream_proxy_protocol,
-        trusted_sources.len()
-    );
-    match route.downstream_proxy_protocol {
-        DownstreamProxyProtocol::Off => {}
-        DownstreamProxyProtocol::V1 => {
-            service.set_proxy_protocol_v1(pingora::listeners::ProxyProtocolConfig::v1(
-                trusted_sources,
-            ));
-        }
-        DownstreamProxyProtocol::V2 => {
-            service.set_proxy_protocol_v2(pingora::listeners::ProxyProtocolConfig::v2(
-                trusted_sources,
-            ));
-        }
-    }
-    Ok(())
+        .collect::<FluxResult<Vec<_>>>()
 }
 
-fn parse_stream_proxy_protocol_trusted_source(
-    value: &str,
-) -> FluxResult<pingora::listeners::ProxyProtocolTrustedSource> {
+fn parse_stream_proxy_protocol_trusted_source(value: &str) -> FluxResult<StreamTrustedSource> {
     if let Some((address, prefix)) = value.split_once('/') {
         let network = address.parse::<IpAddr>().map_err(|error| {
             FluxError::invalid_input(format!(
@@ -853,22 +970,265 @@ fn parse_stream_proxy_protocol_trusted_source(
                 "invalid stream trusted proxy prefix {value:?}: {error}"
             ))
         })?;
-        return Ok(pingora::listeners::ProxyProtocolTrustedSource::Cidr { network, prefix });
+        let max_prefix = match network {
+            IpAddr::V4(_) => 32,
+            IpAddr::V6(_) => 128,
+        };
+        if prefix > max_prefix {
+            return Err(FluxError::invalid_input(format!(
+                "invalid stream trusted proxy prefix {value:?}: prefix exceeds address family width"
+            )));
+        }
+        return Ok(StreamTrustedSource::Cidr { network, prefix });
     }
-    Ok(pingora::listeners::ProxyProtocolTrustedSource::Ip(
-        value.parse::<IpAddr>().map_err(|error| {
+    Ok(StreamTrustedSource::Ip(value.parse::<IpAddr>().map_err(
+        |error| {
             FluxError::invalid_input(format!(
                 "invalid stream trusted proxy address {value:?}: {error}"
             ))
-        })?,
-    ))
+        },
+    )?))
+}
+
+async fn apply_downstream_proxy_protocol_to_stream(
+    downstream: &mut TcpStream,
+    protocol: DownstreamProxyProtocol,
+    trusted_sources: &[StreamTrustedSource],
+    direct_source: Option<SocketAddr>,
+    idle_timeout: Duration,
+) -> FluxResult<Option<SocketAddr>> {
+    if protocol == DownstreamProxyProtocol::Off {
+        return Ok(direct_source);
+    }
+    let Some(direct_source) = direct_source else {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY protocol requires a TCP peer address",
+        ));
+    };
+    if !trusted_sources
+        .iter()
+        .any(|source| source.matches(direct_source.ip()))
+    {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY protocol peer is not trusted",
+        ));
+    }
+    match protocol {
+        DownstreamProxyProtocol::Off => Ok(Some(direct_source)),
+        DownstreamProxyProtocol::V1 => {
+            read_downstream_proxy_protocol_v1(downstream, idle_timeout).await
+        }
+        DownstreamProxyProtocol::V2 => {
+            read_downstream_proxy_protocol_v2(downstream, idle_timeout).await
+        }
+    }
+}
+
+async fn read_downstream_proxy_protocol_v1(
+    downstream: &mut TcpStream,
+    idle_timeout: Duration,
+) -> FluxResult<Option<SocketAddr>> {
+    let mut line = Vec::with_capacity(PROXY_PROTOCOL_V1_MAX_LINE);
+    loop {
+        let mut byte = [0u8; 1];
+        let read = read_with_idle_timeout(downstream, &mut byte, idle_timeout).await?;
+        if read == 0 {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY protocol v1 header ended early",
+            ));
+        }
+        line.push(byte[0]);
+        if byte[0] == b'\n' {
+            break;
+        }
+        if line.len() >= PROXY_PROTOCOL_V1_MAX_LINE {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY protocol v1 header exceeds size limit",
+            ));
+        }
+    }
+    parse_downstream_proxy_protocol_v1(&line)
+}
+
+fn parse_downstream_proxy_protocol_v1(line: &[u8]) -> FluxResult<Option<SocketAddr>> {
+    let line = std::str::from_utf8(line)
+        .map_err(|_| FluxError::InvalidInput("stream downstream PROXY v1 header is not UTF-8"))?;
+    let line = line.strip_suffix("\r\n").ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing CRLF",
+    ))?;
+    if line == "PROXY UNKNOWN" {
+        return Ok(None);
+    }
+    let mut fields = line.split_whitespace();
+    if fields.next() != Some("PROXY") {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v1 header is missing prefix",
+        ));
+    }
+    let family = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing family",
+    ))?;
+    let source_addr = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing source address",
+    ))?;
+    let destination_addr = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing destination address",
+    ))?;
+    let source_port = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing source port",
+    ))?;
+    let destination_port = fields.next().ok_or(FluxError::InvalidInput(
+        "stream downstream PROXY v1 header is missing destination port",
+    ))?;
+    if fields.next().is_some() {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v1 header has unexpected fields",
+        ));
+    }
+    let source_ip = source_addr.parse::<IpAddr>().map_err(|_| {
+        FluxError::InvalidInput("stream downstream PROXY v1 source address is invalid")
+    })?;
+    let destination_ip = destination_addr.parse::<IpAddr>().map_err(|_| {
+        FluxError::InvalidInput("stream downstream PROXY v1 destination address is invalid")
+    })?;
+    match (family, source_ip, destination_ip) {
+        ("TCP4", IpAddr::V4(_), IpAddr::V4(_)) | ("TCP6", IpAddr::V6(_), IpAddr::V6(_)) => {}
+        _ => {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY v1 family does not match address types",
+            ));
+        }
+    }
+    let source_port = parse_proxy_protocol_port(source_port)?;
+    let _destination_port = parse_proxy_protocol_port(destination_port)?;
+    Ok(Some(SocketAddr::new(source_ip, source_port)))
+}
+
+async fn read_downstream_proxy_protocol_v2(
+    downstream: &mut TcpStream,
+    idle_timeout: Duration,
+) -> FluxResult<Option<SocketAddr>> {
+    let mut header = [0u8; PROXY_PROTOCOL_V2_HEADER_LEN];
+    read_exact_with_idle_timeout(downstream, &mut header, idle_timeout).await?;
+    if &header[..PROXY_PROTOCOL_V2_SIGNATURE.len()] != PROXY_PROTOCOL_V2_SIGNATURE {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 header has invalid signature",
+        ));
+    }
+    let payload_len = u16::from_be_bytes([header[14], header[15]]) as usize;
+    if payload_len > PROXY_PROTOCOL_V2_MAX_PAYLOAD {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 payload exceeds size limit",
+        ));
+    }
+    let mut payload = vec![0u8; payload_len];
+    if payload_len > 0 {
+        read_exact_with_idle_timeout(downstream, &mut payload, idle_timeout).await?;
+    }
+    parse_downstream_proxy_protocol_v2(&header, &payload)
+}
+
+fn parse_downstream_proxy_protocol_v2(
+    header: &[u8; PROXY_PROTOCOL_V2_HEADER_LEN],
+    payload: &[u8],
+) -> FluxResult<Option<SocketAddr>> {
+    if header[12] >> 4 != 0x2 {
+        return Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 header has invalid version",
+        ));
+    }
+    match header[12] & 0x0f {
+        0x00 => return Ok(None),
+        0x01 => {}
+        _ => {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY v2 header has invalid command",
+            ));
+        }
+    }
+    match header[13] {
+        0x11 => {
+            if payload.len() < 12 {
+                return Err(FluxError::InvalidInput(
+                    "stream downstream PROXY v2 TCP4 address is truncated",
+                ));
+            }
+            let source = Ipv4Addr::new(payload[0], payload[1], payload[2], payload[3]);
+            let port = u16::from_be_bytes([payload[8], payload[9]]);
+            Ok(Some(SocketAddr::new(IpAddr::V4(source), port)))
+        }
+        0x21 => {
+            if payload.len() < 36 {
+                return Err(FluxError::InvalidInput(
+                    "stream downstream PROXY v2 TCP6 address is truncated",
+                ));
+            }
+            let source = Ipv6Addr::from(<[u8; 16]>::try_from(&payload[0..16]).map_err(|_| {
+                FluxError::InvalidInput("stream downstream PROXY v2 TCP6 source is invalid")
+            })?);
+            let port = u16::from_be_bytes([payload[32], payload[33]]);
+            Ok(Some(SocketAddr::new(IpAddr::V6(source), port)))
+        }
+        0x00 => Ok(None),
+        _ => Err(FluxError::InvalidInput(
+            "stream downstream PROXY v2 address family is unsupported",
+        )),
+    }
+}
+
+async fn read_exact_with_idle_timeout<R>(
+    reader: &mut R,
+    buffer: &mut [u8],
+    idle_timeout: Duration,
+) -> FluxResult<()>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut offset = 0usize;
+    while offset < buffer.len() {
+        let read = read_with_idle_timeout(reader, &mut buffer[offset..], idle_timeout).await?;
+        if read == 0 {
+            return Err(FluxError::InvalidInput(
+                "stream downstream PROXY protocol header ended early",
+            ));
+        }
+        offset = offset.saturating_add(read);
+    }
+    Ok(())
+}
+
+fn parse_proxy_protocol_port(value: &str) -> FluxResult<u16> {
+    value
+        .parse::<u16>()
+        .map_err(|_| FluxError::InvalidInput("stream downstream PROXY port is invalid"))
+}
+
+fn ip_in_prefix(address: IpAddr, network: IpAddr, prefix: u8) -> bool {
+    match (address, network) {
+        (IpAddr::V4(address), IpAddr::V4(network)) => {
+            let mask = prefix_mask(prefix, 32) as u32;
+            u32::from(address) & mask == u32::from(network) & mask
+        }
+        (IpAddr::V6(address), IpAddr::V6(network)) => {
+            let mask = prefix_mask(prefix, 128);
+            u128::from(address) & mask == u128::from(network) & mask
+        }
+        _ => false,
+    }
+}
+
+fn prefix_mask(prefix: u8, bits: u8) -> u128 {
+    if prefix == 0 {
+        0
+    } else {
+        u128::MAX << u32::from(bits.saturating_sub(prefix))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{StreamProxyApp, proxy_stream_connection};
     use crate::config::{DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
-    use pingora::protocols::Stream as AnyStream;
     use std::io;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
@@ -985,6 +1345,67 @@ mod tests {
     }
 
     #[test]
+    fn stream_trusted_sources_match_exact_and_cidr() {
+        let exact = super::parse_stream_proxy_protocol_trusted_source("127.0.0.1").unwrap();
+        assert!(exact.matches("127.0.0.1".parse().unwrap()));
+        assert!(!exact.matches("127.0.0.2".parse().unwrap()));
+
+        let cidr = super::parse_stream_proxy_protocol_trusted_source("10.0.0.0/24").unwrap();
+        assert!(cidr.matches("10.0.0.42".parse().unwrap()));
+        assert!(!cidr.matches("10.0.1.42".parse().unwrap()));
+
+        assert!(super::parse_stream_proxy_protocol_trusted_source("10.0.0.0/64").is_err());
+    }
+
+    #[test]
+    fn stream_downstream_proxy_protocol_v1_parser_extracts_source() {
+        let parsed = super::parse_downstream_proxy_protocol_v1(
+            b"PROXY TCP4 203.0.113.10 192.0.2.20 42300 443\r\n",
+        )
+        .unwrap();
+
+        assert_eq!(parsed, Some("203.0.113.10:42300".parse().unwrap()));
+        assert_eq!(
+            super::parse_downstream_proxy_protocol_v1(b"PROXY UNKNOWN\r\n").unwrap(),
+            None
+        );
+        assert!(
+            super::parse_downstream_proxy_protocol_v1(
+                b"PROXY TCP4 2001:db8::10 192.0.2.20 42300 443\r\n"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn stream_downstream_proxy_protocol_v2_parser_extracts_source() {
+        let mut header = [0u8; super::PROXY_PROTOCOL_V2_HEADER_LEN];
+        header[..super::PROXY_PROTOCOL_V2_SIGNATURE.len()]
+            .copy_from_slice(super::PROXY_PROTOCOL_V2_SIGNATURE);
+        header[12] = 0x21;
+        header[13] = 0x11;
+        header[14..16].copy_from_slice(&12u16.to_be_bytes());
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[203, 0, 113, 10]);
+        payload.extend_from_slice(&[192, 0, 2, 20]);
+        payload.extend_from_slice(&42300u16.to_be_bytes());
+        payload.extend_from_slice(&443u16.to_be_bytes());
+
+        assert_eq!(
+            super::parse_downstream_proxy_protocol_v2(&header, &payload).unwrap(),
+            Some("203.0.113.10:42300".parse().unwrap())
+        );
+
+        header[12] = 0x20;
+        header[13] = 0x00;
+        header[14..16].copy_from_slice(&0u16.to_be_bytes());
+        assert_eq!(
+            super::parse_downstream_proxy_protocol_v2(&header, &[]).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn stream_proxy_copies_bytes_bidirectionally() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_io()
@@ -1006,9 +1427,7 @@ mod tests {
             let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let downstream_addr = downstream_listener.local_addr().unwrap();
             let proxy_task = tokio::spawn(async move {
-                let (stream, _) = downstream_listener.accept().await.unwrap();
-                let mut downstream: AnyStream =
-                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                let (mut downstream, _) = downstream_listener.accept().await.unwrap();
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
@@ -1055,9 +1474,7 @@ mod tests {
             let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let downstream_addr = downstream_listener.local_addr().unwrap();
             let proxy_task = tokio::spawn(async move {
-                let (stream, _) = downstream_listener.accept().await.unwrap();
-                let mut downstream: AnyStream =
-                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                let (mut downstream, _) = downstream_listener.accept().await.unwrap();
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
@@ -1099,9 +1516,7 @@ mod tests {
             let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let downstream_addr = downstream_listener.local_addr().unwrap();
             let proxy_task = tokio::spawn(async move {
-                let (stream, _) = downstream_listener.accept().await.unwrap();
-                let mut downstream: AnyStream =
-                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                let (mut downstream, _) = downstream_listener.accept().await.unwrap();
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
@@ -1141,9 +1556,7 @@ mod tests {
             let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let downstream_addr = downstream_listener.local_addr().unwrap();
             let proxy_task = tokio::spawn(async move {
-                let (stream, _) = downstream_listener.accept().await.unwrap();
-                let mut downstream: AnyStream =
-                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                let (mut downstream, _) = downstream_listener.accept().await.unwrap();
                 proxy_stream_connection(
                     &mut downstream,
                     &upstream_addr.to_string(),
@@ -1195,9 +1608,7 @@ mod tests {
             let downstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let downstream_addr = downstream_listener.local_addr().unwrap();
             let proxy_task = tokio::spawn(async move {
-                let (stream, _) = downstream_listener.accept().await.unwrap();
-                let mut downstream: AnyStream =
-                    Box::new(pingora::protocols::l4::stream::Stream::from(stream));
+                let (mut downstream, _) = downstream_listener.accept().await.unwrap();
                 let mut options = plain_options(std::time::Duration::from_secs(1), None);
                 options.upstream_proxy_protocol = UpstreamProxyProtocol::V2;
                 proxy_stream_connection(
