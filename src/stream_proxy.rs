@@ -9,30 +9,26 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-use pingora::connectors::TransportConnector;
 #[cfg(unix)]
 use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
-#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-use pingora::upstreams::peer::HttpPeer;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, UpstreamProxyProtocol};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-use crate::config_net::upstream_host;
-use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot};
-use crate::flux_error::{FluxError, FluxResult};
-#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-use crate::upstream_tls::RuntimeUpstreamTls;
+use crate::stream_tls::StreamUpstreamTlsConnector;
+use crate::{
+    config_stream::{StreamConnectionSlot, acquire_stream_connection_slot},
+    flux_error::{FluxError, FluxResult},
+};
 
-trait StreamIo: AsyncRead + AsyncWrite + Unpin + Send {}
+pub(crate) trait StreamIo: AsyncRead + AsyncWrite + Unpin + Send {}
 
 impl<T> StreamIo for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
 
-type FluxStream = Box<dyn StreamIo>;
+pub(crate) type FluxStream = Box<dyn StreamIo>;
 
 pub(crate) fn stream_services_from_config(config: &Config) -> io::Result<Vec<StreamProxyService>> {
     if !config.stream.enabled {
@@ -193,17 +189,7 @@ pub(crate) struct StreamProxyApp {
     upstream_proxy_protocol: UpstreamProxyProtocol,
     upstream_tls: bool,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_sni: Option<Arc<str>>,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_verify_cert: bool,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_verify_hostname: bool,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_alternative_cn: Option<Arc<str>>,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_tls_material: RuntimeUpstreamTls,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    connector: Option<Arc<TransportConnector>>,
+    upstream_tls_connector: Option<StreamUpstreamTlsConnector>,
 }
 
 impl StreamProxyApp {
@@ -238,17 +224,7 @@ impl StreamProxyApp {
             .max(1);
 
         #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-        let upstream_tls_material = RuntimeUpstreamTls::from_paths(
-            route.upstream_ca_path.as_deref(),
-            route.upstream_client_cert_path.as_deref(),
-            route.upstream_client_key_path.as_deref(),
-        )
-        .map_err(|error| {
-            FluxError::io(
-                "load stream upstream TLS material",
-                io::Error::new(error.kind(), format!("route {}: {error}", route.name)),
-            )
-        })?;
+        let upstream_tls_connector = StreamUpstreamTlsConnector::from_route(route)?;
 
         Ok(Self {
             name: Arc::from(route.name.as_str()),
@@ -266,19 +242,7 @@ impl StreamProxyApp {
             upstream_proxy_protocol: route.upstream_proxy_protocol,
             upstream_tls: route.upstream_tls,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_sni: route.upstream_sni.as_deref().map(Arc::from),
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_verify_cert: route.upstream_verify_cert,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_verify_hostname: route.upstream_verify_hostname,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_alternative_cn: route.upstream_alternative_cn.as_deref().map(Arc::from),
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_tls_material,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            connector: route
-                .upstream_tls
-                .then(|| Arc::new(TransportConnector::new(None))),
+            upstream_tls_connector,
         })
     }
 
@@ -328,17 +292,7 @@ impl StreamProxyApp {
             upstream_proxy_protocol: self.upstream_proxy_protocol,
             upstream_tls: self.upstream_tls,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_sni: self.upstream_sni.clone(),
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_verify_cert: self.upstream_verify_cert,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_verify_hostname: self.upstream_verify_hostname,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_alternative_cn: self.upstream_alternative_cn.clone(),
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_tls_material: self.upstream_tls_material.clone(),
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            connector: self.connector.clone(),
+            upstream_tls_connector: self.upstream_tls_connector.clone(),
         }
     }
 
@@ -621,17 +575,7 @@ struct StreamProxyConnectionOptions {
     upstream_proxy_protocol: UpstreamProxyProtocol,
     upstream_tls: bool,
     #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_sni: Option<Arc<str>>,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_verify_cert: bool,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_verify_hostname: bool,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_alternative_cn: Option<Arc<str>>,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    upstream_tls_material: RuntimeUpstreamTls,
-    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-    connector: Option<Arc<TransportConnector>>,
+    upstream_tls_connector: Option<StreamUpstreamTlsConnector>,
 }
 
 enum StreamCopyEvent {
@@ -829,33 +773,14 @@ async fn connect_tls_upstream(
     {
         let connect = async {
             let socket_addr = resolve_upstream_socket_addr(upstream_authority).await?;
-            let sni = stream_upstream_tls_sni(options.upstream_sni.as_deref(), upstream_authority);
-            let mut peer = HttpPeer::new(socket_addr, true, sni);
-            peer.options.connection_timeout = Some(options.connect_timeout);
-            peer.options.total_connection_timeout = Some(options.connect_timeout);
-            peer.options.verify_cert = options.upstream_verify_cert;
-            peer.options.verify_hostname = options.upstream_verify_hostname;
-            peer.options.alternative_cn = options
-                .upstream_alternative_cn
-                .as_deref()
-                .map(str::to_owned);
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            {
-                peer.options.ca = options.upstream_tls_material.ca.clone();
-                peer.client_cert_key = options.upstream_tls_material.client_cert_key.clone();
-            }
-            let Some(connector) = &options.connector else {
+            let Some(connector) = &options.upstream_tls_connector else {
                 return Err(FluxError::InvalidInput(
                     "stream upstream TLS connector is not initialized",
                 ));
             };
             connector
-                .get_stream(&peer)
+                .connect(upstream_authority, socket_addr, options.connect_timeout)
                 .await
-                .map(|(stream, _reused)| Box::new(stream) as FluxStream)
-                .map_err(|error| {
-                    FluxError::invalid_input(format!("stream upstream TLS connect failed: {error}"))
-                })
         };
 
         match tokio::time::timeout(options.connect_timeout, connect).await {
@@ -872,17 +797,6 @@ async fn connect_tls_upstream(
             "stream upstream TLS requires a TLS backend feature",
         ))
     }
-}
-
-#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-fn stream_upstream_tls_sni(configured: Option<&str>, upstream_authority: &str) -> String {
-    configured
-        .map(str::to_owned)
-        .or_else(|| {
-            let host = upstream_host(upstream_authority)?;
-            host.parse::<IpAddr>().is_err().then_some(host)
-        })
-        .unwrap_or_default()
 }
 
 async fn connect_upstream_inner(upstream_authority: &str) -> FluxResult<tokio::net::TcpStream> {
@@ -1255,17 +1169,7 @@ mod tests {
             upstream_proxy_protocol: UpstreamProxyProtocol::Off,
             upstream_tls: false,
             #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_sni: None,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_verify_cert: true,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_verify_hostname: true,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_alternative_cn: None,
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            upstream_tls_material: crate::upstream_tls::RuntimeUpstreamTls::default(),
-            #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-            connector: None,
+            upstream_tls_connector: None,
         }
     }
 

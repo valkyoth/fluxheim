@@ -154,7 +154,8 @@ serving logic. The current stream datapath and listener loop are
 Fluxheim-owned in the `1.5.6` line, including the internal async IO boundary
 used by accepted TCP connections and selected upstream connections. The
 upstream TLS connector adapter remains the stream-specific Pingora wrapper
-planned for the rest of the `1.5.6` dependency-reduction line.
+planned for the rest of the `1.5.6` dependency-reduction line, isolated behind
+the `stream_tls` adapter module.
 
 ```toml
 [stream]

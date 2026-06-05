@@ -27,6 +27,10 @@ configuration and behavior.
   values instead of being wrapped in Pingora's L4 stream type; TLS upstreams are
   adapted behind the same internal boundary until the connector replacement
   lands.
+- Isolate stream upstream TLS connector setup in a dedicated `stream_tls`
+  adapter module. This keeps Pingora `TransportConnector` / `HttpPeer` wiring
+  out of the stream proxy orchestration file and narrows the remaining native
+  TLS replacement target.
 
 ## Boundaries
 
@@ -34,8 +38,9 @@ configuration and behavior.
 behavior, route-local downstream and upstream PROXY protocol behavior, weighted
 upstream selection, idle/lifetime/byte caps, metrics, release profiles, and
 smoke-test shape. The upstream TLS connector adapter remains the main
-stream-specific Pingora wrapper still planned for this release line; the
-general stream copy/proxy path no longer requires Pingora's stream wrapper.
+stream-specific Pingora wrapper still planned for this release line, but it is
+now isolated in `stream_tls`; the general stream copy/proxy path no longer
+requires Pingora's stream wrapper.
 
 1.5.6 does not replace the HTTP proxy runtime, native load-balancer internals,
 restart-persistent load-balancer state, active-active state sync, UDP/GSLB,

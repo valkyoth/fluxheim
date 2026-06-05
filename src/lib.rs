@@ -91,6 +91,11 @@ pub mod security;
 pub mod snapshot;
 #[cfg(feature = "stream-proxy")]
 mod stream_proxy;
+#[cfg(all(
+    feature = "stream-proxy",
+    any(feature = "tls-rustls-backend", feature = "tls-openssl")
+))]
+mod stream_tls;
 #[cfg(any(
     feature = "tls",
     feature = "tls-rustls-backend",

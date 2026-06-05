@@ -35,6 +35,10 @@ behavior when the change improves security or project direction.
   instead of being wrapped in Pingora's L4 stream type. TLS upstreams are
   adapted behind the same boundary while the explicit connector replacement
   remains in the `1.5.6` line.
+- Split stream upstream TLS connector wiring into a dedicated `stream_tls`
+  adapter module. The stream proxy orchestration file no longer owns Pingora
+  `TransportConnector` / `HttpPeer` setup directly; the remaining connector
+  dependency is isolated for the native rustls/OpenSSL replacement.
 
 ## 1.5.5 - 2026-06-05
 
