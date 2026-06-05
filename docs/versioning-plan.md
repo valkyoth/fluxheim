@@ -3572,10 +3572,10 @@ the exception while the cache server is being completed as a focused sequence:
   Wasm/iRules/Lua scripting in this release. Defer remaining runtime-heavy
   error-boundary work explicitly: PHP-FPM process supervision and request-body
   spool I/O move with later PHP/HTTP-runtime work, stream connect/copy/shutdown
-  helpers move with `v1.5.6`, load-balancer factory/background wiring moves
-  with `v1.5.7`, and upstream TLS material loading moves with the later
-  server/listener/TLS runtime line unless it is required earlier for stream
-  runtime correctness.
+  helpers move with `v1.5.6`, stream upstream TLS connector ownership moves
+  with `v1.5.6`, load-balancer factory/background wiring moves with `v1.5.7`,
+  and broader HTTP/server upstream TLS material loading moves with the later
+  server/listener/TLS runtime line.
 - `v1.5.6`: Fluxheim-native stream-proxy runtime line. Stop at replacing
   Pingora's stream service entrypoint and stream/TLS connector wrappers with a
   Fluxheim-owned Tokio listener loop and explicit outbound connector for raw

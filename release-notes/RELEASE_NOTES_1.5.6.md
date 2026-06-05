@@ -25,22 +25,24 @@ configuration and behavior.
 - Replace the internal stream connection return type with a Fluxheim-owned
   async IO boundary. Plain TCP stream upstreams now stay as Tokio `TcpStream`
   values instead of being wrapped in Pingora's L4 stream type; TLS upstreams are
-  adapted behind the same internal boundary until the connector replacement
-  lands.
+  adapted behind the same internal boundary.
 - Isolate stream upstream TLS connector setup in a dedicated `stream_tls`
   adapter module. This keeps Pingora `TransportConnector` / `HttpPeer` wiring
-  out of the stream proxy orchestration file and narrows the remaining native
-  TLS replacement target.
+  out of the stream proxy orchestration file.
+- Replace the stream upstream TLS connector adapter with Fluxheim-native
+  `tokio-rustls` / `tokio-openssl` connectors. Stream routes now use
+  Fluxheim-owned TCP connect, TLS handshake, route-local trust roots, SNI
+  derivation, verification policy, and upstream mTLS client material loading.
 
 ## Boundaries
 
 1.5.6 preserves the existing stream route configuration, TCP stream proxy
 behavior, route-local downstream and upstream PROXY protocol behavior, weighted
 upstream selection, idle/lifetime/byte caps, metrics, release profiles, and
-smoke-test shape. The upstream TLS connector adapter remains the main
-stream-specific Pingora wrapper still planned for this release line, but it is
-now isolated in `stream_tls`; the general stream copy/proxy path no longer
-requires Pingora's stream wrapper.
+smoke-test shape. The stream listener, stream copy/proxy path, and stream
+upstream TLS connector are Fluxheim-owned in this release line; stream routes
+no longer require Pingora's listening service, stream wrapper, or TLS connector
+adapter.
 
 1.5.6 does not replace the HTTP proxy runtime, native load-balancer internals,
 restart-persistent load-balancer state, active-active state sync, UDP/GSLB,

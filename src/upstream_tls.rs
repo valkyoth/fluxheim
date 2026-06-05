@@ -83,7 +83,7 @@ compile_error!(
 const MAX_UPSTREAM_TLS_FILE_BYTES: u64 = 1024 * 1024;
 
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
-fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
+pub(crate) fn read_upstream_tls_file(path: &std::path::Path) -> io::Result<Vec<u8>> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(io::Error::new(
