@@ -20,7 +20,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-mkdir -p "$tmp/public"
+mkdir -p "$tmp/public" "$tmp/run"
 printf '%s\n' '<!doctype html><title>Fluxheim smoke</title><h1>Fluxheim smoke ok</h1>' > "$tmp/public/index.html"
 printf '%s\n' 'local-static-cache-webp' > "$tmp/public/asset.webp"
 
@@ -29,6 +29,11 @@ cat > "$config" <<EOF
 listen = ["127.0.0.1:$port"]
 default_vhost = "static.test"
 trusted_proxies = []
+
+[server.process]
+pid_file = "$tmp/run/fluxheim.pid"
+upgrade_sock = "$tmp/run/fluxheim-upgrade.sock"
+certificate_reload_sock = "$tmp/run/fluxheim-cert-reload.sock"
 
 [server.limits]
 max_request_header_bytes = "64KiB"
