@@ -1,4 +1,3 @@
-use std::io;
 use std::process;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -13,6 +12,7 @@ use super::policy::BackendSelectionPolicy;
 use super::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
 };
+use crate::flux_error::{FluxError, FluxResult};
 
 const MAGLEV_TABLE_SIZE: usize = 65_537;
 
@@ -665,10 +665,9 @@ pub(super) struct MaglevTable {
 }
 
 impl MaglevTable {
-    pub(super) fn from_backends(backends: &[Backend]) -> io::Result<Self> {
+    pub(super) fn from_backends(backends: &[Backend]) -> FluxResult<Self> {
         if backends.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
+            return Err(FluxError::InvalidInput(
                 "maglev requires at least one backend",
             ));
         }

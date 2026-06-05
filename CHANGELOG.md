@@ -53,6 +53,8 @@ behavior when the change improves security or project direction.
 - Move trusted-proxy parsing and runtime access-policy construction onto
   `FluxResult`, with conversion back to `io::Error` kept at proxy runtime
   construction boundaries.
+- Move Maglev table construction validation onto `FluxResult`, with conversion
+  back to `io::Error` kept at the load-balancer discovery factory boundary.
 
 ## 1.5.4 - 2026-06-04
 

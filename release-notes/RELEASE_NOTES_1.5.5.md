@@ -56,6 +56,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
 - Move trusted-proxy parsing and runtime access-policy construction onto
   `FluxResult`, with conversion back to `io::Error` kept at proxy runtime
   construction boundaries.
+- Move Maglev table construction validation onto `FluxResult`, with conversion
+  back to `io::Error` kept at the load-balancer discovery factory boundary.
 
 ## Boundaries
 

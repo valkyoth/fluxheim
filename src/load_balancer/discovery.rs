@@ -269,7 +269,7 @@ fn configured_backends(config: &ProxyConfig) -> io::Result<std::collections::BTr
 
 pub(super) fn configured_maglev_table(config: &ProxyConfig) -> io::Result<MaglevTable> {
     let backends: Vec<_> = configured_backends(config)?.into_iter().collect();
-    MaglevTable::from_backends(&backends)
+    MaglevTable::from_backends(&backends).map_err(FluxError::into_io)
 }
 
 fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {
