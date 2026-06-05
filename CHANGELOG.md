@@ -57,6 +57,8 @@ behavior when the change improves security or project direction.
   back to `io::Error` kept at the load-balancer discovery factory boundary.
 - Move static load-balancer backend construction onto `FluxResult`, with
   conversion back to `io::Error` kept at load-balancer discovery setup.
+- Move stream downstream PROXY trusted-source parsing onto `FluxResult`, with
+  conversion back to `io::Error` kept at stream service construction.
 
 ## 1.5.4 - 2026-06-04
 

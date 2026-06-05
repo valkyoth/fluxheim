@@ -19,6 +19,7 @@ use crate::config::{Config, DownstreamProxyProtocol, StreamRouteConfig, Upstream
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::config_net::upstream_host;
 use crate::config_stream::{StreamConnectionSlot, acquire_stream_connection_slot};
+use crate::flux_error::{FluxError, FluxResult};
 #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::upstream_tls::RuntimeUpstreamTls;
 
@@ -799,7 +800,8 @@ fn apply_stream_downstream_proxy_protocol(
         .trusted_proxies
         .iter()
         .map(|source| parse_stream_proxy_protocol_trusted_source(source))
-        .collect::<io::Result<Vec<_>>>()?;
+        .collect::<FluxResult<Vec<_>>>()
+        .map_err(FluxError::into_io)?;
     log::info!(
         "stream route {} downstream PROXY protocol {:?} receive enabled for {} trusted source(s)",
         route.name,
@@ -824,28 +826,25 @@ fn apply_stream_downstream_proxy_protocol(
 
 fn parse_stream_proxy_protocol_trusted_source(
     value: &str,
-) -> io::Result<pingora::listeners::ProxyProtocolTrustedSource> {
+) -> FluxResult<pingora::listeners::ProxyProtocolTrustedSource> {
     if let Some((address, prefix)) = value.split_once('/') {
         let network = address.parse::<IpAddr>().map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("invalid stream trusted proxy network {value:?}: {error}"),
-            )
+            FluxError::invalid_input(format!(
+                "invalid stream trusted proxy network {value:?}: {error}"
+            ))
         })?;
         let prefix = prefix.parse::<u8>().map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("invalid stream trusted proxy prefix {value:?}: {error}"),
-            )
+            FluxError::invalid_input(format!(
+                "invalid stream trusted proxy prefix {value:?}: {error}"
+            ))
         })?;
         return Ok(pingora::listeners::ProxyProtocolTrustedSource::Cidr { network, prefix });
     }
     Ok(pingora::listeners::ProxyProtocolTrustedSource::Ip(
         value.parse::<IpAddr>().map_err(|error| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("invalid stream trusted proxy address {value:?}: {error}"),
-            )
+            FluxError::invalid_input(format!(
+                "invalid stream trusted proxy address {value:?}: {error}"
+            ))
         })?,
     ))
 }

@@ -60,6 +60,8 @@ keeping narrow Pingora adapters at the current runtime boundaries.
   back to `io::Error` kept at the load-balancer discovery factory boundary.
 - Move static load-balancer backend construction onto `FluxResult`, with
   conversion back to `io::Error` kept at load-balancer discovery setup.
+- Move stream downstream PROXY trusted-source parsing onto `FluxResult`, with
+  conversion back to `io::Error` kept at stream service construction.
 
 ## Boundaries
 
