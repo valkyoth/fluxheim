@@ -3366,7 +3366,8 @@ impl RuntimeErrorPage {
             let web = static_file_server_from_config(
                 format!("{scope} error page status {} web", config.status),
                 &config.web,
-            )?
+            )
+            .map_err(crate::flux_error::FluxError::into_io)?
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -3430,7 +3431,8 @@ impl RuntimeRoute {
                 let web = static_file_server_from_config(
                     format!("vhost {vhost_name:?} route {:?} web", route.name),
                     web,
-                )?
+                )
+                .map_err(crate::flux_error::FluxError::into_io)?
                 .ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -3714,7 +3716,8 @@ impl RuntimeVhost {
             #[cfg(feature = "cache")]
             cache,
             #[cfg(feature = "web")]
-            web: static_file_server_from_config("default web", &web)?,
+            web: static_file_server_from_config("default web", &web)
+                .map_err(crate::flux_error::FluxError::into_io)?,
             #[cfg(feature = "php-fpm")]
             php: None,
             routes: Vec::new(),
@@ -3856,7 +3859,8 @@ impl RuntimeVhost {
             #[cfg(feature = "cache")]
             cache: cache_config,
             #[cfg(feature = "web")]
-            web: static_file_server_from_config(web_scope, &vhost.web)?,
+            web: static_file_server_from_config(web_scope, &vhost.web)
+                .map_err(crate::flux_error::FluxError::into_io)?,
             #[cfg(feature = "php-fpm")]
             php: RuntimePhp::from_config(php_scope, &vhost.name, "default", &vhost.php)?,
             routes,
@@ -3868,10 +3872,14 @@ impl RuntimeVhost {
 fn static_file_server_from_config(
     scope: impl std::fmt::Display,
     web: &crate::config::WebConfig,
-) -> io::Result<Option<StaticFileServer>> {
+) -> FluxResult<Option<StaticFileServer>> {
     let scope = scope.to_string();
-    StaticFileServer::from_config(web)
-        .map_err(|error| io::Error::new(error.kind(), format!("{scope}: {error}")))
+    StaticFileServer::from_config(web).map_err(|error| {
+        FluxError::io(
+            "build static file server",
+            io::Error::new(error.kind(), format!("{scope}: {error}")),
+        )
+    })
 }
 
 #[derive(Debug, Default)]
