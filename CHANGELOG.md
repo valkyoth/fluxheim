@@ -61,6 +61,8 @@ behavior when the change improves security or project direction.
   alias during the native-substrate migration.
 - Wrap the current Pingora load-balancer container in a Fluxheim runtime type
   before handing pools to selection, status, and background-service code.
+- Return Fluxheim runtime-wrapped load-balancer pools from discovery so
+  selection-mode construction no longer repeats Pingora container wrapping.
 
 ## 1.5.6 - 2026-06-06
 

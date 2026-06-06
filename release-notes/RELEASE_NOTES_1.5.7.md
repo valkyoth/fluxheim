@@ -54,6 +54,8 @@ results as far as possible.
   adapter alias while the native substrate is phased in.
 - Wrap the current Pingora load-balancer container in a Fluxheim runtime type
   before handing pools to selection, status, and background-service code.
+- Return Fluxheim runtime-wrapped load-balancer pools from discovery so
+  selection-mode construction no longer repeats Pingora container wrapping.
 - Preserve existing Pingora readiness and health-check adapters while the
   native backend set, selector boundary, and service wrapper are introduced,
   keeping this first 1.5.7 line behavior-preserving.

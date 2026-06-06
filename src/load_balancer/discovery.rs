@@ -25,7 +25,7 @@ use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalance
 
 pub(super) fn configured_load_balancer(
     config: &ProxyConfig,
-) -> io::Result<Option<PingoraLoadBalancer>> {
+) -> io::Result<Option<FluxLoadBalancerRuntime>> {
     if config.upstreams.len() < 2
         && config.upstreams_file.is_none()
         && config.upstream_dns_refresh_secs.is_none()
@@ -57,7 +57,7 @@ pub(super) fn configured_load_balancer(
         load_balancer.parallel_health_check = config.load_balance.health_check.parallel;
     }
 
-    Ok(Some(load_balancer))
+    Ok(Some(FluxLoadBalancerRuntime::new(load_balancer)))
 }
 
 fn apply_disabled_backend_enablement(load_balancer: &PingoraLoadBalancer, config: &ProxyConfig) {
@@ -262,10 +262,7 @@ where
         return Ok(None);
     };
 
-    let service = FluxLoadBalancerBackgroundService::new(
-        format!("LB {name}"),
-        FluxLoadBalancerRuntime::new(inner),
-    );
+    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), inner);
     let load_balancer = UpstreamLoadBalancer::from_inner(wrap(service.task()), config);
     Ok(Some((load_balancer, Box::new(service))))
 }
@@ -278,10 +275,7 @@ pub(super) fn background_maglev_service_for(
         return Ok(None);
     };
     let table = Arc::new(configured_maglev_table(config)?);
-    let service = FluxLoadBalancerBackgroundService::new(
-        format!("LB {name}"),
-        FluxLoadBalancerRuntime::new(inner),
-    );
+    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), inner);
     let load_balancer = UpstreamLoadBalancer::from_inner(
         UpstreamLoadBalancerInner::MaglevHash {
             inner: service.task(),

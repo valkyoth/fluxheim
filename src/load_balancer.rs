@@ -315,9 +315,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::RoundRobin(Arc::new(FluxLoadBalancerRuntime::new(
-                        inner,
-                    ))),
+                    UpstreamLoadBalancerInner::RoundRobin(Arc::new(inner)),
                     config,
                 )))
             }
@@ -326,9 +324,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::LeastConnections(Arc::new(
-                        FluxLoadBalancerRuntime::new(inner),
-                    )),
+                    UpstreamLoadBalancerInner::LeastConnections(Arc::new(inner)),
                     config,
                 )))
             }
@@ -337,9 +333,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::LeastSessions(Arc::new(
-                        FluxLoadBalancerRuntime::new(inner),
-                    )),
+                    UpstreamLoadBalancerInner::LeastSessions(Arc::new(inner)),
                     config,
                 )))
             }
@@ -349,7 +343,7 @@ impl UpstreamLoadBalancer {
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::LeastTime {
-                        inner: Arc::new(FluxLoadBalancerRuntime::new(inner)),
+                        inner: Arc::new(inner),
                         latency: Arc::new(BackendLatencyState::default()),
                     },
                     config,
@@ -360,9 +354,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::PowerOfTwo(Arc::new(FluxLoadBalancerRuntime::new(
-                        inner,
-                    ))),
+                    UpstreamLoadBalancerInner::PowerOfTwo(Arc::new(inner)),
                     config,
                 )))
             }
@@ -374,9 +366,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::FnvHash(Arc::new(FluxLoadBalancerRuntime::new(
-                        inner,
-                    ))),
+                    UpstreamLoadBalancerInner::FnvHash(Arc::new(inner)),
                     config,
                 )))
             }
@@ -388,9 +378,7 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::ConsistentHash(Arc::new(
-                        FluxLoadBalancerRuntime::new(inner),
-                    )),
+                    UpstreamLoadBalancerInner::ConsistentHash(Arc::new(inner)),
                     config,
                 )))
             }
@@ -403,7 +391,7 @@ impl UpstreamLoadBalancer {
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::BoundedLoadConsistentHash {
-                        inner: Arc::new(FluxLoadBalancerRuntime::new(inner)),
+                        inner: Arc::new(inner),
                         factor_per_mille: config.load_balance.bounded_load_factor_per_mille,
                     },
                     config,
@@ -419,7 +407,7 @@ impl UpstreamLoadBalancer {
                 let table = Arc::new(configured_maglev_table(config)?);
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::MaglevHash {
-                        inner: Arc::new(FluxLoadBalancerRuntime::new(inner)),
+                        inner: Arc::new(inner),
                         table,
                     },
                     config,
