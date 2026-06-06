@@ -9,8 +9,6 @@ use futures::FutureExt;
 use pingora::lb::Backend;
 use pingora::lb::Backends;
 use pingora::lb::discovery::ServiceDiscovery;
-use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::RoundRobin;
 #[cfg(unix)]
 use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
@@ -20,14 +18,14 @@ use pingora::{Error, ErrorType};
 use crate::config::ProxyConfig;
 use crate::flux_error::{FluxError, FluxResult};
 
-use super::backend::{FluxBackend, FluxBackendSet};
+use super::backend::{FluxBackend, FluxBackendSet, PingoraLoadBalancer};
 use super::health::configured_health_check;
 use super::selection::MaglevTable;
 use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalancerService};
 
 pub(super) fn configured_load_balancer(
     config: &ProxyConfig,
-) -> io::Result<Option<LoadBalancer<RoundRobin>>> {
+) -> io::Result<Option<PingoraLoadBalancer>> {
     if config.upstreams.len() < 2
         && config.upstreams_file.is_none()
         && config.upstream_dns_refresh_secs.is_none()
@@ -35,7 +33,8 @@ pub(super) fn configured_load_balancer(
         return Ok(None);
     }
 
-    let mut load_balancer = LoadBalancer::from_backends(configured_backend_discovery(config)?);
+    let mut load_balancer =
+        PingoraLoadBalancer::from_backends(configured_backend_discovery(config)?);
     if config.upstreams_file.is_some() {
         load_balancer.update_frequency = Some(Duration::from_secs(
             config.upstreams_file_refresh_secs.clamp(1, 300),
@@ -61,10 +60,7 @@ pub(super) fn configured_load_balancer(
     Ok(Some(load_balancer))
 }
 
-fn apply_disabled_backend_enablement(
-    load_balancer: &LoadBalancer<RoundRobin>,
-    config: &ProxyConfig,
-) {
+fn apply_disabled_backend_enablement(load_balancer: &PingoraLoadBalancer, config: &ProxyConfig) {
     for upstream in &config.disabled_upstreams {
         if let Ok(backend) =
             FluxBackend::new(upstream).and_then(|backend| backend.to_pingora_backend())
@@ -260,7 +256,7 @@ pub(super) fn background_service_for<F>(
     wrap: F,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>>
 where
-    F: FnOnce(Arc<LoadBalancer<RoundRobin>>) -> UpstreamLoadBalancerInner,
+    F: FnOnce(Arc<PingoraLoadBalancer>) -> UpstreamLoadBalancerInner,
 {
     let Some(inner) = configured_load_balancer(config)? else {
         return Ok(None);
@@ -292,15 +288,15 @@ pub(super) fn background_maglev_service_for(
 
 struct FluxLoadBalancerBackgroundService {
     name: String,
-    task: Arc<LoadBalancer<RoundRobin>>,
+    task: Arc<PingoraLoadBalancer>,
 }
 
 impl FluxLoadBalancerBackgroundService {
-    fn new(name: String, task: Arc<LoadBalancer<RoundRobin>>) -> Self {
+    fn new(name: String, task: Arc<PingoraLoadBalancer>) -> Self {
         Self { name, task }
     }
 
-    fn task(&self) -> Arc<LoadBalancer<RoundRobin>> {
+    fn task(&self) -> Arc<PingoraLoadBalancer> {
         self.task.clone()
     }
 }

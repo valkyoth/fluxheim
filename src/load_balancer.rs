@@ -7,8 +7,6 @@ use std::time::{Duration, Instant};
 
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use pingora::lb::Backend;
-use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::RoundRobin;
 use pingora::services::ServiceWithDependents;
 use serde::Serialize;
 
@@ -32,8 +30,8 @@ use self::backend::BackendIdentity;
 #[cfg(test)]
 use self::backend::pingora_run_health_check;
 use self::backend::{
-    pingora_backend_ready, pingora_backend_set, pingora_health_check_frequency,
-    pingora_parallel_health_check,
+    PingoraLoadBalancer, pingora_backend_ready, pingora_backend_set,
+    pingora_health_check_frequency, pingora_parallel_health_check,
 };
 use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
@@ -1015,28 +1013,28 @@ impl LoadBalancerRetryRuntimeStats {
 
 #[derive(Clone)]
 enum UpstreamLoadBalancerInner {
-    RoundRobin(Arc<LoadBalancer<RoundRobin>>),
-    LeastConnections(Arc<LoadBalancer<RoundRobin>>),
-    LeastSessions(Arc<LoadBalancer<RoundRobin>>),
+    RoundRobin(Arc<PingoraLoadBalancer>),
+    LeastConnections(Arc<PingoraLoadBalancer>),
+    LeastSessions(Arc<PingoraLoadBalancer>),
     LeastTime {
-        inner: Arc<LoadBalancer<RoundRobin>>,
+        inner: Arc<PingoraLoadBalancer>,
         latency: Arc<BackendLatencyState>,
     },
-    PowerOfTwo(Arc<LoadBalancer<RoundRobin>>),
-    FnvHash(Arc<LoadBalancer<RoundRobin>>),
-    ConsistentHash(Arc<LoadBalancer<RoundRobin>>),
+    PowerOfTwo(Arc<PingoraLoadBalancer>),
+    FnvHash(Arc<PingoraLoadBalancer>),
+    ConsistentHash(Arc<PingoraLoadBalancer>),
     BoundedLoadConsistentHash {
-        inner: Arc<LoadBalancer<RoundRobin>>,
+        inner: Arc<PingoraLoadBalancer>,
         factor_per_mille: u16,
     },
     MaglevHash {
-        inner: Arc<LoadBalancer<RoundRobin>>,
+        inner: Arc<PingoraLoadBalancer>,
         table: Arc<MaglevTable>,
     },
 }
 
 impl UpstreamLoadBalancerInner {
-    fn container(&self) -> &Arc<LoadBalancer<RoundRobin>> {
+    fn container(&self) -> &Arc<PingoraLoadBalancer> {
         match self {
             Self::RoundRobin(inner)
             | Self::LeastConnections(inner)
@@ -1223,7 +1221,7 @@ impl SelectedUpstream {
 }
 
 #[cfg(test)]
-fn backend_weights(inner: &LoadBalancer<RoundRobin>) -> Vec<usize> {
+fn backend_weights(inner: &PingoraLoadBalancer) -> Vec<usize> {
     pingora_backend_set(inner)
         .iter()
         .map(|backend| backend.weight())

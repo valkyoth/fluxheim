@@ -49,6 +49,9 @@ results as far as possible.
 - Introduce a Fluxheim backend-container trait so selector and runtime-stat
   code depend on Fluxheim's backend/readiness interface instead of the concrete
   Pingora container type.
+- Centralize the remaining concrete Pingora load-balancer container type behind
+  the backend adapter module, keeping orchestration and discovery on Fluxheim's
+  adapter alias while the native substrate is phased in.
 - Preserve existing Pingora readiness and health-check adapters while the
   native backend set, selector boundary, and service wrapper are introduced,
   keeping this first 1.5.7 line behavior-preserving.

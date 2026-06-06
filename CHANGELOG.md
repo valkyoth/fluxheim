@@ -56,6 +56,9 @@ behavior when the change improves security or project direction.
 - Introduce a Fluxheim backend-container trait and move selection/stat modules
   onto that trait instead of the concrete Pingora `LoadBalancer<RoundRobin>`
   type.
+- Centralize the concrete Pingora load-balancer container type behind the
+  backend adapter module so orchestration and discovery use Fluxheim's adapter
+  alias during the native-substrate migration.
 
 ## 1.5.6 - 2026-06-06
 

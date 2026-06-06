@@ -10,6 +10,8 @@ use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
 
+pub(super) type PingoraLoadBalancer = LoadBalancer<RoundRobin>;
+
 pub(crate) trait BackendIdentity {
     fn authority(&self) -> String;
 
@@ -117,11 +119,11 @@ impl FluxBackendSet {
     }
 }
 
-pub(super) fn pingora_backend_set(inner: &LoadBalancer<RoundRobin>) -> Arc<BTreeSet<Backend>> {
+pub(super) fn pingora_backend_set(inner: &PingoraLoadBalancer) -> Arc<BTreeSet<Backend>> {
     inner.backends().get_backend()
 }
 
-pub(super) fn pingora_backend_ready(inner: &LoadBalancer<RoundRobin>, backend: &Backend) -> bool {
+pub(super) fn pingora_backend_ready(inner: &PingoraLoadBalancer, backend: &Backend) -> bool {
     inner.backends().ready(backend)
 }
 
@@ -131,7 +133,7 @@ pub(super) trait BackendContainer {
     fn backend_ready(&self, backend: &Backend) -> bool;
 }
 
-impl BackendContainer for LoadBalancer<RoundRobin> {
+impl BackendContainer for PingoraLoadBalancer {
     fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
         pingora_backend_set(self)
     }
@@ -165,16 +167,16 @@ pub(super) fn backend_container_ready(
     container.backend_ready(backend)
 }
 
-pub(super) fn pingora_health_check_frequency(inner: &LoadBalancer<RoundRobin>) -> Option<Duration> {
+pub(super) fn pingora_health_check_frequency(inner: &PingoraLoadBalancer) -> Option<Duration> {
     inner.health_check_frequency
 }
 
-pub(super) fn pingora_parallel_health_check(inner: &LoadBalancer<RoundRobin>) -> bool {
+pub(super) fn pingora_parallel_health_check(inner: &PingoraLoadBalancer) -> bool {
     inner.parallel_health_check
 }
 
 #[cfg(test)]
-pub(super) async fn pingora_run_health_check(inner: &LoadBalancer<RoundRobin>, parallel: bool) {
+pub(super) async fn pingora_run_health_check(inner: &PingoraLoadBalancer, parallel: bool) {
     inner.backends().run_health_check(parallel).await;
 }
 
