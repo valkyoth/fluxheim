@@ -53,6 +53,9 @@ behavior when the change improves security or project direction.
 - Replace Pingora's generic `GenBackgroundService` wrapper for load-balancer
   pools with a Fluxheim-owned `ServiceWithDependents` implementation while
   preserving the current update and health-check loop.
+- Introduce a Fluxheim backend-container trait and move selection/stat modules
+  onto that trait instead of the concrete Pingora `LoadBalancer<RoundRobin>`
+  type.
 
 ## 1.5.6 - 2026-06-06
 

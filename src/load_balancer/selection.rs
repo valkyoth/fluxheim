@@ -3,12 +3,10 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pingora::lb::Backend;
-use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::RoundRobin;
 
 use super::SelectedUpstream;
 use super::backend::BackendIdentity;
-use super::backend::{pingora_backend_ready, pingora_backend_set};
+use super::backend::{BackendContainer, backend_container_ready, backend_container_set};
 use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
 use super::state::{
@@ -92,7 +90,7 @@ fn selection_passes(backend_policy: &BackendSelectionPolicy) -> Vec<SelectionPas
 }
 
 fn priority_activation_satisfied(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> bool {
@@ -105,10 +103,10 @@ fn priority_activation_satisfied(
         return true;
     }
 
-    pingora_backend_set(inner)
+    backend_container_set(inner)
         .iter()
         .filter(|backend| {
-            pingora_backend_ready(inner, backend)
+            backend_container_ready(inner, backend)
                 && context
                     .backend_policy
                     .permits(backend, pass, context.counters)
@@ -126,7 +124,7 @@ fn priority_activation_satisfied(
 }
 
 pub(super) fn select_weighted_round_robin(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
     let context = SelectionContext {
@@ -152,15 +150,15 @@ pub(super) fn select_weighted_round_robin(
 }
 
 fn select_weighted_round_robin_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     cursor: &AtomicUsize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut candidates = Vec::new();
     let mut total_weight = 0usize;
-    for backend in pingora_backend_set(inner).iter() {
-        if !pingora_backend_ready(inner, backend)
+    for backend in backend_container_set(inner).iter() {
+        if !backend_container_ready(inner, backend)
             || !context
                 .backend_policy
                 .permits(backend, pass, context.counters)
@@ -192,7 +190,7 @@ fn select_weighted_round_robin_with_backup_policy(
 }
 
 pub(super) fn select_least_connections(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
@@ -223,7 +221,7 @@ pub(super) fn select_least_connections(
 }
 
 fn select_least_connections_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
@@ -231,8 +229,8 @@ fn select_least_connections_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in pingora_backend_set(inner).iter() {
-        if !pingora_backend_ready(inner, backend)
+    for backend in backend_container_set(inner).iter() {
+        if !backend_container_ready(inner, backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -259,7 +257,7 @@ fn select_least_connections_with_backup_policy(
 }
 
 pub(super) fn select_least_sessions(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
@@ -292,7 +290,7 @@ pub(super) fn select_least_sessions(
 }
 
 fn select_least_sessions_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     counters: &BackendConnectionCounters,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
@@ -301,8 +299,8 @@ fn select_least_sessions_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in pingora_backend_set(inner).iter() {
-        if !pingora_backend_ready(inner, backend)
+    for backend in backend_container_set(inner).iter() {
+        if !backend_container_ready(inner, backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -342,7 +340,7 @@ pub(super) fn least_connections_score_is_lower(
 }
 
 pub(super) fn select_least_time(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     counters: &BackendConnectionCounters,
     latency: &BackendLatencyState,
     passive_health: Option<&PassiveHealthState>,
@@ -375,7 +373,7 @@ pub(super) fn select_least_time(
 }
 
 fn select_least_time_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     counters: &BackendConnectionCounters,
     latency: &BackendLatencyState,
     passive_health: Option<&PassiveHealthState>,
@@ -384,8 +382,8 @@ fn select_least_time_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in pingora_backend_set(inner).iter() {
-        if !pingora_backend_ready(inner, backend)
+    for backend in backend_container_set(inner).iter() {
+        if !backend_container_ready(inner, backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -440,7 +438,7 @@ fn least_time_score_is_lower(
 }
 
 pub(super) fn select_power_of_two(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     counters: &BackendConnectionCounters,
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
@@ -467,7 +465,7 @@ pub(super) fn select_power_of_two(
 }
 
 fn select_power_of_two_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
@@ -491,13 +489,13 @@ fn select_power_of_two_with_backup_policy(
 }
 
 fn select_weighted_random_candidate(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
     excluded_key: Option<u64>,
 ) -> Option<Backend> {
-    let backends: Vec<Backend> = pingora_backend_set(inner).iter().cloned().collect();
+    let backends: Vec<Backend> = backend_container_set(inner).iter().cloned().collect();
     if backends.is_empty() {
         return None;
     }
@@ -530,7 +528,7 @@ fn select_weighted_random_candidate(
 }
 
 fn random_candidate_allowed(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     candidate: &Backend,
     context: SelectionContext<'_>,
     pass: SelectionPass,
@@ -557,7 +555,7 @@ fn random_u64() -> u64 {
 }
 
 pub(super) fn select_fnv_hash(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
     let context = SelectionContext {
@@ -584,13 +582,13 @@ pub(super) fn select_fnv_hash(
 }
 
 fn select_fnv_hash_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     key: &[u8],
     max_iterations: usize,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> Option<Backend> {
-    let backends: Vec<Backend> = pingora_backend_set(inner).iter().cloned().collect();
+    let backends: Vec<Backend> = backend_container_set(inner).iter().cloned().collect();
     if backends.is_empty() {
         return None;
     }
@@ -628,12 +626,12 @@ fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
 }
 
 fn backend_candidate_allowed(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     backend: &Backend,
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> bool {
-    pingora_backend_ready(inner, backend)
+    backend_container_ready(inner, backend)
         && context
             .backend_policy
             .permits(backend, pass, context.counters)
@@ -647,7 +645,7 @@ fn backend_candidate_allowed(
 }
 
 pub(super) fn select_consistent_hash(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
     let context = SelectionContext {
@@ -675,7 +673,7 @@ pub(super) fn select_consistent_hash(
 }
 
 pub(super) fn select_bounded_load_consistent(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     factor_per_mille: u16,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
@@ -704,7 +702,7 @@ pub(super) fn select_bounded_load_consistent(
 }
 
 fn select_bounded_load_consistent_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     key: &[u8],
     max_iterations: usize,
     context: SelectionContext<'_>,
@@ -742,15 +740,15 @@ struct BoundedLoadSnapshot {
 }
 
 fn bounded_load_snapshot(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     context: SelectionContext<'_>,
     pass: SelectionPass,
     factor_per_mille: u16,
 ) -> Option<BoundedLoadSnapshot> {
     let mut total_connections = 0usize;
     let mut total_weight = 0usize;
-    for backend in pingora_backend_set(inner).iter() {
-        if !pingora_backend_ready(inner, backend)
+    for backend in backend_container_set(inner).iter() {
+        if !backend_container_ready(inner, backend)
             || !context
                 .backend_policy
                 .permits(backend, pass, context.counters)
@@ -793,7 +791,7 @@ fn bounded_load_permits(
 }
 
 fn select_consistent_hash_with_backup_policy(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     key: &[u8],
     max_iterations: usize,
     context: SelectionContext<'_>,
@@ -815,11 +813,11 @@ fn select_consistent_hash_with_backup_policy(
 }
 
 fn consistent_hash_candidates(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     key: &[u8],
     backend_policy: &BackendSelectionPolicy,
 ) -> Vec<(u64, u64, Backend)> {
-    let mut candidates: Vec<_> = pingora_backend_set(inner)
+    let mut candidates: Vec<_> = backend_container_set(inner)
         .iter()
         .cloned()
         .map(|backend| {
@@ -921,13 +919,11 @@ fn maglev_candidate(offset: usize, next: usize, skip: usize) -> usize {
 }
 
 pub(super) fn select_maglev(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     table: &MaglevTable,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
-    let backend_by_key: std::collections::HashMap<u64, Backend> = inner
-        .backends()
-        .get_backend()
+    let backend_by_key: std::collections::HashMap<u64, Backend> = backend_container_set(inner)
         .iter()
         .cloned()
         .map(|backend| (backend_key(&backend), backend))
@@ -949,7 +945,7 @@ pub(super) fn select_maglev(
             let Some(backend) = backend_by_key.get(&key) else {
                 continue;
             };
-            if pingora_backend_ready(inner, backend)
+            if backend_container_ready(inner, backend)
                 && inputs
                     .backend_policy
                     .permits(backend, pass, inputs.counters)

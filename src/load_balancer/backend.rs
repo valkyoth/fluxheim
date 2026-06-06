@@ -125,6 +125,46 @@ pub(super) fn pingora_backend_ready(inner: &LoadBalancer<RoundRobin>, backend: &
     inner.backends().ready(backend)
 }
 
+pub(super) trait BackendContainer {
+    fn backend_set(&self) -> Arc<BTreeSet<Backend>>;
+
+    fn backend_ready(&self, backend: &Backend) -> bool;
+}
+
+impl BackendContainer for LoadBalancer<RoundRobin> {
+    fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
+        pingora_backend_set(self)
+    }
+
+    fn backend_ready(&self, backend: &Backend) -> bool {
+        pingora_backend_ready(self, backend)
+    }
+}
+
+impl<T> BackendContainer for Arc<T>
+where
+    T: BackendContainer + ?Sized,
+{
+    fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
+        (**self).backend_set()
+    }
+
+    fn backend_ready(&self, backend: &Backend) -> bool {
+        (**self).backend_ready(backend)
+    }
+}
+
+pub(super) fn backend_container_set(container: &impl BackendContainer) -> Arc<BTreeSet<Backend>> {
+    container.backend_set()
+}
+
+pub(super) fn backend_container_ready(
+    container: &impl BackendContainer,
+    backend: &Backend,
+) -> bool {
+    container.backend_ready(backend)
+}
+
 pub(super) fn pingora_health_check_frequency(inner: &LoadBalancer<RoundRobin>) -> Option<Duration> {
     inner.health_check_frequency
 }

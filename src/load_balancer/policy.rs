@@ -2,13 +2,10 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::RoundRobin;
-
 use crate::config::ProxyConfig;
 
+use super::backend::{BackendContainer, backend_container_ready, backend_container_set};
 use super::backend::{BackendIdentity, FluxBackend};
-use super::backend::{pingora_backend_ready, pingora_backend_set};
 use super::key::backend_key;
 use super::selection::SelectionPass;
 use super::state::{
@@ -579,10 +576,10 @@ impl<'a> BackendStatsInputs<'a> {
 }
 
 pub(super) fn load_balancer_backend_stats(
-    inner: &LoadBalancer<RoundRobin>,
+    inner: &impl BackendContainer,
     inputs: BackendStatsInputs<'_>,
 ) -> Vec<LoadBalancerBackendRuntimeStats> {
-    pingora_backend_set(inner)
+    backend_container_set(inner)
         .iter()
         .map(|backend| {
             let key = backend_key(backend);
@@ -614,7 +611,7 @@ pub(super) fn load_balancer_backend_stats(
                             .contains(&locality)
                     },
                 ),
-                ready: pingora_backend_ready(inner, backend),
+                ready: backend_container_ready(inner, backend),
                 backup: inputs.backend_policy.backup(key),
                 drained: inputs.backend_policy.drained(key),
                 disabled: inputs.backend_policy.disabled(key),

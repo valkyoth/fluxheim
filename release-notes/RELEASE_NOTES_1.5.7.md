@@ -46,6 +46,9 @@ results as far as possible.
 - Replace Pingora's generic `GenBackgroundService` wrapper for load-balancer
   pools with a Fluxheim-owned `ServiceWithDependents` implementation while
   preserving the current update and health-check loop.
+- Introduce a Fluxheim backend-container trait so selector and runtime-stat
+  code depend on Fluxheim's backend/readiness interface instead of the concrete
+  Pingora container type.
 - Preserve existing Pingora readiness and health-check adapters while the
   native backend set, selector boundary, and service wrapper are introduced,
   keeping this first 1.5.7 line behavior-preserving.
