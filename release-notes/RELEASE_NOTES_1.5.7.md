@@ -18,6 +18,9 @@ results as far as possible.
   identity abstraction.
 - Build Maglev lookup tables from Fluxheim backend identities so Maglev
   construction no longer depends on Pingora's concrete backend type.
+- Move file-refreshed and DNS-refreshed backend discovery behind a
+  Fluxheim-owned discovery trait, with Pingora service discovery retained only
+  as an adapter.
 - Preserve existing Pingora selector/background-service adapters while the
   native backend set and identity boundary are introduced, keeping this first
   1.5.7 slice behavior-preserving.

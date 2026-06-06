@@ -25,6 +25,9 @@ behavior when the change improves security or project direction.
 - Build Maglev lookup tables from Fluxheim backend identities instead of
   adapting static upstreams to Pingora backend values during table
   construction.
+- Move file-refreshed and DNS-refreshed backend discovery behind a
+  Fluxheim-owned discovery trait, keeping Pingora service discovery as a thin
+  adapter at the current runtime boundary.
 
 ## 1.5.6 - 2026-06-06
 

@@ -79,6 +79,25 @@ struct FileUpstreamDiscovery {
 }
 
 #[async_trait]
+trait FluxBackendDiscovery {
+    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError>;
+}
+
+#[async_trait]
+impl FluxBackendDiscovery for FileUpstreamDiscovery {
+    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError> {
+        let upstreams = read_proxy_upstreams_file_for_discovery(self.path.clone()).await?;
+        let mut backends = FluxBackendSet::default();
+        for upstream in upstreams {
+            let backend = FluxBackend::new(&upstream)
+                .map_err(|error| DiscoveryError::new(ErrorType::InvalidHTTPHeader, error))?;
+            backends.insert(backend);
+        }
+        Ok(backends)
+    }
+}
+
+#[async_trait]
 impl ServiceDiscovery for FileUpstreamDiscovery {
     async fn discover(
         &self,
@@ -86,19 +105,7 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
         std::collections::BTreeSet<Backend>,
         std::collections::HashMap<u64, bool>,
     )> {
-        let upstreams = read_proxy_upstreams_file_for_discovery(self.path.clone())
-            .await
-            .map_err(DiscoveryError::into_pingora)?;
-        let mut backends = FluxBackendSet::default();
-        for upstream in upstreams {
-            let backend = FluxBackend::new(&upstream).map_err(|error| {
-                DiscoveryError::new(ErrorType::InvalidHTTPHeader, error).into_pingora()
-            })?;
-            backends.insert(backend);
-        }
-        backends
-            .into_pingora_parts()
-            .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error).into_pingora())
+        adapt_flux_discovery_to_pingora(self.discover_flux_backends().await)
     }
 }
 
@@ -137,22 +144,14 @@ struct DnsUpstreamDiscovery {
 }
 
 #[async_trait]
-impl ServiceDiscovery for DnsUpstreamDiscovery {
-    async fn discover(
-        &self,
-    ) -> pingora::Result<(
-        std::collections::BTreeSet<Backend>,
-        std::collections::HashMap<u64, bool>,
-    )> {
+impl FluxBackendDiscovery for DnsUpstreamDiscovery {
+    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError> {
         let mut backends = FluxBackendSet::default();
         for upstream in self.upstreams.iter() {
-            let resolved = resolve_proxy_upstream_for_discovery(upstream)
-                .await
-                .map_err(DiscoveryError::into_pingora)?;
+            let resolved = resolve_proxy_upstream_for_discovery(upstream).await?;
             for address in resolved {
-                let backend = FluxBackend::new(&address.to_string()).map_err(|error| {
-                    DiscoveryError::new(ErrorType::InternalError, error).into_pingora()
-                })?;
+                let backend = FluxBackend::new(&address.to_string())
+                    .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error))?;
                 backends.insert(backend);
             }
         }
@@ -160,13 +159,37 @@ impl ServiceDiscovery for DnsUpstreamDiscovery {
             return Err(DiscoveryError::new(
                 ErrorType::ConnectError,
                 FluxError::InvalidInput("DNS discovery resolved no proxy upstreams"),
-            )
-            .into_pingora());
+            ));
         }
-        backends
-            .into_pingora_parts()
-            .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error).into_pingora())
+        Ok(backends)
     }
+}
+
+#[async_trait]
+impl ServiceDiscovery for DnsUpstreamDiscovery {
+    async fn discover(
+        &self,
+    ) -> pingora::Result<(
+        std::collections::BTreeSet<Backend>,
+        std::collections::HashMap<u64, bool>,
+    )> {
+        adapt_flux_discovery_to_pingora(self.discover_flux_backends().await)
+    }
+}
+
+fn adapt_flux_discovery_to_pingora(
+    discovered: Result<FluxBackendSet, DiscoveryError>,
+) -> pingora::Result<(
+    std::collections::BTreeSet<Backend>,
+    std::collections::HashMap<u64, bool>,
+)> {
+    discovered
+        .and_then(|backends| {
+            backends
+                .into_pingora_parts()
+                .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error))
+        })
+        .map_err(DiscoveryError::into_pingora)
 }
 
 async fn resolve_proxy_upstream_for_discovery(
