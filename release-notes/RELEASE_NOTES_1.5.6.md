@@ -67,7 +67,7 @@ scripting.
 
 Fluxheim zeroizes stream upstream mTLS PEM input buffers after parsing. In
 rustls builds, parsed private-key DER is owned by rustls 0.23 after that point
-and follows rustls' memory-erasure behavior. Operators with strict private-key
-memory erasure requirements should account for core-dump/process-memory
-controls or use an approved OpenSSL-backed profile until rustls exposes a
-zeroizing parsed-key container.
+and rustls does not yet provide zeroing of private-key DER bytes on drop.
+Operators with strict private-key memory erasure requirements should account
+for core-dump/process-memory controls or use an approved OpenSSL-backed profile
+until rustls exposes a zeroizing parsed-key container.

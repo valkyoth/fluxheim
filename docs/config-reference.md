@@ -230,9 +230,9 @@ upstream_tls = false
   mTLS client material and must be set together. Custom trust roots and
   upstream client certificates are supported for rustls and OpenSSL builds.
   Fluxheim zeroizes the PEM input buffers after parsing; in rustls builds the
-  parsed private-key DER is then owned by rustls 0.23 and follows that crate's
-  memory-erasure behavior. BoringSSL and s2n are not supported Fluxheim TLS
-  backends.
+  parsed private-key DER is then owned by rustls 0.23, which does not yet
+  provide zeroing of private-key DER bytes on drop. This is a known upstream
+  limitation. BoringSSL and s2n are not supported Fluxheim TLS backends.
 
 When `metrics` is compiled and enabled,
 `fluxheim_stream_connections_total{route,outcome}` records bounded connection

@@ -172,17 +172,11 @@ fn stream_route_tls_cert_verification_skips_for_ip_upstreams(route: &StreamRoute
         return false;
     }
 
-    let mut saw_upstream = false;
-    for upstream in route.upstreams() {
-        saw_upstream = true;
-        let Some(host) = upstream_host(upstream) else {
-            return false;
-        };
-        if host.parse::<IpAddr>().is_err() {
-            return false;
-        }
-    }
-    saw_upstream
+    route.upstreams().any(|upstream| {
+        upstream_host(upstream)
+            .map(|host| host.parse::<IpAddr>().is_ok())
+            .unwrap_or(false)
+    })
 }
 
 #[cfg(feature = "tls-rustls-backend")]
@@ -648,6 +642,15 @@ mod tests {
         route.upstream = Some("backend.example.test:9443".to_owned());
         route.upstreams.clear();
         assert!(!stream_route_tls_cert_verification_skips_for_ip_upstreams(
+            &route
+        ));
+
+        route.upstream = None;
+        route.upstreams = vec![
+            "192.168.1.100:9443".to_owned(),
+            "backend.example.test:9443".to_owned(),
+        ];
+        assert!(stream_route_tls_cert_verification_skips_for_ip_upstreams(
             &route
         ));
     }
