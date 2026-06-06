@@ -2,11 +2,19 @@ use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::net::SocketAddr;
 
-use pingora::lb::Backend;
-
-#[cfg(test)]
 use super::key::backend_authority_key;
 use crate::flux_error::{FluxError, FluxResult};
+use pingora::lb::Backend;
+
+pub(crate) trait BackendIdentity {
+    fn authority(&self) -> String;
+
+    fn weight(&self) -> usize;
+
+    fn key(&self) -> u64 {
+        backend_authority_key(&self.authority())
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(super) struct FluxBackend {
@@ -29,20 +37,6 @@ impl FluxBackend {
         Ok(Self { address, weight })
     }
 
-    pub(super) fn authority(&self) -> String {
-        self.address.to_string()
-    }
-
-    #[cfg(test)]
-    pub(super) fn key(&self) -> u64 {
-        backend_authority_key(&self.authority())
-    }
-
-    #[cfg(test)]
-    pub(super) fn weight(&self) -> usize {
-        self.weight
-    }
-
     pub(super) fn to_pingora_backend(&self) -> FluxResult<Backend> {
         Backend::new_with_weight(&self.authority(), self.weight).map_err(|error| {
             FluxError::io(
@@ -50,6 +44,39 @@ impl FluxBackend {
                 io::Error::other(error.to_string()),
             )
         })
+    }
+}
+
+impl BackendIdentity for FluxBackend {
+    fn authority(&self) -> String {
+        self.address.to_string()
+    }
+
+    fn weight(&self) -> usize {
+        self.weight
+    }
+}
+
+impl BackendIdentity for Backend {
+    fn authority(&self) -> String {
+        self.addr.to_string()
+    }
+
+    fn weight(&self) -> usize {
+        self.weight
+    }
+}
+
+impl<T> BackendIdentity for &T
+where
+    T: BackendIdentity + ?Sized,
+{
+    fn authority(&self) -> String {
+        (*self).authority()
+    }
+
+    fn weight(&self) -> usize {
+        (*self).weight()
     }
 }
 
@@ -88,7 +115,7 @@ impl FluxBackendSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{FluxBackend, FluxBackendSet};
+    use super::{BackendIdentity, FluxBackend, FluxBackendSet};
 
     #[test]
     fn flux_backend_preserves_authority_weight_and_key() {

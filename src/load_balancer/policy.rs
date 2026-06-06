@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{BackendIter, BackendSelection};
 
 use crate::config::ProxyConfig;
 
+use super::backend::{BackendIdentity, FluxBackend};
 use super::key::backend_key;
 use super::selection::SelectionPass;
 use super::state::{
@@ -81,7 +81,7 @@ impl BackendSelectionPolicy {
 
     pub(super) fn permits(
         &self,
-        backend: &Backend,
+        backend: &impl BackendIdentity,
         pass: SelectionPass,
         counters: &BackendConnectionCounters,
     ) -> bool {
@@ -113,7 +113,7 @@ impl BackendSelectionPolicy {
             .is_some_and(|lowest| *lowest == group)
     }
 
-    pub(super) fn max_in_flight(&self, backend: &Backend) -> Option<usize> {
+    pub(super) fn max_in_flight(&self, backend: &impl BackendIdentity) -> Option<usize> {
         self.max_in_flight.get(&backend_key(backend)).copied()
     }
 
@@ -173,10 +173,10 @@ impl BackendSelectionPolicy {
         self.runtime.set_weight(key, weight)
     }
 
-    pub(super) fn effective_weight(&self, backend: &Backend) -> usize {
+    pub(super) fn effective_weight(&self, backend: &impl BackendIdentity) -> usize {
         self.runtime
             .weight(backend_key(backend))
-            .unwrap_or(backend.weight)
+            .unwrap_or_else(|| backend.weight())
             .max(1)
     }
 
@@ -355,7 +355,7 @@ fn runtime_override_key_has_capacity(keys: &std::collections::HashSet<u64>, key:
 fn backend_keys(upstreams: &[String]) -> std::collections::HashSet<u64> {
     upstreams
         .iter()
-        .filter_map(|upstream| Backend::new(upstream).ok())
+        .filter_map(|upstream| FluxBackend::new(upstream).ok())
         .map(|backend| backend_key(&backend))
         .collect()
 }
@@ -489,7 +489,7 @@ fn backend_priority_groups(config: &ProxyConfig) -> std::collections::HashMap<u6
         .iter()
         .zip(&config.upstream_priority_groups)
         .filter_map(|(upstream, priority)| {
-            let backend = Backend::new(upstream).ok()?;
+            let backend = FluxBackend::new(upstream).ok()?;
             Some((backend_key(&backend), *priority))
         })
         .collect()
@@ -501,7 +501,7 @@ fn backend_max_in_flight(config: &ProxyConfig) -> std::collections::HashMap<u64,
         .iter()
         .zip(&config.upstream_max_in_flight)
         .filter_map(|(upstream, max_in_flight)| {
-            let backend = Backend::new(upstream).ok()?;
+            let backend = FluxBackend::new(upstream).ok()?;
             Some((backend_key(&backend), *max_in_flight))
         })
         .collect()
@@ -513,7 +513,7 @@ fn backend_localities(config: &ProxyConfig) -> std::collections::HashMap<u64, Ar
         .iter()
         .zip(&config.upstream_localities)
         .filter_map(|(upstream, locality)| {
-            let backend = Backend::new(upstream).ok()?;
+            let backend = FluxBackend::new(upstream).ok()?;
             Some((
                 backend_key(&backend),
                 Arc::<str>::from(locality.to_ascii_lowercase()),
@@ -528,7 +528,7 @@ fn backend_tags(config: &ProxyConfig) -> std::collections::HashMap<u64, Arc<[Str
         .iter()
         .zip(&config.upstream_tags)
         .filter_map(|(upstream, tags)| {
-            let backend = Backend::new(upstream).ok()?;
+            let backend = FluxBackend::new(upstream).ok()?;
             Some((backend_key(&backend), Arc::<[String]>::from(tags.clone())))
         })
         .collect()
@@ -551,7 +551,7 @@ pub(super) fn backend_aliases(config: &ProxyConfig) -> std::collections::HashMap
         .iter()
         .zip(&config.upstream_aliases)
         .filter_map(|(upstream, alias)| {
-            let backend = Backend::new(upstream).ok()?;
+            let backend = FluxBackend::new(upstream).ok()?;
             Some((backend_key(&backend), Arc::<str>::from(alias.as_str())))
         })
         .collect()

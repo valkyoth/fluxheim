@@ -13,9 +13,12 @@ results as far as possible.
 - Route static upstream pools, file-refreshed upstream discovery, and
   DNS-refreshed upstream discovery through the Fluxheim backend model before
   adapting to the remaining Pingora selector boundary.
+- Move backend keying, passive health, slow start, connection counters,
+  latency scoring, and backend policy evaluation onto a Fluxheim-owned backend
+  identity abstraction.
 - Preserve existing Pingora selector/background-service adapters while the
-  native backend set is introduced, keeping this first 1.5.7 slice
-  behavior-preserving.
+  native backend set and identity boundary are introduced, keeping this first
+  1.5.7 slice behavior-preserving.
 
 ## Boundaries
 

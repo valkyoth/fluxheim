@@ -4,14 +4,13 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use pingora::lb::Backend;
-
 use crate::config::{
     LoadBalanceHealthCheckExpectedStatusRange, LoadBalancePassiveHealthConfig,
     LoadBalanceSlowStartConfig,
 };
 
 use super::LoadBalancedUpstreamOutcome;
+use super::backend::BackendIdentity;
 use super::key::backend_key;
 use super::selection::fnv1a64_with_seed;
 
@@ -135,7 +134,7 @@ impl PassiveHealthState {
         }
     }
 
-    pub(super) fn is_ejected(&self, backend: &Backend) -> bool {
+    pub(super) fn is_ejected(&self, backend: &impl BackendIdentity) -> bool {
         let key = backend_key(backend);
         self.key_is_ejected(key)
     }
@@ -277,7 +276,7 @@ impl SlowStartState {
         }
     }
 
-    pub(super) fn permits(&self, backend: &Backend) -> bool {
+    pub(super) fn permits(&self, backend: &impl BackendIdentity) -> bool {
         let now = Instant::now();
         let key = backend_key(backend);
         let mut backends = self
@@ -311,7 +310,7 @@ impl SlowStartState {
             .retain(|key, _| live_keys.contains(key));
     }
 
-    pub(super) fn permits_read_only(&self, backend: &Backend) -> bool {
+    pub(super) fn permits_read_only(&self, backend: &impl BackendIdentity) -> bool {
         let now = Instant::now();
         let key = backend_key(backend);
         let Some(started_at) = self
@@ -343,11 +342,11 @@ pub(super) struct BackendConnectionCounters {
 }
 
 impl BackendConnectionCounters {
-    pub(super) fn count(&self, backend: &Backend) -> usize {
+    pub(super) fn count(&self, backend: &impl BackendIdentity) -> usize {
         self.counter(backend).load(Ordering::Acquire)
     }
 
-    pub(super) fn count_existing(&self, backend: &Backend) -> usize {
+    pub(super) fn count_existing(&self, backend: &impl BackendIdentity) -> usize {
         self.counters
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -358,7 +357,7 @@ impl BackendConnectionCounters {
 
     pub(super) fn permit(
         &self,
-        backend: &Backend,
+        backend: &impl BackendIdentity,
         max_in_flight: Option<usize>,
     ) -> Option<LoadBalancedConnectionPermit> {
         let counter = self.counter(backend);
@@ -376,7 +375,7 @@ impl BackendConnectionCounters {
         }
     }
 
-    fn counter(&self, backend: &Backend) -> Arc<AtomicUsize> {
+    fn counter(&self, backend: &impl BackendIdentity) -> Arc<AtomicUsize> {
         let mut counters = self
             .counters
             .lock()
@@ -419,7 +418,7 @@ impl BackendLatencyState {
             .or_insert(sample);
     }
 
-    pub(super) fn score(&self, backend: &Backend) -> Option<u64> {
+    pub(super) fn score(&self, backend: &impl BackendIdentity) -> Option<u64> {
         self.score_key(backend_key(backend))
     }
 
@@ -442,6 +441,7 @@ impl BackendLatencyState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pingora::lb::Backend;
 
     #[test]
     fn slow_start_zero_duration_permits_without_division() {

@@ -18,6 +18,10 @@ behavior when the change improves security or project direction.
 - Add a Fluxheim-owned backend/backend-set model and route static, file, and
   DNS upstream discovery through it before adapting to the current Pingora
   selector boundary.
+- Move load-balancer key, passive-health, slow-start, connection-counter,
+  latency, and backend-policy helpers onto a Fluxheim-owned backend identity
+  abstraction so those subsystems no longer require Pingora's concrete backend
+  type.
 
 ## 1.5.6 - 2026-06-06
 
