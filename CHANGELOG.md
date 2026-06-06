@@ -41,6 +41,9 @@ behavior when the change improves security or project direction.
   rendezvous candidate ordering for consistent and bounded-load consistent
   hash modes, while preserving dynamic discovery support through the current
   backend container.
+- Collapse the load-balancer factory, stats, and priority-check helpers onto a
+  concrete readiness container now that Fluxheim owns all shipped selection
+  algorithms, removing the remaining generic Pingora selector trait plumbing.
 
 ## 1.5.6 - 2026-06-06
 

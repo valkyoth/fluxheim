@@ -311,7 +311,7 @@ impl UpstreamLoadBalancer {
     pub fn from_proxy_config(config: &ProxyConfig) -> io::Result<Option<Self>> {
         match config.load_balance.selection {
             LoadBalanceSelection::RoundRobin => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -320,7 +320,7 @@ impl UpstreamLoadBalancer {
                 )))
             }
             LoadBalanceSelection::LeastConnections => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -329,7 +329,7 @@ impl UpstreamLoadBalancer {
                 )))
             }
             LoadBalanceSelection::LeastSessions => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -338,7 +338,7 @@ impl UpstreamLoadBalancer {
                 )))
             }
             LoadBalanceSelection::LeastTime => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -350,7 +350,7 @@ impl UpstreamLoadBalancer {
                 )))
             }
             LoadBalanceSelection::PowerOfTwo => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -362,7 +362,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
             | LoadBalanceSelection::CookieHash => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -374,7 +374,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::ConsistentHeaderHash
             | LoadBalanceSelection::ConsistentCookieHash => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -386,7 +386,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
             | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -401,7 +401,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::MaglevUriHash
             | LoadBalanceSelection::MaglevHeaderHash
             | LoadBalanceSelection::MaglevCookieHash => {
-                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+                let Some(inner) = configured_load_balancer(config)? else {
                     return Ok(None);
                 };
                 let table = Arc::new(configured_maglev_table(config)?);
@@ -421,58 +421,44 @@ impl UpstreamLoadBalancer {
         config: &ProxyConfig,
     ) -> io::Result<Option<(Self, UpstreamLoadBalancerService)>> {
         match config.load_balance.selection {
-            LoadBalanceSelection::RoundRobin => background_service_for::<RoundRobin, _>(
-                name,
-                config,
-                UpstreamLoadBalancerInner::RoundRobin,
-            ),
+            LoadBalanceSelection::RoundRobin => {
+                background_service_for(name, config, UpstreamLoadBalancerInner::RoundRobin)
+            }
             LoadBalanceSelection::LeastConnections => {
-                background_service_for::<RoundRobin, _>(name, config, |inner| {
+                background_service_for(name, config, |inner| {
                     UpstreamLoadBalancerInner::LeastConnections(inner)
                 })
             }
-            LoadBalanceSelection::LeastSessions => {
-                background_service_for::<RoundRobin, _>(name, config, |inner| {
-                    UpstreamLoadBalancerInner::LeastSessions(inner)
-                })
-            }
+            LoadBalanceSelection::LeastSessions => background_service_for(name, config, |inner| {
+                UpstreamLoadBalancerInner::LeastSessions(inner)
+            }),
             LoadBalanceSelection::LeastTime => {
-                background_service_for::<RoundRobin, _>(name, config, |inner| {
-                    UpstreamLoadBalancerInner::LeastTime {
-                        inner,
-                        latency: Arc::new(BackendLatencyState::default()),
-                    }
+                background_service_for(name, config, |inner| UpstreamLoadBalancerInner::LeastTime {
+                    inner,
+                    latency: Arc::new(BackendLatencyState::default()),
                 })
             }
-            LoadBalanceSelection::PowerOfTwo => {
-                background_service_for::<RoundRobin, _>(name, config, |inner| {
-                    UpstreamLoadBalancerInner::PowerOfTwo(inner)
-                })
-            }
+            LoadBalanceSelection::PowerOfTwo => background_service_for(name, config, |inner| {
+                UpstreamLoadBalancerInner::PowerOfTwo(inner)
+            }),
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
-            | LoadBalanceSelection::CookieHash => background_service_for::<RoundRobin, _>(
-                name,
-                config,
-                UpstreamLoadBalancerInner::FnvHash,
-            ),
+            | LoadBalanceSelection::CookieHash => {
+                background_service_for(name, config, UpstreamLoadBalancerInner::FnvHash)
+            }
             LoadBalanceSelection::ConsistentSourceHash
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::ConsistentHeaderHash
             | LoadBalanceSelection::ConsistentCookieHash => {
-                background_service_for::<RoundRobin, _>(
-                    name,
-                    config,
-                    UpstreamLoadBalancerInner::ConsistentHash,
-                )
+                background_service_for(name, config, UpstreamLoadBalancerInner::ConsistentHash)
             }
             LoadBalanceSelection::BoundedLoadConsistentSourceHash
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
             | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
                 let factor_per_mille = config.load_balance.bounded_load_factor_per_mille;
-                background_service_for::<RoundRobin, _>(name, config, move |inner| {
+                background_service_for(name, config, move |inner| {
                     UpstreamLoadBalancerInner::BoundedLoadConsistentHash {
                         inner,
                         factor_per_mille,
@@ -1304,11 +1290,7 @@ impl SelectedUpstream {
 }
 
 #[cfg(test)]
-fn backend_weights<S>(inner: &LoadBalancer<S>) -> Vec<usize>
-where
-    S: pingora::lb::selection::BackendSelection + 'static,
-    S::Iter: pingora::lb::selection::BackendIter,
-{
+fn backend_weights(inner: &LoadBalancer<RoundRobin>) -> Vec<usize> {
     inner
         .backends()
         .get_backend()

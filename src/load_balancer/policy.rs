@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{BackendIter, BackendSelection};
+use pingora::lb::selection::RoundRobin;
 
 use crate::config::ProxyConfig;
 
@@ -577,14 +577,10 @@ impl<'a> BackendStatsInputs<'a> {
     }
 }
 
-pub(super) fn load_balancer_backend_stats<S>(
-    inner: &LoadBalancer<S>,
+pub(super) fn load_balancer_backend_stats(
+    inner: &LoadBalancer<RoundRobin>,
     inputs: BackendStatsInputs<'_>,
-) -> Vec<LoadBalancerBackendRuntimeStats>
-where
-    S: BackendSelection + 'static,
-    S::Iter: BackendIter,
-{
+) -> Vec<LoadBalancerBackendRuntimeStats> {
     inner
         .backends()
         .get_backend()

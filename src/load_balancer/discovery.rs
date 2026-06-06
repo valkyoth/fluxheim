@@ -10,7 +10,7 @@ use pingora::lb::Backend;
 use pingora::lb::Backends;
 use pingora::lb::discovery::{ServiceDiscovery, Static};
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{BackendIter, BackendSelection, RoundRobin};
+use pingora::lb::selection::RoundRobin;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
 use pingora::{Error, ErrorType};
 
@@ -22,13 +22,9 @@ use super::health::configured_health_check;
 use super::selection::MaglevTable;
 use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalancerService};
 
-pub(super) fn configured_load_balancer<S>(
+pub(super) fn configured_load_balancer(
     config: &ProxyConfig,
-) -> io::Result<Option<LoadBalancer<S>>>
-where
-    S: BackendSelection + 'static,
-    S::Iter: BackendIter,
-{
+) -> io::Result<Option<LoadBalancer<RoundRobin>>> {
     if config.upstreams.len() < 2
         && config.upstreams_file.is_none()
         && config.upstream_dns_refresh_secs.is_none()
@@ -62,11 +58,10 @@ where
     Ok(Some(load_balancer))
 }
 
-fn apply_disabled_backend_enablement<S>(load_balancer: &LoadBalancer<S>, config: &ProxyConfig)
-where
-    S: BackendSelection + 'static,
-    S::Iter: BackendIter,
-{
+fn apply_disabled_backend_enablement(
+    load_balancer: &LoadBalancer<RoundRobin>,
+    config: &ProxyConfig,
+) {
     for upstream in &config.disabled_upstreams {
         if let Ok(backend) =
             FluxBackend::new(upstream).and_then(|backend| backend.to_pingora_backend())
@@ -233,18 +228,16 @@ impl DiscoveryError {
     }
 }
 
-pub(super) fn background_service_for<S, F>(
+pub(super) fn background_service_for<F>(
     name: &str,
     config: &ProxyConfig,
     wrap: F,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>>
 where
-    S: BackendSelection + Send + Sync + 'static,
-    S::Iter: BackendIter,
-    LoadBalancer<S>: BackgroundService,
-    F: FnOnce(Arc<LoadBalancer<S>>) -> UpstreamLoadBalancerInner,
+    LoadBalancer<RoundRobin>: BackgroundService,
+    F: FnOnce(Arc<LoadBalancer<RoundRobin>>) -> UpstreamLoadBalancerInner,
 {
-    let Some(inner) = configured_load_balancer::<S>(config)? else {
+    let Some(inner) = configured_load_balancer(config)? else {
         return Ok(None);
     };
 
@@ -257,7 +250,7 @@ pub(super) fn background_maglev_service_for(
     name: &str,
     config: &ProxyConfig,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>> {
-    let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
+    let Some(inner) = configured_load_balancer(config)? else {
         return Ok(None);
     };
     let table = Arc::new(configured_maglev_table(config)?);

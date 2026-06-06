@@ -34,6 +34,9 @@ results as far as possible.
   rendezvous candidate ordering for consistent and bounded-load consistent
   hash modes. Dynamic file/DNS discovery remains supported through the current
   backend container.
+- Collapse load-balancer factory, stats, and priority-check helpers onto a
+  concrete readiness container now that Fluxheim owns all shipped selection
+  algorithms.
 - Preserve existing Pingora background-service, readiness, and health-check
   adapters while the native backend set and selector boundary are introduced,
   keeping this first 1.5.7 line behavior-preserving.

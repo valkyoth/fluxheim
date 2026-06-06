@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{BackendIter, BackendSelection, RoundRobin};
+use pingora::lb::selection::RoundRobin;
 
 use super::SelectedUpstream;
 use super::backend::BackendIdentity;
@@ -90,15 +90,11 @@ fn selection_passes(backend_policy: &BackendSelectionPolicy) -> Vec<SelectionPas
     passes
 }
 
-fn priority_activation_satisfied<S>(
-    inner: &LoadBalancer<S>,
+fn priority_activation_satisfied(
+    inner: &LoadBalancer<RoundRobin>,
     context: SelectionContext<'_>,
     pass: SelectionPass,
-) -> bool
-where
-    S: BackendSelection + 'static,
-    S::Iter: BackendIter,
-{
+) -> bool {
     if pass.minimum_priority_group.is_none()
         || context.backend_policy.priority_group_min_active() <= 1
         || pass
