@@ -47,6 +47,9 @@ behavior when the change improves security or project direction.
 - Centralize the remaining Pingora backend container operations behind
   Fluxheim-owned adapter helpers so readiness, backend enumeration, and
   health-check metadata have one migration boundary.
+- Route static upstream pools through the same Fluxheim-owned discovery
+  adapter as file-refreshed and DNS-refreshed pools, removing Pingora's static
+  discovery wrapper from load-balancer construction.
 
 ## 1.5.6 - 2026-06-06
 

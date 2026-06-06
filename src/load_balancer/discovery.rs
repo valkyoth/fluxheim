@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use futures::FutureExt;
 use pingora::lb::Backend;
 use pingora::lb::Backends;
-use pingora::lb::discovery::{ServiceDiscovery, Static};
+use pingora::lb::discovery::ServiceDiscovery;
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
 use pingora::services::background::{BackgroundService, GenBackgroundService};
@@ -75,9 +75,32 @@ struct FileUpstreamDiscovery {
     path: PathBuf,
 }
 
+struct StaticUpstreamDiscovery {
+    backends: FluxBackendSet,
+}
+
 #[async_trait]
 trait FluxBackendDiscovery {
     async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError>;
+}
+
+#[async_trait]
+impl FluxBackendDiscovery for StaticUpstreamDiscovery {
+    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError> {
+        Ok(self.backends.clone())
+    }
+}
+
+#[async_trait]
+impl ServiceDiscovery for StaticUpstreamDiscovery {
+    async fn discover(
+        &self,
+    ) -> pingora::Result<(
+        std::collections::BTreeSet<Backend>,
+        std::collections::HashMap<u64, bool>,
+    )> {
+        adapt_flux_discovery_to_pingora(self.discover_flux_backends().await)
+    }
 }
 
 #[async_trait]
@@ -292,9 +315,7 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {
         })));
     }
 
-    Ok(Backends::new(Static::new(
-        configured_backends(config)
-            .and_then(FluxBackendSet::into_pingora_backends)
-            .map_err(FluxError::into_io)?,
-    )))
+    Ok(Backends::new(Box::new(StaticUpstreamDiscovery {
+        backends: configured_backends(config).map_err(FluxError::into_io)?,
+    })))
 }

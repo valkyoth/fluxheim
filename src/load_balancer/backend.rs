@@ -115,10 +115,6 @@ impl FluxBackendSet {
         }
         Ok((backends, self.ready))
     }
-
-    pub(super) fn into_pingora_backends(self) -> FluxResult<BTreeSet<Backend>> {
-        self.into_pingora_parts().map(|(backends, _ready)| backends)
-    }
 }
 
 pub(super) fn pingora_backend_set(inner: &LoadBalancer<RoundRobin>) -> Arc<BTreeSet<Backend>> {
