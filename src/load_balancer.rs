@@ -18,6 +18,7 @@ use crate::config::{
     LoadBalanceRetryConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
 };
 
+mod backend;
 mod discovery;
 mod health;
 mod key;

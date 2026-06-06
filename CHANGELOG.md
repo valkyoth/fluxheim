@@ -7,6 +7,18 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
+## 1.5.7 - 2026-06-06
+
+### Changed
+
+- Start the Fluxheim-native load-balancer core line. The stop line remains
+  replacing the `pingora-load-balancing` substrate while preserving current
+  config, admin API, status shape, metrics, privacy-mode behavior,
+  managed-cookie behavior, and selector results as far as possible.
+- Add a Fluxheim-owned backend/backend-set model and route static, file, and
+  DNS upstream discovery through it before adapting to the current Pingora
+  selector boundary.
+
 ## 1.5.6 - 2026-06-06
 
 ### Changed

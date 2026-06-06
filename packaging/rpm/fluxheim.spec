@@ -7,7 +7,7 @@
 %{!?_unitdir:%global _unitdir %{_prefix}/lib/systemd/system}
 
 Name:           fluxheim
-Version:        1.5.6
+Version:        1.5.7
 Release:        1%{?dist}
 Summary:        Rust edge gateway for websites, caching, and load balancing
 License:        EUPL-1.2
@@ -154,6 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
+* Sat Jun 06 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.7-1
+- Start the Fluxheim-native load-balancer core line by introducing owned
+  backend/backend-set construction and routing static, file, and DNS discovery
+  through the Fluxheim model before adapting to the remaining Pingora selector
+  boundary.
+
 * Sat Jun 06 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.6-1
 - Start the Fluxheim-native stream-proxy runtime line, focused on moving stream
   listener, connect/copy/shutdown, and upstream TLS connector helpers behind

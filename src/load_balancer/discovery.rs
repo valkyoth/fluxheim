@@ -17,6 +17,7 @@ use pingora::{Error, ErrorType};
 use crate::config::ProxyConfig;
 use crate::flux_error::{FluxError, FluxResult};
 
+use super::backend::{FluxBackend, FluxBackendSet};
 use super::health::configured_health_check;
 use super::selection::MaglevTable;
 use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalancerService};
@@ -88,21 +89,16 @@ impl ServiceDiscovery for FileUpstreamDiscovery {
         let upstreams = read_proxy_upstreams_file_for_discovery(self.path.clone())
             .await
             .map_err(DiscoveryError::into_pingora)?;
-        let mut backends = std::collections::BTreeSet::new();
+        let mut backends = FluxBackendSet::default();
         for upstream in upstreams {
-            let backend = Backend::new(&upstream).map_err(|error| {
-                DiscoveryError::new(
-                    ErrorType::InvalidHTTPHeader,
-                    FluxError::io(
-                        "proxy upstreams file contains an invalid backend",
-                        io::Error::other(error.to_string()),
-                    ),
-                )
-                .into_pingora()
+            let backend = FluxBackend::new(&upstream).map_err(|error| {
+                DiscoveryError::new(ErrorType::InvalidHTTPHeader, error).into_pingora()
             })?;
             backends.insert(backend);
         }
-        Ok((backends, std::collections::HashMap::new()))
+        backends
+            .into_pingora_parts()
+            .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error).into_pingora())
     }
 }
 
@@ -148,21 +144,14 @@ impl ServiceDiscovery for DnsUpstreamDiscovery {
         std::collections::BTreeSet<Backend>,
         std::collections::HashMap<u64, bool>,
     )> {
-        let mut backends = std::collections::BTreeSet::new();
+        let mut backends = FluxBackendSet::default();
         for upstream in self.upstreams.iter() {
             let resolved = resolve_proxy_upstream_for_discovery(upstream)
                 .await
                 .map_err(DiscoveryError::into_pingora)?;
             for address in resolved {
-                let backend = Backend::new(&address.to_string()).map_err(|error| {
-                    DiscoveryError::new(
-                        ErrorType::InternalError,
-                        FluxError::io(
-                            "resolved proxy upstream is not usable as a backend",
-                            io::Error::other(error.to_string()),
-                        ),
-                    )
-                    .into_pingora()
+                let backend = FluxBackend::new(&address.to_string()).map_err(|error| {
+                    DiscoveryError::new(ErrorType::InternalError, error).into_pingora()
                 })?;
                 backends.insert(backend);
             }
@@ -174,7 +163,9 @@ impl ServiceDiscovery for DnsUpstreamDiscovery {
             )
             .into_pingora());
         }
-        Ok((backends, std::collections::HashMap::new()))
+        backends
+            .into_pingora_parts()
+            .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error).into_pingora())
     }
 }
 
@@ -256,16 +247,11 @@ pub(super) fn background_maglev_service_for(
     Ok(Some((load_balancer, Box::new(service))))
 }
 
-fn configured_backends(config: &ProxyConfig) -> FluxResult<std::collections::BTreeSet<Backend>> {
-    let mut backends = std::collections::BTreeSet::new();
+fn configured_backends(config: &ProxyConfig) -> FluxResult<FluxBackendSet> {
+    let mut backends = FluxBackendSet::default();
     for (index, upstream) in config.upstreams.iter().enumerate() {
         let weight = config.upstream_weights.get(index).copied().unwrap_or(1);
-        let backend = Backend::new_with_weight(upstream, weight).map_err(|error| {
-            FluxError::io(
-                "configured proxy upstream is not usable as a backend",
-                io::Error::other(error.to_string()),
-            )
-        })?;
+        let backend = FluxBackend::new_with_weight(upstream, weight)?;
         backends.insert(backend);
     }
     Ok(backends)
@@ -273,6 +259,8 @@ fn configured_backends(config: &ProxyConfig) -> FluxResult<std::collections::BTr
 
 pub(super) fn configured_maglev_table(config: &ProxyConfig) -> io::Result<MaglevTable> {
     let backends: Vec<_> = configured_backends(config)
+        .map_err(FluxError::into_io)?
+        .into_pingora_backends()
         .map_err(FluxError::into_io)?
         .into_iter()
         .collect();
@@ -292,6 +280,8 @@ fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {
     }
 
     Ok(Backends::new(Static::new(
-        configured_backends(config).map_err(FluxError::into_io)?,
+        configured_backends(config)
+            .and_then(FluxBackendSet::into_pingora_backends)
+            .map_err(FluxError::into_io)?,
     )))
 }
