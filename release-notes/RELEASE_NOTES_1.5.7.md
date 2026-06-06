@@ -28,6 +28,8 @@ results as far as possible.
 - Replace Pingora's FNV weighted-hash selector for source, URI, header, and
   cookie hash modes with Fluxheim-owned weighted-first FNV selection over the
   current backend container.
+- Replace Pingora's random selector dependency for power-of-two choices with a
+  Fluxheim-owned weighted random first pick and unique backend fallback scan.
 - Preserve existing Pingora selector/background-service adapters while the
   native backend set and identity boundary are introduced, keeping this first
   1.5.7 slice behavior-preserving.

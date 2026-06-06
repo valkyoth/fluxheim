@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{Consistent, Random, RoundRobin};
+use pingora::lb::selection::{Consistent, RoundRobin};
 use pingora::services::ServiceWithDependents;
 use serde::Serialize;
 
@@ -350,7 +350,7 @@ impl UpstreamLoadBalancer {
                 )))
             }
             LoadBalanceSelection::PowerOfTwo => {
-                let Some(inner) = configured_load_balancer::<Random>(config)? else {
+                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -445,7 +445,7 @@ impl UpstreamLoadBalancer {
                 })
             }
             LoadBalanceSelection::PowerOfTwo => {
-                background_service_for::<Random, _>(name, config, |inner| {
+                background_service_for::<RoundRobin, _>(name, config, |inner| {
                     UpstreamLoadBalancerInner::PowerOfTwo(inner)
                 })
             }
@@ -1030,7 +1030,7 @@ enum UpstreamLoadBalancerInner {
         inner: Arc<LoadBalancer<RoundRobin>>,
         latency: Arc<BackendLatencyState>,
     },
-    PowerOfTwo(Arc<LoadBalancer<Random>>),
+    PowerOfTwo(Arc<LoadBalancer<RoundRobin>>),
     FnvHash(Arc<LoadBalancer<RoundRobin>>),
     ConsistentHash(Arc<LoadBalancer<Consistent>>),
     BoundedLoadConsistentHash {

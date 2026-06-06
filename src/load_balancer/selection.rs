@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, Random, RoundRobin};
+use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, RoundRobin};
 
 use super::SelectedUpstream;
 use super::backend::BackendIdentity;
@@ -503,48 +503,120 @@ fn least_time_score_is_lower(
 }
 
 pub(super) fn select_power_of_two(
-    inner: &LoadBalancer<Random>,
+    inner: &LoadBalancer<RoundRobin>,
     counters: &BackendConnectionCounters,
     max_iterations: usize,
     passive_health: Option<&PassiveHealthState>,
     slow_start: Option<&SlowStartState>,
     backend_policy: &BackendSelectionPolicy,
 ) -> Option<SelectedUpstream> {
-    let first = select_pingora(
-        inner,
-        b"",
-        max_iterations,
+    let context = SelectionContext {
         passive_health,
         slow_start,
         counters,
         backend_policy,
-    )?;
+    };
+    for pass in selection_passes(backend_policy) {
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(selected) =
+            select_power_of_two_with_backup_policy(inner, max_iterations, context, pass)
+        {
+            return Some(selected);
+        }
+    }
+    None
+}
+
+fn select_power_of_two_with_backup_policy(
+    inner: &LoadBalancer<RoundRobin>,
+    max_iterations: usize,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+) -> Option<SelectedUpstream> {
+    let first = select_weighted_random_candidate(inner, max_iterations, context, pass, None)?;
     let first_key = backend_key(&first);
-    let second = (0..max_iterations)
-        .filter_map(|_| {
-            select_pingora(
-                inner,
-                b"",
-                max_iterations,
-                passive_health,
-                slow_start,
-                counters,
-                backend_policy,
-            )
-        })
-        .find(|backend| backend_key(backend) != first_key)
-        .unwrap_or_else(|| first.clone());
+    let second =
+        select_weighted_random_candidate(inner, max_iterations, context, pass, Some(first_key))
+            .unwrap_or_else(|| first.clone());
     let selected = if least_connections_score_is_lower(
-        counters.count(&second),
-        backend_policy.effective_weight(&second),
-        counters.count(&first),
-        backend_policy.effective_weight(&first),
+        context.counters.count(&second),
+        context.backend_policy.effective_weight(&second),
+        context.counters.count(&first),
+        context.backend_policy.effective_weight(&first),
     ) {
         second
     } else {
         first
     };
     Some(SelectedUpstream::new(selected))
+}
+
+fn select_weighted_random_candidate(
+    inner: &LoadBalancer<RoundRobin>,
+    max_iterations: usize,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+    excluded_key: Option<u64>,
+) -> Option<Backend> {
+    let backends: Vec<Backend> = inner.backends().get_backend().iter().cloned().collect();
+    if backends.is_empty() {
+        return None;
+    }
+    let weighted = weighted_backend_indices(&backends);
+    if weighted.is_empty() {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+
+    let weighted_candidate = &backends[weighted[random_u64() as usize % weighted.len()]];
+    if random_candidate_allowed(
+        inner,
+        weighted_candidate,
+        context,
+        pass,
+        excluded_key,
+        &mut seen,
+    ) {
+        return Some(weighted_candidate.clone());
+    }
+
+    let start = random_u64() as usize % backends.len();
+    for offset in 0..max_iterations.max(1).min(backends.len()) {
+        let candidate = &backends[(start + offset) % backends.len()];
+        if random_candidate_allowed(inner, candidate, context, pass, excluded_key, &mut seen) {
+            return Some(candidate.clone());
+        }
+    }
+    None
+}
+
+fn random_candidate_allowed(
+    inner: &LoadBalancer<RoundRobin>,
+    candidate: &Backend,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+    excluded_key: Option<u64>,
+    seen: &mut std::collections::HashSet<u64>,
+) -> bool {
+    let candidate_key = backend_key(candidate);
+    if excluded_key == Some(candidate_key) || !seen.insert(candidate_key) {
+        return false;
+    }
+    backend_candidate_allowed(inner, candidate, context, pass)
+}
+
+fn random_u64() -> u64 {
+    let mut bytes = [0u8; 8];
+    if let Err(error) = getrandom::fill(&mut bytes) {
+        log::error!(
+            target: "fluxheim::security",
+            "failed to generate load-balancer random candidate seed: {error}"
+        );
+        process::abort();
+    }
+    u64::from_le_bytes(bytes)
 }
 
 pub(super) fn select_fnv_hash(
@@ -603,7 +675,7 @@ fn select_fnv_hash_with_backup_policy(
         if !seen.insert(backend_key(candidate)) {
             continue;
         }
-        if fnv_hash_candidate_allowed(inner, candidate, context, pass) {
+        if backend_candidate_allowed(inner, candidate, context, pass) {
             return Some(candidate.clone());
         }
     }
@@ -618,7 +690,7 @@ fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
     weighted
 }
 
-fn fnv_hash_candidate_allowed(
+fn backend_candidate_allowed(
     inner: &LoadBalancer<RoundRobin>,
     backend: &Backend,
     context: SelectionContext<'_>,
