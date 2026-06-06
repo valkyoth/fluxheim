@@ -1,7 +1,9 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::net::SocketAddr;
+use std::process;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -34,18 +36,18 @@ pub(super) trait FluxHealthCheck: Send + Sync + 'static {
     }
 }
 
-#[derive(Clone)]
 struct FluxBackendHealthInner {
     healthy: bool,
     enabled: bool,
     consecutive_counter: usize,
 }
 
-struct FluxBackendHealth(ArcSwap<FluxBackendHealthInner>);
+#[derive(Clone)]
+struct FluxBackendHealth(Arc<Mutex<FluxBackendHealthInner>>);
 
 impl Default for FluxBackendHealth {
     fn default() -> Self {
-        Self(ArcSwap::new(Arc::new(FluxBackendHealthInner {
+        Self(Arc::new(Mutex::new(FluxBackendHealthInner {
             healthy: true,
             enabled: true,
             consecutive_counter: 0,
@@ -53,45 +55,33 @@ impl Default for FluxBackendHealth {
     }
 }
 
-impl Clone for FluxBackendHealth {
-    fn clone(&self) -> Self {
-        Self(ArcSwap::new(self.0.load_full()))
-    }
-}
-
 impl FluxBackendHealth {
+    fn lock(&self) -> std::sync::MutexGuard<'_, FluxBackendHealthInner> {
+        self.0.lock().unwrap_or_else(|_| process::abort())
+    }
+
     fn ready(&self) -> bool {
-        let health = self.0.load();
+        let health = self.lock();
         health.healthy && health.enabled
     }
 
     fn enable(&self, enabled: bool) {
-        let health = self.0.load();
-        if health.enabled != enabled {
-            let mut next = (**health).clone();
-            next.enabled = enabled;
-            self.0.store(Arc::new(next));
-        }
+        self.lock().enabled = enabled;
     }
 
     fn observe(&self, healthy: bool, flip_threshold: usize) -> bool {
-        let health = self.0.load();
-        let mut flipped = false;
+        let mut health = self.lock();
         if health.healthy != healthy {
-            let mut next = (**health).clone();
-            next.consecutive_counter = next.consecutive_counter.saturating_add(1);
-            if next.consecutive_counter >= flip_threshold {
-                next.healthy = healthy;
-                next.consecutive_counter = 0;
-                flipped = true;
+            health.consecutive_counter = health.consecutive_counter.saturating_add(1);
+            if health.consecutive_counter >= flip_threshold {
+                health.healthy = healthy;
+                health.consecutive_counter = 0;
+                return true;
             }
-            self.0.store(Arc::new(next));
-        } else if health.consecutive_counter > 0 {
-            let mut next = (**health).clone();
-            next.consecutive_counter = 0;
-            self.0.store(Arc::new(next));
+        } else {
+            health.consecutive_counter = 0;
         }
-        flipped
+        false
     }
 }
 
@@ -149,8 +139,8 @@ impl FluxLoadBalancerRuntime {
                 }
                 next_health.insert(key, backend_health);
             }
-            self.health.store(Arc::new(next_health));
             self.backends.store(Arc::new(new_backends));
+            self.health.store(Arc::new(next_health));
         } else {
             let health = self.health.load();
             for (key, enabled) in enablement {
@@ -187,7 +177,7 @@ impl FluxLoadBalancerRuntime {
                 if let Err(error) = self.update().await {
                     log::warn!("load-balancer discovery update failed: {error}");
                 }
-                next_update = now + self.update_frequency.unwrap_or(NEVER);
+                next_update = checked_next_wake(now, self.update_frequency.unwrap_or(NEVER));
             }
 
             if let Some(ready) = ready.take() {
@@ -196,7 +186,8 @@ impl FluxLoadBalancerRuntime {
 
             if next_health_check <= now {
                 self.run_health_check(self.parallel_health_check).await;
-                next_health_check = now + self.health_check_frequency.unwrap_or(NEVER);
+                next_health_check =
+                    checked_next_wake(now, self.health_check_frequency.unwrap_or(NEVER));
             }
 
             if self.update_frequency.is_none() && self.health_check_frequency.is_none() {
@@ -257,6 +248,11 @@ impl FluxLoadBalancerRuntime {
             }
         }
     }
+}
+
+fn checked_next_wake(now: Instant, delay: Duration) -> Instant {
+    now.checked_add(delay)
+        .unwrap_or_else(|| now + Duration::from_secs(3600))
 }
 
 pub(crate) trait BackendIdentity {

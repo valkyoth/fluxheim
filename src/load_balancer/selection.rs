@@ -12,10 +12,11 @@ use super::state::{
 };
 use crate::flux_error::{FluxError, FluxResult};
 
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const MAGLEV_TABLE_SIZE: usize = 65_537;
 
 pub(super) fn fnv1a64(bytes: &[u8]) -> u64 {
-    fnv1a64_with_seed(bytes, 0xcbf2_9ce4_8422_2325)
+    fnv1a64_with_seed(bytes, FNV_OFFSET_BASIS)
 }
 
 pub(super) fn fnv1a64_with_seed(bytes: &[u8], seed: u64) -> u64 {
@@ -596,12 +597,12 @@ fn select_fnv_hash_with_backup_policy(
     }
 
     let mut seen = std::collections::HashSet::new();
-    let mut index = fnv1a64(key);
+    let mut index = fnv1a64_with_seed(key, fnv_route_secret());
     for step in 0..max_iterations.max(1) {
         let candidate_index = if step == 0 {
             weighted[index as usize % weighted.len()]
         } else {
-            index = fnv1a64(&index.to_le_bytes());
+            index = fnv1a64_with_seed(&index.to_le_bytes(), fnv_route_secret());
             index as usize % backends.len()
         };
         let candidate = &backends[candidate_index];
@@ -834,7 +835,7 @@ fn consistent_hash_candidates(
 fn consistent_backend_score(key: &[u8], backend_key: u64, weight: usize) -> u64 {
     let mut best = 0u64;
     for replica in 0..weight.max(1) {
-        let mut hash = fnv1a64_with_seed(key, 0x9e37_79b9_7f4a_7c15);
+        let mut hash = fnv1a64_with_seed(key, consistent_route_secret());
         hash = fnv1a64_with_seed(&backend_key.to_le_bytes(), hash);
         hash = fnv1a64_with_seed(&(replica as u64).to_le_bytes(), hash);
         best = best.max(hash);
@@ -870,8 +871,7 @@ impl MaglevTable {
             .iter()
             .map(|backend_key| {
                 let key = backend_key.to_le_bytes();
-                let offset =
-                    fnv1a64_with_seed(&key, 0xcbf2_9ce4_8422_2325) as usize % MAGLEV_TABLE_SIZE;
+                let offset = fnv1a64_with_seed(&key, FNV_OFFSET_BASIS) as usize % MAGLEV_TABLE_SIZE;
                 let skip = (fnv1a64_with_seed(&key, 0x8422_2325_cbf2_9ce4) as usize
                     % (MAGLEV_TABLE_SIZE - 1))
                     + 1;
@@ -961,13 +961,28 @@ pub(super) fn select_maglev(
 }
 
 fn maglev_route_secret() -> u64 {
-    static SECRET: OnceLock<u64> = OnceLock::new();
-    *SECRET.get_or_init(|| {
+    route_secret(&MAGLEV_ROUTE_SECRET, "Maglev routing hash")
+}
+
+fn consistent_route_secret() -> u64 {
+    route_secret(&CONSISTENT_ROUTE_SECRET, "consistent-hash routing")
+}
+
+fn fnv_route_secret() -> u64 {
+    route_secret(&FNV_ROUTE_SECRET, "FNV routing hash")
+}
+
+static MAGLEV_ROUTE_SECRET: OnceLock<u64> = OnceLock::new();
+static CONSISTENT_ROUTE_SECRET: OnceLock<u64> = OnceLock::new();
+static FNV_ROUTE_SECRET: OnceLock<u64> = OnceLock::new();
+
+fn route_secret(secret: &'static OnceLock<u64>, label: &'static str) -> u64 {
+    *secret.get_or_init(|| {
         let mut bytes = [0u8; 8];
         if let Err(error) = getrandom::fill(&mut bytes) {
             log::error!(
                 target: "fluxheim::security",
-                "failed to seed Maglev routing hash secret: {error}"
+                "failed to seed {label} secret: {error}"
             );
             process::abort();
         }

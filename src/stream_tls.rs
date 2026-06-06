@@ -161,7 +161,7 @@ fn warn_if_ip_upstream_tls_verification_skips_hostname(route: &StreamRouteConfig
     }
     log::warn!(
         target: "fluxheim::security",
-        "stream route '{}' enables upstream TLS certificate verification for IP-only upstreams without upstream_sni; hostname verification is skipped for those connections",
+        "stream route '{}' enables upstream TLS certificate verification for one or more IP upstreams without upstream_sni; hostname verification is skipped for those IP connections",
         route.name
     );
 }

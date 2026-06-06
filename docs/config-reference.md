@@ -1070,12 +1070,15 @@ and at least one upstream must remain a normal primary.
 `maglev-header-hash`, and `maglev-cookie-hash`. Header-hash modes require
 `proxy.load_balance.hash_header = "x-session"` or another valid HTTP header
 name. Cookie-hash modes require `proxy.load_balance.hash_cookie = "session"` or
-another valid cookie name. Hash modes use weighted FNV selection; consistent
-modes use Pingora's weighted Ketama ring for lower remapping when upstream
-membership changes. Bounded-load consistent modes use the same ring and skip a
-hash target whose weighted in-flight pressure is above the configured soft
-bound when another eligible candidate is available inside `max_iterations`;
-they fall back to normal consistent selection if no bounded candidate is found.
+another valid cookie name. Hash modes use weighted FNV selection seeded with a
+per-boot secret. Consistent modes use Fluxheim-owned weighted rendezvous
+hashing, also seeded with a per-boot secret, for low remapping when upstream
+membership changes. Upgrading from the pre-1.5.7 Pingora ring-backed
+consistent selector can remap existing affinity keys once. Bounded-load
+consistent modes use the same rendezvous candidate ordering and skip a hash
+target whose weighted in-flight pressure is above the configured soft bound
+when another eligible candidate is available inside `max_iterations`; they
+fall back to normal consistent selection if no bounded candidate is found.
 `bounded_load_factor_per_mille` defaults to `1250`, meaning roughly 125% of
 current weighted average load, and is valid only with bounded-load consistent
 selectors. Maglev modes use a fixed 65,537-slot bounded lookup table for static

@@ -28,12 +28,15 @@ results as far as possible.
 - Replace Pingora's FNV weighted-hash selector for source, URI, header, and
   cookie hash modes with Fluxheim-owned weighted-first FNV selection over the
   current backend container.
+- Seed Fluxheim-owned FNV and consistent-hash selectors with per-boot routing
+  secrets so clients cannot precompute keys that target a chosen backend.
 - Replace Pingora's random selector dependency for power-of-two choices with a
   Fluxheim-owned weighted random first pick and unique backend fallback scan.
 - Replace Pingora's consistent-hash selector dependency with Fluxheim-owned
   rendezvous candidate ordering for consistent and bounded-load consistent
   hash modes. Dynamic file/DNS discovery remains supported through the current
-  backend container.
+  backend container. This is a valid consistent-hash algorithm change and can
+  remap existing consistent-hash affinity keys once during the 1.5.7 upgrade.
 - Collapse load-balancer factory, stats, and priority-check helpers onto a
   concrete readiness container now that Fluxheim owns all shipped selection
   algorithms.
@@ -68,6 +71,14 @@ results as far as possible.
 - Hide the remaining runtime backend value type behind the load-balancer
   backend adapter so selector and health-check modules use Fluxheim's boundary
   type while the final backend-type replacement remains isolated.
+- Serialize per-backend load-balancer health state updates so enable/disable
+  changes and active health observations cannot overwrite each other under
+  concurrent health checks.
+- Store refreshed backend sets before refreshed health maps and use checked
+  wake-time arithmetic in the load-balancer background loop.
+- Clarify stream upstream TLS warnings for mixed hostname and IP upstream
+  routes where only IP connections skip hostname verification without
+  `upstream_sni`.
 
 ## Boundaries
 
