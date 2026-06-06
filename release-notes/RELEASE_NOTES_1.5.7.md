@@ -59,9 +59,12 @@ results as far as possible.
 - Keep the selector-facing backend-container trait implemented only by the
   Fluxheim runtime wrapper, with raw Pingora container access confined inside
   that adapter.
-- Preserve existing Pingora readiness and health-check adapters while the
-  native backend set, selector boundary, and service wrapper are introduced,
-  keeping this first 1.5.7 line behavior-preserving.
+- Replace Pingora's load-balancer `Backends` container, discovery adapter, and
+  background update loop with Fluxheim-owned backend storage, readiness state,
+  discovery refresh, health-check scheduling, and shutdown handling.
+- Preserve existing TCP/HTTP health-check behavior by reusing the current
+  Pingora health-check implementations behind Fluxheim's runtime-owned
+  readiness state.
 
 ## Boundaries
 

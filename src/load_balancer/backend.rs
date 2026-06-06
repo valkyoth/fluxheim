@@ -3,44 +3,248 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
-use super::key::backend_authority_key;
+use super::key::{backend_authority_key, backend_key};
 use crate::flux_error::{FluxError, FluxResult};
+use arc_swap::ArcSwap;
+use async_trait::async_trait;
+use futures::future;
 use pingora::lb::Backend;
-use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::RoundRobin;
+use pingora::lb::health_check::HealthCheck;
 use pingora::server::ShutdownWatch;
 use pingora::services::ServiceReadyNotifier;
 
-pub(super) type PingoraLoadBalancer = LoadBalancer<RoundRobin>;
-
-#[derive(Clone)]
-pub(super) struct FluxLoadBalancerRuntime {
-    inner: Arc<PingoraLoadBalancer>,
+#[async_trait]
+pub(super) trait FluxBackendDiscovery: Send + Sync + 'static {
+    async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet>;
 }
 
-impl FluxLoadBalancerRuntime {
-    pub(super) fn new(inner: PingoraLoadBalancer) -> Self {
-        Self {
-            inner: Arc::new(inner),
+#[derive(Clone)]
+struct FluxBackendHealthInner {
+    healthy: bool,
+    enabled: bool,
+    consecutive_counter: usize,
+}
+
+struct FluxBackendHealth(ArcSwap<FluxBackendHealthInner>);
+
+impl Default for FluxBackendHealth {
+    fn default() -> Self {
+        Self(ArcSwap::new(Arc::new(FluxBackendHealthInner {
+            healthy: true,
+            enabled: true,
+            consecutive_counter: 0,
+        })))
+    }
+}
+
+impl Clone for FluxBackendHealth {
+    fn clone(&self) -> Self {
+        Self(ArcSwap::new(self.0.load_full()))
+    }
+}
+
+impl FluxBackendHealth {
+    fn ready(&self) -> bool {
+        let health = self.0.load();
+        health.healthy && health.enabled
+    }
+
+    fn enable(&self, enabled: bool) {
+        let health = self.0.load();
+        if health.enabled != enabled {
+            let mut next = (**health).clone();
+            next.enabled = enabled;
+            self.0.store(Arc::new(next));
         }
     }
 
-    pub(super) async fn run(&self, shutdown: ShutdownWatch, ready: Option<ServiceReadyNotifier>) {
-        self.inner.run(shutdown, ready).await;
+    fn observe(&self, healthy: bool, flip_threshold: usize) -> bool {
+        let health = self.0.load();
+        let mut flipped = false;
+        if health.healthy != healthy {
+            let mut next = (**health).clone();
+            next.consecutive_counter = next.consecutive_counter.saturating_add(1);
+            if next.consecutive_counter >= flip_threshold {
+                next.healthy = healthy;
+                next.consecutive_counter = 0;
+                flipped = true;
+            }
+            self.0.store(Arc::new(next));
+        } else if health.consecutive_counter > 0 {
+            let mut next = (**health).clone();
+            next.consecutive_counter = 0;
+            self.0.store(Arc::new(next));
+        }
+        flipped
+    }
+}
+
+pub(super) struct FluxLoadBalancerRuntime {
+    discovery: Arc<dyn FluxBackendDiscovery>,
+    health_check: Option<Arc<dyn HealthCheck + Send + Sync + 'static>>,
+    backends: ArcSwap<BTreeSet<Backend>>,
+    health: ArcSwap<HashMap<u64, FluxBackendHealth>>,
+    update_frequency: Option<Duration>,
+    health_check_frequency: Option<Duration>,
+    parallel_health_check: bool,
+}
+
+impl FluxLoadBalancerRuntime {
+    pub(super) fn new(discovery: Box<dyn FluxBackendDiscovery>) -> Self {
+        Self {
+            discovery: discovery.into(),
+            health_check: None,
+            backends: Default::default(),
+            health: Default::default(),
+            update_frequency: None,
+            health_check_frequency: None,
+            parallel_health_check: false,
+        }
+    }
+
+    pub(super) fn set_update_frequency(&mut self, frequency: Option<Duration>) {
+        self.update_frequency = frequency;
+    }
+
+    pub(super) fn set_health_check(
+        &mut self,
+        health_check: Box<dyn HealthCheck + Send + Sync + 'static>,
+    ) {
+        self.health_check = Some(health_check.into());
+    }
+
+    pub(super) fn set_health_check_frequency(&mut self, frequency: Option<Duration>) {
+        self.health_check_frequency = frequency;
+    }
+
+    pub(super) fn set_parallel_health_check(&mut self, parallel: bool) {
+        self.parallel_health_check = parallel;
+    }
+
+    pub(super) async fn update(&self) -> FluxResult<()> {
+        let discovered = self.discovery.discover_flux_backends().await?;
+        let (new_backends, enablement) = discovered.into_pingora_parts()?;
+        let current_backends = self.backends.load();
+        if **current_backends != new_backends {
+            let old_health = self.health.load();
+            let mut next_health = HashMap::with_capacity(new_backends.len());
+            for backend in &new_backends {
+                let key = backend_key(backend);
+                let backend_health = old_health.get(&key).cloned().unwrap_or_default();
+                if let Some(enabled) = enablement.get(&key) {
+                    backend_health.enable(*enabled);
+                }
+                next_health.insert(key, backend_health);
+            }
+            self.health.store(Arc::new(next_health));
+            self.backends.store(Arc::new(new_backends));
+        } else {
+            let health = self.health.load();
+            for (key, enabled) in enablement {
+                if let Some(backend_health) = health.get(&key) {
+                    backend_health.enable(enabled);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn set_enable(&self, backend: &Backend, enabled: bool) {
+        if let Some(backend_health) = self.health.load().get(&backend_key(backend)) {
+            backend_health.enable(enabled);
+        }
+    }
+
+    pub(super) async fn run(
+        &self,
+        shutdown: ShutdownWatch,
+        mut ready: Option<ServiceReadyNotifier>,
+    ) {
+        const NEVER: Duration = Duration::from_secs(u32::MAX as u64);
+        let mut now = Instant::now();
+        let mut next_update = now;
+        let mut next_health_check = now;
+
+        loop {
+            if *shutdown.borrow() {
+                return;
+            }
+
+            if next_update <= now {
+                if let Err(error) = self.update().await {
+                    log::warn!("load-balancer discovery update failed: {error}");
+                }
+                next_update = now + self.update_frequency.unwrap_or(NEVER);
+            }
+
+            if let Some(ready) = ready.take() {
+                ServiceReadyNotifier::notify_ready(ready);
+            }
+
+            if next_health_check <= now {
+                self.run_health_check(self.parallel_health_check).await;
+                next_health_check = now + self.health_check_frequency.unwrap_or(NEVER);
+            }
+
+            if self.update_frequency.is_none() && self.health_check_frequency.is_none() {
+                return;
+            }
+
+            let wake_at = std::cmp::min(next_update, next_health_check);
+            tokio::time::sleep_until(wake_at.into()).await;
+            now = Instant::now();
+        }
     }
 
     pub(super) fn health_check_frequency(&self) -> Option<Duration> {
-        self.inner.health_check_frequency
+        self.health_check_frequency
     }
 
     pub(super) fn parallel_health_check(&self) -> bool {
-        self.inner.parallel_health_check
+        self.parallel_health_check
     }
 
-    #[cfg(test)]
     pub(super) async fn run_health_check(&self, parallel: bool) {
-        self.inner.backends().run_health_check(parallel).await;
+        async fn check_one(
+            backend: Backend,
+            check: Arc<dyn HealthCheck + Send + Sync + 'static>,
+            health: Arc<HashMap<u64, FluxBackendHealth>>,
+        ) {
+            let error = check.check(&backend).await.err();
+            if let Some(backend_health) = health.get(&backend_key(&backend)) {
+                let healthy = error.is_none();
+                let flipped = backend_health.observe(healthy, check.health_threshold(healthy));
+                if flipped {
+                    check.health_status_change(&backend, healthy).await;
+                    let summary = check.backend_summary(&backend);
+                    if let Some(error) = error {
+                        log::warn!("{summary} becomes unhealthy, {error}");
+                    } else {
+                        log::info!("{summary} becomes healthy");
+                    }
+                }
+            }
+        }
+
+        let Some(health_check) = self.health_check.as_ref() else {
+            return;
+        };
+
+        let backends = self.backends.load();
+        if parallel {
+            let health = self.health.load_full();
+            let jobs = backends.iter().cloned().map(|backend| {
+                tokio::spawn(check_one(backend, health_check.clone(), health.clone()))
+            });
+            let _ = future::join_all(jobs).await;
+        } else {
+            let health = self.health.load_full();
+            for backend in backends.iter().cloned() {
+                check_one(backend, health_check.clone(), health.clone()).await;
+            }
+        }
     }
 }
 
@@ -159,11 +363,14 @@ pub(super) trait BackendContainer {
 
 impl BackendContainer for FluxLoadBalancerRuntime {
     fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
-        self.inner.backends().get_backend()
+        self.backends.load_full()
     }
 
     fn backend_ready(&self, backend: &Backend) -> bool {
-        self.inner.backends().ready(backend)
+        self.health
+            .load()
+            .get(&backend_key(backend))
+            .map_or(self.health_check.is_none(), FluxBackendHealth::ready)
     }
 }
 

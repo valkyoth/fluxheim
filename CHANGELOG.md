@@ -66,6 +66,10 @@ behavior when the change improves security or project direction.
 - Keep the selector-facing backend-container trait implemented only by the
   Fluxheim runtime wrapper, with raw Pingora container access confined inside
   that adapter.
+- Replace Pingora's load-balancer `Backends` container, discovery adapter, and
+  background update loop with Fluxheim-owned backend storage, readiness state,
+  discovery refresh, health-check scheduling, and shutdown handling. Existing
+  Pingora health-check implementations remain adapted for this slice.
 
 ## 1.5.6 - 2026-06-06
 

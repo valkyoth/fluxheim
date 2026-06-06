@@ -6,19 +6,15 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::FutureExt;
-use pingora::lb::Backend;
-use pingora::lb::Backends;
-use pingora::lb::discovery::ServiceDiscovery;
 #[cfg(unix)]
 use pingora::server::ListenFds;
 use pingora::server::ShutdownWatch;
 use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
-use pingora::{Error, ErrorType};
 
 use crate::config::ProxyConfig;
 use crate::flux_error::{FluxError, FluxResult};
 
-use super::backend::{FluxBackend, FluxBackendSet, FluxLoadBalancerRuntime, PingoraLoadBalancer};
+use super::backend::{FluxBackend, FluxBackendDiscovery, FluxBackendSet, FluxLoadBalancerRuntime};
 use super::health::configured_health_check;
 use super::selection::MaglevTable;
 use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalancerService};
@@ -33,39 +29,41 @@ pub(super) fn configured_load_balancer(
         return Ok(None);
     }
 
-    let mut load_balancer =
-        PingoraLoadBalancer::from_backends(configured_backend_discovery(config)?);
+    let mut load_balancer = FluxLoadBalancerRuntime::new(configured_backend_discovery(config)?);
     if config.upstreams_file.is_some() {
-        load_balancer.update_frequency = Some(Duration::from_secs(
+        load_balancer.set_update_frequency(Some(Duration::from_secs(
             config.upstreams_file_refresh_secs.clamp(1, 300),
-        ));
+        )));
     } else if let Some(refresh_secs) = config.upstream_dns_refresh_secs {
-        load_balancer.update_frequency = Some(Duration::from_secs(refresh_secs.clamp(1, 300)));
+        load_balancer.set_update_frequency(Some(Duration::from_secs(refresh_secs.clamp(1, 300))));
     }
     load_balancer
         .update()
         .now_or_never()
         .ok_or_else(|| io::Error::other("static load balancer update blocked unexpectedly"))?
-        .map_err(|error| io::Error::other(error.to_string()))?;
+        .map_err(FluxError::into_io)?;
     apply_disabled_backend_enablement(&load_balancer, config);
     if config.load_balance.health_check.enabled {
         let health_check = configured_health_check(config)?;
         load_balancer.set_health_check(health_check);
-        load_balancer.health_check_frequency = Some(Duration::from_secs(
+        load_balancer.set_health_check_frequency(Some(Duration::from_secs(
             config.load_balance.health_check.interval_secs,
-        ));
-        load_balancer.parallel_health_check = config.load_balance.health_check.parallel;
+        )));
+        load_balancer.set_parallel_health_check(config.load_balance.health_check.parallel);
     }
 
-    Ok(Some(FluxLoadBalancerRuntime::new(load_balancer)))
+    Ok(Some(load_balancer))
 }
 
-fn apply_disabled_backend_enablement(load_balancer: &PingoraLoadBalancer, config: &ProxyConfig) {
+fn apply_disabled_backend_enablement(
+    load_balancer: &FluxLoadBalancerRuntime,
+    config: &ProxyConfig,
+) {
     for upstream in &config.disabled_upstreams {
         if let Ok(backend) =
             FluxBackend::new(upstream).and_then(|backend| backend.to_pingora_backend())
         {
-            load_balancer.backends().set_enable(&backend, false);
+            load_balancer.set_enable(&backend, false);
         }
     }
 }
@@ -79,68 +77,33 @@ struct StaticUpstreamDiscovery {
 }
 
 #[async_trait]
-trait FluxBackendDiscovery {
-    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError>;
-}
-
-#[async_trait]
 impl FluxBackendDiscovery for StaticUpstreamDiscovery {
-    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError> {
+    async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet> {
         Ok(self.backends.clone())
     }
 }
 
 #[async_trait]
-impl ServiceDiscovery for StaticUpstreamDiscovery {
-    async fn discover(
-        &self,
-    ) -> pingora::Result<(
-        std::collections::BTreeSet<Backend>,
-        std::collections::HashMap<u64, bool>,
-    )> {
-        adapt_flux_discovery_to_pingora(self.discover_flux_backends().await)
-    }
-}
-
-#[async_trait]
 impl FluxBackendDiscovery for FileUpstreamDiscovery {
-    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError> {
+    async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet> {
         let upstreams = read_proxy_upstreams_file_for_discovery(self.path.clone()).await?;
         let mut backends = FluxBackendSet::default();
         for upstream in upstreams {
-            let backend = FluxBackend::new(&upstream)
-                .map_err(|error| DiscoveryError::new(ErrorType::InvalidHTTPHeader, error))?;
+            let backend = FluxBackend::new(&upstream)?;
             backends.insert(backend);
         }
         Ok(backends)
     }
 }
 
-#[async_trait]
-impl ServiceDiscovery for FileUpstreamDiscovery {
-    async fn discover(
-        &self,
-    ) -> pingora::Result<(
-        std::collections::BTreeSet<Backend>,
-        std::collections::HashMap<u64, bool>,
-    )> {
-        adapt_flux_discovery_to_pingora(self.discover_flux_backends().await)
-    }
-}
-
-async fn read_proxy_upstreams_file_for_discovery(
-    path: PathBuf,
-) -> Result<Vec<String>, DiscoveryError> {
+async fn read_proxy_upstreams_file_for_discovery(path: PathBuf) -> FluxResult<Vec<String>> {
     let result = if tokio::runtime::Handle::try_current().is_ok() {
         tokio::task::spawn_blocking(move || crate::config::read_proxy_upstreams_file(&path))
             .await
             .map_err(|error| {
-                DiscoveryError::new(
-                    ErrorType::InternalError,
-                    FluxError::io(
-                        "proxy upstreams file discovery task failed",
-                        io::Error::other(error.to_string()),
-                    ),
+                FluxError::io(
+                    "proxy upstreams file discovery task failed",
+                    io::Error::other(error.to_string()),
                 )
             })?
     } else {
@@ -150,12 +113,7 @@ async fn read_proxy_upstreams_file_for_discovery(
         crate::config::read_proxy_upstreams_file(&path)
     };
 
-    result.map_err(|error| {
-        DiscoveryError::new(
-            ErrorType::ReadError,
-            FluxError::io("failed to read proxy upstreams file", error),
-        )
-    })
+    result.map_err(|error| FluxError::io("failed to read proxy upstreams file", error))
 }
 
 struct DnsUpstreamDiscovery {
@@ -164,56 +122,25 @@ struct DnsUpstreamDiscovery {
 
 #[async_trait]
 impl FluxBackendDiscovery for DnsUpstreamDiscovery {
-    async fn discover_flux_backends(&self) -> Result<FluxBackendSet, DiscoveryError> {
+    async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet> {
         let mut backends = FluxBackendSet::default();
         for upstream in self.upstreams.iter() {
             let resolved = resolve_proxy_upstream_for_discovery(upstream).await?;
             for address in resolved {
-                let backend = FluxBackend::new(&address.to_string())
-                    .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error))?;
+                let backend = FluxBackend::new(&address.to_string())?;
                 backends.insert(backend);
             }
         }
         if backends.is_empty() {
-            return Err(DiscoveryError::new(
-                ErrorType::ConnectError,
-                FluxError::InvalidInput("DNS discovery resolved no proxy upstreams"),
+            return Err(FluxError::InvalidInput(
+                "DNS discovery resolved no proxy upstreams",
             ));
         }
         Ok(backends)
     }
 }
 
-#[async_trait]
-impl ServiceDiscovery for DnsUpstreamDiscovery {
-    async fn discover(
-        &self,
-    ) -> pingora::Result<(
-        std::collections::BTreeSet<Backend>,
-        std::collections::HashMap<u64, bool>,
-    )> {
-        adapt_flux_discovery_to_pingora(self.discover_flux_backends().await)
-    }
-}
-
-fn adapt_flux_discovery_to_pingora(
-    discovered: Result<FluxBackendSet, DiscoveryError>,
-) -> pingora::Result<(
-    std::collections::BTreeSet<Backend>,
-    std::collections::HashMap<u64, bool>,
-)> {
-    discovered
-        .and_then(|backends| {
-            backends
-                .into_pingora_parts()
-                .map_err(|error| DiscoveryError::new(ErrorType::InternalError, error))
-        })
-        .map_err(DiscoveryError::into_pingora)
-}
-
-async fn resolve_proxy_upstream_for_discovery(
-    upstream: &str,
-) -> Result<Vec<SocketAddr>, DiscoveryError> {
+async fn resolve_proxy_upstream_for_discovery(upstream: &str) -> FluxResult<Vec<SocketAddr>> {
     let result = if tokio::runtime::Handle::try_current().is_ok() {
         tokio::net::lookup_host(upstream)
             .await
@@ -227,27 +154,7 @@ async fn resolve_proxy_upstream_for_discovery(
             .map(|resolved| resolved.collect::<Vec<_>>())
     };
 
-    result.map_err(|error| {
-        DiscoveryError::new(
-            ErrorType::ConnectError,
-            FluxError::io("failed to resolve proxy upstream", error),
-        )
-    })
-}
-
-struct DiscoveryError {
-    kind: ErrorType,
-    error: FluxError,
-}
-
-impl DiscoveryError {
-    fn new(kind: ErrorType, error: FluxError) -> Self {
-        Self { kind, error }
-    }
-
-    fn into_pingora(self) -> Box<Error> {
-        Error::because(self.kind, "load-balancer discovery failed", self.error)
-    }
+    result.map_err(|error| FluxError::io("failed to resolve proxy upstream", error))
 }
 
 pub(super) fn background_service_for<F>(
@@ -340,19 +247,17 @@ pub(super) fn configured_maglev_table(config: &ProxyConfig) -> io::Result<Maglev
     MaglevTable::from_backend_identities(backends.iter()).map_err(FluxError::into_io)
 }
 
-fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {
+fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Box<dyn FluxBackendDiscovery>> {
     if let Some(path) = &config.upstreams_file {
-        return Ok(Backends::new(Box::new(FileUpstreamDiscovery {
-            path: path.clone(),
-        })));
+        return Ok(Box::new(FileUpstreamDiscovery { path: path.clone() }));
     }
     if config.upstream_dns_refresh_secs.is_some() {
-        return Ok(Backends::new(Box::new(DnsUpstreamDiscovery {
+        return Ok(Box::new(DnsUpstreamDiscovery {
             upstreams: config.upstreams.clone().into(),
-        })));
+        }));
     }
 
-    Ok(Backends::new(Box::new(StaticUpstreamDiscovery {
+    Ok(Box::new(StaticUpstreamDiscovery {
         backends: configured_backends(config).map_err(FluxError::into_io)?,
-    })))
+    }))
 }
