@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::http_types::PingoraRequestHeader as RequestHeader;
-use pingora::lb::Backend;
 use pingora::services::ServiceWithDependents;
 use serde::Serialize;
 
@@ -28,6 +27,7 @@ mod state;
 #[cfg(test)]
 use self::backend::BackendIdentity;
 use self::backend::FluxLoadBalancerRuntime;
+use self::backend::RuntimeBackend as Backend;
 use self::backend::{backend_container_ready, backend_container_set};
 use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
