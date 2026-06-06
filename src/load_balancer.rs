@@ -27,12 +27,8 @@ mod state;
 
 #[cfg(test)]
 use self::backend::BackendIdentity;
-#[cfg(test)]
-use self::backend::pingora_run_health_check;
-use self::backend::{
-    PingoraLoadBalancer, pingora_backend_ready, pingora_backend_set,
-    pingora_health_check_frequency, pingora_parallel_health_check,
-};
+use self::backend::FluxLoadBalancerRuntime;
+use self::backend::{backend_container_ready, backend_container_set};
 use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
     configured_maglev_table,
@@ -319,7 +315,9 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::RoundRobin(Arc::new(inner)),
+                    UpstreamLoadBalancerInner::RoundRobin(Arc::new(FluxLoadBalancerRuntime::new(
+                        inner,
+                    ))),
                     config,
                 )))
             }
@@ -328,7 +326,9 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::LeastConnections(Arc::new(inner)),
+                    UpstreamLoadBalancerInner::LeastConnections(Arc::new(
+                        FluxLoadBalancerRuntime::new(inner),
+                    )),
                     config,
                 )))
             }
@@ -337,7 +337,9 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::LeastSessions(Arc::new(inner)),
+                    UpstreamLoadBalancerInner::LeastSessions(Arc::new(
+                        FluxLoadBalancerRuntime::new(inner),
+                    )),
                     config,
                 )))
             }
@@ -347,7 +349,7 @@ impl UpstreamLoadBalancer {
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::LeastTime {
-                        inner: Arc::new(inner),
+                        inner: Arc::new(FluxLoadBalancerRuntime::new(inner)),
                         latency: Arc::new(BackendLatencyState::default()),
                     },
                     config,
@@ -358,7 +360,9 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::PowerOfTwo(Arc::new(inner)),
+                    UpstreamLoadBalancerInner::PowerOfTwo(Arc::new(FluxLoadBalancerRuntime::new(
+                        inner,
+                    ))),
                     config,
                 )))
             }
@@ -370,7 +374,9 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::FnvHash(Arc::new(inner)),
+                    UpstreamLoadBalancerInner::FnvHash(Arc::new(FluxLoadBalancerRuntime::new(
+                        inner,
+                    ))),
                     config,
                 )))
             }
@@ -382,7 +388,9 @@ impl UpstreamLoadBalancer {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
-                    UpstreamLoadBalancerInner::ConsistentHash(Arc::new(inner)),
+                    UpstreamLoadBalancerInner::ConsistentHash(Arc::new(
+                        FluxLoadBalancerRuntime::new(inner),
+                    )),
                     config,
                 )))
             }
@@ -395,7 +403,7 @@ impl UpstreamLoadBalancer {
                 };
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::BoundedLoadConsistentHash {
-                        inner: Arc::new(inner),
+                        inner: Arc::new(FluxLoadBalancerRuntime::new(inner)),
                         factor_per_mille: config.load_balance.bounded_load_factor_per_mille,
                     },
                     config,
@@ -411,7 +419,7 @@ impl UpstreamLoadBalancer {
                 let table = Arc::new(configured_maglev_table(config)?);
                 Ok(Some(Self::from_inner(
                     UpstreamLoadBalancerInner::MaglevHash {
-                        inner: Arc::new(inner),
+                        inner: Arc::new(FluxLoadBalancerRuntime::new(inner)),
                         table,
                     },
                     config,
@@ -1013,28 +1021,28 @@ impl LoadBalancerRetryRuntimeStats {
 
 #[derive(Clone)]
 enum UpstreamLoadBalancerInner {
-    RoundRobin(Arc<PingoraLoadBalancer>),
-    LeastConnections(Arc<PingoraLoadBalancer>),
-    LeastSessions(Arc<PingoraLoadBalancer>),
+    RoundRobin(Arc<FluxLoadBalancerRuntime>),
+    LeastConnections(Arc<FluxLoadBalancerRuntime>),
+    LeastSessions(Arc<FluxLoadBalancerRuntime>),
     LeastTime {
-        inner: Arc<PingoraLoadBalancer>,
+        inner: Arc<FluxLoadBalancerRuntime>,
         latency: Arc<BackendLatencyState>,
     },
-    PowerOfTwo(Arc<PingoraLoadBalancer>),
-    FnvHash(Arc<PingoraLoadBalancer>),
-    ConsistentHash(Arc<PingoraLoadBalancer>),
+    PowerOfTwo(Arc<FluxLoadBalancerRuntime>),
+    FnvHash(Arc<FluxLoadBalancerRuntime>),
+    ConsistentHash(Arc<FluxLoadBalancerRuntime>),
     BoundedLoadConsistentHash {
-        inner: Arc<PingoraLoadBalancer>,
+        inner: Arc<FluxLoadBalancerRuntime>,
         factor_per_mille: u16,
     },
     MaglevHash {
-        inner: Arc<PingoraLoadBalancer>,
+        inner: Arc<FluxLoadBalancerRuntime>,
         table: Arc<MaglevTable>,
     },
 }
 
 impl UpstreamLoadBalancerInner {
-    fn container(&self) -> &Arc<PingoraLoadBalancer> {
+    fn container(&self) -> &Arc<FluxLoadBalancerRuntime> {
         match self {
             Self::RoundRobin(inner)
             | Self::LeastConnections(inner)
@@ -1093,7 +1101,7 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn backend_count(&self) -> usize {
-        pingora_backend_set(self.container()).len()
+        backend_container_set(self.container()).len()
     }
 
     fn backend_stats(
@@ -1127,11 +1135,11 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn health_check_frequency(&self) -> Option<Duration> {
-        pingora_health_check_frequency(self.container())
+        self.container().health_check_frequency()
     }
 
     fn parallel_health_check(&self) -> bool {
-        pingora_parallel_health_check(self.container())
+        self.container().parallel_health_check()
     }
 
     fn latency_state(&self) -> Option<Arc<BackendLatencyState>> {
@@ -1150,7 +1158,7 @@ impl UpstreamLoadBalancerInner {
 
     #[cfg(test)]
     async fn run_health_check(&self, parallel: bool) {
-        pingora_run_health_check(self.container(), parallel).await;
+        self.container().run_health_check(parallel).await;
     }
 
     fn backend_by_member(
@@ -1196,11 +1204,11 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn backend_ready(&self, backend: &Backend) -> bool {
-        pingora_backend_ready(self.container(), backend)
+        backend_container_ready(self.container(), backend)
     }
 
     fn backends(&self) -> Vec<Backend> {
-        pingora_backend_set(self.container())
+        backend_container_set(self.container())
             .iter()
             .cloned()
             .collect()
@@ -1221,8 +1229,8 @@ impl SelectedUpstream {
 }
 
 #[cfg(test)]
-fn backend_weights(inner: &PingoraLoadBalancer) -> Vec<usize> {
-    pingora_backend_set(inner)
+fn backend_weights(inner: &FluxLoadBalancerRuntime) -> Vec<usize> {
+    backend_container_set(inner)
         .iter()
         .map(|backend| backend.weight())
         .collect()

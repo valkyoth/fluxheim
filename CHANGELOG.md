@@ -59,6 +59,8 @@ behavior when the change improves security or project direction.
 - Centralize the concrete Pingora load-balancer container type behind the
   backend adapter module so orchestration and discovery use Fluxheim's adapter
   alias during the native-substrate migration.
+- Wrap the current Pingora load-balancer container in a Fluxheim runtime type
+  before handing pools to selection, status, and background-service code.
 
 ## 1.5.6 - 2026-06-06
 

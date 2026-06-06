@@ -18,7 +18,7 @@ use pingora::{Error, ErrorType};
 use crate::config::ProxyConfig;
 use crate::flux_error::{FluxError, FluxResult};
 
-use super::backend::{FluxBackend, FluxBackendSet, PingoraLoadBalancer};
+use super::backend::{FluxBackend, FluxBackendSet, FluxLoadBalancerRuntime, PingoraLoadBalancer};
 use super::health::configured_health_check;
 use super::selection::MaglevTable;
 use super::{UpstreamLoadBalancer, UpstreamLoadBalancerInner, UpstreamLoadBalancerService};
@@ -256,13 +256,16 @@ pub(super) fn background_service_for<F>(
     wrap: F,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>>
 where
-    F: FnOnce(Arc<PingoraLoadBalancer>) -> UpstreamLoadBalancerInner,
+    F: FnOnce(Arc<FluxLoadBalancerRuntime>) -> UpstreamLoadBalancerInner,
 {
     let Some(inner) = configured_load_balancer(config)? else {
         return Ok(None);
     };
 
-    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), Arc::new(inner));
+    let service = FluxLoadBalancerBackgroundService::new(
+        format!("LB {name}"),
+        FluxLoadBalancerRuntime::new(inner),
+    );
     let load_balancer = UpstreamLoadBalancer::from_inner(wrap(service.task()), config);
     Ok(Some((load_balancer, Box::new(service))))
 }
@@ -275,7 +278,10 @@ pub(super) fn background_maglev_service_for(
         return Ok(None);
     };
     let table = Arc::new(configured_maglev_table(config)?);
-    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), Arc::new(inner));
+    let service = FluxLoadBalancerBackgroundService::new(
+        format!("LB {name}"),
+        FluxLoadBalancerRuntime::new(inner),
+    );
     let load_balancer = UpstreamLoadBalancer::from_inner(
         UpstreamLoadBalancerInner::MaglevHash {
             inner: service.task(),
@@ -288,15 +294,18 @@ pub(super) fn background_maglev_service_for(
 
 struct FluxLoadBalancerBackgroundService {
     name: String,
-    task: Arc<PingoraLoadBalancer>,
+    task: Arc<FluxLoadBalancerRuntime>,
 }
 
 impl FluxLoadBalancerBackgroundService {
-    fn new(name: String, task: Arc<PingoraLoadBalancer>) -> Self {
-        Self { name, task }
+    fn new(name: String, task: FluxLoadBalancerRuntime) -> Self {
+        Self {
+            name,
+            task: Arc::new(task),
+        }
     }
 
-    fn task(&self) -> Arc<PingoraLoadBalancer> {
+    fn task(&self) -> Arc<FluxLoadBalancerRuntime> {
         self.task.clone()
     }
 }
