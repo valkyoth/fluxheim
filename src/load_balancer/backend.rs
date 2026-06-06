@@ -95,6 +95,10 @@ impl FluxBackendSet {
         self.backends.is_empty()
     }
 
+    pub(super) fn iter(&self) -> impl Iterator<Item = &FluxBackend> {
+        self.backends.iter()
+    }
+
     #[cfg(test)]
     pub(super) fn set_ready(&mut self, backend: &FluxBackend, ready: bool) {
         self.ready.insert(backend.key(), ready);

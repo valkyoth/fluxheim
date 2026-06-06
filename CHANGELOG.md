@@ -22,6 +22,9 @@ behavior when the change improves security or project direction.
   latency, and backend-policy helpers onto a Fluxheim-owned backend identity
   abstraction so those subsystems no longer require Pingora's concrete backend
   type.
+- Build Maglev lookup tables from Fluxheim backend identities instead of
+  adapting static upstreams to Pingora backend values during table
+  construction.
 
 ## 1.5.6 - 2026-06-06
 

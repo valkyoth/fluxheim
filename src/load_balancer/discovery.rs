@@ -258,13 +258,8 @@ fn configured_backends(config: &ProxyConfig) -> FluxResult<FluxBackendSet> {
 }
 
 pub(super) fn configured_maglev_table(config: &ProxyConfig) -> io::Result<MaglevTable> {
-    let backends: Vec<_> = configured_backends(config)
-        .map_err(FluxError::into_io)?
-        .into_pingora_backends()
-        .map_err(FluxError::into_io)?
-        .into_iter()
-        .collect();
-    MaglevTable::from_backends(&backends).map_err(FluxError::into_io)
+    let backends = configured_backends(config).map_err(FluxError::into_io)?;
+    MaglevTable::from_backend_identities(backends.iter()).map_err(FluxError::into_io)
 }
 
 fn configured_backend_discovery(config: &ProxyConfig) -> io::Result<Backends> {

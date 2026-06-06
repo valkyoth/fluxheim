@@ -7,6 +7,7 @@ use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, Random, RoundRobin};
 
 use super::SelectedUpstream;
+use super::backend::BackendIdentity;
 use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
 use super::state::{
@@ -665,19 +666,28 @@ pub(super) struct MaglevTable {
 }
 
 impl MaglevTable {
-    pub(super) fn from_backends(backends: &[Backend]) -> FluxResult<Self> {
-        if backends.is_empty() {
+    pub(super) fn from_backend_identities<'a, I, B>(backends: I) -> FluxResult<Self>
+    where
+        I: IntoIterator<Item = &'a B>,
+        B: BackendIdentity + 'a,
+    {
+        let keys: Vec<u64> = backends.into_iter().map(backend_key).collect();
+        Self::from_backend_keys(&keys)
+    }
+
+    fn from_backend_keys(keys: &[u64]) -> FluxResult<Self> {
+        if keys.is_empty() {
             return Err(FluxError::InvalidInput(
                 "maglev requires at least one backend",
             ));
         }
 
         let mut slots = vec![u64::MAX; MAGLEV_TABLE_SIZE];
-        let mut next = vec![0usize; backends.len()];
-        let permutations: Vec<(usize, usize)> = backends
+        let mut next = vec![0usize; keys.len()];
+        let permutations: Vec<(usize, usize)> = keys
             .iter()
-            .map(|backend| {
-                let key = backend_key(backend).to_le_bytes();
+            .map(|backend_key| {
+                let key = backend_key.to_le_bytes();
                 let offset =
                     fnv1a64_with_seed(&key, 0xcbf2_9ce4_8422_2325) as usize % MAGLEV_TABLE_SIZE;
                 let skip = (fnv1a64_with_seed(&key, 0x8422_2325_cbf2_9ce4) as usize
@@ -689,13 +699,13 @@ impl MaglevTable {
 
         let mut filled = 0usize;
         while filled < MAGLEV_TABLE_SIZE {
-            for (index, backend) in backends.iter().enumerate() {
+            for (index, backend_key) in keys.iter().enumerate() {
                 loop {
                     let (offset, skip) = permutations[index];
                     let candidate = maglev_candidate(offset, next[index], skip);
                     next[index] = next[index].saturating_add(1);
                     if slots[candidate] == u64::MAX {
-                        slots[candidate] = backend_key(backend);
+                        slots[candidate] = *backend_key;
                         filled = filled.saturating_add(1);
                         break;
                     }

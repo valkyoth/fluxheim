@@ -16,6 +16,8 @@ results as far as possible.
 - Move backend keying, passive health, slow start, connection counters,
   latency scoring, and backend policy evaluation onto a Fluxheim-owned backend
   identity abstraction.
+- Build Maglev lookup tables from Fluxheim backend identities so Maglev
+  construction no longer depends on Pingora's concrete backend type.
 - Preserve existing Pingora selector/background-service adapters while the
   native backend set and identity boundary are introduced, keeping this first
   1.5.7 slice behavior-preserving.
