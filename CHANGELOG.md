@@ -7,7 +7,7 @@ Fluxheim follows semantic versioning once `1.0.0` is released. Before `1.0.0`,
 minor versions may still change configuration shape, feature names, and runtime
 behavior when the change improves security or project direction.
 
-## 1.5.6 - 2026-06-05
+## 1.5.6 - 2026-06-06
 
 ### Changed
 
@@ -45,6 +45,13 @@ behavior when the change improves security or project direction.
 - Extend the local stream smoke to exercise a route-local rustls upstream TLS
   connection with generated server certificate, explicit SNI, and custom trust
   root validation.
+- Clarify stream upstream TLS hostname verification semantics, warn when a
+  verified stream TLS route contains any IP-address upstream without explicit
+  `upstream_sni`, and document rustls parsed private-key DER zeroing limits.
+- Accept HAProxy PROXY protocol v1 `UNKNOWN` lines with optional trailing
+  address fields.
+- Remove the nested stream TLS handshake timeout so the route connect timeout
+  consistently covers DNS lookup, TCP connect, and TLS handshake.
 
 ## 1.5.5 - 2026-06-05
 

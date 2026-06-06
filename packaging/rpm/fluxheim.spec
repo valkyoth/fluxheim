@@ -154,11 +154,12 @@ fi
 %config(noreplace) %attr(0644,fluxheim,fluxheim) /srv/fluxheim/index.html
 
 %changelog
-* Fri Jun 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.6-1
+* Sat Jun 06 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.6-1
 - Start the Fluxheim-native stream-proxy runtime line, focused on moving stream
   listener, connect/copy/shutdown, and upstream TLS connector helpers behind
   owned runtime and error boundaries while preserving existing TCP stream proxy
   behavior.
+- Harden stream upstream TLS observability and HAProxy PROXY v1 UNKNOWN parsing.
 
 * Fri Jun 05 2026 Fluxheim Maintainers <1921261+eldryoth@users.noreply.github.com> - 1.5.5-1
 - Start the Fluxheim-native HTTP/error type boundary line with standard HTTP
