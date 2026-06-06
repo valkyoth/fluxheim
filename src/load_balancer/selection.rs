@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{BackendIter, BackendSelection, Consistent, RoundRobin};
+use pingora::lb::selection::{BackendIter, BackendSelection, RoundRobin};
 
 use super::SelectedUpstream;
 use super::backend::BackendIdentity;
@@ -40,38 +40,6 @@ pub(super) struct LoadBalancerSelectInputs<'a> {
     pub(super) backend_policy: &'a BackendSelectionPolicy,
     pub(super) persistence_entry_counts: &'a std::collections::HashMap<u64, usize>,
     pub(super) round_robin_cursor: &'a AtomicUsize,
-}
-
-pub(super) fn select_pingora<S>(
-    inner: &LoadBalancer<S>,
-    key: &[u8],
-    max_iterations: usize,
-    passive_health: Option<&PassiveHealthState>,
-    slow_start: Option<&SlowStartState>,
-    counters: &BackendConnectionCounters,
-    backend_policy: &BackendSelectionPolicy,
-) -> Option<Backend>
-where
-    S: BackendSelection + 'static,
-    S::Iter: BackendIter,
-{
-    let context = SelectionContext {
-        passive_health,
-        slow_start,
-        counters,
-        backend_policy,
-    };
-    for pass in selection_passes(backend_policy) {
-        if !priority_activation_satisfied(inner, context, pass) {
-            continue;
-        }
-        if let Some(backend) =
-            select_pingora_with_backup_policy(inner, key, max_iterations, context, pass)
-        {
-            return Some(backend);
-        }
-    }
-    None
 }
 
 #[derive(Clone, Copy)]
@@ -160,32 +128,6 @@ where
         .take(context.backend_policy.priority_group_min_active())
         .count()
         >= context.backend_policy.priority_group_min_active()
-}
-
-fn select_pingora_with_backup_policy<S>(
-    inner: &LoadBalancer<S>,
-    key: &[u8],
-    max_iterations: usize,
-    context: SelectionContext<'_>,
-    pass: SelectionPass,
-) -> Option<Backend>
-where
-    S: BackendSelection + 'static,
-    S::Iter: BackendIter,
-{
-    inner.select_with(key, max_iterations, |backend, ready| {
-        ready
-            && context
-                .backend_policy
-                .permits(backend, pass, context.counters)
-            && context
-                .passive_health
-                .is_none_or(|health| !health.is_ejected(backend))
-            && (pass.ignore_slow_start
-                || context
-                    .slow_start
-                    .is_none_or(|state| state.permits(backend)))
-    })
 }
 
 pub(super) fn select_weighted_round_robin(
@@ -709,8 +651,36 @@ fn backend_candidate_allowed(
                 .is_none_or(|state| state.permits(backend)))
 }
 
+pub(super) fn select_consistent_hash(
+    inner: &LoadBalancer<RoundRobin>,
+    inputs: LoadBalancerSelectInputs<'_>,
+) -> Option<SelectedUpstream> {
+    let context = SelectionContext {
+        passive_health: inputs.passive_health,
+        slow_start: inputs.slow_start,
+        counters: inputs.counters,
+        backend_policy: inputs.backend_policy,
+    };
+    for pass in selection_passes(inputs.backend_policy) {
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(backend) = select_consistent_hash_with_backup_policy(
+            inner,
+            inputs.key.unwrap_or_default(),
+            inputs.max_iterations,
+            context,
+            pass,
+            None,
+        ) {
+            return Some(SelectedUpstream::new(backend));
+        }
+    }
+    None
+}
+
 pub(super) fn select_bounded_load_consistent(
-    inner: &LoadBalancer<Consistent>,
+    inner: &LoadBalancer<RoundRobin>,
     factor_per_mille: u16,
     inputs: LoadBalancerSelectInputs<'_>,
 ) -> Option<SelectedUpstream> {
@@ -739,7 +709,7 @@ pub(super) fn select_bounded_load_consistent(
 }
 
 fn select_bounded_load_consistent_with_backup_policy(
-    inner: &LoadBalancer<Consistent>,
+    inner: &LoadBalancer<RoundRobin>,
     key: &[u8],
     max_iterations: usize,
     context: SelectionContext<'_>,
@@ -747,23 +717,26 @@ fn select_bounded_load_consistent_with_backup_policy(
     factor_per_mille: u16,
 ) -> Option<Backend> {
     let Some(bound) = bounded_load_snapshot(inner, context, pass, factor_per_mille) else {
-        return select_pingora_with_backup_policy(inner, key, max_iterations, context, pass);
+        return select_consistent_hash_with_backup_policy(
+            inner,
+            key,
+            max_iterations,
+            context,
+            pass,
+            None,
+        );
     };
-    let bounded = inner.select_with(key, max_iterations, |backend, ready| {
-        ready
-            && context
-                .backend_policy
-                .permits(backend, pass, context.counters)
-            && context
-                .passive_health
-                .is_none_or(|health| !health.is_ejected(backend))
-            && (pass.ignore_slow_start
-                || context
-                    .slow_start
-                    .is_none_or(|state| state.permits(backend)))
-            && bounded_load_permits(backend, context.counters, &bound)
-    });
-    bounded.or_else(|| select_pingora_with_backup_policy(inner, key, max_iterations, context, pass))
+    select_consistent_hash_with_backup_policy(
+        inner,
+        key,
+        max_iterations,
+        context,
+        pass,
+        Some(&bound),
+    )
+    .or_else(|| {
+        select_consistent_hash_with_backup_policy(inner, key, max_iterations, context, pass, None)
+    })
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -774,7 +747,7 @@ struct BoundedLoadSnapshot {
 }
 
 fn bounded_load_snapshot(
-    inner: &LoadBalancer<Consistent>,
+    inner: &LoadBalancer<RoundRobin>,
     context: SelectionContext<'_>,
     pass: SelectionPass,
     factor_per_mille: u16,
@@ -797,7 +770,8 @@ fn bounded_load_snapshot(
             continue;
         }
         total_connections = total_connections.saturating_add(context.counters.count(backend));
-        total_weight = total_weight.saturating_add(backend.weight().max(1));
+        total_weight =
+            total_weight.saturating_add(context.backend_policy.effective_weight(backend));
     }
     (total_weight > 0 && total_connections > 0).then_some(BoundedLoadSnapshot {
         total_connections,
@@ -809,10 +783,11 @@ fn bounded_load_snapshot(
 fn bounded_load_permits(
     backend: &Backend,
     counters: &BackendConnectionCounters,
+    backend_policy: &BackendSelectionPolicy,
     bound: &BoundedLoadSnapshot,
 ) -> bool {
     let candidate_connections = counters.count(backend) as u128;
-    let candidate_weight = backend.weight().max(1) as u128;
+    let candidate_weight = backend_policy.effective_weight(backend) as u128;
     let left = candidate_connections
         .saturating_mul(bound.total_weight as u128)
         .saturating_mul(1000);
@@ -820,6 +795,62 @@ fn bounded_load_permits(
         .saturating_mul(candidate_weight)
         .saturating_mul(u128::from(bound.factor_per_mille));
     left <= right
+}
+
+fn select_consistent_hash_with_backup_policy(
+    inner: &LoadBalancer<RoundRobin>,
+    key: &[u8],
+    max_iterations: usize,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+    bound: Option<&BoundedLoadSnapshot>,
+) -> Option<Backend> {
+    let candidates = consistent_hash_candidates(inner, key, context.backend_policy);
+    let limit = max_iterations.max(1).min(candidates.len());
+    candidates
+        .into_iter()
+        .take(limit)
+        .map(|(_, _, backend)| backend)
+        .find(|backend| {
+            backend_candidate_allowed(inner, backend, context, pass)
+                && bound.is_none_or(|bound| {
+                    bounded_load_permits(backend, context.counters, context.backend_policy, bound)
+                })
+        })
+}
+
+fn consistent_hash_candidates(
+    inner: &LoadBalancer<RoundRobin>,
+    key: &[u8],
+    backend_policy: &BackendSelectionPolicy,
+) -> Vec<(u64, u64, Backend)> {
+    let mut candidates: Vec<_> = inner
+        .backends()
+        .get_backend()
+        .iter()
+        .cloned()
+        .map(|backend| {
+            let key_id = backend_key(&backend);
+            (
+                consistent_backend_score(key, key_id, backend_policy.effective_weight(&backend)),
+                key_id,
+                backend,
+            )
+        })
+        .collect();
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    candidates
+}
+
+fn consistent_backend_score(key: &[u8], backend_key: u64, weight: usize) -> u64 {
+    let mut best = 0u64;
+    for replica in 0..weight.max(1) {
+        let mut hash = fnv1a64_with_seed(key, 0x9e37_79b9_7f4a_7c15);
+        hash = fnv1a64_with_seed(&backend_key.to_le_bytes(), hash);
+        hash = fnv1a64_with_seed(&(replica as u64).to_le_bytes(), hash);
+        best = best.max(hash);
+    }
+    best
 }
 
 #[derive(Clone, Debug)]

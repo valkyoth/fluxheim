@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{Consistent, RoundRobin};
+use pingora::lb::selection::RoundRobin;
 use pingora::services::ServiceWithDependents;
 use serde::Serialize;
 
@@ -42,8 +42,8 @@ use self::policy::{
 };
 use self::selection::{
     LoadBalancerSelectInputs, MaglevTable, SelectionPass, select_bounded_load_consistent,
-    select_fnv_hash, select_least_connections, select_least_sessions, select_least_time,
-    select_maglev, select_pingora, select_power_of_two, select_weighted_round_robin,
+    select_consistent_hash, select_fnv_hash, select_least_connections, select_least_sessions,
+    select_least_time, select_maglev, select_power_of_two, select_weighted_round_robin,
 };
 use self::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
@@ -374,7 +374,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::ConsistentHeaderHash
             | LoadBalanceSelection::ConsistentCookieHash => {
-                let Some(inner) = configured_load_balancer::<Consistent>(config)? else {
+                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -386,7 +386,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::BoundedLoadConsistentUriHash
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
             | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
-                let Some(inner) = configured_load_balancer::<Consistent>(config)? else {
+                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -461,7 +461,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::ConsistentUriHash
             | LoadBalanceSelection::ConsistentHeaderHash
             | LoadBalanceSelection::ConsistentCookieHash => {
-                background_service_for::<Consistent, _>(
+                background_service_for::<RoundRobin, _>(
                     name,
                     config,
                     UpstreamLoadBalancerInner::ConsistentHash,
@@ -472,7 +472,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::BoundedLoadConsistentHeaderHash
             | LoadBalanceSelection::BoundedLoadConsistentCookieHash => {
                 let factor_per_mille = config.load_balance.bounded_load_factor_per_mille;
-                background_service_for::<Consistent, _>(name, config, move |inner| {
+                background_service_for::<RoundRobin, _>(name, config, move |inner| {
                     UpstreamLoadBalancerInner::BoundedLoadConsistentHash {
                         inner,
                         factor_per_mille,
@@ -1032,9 +1032,9 @@ enum UpstreamLoadBalancerInner {
     },
     PowerOfTwo(Arc<LoadBalancer<RoundRobin>>),
     FnvHash(Arc<LoadBalancer<RoundRobin>>),
-    ConsistentHash(Arc<LoadBalancer<Consistent>>),
+    ConsistentHash(Arc<LoadBalancer<RoundRobin>>),
     BoundedLoadConsistentHash {
-        inner: Arc<LoadBalancer<Consistent>>,
+        inner: Arc<LoadBalancer<RoundRobin>>,
         factor_per_mille: u16,
     },
     MaglevHash {
@@ -1079,16 +1079,7 @@ impl UpstreamLoadBalancerInner {
                 inputs.backend_policy,
             ),
             Self::FnvHash(inner) => select_fnv_hash(inner, inputs),
-            Self::ConsistentHash(inner) => select_pingora(
-                inner,
-                inputs.key.unwrap_or_default(),
-                inputs.max_iterations,
-                inputs.passive_health,
-                inputs.slow_start,
-                inputs.counters,
-                inputs.backend_policy,
-            )
-            .map(SelectedUpstream::new),
+            Self::ConsistentHash(inner) => select_consistent_hash(inner, inputs),
             Self::BoundedLoadConsistentHash {
                 inner,
                 factor_per_mille,

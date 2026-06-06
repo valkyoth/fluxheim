@@ -37,6 +37,10 @@ behavior when the change improves security or project direction.
   current backend container.
 - Replace Pingora's random selector dependency for power-of-two choices with a
   Fluxheim-owned weighted random first pick and unique backend fallback scan.
+- Replace Pingora's consistent-hash selector dependency with Fluxheim-owned
+  rendezvous candidate ordering for consistent and bounded-load consistent
+  hash modes, while preserving dynamic discovery support through the current
+  backend container.
 
 ## 1.5.6 - 2026-06-06
 

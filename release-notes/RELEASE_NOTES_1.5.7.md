@@ -30,9 +30,13 @@ results as far as possible.
   current backend container.
 - Replace Pingora's random selector dependency for power-of-two choices with a
   Fluxheim-owned weighted random first pick and unique backend fallback scan.
-- Preserve existing Pingora selector/background-service adapters while the
-  native backend set and identity boundary are introduced, keeping this first
-  1.5.7 slice behavior-preserving.
+- Replace Pingora's consistent-hash selector dependency with Fluxheim-owned
+  rendezvous candidate ordering for consistent and bounded-load consistent
+  hash modes. Dynamic file/DNS discovery remains supported through the current
+  backend container.
+- Preserve existing Pingora background-service, readiness, and health-check
+  adapters while the native backend set and selector boundary are introduced,
+  keeping this first 1.5.7 line behavior-preserving.
 
 ## Boundaries
 
