@@ -43,8 +43,11 @@ results as far as possible.
 - Route static upstream pools through the same Fluxheim-owned discovery
   adapter as file-refreshed and DNS-refreshed pools, removing Pingora's static
   discovery wrapper from load-balancer construction.
-- Preserve existing Pingora background-service, readiness, and health-check
-  adapters while the native backend set and selector boundary are introduced,
+- Replace Pingora's generic `GenBackgroundService` wrapper for load-balancer
+  pools with a Fluxheim-owned `ServiceWithDependents` implementation while
+  preserving the current update and health-check loop.
+- Preserve existing Pingora readiness and health-check adapters while the
+  native backend set, selector boundary, and service wrapper are introduced,
   keeping this first 1.5.7 line behavior-preserving.
 
 ## Boundaries

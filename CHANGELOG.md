@@ -50,6 +50,9 @@ behavior when the change improves security or project direction.
 - Route static upstream pools through the same Fluxheim-owned discovery
   adapter as file-refreshed and DNS-refreshed pools, removing Pingora's static
   discovery wrapper from load-balancer construction.
+- Replace Pingora's generic `GenBackgroundService` wrapper for load-balancer
+  pools with a Fluxheim-owned `ServiceWithDependents` implementation while
+  preserving the current update and health-check loop.
 
 ## 1.5.6 - 2026-06-06
 

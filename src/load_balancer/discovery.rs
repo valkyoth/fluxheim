@@ -11,7 +11,10 @@ use pingora::lb::Backends;
 use pingora::lb::discovery::ServiceDiscovery;
 use pingora::lb::prelude::LoadBalancer;
 use pingora::lb::selection::RoundRobin;
-use pingora::services::background::{BackgroundService, GenBackgroundService};
+#[cfg(unix)]
+use pingora::server::ListenFds;
+use pingora::server::ShutdownWatch;
+use pingora::services::{ServiceReadyNotifier, ServiceWithDependents};
 use pingora::{Error, ErrorType};
 
 use crate::config::ProxyConfig;
@@ -257,14 +260,13 @@ pub(super) fn background_service_for<F>(
     wrap: F,
 ) -> io::Result<Option<(UpstreamLoadBalancer, UpstreamLoadBalancerService)>>
 where
-    LoadBalancer<RoundRobin>: BackgroundService,
     F: FnOnce(Arc<LoadBalancer<RoundRobin>>) -> UpstreamLoadBalancerInner,
 {
     let Some(inner) = configured_load_balancer(config)? else {
         return Ok(None);
     };
 
-    let service = GenBackgroundService::new(format!("LB {name}"), Arc::new(inner));
+    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), Arc::new(inner));
     let load_balancer = UpstreamLoadBalancer::from_inner(wrap(service.task()), config);
     Ok(Some((load_balancer, Box::new(service))))
 }
@@ -277,7 +279,7 @@ pub(super) fn background_maglev_service_for(
         return Ok(None);
     };
     let table = Arc::new(configured_maglev_table(config)?);
-    let service = GenBackgroundService::new(format!("LB {name}"), Arc::new(inner));
+    let service = FluxLoadBalancerBackgroundService::new(format!("LB {name}"), Arc::new(inner));
     let load_balancer = UpstreamLoadBalancer::from_inner(
         UpstreamLoadBalancerInner::MaglevHash {
             inner: service.task(),
@@ -286,6 +288,42 @@ pub(super) fn background_maglev_service_for(
         config,
     );
     Ok(Some((load_balancer, Box::new(service))))
+}
+
+struct FluxLoadBalancerBackgroundService {
+    name: String,
+    task: Arc<LoadBalancer<RoundRobin>>,
+}
+
+impl FluxLoadBalancerBackgroundService {
+    fn new(name: String, task: Arc<LoadBalancer<RoundRobin>>) -> Self {
+        Self { name, task }
+    }
+
+    fn task(&self) -> Arc<LoadBalancer<RoundRobin>> {
+        self.task.clone()
+    }
+}
+
+#[async_trait]
+impl ServiceWithDependents for FluxLoadBalancerBackgroundService {
+    async fn start_service(
+        &mut self,
+        #[cfg(unix)] _fds: Option<ListenFds>,
+        shutdown: ShutdownWatch,
+        _listeners_per_fd: usize,
+        ready: ServiceReadyNotifier,
+    ) {
+        self.task.run(shutdown, Some(ready)).await;
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn threads(&self) -> Option<usize> {
+        Some(1)
+    }
 }
 
 fn configured_backends(config: &ProxyConfig) -> FluxResult<FluxBackendSet> {
