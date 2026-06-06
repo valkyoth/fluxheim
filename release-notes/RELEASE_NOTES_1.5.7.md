@@ -11,16 +11,14 @@ results as far as possible.
 - Add a Fluxheim-owned backend/backend-set model for load-balancer upstream
   construction.
 - Route static upstream pools, file-refreshed upstream discovery, and
-  DNS-refreshed upstream discovery through the Fluxheim backend model before
-  adapting to the remaining Pingora selector boundary.
+  DNS-refreshed upstream discovery through the Fluxheim backend model.
 - Move backend keying, passive health, slow start, connection counters,
   latency scoring, and backend policy evaluation onto a Fluxheim-owned backend
   identity abstraction.
 - Build Maglev lookup tables from Fluxheim backend identities so Maglev
   construction no longer depends on Pingora's concrete backend type.
 - Move file-refreshed and DNS-refreshed backend discovery behind a
-  Fluxheim-owned discovery trait, with Pingora service discovery retained only
-  as an adapter.
+  Fluxheim-owned discovery trait.
 - Route runtime backend stats, bounded-load weight accounting, and disabled
   upstream parsing through the Fluxheim backend identity/adapter layer.
 - Move slow-start state regression coverage onto Fluxheim backend identities,
@@ -34,15 +32,16 @@ results as far as possible.
   Fluxheim-owned weighted random first pick and unique backend fallback scan.
 - Replace Pingora's consistent-hash selector dependency with Fluxheim-owned
   rendezvous candidate ordering for consistent and bounded-load consistent
-  hash modes. Dynamic file/DNS discovery remains supported through the current
-  backend container. This is a valid consistent-hash algorithm change and can
-  remap existing consistent-hash affinity keys once during the 1.5.7 upgrade.
+  hash modes. Dynamic file/DNS discovery remains supported through the
+  Fluxheim runtime backend container. This is a valid consistent-hash
+  algorithm change and can remap existing consistent-hash affinity keys once
+  during the 1.5.7 upgrade.
 - Collapse load-balancer factory, stats, and priority-check helpers onto a
   concrete readiness container now that Fluxheim owns all shipped selection
   algorithms.
-- Centralize the remaining Pingora backend container operations behind
-  Fluxheim-owned adapter helpers so readiness checks, backend enumeration, and
-  health-check metadata have one migration boundary.
+- Centralize runtime backend container operations behind Fluxheim-owned
+  adapter helpers so readiness checks, backend enumeration, and health-check
+  metadata have one migration boundary.
 - Route static upstream pools through the same Fluxheim-owned discovery
   adapter as file-refreshed and DNS-refreshed pools, removing Pingora's static
   discovery wrapper from load-balancer construction.
@@ -52,16 +51,15 @@ results as far as possible.
 - Introduce a Fluxheim backend-container trait so selector and runtime-stat
   code depend on Fluxheim's backend/readiness interface instead of the concrete
   Pingora container type.
-- Centralize the remaining concrete Pingora load-balancer container type behind
-  the backend adapter module, keeping orchestration and discovery on Fluxheim's
-  adapter alias while the native substrate is phased in.
-- Wrap the current Pingora load-balancer container in a Fluxheim runtime type
-  before handing pools to selection, status, and background-service code.
+- Centralize the remaining concrete runtime backend value type behind the
+  backend adapter module, keeping orchestration and discovery on Fluxheim's
+  adapter alias while the final value-type replacement remains isolated.
+- Wrap load-balanced pools in a Fluxheim runtime type before handing them to
+  selection, status, and background-service code.
 - Return Fluxheim runtime-wrapped load-balancer pools from discovery so
   selection-mode construction no longer repeats Pingora container wrapping.
 - Keep the selector-facing backend-container trait implemented only by the
-  Fluxheim runtime wrapper, with raw Pingora container access confined inside
-  that adapter.
+  Fluxheim runtime wrapper.
 - Replace Pingora's load-balancer `Backends` container, discovery adapter, and
   background update loop with Fluxheim-owned backend storage, readiness state,
   discovery refresh, health-check scheduling, and shutdown handling.

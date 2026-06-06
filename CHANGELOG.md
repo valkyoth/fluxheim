@@ -16,8 +16,7 @@ behavior when the change improves security or project direction.
   config, admin API, status shape, metrics, privacy-mode behavior,
   managed-cookie behavior, and selector results as far as possible.
 - Add a Fluxheim-owned backend/backend-set model and route static, file, and
-  DNS upstream discovery through it before adapting to the current Pingora
-  selector boundary.
+  DNS upstream discovery through it.
 - Move load-balancer key, passive-health, slow-start, connection-counter,
   latency, and backend-policy helpers onto a Fluxheim-owned backend identity
   abstraction so those subsystems no longer require Pingora's concrete backend
@@ -26,8 +25,7 @@ behavior when the change improves security or project direction.
   adapting static upstreams to Pingora backend values during table
   construction.
 - Move file-refreshed and DNS-refreshed backend discovery behind a
-  Fluxheim-owned discovery trait, keeping Pingora service discovery as a thin
-  adapter at the current runtime boundary.
+  Fluxheim-owned discovery trait.
 - Route runtime backend stats, bounded-load weight accounting, and disabled
   upstream parsing through the same backend identity/adapter layer.
 - Move slow-start state regression coverage onto Fluxheim backend identities,
@@ -41,15 +39,16 @@ behavior when the change improves security or project direction.
   Fluxheim-owned weighted random first pick and unique backend fallback scan.
 - Replace Pingora's consistent-hash selector dependency with Fluxheim-owned
   rendezvous candidate ordering for consistent and bounded-load consistent
-  hash modes, while preserving dynamic discovery support through the current
-  backend container. This is a valid consistent-hash algorithm change and can
-  remap existing consistent-hash affinity keys once during the 1.5.7 upgrade.
+  hash modes, while preserving dynamic discovery support through the Fluxheim
+  runtime backend container. This is a valid consistent-hash algorithm change
+  and can remap existing consistent-hash affinity keys once during the 1.5.7
+  upgrade.
 - Collapse the load-balancer factory, stats, and priority-check helpers onto a
   concrete readiness container now that Fluxheim owns all shipped selection
   algorithms, removing the remaining generic Pingora selector trait plumbing.
-- Centralize the remaining Pingora backend container operations behind
-  Fluxheim-owned adapter helpers so readiness, backend enumeration, and
-  health-check metadata have one migration boundary.
+- Centralize runtime backend container operations behind Fluxheim-owned
+  adapter helpers so readiness, backend enumeration, and health-check metadata
+  have one migration boundary.
 - Route static upstream pools through the same Fluxheim-owned discovery
   adapter as file-refreshed and DNS-refreshed pools, removing Pingora's static
   discovery wrapper from load-balancer construction.
@@ -59,16 +58,15 @@ behavior when the change improves security or project direction.
 - Introduce a Fluxheim backend-container trait and move selection/stat modules
   onto that trait instead of the concrete Pingora `LoadBalancer<RoundRobin>`
   type.
-- Centralize the concrete Pingora load-balancer container type behind the
+- Centralize the remaining concrete runtime backend value type behind the
   backend adapter module so orchestration and discovery use Fluxheim's adapter
-  alias during the native-substrate migration.
-- Wrap the current Pingora load-balancer container in a Fluxheim runtime type
-  before handing pools to selection, status, and background-service code.
+  alias while the final value-type replacement remains isolated.
+- Wrap load-balanced pools in a Fluxheim runtime type before handing them to
+  selection, status, and background-service code.
 - Return Fluxheim runtime-wrapped load-balancer pools from discovery so
   selection-mode construction no longer repeats Pingora container wrapping.
 - Keep the selector-facing backend-container trait implemented only by the
-  Fluxheim runtime wrapper, with raw Pingora container access confined inside
-  that adapter.
+  Fluxheim runtime wrapper.
 - Replace Pingora's load-balancer `Backends` container, discovery adapter, and
   background update loop with Fluxheim-owned backend storage, readiness state,
   discovery refresh, health-check scheduling, and shutdown handling. Existing
