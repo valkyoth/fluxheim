@@ -44,6 +44,9 @@ behavior when the change improves security or project direction.
 - Collapse the load-balancer factory, stats, and priority-check helpers onto a
   concrete readiness container now that Fluxheim owns all shipped selection
   algorithms, removing the remaining generic Pingora selector trait plumbing.
+- Centralize the remaining Pingora backend container operations behind
+  Fluxheim-owned adapter helpers so readiness, backend enumeration, and
+  health-check metadata have one migration boundary.
 
 ## 1.5.6 - 2026-06-06
 

@@ -1,10 +1,14 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 
 use super::key::backend_authority_key;
 use crate::flux_error::{FluxError, FluxResult};
 use pingora::lb::Backend;
+use pingora::lb::prelude::LoadBalancer;
+use pingora::lb::selection::RoundRobin;
 
 pub(crate) trait BackendIdentity {
     fn authority(&self) -> String;
@@ -115,6 +119,27 @@ impl FluxBackendSet {
     pub(super) fn into_pingora_backends(self) -> FluxResult<BTreeSet<Backend>> {
         self.into_pingora_parts().map(|(backends, _ready)| backends)
     }
+}
+
+pub(super) fn pingora_backend_set(inner: &LoadBalancer<RoundRobin>) -> Arc<BTreeSet<Backend>> {
+    inner.backends().get_backend()
+}
+
+pub(super) fn pingora_backend_ready(inner: &LoadBalancer<RoundRobin>, backend: &Backend) -> bool {
+    inner.backends().ready(backend)
+}
+
+pub(super) fn pingora_health_check_frequency(inner: &LoadBalancer<RoundRobin>) -> Option<Duration> {
+    inner.health_check_frequency
+}
+
+pub(super) fn pingora_parallel_health_check(inner: &LoadBalancer<RoundRobin>) -> bool {
+    inner.parallel_health_check
+}
+
+#[cfg(test)]
+pub(super) async fn pingora_run_health_check(inner: &LoadBalancer<RoundRobin>, parallel: bool) {
+    inner.backends().run_health_check(parallel).await;
 }
 
 #[cfg(test)]

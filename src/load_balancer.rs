@@ -29,6 +29,12 @@ mod state;
 
 #[cfg(test)]
 use self::backend::BackendIdentity;
+#[cfg(test)]
+use self::backend::pingora_run_health_check;
+use self::backend::{
+    pingora_backend_ready, pingora_backend_set, pingora_health_check_frequency,
+    pingora_parallel_health_check,
+};
 use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
     configured_maglev_table,
@@ -1030,6 +1036,20 @@ enum UpstreamLoadBalancerInner {
 }
 
 impl UpstreamLoadBalancerInner {
+    fn container(&self) -> &Arc<LoadBalancer<RoundRobin>> {
+        match self {
+            Self::RoundRobin(inner)
+            | Self::LeastConnections(inner)
+            | Self::LeastSessions(inner)
+            | Self::PowerOfTwo(inner)
+            | Self::FnvHash(inner)
+            | Self::ConsistentHash(inner) => inner,
+            Self::LeastTime { inner, .. }
+            | Self::BoundedLoadConsistentHash { inner, .. }
+            | Self::MaglevHash { inner, .. } => inner,
+        }
+    }
+
     fn select(&self, inputs: LoadBalancerSelectInputs<'_>) -> Option<SelectedUpstream> {
         match self {
             Self::RoundRobin(inner) => select_weighted_round_robin(inner, inputs),
@@ -1075,17 +1095,7 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn backend_count(&self) -> usize {
-        match self {
-            Self::RoundRobin(inner) => inner.backends().get_backend().len(),
-            Self::LeastConnections(inner) => inner.backends().get_backend().len(),
-            Self::LeastSessions(inner) => inner.backends().get_backend().len(),
-            Self::LeastTime { inner, .. } => inner.backends().get_backend().len(),
-            Self::PowerOfTwo(inner) => inner.backends().get_backend().len(),
-            Self::FnvHash(inner) => inner.backends().get_backend().len(),
-            Self::ConsistentHash(inner) => inner.backends().get_backend().len(),
-            Self::BoundedLoadConsistentHash { inner, .. } => inner.backends().get_backend().len(),
-            Self::MaglevHash { inner, .. } => inner.backends().get_backend().len(),
-        }
+        pingora_backend_set(self.container()).len()
     }
 
     fn backend_stats(
@@ -1106,64 +1116,24 @@ impl UpstreamLoadBalancerInner {
             persistence_entry_counts,
             latency: None,
         };
-        match self {
-            Self::RoundRobin(inner) => load_balancer_backend_stats(inner, inputs),
-            Self::LeastConnections(inner) => load_balancer_backend_stats(inner, inputs),
-            Self::LeastSessions(inner) => load_balancer_backend_stats(inner, inputs),
-            Self::LeastTime { inner, latency } => {
-                load_balancer_backend_stats(inner, inputs.with_latency(latency))
-            }
-            Self::PowerOfTwo(inner) => load_balancer_backend_stats(inner, inputs),
-            Self::FnvHash(inner) => load_balancer_backend_stats(inner, inputs),
-            Self::ConsistentHash(inner) => load_balancer_backend_stats(inner, inputs),
-            Self::BoundedLoadConsistentHash { inner, .. } => {
-                load_balancer_backend_stats(inner, inputs)
-            }
-            Self::MaglevHash { inner, .. } => load_balancer_backend_stats(inner, inputs),
+        if let Self::LeastTime { latency, .. } = self {
+            load_balancer_backend_stats(self.container(), inputs.with_latency(latency))
+        } else {
+            load_balancer_backend_stats(self.container(), inputs)
         }
     }
 
     #[cfg(test)]
     fn backend_weights(&self) -> Vec<usize> {
-        match self {
-            Self::RoundRobin(inner) => backend_weights(inner),
-            Self::LeastConnections(inner) => backend_weights(inner),
-            Self::LeastSessions(inner) => backend_weights(inner),
-            Self::LeastTime { inner, .. } => backend_weights(inner),
-            Self::PowerOfTwo(inner) => backend_weights(inner),
-            Self::FnvHash(inner) => backend_weights(inner),
-            Self::ConsistentHash(inner) => backend_weights(inner),
-            Self::BoundedLoadConsistentHash { inner, .. } => backend_weights(inner),
-            Self::MaglevHash { inner, .. } => backend_weights(inner),
-        }
+        backend_weights(self.container())
     }
 
     fn health_check_frequency(&self) -> Option<Duration> {
-        match self {
-            Self::RoundRobin(inner) => inner.health_check_frequency,
-            Self::LeastConnections(inner) => inner.health_check_frequency,
-            Self::LeastSessions(inner) => inner.health_check_frequency,
-            Self::LeastTime { inner, .. } => inner.health_check_frequency,
-            Self::PowerOfTwo(inner) => inner.health_check_frequency,
-            Self::FnvHash(inner) => inner.health_check_frequency,
-            Self::ConsistentHash(inner) => inner.health_check_frequency,
-            Self::BoundedLoadConsistentHash { inner, .. } => inner.health_check_frequency,
-            Self::MaglevHash { inner, .. } => inner.health_check_frequency,
-        }
+        pingora_health_check_frequency(self.container())
     }
 
     fn parallel_health_check(&self) -> bool {
-        match self {
-            Self::RoundRobin(inner) => inner.parallel_health_check,
-            Self::LeastConnections(inner) => inner.parallel_health_check,
-            Self::LeastSessions(inner) => inner.parallel_health_check,
-            Self::LeastTime { inner, .. } => inner.parallel_health_check,
-            Self::PowerOfTwo(inner) => inner.parallel_health_check,
-            Self::FnvHash(inner) => inner.parallel_health_check,
-            Self::ConsistentHash(inner) => inner.parallel_health_check,
-            Self::BoundedLoadConsistentHash { inner, .. } => inner.parallel_health_check,
-            Self::MaglevHash { inner, .. } => inner.parallel_health_check,
-        }
+        pingora_parallel_health_check(self.container())
     }
 
     fn latency_state(&self) -> Option<Arc<BackendLatencyState>> {
@@ -1182,19 +1152,7 @@ impl UpstreamLoadBalancerInner {
 
     #[cfg(test)]
     async fn run_health_check(&self, parallel: bool) {
-        match self {
-            Self::RoundRobin(inner) => inner.backends().run_health_check(parallel).await,
-            Self::LeastConnections(inner) => inner.backends().run_health_check(parallel).await,
-            Self::LeastSessions(inner) => inner.backends().run_health_check(parallel).await,
-            Self::LeastTime { inner, .. } => inner.backends().run_health_check(parallel).await,
-            Self::PowerOfTwo(inner) => inner.backends().run_health_check(parallel).await,
-            Self::FnvHash(inner) => inner.backends().run_health_check(parallel).await,
-            Self::ConsistentHash(inner) => inner.backends().run_health_check(parallel).await,
-            Self::BoundedLoadConsistentHash { inner, .. } => {
-                inner.backends().run_health_check(parallel).await
-            }
-            Self::MaglevHash { inner, .. } => inner.backends().run_health_check(parallel).await,
-        }
+        pingora_run_health_check(self.container(), parallel).await;
     }
 
     fn backend_by_member(
@@ -1240,39 +1198,14 @@ impl UpstreamLoadBalancerInner {
     }
 
     fn backend_ready(&self, backend: &Backend) -> bool {
-        match self {
-            Self::RoundRobin(inner) => inner.backends().ready(backend),
-            Self::LeastConnections(inner) => inner.backends().ready(backend),
-            Self::LeastSessions(inner) => inner.backends().ready(backend),
-            Self::LeastTime { inner, .. } => inner.backends().ready(backend),
-            Self::PowerOfTwo(inner) => inner.backends().ready(backend),
-            Self::FnvHash(inner) => inner.backends().ready(backend),
-            Self::ConsistentHash(inner) => inner.backends().ready(backend),
-            Self::BoundedLoadConsistentHash { inner, .. } => inner.backends().ready(backend),
-            Self::MaglevHash { inner, .. } => inner.backends().ready(backend),
-        }
+        pingora_backend_ready(self.container(), backend)
     }
 
     fn backends(&self) -> Vec<Backend> {
-        match self {
-            Self::RoundRobin(inner) => inner.backends().get_backend().iter().cloned().collect(),
-            Self::LeastConnections(inner) => {
-                inner.backends().get_backend().iter().cloned().collect()
-            }
-            Self::LeastSessions(inner) => inner.backends().get_backend().iter().cloned().collect(),
-            Self::LeastTime { inner, .. } => {
-                inner.backends().get_backend().iter().cloned().collect()
-            }
-            Self::PowerOfTwo(inner) => inner.backends().get_backend().iter().cloned().collect(),
-            Self::FnvHash(inner) => inner.backends().get_backend().iter().cloned().collect(),
-            Self::ConsistentHash(inner) => inner.backends().get_backend().iter().cloned().collect(),
-            Self::BoundedLoadConsistentHash { inner, .. } => {
-                inner.backends().get_backend().iter().cloned().collect()
-            }
-            Self::MaglevHash { inner, .. } => {
-                inner.backends().get_backend().iter().cloned().collect()
-            }
-        }
+        pingora_backend_set(self.container())
+            .iter()
+            .cloned()
+            .collect()
     }
 }
 
@@ -1291,9 +1224,7 @@ impl SelectedUpstream {
 
 #[cfg(test)]
 fn backend_weights(inner: &LoadBalancer<RoundRobin>) -> Vec<usize> {
-    inner
-        .backends()
-        .get_backend()
+    pingora_backend_set(inner)
         .iter()
         .map(|backend| backend.weight())
         .collect()

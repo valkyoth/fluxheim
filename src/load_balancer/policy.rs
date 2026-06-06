@@ -8,6 +8,7 @@ use pingora::lb::selection::RoundRobin;
 use crate::config::ProxyConfig;
 
 use super::backend::{BackendIdentity, FluxBackend};
+use super::backend::{pingora_backend_ready, pingora_backend_set};
 use super::key::backend_key;
 use super::selection::SelectionPass;
 use super::state::{
@@ -581,9 +582,7 @@ pub(super) fn load_balancer_backend_stats(
     inner: &LoadBalancer<RoundRobin>,
     inputs: BackendStatsInputs<'_>,
 ) -> Vec<LoadBalancerBackendRuntimeStats> {
-    inner
-        .backends()
-        .get_backend()
+    pingora_backend_set(inner)
         .iter()
         .map(|backend| {
             let key = backend_key(backend);
@@ -615,7 +614,7 @@ pub(super) fn load_balancer_backend_stats(
                             .contains(&locality)
                     },
                 ),
-                ready: inner.backends().ready(backend),
+                ready: pingora_backend_ready(inner, backend),
                 backup: inputs.backend_policy.backup(key),
                 drained: inputs.backend_policy.drained(key),
                 disabled: inputs.backend_policy.disabled(key),

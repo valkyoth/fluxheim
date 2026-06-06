@@ -8,6 +8,7 @@ use pingora::lb::selection::RoundRobin;
 
 use super::SelectedUpstream;
 use super::backend::BackendIdentity;
+use super::backend::{pingora_backend_ready, pingora_backend_set};
 use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
 use super::state::{
@@ -104,12 +105,10 @@ fn priority_activation_satisfied(
         return true;
     }
 
-    inner
-        .backends()
-        .get_backend()
+    pingora_backend_set(inner)
         .iter()
         .filter(|backend| {
-            inner.backends().ready(backend)
+            pingora_backend_ready(inner, backend)
                 && context
                     .backend_policy
                     .permits(backend, pass, context.counters)
@@ -160,8 +159,8 @@ fn select_weighted_round_robin_with_backup_policy(
 ) -> Option<SelectedUpstream> {
     let mut candidates = Vec::new();
     let mut total_weight = 0usize;
-    for backend in inner.backends().get_backend().iter() {
-        if !inner.backends().ready(backend)
+    for backend in pingora_backend_set(inner).iter() {
+        if !pingora_backend_ready(inner, backend)
             || !context
                 .backend_policy
                 .permits(backend, pass, context.counters)
@@ -232,8 +231,8 @@ fn select_least_connections_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in inner.backends().get_backend().iter() {
-        if !inner.backends().ready(backend)
+    for backend in pingora_backend_set(inner).iter() {
+        if !pingora_backend_ready(inner, backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -302,8 +301,8 @@ fn select_least_sessions_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in inner.backends().get_backend().iter() {
-        if !inner.backends().ready(backend)
+    for backend in pingora_backend_set(inner).iter() {
+        if !pingora_backend_ready(inner, backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -385,8 +384,8 @@ fn select_least_time_with_backup_policy(
     pass: SelectionPass,
 ) -> Option<SelectedUpstream> {
     let mut selected = None;
-    for backend in inner.backends().get_backend().iter() {
-        if !inner.backends().ready(backend)
+    for backend in pingora_backend_set(inner).iter() {
+        if !pingora_backend_ready(inner, backend)
             || !backend_policy.permits(backend, pass, counters)
             || passive_health.is_some_and(|health| health.is_ejected(backend))
             || (!pass.ignore_slow_start && slow_start.is_some_and(|state| !state.permits(backend)))
@@ -498,7 +497,7 @@ fn select_weighted_random_candidate(
     pass: SelectionPass,
     excluded_key: Option<u64>,
 ) -> Option<Backend> {
-    let backends: Vec<Backend> = inner.backends().get_backend().iter().cloned().collect();
+    let backends: Vec<Backend> = pingora_backend_set(inner).iter().cloned().collect();
     if backends.is_empty() {
         return None;
     }
@@ -591,7 +590,7 @@ fn select_fnv_hash_with_backup_policy(
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> Option<Backend> {
-    let backends: Vec<Backend> = inner.backends().get_backend().iter().cloned().collect();
+    let backends: Vec<Backend> = pingora_backend_set(inner).iter().cloned().collect();
     if backends.is_empty() {
         return None;
     }
@@ -634,7 +633,7 @@ fn backend_candidate_allowed(
     context: SelectionContext<'_>,
     pass: SelectionPass,
 ) -> bool {
-    inner.backends().ready(backend)
+    pingora_backend_ready(inner, backend)
         && context
             .backend_policy
             .permits(backend, pass, context.counters)
@@ -750,8 +749,8 @@ fn bounded_load_snapshot(
 ) -> Option<BoundedLoadSnapshot> {
     let mut total_connections = 0usize;
     let mut total_weight = 0usize;
-    for backend in inner.backends().get_backend().iter() {
-        if !inner.backends().ready(backend)
+    for backend in pingora_backend_set(inner).iter() {
+        if !pingora_backend_ready(inner, backend)
             || !context
                 .backend_policy
                 .permits(backend, pass, context.counters)
@@ -820,9 +819,7 @@ fn consistent_hash_candidates(
     key: &[u8],
     backend_policy: &BackendSelectionPolicy,
 ) -> Vec<(u64, u64, Backend)> {
-    let mut candidates: Vec<_> = inner
-        .backends()
-        .get_backend()
+    let mut candidates: Vec<_> = pingora_backend_set(inner)
         .iter()
         .cloned()
         .map(|backend| {
@@ -952,7 +949,7 @@ pub(super) fn select_maglev(
             let Some(backend) = backend_by_key.get(&key) else {
                 continue;
             };
-            if inner.backends().ready(backend)
+            if pingora_backend_ready(inner, backend)
                 && inputs
                     .backend_policy
                     .permits(backend, pass, inputs.counters)
