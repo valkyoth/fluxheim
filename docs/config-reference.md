@@ -217,16 +217,22 @@ upstream_tls = false
   connector before that combination can be enabled safely.
 - `upstream_tls = true` sends TLS to the selected stream upstream.
   `upstream_sni` is optional; when unset Fluxheim derives SNI from the selected
-  upstream host. `upstream_verify_cert` and `upstream_verify_hostname` default
-  to `true`; disabling certificate verification also requires hostname
+  upstream host. IP upstreams do not have a DNS hostname to verify; set
+  `upstream_sni` when a TLS certificate must be matched for an IP-address
+  upstream. `upstream_verify_cert` and `upstream_verify_hostname` default to
+  `true`; disabling certificate verification also requires hostname
   verification to be disabled so the policy cannot imply a hostname check that
   is not happening.
-- `upstream_alternative_cn` allows one additional non-wildcard hostname for
-  upstream certificate matching. `upstream_ca_path` loads a route-local PEM CA
-  bundle. `upstream_client_cert_path` and `upstream_client_key_path` configure
-  upstream mTLS client material and must be set together. Custom trust roots
-  and upstream client certificates are supported for rustls and OpenSSL builds.
-  BoringSSL and s2n are not supported Fluxheim TLS backends.
+- `upstream_alternative_cn` replaces the SNI-derived verification hostname with
+  one explicit non-wildcard hostname. It is not an additional hostname checked
+  alongside SNI. `upstream_ca_path` loads a route-local PEM CA bundle.
+  `upstream_client_cert_path` and `upstream_client_key_path` configure upstream
+  mTLS client material and must be set together. Custom trust roots and
+  upstream client certificates are supported for rustls and OpenSSL builds.
+  Fluxheim zeroizes the PEM input buffers after parsing; in rustls builds the
+  parsed private-key DER is then owned by rustls 0.23 and follows that crate's
+  memory-erasure behavior. BoringSSL and s2n are not supported Fluxheim TLS
+  backends.
 
 When `metrics` is compiled and enabled,
 `fluxheim_stream_connections_total{route,outcome}` records bounded connection

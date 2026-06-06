@@ -138,7 +138,7 @@ impl ServiceWithDependents for StreamProxyService {
                         target: "fluxheim::stream",
                         "failed to bind stream listener {listen}: {error}"
                     );
-                    process::abort();
+                    process::exit(1);
                 }
             }
         }
@@ -778,9 +778,7 @@ async fn connect_tls_upstream(
                     "stream upstream TLS connector is not initialized",
                 ));
             };
-            connector
-                .connect(upstream_authority, socket_addr, options.connect_timeout)
-                .await
+            connector.connect(upstream_authority, socket_addr).await
         };
 
         match tokio::time::timeout(options.connect_timeout, connect).await {
@@ -973,9 +971,6 @@ fn parse_downstream_proxy_protocol_v1(line: &[u8]) -> FluxResult<Option<SocketAd
     let line = line.strip_suffix("\r\n").ok_or(FluxError::InvalidInput(
         "stream downstream PROXY v1 header is missing CRLF",
     ))?;
-    if line == "PROXY UNKNOWN" {
-        return Ok(None);
-    }
     let mut fields = line.split_whitespace();
     if fields.next() != Some("PROXY") {
         return Err(FluxError::InvalidInput(
@@ -985,6 +980,9 @@ fn parse_downstream_proxy_protocol_v1(line: &[u8]) -> FluxResult<Option<SocketAd
     let family = fields.next().ok_or(FluxError::InvalidInput(
         "stream downstream PROXY v1 header is missing family",
     ))?;
+    if family == "UNKNOWN" {
+        return Ok(None);
+    }
     let source_addr = fields.next().ok_or(FluxError::InvalidInput(
         "stream downstream PROXY v1 header is missing source address",
     ))?;
@@ -1274,6 +1272,13 @@ mod tests {
         assert_eq!(parsed, Some("203.0.113.10:42300".parse().unwrap()));
         assert_eq!(
             super::parse_downstream_proxy_protocol_v1(b"PROXY UNKNOWN\r\n").unwrap(),
+            None
+        );
+        assert_eq!(
+            super::parse_downstream_proxy_protocol_v1(
+                b"PROXY UNKNOWN 192.0.2.20 203.0.113.10 443 42300\r\n"
+            )
+            .unwrap(),
             None
         );
         assert!(

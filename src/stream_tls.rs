@@ -1,13 +1,13 @@
 use std::fmt;
-#[cfg(feature = "tls-openssl")]
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use std::net::IpAddr;
 use std::net::SocketAddr;
 #[cfg(feature = "tls-rustls-backend")]
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use crate::config::StreamRouteConfig;
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
 use crate::config_net::upstream_host;
 use crate::flux_error::{FluxError, FluxResult};
 use crate::stream_proxy::FluxStream;
@@ -53,6 +53,7 @@ impl StreamUpstreamTlsConnector {
         if !route.upstream_tls {
             return Ok(None);
         }
+        warn_if_ip_upstream_tls_verification_skips_hostname(route);
 
         Ok(Some(Self {
             sni: route.upstream_sni.as_deref().map(Arc::from),
@@ -70,17 +71,14 @@ impl StreamUpstreamTlsConnector {
         &self,
         upstream_authority: &str,
         socket_addr: SocketAddr,
-        connect_timeout: Duration,
     ) -> FluxResult<FluxStream> {
         #[cfg(feature = "tls-rustls-backend")]
         {
-            self.connect_rustls(upstream_authority, socket_addr, connect_timeout)
-                .await
+            self.connect_rustls(upstream_authority, socket_addr).await
         }
         #[cfg(all(feature = "tls-openssl", not(feature = "tls-rustls-backend")))]
         {
-            self.connect_openssl(upstream_authority, socket_addr, connect_timeout)
-                .await
+            self.connect_openssl(upstream_authority, socket_addr).await
         }
     }
 
@@ -89,25 +87,19 @@ impl StreamUpstreamTlsConnector {
         &self,
         upstream_authority: &str,
         socket_addr: SocketAddr,
-        connect_timeout: Duration,
     ) -> FluxResult<FluxStream> {
         let stream = tokio::net::TcpStream::connect(socket_addr)
             .await
             .map_err(|error| FluxError::io("connect stream TLS upstream", error))?;
         let server_name =
             stream_upstream_tls_server_name(self.sni.as_deref(), upstream_authority, socket_addr)?;
-        let stream =
-            tokio::time::timeout(connect_timeout, self.rustls.connect(server_name, stream))
-                .await
-                .map_err(|_| {
-                    FluxError::timeout(
-                        "stream upstream TLS handshake timeout",
-                        "stream upstream TLS handshake timeout elapsed",
-                    )
-                })?
-                .map_err(|error| {
-                    FluxError::invalid_input(format!("stream upstream TLS connect failed: {error}"))
-                })?;
+        let stream = self
+            .rustls
+            .connect(server_name, stream)
+            .await
+            .map_err(|error| {
+                FluxError::invalid_input(format!("stream upstream TLS connect failed: {error}"))
+            })?;
         Ok(Box::new(stream) as FluxStream)
     }
 
@@ -116,7 +108,6 @@ impl StreamUpstreamTlsConnector {
         &self,
         upstream_authority: &str,
         socket_addr: SocketAddr,
-        connect_timeout: Duration,
     ) -> FluxResult<FluxStream> {
         let stream = tokio::net::TcpStream::connect(socket_addr)
             .await
@@ -131,21 +122,15 @@ impl StreamUpstreamTlsConnector {
             config.set_verify(SslVerifyMode::NONE);
         } else if self.verify_cert {
             if self.verify_hostname {
-                config.param_mut().set_host(&sni).map_err(|error| {
+                // OpenSSL's set_host() replaces the previous hostname list; an
+                // alternative CN is an explicit verification override, not an
+                // additional host checked alongside SNI.
+                let check_host = self.alternative_cn.as_deref().unwrap_or(&sni);
+                config.param_mut().set_host(check_host).map_err(|error| {
                     FluxError::invalid_input(format!(
                         "stream upstream TLS hostname policy failed: {error}"
                     ))
                 })?;
-                if let Some(alternative_cn) = self.alternative_cn.as_deref() {
-                    config
-                        .param_mut()
-                        .set_host(alternative_cn)
-                        .map_err(|error| {
-                            FluxError::invalid_input(format!(
-                                "stream upstream TLS alternative hostname policy failed: {error}"
-                            ))
-                        })?;
-                }
             }
             config.set_verify(SslVerifyMode::PEER);
         } else {
@@ -159,19 +144,45 @@ impl StreamUpstreamTlsConnector {
         let mut stream = SslStream::new(ssl, stream).map_err(|error| {
             FluxError::invalid_input(format!("stream upstream TLS stream setup failed: {error}"))
         })?;
-        tokio::time::timeout(connect_timeout, std::pin::Pin::new(&mut stream).connect())
+        std::pin::Pin::new(&mut stream)
+            .connect()
             .await
-            .map_err(|_| {
-                FluxError::timeout(
-                    "stream upstream TLS handshake timeout",
-                    "stream upstream TLS handshake timeout elapsed",
-                )
-            })?
             .map_err(|error| {
                 FluxError::invalid_input(format!("stream upstream TLS connect failed: {error}"))
             })?;
         Ok(Box::new(stream) as FluxStream)
     }
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+fn warn_if_ip_upstream_tls_verification_skips_hostname(route: &StreamRouteConfig) {
+    if !stream_route_tls_cert_verification_skips_for_ip_upstreams(route) {
+        return;
+    }
+    log::warn!(
+        target: "fluxheim::security",
+        "stream route '{}' enables upstream TLS certificate verification for IP-only upstreams without upstream_sni; hostname verification is skipped for those connections",
+        route.name
+    );
+}
+
+#[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+fn stream_route_tls_cert_verification_skips_for_ip_upstreams(route: &StreamRouteConfig) -> bool {
+    if !route.upstream_tls || !route.upstream_verify_cert || route.upstream_sni.is_some() {
+        return false;
+    }
+
+    let mut saw_upstream = false;
+    for upstream in route.upstreams() {
+        saw_upstream = true;
+        let Some(host) = upstream_host(upstream) else {
+            return false;
+        };
+        if host.parse::<IpAddr>().is_err() {
+            return false;
+        }
+    }
+    saw_upstream
 }
 
 #[cfg(feature = "tls-rustls-backend")]
@@ -547,15 +558,17 @@ impl fmt::Debug for StreamUpstreamTlsConnector {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+    use super::stream_route_tls_cert_verification_skips_for_ip_upstreams;
     #[cfg(feature = "tls-openssl")]
     use super::stream_upstream_tls_sni;
     #[cfg(feature = "tls-rustls-backend")]
     use super::{RustlsVerificationMode, rustls_verification_mode};
-    #[cfg(feature = "tls-rustls-backend")]
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
     use crate::config::StreamRouteConfig;
 
-    #[cfg(feature = "tls-rustls-backend")]
-    fn rustls_route() -> StreamRouteConfig {
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+    fn tls_ip_route() -> StreamRouteConfig {
         StreamRouteConfig {
             name: "stream".to_owned(),
             listen: vec!["127.0.0.1:8443".to_owned()],
@@ -568,7 +581,7 @@ mod tests {
     #[cfg(feature = "tls-rustls-backend")]
     #[test]
     fn rustls_without_explicit_sni_decides_ip_skip_per_connection() {
-        let route = rustls_route();
+        let route = tls_ip_route();
         assert_eq!(
             rustls_verification_mode(&route),
             RustlsVerificationMode::FullOrSkipAllForIp
@@ -578,7 +591,7 @@ mod tests {
     #[cfg(feature = "tls-rustls-backend")]
     #[test]
     fn rustls_explicit_sni_uses_full_verification() {
-        let mut route = rustls_route();
+        let mut route = tls_ip_route();
         route.upstream_sni = Some("backend.example.test".to_owned());
         assert_eq!(
             rustls_verification_mode(&route),
@@ -589,7 +602,7 @@ mod tests {
     #[cfg(feature = "tls-rustls-backend")]
     #[test]
     fn rustls_verification_flags_override_sni_policy() {
-        let mut route = rustls_route();
+        let mut route = tls_ip_route();
         route.upstream_sni = Some("backend.example.test".to_owned());
         route.upstream_verify_hostname = false;
         assert_eq!(
@@ -616,5 +629,26 @@ mod tests {
             stream_upstream_tls_sni(Some("configured.example.test"), "127.0.0.1:443"),
             "configured.example.test"
         );
+    }
+
+    #[cfg(any(feature = "tls-rustls-backend", feature = "tls-openssl"))]
+    #[test]
+    fn ip_only_verified_stream_tls_without_sni_is_warnable() {
+        let mut route = tls_ip_route();
+        assert!(stream_route_tls_cert_verification_skips_for_ip_upstreams(
+            &route
+        ));
+
+        route.upstream_sni = Some("backend.example.test".to_owned());
+        assert!(!stream_route_tls_cert_verification_skips_for_ip_upstreams(
+            &route
+        ));
+
+        route.upstream_sni = None;
+        route.upstream = Some("backend.example.test:9443".to_owned());
+        route.upstreams.clear();
+        assert!(!stream_route_tls_cert_verification_skips_for_ip_upstreams(
+            &route
+        ));
     }
 }

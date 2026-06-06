@@ -36,6 +36,17 @@ configuration and behavior.
 - Extend the local stream smoke to prove rustls upstream TLS with generated
   server certificate, explicit SNI, and route-local custom trust-root
   validation.
+- Clarify stream upstream TLS hostname verification semantics: an
+  `upstream_alternative_cn` value now acts as the single explicit hostname
+  checked against the upstream certificate, and IP-only verified upstream TLS
+  routes without `upstream_sni` emit a security warning because there is no DNS
+  hostname to verify.
+- Remove the nested TLS-handshake timeout from the stream TLS connector path so
+  the route's stream upstream connect timeout consistently covers DNS lookup,
+  TCP connect, and TLS handshake as one operation.
+- Accept HAProxy PROXY protocol v1 `UNKNOWN` lines with optional trailing
+  address fields, matching the protocol's "ignore addresses for UNKNOWN"
+  semantics.
 
 ## Boundaries
 
@@ -51,3 +62,12 @@ adapter.
 restart-persistent load-balancer state, active-active state sync, UDP/GSLB,
 HTTP/3/QUIC, WAF, VPN/firewall appliance behavior, or Wasm/iRules/Lua
 scripting.
+
+## Known Limitations
+
+Fluxheim zeroizes stream upstream mTLS PEM input buffers after parsing. In
+rustls builds, parsed private-key DER is owned by rustls 0.23 after that point
+and follows rustls' memory-erasure behavior. Operators with strict private-key
+memory erasure requirements should account for core-dump/process-memory
+controls or use an approved OpenSSL-backed profile until rustls exposes a
+zeroizing parsed-key container.
