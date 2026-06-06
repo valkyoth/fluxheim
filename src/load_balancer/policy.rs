@@ -596,12 +596,12 @@ where
                 .is_some_and(|health| health.key_is_currently_ejected(key));
             LoadBalancerBackendRuntimeStats {
                 #[cfg(not(feature = "privacy-mode"))]
-                address: Some(backend.addr.to_string()),
+                address: Some(backend.authority()),
                 #[cfg(feature = "privacy-mode")]
                 address: None,
                 alias: inputs.aliases.get(&key).map(|alias| alias.to_string()),
                 tags: inputs.backend_policy.tags(key),
-                weight: backend.weight,
+                weight: backend.weight(),
                 effective_weight: inputs.backend_policy.effective_weight(backend),
                 runtime_weight_override: inputs.backend_policy.runtime_backend_weight(key),
                 runtime_weight_changed_at_unix_secs: inputs

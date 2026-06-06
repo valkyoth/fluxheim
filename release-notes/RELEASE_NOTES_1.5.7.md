@@ -21,6 +21,8 @@ results as far as possible.
 - Move file-refreshed and DNS-refreshed backend discovery behind a
   Fluxheim-owned discovery trait, with Pingora service discovery retained only
   as an adapter.
+- Route runtime backend stats, bounded-load weight accounting, and disabled
+  upstream parsing through the Fluxheim backend identity/adapter layer.
 - Preserve existing Pingora selector/background-service adapters while the
   native backend set and identity boundary are introduced, keeping this first
   1.5.7 slice behavior-preserving.

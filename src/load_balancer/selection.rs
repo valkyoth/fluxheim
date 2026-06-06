@@ -635,7 +635,7 @@ fn bounded_load_snapshot(
             continue;
         }
         total_connections = total_connections.saturating_add(context.counters.count(backend));
-        total_weight = total_weight.saturating_add(backend.weight.max(1));
+        total_weight = total_weight.saturating_add(backend.weight().max(1));
     }
     (total_weight > 0 && total_connections > 0).then_some(BoundedLoadSnapshot {
         total_connections,
@@ -650,7 +650,7 @@ fn bounded_load_permits(
     bound: &BoundedLoadSnapshot,
 ) -> bool {
     let candidate_connections = counters.count(backend) as u128;
-    let candidate_weight = backend.weight.max(1) as u128;
+    let candidate_weight = backend.weight().max(1) as u128;
     let left = candidate_connections
         .saturating_mul(bound.total_weight as u128)
         .saturating_mul(1000);

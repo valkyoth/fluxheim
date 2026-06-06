@@ -440,12 +440,12 @@ impl BackendLatencyState {
 
 #[cfg(test)]
 mod tests {
+    use super::super::backend::FluxBackend;
     use super::*;
-    use pingora::lb::Backend;
 
     #[test]
     fn slow_start_zero_duration_permits_without_division() {
-        let backend = Backend::new("127.0.0.1:3000").unwrap();
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
         let state = SlowStartState::from_config(&LoadBalanceSlowStartConfig {
             enabled: true,
             duration_secs: 0,

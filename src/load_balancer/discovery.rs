@@ -68,7 +68,9 @@ where
     S::Iter: BackendIter,
 {
     for upstream in &config.disabled_upstreams {
-        if let Ok(backend) = Backend::new(upstream) {
+        if let Ok(backend) =
+            FluxBackend::new(upstream).and_then(|backend| backend.to_pingora_backend())
+        {
             load_balancer.backends().set_enable(&backend, false);
         }
     }

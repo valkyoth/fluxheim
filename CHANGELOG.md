@@ -28,6 +28,8 @@ behavior when the change improves security or project direction.
 - Move file-refreshed and DNS-refreshed backend discovery behind a
   Fluxheim-owned discovery trait, keeping Pingora service discovery as a thin
   adapter at the current runtime boundary.
+- Route runtime backend stats, bounded-load weight accounting, and disabled
+  upstream parsing through the same backend identity/adapter layer.
 
 ## 1.5.6 - 2026-06-06
 
