@@ -2,11 +2,9 @@ use std::process;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use pingora::lb::Backend;
-
 use super::SelectedUpstream;
-use super::backend::BackendIdentity;
 use super::backend::{BackendContainer, backend_container_ready, backend_container_set};
+use super::backend::{BackendIdentity, RuntimeBackend as Backend};
 use super::key::backend_key;
 use super::policy::BackendSelectionPolicy;
 use super::state::{

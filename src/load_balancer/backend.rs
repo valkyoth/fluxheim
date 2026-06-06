@@ -14,6 +14,8 @@ use pingora::lb::Backend;
 use pingora::server::ShutdownWatch;
 use pingora::services::ServiceReadyNotifier;
 
+pub(super) type RuntimeBackend = Backend;
+
 #[async_trait]
 pub(super) trait FluxBackendDiscovery: Send + Sync + 'static {
     async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet>;

@@ -73,6 +73,9 @@ behavior when the change improves security or project direction.
 - Move load-balancer health checks behind a Fluxheim-owned health-check trait,
   keeping Pingora TCP/HTTP health-check connector code only inside the
   adapter layer while runtime readiness depends on Fluxheim's trait.
+- Hide the remaining runtime backend value type behind the load-balancer
+  backend adapter so selector and health-check modules import Fluxheim's
+  boundary type instead of `pingora::lb::Backend` directly.
 
 ## 1.5.6 - 2026-06-06
 

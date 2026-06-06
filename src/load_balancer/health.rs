@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pingora::connectors::http::Connector as HttpConnector;
-use pingora::lb::Backend;
 use pingora::lb::health_check::{HealthCheck as PingoraHealthCheck, TcpHealthCheck};
 use pingora::protocols::http::client::HttpSession;
 use pingora::upstreams::peer::{HttpPeer, Peer};
@@ -19,7 +18,7 @@ use crate::http_types::{
     PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
 
-use super::backend::FluxHealthCheck;
+use super::backend::{FluxHealthCheck, RuntimeBackend as Backend};
 
 const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
 
