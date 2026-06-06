@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use pingora::lb::Backend;
 use pingora::lb::prelude::LoadBalancer;
-use pingora::lb::selection::{Consistent, FNVHash, Random, RoundRobin};
+use pingora::lb::selection::{Consistent, Random, RoundRobin};
 use pingora::services::ServiceWithDependents;
 use serde::Serialize;
 
@@ -42,8 +42,8 @@ use self::policy::{
 };
 use self::selection::{
     LoadBalancerSelectInputs, MaglevTable, SelectionPass, select_bounded_load_consistent,
-    select_least_connections, select_least_sessions, select_least_time, select_maglev,
-    select_pingora, select_power_of_two, select_weighted_round_robin,
+    select_fnv_hash, select_least_connections, select_least_sessions, select_least_time,
+    select_maglev, select_pingora, select_power_of_two, select_weighted_round_robin,
 };
 use self::state::{
     BackendConnectionCounters, BackendLatencyState, PassiveHealthState, SlowStartState,
@@ -362,7 +362,7 @@ impl UpstreamLoadBalancer {
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
             | LoadBalanceSelection::CookieHash => {
-                let Some(inner) = configured_load_balancer::<FNVHash>(config)? else {
+                let Some(inner) = configured_load_balancer::<RoundRobin>(config)? else {
                     return Ok(None);
                 };
                 Ok(Some(Self::from_inner(
@@ -452,7 +452,7 @@ impl UpstreamLoadBalancer {
             LoadBalanceSelection::SourceHash
             | LoadBalanceSelection::UriHash
             | LoadBalanceSelection::HeaderHash
-            | LoadBalanceSelection::CookieHash => background_service_for::<FNVHash, _>(
+            | LoadBalanceSelection::CookieHash => background_service_for::<RoundRobin, _>(
                 name,
                 config,
                 UpstreamLoadBalancerInner::FnvHash,
@@ -1031,7 +1031,7 @@ enum UpstreamLoadBalancerInner {
         latency: Arc<BackendLatencyState>,
     },
     PowerOfTwo(Arc<LoadBalancer<Random>>),
-    FnvHash(Arc<LoadBalancer<FNVHash>>),
+    FnvHash(Arc<LoadBalancer<RoundRobin>>),
     ConsistentHash(Arc<LoadBalancer<Consistent>>),
     BoundedLoadConsistentHash {
         inner: Arc<LoadBalancer<Consistent>>,
@@ -1078,16 +1078,7 @@ impl UpstreamLoadBalancerInner {
                 inputs.slow_start,
                 inputs.backend_policy,
             ),
-            Self::FnvHash(inner) => select_pingora(
-                inner,
-                inputs.key.unwrap_or_default(),
-                inputs.max_iterations,
-                inputs.passive_health,
-                inputs.slow_start,
-                inputs.counters,
-                inputs.backend_policy,
-            )
-            .map(SelectedUpstream::new),
+            Self::FnvHash(inner) => select_fnv_hash(inner, inputs),
             Self::ConsistentHash(inner) => select_pingora(
                 inner,
                 inputs.key.unwrap_or_default(),

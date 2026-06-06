@@ -25,6 +25,9 @@ results as far as possible.
   upstream parsing through the Fluxheim backend identity/adapter layer.
 - Move slow-start state regression coverage onto Fluxheim backend identities,
   keeping Pingora backend construction only in runtime-selection tests.
+- Replace Pingora's FNV weighted-hash selector for source, URI, header, and
+  cookie hash modes with Fluxheim-owned weighted-first FNV selection over the
+  current backend container.
 - Preserve existing Pingora selector/background-service adapters while the
   native backend set and identity boundary are introduced, keeping this first
   1.5.7 slice behavior-preserving.

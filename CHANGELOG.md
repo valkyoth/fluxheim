@@ -32,6 +32,9 @@ behavior when the change improves security or project direction.
   upstream parsing through the same backend identity/adapter layer.
 - Move slow-start state regression coverage onto Fluxheim backend identities,
   keeping Pingora backend construction only in runtime-selection tests.
+- Replace Pingora's FNV weighted-hash selector for source, URI, header, and
+  cookie hash modes with Fluxheim-owned weighted-first FNV selection over the
+  current backend container.
 
 ## 1.5.6 - 2026-06-06
 

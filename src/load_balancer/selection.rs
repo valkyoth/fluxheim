@@ -547,6 +547,96 @@ pub(super) fn select_power_of_two(
     Some(SelectedUpstream::new(selected))
 }
 
+pub(super) fn select_fnv_hash(
+    inner: &LoadBalancer<RoundRobin>,
+    inputs: LoadBalancerSelectInputs<'_>,
+) -> Option<SelectedUpstream> {
+    let context = SelectionContext {
+        passive_health: inputs.passive_health,
+        slow_start: inputs.slow_start,
+        counters: inputs.counters,
+        backend_policy: inputs.backend_policy,
+    };
+    for pass in selection_passes(inputs.backend_policy) {
+        if !priority_activation_satisfied(inner, context, pass) {
+            continue;
+        }
+        if let Some(backend) = select_fnv_hash_with_backup_policy(
+            inner,
+            inputs.key.unwrap_or_default(),
+            inputs.max_iterations,
+            context,
+            pass,
+        ) {
+            return Some(SelectedUpstream::new(backend));
+        }
+    }
+    None
+}
+
+fn select_fnv_hash_with_backup_policy(
+    inner: &LoadBalancer<RoundRobin>,
+    key: &[u8],
+    max_iterations: usize,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+) -> Option<Backend> {
+    let backends: Vec<Backend> = inner.backends().get_backend().iter().cloned().collect();
+    if backends.is_empty() {
+        return None;
+    }
+    let weighted = weighted_backend_indices(&backends);
+    if weighted.is_empty() {
+        return None;
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut index = fnv1a64(key);
+    for step in 0..max_iterations.max(1) {
+        let candidate_index = if step == 0 {
+            weighted[index as usize % weighted.len()]
+        } else {
+            index = fnv1a64(&index.to_le_bytes());
+            index as usize % backends.len()
+        };
+        let candidate = &backends[candidate_index];
+        if !seen.insert(backend_key(candidate)) {
+            continue;
+        }
+        if fnv_hash_candidate_allowed(inner, candidate, context, pass) {
+            return Some(candidate.clone());
+        }
+    }
+    None
+}
+
+fn weighted_backend_indices(backends: &[Backend]) -> Vec<usize> {
+    let mut weighted = Vec::new();
+    for (index, backend) in backends.iter().enumerate() {
+        weighted.extend(std::iter::repeat_n(index, backend.weight().max(1)));
+    }
+    weighted
+}
+
+fn fnv_hash_candidate_allowed(
+    inner: &LoadBalancer<RoundRobin>,
+    backend: &Backend,
+    context: SelectionContext<'_>,
+    pass: SelectionPass,
+) -> bool {
+    inner.backends().ready(backend)
+        && context
+            .backend_policy
+            .permits(backend, pass, context.counters)
+        && context
+            .passive_health
+            .is_none_or(|health| !health.is_ejected(backend))
+        && (pass.ignore_slow_start
+            || context
+                .slow_start
+                .is_none_or(|state| state.permits(backend)))
+}
+
 pub(super) fn select_bounded_load_consistent(
     inner: &LoadBalancer<Consistent>,
     factor_per_mille: u16,
