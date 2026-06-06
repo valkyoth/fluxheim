@@ -70,6 +70,9 @@ behavior when the change improves security or project direction.
   background update loop with Fluxheim-owned backend storage, readiness state,
   discovery refresh, health-check scheduling, and shutdown handling. Existing
   Pingora health-check implementations remain adapted for this slice.
+- Move load-balancer health checks behind a Fluxheim-owned health-check trait,
+  keeping Pingora TCP/HTTP health-check connector code only inside the
+  adapter layer while runtime readiness depends on Fluxheim's trait.
 
 ## 1.5.6 - 2026-06-06
 

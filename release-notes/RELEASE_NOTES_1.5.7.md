@@ -62,9 +62,9 @@ results as far as possible.
 - Replace Pingora's load-balancer `Backends` container, discovery adapter, and
   background update loop with Fluxheim-owned backend storage, readiness state,
   discovery refresh, health-check scheduling, and shutdown handling.
-- Preserve existing TCP/HTTP health-check behavior by reusing the current
-  Pingora health-check implementations behind Fluxheim's runtime-owned
-  readiness state.
+- Move load-balancer health checks behind a Fluxheim-owned health-check trait.
+  Existing TCP/HTTP health-check behavior is preserved, with Pingora connector
+  code kept inside the adapter layer instead of the runtime readiness boundary.
 
 ## Boundaries
 

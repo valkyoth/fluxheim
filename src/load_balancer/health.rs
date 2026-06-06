@@ -5,7 +5,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pingora::connectors::http::Connector as HttpConnector;
 use pingora::lb::Backend;
-use pingora::lb::health_check::{HealthCheck, TcpHealthCheck};
+use pingora::lb::health_check::{HealthCheck as PingoraHealthCheck, TcpHealthCheck};
 use pingora::protocols::http::client::HttpSession;
 use pingora::upstreams::peer::{HttpPeer, Peer};
 use pingora::{Error, ErrorType};
@@ -19,11 +19,13 @@ use crate::http_types::{
     PingoraRequestHeader as RequestHeader, PingoraResponseHeader as ResponseHeader,
 };
 
+use super::backend::FluxHealthCheck;
+
 const HTTP_HEALTH_CHECK_MAX_BODY_BYTES: usize = 64 * 1024;
 
 pub(super) fn configured_health_check(
     config: &ProxyConfig,
-) -> io::Result<Box<dyn HealthCheck + Send + Sync + 'static>> {
+) -> io::Result<Box<dyn FluxHealthCheck>> {
     match config.load_balance.health_check.protocol {
         LoadBalanceHealthCheckProtocol::Tcp => {
             let mut health_check = if config.upstream_tls {
@@ -38,11 +40,39 @@ pub(super) fn configured_health_check(
                 None,
                 config,
             );
-            Ok(health_check)
+            Ok(Box::new(FluxTcpHealthCheck {
+                inner: health_check,
+            }))
         }
         LoadBalanceHealthCheckProtocol::Http => configured_http_health_check(config)
             .map_err(FluxError::into_io)
-            .map(|check| check as Box<dyn HealthCheck + Send + Sync + 'static>),
+            .map(|check| check as Box<dyn FluxHealthCheck>),
+    }
+}
+
+struct FluxTcpHealthCheck {
+    inner: Box<TcpHealthCheck>,
+}
+
+#[async_trait]
+impl FluxHealthCheck for FluxTcpHealthCheck {
+    async fn check(&self, target: &Backend) -> FluxResult<()> {
+        self.inner
+            .check(target)
+            .await
+            .map_err(pingora_health_error("TCP health check failed"))
+    }
+
+    fn health_threshold(&self, success: bool) -> usize {
+        self.inner.health_threshold(success)
+    }
+
+    async fn health_status_change(&self, target: &Backend, healthy: bool) {
+        self.inner.health_status_change(target, healthy).await;
+    }
+
+    fn backend_summary(&self, target: &Backend) -> String {
+        self.inner.backend_summary(target)
     }
 }
 
@@ -61,7 +91,7 @@ struct FluxHttpHealthCheck {
 }
 
 #[async_trait]
-impl HealthCheck for FluxHttpHealthCheck {
+impl FluxHealthCheck for FluxHttpHealthCheck {
     fn health_threshold(&self, success: bool) -> usize {
         if success {
             self.consecutive_success
@@ -70,29 +100,47 @@ impl HealthCheck for FluxHttpHealthCheck {
         }
     }
 
-    async fn check(&self, target: &Backend) -> pingora::Result<()> {
+    async fn check(&self, target: &Backend) -> FluxResult<()> {
         let mut peer = self.peer_template.clone();
         peer._address = target.addr.clone();
         if let Some(port) = self.port_override {
             peer._address.set_port(port);
         }
 
-        let (mut session, _) = self.connector.get_http_session(&peer).await?;
+        let (mut session, _) = self
+            .connector
+            .get_http_session(&peer)
+            .await
+            .map_err(pingora_health_error("connect HTTP health check upstream"))?;
         session
             .write_request_header(Box::new(self.req.clone()))
-            .await?;
-        session.finish_request_body().await?;
+            .await
+            .map_err(pingora_health_error(
+                "write HTTP health check request header",
+            ))?;
+        session
+            .finish_request_body()
+            .await
+            .map_err(pingora_health_error(
+                "finish HTTP health check request body",
+            ))?;
 
         if let Some(read_timeout) = peer.options.read_timeout {
             session.set_read_timeout(Some(read_timeout));
         }
 
-        session.read_response_header().await?;
+        session
+            .read_response_header()
+            .await
+            .map_err(pingora_health_error(
+                "read HTTP health check response header",
+            ))?;
         let Some(response) = session.response_header() else {
-            return Err(http_health_check_error(
+            return Err(HttpHealthCheckError::new(
                 ErrorType::ReadError,
                 "missing HTTP health check response header",
-            ));
+            )
+            .into_flux());
         };
         validate_http_health_response(
             response,
@@ -100,14 +148,14 @@ impl HealthCheck for FluxHttpHealthCheck {
             &self.expected_status_ranges,
             &self.expected_headers,
         )
-        .map_err(HttpHealthCheckError::into_pingora)?;
+        .map_err(HttpHealthCheckError::into_flux)?;
 
         if self.expected_body_contains.is_empty() {
             drain_http_health_response_body(&mut session).await?;
         } else {
             let body = read_http_health_response_body(&mut session).await?;
             validate_http_health_response_body(&body, &self.expected_body_contains)
-                .map_err(HttpHealthCheckError::into_pingora)?;
+                .map_err(HttpHealthCheckError::into_flux)?;
         }
 
         if self.reuse_connection {
@@ -262,28 +310,38 @@ fn validate_http_health_response(
     Ok(())
 }
 
-async fn drain_http_health_response_body(session: &mut HttpSession) -> pingora::Result<()> {
+async fn drain_http_health_response_body(session: &mut HttpSession) -> FluxResult<()> {
     let mut drained = 0usize;
-    while let Some(chunk) = session.read_response_body().await? {
+    while let Some(chunk) = session
+        .read_response_body()
+        .await
+        .map_err(pingora_health_error("read HTTP health check response body"))?
+    {
         drained = drained.saturating_add(chunk.len());
         if drained > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
-            return Err(http_health_check_error(
+            return Err(HttpHealthCheckError::new(
                 ErrorType::ReadError,
                 "HTTP health check response body exceeded maximum size",
-            ));
+            )
+            .into_flux());
         }
     }
     Ok(())
 }
 
-async fn read_http_health_response_body(session: &mut HttpSession) -> pingora::Result<Vec<u8>> {
+async fn read_http_health_response_body(session: &mut HttpSession) -> FluxResult<Vec<u8>> {
     let mut body = Vec::new();
-    while let Some(chunk) = session.read_response_body().await? {
+    while let Some(chunk) = session
+        .read_response_body()
+        .await
+        .map_err(pingora_health_error("read HTTP health check response body"))?
+    {
         if body.len().saturating_add(chunk.len()) > HTTP_HEALTH_CHECK_MAX_BODY_BYTES {
-            return Err(http_health_check_error(
+            return Err(HttpHealthCheckError::new(
                 ErrorType::ReadError,
                 "HTTP health check response body exceeded maximum size",
-            ));
+            )
+            .into_flux());
         }
         body.extend_from_slice(&chunk);
     }
@@ -321,13 +379,16 @@ impl HttpHealthCheckError {
         }
     }
 
-    fn into_pingora(self) -> Box<Error> {
-        Error::because(self.kind, "HTTP health check failed", self.error)
+    fn into_flux(self) -> FluxError {
+        FluxError::io(
+            "HTTP health check failed",
+            io::Error::other(format!("{:?}: {}", self.kind, self.error)),
+        )
     }
 }
 
-fn http_health_check_error(kind: ErrorType, detail: &'static str) -> Box<Error> {
-    HttpHealthCheckError::new(kind, detail).into_pingora()
+fn pingora_health_error(context: &'static str) -> impl FnOnce(Box<Error>) -> FluxError {
+    move |error| FluxError::io(context, io::Error::other(error.to_string()))
 }
 
 #[cfg(test)]

@@ -11,13 +11,25 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures::future;
 use pingora::lb::Backend;
-use pingora::lb::health_check::HealthCheck;
 use pingora::server::ShutdownWatch;
 use pingora::services::ServiceReadyNotifier;
 
 #[async_trait]
 pub(super) trait FluxBackendDiscovery: Send + Sync + 'static {
     async fn discover_flux_backends(&self) -> FluxResult<FluxBackendSet>;
+}
+
+#[async_trait]
+pub(super) trait FluxHealthCheck: Send + Sync + 'static {
+    async fn check(&self, target: &Backend) -> FluxResult<()>;
+
+    fn health_threshold(&self, success: bool) -> usize;
+
+    async fn health_status_change(&self, _target: &Backend, _healthy: bool) {}
+
+    fn backend_summary(&self, target: &Backend) -> String {
+        format!("{target:?}")
+    }
 }
 
 #[derive(Clone)]
@@ -83,7 +95,7 @@ impl FluxBackendHealth {
 
 pub(super) struct FluxLoadBalancerRuntime {
     discovery: Arc<dyn FluxBackendDiscovery>,
-    health_check: Option<Arc<dyn HealthCheck + Send + Sync + 'static>>,
+    health_check: Option<Arc<dyn FluxHealthCheck>>,
     backends: ArcSwap<BTreeSet<Backend>>,
     health: ArcSwap<HashMap<u64, FluxBackendHealth>>,
     update_frequency: Option<Duration>,
@@ -108,10 +120,7 @@ impl FluxLoadBalancerRuntime {
         self.update_frequency = frequency;
     }
 
-    pub(super) fn set_health_check(
-        &mut self,
-        health_check: Box<dyn HealthCheck + Send + Sync + 'static>,
-    ) {
+    pub(super) fn set_health_check(&mut self, health_check: Box<dyn FluxHealthCheck>) {
         self.health_check = Some(health_check.into());
     }
 
@@ -209,7 +218,7 @@ impl FluxLoadBalancerRuntime {
     pub(super) async fn run_health_check(&self, parallel: bool) {
         async fn check_one(
             backend: Backend,
-            check: Arc<dyn HealthCheck + Send + Sync + 'static>,
+            check: Arc<dyn FluxHealthCheck>,
             health: Arc<HashMap<u64, FluxBackendHealth>>,
         ) {
             let error = check.check(&backend).await.err();
