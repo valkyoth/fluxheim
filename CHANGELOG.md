@@ -63,6 +63,9 @@ behavior when the change improves security or project direction.
   before handing pools to selection, status, and background-service code.
 - Return Fluxheim runtime-wrapped load-balancer pools from discovery so
   selection-mode construction no longer repeats Pingora container wrapping.
+- Keep the selector-facing backend-container trait implemented only by the
+  Fluxheim runtime wrapper, with raw Pingora container access confined inside
+  that adapter.
 
 ## 1.5.6 - 2026-06-06
 

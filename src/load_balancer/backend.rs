@@ -151,37 +151,19 @@ impl FluxBackendSet {
     }
 }
 
-pub(super) fn pingora_backend_set(inner: &PingoraLoadBalancer) -> Arc<BTreeSet<Backend>> {
-    inner.backends().get_backend()
-}
-
-pub(super) fn pingora_backend_ready(inner: &PingoraLoadBalancer, backend: &Backend) -> bool {
-    inner.backends().ready(backend)
-}
-
 pub(super) trait BackendContainer {
     fn backend_set(&self) -> Arc<BTreeSet<Backend>>;
 
     fn backend_ready(&self, backend: &Backend) -> bool;
 }
 
-impl BackendContainer for PingoraLoadBalancer {
-    fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
-        pingora_backend_set(self)
-    }
-
-    fn backend_ready(&self, backend: &Backend) -> bool {
-        pingora_backend_ready(self, backend)
-    }
-}
-
 impl BackendContainer for FluxLoadBalancerRuntime {
     fn backend_set(&self) -> Arc<BTreeSet<Backend>> {
-        pingora_backend_set(&self.inner)
+        self.inner.backends().get_backend()
     }
 
     fn backend_ready(&self, backend: &Backend) -> bool {
-        pingora_backend_ready(&self.inner, backend)
+        self.inner.backends().ready(backend)
     }
 }
 
