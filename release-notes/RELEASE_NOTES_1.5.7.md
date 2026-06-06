@@ -23,6 +23,8 @@ results as far as possible.
   as an adapter.
 - Route runtime backend stats, bounded-load weight accounting, and disabled
   upstream parsing through the Fluxheim backend identity/adapter layer.
+- Move slow-start state regression coverage onto Fluxheim backend identities,
+  keeping Pingora backend construction only in runtime-selection tests.
 - Preserve existing Pingora selector/background-service adapters while the
   native backend set and identity boundary are introduced, keeping this first
   1.5.7 slice behavior-preserving.

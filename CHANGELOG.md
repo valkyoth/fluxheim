@@ -30,6 +30,8 @@ behavior when the change improves security or project direction.
   adapter at the current runtime boundary.
 - Route runtime backend stats, bounded-load weight accounting, and disabled
   upstream parsing through the same backend identity/adapter layer.
+- Move slow-start state regression coverage onto Fluxheim backend identities,
+  keeping Pingora backend construction only in runtime-selection tests.
 
 ## 1.5.6 - 2026-06-06
 

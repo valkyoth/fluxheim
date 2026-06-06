@@ -27,6 +27,8 @@ mod policy;
 mod selection;
 mod state;
 
+#[cfg(test)]
+use self::backend::BackendIdentity;
 use self::discovery::{
     background_maglev_service_for, background_service_for, configured_load_balancer,
     configured_maglev_table,
@@ -1329,7 +1331,7 @@ where
         .backends()
         .get_backend()
         .iter()
-        .map(|backend| backend.weight)
+        .map(|backend| backend.weight())
         .collect()
 }
 
@@ -1341,8 +1343,6 @@ mod tests {
     use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};
 
-    use pingora::lb::Backend;
-
     use crate::config::{
         LoadBalanceConfig, LoadBalanceHealthCheckConfig, LoadBalanceHealthCheckExpectedStatusRange,
         LoadBalanceHealthCheckProtocol, LoadBalanceManagedCookieSameSite,
@@ -1351,6 +1351,7 @@ mod tests {
     };
     use crate::http_types::PingoraRequestHeader as RequestHeader;
 
+    use super::backend::{BackendIdentity, FluxBackend};
     use super::persistence::{MAX_PERSISTENCE_KEY_BYTES, cookie_key, request_header_key};
     use super::selection::{fnv1a64_with_seed, least_connections_score_is_lower};
     use super::state::PassiveBackendHealth;
@@ -1370,7 +1371,7 @@ mod tests {
         RequestHeader::build("GET", b"/app?id=42", None).unwrap()
     }
 
-    fn slow_start_blocking_sample(backend: &Backend) -> u64 {
+    fn slow_start_blocking_sample(backend: &impl BackendIdentity) -> u64 {
         let key = backend_key(backend);
         (0u64..10_000)
             .find(|sample| fnv1a64_with_seed(&sample.to_le_bytes(), key) % 1000 >= 1)
@@ -2459,7 +2460,7 @@ mod tests {
             enabled: true,
             duration_secs: 60,
         });
-        let backend = Backend::new("127.0.0.1:3000").unwrap();
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
         state
             .sample_counter
             .store(slow_start_blocking_sample(&backend), Ordering::Relaxed);
@@ -2478,7 +2479,7 @@ mod tests {
             enabled: true,
             duration_secs: 60,
         });
-        let backend = Backend::new("127.0.0.1:3000").unwrap();
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
         state
             .backends
             .lock()
@@ -2520,7 +2521,7 @@ mod tests {
             enabled: true,
             duration_secs: 60,
         }));
-        let backend = Backend::new("127.0.0.1:3000").unwrap();
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
         let key = backend_key(&backend);
         slow_start
             .backends
