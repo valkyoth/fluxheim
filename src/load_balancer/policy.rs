@@ -13,6 +13,7 @@ use super::state::{
 };
 use super::{
     LoadBalancerBackendRuntimeStats, LoadBalancerCircuitState, LoadBalancerRuntimeBackendState,
+    MAX_RUNTIME_BACKEND_WEIGHT,
 };
 
 const MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES: usize = 4096;
@@ -58,6 +59,26 @@ struct RuntimeBackendPolicyOverrideState {
     weights: std::collections::HashMap<u64, usize>,
     weight_changed_at_unix_secs: std::collections::HashMap<u64, u64>,
     changed_at_unix_secs: std::collections::HashMap<u64, u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub(crate) struct RuntimeBackendPolicySnapshot {
+    pub(crate) states: Vec<RuntimeBackendPolicyStateSnapshot>,
+    pub(crate) weights: Vec<RuntimeBackendPolicyWeightSnapshot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub(crate) struct RuntimeBackendPolicyStateSnapshot {
+    pub(crate) key: u64,
+    pub(crate) state: LoadBalancerRuntimeBackendState,
+    pub(crate) changed_at_unix_secs: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub(crate) struct RuntimeBackendPolicyWeightSnapshot {
+    pub(crate) key: u64,
+    pub(crate) weight: usize,
+    pub(crate) changed_at_unix_secs: u64,
 }
 
 impl BackendSelectionPolicy {
@@ -205,6 +226,17 @@ impl BackendSelectionPolicy {
     pub(super) fn prune_stale(&self, live_keys: &std::collections::HashSet<u64>) {
         self.runtime.prune_stale(live_keys);
         self.health_weights.prune_stale(live_keys);
+    }
+
+    pub(crate) fn runtime_snapshot(&self) -> RuntimeBackendPolicySnapshot {
+        self.runtime.snapshot()
+    }
+
+    pub(crate) fn restore_runtime_snapshot(
+        &self,
+        snapshot: &RuntimeBackendPolicySnapshot,
+    ) -> Result<(), &'static str> {
+        self.runtime.restore_snapshot(snapshot)
     }
 
     fn runtime_backend_state(&self, key: u64) -> Option<LoadBalancerRuntimeBackendState> {
@@ -405,6 +437,121 @@ impl RuntimeBackendPolicyOverrides {
             .weight_changed_at_unix_secs
             .retain(|key, _| live_keys.contains(key) || retained_override_keys.contains(key));
     }
+
+    fn snapshot(&self) -> RuntimeBackendPolicySnapshot {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut states = Vec::with_capacity(
+            state
+                .drain
+                .len()
+                .saturating_add(state.disabled.len())
+                .saturating_add(state.forced_down.len()),
+        );
+        states.extend(
+            state
+                .drain
+                .iter()
+                .copied()
+                .map(|key| RuntimeBackendPolicyStateSnapshot {
+                    key,
+                    state: LoadBalancerRuntimeBackendState::Drained,
+                    changed_at_unix_secs: state
+                        .changed_at_unix_secs
+                        .get(&key)
+                        .copied()
+                        .unwrap_or(0),
+                }),
+        );
+        states.extend(state.disabled.iter().copied().map(|key| {
+            RuntimeBackendPolicyStateSnapshot {
+                key,
+                state: LoadBalancerRuntimeBackendState::Disabled,
+                changed_at_unix_secs: state.changed_at_unix_secs.get(&key).copied().unwrap_or(0),
+            }
+        }));
+        states.extend(state.forced_down.iter().copied().map(|key| {
+            RuntimeBackendPolicyStateSnapshot {
+                key,
+                state: LoadBalancerRuntimeBackendState::ForcedDown,
+                changed_at_unix_secs: state.changed_at_unix_secs.get(&key).copied().unwrap_or(0),
+            }
+        }));
+        states.sort_by_key(|entry| (entry.key, entry.state.as_str()));
+
+        let mut weights = state
+            .weights
+            .iter()
+            .map(|(key, weight)| RuntimeBackendPolicyWeightSnapshot {
+                key: *key,
+                weight: *weight,
+                changed_at_unix_secs: state
+                    .weight_changed_at_unix_secs
+                    .get(key)
+                    .copied()
+                    .unwrap_or(0),
+            })
+            .collect::<Vec<_>>();
+        weights.sort_by_key(|entry| entry.key);
+        RuntimeBackendPolicySnapshot { states, weights }
+    }
+
+    fn restore_snapshot(
+        &self,
+        snapshot: &RuntimeBackendPolicySnapshot,
+    ) -> Result<(), &'static str> {
+        if snapshot.states.len() > MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES
+            || snapshot.weights.len() > MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES
+        {
+            return Err("load balancer runtime override snapshot exceeds entry limit");
+        }
+
+        let mut seen_states = std::collections::HashSet::with_capacity(snapshot.states.len());
+        let mut next = RuntimeBackendPolicyOverrideState::default();
+        for entry in &snapshot.states {
+            if !seen_states.insert(entry.key) {
+                return Err("load balancer runtime override snapshot has duplicate state keys");
+            }
+            match entry.state {
+                LoadBalancerRuntimeBackendState::Drained => {
+                    next.drain.insert(entry.key);
+                }
+                LoadBalancerRuntimeBackendState::Disabled => {
+                    next.disabled.insert(entry.key);
+                }
+                LoadBalancerRuntimeBackendState::ForcedDown => {
+                    next.forced_down.insert(entry.key);
+                }
+                LoadBalancerRuntimeBackendState::Normal
+                | LoadBalancerRuntimeBackendState::ManualResume => {
+                    return Err("load balancer runtime override snapshot has non-persistent state");
+                }
+            }
+            next.changed_at_unix_secs
+                .insert(entry.key, entry.changed_at_unix_secs);
+        }
+
+        let mut seen_weights = std::collections::HashSet::with_capacity(snapshot.weights.len());
+        for entry in &snapshot.weights {
+            if !seen_weights.insert(entry.key) {
+                return Err("load balancer runtime override snapshot has duplicate weight keys");
+            }
+            if entry.weight == 0 || entry.weight > MAX_RUNTIME_BACKEND_WEIGHT {
+                return Err("load balancer runtime override snapshot has invalid weight");
+            }
+            next.weights.insert(entry.key, entry.weight);
+            next.weight_changed_at_unix_secs
+                .insert(entry.key, entry.changed_at_unix_secs);
+        }
+
+        *self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+        Ok(())
+    }
 }
 
 fn runtime_override_key_has_capacity(keys: &std::collections::HashSet<u64>, key: u64) -> bool {
@@ -559,6 +706,49 @@ mod tests {
             MAX_RUNTIME_BACKEND_POLICY_OVERRIDE_ENTRIES as u64,
             LoadBalancerRuntimeBackendState::Disabled
         ));
+    }
+
+    #[test]
+    fn runtime_backend_policy_snapshot_restores_overrides_atomically() {
+        let policy = BackendSelectionPolicy::default();
+        assert!(policy.set_runtime_backend_state(10, LoadBalancerRuntimeBackendState::Disabled));
+        assert!(policy.set_runtime_backend_state(20, LoadBalancerRuntimeBackendState::ForcedDown));
+        assert!(policy.set_runtime_backend_weight(10, Some(7)));
+
+        let snapshot = policy.runtime_snapshot();
+        let restored = BackendSelectionPolicy::default();
+        restored.restore_runtime_snapshot(&snapshot).unwrap();
+
+        assert_eq!(
+            restored.runtime_backend_state(10),
+            Some(LoadBalancerRuntimeBackendState::Disabled)
+        );
+        assert_eq!(
+            restored.runtime_backend_state(20),
+            Some(LoadBalancerRuntimeBackendState::ForcedDown)
+        );
+        assert_eq!(restored.runtime_backend_weight(10), Some(7));
+    }
+
+    #[test]
+    fn runtime_backend_policy_rejects_invalid_snapshot_before_replacing() {
+        let policy = BackendSelectionPolicy::default();
+        assert!(policy.set_runtime_backend_state(10, LoadBalancerRuntimeBackendState::Disabled));
+
+        let invalid = RuntimeBackendPolicySnapshot {
+            states: vec![RuntimeBackendPolicyStateSnapshot {
+                key: 20,
+                state: LoadBalancerRuntimeBackendState::Normal,
+                changed_at_unix_secs: 0,
+            }],
+            weights: Vec::new(),
+        };
+
+        assert!(policy.restore_runtime_snapshot(&invalid).is_err());
+        assert_eq!(
+            policy.runtime_backend_state(10),
+            Some(LoadBalancerRuntimeBackendState::Disabled)
+        );
     }
 }
 

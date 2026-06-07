@@ -50,6 +50,18 @@ struct LoadBalancerPersistenceEntry {
     expires_at: Instant,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub(crate) struct LoadBalancerPersistenceSnapshot {
+    pub(crate) entries: Vec<LoadBalancerPersistenceEntrySnapshot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub(crate) struct LoadBalancerPersistenceEntrySnapshot {
+    pub(crate) key: Vec<u8>,
+    pub(crate) backend_key: u64,
+    pub(crate) ttl_remaining_secs: u64,
+}
+
 impl LoadBalancerPersistenceState {
     pub(super) fn from_config(config: &LoadBalancePersistenceConfig) -> Self {
         Self {
@@ -189,6 +201,80 @@ impl LoadBalancerPersistenceState {
         table.retain(|_, entry| {
             entry.expires_at > now && live_backend_keys.contains(&entry.backend_key)
         });
+    }
+
+    pub(crate) fn snapshot(
+        &self,
+        live_backend_keys: &std::collections::HashSet<u64>,
+    ) -> LoadBalancerPersistenceSnapshot {
+        let now = Instant::now();
+        let table = self
+            .table
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut entries = table
+            .iter()
+            .filter(|(_, entry)| {
+                entry.expires_at > now && live_backend_keys.contains(&entry.backend_key)
+            })
+            .map(|(key, entry)| LoadBalancerPersistenceEntrySnapshot {
+                key: key.clone(),
+                backend_key: entry.backend_key,
+                ttl_remaining_secs: entry
+                    .expires_at
+                    .saturating_duration_since(now)
+                    .as_secs()
+                    .max(1)
+                    .min(self.ttl.as_secs()),
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            left.backend_key
+                .cmp(&right.backend_key)
+                .then_with(|| left.key.cmp(&right.key))
+        });
+        LoadBalancerPersistenceSnapshot { entries }
+    }
+
+    pub(crate) fn restore_snapshot(
+        &self,
+        snapshot: &LoadBalancerPersistenceSnapshot,
+        live_backend_keys: &std::collections::HashSet<u64>,
+    ) -> Result<usize, &'static str> {
+        if snapshot.entries.len() > self.table_max_entries {
+            return Err("load balancer persistence snapshot exceeds table limit");
+        }
+        let mut next = std::collections::HashMap::with_capacity(snapshot.entries.len());
+        let now = Instant::now();
+        for entry in &snapshot.entries {
+            if entry.key.is_empty() || entry.key.len() > MAX_PERSISTENCE_KEY_BYTES {
+                return Err("load balancer persistence snapshot has invalid key");
+            }
+            if entry.ttl_remaining_secs == 0 || entry.ttl_remaining_secs > self.ttl.as_secs() {
+                return Err("load balancer persistence snapshot has invalid ttl");
+            }
+            if !live_backend_keys.contains(&entry.backend_key) {
+                continue;
+            }
+            if next
+                .insert(
+                    entry.key.clone(),
+                    LoadBalancerPersistenceEntry {
+                        backend_key: entry.backend_key,
+                        expires_at: now + Duration::from_secs(entry.ttl_remaining_secs),
+                    },
+                )
+                .is_some()
+            {
+                return Err("load balancer persistence snapshot has duplicate keys");
+            }
+        }
+        let restored = next.len();
+        *self
+            .table
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+        Ok(restored)
     }
 
     pub(super) fn new_managed_cookie(&self) -> Option<(Vec<u8>, ManagedAffinityCookie)> {
@@ -512,6 +598,57 @@ mod tests {
 
         assert_eq!(state.lookup(b"client-a"), None);
         assert_eq!(state.lookup(b"client-b"), Some(20));
+    }
+
+    #[test]
+    fn persistence_snapshot_restores_live_entries_with_remaining_ttl() {
+        let state = LoadBalancerPersistenceState::from_config(&LoadBalancePersistenceConfig {
+            enabled: true,
+            ttl_secs: 60,
+            table_max_entries: 16,
+            ..LoadBalancePersistenceConfig::default()
+        });
+        state.record(b"client-a", 10);
+        state.record(b"client-b", 20);
+
+        let live_keys = [10].into_iter().collect::<std::collections::HashSet<_>>();
+        let snapshot = state.snapshot(&live_keys);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].key, b"client-a");
+
+        let restored = LoadBalancerPersistenceState::from_config(&LoadBalancePersistenceConfig {
+            enabled: true,
+            ttl_secs: 60,
+            table_max_entries: 16,
+            ..LoadBalancePersistenceConfig::default()
+        });
+        assert_eq!(restored.restore_snapshot(&snapshot, &live_keys).unwrap(), 1);
+        assert_eq!(restored.lookup(b"client-a"), Some(10));
+        assert_eq!(restored.lookup(b"client-b"), None);
+    }
+
+    #[test]
+    fn persistence_snapshot_rejects_invalid_entries_before_replacing() {
+        let state = LoadBalancerPersistenceState::from_config(&LoadBalancePersistenceConfig {
+            enabled: true,
+            ttl_secs: 60,
+            table_max_entries: 16,
+            ..LoadBalancePersistenceConfig::default()
+        });
+        state.record(b"client-a", 10);
+
+        let live_keys = [10].into_iter().collect::<std::collections::HashSet<_>>();
+        let invalid = LoadBalancerPersistenceSnapshot {
+            entries: vec![LoadBalancerPersistenceEntrySnapshot {
+                key: b"client-b".to_vec(),
+                backend_key: 10,
+                ttl_remaining_secs: 0,
+            }],
+        };
+
+        assert!(state.restore_snapshot(&invalid, &live_keys).is_err());
+        assert_eq!(state.lookup(b"client-a"), Some(10));
+        assert_eq!(state.lookup(b"client-b"), None);
     }
 
     #[test]

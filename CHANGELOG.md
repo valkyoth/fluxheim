@@ -19,6 +19,10 @@ behavior when the change improves security or project direction.
   persisted state must be ignored and rebuilt, not poison a pool; this release
   does not add cross-node state sync, runtime add/remove-member, dynamic
   discovery control planes, UDP/GSLB, or Wasm/iRules/Lua scripting.
+- Add a versioned load-balancer runtime state snapshot API for runtime member
+  overrides and local persistence tables. Snapshot restore validates version,
+  entry limits, duplicate keys, override states, runtime weights, persistence
+  key size, TTLs, and live backend membership before replacing current state.
 
 ## 1.5.8 - 2026-06-07
 

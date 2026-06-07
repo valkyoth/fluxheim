@@ -11,6 +11,14 @@ Fluxheim 1.5.9 starts the restart-persistent load-balancer state line.
 - Fail-closed recovery semantics: corrupt, oversized, or incompatible state is
   ignored and rebuilt instead of poisoning a runtime pool.
 
+## Added
+
+- A versioned load-balancer runtime state snapshot API for runtime member
+  overrides and local persistence tables.
+- Restore validation for snapshot version, entry limits, duplicate keys,
+  persistent runtime states, runtime weights, persistence key sizes, TTLs, and
+  live backend membership before current runtime state is replaced.
+
 ## Stop Line
 
 This release does not add cross-node state sync, runtime add/remove-member,

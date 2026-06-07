@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::http_types::PingoraRequestHeader as RequestHeader;
 use pingora::services::ServiceWithDependents;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{
     LoadBalanceHealthCheckExpectedStatusRange, LoadBalancePassiveHealthConfig,
@@ -35,10 +35,12 @@ use self::discovery::{
 };
 pub(crate) use self::key::{backend_authority_key, backend_key};
 use self::persistence::{
-    LoadBalanceKeySource, LoadBalancerPersistenceState, ManagedAffinityCookie,
+    LoadBalanceKeySource, LoadBalancerPersistenceSnapshot, LoadBalancerPersistenceState,
+    ManagedAffinityCookie,
 };
 use self::policy::{
-    BackendSelectionPolicy, BackendStatsInputs, backend_aliases, load_balancer_backend_stats,
+    BackendSelectionPolicy, BackendStatsInputs, RuntimeBackendPolicySnapshot, backend_aliases,
+    load_balancer_backend_stats,
 };
 use self::selection::{
     LoadBalancerSelectInputs, MaglevTable, SelectionPass, select_bounded_load_consistent,
@@ -132,7 +134,7 @@ pub struct LoadBalancedUpstreamOutcome {
     pub ejected: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoadBalancerRuntimeBackendState {
     Normal,
@@ -257,6 +259,20 @@ pub struct LoadBalancerQueueRuntimeStats {
     pub retry_interval_ms: u64,
     pub waiting: usize,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct LoadBalancerRuntimeStateSnapshot {
+    version: u16,
+    runtime_overrides: RuntimeBackendPolicySnapshot,
+    persistence: Option<LoadBalancerPersistenceSnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LoadBalancerRuntimeStateRestore {
+    pub persistence_entries: usize,
+}
+
+const LOAD_BALANCER_RUNTIME_STATE_VERSION: u16 = 1;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct LoadBalancerBackendRuntimeStats {
@@ -995,6 +1011,46 @@ impl UpstreamLoadBalancer {
             .as_ref()
             .map_or(0, |persistence| persistence.clear())
     }
+
+    pub fn runtime_state_snapshot(&self) -> LoadBalancerRuntimeStateSnapshot {
+        let live_keys = self.live_backend_keys();
+        LoadBalancerRuntimeStateSnapshot {
+            version: LOAD_BALANCER_RUNTIME_STATE_VERSION,
+            runtime_overrides: self.backend_policy.runtime_snapshot(),
+            persistence: self
+                .persistence
+                .as_ref()
+                .map(|persistence| persistence.snapshot(&live_keys)),
+        }
+    }
+
+    pub fn restore_runtime_state_snapshot(
+        &self,
+        snapshot: &LoadBalancerRuntimeStateSnapshot,
+    ) -> io::Result<LoadBalancerRuntimeStateRestore> {
+        if snapshot.version != LOAD_BALANCER_RUNTIME_STATE_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported load balancer runtime state version",
+            ));
+        }
+        self.backend_policy
+            .restore_runtime_snapshot(&snapshot.runtime_overrides)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        let live_keys = self.live_backend_keys();
+        let persistence_entries = if let (Some(persistence), Some(snapshot)) =
+            (&self.persistence, &snapshot.persistence)
+        {
+            persistence
+                .restore_snapshot(snapshot, &live_keys)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+        } else {
+            0
+        };
+        Ok(LoadBalancerRuntimeStateRestore {
+            persistence_entries,
+        })
+    }
 }
 
 fn backend_runtime_status_eligible(backend: &LoadBalancerBackendRuntimeStats) -> bool {
@@ -1631,6 +1687,77 @@ mod tests {
                 .map(|backend| backend.persistence_entry_count)
                 .sum::<usize>(),
             2
+        );
+    }
+
+    #[test]
+    fn runtime_state_snapshot_restores_overrides_and_persistence() {
+        install_test_crypto_provider();
+        let config = ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                persistence: LoadBalancePersistenceConfig {
+                    enabled: true,
+                    ttl_secs: 60,
+                    table_max_entries: 16,
+                    ..LoadBalancePersistenceConfig::default()
+                },
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        };
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&config)
+            .unwrap()
+            .unwrap();
+
+        let first = balancer
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))))
+            .unwrap();
+        assert_eq!(first.backend.addr.to_string(), "127.0.0.1:3000");
+        drop(first);
+        balancer
+            .set_runtime_backend_state(
+                "127.0.0.1:3001",
+                LoadBalancerRuntimeBackendState::ForcedDown,
+            )
+            .unwrap();
+        balancer
+            .set_runtime_backend_weight("127.0.0.1:3000", Some(7))
+            .unwrap();
+
+        let snapshot = balancer.runtime_state_snapshot();
+        let restored = UpstreamLoadBalancer::from_proxy_config(&config)
+            .unwrap()
+            .unwrap();
+        let restore = restored.restore_runtime_state_snapshot(&snapshot).unwrap();
+        assert_eq!(restore.persistence_entries, 1);
+
+        let stats = restored.runtime_stats();
+        let backend_a = stats
+            .backends
+            .iter()
+            .find(|backend| backend.address.as_deref() == Some("127.0.0.1:3000"))
+            .expect("backend a");
+        assert_eq!(backend_a.runtime_weight_override, Some(7));
+        assert_eq!(backend_a.persistence_entry_count, 1);
+        let backend_b = stats
+            .backends
+            .iter()
+            .find(|backend| backend.address.as_deref() == Some("127.0.0.1:3001"))
+            .expect("backend b");
+        assert_eq!(
+            backend_b.runtime_state_override,
+            Some(LoadBalancerRuntimeBackendState::ForcedDown)
+        );
+
+        let second = restored
+            .select(&request(), Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))))
+            .unwrap();
+        assert_eq!(second.backend.addr.to_string(), "127.0.0.1:3000");
+        assert_eq!(
+            second.persistence_outcome,
+            Some(LoadBalancerPersistenceOutcome::Hit)
         );
     }
 
