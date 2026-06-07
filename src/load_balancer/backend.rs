@@ -95,6 +95,7 @@ pub(super) struct FluxLoadBalancerRuntime {
     discovery: Arc<dyn FluxBackendDiscovery>,
     health_check: Option<Arc<dyn FluxHealthCheck>>,
     snapshot: ArcSwap<FluxBackendSnapshot>,
+    mutation_lock: Mutex<()>,
     update_frequency: Option<Duration>,
     health_check_frequency: Option<Duration>,
     parallel_health_check: bool,
@@ -106,6 +107,7 @@ impl FluxLoadBalancerRuntime {
             discovery: discovery.into(),
             health_check: None,
             snapshot: Default::default(),
+            mutation_lock: Mutex::new(()),
             update_frequency: None,
             health_check_frequency: None,
             parallel_health_check: false,
@@ -161,6 +163,140 @@ impl FluxLoadBalancerRuntime {
         if let Some(backend_health) = self.snapshot.load().health.get(&backend_key(backend)) {
             backend_health.enable(enabled);
         }
+    }
+
+    pub(super) fn runtime_backend_set_mutable(&self) -> bool {
+        self.update_frequency.is_none()
+    }
+
+    pub(super) fn add_runtime_backend(&self, backend: Backend) -> io::Result<usize> {
+        if !self.runtime_backend_set_mutable() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime backend-set mutation is available only for static upstream pools",
+            ));
+        }
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let snapshot = self.snapshot.load_full();
+        let key = backend_key(&backend);
+        if snapshot
+            .backends
+            .iter()
+            .any(|existing| backend_key(existing) == key)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "load balancer member is already configured in this pool",
+            ));
+        }
+
+        let mut next_backends = (*snapshot.backends).clone();
+        next_backends.insert(backend);
+        let mut next_health = (*snapshot.health).clone();
+        next_health.entry(key).or_default();
+        let backend_count = next_backends.len();
+        self.snapshot.store(Arc::new(FluxBackendSnapshot {
+            backends: Arc::new(next_backends),
+            health: Arc::new(next_health),
+        }));
+        Ok(backend_count)
+    }
+
+    pub(super) fn remove_runtime_backend(&self, backend: &Backend) -> io::Result<usize> {
+        if !self.runtime_backend_set_mutable() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime backend-set mutation is available only for static upstream pools",
+            ));
+        }
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let snapshot = self.snapshot.load_full();
+        let key = backend_key(backend);
+        if !snapshot
+            .backends
+            .iter()
+            .any(|existing| backend_key(existing) == key)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "load balancer member is not configured in this pool",
+            ));
+        }
+
+        let mut next_backends = (*snapshot.backends).clone();
+        next_backends.retain(|existing| backend_key(existing) != key);
+        let mut next_health = (*snapshot.health).clone();
+        next_health.remove(&key);
+        let backend_count = next_backends.len();
+        self.snapshot.store(Arc::new(FluxBackendSnapshot {
+            backends: Arc::new(next_backends),
+            health: Arc::new(next_health),
+        }));
+        Ok(backend_count)
+    }
+
+    pub(super) fn update_runtime_backend(
+        &self,
+        current: &Backend,
+        updated: Backend,
+    ) -> io::Result<usize> {
+        if !self.runtime_backend_set_mutable() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime backend-set mutation is available only for static upstream pools",
+            ));
+        }
+        let _guard = self
+            .mutation_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let snapshot = self.snapshot.load_full();
+        let current_key = backend_key(current);
+        let updated_key = backend_key(&updated);
+        if !snapshot
+            .backends
+            .iter()
+            .any(|existing| backend_key(existing) == current_key)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "load balancer member is not configured in this pool",
+            ));
+        }
+        if current_key != updated_key
+            && snapshot
+                .backends
+                .iter()
+                .any(|existing| backend_key(existing) == updated_key)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "updated load balancer member address is already configured in this pool",
+            ));
+        }
+
+        let mut next_backends = (*snapshot.backends).clone();
+        next_backends.retain(|existing| backend_key(existing) != current_key);
+        next_backends.insert(updated);
+        let mut next_health = (*snapshot.health).clone();
+        if current_key != updated_key {
+            let health = next_health.remove(&current_key).unwrap_or_default();
+            next_health.insert(updated_key, health);
+        } else {
+            next_health.entry(updated_key).or_default();
+        }
+        let backend_count = next_backends.len();
+        self.snapshot.store(Arc::new(FluxBackendSnapshot {
+            backends: Arc::new(next_backends),
+            health: Arc::new(next_health),
+        }));
+        Ok(backend_count)
     }
 
     pub(super) async fn run(

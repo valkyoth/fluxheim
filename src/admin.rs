@@ -28,7 +28,9 @@ use crate::load_balancer::LoadBalancerRuntimeBackendState;
 use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
 #[cfg(feature = "load-balancer")]
 use crate::proxy::{
-    LoadBalancerMemberStateRequest, LoadBalancerMemberWeightRequest,
+    LoadBalancerMemberAddRequest, LoadBalancerMemberRemoveRequest,
+    LoadBalancerMemberSetMutationResult, LoadBalancerMemberStateRequest,
+    LoadBalancerMemberUpdateRequest, LoadBalancerMemberWeightRequest,
     LoadBalancerPersistenceClearRequest,
 };
 use crate::reload::{ReloadReason, classify_reload};
@@ -656,6 +658,41 @@ impl AdminApp {
                     header_value(headers, "x-fluxheim-lb-weight")
                         .or_else(|| query_param(query, "weight")),
                 ),
+            ("POST", "/_fluxheim/load-balancer/member-add") => self
+                .load_balancer_member_add_response(
+                    header_value(headers, "x-fluxheim-lb-vhost")
+                        .or_else(|| query_param(query, "vhost")),
+                    header_value(headers, "x-fluxheim-lb-route")
+                        .or_else(|| query_param(query, "route")),
+                    header_value(headers, "x-fluxheim-lb-member")
+                        .or_else(|| query_param(query, "member")),
+                    header_value(headers, "x-fluxheim-lb-weight")
+                        .or_else(|| query_param(query, "weight")),
+                ),
+            ("POST", "/_fluxheim/load-balancer/member-remove") => self
+                .load_balancer_member_remove_response(
+                    header_value(headers, "x-fluxheim-lb-vhost")
+                        .or_else(|| query_param(query, "vhost")),
+                    header_value(headers, "x-fluxheim-lb-route")
+                        .or_else(|| query_param(query, "route")),
+                    header_value(headers, "x-fluxheim-lb-member")
+                        .or_else(|| query_param(query, "member")),
+                ),
+            ("POST", "/_fluxheim/load-balancer/member-update") => self
+                .load_balancer_member_update_response(
+                    header_value(headers, "x-fluxheim-lb-vhost")
+                        .or_else(|| query_param(query, "vhost")),
+                    header_value(headers, "x-fluxheim-lb-route")
+                        .or_else(|| query_param(query, "route")),
+                    header_value(headers, "x-fluxheim-lb-member")
+                        .or_else(|| query_param(query, "member")),
+                    header_value(headers, "x-fluxheim-lb-new-member")
+                        .or_else(|| header_value(headers, "x-fluxheim-lb-address"))
+                        .or_else(|| query_param(query, "new_member"))
+                        .or_else(|| query_param(query, "address")),
+                    header_value(headers, "x-fluxheim-lb-weight")
+                        .or_else(|| query_param(query, "weight")),
+                ),
             ("POST", "/_fluxheim/load-balancer/persistence/clear") => self
                 .load_balancer_persistence_clear_response(
                     header_value(headers, "x-fluxheim-lb-vhost")
@@ -786,6 +823,9 @@ impl AdminApp {
                 | "/_fluxheim/self-heal/report"
                 | "/_fluxheim/load-balancer/member-state"
                 | "/_fluxheim/load-balancer/member-weight"
+                | "/_fluxheim/load-balancer/member-add"
+                | "/_fluxheim/load-balancer/member-remove"
+                | "/_fluxheim/load-balancer/member-update"
                 | "/_fluxheim/load-balancer/persistence/clear"
                 | "/_fluxheim/cache/purge"
                 | "/_fluxheim/cache/purge-bulk"
@@ -1203,6 +1243,243 @@ impl AdminApp {
     }
 
     #[cfg(feature = "load-balancer")]
+    fn load_balancer_member_add_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        member: Option<&str>,
+        weight: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer vhost is required");
+        };
+        let Some(member) = member else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer member is required");
+        };
+        let weight = match weight {
+            Some(weight) => match parse_load_balancer_member_weight(weight) {
+                Ok(weight) => weight,
+                Err(error) => return error_response(StatusCode::BAD_REQUEST, error),
+            },
+            None => 1,
+        };
+        let result = self
+            .proxy
+            .add_load_balancer_member(LoadBalancerMemberAddRequest {
+                vhost,
+                route,
+                member,
+                weight,
+            });
+        self.load_balancer_member_set_response(result, vhost, route, member, "member_add")
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_member_remove_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        member: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer vhost is required");
+        };
+        let Some(member) = member else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer member is required");
+        };
+        let result = self
+            .proxy
+            .remove_load_balancer_member(LoadBalancerMemberRemoveRequest {
+                vhost,
+                route,
+                member,
+            });
+        self.load_balancer_member_set_response(result, vhost, route, member, "member_remove")
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_member_update_response(
+        &self,
+        vhost: Option<&str>,
+        route: Option<&str>,
+        member: Option<&str>,
+        updated_member: Option<&str>,
+        weight: Option<&str>,
+    ) -> AdminResponse {
+        let Some(vhost) = vhost else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer vhost is required");
+        };
+        let Some(member) = member else {
+            return error_response(StatusCode::BAD_REQUEST, "load balancer member is required");
+        };
+        let weight = match weight {
+            Some(weight) => match parse_load_balancer_member_weight(weight) {
+                Ok(weight) => Some(weight),
+                Err(error) => return error_response(StatusCode::BAD_REQUEST, error),
+            },
+            None => None,
+        };
+        let result = self
+            .proxy
+            .update_load_balancer_member(LoadBalancerMemberUpdateRequest {
+                vhost,
+                route,
+                member,
+                updated_member,
+                weight,
+            });
+        self.load_balancer_member_set_response(result, vhost, route, member, "member_update")
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_member_set_response(
+        &self,
+        result: io::Result<LoadBalancerMemberSetMutationResult>,
+        vhost: &str,
+        route: Option<&str>,
+        member: &str,
+        event: &'static str,
+    ) -> AdminResponse {
+        match result {
+            Ok(result) => {
+                let scope = if result.route.is_some() {
+                    "route"
+                } else {
+                    "vhost"
+                };
+                #[cfg(not(feature = "privacy-mode"))]
+                log::info!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member set updated vhost={} route={} scope={} member={} operation={} configured_weight={} backend_count={} address={} previous_address={} alias={} persistent={}",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.operation.as_str(),
+                    result.configured_weight,
+                    result.backend_count,
+                    result.address,
+                    result.previous_address.as_deref().unwrap_or(""),
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
+                );
+                #[cfg(feature = "privacy-mode")]
+                log::info!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member set updated vhost={} route={} scope={} member={} operation={} configured_weight={} backend_count={} alias={} persistent={}",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.operation.as_str(),
+                    result.configured_weight,
+                    result.backend_count,
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
+                );
+                log::info!(
+                    target: "fluxheim::audit",
+                    "load balancer member set updated vhost={} route={} scope={} member={} operation={} configured_weight={} backend_count={} alias={} persistent={}",
+                    result.vhost,
+                    result.route.as_deref().unwrap_or(""),
+                    scope,
+                    result.member,
+                    result.operation.as_str(),
+                    result.configured_weight,
+                    result.backend_count,
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
+                );
+                record_load_balancer_event(
+                    &result.vhost,
+                    result.route.as_deref(),
+                    load_balancer_metric_member_label(
+                        result.alias.as_deref(),
+                        result.member.as_str(),
+                    ),
+                    event,
+                );
+                let mut body = serde_json::Map::new();
+                body.insert("status".to_owned(), json!("ok"));
+                body.insert("vhost".to_owned(), json!(result.vhost));
+                body.insert("route".to_owned(), json!(result.route));
+                body.insert("scope".to_owned(), json!(scope));
+                body.insert("member".to_owned(), json!(result.member));
+                body.insert("operation".to_owned(), json!(result.operation));
+                body.insert(
+                    "configured_weight".to_owned(),
+                    json!(result.configured_weight),
+                );
+                body.insert("backend_count".to_owned(), json!(result.backend_count));
+                #[cfg(not(feature = "privacy-mode"))]
+                {
+                    body.insert("address".to_owned(), json!(result.address));
+                    body.insert(
+                        "previous_address".to_owned(),
+                        json!(result.previous_address),
+                    );
+                }
+                body.insert("alias".to_owned(), json!(result.alias));
+                body.insert("persistent".to_owned(), json!(result.persistent));
+                json_response_value(StatusCode::OK, &Value::Object(body))
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member set rejected invalid input vhost={} route={} member={} event={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    event,
+                    error
+                );
+                record_load_balancer_event(vhost, route, Some(member), "member_set_invalid");
+                error_response(StatusCode::BAD_REQUEST, &error.to_string())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member set target already exists vhost={} route={} member={} event={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    event,
+                    error
+                );
+                record_load_balancer_event(vhost, route, Some(member), "member_set_conflict");
+                error_response(StatusCode::CONFLICT, &error.to_string())
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member set blocked by active traffic vhost={} route={} member={} event={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    event,
+                    error
+                );
+                record_load_balancer_event(vhost, route, Some(member), "member_set_blocked");
+                error_response(StatusCode::CONFLICT, &error.to_string())
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                log::warn!(
+                    target: "fluxheim::load_balancer",
+                    "load balancer member set target not found vhost={} route={} member={} event={} error={}",
+                    vhost,
+                    route.unwrap_or(""),
+                    member,
+                    event,
+                    error
+                );
+                record_load_balancer_event(vhost, route, Some(member), "member_set_not_found");
+                error_response(StatusCode::NOT_FOUND, &error.to_string())
+            }
+            Err(error) => internal_error_response(&error),
+        }
+    }
+
+    #[cfg(feature = "load-balancer")]
     fn load_balancer_persistence_clear_response(
         &self,
         vhost: Option<&str>,
@@ -1295,6 +1572,48 @@ impl AdminApp {
         _route: Option<&str>,
         _member: Option<&str>,
         _state: Option<&str>,
+    ) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "load balancer support is not compiled in",
+        )
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    fn load_balancer_member_add_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _member: Option<&str>,
+        _weight: Option<&str>,
+    ) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "load balancer support is not compiled in",
+        )
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    fn load_balancer_member_remove_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _member: Option<&str>,
+    ) -> AdminResponse {
+        error_response(
+            StatusCode::BAD_REQUEST,
+            "load balancer support is not compiled in",
+        )
+    }
+
+    #[cfg(not(feature = "load-balancer"))]
+    fn load_balancer_member_update_response(
+        &self,
+        _vhost: Option<&str>,
+        _route: Option<&str>,
+        _member: Option<&str>,
+        _updated_member: Option<&str>,
+        _weight: Option<&str>,
     ) -> AdminResponse {
         error_response(
             StatusCode::BAD_REQUEST,
@@ -3570,6 +3889,18 @@ fn parse_load_balancer_runtime_weight(value: &str) -> Result<Option<usize>, &'st
     Ok(Some(weight))
 }
 
+#[cfg(feature = "load-balancer")]
+fn parse_load_balancer_member_weight(value: &str) -> Result<usize, &'static str> {
+    let value = value.trim();
+    let Ok(weight) = value.parse::<usize>() else {
+        return Err("load balancer member weight must be a number");
+    };
+    if weight == 0 || weight > crate::load_balancer::MAX_RUNTIME_BACKEND_WEIGHT {
+        return Err("load balancer member weight must be between 1 and 1000");
+    }
+    Ok(weight)
+}
+
 fn cache_purge_paths<'a>(headers: &'a HeaderMap, query: Option<&'a str>) -> Vec<&'a str> {
     let query_paths = query_params(query, "path");
     if !query_paths.is_empty() {
@@ -4187,6 +4518,73 @@ mod tests {
         let body: Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(body["effective_weight"], 1);
         assert_eq!(body["runtime_weight_override"], Value::Null);
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_member_set_endpoints_mutate_static_pool() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_admin_config());
+        let added = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-add",
+            Some("vhost=one&member=127.0.0.1:3003&weight=2"),
+            &auth_headers(),
+        );
+        assert_eq!(added.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&added.body).unwrap();
+        assert_eq!(body["status"], "ok");
+        assert_eq!(body["operation"], "added");
+        assert_eq!(body["member"], "127.0.0.1:3003");
+        assert_eq!(body["configured_weight"], 2);
+        assert_eq!(body["backend_count"], 3);
+        assert_eq!(body["persistent"], false);
+
+        let updated = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-update",
+            Some("vhost=one&member=127.0.0.1:3003&weight=4"),
+            &auth_headers(),
+        );
+        assert_eq!(updated.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&updated.body).unwrap();
+        assert_eq!(body["operation"], "updated");
+        assert_eq!(body["configured_weight"], 4);
+        assert_eq!(body["backend_count"], 3);
+
+        let status = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
+        assert_eq!(status.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&status.body).unwrap();
+        let pool = &body["load_balancer"]["vhosts"][0]["pool"];
+        assert_eq!(pool["backend_count"], 3);
+        let added_backend = pool["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|backend| backend["address"] == "127.0.0.1:3003")
+            .expect("added backend status");
+        assert_eq!(added_backend["weight"], 4);
+
+        let removed = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-remove",
+            Some("vhost=one&member=127.0.0.1:3003"),
+            &auth_headers(),
+        );
+        assert_eq!(removed.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&removed.body).unwrap();
+        assert_eq!(body["operation"], "removed");
+        assert_eq!(body["backend_count"], 2);
+
+        let status = app.handle("GET", "/_fluxheim/status", None, &auth_headers());
+        assert_eq!(status.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&status.body).unwrap();
+        assert_eq!(
+            body["load_balancer"]["vhosts"][0]["pool"]["backend_count"],
+            2
+        );
     }
 
     #[cfg(feature = "load-balancer")]

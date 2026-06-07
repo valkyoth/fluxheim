@@ -19,6 +19,15 @@ behavior when the change improves security or project direction.
   clear selector limitations for hash, ring, Maglev, and power-of-two policies.
   This release does not add xDS/Kubernetes/Consul discovery, UDP/GSLB, WAF,
   VPN/firewall appliance behavior, or Wasm/iRules/Lua scripting.
+- Add authenticated admin endpoints for static load-balancer pools:
+  `POST /_fluxheim/load-balancer/member-add`,
+  `POST /_fluxheim/load-balancer/member-remove`, and
+  `POST /_fluxheim/load-balancer/member-update`.
+- Publish backend-set and readiness changes as one atomic runtime snapshot, and
+  reject runtime backend-set mutations for DNS/file-discovery pools and Maglev
+  selectors in this release.
+- Require in-flight requests to drain before removing a member or retargeting it
+  to a new address.
 
 ## 1.5.9 - 2026-06-07
 

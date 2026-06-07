@@ -374,6 +374,45 @@ Successful and rejected member-state operations are logged under the
 `fluxheim_load_balancer_events_total` with bounded events `member_state`,
 `member_state_invalid`, and `member_state_not_found`.
 
+Authenticated admins can also mutate the runtime backend set for static
+upstream pools:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/member-add?vhost=app&member=127.0.0.1:3002&weight=2"
+
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/member-update?vhost=app&member=127.0.0.1:3002&weight=5"
+
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/member-remove?vhost=app&member=127.0.0.1:3002"
+```
+
+`member-add` takes a socket-address `member` and optional numeric `weight`
+between `1` and `1000` (default `1`). `member-update` takes the existing
+`member`, optional `weight`, and optional replacement address via `address`,
+`new_member`, `X-Fluxheim-Lb-Address`, or `X-Fluxheim-Lb-New-Member`.
+Address retargeting is rejected for aliased members because aliases are part of
+the static config identity; change those through config reload. `member-remove`
+removes an existing configured address or alias. The backend set and health map
+are published as one atomic runtime snapshot, so status and selection do not
+observe a half-updated pool. Remove and address-update operations reject members
+with active in-flight connections; drain the member first, wait for it to reach
+zero in-flight requests, then remove or retarget it.
+
+Runtime backend-set mutation is available only for static upstream pools in
+this release. It is rejected for DNS/file-discovery pools because discovery
+refresh would overwrite local admin changes. It is also rejected for Maglev
+selectors because Maglev requires a rebuilt lookup table; use a non-Maglev
+selector for runtime backend-set changes. Backend-set additions, removals, and
+configured-weight updates are in-memory control-plane actions and are reported
+with `"persistent": false`; `proxy.load_balance.runtime_state_file` currently
+persists runtime member-state overrides, runtime weight overrides, and local
+persistence tables, not the mutated backend set itself.
+
 Authenticated admins can adjust the runtime weight of an already configured
 member without reloading when the pool uses `round-robin`, `least-connections`,
 `least-sessions`, or `least-time` selection:

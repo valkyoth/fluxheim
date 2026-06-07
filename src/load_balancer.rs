@@ -15,6 +15,7 @@ use crate::config::{
     LoadBalancePersistenceConfig, LoadBalancePersistenceMode, LoadBalanceQueueConfig,
     LoadBalanceRetryConfig, LoadBalanceSelection, LoadBalanceSlowStartConfig, ProxyConfig,
 };
+use crate::flux_error::FluxError;
 
 mod backend;
 mod discovery;
@@ -28,6 +29,7 @@ mod state_file;
 
 #[cfg(test)]
 use self::backend::BackendIdentity;
+use self::backend::FluxBackend;
 use self::backend::FluxLoadBalancerRuntime;
 use self::backend::RuntimeBackend as Backend;
 use self::backend::backend_container_snapshot;
@@ -193,6 +195,38 @@ pub struct LoadBalancerRuntimeBackendWeightMutation {
     pub persistent: bool,
     #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
+    pub alias: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadBalancerRuntimeBackendSetOperation {
+    Added,
+    Removed,
+    Updated,
+}
+
+impl LoadBalancerRuntimeBackendSetOperation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Removed => "removed",
+            Self::Updated => "updated",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct LoadBalancerRuntimeBackendSetMutation {
+    pub member: String,
+    pub operation: LoadBalancerRuntimeBackendSetOperation,
+    pub configured_weight: usize,
+    pub backend_count: usize,
+    pub persistent: bool,
+    #[cfg(not(feature = "privacy-mode"))]
+    pub address: String,
+    #[cfg(not(feature = "privacy-mode"))]
+    pub previous_address: Option<String>,
     pub alias: Option<String>,
 }
 
@@ -778,6 +812,10 @@ impl UpstreamLoadBalancer {
         if !current.is_multiple_of(BACKEND_STATE_PRUNE_INTERVAL) {
             return;
         }
+        self.prune_stale_backend_state();
+    }
+
+    fn prune_stale_backend_state(&self) {
         let backends = self.inner.backends();
         let live_keys = backends
             .iter()
@@ -1024,6 +1062,139 @@ impl UpstreamLoadBalancer {
         })
     }
 
+    pub fn add_runtime_backend_member(
+        &self,
+        member: &str,
+        weight: usize,
+    ) -> io::Result<LoadBalancerRuntimeBackendSetMutation> {
+        self.validate_runtime_backend_set_mutation()?;
+        let backend = runtime_backend_from_member(member, weight)?;
+        let key = backend_key(&backend);
+        let backend_count = self.inner.add_runtime_backend(backend.clone())?;
+        self.save_runtime_state_if_configured("member_add");
+        Ok(LoadBalancerRuntimeBackendSetMutation {
+            member: backend.addr.to_string(),
+            operation: LoadBalancerRuntimeBackendSetOperation::Added,
+            configured_weight: backend.weight,
+            backend_count,
+            persistent: false,
+            #[cfg(not(feature = "privacy-mode"))]
+            address: backend.addr.to_string(),
+            #[cfg(not(feature = "privacy-mode"))]
+            previous_address: None,
+            alias: self
+                .backend_aliases
+                .get(&key)
+                .map(|alias| alias.to_string()),
+        })
+    }
+
+    pub fn remove_runtime_backend_member(
+        &self,
+        member: &str,
+    ) -> io::Result<LoadBalancerRuntimeBackendSetMutation> {
+        self.validate_runtime_backend_set_mutation()?;
+        let backend = self
+            .inner
+            .backend_by_member(member, &self.backend_aliases)?;
+        if self.inner.backend_count() <= 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member cannot be removed because at least one backend must remain",
+            ));
+        }
+        if self.counters.count(&backend) > 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "load balancer member still has in-flight connections; drain before removing",
+            ));
+        }
+        let key = backend_key(&backend);
+        let alias = self
+            .backend_aliases
+            .get(&key)
+            .map(|alias| alias.to_string());
+        let backend_count = self.inner.remove_runtime_backend(&backend)?;
+        self.prune_stale_backend_state();
+        self.save_runtime_state_if_configured("member_remove");
+        Ok(LoadBalancerRuntimeBackendSetMutation {
+            member: member.trim().to_owned(),
+            operation: LoadBalancerRuntimeBackendSetOperation::Removed,
+            configured_weight: backend.weight,
+            backend_count,
+            persistent: false,
+            #[cfg(not(feature = "privacy-mode"))]
+            address: backend.addr.to_string(),
+            #[cfg(not(feature = "privacy-mode"))]
+            previous_address: None,
+            alias,
+        })
+    }
+
+    pub fn update_runtime_backend_member(
+        &self,
+        member: &str,
+        updated_member: Option<&str>,
+        weight: Option<usize>,
+    ) -> io::Result<LoadBalancerRuntimeBackendSetMutation> {
+        self.validate_runtime_backend_set_mutation()?;
+        let current = self
+            .inner
+            .backend_by_member(member, &self.backend_aliases)?;
+        let updated_authority = updated_member
+            .map(str::trim)
+            .filter(|member| !member.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| current.addr.to_string());
+        let updated_weight = weight.unwrap_or(current.weight);
+        if updated_authority == current.addr.to_string() && updated_weight == current.weight {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member update must change address or weight",
+            ));
+        }
+        let current_key = backend_key(&current);
+        let current_alias = self
+            .backend_aliases
+            .get(&current_key)
+            .map(|alias| alias.to_string());
+        if updated_authority != current.addr.to_string() && current_alias.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer aliased members cannot be retargeted without a config reload",
+            ));
+        }
+        if updated_authority != current.addr.to_string() && self.counters.count(&current) > 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "load balancer member still has in-flight connections; drain before changing address",
+            ));
+        }
+        let updated = runtime_backend_from_member(&updated_authority, updated_weight)?;
+        let updated_key = backend_key(&updated);
+        let backend_count = self
+            .inner
+            .update_runtime_backend(&current, updated.clone())?;
+        self.prune_stale_backend_state();
+        self.save_runtime_state_if_configured("member_update");
+        Ok(LoadBalancerRuntimeBackendSetMutation {
+            member: member.trim().to_owned(),
+            operation: LoadBalancerRuntimeBackendSetOperation::Updated,
+            configured_weight: updated.weight,
+            backend_count,
+            persistent: false,
+            #[cfg(not(feature = "privacy-mode"))]
+            address: updated.addr.to_string(),
+            #[cfg(not(feature = "privacy-mode"))]
+            previous_address: Some(current.addr.to_string()),
+            alias: current_alias.or_else(|| {
+                self.backend_aliases
+                    .get(&updated_key)
+                    .map(|alias| alias.to_string())
+            }),
+        })
+    }
+
     pub fn clear_persistence(&self) -> usize {
         let cleared = self
             .persistence
@@ -1083,6 +1254,22 @@ impl UpstreamLoadBalancer {
         Ok(LoadBalancerRuntimeStateRestore {
             persistence_entries,
         })
+    }
+
+    fn validate_runtime_backend_set_mutation(&self) -> io::Result<()> {
+        if !self.inner.supports_runtime_backend_set_mutation() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime backend-set mutation is not available for Maglev selections in this release",
+            ));
+        }
+        if !self.inner.runtime_backend_set_mutable() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "runtime backend-set mutation is available only for static upstream pools",
+            ));
+        }
+        Ok(())
     }
 
     fn load_runtime_state_if_configured(&self) {
@@ -1310,6 +1497,26 @@ impl UpstreamLoadBalancerInner {
         self.container().health_check_frequency()
     }
 
+    fn runtime_backend_set_mutable(&self) -> bool {
+        self.container().runtime_backend_set_mutable()
+    }
+
+    fn supports_runtime_backend_set_mutation(&self) -> bool {
+        !matches!(self, Self::MaglevHash { .. })
+    }
+
+    fn add_runtime_backend(&self, backend: Backend) -> io::Result<usize> {
+        self.container().add_runtime_backend(backend)
+    }
+
+    fn remove_runtime_backend(&self, backend: &Backend) -> io::Result<usize> {
+        self.container().remove_runtime_backend(backend)
+    }
+
+    fn update_runtime_backend(&self, current: &Backend, updated: Backend) -> io::Result<usize> {
+        self.container().update_runtime_backend(current, updated)
+    }
+
     fn parallel_health_check(&self) -> bool {
         self.container().parallel_health_check()
     }
@@ -1410,9 +1617,28 @@ fn backend_weights(inner: &FluxLoadBalancerRuntime) -> Vec<usize> {
         .collect()
 }
 
+fn runtime_backend_from_member(member: &str, weight: usize) -> io::Result<Backend> {
+    let member = member.trim();
+    if member.is_empty() || member.len() > 256 || member.chars().any(char::is_whitespace) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "load balancer member must be a socket address without whitespace",
+        ));
+    }
+    if weight == 0 || weight > MAX_RUNTIME_BACKEND_WEIGHT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "load balancer member weight must be between 1 and 1000",
+        ));
+    }
+    FluxBackend::new_with_weight(member, weight)
+        .and_then(|backend| backend.to_pingora_backend())
+        .map_err(FluxError::into_io)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::ErrorKind;
+    use std::io::{self, ErrorKind};
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
@@ -1432,8 +1658,9 @@ mod tests {
     use super::state::PassiveBackendHealth;
     use super::{
         LoadBalancedUpstreamReporter, LoadBalancerCircuitState, LoadBalancerPersistenceOutcome,
-        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendState, PassiveHealthState,
-        SlowStartState, UpstreamLoadBalancer, backend_key,
+        LoadBalancerQueueOutcome, LoadBalancerRuntimeBackendSetOperation,
+        LoadBalancerRuntimeBackendState, PassiveHealthState, SlowStartState, UpstreamLoadBalancer,
+        backend_key,
     };
     use crate::test_support::{safe_child_path, unique_temp_path};
 
@@ -1673,6 +1900,132 @@ mod tests {
             .set_runtime_backend_weight("origin-a", Some(4))
             .unwrap_err();
         assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn runtime_backend_set_mutations_update_static_pool() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let added = balancer
+            .add_runtime_backend_member("127.0.0.1:3002", 3)
+            .unwrap();
+        assert_eq!(
+            added.operation,
+            LoadBalancerRuntimeBackendSetOperation::Added
+        );
+        assert_eq!(added.configured_weight, 3);
+        assert_eq!(added.backend_count, 3);
+        assert_eq!(balancer.backend_count(), 3);
+        assert_eq!(balancer.backend_weights(), [1, 1, 3]);
+
+        let duplicate = balancer
+            .add_runtime_backend_member("127.0.0.1:3002", 3)
+            .unwrap_err();
+        assert_eq!(duplicate.kind(), io::ErrorKind::AlreadyExists);
+
+        let updated = balancer
+            .update_runtime_backend_member("127.0.0.1:3002", None, Some(5))
+            .unwrap();
+        assert_eq!(
+            updated.operation,
+            LoadBalancerRuntimeBackendSetOperation::Updated
+        );
+        assert_eq!(updated.configured_weight, 5);
+        assert_eq!(updated.backend_count, 3);
+        assert_eq!(balancer.backend_weights(), [1, 1, 5]);
+
+        let removed = balancer
+            .remove_runtime_backend_member("127.0.0.1:3002")
+            .unwrap();
+        assert_eq!(
+            removed.operation,
+            LoadBalancerRuntimeBackendSetOperation::Removed
+        );
+        assert_eq!(removed.backend_count, 2);
+        assert_eq!(balancer.backend_count(), 2);
+        assert_eq!(balancer.backend_weights(), [1, 1]);
+    }
+
+    #[test]
+    fn runtime_backend_set_update_rejects_aliased_address_retarget() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            upstream_aliases: vec!["origin-a".to_owned(), "origin-b".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let updated = balancer
+            .update_runtime_backend_member("origin-a", None, Some(3))
+            .unwrap();
+        assert_eq!(updated.alias.as_deref(), Some("origin-a"));
+        assert_eq!(updated.configured_weight, 3);
+
+        let error = balancer
+            .update_runtime_backend_member("origin-a", Some("127.0.0.1:3002"), None)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("aliased"));
+    }
+
+    #[test]
+    fn runtime_backend_set_remove_rejects_in_flight_member() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+        let selected = balancer.select(&request(), None).unwrap();
+        let member = selected.backend.addr.to_string();
+
+        let error = balancer.remove_runtime_backend_member(&member).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        drop(selected);
+        assert!(balancer.remove_runtime_backend_member(&member).is_ok());
+    }
+
+    #[test]
+    fn runtime_backend_set_mutation_rejects_maglev_selection() {
+        install_test_crypto_provider();
+        let balancer = UpstreamLoadBalancer::from_proxy_config(&ProxyConfig {
+            upstreams: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+            load_balance: LoadBalanceConfig {
+                selection: LoadBalanceSelection::MaglevUriHash,
+                max_iterations: 8,
+                ..LoadBalanceConfig::default()
+            },
+            ..ProxyConfig::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        let error = balancer
+            .add_runtime_backend_member("127.0.0.1:3002", 1)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("Maglev"));
     }
 
     #[test]

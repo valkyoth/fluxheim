@@ -628,6 +628,30 @@ impl FluxProxy {
     }
 
     #[cfg(feature = "load-balancer")]
+    pub fn add_load_balancer_member(
+        &self,
+        request: LoadBalancerMemberAddRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberSetMutationResult> {
+        self.snapshot().add_load_balancer_member(request)
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn remove_load_balancer_member(
+        &self,
+        request: LoadBalancerMemberRemoveRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberSetMutationResult> {
+        self.snapshot().remove_load_balancer_member(request)
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn update_load_balancer_member(
+        &self,
+        request: LoadBalancerMemberUpdateRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberSetMutationResult> {
+        self.snapshot().update_load_balancer_member(request)
+    }
+
+    #[cfg(feature = "load-balancer")]
     pub fn clear_load_balancer_persistence(
         &self,
         request: LoadBalancerPersistenceClearRequest<'_>,
@@ -777,6 +801,50 @@ pub struct LoadBalancerMemberWeightResult {
     pub persistent: bool,
     #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
+    pub alias: Option<String>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadBalancerMemberAddRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub member: &'a str,
+    pub weight: usize,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadBalancerMemberRemoveRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub member: &'a str,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoadBalancerMemberUpdateRequest<'a> {
+    pub vhost: &'a str,
+    pub route: Option<&'a str>,
+    pub member: &'a str,
+    pub updated_member: Option<&'a str>,
+    pub weight: Option<usize>,
+}
+
+#[cfg(feature = "load-balancer")]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct LoadBalancerMemberSetMutationResult {
+    pub vhost: String,
+    pub route: Option<String>,
+    pub member: String,
+    pub operation: crate::load_balancer::LoadBalancerRuntimeBackendSetOperation,
+    pub configured_weight: usize,
+    pub backend_count: usize,
+    pub persistent: bool,
+    #[cfg(not(feature = "privacy-mode"))]
+    pub address: String,
+    #[cfg(not(feature = "privacy-mode"))]
+    pub previous_address: Option<String>,
     pub alias: Option<String>,
 }
 
@@ -1175,6 +1243,157 @@ impl ProxySnapshot {
             address: mutation.address,
             alias: mutation.alias,
         })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn add_load_balancer_member(
+        &self,
+        request: LoadBalancerMemberAddRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberSetMutationResult> {
+        let (vhost, route_name, pool) = self.load_balancer_pool_for_mutation(
+            request.vhost,
+            request.route,
+            "load balancer vhost is required",
+        )?;
+        let mutation = pool.add_runtime_backend_member(request.member, request.weight)?;
+        Ok(LoadBalancerMemberSetMutationResult {
+            vhost: vhost.name.clone(),
+            route: route_name,
+            member: mutation.member,
+            operation: mutation.operation,
+            configured_weight: mutation.configured_weight,
+            backend_count: mutation.backend_count,
+            persistent: mutation.persistent,
+            #[cfg(not(feature = "privacy-mode"))]
+            address: mutation.address,
+            #[cfg(not(feature = "privacy-mode"))]
+            previous_address: mutation.previous_address,
+            alias: mutation.alias,
+        })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn remove_load_balancer_member(
+        &self,
+        request: LoadBalancerMemberRemoveRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberSetMutationResult> {
+        let member = request.member.trim();
+        if member.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member is required",
+            ));
+        }
+        let (vhost, route_name, pool) = self.load_balancer_pool_for_mutation(
+            request.vhost,
+            request.route,
+            "load balancer vhost is required",
+        )?;
+        let mutation = pool.remove_runtime_backend_member(member)?;
+        Ok(LoadBalancerMemberSetMutationResult {
+            vhost: vhost.name.clone(),
+            route: route_name,
+            member: mutation.member,
+            operation: mutation.operation,
+            configured_weight: mutation.configured_weight,
+            backend_count: mutation.backend_count,
+            persistent: mutation.persistent,
+            #[cfg(not(feature = "privacy-mode"))]
+            address: mutation.address,
+            #[cfg(not(feature = "privacy-mode"))]
+            previous_address: mutation.previous_address,
+            alias: mutation.alias,
+        })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    pub fn update_load_balancer_member(
+        &self,
+        request: LoadBalancerMemberUpdateRequest<'_>,
+    ) -> io::Result<LoadBalancerMemberSetMutationResult> {
+        let member = request.member.trim();
+        if member.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "load balancer member is required",
+            ));
+        }
+        let (vhost, route_name, pool) = self.load_balancer_pool_for_mutation(
+            request.vhost,
+            request.route,
+            "load balancer vhost is required",
+        )?;
+        let mutation =
+            pool.update_runtime_backend_member(member, request.updated_member, request.weight)?;
+        Ok(LoadBalancerMemberSetMutationResult {
+            vhost: vhost.name.clone(),
+            route: route_name,
+            member: mutation.member,
+            operation: mutation.operation,
+            configured_weight: mutation.configured_weight,
+            backend_count: mutation.backend_count,
+            persistent: mutation.persistent,
+            #[cfg(not(feature = "privacy-mode"))]
+            address: mutation.address,
+            #[cfg(not(feature = "privacy-mode"))]
+            previous_address: mutation.previous_address,
+            alias: mutation.alias,
+        })
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_pool_for_mutation(
+        &self,
+        vhost_name: &str,
+        route: Option<&str>,
+        missing_vhost_message: &'static str,
+    ) -> io::Result<(&RuntimeVhost, Option<String>, &UpstreamLoadBalancer)> {
+        let vhost_name = vhost_name.trim();
+        if vhost_name.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                missing_vhost_message,
+            ));
+        }
+        let vhost = self
+            .state
+            .vhosts
+            .iter()
+            .find(|vhost| vhost.name == vhost_name)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost is not configured",
+                )
+            })?;
+        let route = route.map(str::trim).filter(|route| !route.is_empty());
+        if let Some(route_name) = route {
+            let route = vhost
+                .routes
+                .iter()
+                .find(|route| route.name == route_name)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "load balancer route is not configured",
+                    )
+                })?;
+            let pool = route.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer route has no configured pool",
+                )
+            })?;
+            Ok((vhost, Some(route.name.clone()), pool))
+        } else {
+            let pool = vhost.load_balancer.as_ref().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "load balancer vhost has no configured pool",
+                )
+            })?;
+            Ok((vhost, None, pool))
+        }
     }
 
     #[cfg(feature = "load-balancer")]

@@ -101,6 +101,7 @@ Fluxheim maps those pieces as follows:
 | Source-address persistence | `proxy.load_balance.persistence` with `mode = "source-ip"` |
 | Manual drain/disable/force-down/resume | `POST /_fluxheim/load-balancer/member-state` |
 | Runtime member weight shift | `POST /_fluxheim/load-balancer/member-weight` for round-robin and least-* selectors |
+| Runtime static-pool member add/remove/update | `POST /_fluxheim/load-balancer/member-add`, `member-remove`, `member-update` |
 | Saturation queue | `proxy.load_balance.queue` |
 | Pool all-down response | `proxy.load_balance.all_down_status` |
 
@@ -149,6 +150,22 @@ Use `weight=default`, `reset`, `clear`, or `configured` to clear the override.
 Hash, consistent-hash, bounded-load consistent, Maglev, and power-of-two
 selectors reject runtime weights in the current release because their
 ring/table or weighted-sampling semantics need a separate design.
+
+Static upstream pools can add, remove, or update members at runtime:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
+  "http://127.0.0.1:8081/_fluxheim/load-balancer/member-add?vhost=app&member=10.0.0.12:8080&weight=2"
+```
+
+Use `member-update` with `weight` to change the configured runtime weight, or
+with `address`/`new_member` to retarget a non-aliased member. Aliased members
+can be weight-updated but need a config reload for address changes because the
+alias is part of the static backend identity. Use `member-remove` after the
+member has drained to zero in-flight requests. These backend-set mutations are
+local in-memory changes in the current release; DNS/file-discovery pools and
+Maglev selectors reject them.
 
 The load-balancer-only status view is available without parsing the full admin
 status body:
