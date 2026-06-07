@@ -970,35 +970,38 @@ impl AdminApp {
                 #[cfg(not(feature = "privacy-mode"))]
                 log::info!(
                     target: "fluxheim::load_balancer",
-                    "load balancer member state updated vhost={} route={} scope={} member={} state={} address={} alias={} persistent=false",
+                    "load balancer member state updated vhost={} route={} scope={} member={} state={} address={} alias={} persistent={}",
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
                     result.member,
                     result.state.as_str(),
                     result.address,
-                    result.alias.as_deref().unwrap_or("")
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
                 );
                 #[cfg(feature = "privacy-mode")]
                 log::info!(
                     target: "fluxheim::load_balancer",
-                    "load balancer member state updated vhost={} route={} scope={} member={} state={} alias={} persistent=false",
+                    "load balancer member state updated vhost={} route={} scope={} member={} state={} alias={} persistent={}",
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
                     result.member,
                     result.state.as_str(),
-                    result.alias.as_deref().unwrap_or("")
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
                 );
                 log::info!(
                     target: "fluxheim::audit",
-                    "load balancer member state updated vhost={} route={} scope={} member={} state={} alias={} persistent=false",
+                    "load balancer member state updated vhost={} route={} scope={} member={} state={} alias={} persistent={}",
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
                     result.member,
                     result.state.as_str(),
-                    result.alias.as_deref().unwrap_or("")
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
                 );
                 record_load_balancer_event(
                     &result.vhost,
@@ -1019,7 +1022,7 @@ impl AdminApp {
                 #[cfg(not(feature = "privacy-mode"))]
                 body.insert("address".to_owned(), json!(result.address));
                 body.insert("alias".to_owned(), json!(result.alias));
-                body.insert("persistent".to_owned(), json!(false));
+                body.insert("persistent".to_owned(), json!(result.persistent));
                 json_response_value(StatusCode::OK, &Value::Object(body))
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
@@ -1090,7 +1093,7 @@ impl AdminApp {
                 #[cfg(not(feature = "privacy-mode"))]
                 log::info!(
                     target: "fluxheim::load_balancer",
-                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} address={} alias={} persistent=false",
+                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} address={} alias={} persistent={}",
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
@@ -1102,12 +1105,13 @@ impl AdminApp {
                         .map(|weight| weight.to_string())
                         .unwrap_or_else(|| "none".to_owned()),
                     result.address,
-                    result.alias.as_deref().unwrap_or("")
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
                 );
                 #[cfg(feature = "privacy-mode")]
                 log::info!(
                     target: "fluxheim::load_balancer",
-                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} alias={} persistent=false",
+                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} alias={} persistent={}",
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
@@ -1118,11 +1122,12 @@ impl AdminApp {
                         .runtime_weight_override
                         .map(|weight| weight.to_string())
                         .unwrap_or_else(|| "none".to_owned()),
-                    result.alias.as_deref().unwrap_or("")
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
                 );
                 log::info!(
                     target: "fluxheim::audit",
-                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} alias={} persistent=false",
+                    "load balancer member weight updated vhost={} route={} scope={} member={} configured_weight={} effective_weight={} runtime_weight_override={} alias={} persistent={}",
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
@@ -1133,7 +1138,8 @@ impl AdminApp {
                         .runtime_weight_override
                         .map(|weight| weight.to_string())
                         .unwrap_or_else(|| "none".to_owned()),
-                    result.alias.as_deref().unwrap_or("")
+                    result.alias.as_deref().unwrap_or(""),
+                    result.persistent
                 );
                 record_load_balancer_event(
                     &result.vhost,
@@ -1165,7 +1171,7 @@ impl AdminApp {
                 #[cfg(not(feature = "privacy-mode"))]
                 body.insert("address".to_owned(), json!(result.address));
                 body.insert("alias".to_owned(), json!(result.alias));
-                body.insert("persistent".to_owned(), json!(false));
+                body.insert("persistent".to_owned(), json!(result.persistent));
                 json_response_value(StatusCode::OK, &Value::Object(body))
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
@@ -1217,11 +1223,12 @@ impl AdminApp {
                 };
                 log::info!(
                     target: "fluxheim::load_balancer",
-                    "load balancer persistence table cleared vhost={} route={} scope={} cleared_entries={} persistent=false",
+                    "load balancer persistence table cleared vhost={} route={} scope={} cleared_entries={} persistent={}",
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.cleared_entries
+                    result.cleared_entries,
+                    result.persistent
                 );
                 record_load_balancer_event(
                     &result.vhost,
@@ -1237,7 +1244,7 @@ impl AdminApp {
                         "route": result.route,
                         "scope": scope,
                         "cleared_entries": result.cleared_entries,
-                        "persistent": false,
+                        "persistent": result.persistent,
                     }),
                 )
             }
@@ -3814,7 +3821,7 @@ mod tests {
     use crate::config_route::RouteConfig;
     use crate::proxy::{FluxProxy, ProxyHealthReporter, ProxyHealthSignal};
     use crate::snapshot::SnapshotStore;
-    use crate::test_support::unique_temp_path;
+    use crate::test_support::{safe_child_path, unique_temp_path};
     #[cfg(unix)]
     use crate::test_support::{unique_group_writable_child, unique_world_writable_child};
 
@@ -3909,6 +3916,16 @@ mod tests {
             }],
             ..Config::default()
         }
+    }
+
+    #[cfg(feature = "load-balancer")]
+    fn load_balancer_persistent_admin_config() -> Config {
+        let root = unique_temp_path("admin-lb-runtime-state");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut config = load_balancer_admin_config();
+        config.vhosts[0].proxy.load_balance.runtime_state_file =
+            Some(safe_child_path(&root, "lb-state.json"));
+        config
     }
 
     fn set_test_runtime_state(
@@ -4168,6 +4185,45 @@ mod tests {
         let body: Value = serde_json::from_slice(&response.body).unwrap();
         assert_eq!(body["effective_weight"], 1);
         assert_eq!(body["runtime_weight_override"], Value::Null);
+    }
+
+    #[cfg(feature = "load-balancer")]
+    #[test]
+    fn load_balancer_mutation_endpoints_report_persistent_state_file() {
+        #[cfg(feature = "tls-rustls-backend")]
+        let _ = crate::tls::install_rustls_crypto_provider();
+
+        let app = app_with_config(load_balancer_persistent_admin_config());
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-state",
+            Some("vhost=one&member=app-a&state=disable"),
+            &auth_headers(),
+        );
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["persistent"], true);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/member-weight",
+            Some("vhost=one&member=app-a&weight=5"),
+            &auth_headers(),
+        );
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["persistent"], true);
+
+        let response = app.handle(
+            "POST",
+            "/_fluxheim/load-balancer/persistence/clear",
+            Some("vhost=one"),
+            &auth_headers(),
+        );
+        assert_eq!(response.status, StatusCode::OK);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(body["persistent"], true);
     }
 
     #[cfg(feature = "load-balancer")]

@@ -28,6 +28,9 @@ behavior when the change improves security or project direction.
   ignored on corrupt/incompatible input, and written atomically after runtime
   member-state, runtime weight, persistence-table, and persistence-clear
   changes.
+- Report `persistent: true` from load-balancer admin mutation responses when a
+  pool has `proxy.load_balance.runtime_state_file` configured, and keep
+  `persistent: false` for in-memory-only pools.
 
 ## 1.5.8 - 2026-06-07
 

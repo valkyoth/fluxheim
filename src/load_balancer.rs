@@ -177,6 +177,7 @@ impl LoadBalancerRuntimeBackendState {
 pub struct LoadBalancerRuntimeBackendMutation {
     pub member: String,
     pub state: LoadBalancerRuntimeBackendState,
+    pub persistent: bool,
     #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
@@ -188,6 +189,7 @@ pub struct LoadBalancerRuntimeBackendWeightMutation {
     pub configured_weight: usize,
     pub effective_weight: usize,
     pub runtime_weight_override: Option<usize>,
+    pub persistent: bool,
     #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
@@ -934,6 +936,10 @@ impl UpstreamLoadBalancer {
         self.inner.health_check_frequency()
     }
 
+    pub fn runtime_state_persistent(&self) -> bool {
+        self.runtime_state_file.is_some()
+    }
+
     #[cfg(test)]
     fn parallel_health_check(&self) -> bool {
         self.inner.parallel_health_check()
@@ -971,6 +977,7 @@ impl UpstreamLoadBalancer {
         Ok(LoadBalancerRuntimeBackendMutation {
             member: member.to_owned(),
             state,
+            persistent: self.runtime_state_persistent(),
             #[cfg(not(feature = "privacy-mode"))]
             address: backend.addr.to_string(),
             alias: self
@@ -1007,6 +1014,7 @@ impl UpstreamLoadBalancer {
             configured_weight: backend.weight,
             effective_weight: self.backend_policy.effective_weight(&backend),
             runtime_weight_override: self.backend_policy.runtime_backend_weight(key),
+            persistent: self.runtime_state_persistent(),
             #[cfg(not(feature = "privacy-mode"))]
             address: backend.addr.to_string(),
             alias: self

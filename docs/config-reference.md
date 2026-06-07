@@ -353,9 +353,10 @@ maintenance disables. `manual_resume` clears any runtime override, clears the
 member's passive-health failure/ejection state, and restarts slow-start ramp
 when slow-start is configured. `normal` clears only runtime overrides; static
 `drain_upstreams` and `disabled_upstreams` remain enforced until the config
-changes. Runtime member state is intentionally in-memory in the current `1.5.x`
-line, is reset by process restart or runtime rebuild, and is returned with
-`"persistent": false` in the mutation response. The response also includes
+changes. Runtime member state is in-memory unless
+`proxy.load_balance.runtime_state_file` is configured for that pool. Mutation
+responses include `"persistent": true` when the pool has a local runtime state
+file and `"persistent": false` otherwise. The response also includes
 `scope = "vhost"` or `"route"` so operators can audit which pool was changed.
 In `privacy-mode`, member mutation responses and structured mutation logs omit
 the backend address just like status output. Successful mutation metrics keep
@@ -421,8 +422,10 @@ curl -X POST \
 
 Use the optional `route` query parameter or `X-Fluxheim-Lb-Route` header to
 target a route-local pool. The response includes `cleared_entries`,
-`scope = "vhost"` or `"route"`, and `"persistent": false`. The operation is
-local to the current runtime; it does not alter config or durable snapshots.
+`scope = "vhost"` or `"route"`, and a `persistent` boolean. The operation is
+local to the current runtime unless `proxy.load_balance.runtime_state_file` is
+configured for that pool, in which case the cleared table is written back to
+the local runtime state file; it does not alter config or durable snapshots.
 When metrics are compiled, successful clears are counted as
 `persistence_clear` in `fluxheim_load_balancer_events_total`; rejected clear
 requests are counted separately as `persistence_clear_invalid` or

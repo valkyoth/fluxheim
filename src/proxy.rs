@@ -750,6 +750,7 @@ pub struct LoadBalancerMemberStateResult {
     pub route: Option<String>,
     pub member: String,
     pub state: LoadBalancerRuntimeBackendState,
+    pub persistent: bool,
     #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
@@ -773,6 +774,7 @@ pub struct LoadBalancerMemberWeightResult {
     pub configured_weight: usize,
     pub effective_weight: usize,
     pub runtime_weight_override: Option<usize>,
+    pub persistent: bool,
     #[cfg(not(feature = "privacy-mode"))]
     pub address: String,
     pub alias: Option<String>,
@@ -791,6 +793,7 @@ pub struct LoadBalancerPersistenceClearResult {
     pub vhost: String,
     pub route: Option<String>,
     pub cleared_entries: usize,
+    pub persistent: bool,
 }
 
 impl ProxySnapshot {
@@ -1091,6 +1094,7 @@ impl ProxySnapshot {
             route: route_name,
             member: mutation.member,
             state: mutation.state,
+            persistent: mutation.persistent,
             #[cfg(not(feature = "privacy-mode"))]
             address: mutation.address,
             alias: mutation.alias,
@@ -1166,6 +1170,7 @@ impl ProxySnapshot {
             configured_weight: mutation.configured_weight,
             effective_weight: mutation.effective_weight,
             runtime_weight_override: mutation.runtime_weight_override,
+            persistent: mutation.persistent,
             #[cfg(not(feature = "privacy-mode"))]
             address: mutation.address,
             alias: mutation.alias,
@@ -1230,6 +1235,7 @@ impl ProxySnapshot {
             vhost: vhost.name.clone(),
             route: route_name,
             cleared_entries: pool.clear_persistence(),
+            persistent: pool.runtime_state_persistent(),
         })
     }
 

@@ -22,6 +22,9 @@ Fluxheim 1.5.9 starts the restart-persistent load-balancer state line.
   Fluxheim loads the file best-effort at pool construction and writes it
   atomically after runtime member-state, runtime weight, persistence-table, and
   persistence-clear changes.
+- Admin mutation responses now report `persistent: true` when the target pool
+  has a runtime state file configured, and `persistent: false` for in-memory
+  pools.
 
 ## Stop Line
 

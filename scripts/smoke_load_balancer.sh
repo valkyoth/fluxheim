@@ -306,7 +306,8 @@ curl -fsS -X POST \
 if ! grep -q '"status":"ok"' "$TMP_DIR/member-weight.json" \
     || ! grep -q '"configured_weight":1' "$TMP_DIR/member-weight.json" \
     || ! grep -q '"effective_weight":4' "$TMP_DIR/member-weight.json" \
-    || ! grep -q '"runtime_weight_override":4' "$TMP_DIR/member-weight.json"; then
+    || ! grep -q '"runtime_weight_override":4' "$TMP_DIR/member-weight.json" \
+    || ! grep -q '"persistent":true' "$TMP_DIR/member-weight.json"; then
     echo "load balancer member-weight endpoint did not report runtime weight override" >&2
     cat "$TMP_DIR/member-weight.json" >&2
     exit 1
@@ -484,7 +485,7 @@ curl -fsS -X POST \
 if ! grep -q '"status":"ok"' "$TMP_DIR/persistence-clear.json" \
     || ! grep -q '"scope":"route"' "$TMP_DIR/persistence-clear.json" \
     || ! grep -q '"cleared_entries":1' "$TMP_DIR/persistence-clear.json" \
-    || ! grep -q '"persistent":false' "$TMP_DIR/persistence-clear.json"; then
+    || ! grep -q '"persistent":true' "$TMP_DIR/persistence-clear.json"; then
     echo "load balancer persistence clear endpoint did not report cleared route entry" >&2
     cat "$TMP_DIR/persistence-clear.json" >&2
     exit 1
@@ -501,6 +502,13 @@ curl -fsS -X POST \
     -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
     "http://127.0.0.1:$ADMIN_PORT/_fluxheim/load-balancer/member-state?vhost=smoke&member=origin-two&state=disable" \
     > "$TMP_DIR/member-disable.json"
+
+if ! grep -q '"status":"ok"' "$TMP_DIR/member-disable.json" \
+    || ! grep -q '"persistent":true' "$TMP_DIR/member-disable.json"; then
+    echo "load balancer member-state endpoint did not report persistent runtime state" >&2
+    cat "$TMP_DIR/member-disable.json" >&2
+    exit 1
+fi
 
 curl -fsS \
     -H "Authorization: Bearer $FLUXHEIM_ADMIN_TOKEN" \
