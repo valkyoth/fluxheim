@@ -23,6 +23,9 @@ Fluxheim 1.5.10 starts the runtime backend-set mutation line.
   drained before they can be removed or retargeted to a new address.
 - Explicit selector/discovery limits: runtime backend-set mutation is rejected
   for DNS/file-discovery pools and for Maglev selectors in this release.
+- Privacy-mode mutation responses, logs, and metrics avoid raw backend member
+  addresses; they use configured aliases when available and `redacted` for
+  response/log member fields otherwise.
 
 ## Notes
 

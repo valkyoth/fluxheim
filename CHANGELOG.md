@@ -28,6 +28,9 @@ behavior when the change improves security or project direction.
   selectors in this release.
 - Require in-flight requests to drain before removing a member or retargeting it
   to a new address.
+- Harden privacy-mode load-balancer mutation output so response/log member
+  fields use configured aliases or `redacted`, and metrics keep alias-only
+  member labels.
 
 ## 1.5.9 - 2026-06-07
 

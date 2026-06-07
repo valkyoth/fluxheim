@@ -1007,6 +1007,8 @@ impl AdminApp {
                 } else {
                     "vhost"
                 };
+                let display_member =
+                    load_balancer_display_member(result.alias.as_deref(), result.member.as_str());
                 #[cfg(not(feature = "privacy-mode"))]
                 log::info!(
                     target: "fluxheim::load_balancer",
@@ -1014,7 +1016,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.state.as_str(),
                     result.address,
                     result.alias.as_deref().unwrap_or(""),
@@ -1027,7 +1029,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.state.as_str(),
                     result.alias.as_deref().unwrap_or(""),
                     result.persistent
@@ -1038,7 +1040,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.state.as_str(),
                     result.alias.as_deref().unwrap_or(""),
                     result.persistent
@@ -1057,7 +1059,7 @@ impl AdminApp {
                 body.insert("vhost".to_owned(), json!(result.vhost));
                 body.insert("route".to_owned(), json!(result.route));
                 body.insert("scope".to_owned(), json!(scope));
-                body.insert("member".to_owned(), json!(result.member));
+                body.insert("member".to_owned(), json!(display_member));
                 body.insert("state".to_owned(), json!(result.state));
                 #[cfg(not(feature = "privacy-mode"))]
                 body.insert("address".to_owned(), json!(result.address));
@@ -1066,29 +1068,41 @@ impl AdminApp {
                 json_response_value(StatusCode::OK, &Value::Object(body))
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member state rejected invalid input vhost={} route={} member={} state={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     state.as_str(),
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_state_invalid");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_state_invalid",
+                );
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member state target not found vhost={} route={} member={} state={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     state.as_str(),
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_state_not_found");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_state_not_found",
+                );
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
             }
             Err(error) => internal_error_response(&error),
@@ -1130,6 +1144,8 @@ impl AdminApp {
                 } else {
                     "vhost"
                 };
+                let display_member =
+                    load_balancer_display_member(result.alias.as_deref(), result.member.as_str());
                 #[cfg(not(feature = "privacy-mode"))]
                 log::info!(
                     target: "fluxheim::load_balancer",
@@ -1137,7 +1153,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.configured_weight,
                     result.effective_weight,
                     result
@@ -1155,7 +1171,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.configured_weight,
                     result.effective_weight,
                     result
@@ -1171,7 +1187,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.configured_weight,
                     result.effective_weight,
                     result
@@ -1195,7 +1211,7 @@ impl AdminApp {
                 body.insert("vhost".to_owned(), json!(result.vhost));
                 body.insert("route".to_owned(), json!(result.route));
                 body.insert("scope".to_owned(), json!(scope));
-                body.insert("member".to_owned(), json!(result.member));
+                body.insert("member".to_owned(), json!(display_member));
                 body.insert(
                     "configured_weight".to_owned(),
                     json!(result.configured_weight),
@@ -1215,27 +1231,39 @@ impl AdminApp {
                 json_response_value(StatusCode::OK, &Value::Object(body))
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member weight rejected invalid input vhost={} route={} member={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_weight_invalid");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_weight_invalid",
+                );
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member weight target not found vhost={} route={} member={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_weight_not_found");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_weight_not_found",
+                );
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
             }
             Err(error) => internal_error_response(&error),
@@ -1347,6 +1375,8 @@ impl AdminApp {
                 } else {
                     "vhost"
                 };
+                let display_member =
+                    load_balancer_display_member(result.alias.as_deref(), result.member.as_str());
                 #[cfg(not(feature = "privacy-mode"))]
                 log::info!(
                     target: "fluxheim::load_balancer",
@@ -1354,7 +1384,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.operation.as_str(),
                     result.configured_weight,
                     result.backend_count,
@@ -1370,7 +1400,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.operation.as_str(),
                     result.configured_weight,
                     result.backend_count,
@@ -1383,7 +1413,7 @@ impl AdminApp {
                     result.vhost,
                     result.route.as_deref().unwrap_or(""),
                     scope,
-                    result.member,
+                    display_member,
                     result.operation.as_str(),
                     result.configured_weight,
                     result.backend_count,
@@ -1404,7 +1434,7 @@ impl AdminApp {
                 body.insert("vhost".to_owned(), json!(result.vhost));
                 body.insert("route".to_owned(), json!(result.route));
                 body.insert("scope".to_owned(), json!(scope));
-                body.insert("member".to_owned(), json!(result.member));
+                body.insert("member".to_owned(), json!(display_member));
                 body.insert("operation".to_owned(), json!(result.operation));
                 body.insert(
                     "configured_weight".to_owned(),
@@ -1424,55 +1454,79 @@ impl AdminApp {
                 json_response_value(StatusCode::OK, &Value::Object(body))
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member set rejected invalid input vhost={} route={} member={} event={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     event,
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_set_invalid");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_set_invalid",
+                );
                 error_response(StatusCode::BAD_REQUEST, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member set target already exists vhost={} route={} member={} event={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     event,
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_set_conflict");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_set_conflict",
+                );
                 error_response(StatusCode::CONFLICT, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member set blocked by active traffic vhost={} route={} member={} event={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     event,
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_set_blocked");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_set_blocked",
+                );
                 error_response(StatusCode::CONFLICT, &error.to_string())
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let display_member = load_balancer_display_member(None, member);
                 log::warn!(
                     target: "fluxheim::load_balancer",
                     "load balancer member set target not found vhost={} route={} member={} event={} error={}",
                     vhost,
                     route.unwrap_or(""),
-                    member,
+                    display_member,
                     event,
                     error
                 );
-                record_load_balancer_event(vhost, route, Some(member), "member_set_not_found");
+                record_load_balancer_event(
+                    vhost,
+                    route,
+                    load_balancer_metric_member_label(None, member),
+                    "member_set_not_found",
+                );
                 error_response(StatusCode::NOT_FOUND, &error.to_string())
             }
             Err(error) => internal_error_response(&error),
@@ -3252,6 +3306,17 @@ fn load_balancer_metric_member_label<'a>(
     alias
 }
 
+#[cfg(all(feature = "load-balancer", not(feature = "privacy-mode")))]
+fn load_balancer_display_member(alias: Option<&str>, member: &str) -> String {
+    let _ = alias;
+    member.to_owned()
+}
+
+#[cfg(all(feature = "load-balancer", feature = "privacy-mode"))]
+fn load_balancer_display_member(alias: Option<&str>, _member: &str) -> String {
+    alias.unwrap_or("redacted").to_owned()
+}
+
 fn snapshot_json(snapshot: &ConfigSnapshot, current: Option<&str>) -> Value {
     json!({
         "id": snapshot.id,
@@ -4649,6 +4714,23 @@ mod tests {
         assert_eq!(
             super::load_balancer_metric_member_label(Some("origin-a"), "127.0.0.1:3000"),
             Some("origin-a")
+        );
+    }
+
+    #[cfg(all(feature = "load-balancer", feature = "privacy-mode"))]
+    #[test]
+    fn load_balancer_display_member_redacts_unaliased_privacy_member() {
+        assert_eq!(
+            super::load_balancer_metric_member_label(None, "127.0.0.1:3000"),
+            None
+        );
+        assert_eq!(
+            super::load_balancer_display_member(None, "127.0.0.1:3000"),
+            "redacted"
+        );
+        assert_eq!(
+            super::load_balancer_display_member(Some("origin-a"), "127.0.0.1:3000"),
+            "origin-a"
         );
     }
 
