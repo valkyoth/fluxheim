@@ -37,6 +37,8 @@ behavior when the change improves security or project direction.
 - Clear per-backend runtime overrides and passive-health state when an admin
   explicitly removes or retargets a runtime backend member, so re-adding the
   same address starts from clean runtime state.
+- Start retargeted backend addresses with fresh readiness state instead of
+  carrying the previous address's health-check state across the key change.
 
 ## 1.5.9 - 2026-06-07
 

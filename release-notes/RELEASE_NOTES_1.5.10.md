@@ -28,6 +28,8 @@ Fluxheim 1.5.10 starts the runtime backend-set mutation line.
   response/log member fields otherwise.
 - Explicit remove and address-retarget operations clear stale per-backend
   runtime overrides and passive-health state for the old backend key.
+- Retargeted backend addresses start with fresh readiness state rather than
+  inheriting health-check state from the previous address.
 
 ## Notes
 

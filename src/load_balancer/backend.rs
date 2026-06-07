@@ -286,8 +286,8 @@ impl FluxLoadBalancerRuntime {
         next_backends.insert(updated);
         let mut next_health = (*snapshot.health).clone();
         if current_key != updated_key {
-            let health = next_health.remove(&current_key).unwrap_or_default();
-            next_health.insert(updated_key, health);
+            next_health.remove(&current_key);
+            next_health.entry(updated_key).or_default();
         } else {
             next_health.entry(updated_key).or_default();
         }
@@ -629,5 +629,31 @@ mod tests {
         assert!(snapshot.backends.contains(&pingora_backend));
         assert!(snapshot.health.contains_key(&key));
         assert!(!snapshot.health.get(&key).unwrap().ready());
+    }
+
+    #[tokio::test]
+    async fn runtime_retarget_starts_with_fresh_health_state() {
+        let backend = FluxBackend::new("127.0.0.1:3000").unwrap();
+        let updated = FluxBackend::new("127.0.0.1:3001").unwrap();
+        let mut set = FluxBackendSet::default();
+        set.insert(backend.clone());
+        let runtime = FluxLoadBalancerRuntime::new(Box::new(TestDiscovery::new(set)));
+
+        runtime.update().await.unwrap();
+        let current = backend.to_pingora_backend().unwrap();
+        let replacement = updated.to_pingora_backend().unwrap();
+        runtime.set_enable(&current, false);
+
+        runtime
+            .update_runtime_backend(&current, replacement.clone())
+            .unwrap();
+
+        let snapshot = runtime.snapshot.load();
+        let current_key = crate::load_balancer::backend_key(&current);
+        let updated_key = crate::load_balancer::backend_key(&replacement);
+        assert!(!snapshot.backends.contains(&current));
+        assert!(snapshot.backends.contains(&replacement));
+        assert!(!snapshot.health.contains_key(&current_key));
+        assert!(snapshot.health.get(&updated_key).unwrap().ready());
     }
 }
